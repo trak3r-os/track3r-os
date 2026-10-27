@@ -29,7 +29,7 @@ track3r-os replaces the software that runs on the Tracker. You keep the hardware
 - **You can add to it from the SD card.** New instruments, effects and small apps load as modules.
 - **It is open.** Anyone can read the code, build it and improve it.
 
-**v1.0.0** is the first release. It runs on real hardware and is tested on a unit. The known issues are in the [release notes](docs/release/v1.0.0.md); what is open and what comes next is in [docs/roadmap/BACKLOG.md](docs/roadmap/BACKLOG.md).
+**v1.0.1** is the current release (v1.0.0 was the first). It runs on real hardware and is tested on a unit. The known issues are in the [release notes](docs/release/v1.0.1.md); what is open and what comes next is in [docs/roadmap/BACKLOG.md](docs/roadmap/BACKLOG.md).
 
 ## Screens
 
@@ -115,7 +115,7 @@ track3r-os replaces the software that runs on the Tracker. You keep the hardware
 
 ## Get started
 
-- **Download:** the [latest release](https://github.com/trak3r-os/track3r-os/releases/latest) has the firmware file (`track3r-os-v1.0.0.ptf`) and its checksum. The app modules are the [`apps-v1.0.0`](https://github.com/trak3r-os/track3r-os/releases/tag/apps-v1.0.0) release.
+- **Download:** the [latest release](https://github.com/trak3r-os/track3r-os/releases/latest) has the firmware file (`track3r-os-v1.0.1.ptf`) and its checksum. The app modules are the [`apps-v1.0.0`](https://github.com/trak3r-os/track3r-os/releases/tag/apps-v1.0.0) release.
 - **Install:** read the [install guide](docs/manual/install.md) first. It covers installing from the official firmware, updating, and going back.
 - **Learn it:** the [user manual](docs/manual/index.md), one chapter per screen.
 

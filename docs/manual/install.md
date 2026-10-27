@@ -100,7 +100,7 @@ track3r-os has no firmware update menu on the device: updates come from the comp
 - The unit does not start after an update: do the steps of [Going back](#going-back-to-the-official-firmware). It is the same recovery used for every hung test image.
 - The reset button flashed a file you did not expect: there was more than one `.ptf` in `Firmware/`. Leave exactly one.
 - The unit sits on the "emergency update" screen and does not flash: check that the file on the card is named `PolyendTracker_0.0.1.ptf` (not `track3r-os-<version>.ptf`) and that it is the only `.ptf` in `Firmware/`. Do not use the Polyend Tool app.
-- The pads do not answer after the install, while the buttons and the screen work: reported on one unit (2026-10-25). The cause is not known; a board revision whose pad chip track3r-os does not reach is suspected (OS-BUG-PADS). Open the [Input test](input_test.md) screen (hold `Shift`, `F1` and `F8` while you switch on) and press some pads. The board's status LED (a user saw it blinking behind the buttons under the screen) gives one short blink a second while track3r-os runs; 13 quick flashes after power-on, before that blink starts, mean a key scanner did not answer at boot. Report both in an issue with your model, and go back to the official firmware if you need the pads ([Going back](#going-back-to-the-official-firmware)).
+- The pads do not answer after the install, while the buttons and the screen work: this happened with v1.0.0 on later units (plastic back; issue #1) and is fixed in v1.0.1, which a user with such a unit confirmed (2026-10-26). If your unit runs v1.0.0, install v1.0.1 the same way. If the pads still do not answer on v1.0.1, report it (OS-BUG-PADS). Open the [Input test](input_test.md) screen (hold `Shift`, `F1` and `F8` while you switch on) and press some pads. The board's status LED (a user saw it blinking behind the buttons under the screen) gives one short blink a second while track3r-os runs; 13 quick flashes after power-on, before that blink starts, mean a key scanner did not answer at boot. Report both in an issue with your model, and go back to the official firmware if you need the pads ([Going back](#going-back-to-the-official-firmware)).
 - The unit is not found by `o3console.py`: check the USB cable, and that the unit runs track3r-os (the `diag` console is part of track3r-os).
 - Report problems with the version string from Config, INFO (or the `version` command) and the file name and SHA-256 you installed.
 
@@ -110,7 +110,7 @@ track3r-os has no firmware update menu on the device: updates come from the comp
 |---|---|
 | The release file renamed to `PolyendTracker_0.0.1.ptf` installs on a unit that runs the official firmware | reported working by a user (2026-10-25); method and model not recorded; not repeated on the maintainer's unit |
 | The official firmware's update menu installs the renamed file, without the reset button | reported by a user (2026-10-25); not checked here |
-| The pads on every board revision | one unit reported with pads that do not answer (2026-10-25, OS-BUG-PADS); cause not known |
+| The pads on every board revision | v1.0.0 left the pads dead on a later unit (plastic back, 2026-10-25, OS-BUG-PADS); v1.0.1 works there (one user, 2026-10-26); other revisions not reported |
 | Position of the hidden reset button | not recorded here; see the vendor page |
 | Time the flashing takes and what the screen shows | not recorded |
 | Full USB update sequence with a release file, and checklist FW-3 to FW-10 | not yet verified |

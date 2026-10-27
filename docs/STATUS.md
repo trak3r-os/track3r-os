@@ -6,7 +6,7 @@ Every behaviour carries one of three labels: **verified parity** (compared with 
 
 ## Where things stand
 
-**v1.0.0 is published (2026-10-25), the first release.** Perform PLAYBACK and the five Perform LFO rows are in. Downloads on the Releases page: `v1.0.0` (the firmware file and `SHA256SUMS`), `apps-v1.0.0` (the app modules) and `fixtures-1` (test data for `tools/testdata`). What is open is checks on the unit (below), not work in the tree.
+**v1.0.1 fixes the pads on later Trackers (issue #1; confirmed on an affected unit, 2026-10-26). v1.0.0 (2026-10-25) was the first release.** Perform PLAYBACK and the five Perform LFO rows are in. Downloads on the Releases page: `v1.0.1` and `v1.0.0` (each the firmware file and `SHA256SUMS`), `apps-v1.0.0` (the app modules) and `fixtures-1` (test data for `tools/testdata`). What is open is checks on the unit (below), not work in the tree.
 
 | Item | State |
 |---|---|
@@ -66,7 +66,7 @@ Not yet verified on a unit (host and simulator tests exist for most). The rows m
 - **Swapping the SD card can crash the unit (OS-BUG-HOTSWAP).** Seen once: with the Dense8 project loaded (8 instruments, samples in memory), after about 90 minutes of uptime, a card swap raised a memory-protection fault in the render interrupt and the unit restarted. A later swap with an empty project worked. The cause is unknown (open research question). Workaround: switch the unit off before changing the card.
 - **Very heavy projects can exceed the CPU budget.** The Heavy12 stress project (12 tracks of sampler, Amiga, TB-303 and FM voices with effects) runs at 113 % mean and a worst block of 147 % on the unit (an earlier test image); sound can drop out while it plays, while keys and Stop still answer. Dense8 is the reference; Heavy12 is a stress test only. The release ships with the limit documented, not with features cut.
 - **Some Perform effects cost CPU while they are held.** PLAYBACK costs about 0.89 % of the audio budget per reversed voice (+5.34 pp with six reversed voices, over its 3 pp gate); the five LFO rows with LOWPASS held cost +18.11 pp on twelve tracks (+9.5 pp over LOWPASS alone), PAN LFO +4.3 pp of it. On a project already near the budget, holding them on many tracks can make the sound drop out; release the pad. Accepted for 1.0; follow-up OS-PERF-CPU2.
-- **The pads do not answer on one user's unit (OS-BUG-PADS).** Reported after installing v1.0.0: the buttons and the screen work, the pad grid does not. It happens on plastic-back units (later board revisions; issue #1). A pad-bus bring-up for later boards is in `main` (2026-10-26), untested on those boards yet; a test build is on issue #1 for affected units to try. The installing guide says what to check and report.
+- **The pads did not answer on one user's unit with v1.0.0 (OS-BUG-PADS, fixed in v1.0.1).** Plastic-back units (later board revisions; issue #1). The pad-bus bring-up for later boards is in v1.0.1; the user confirmed pads and note entry work (2026-10-26). Only that one unit has been reported; other later revisions are not checked.
 - **The update list shows only the first 12 files of `Firmware/` (OS-BUG-FWLIST).** Later files are not listed and cannot be chosen. Keep 12 or fewer `.ptf` files there.
 - **A cancelled effect leaves the free sample memory lower.** After cancelling a long compressor the FREE figure stays about 3.9 MB lower until the next effect reuses the buffer (documented in the Sample edit chapter of the manual).
 - **SMF EXPORT** (MIDI file export) is host-tested only.
@@ -83,7 +83,7 @@ Not yet verified on a unit (host and simulator tests exist for most). The rows m
 Ordered for a fresh session:
 
 1. A person presses INSTALL in Update from the unit on the release file, and runs the checks under "Open on the unit"; record each result as PASS, FAIL or NOT RUN in the backlog rows.
-2. After 1.0: OS-BUG-PADS (pads dead on plastic-back units; fix in `main`, test build on issue #1, waiting for a report from an affected unit), OS-BUG-HOTSWAP (the card-swap crash), OS-PERF-CPU2 (the Perform costs), OS-BUG-FWLIST, then the pending rows in `docs/roadmap/BACKLOG.md` and the latent issues below.
+2. After 1.0: OS-BUG-HOTSWAP (the card-swap crash), OS-PERF-CPU2 (the Perform costs), OS-BUG-FWLIST, then the pending rows in `docs/roadmap/BACKLOG.md` and the latent issues below.
 
 Outside contributors: issues come in through the forms in `.github/ISSUE_TEMPLATE/`; pull requests target `dev` (see `CONTRIBUTING.md`).
 

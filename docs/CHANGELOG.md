@@ -4,6 +4,12 @@ User-visible changes of the Community OS, newest first, one entry per change, in
 
 ## Unreleased
 
+## v1.0.1 (date to be set at publication)
+
+### Fixed
+
+- **Pads on later Trackers (plastic back, boards Control 4.0 / Grid 2.0).** On those units the pad grid did not answer after the install and the status LED flashed 13 times at power-on. The pad board is now started later and more gently: its power comes up first with a short wait, the pad chips are first contacted about a second after power-on, the pad bus (I2C2) has a glitch filter, a refused request no longer resets the bus, and the pad chips are asked again once a second until they answer. A user with an affected unit confirmed on issue #1 that the pads and note entry work. New Community OS behaviour; no saved file changes. On a first-batch unit it behaves as before.
+
 ## v1.0.0 (date to be set at publication)
 
 ### New
