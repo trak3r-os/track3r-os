@@ -193,7 +193,18 @@ void draw_stems_typical(ui::Renderer& r, unsigned) {
   m.mix = &w.board;
   m.device.init(core::ParamKind::Device);
   (void)w.stems.set_slot(2, w.stems.slot(2) | (1u << 8));  // S3 = T3 + T9: a slot with two sources
-  draw(r, m, mixer_view(app::MixerPage::Stems, 2, 8));
+  draw(r, m, mixer_view(app::MixerPage::Stems, 3, 8));  // row 0 is OUTPUTS (OS-USBOUTS), so S3 is row 3
+}
+
+void draw_stems_outputs(ui::Renderer& r, unsigned) {
+  static StemWorld w;
+  Model m{};
+  m.project = &w.arena->project;
+  m.mix = &w.board;
+  m.device.init(core::ParamKind::Device);
+  ViewState v = mixer_view(app::MixerPage::Stems, 0, 0);
+  v.mixer.outputs_pending = 6;  // OS-USBOUTS: the cursor on OUTPUTS with 6 chosen and not yet applied (F6 twice)
+  draw(r, m, v);
 }
 
 void draw_stems_none(ui::Renderer& r, unsigned) {
@@ -335,7 +346,7 @@ void draw_perform_worst(ui::Renderer& r, unsigned variant) {
 
 }  // namespace
 
-const ScreenState kMixerStates[17] = {
+const ScreenState kMixerStates[18] = {
     {"typical", true, 1, kBudgetWords, draw_mixer_typical},
     {"pan", true, 1, kBudgetWords, draw_mixer_pan},
     {"master", true, 1, kBudgetWords, draw_mixer_master},
@@ -352,7 +363,8 @@ const ScreenState kMixerStates[17] = {
     {"masterfx_worst", true, app::kMasterFxRows, kBudgetWords, draw_master_worst},
     {"stems", true, 1, kBudgetWords, draw_stems_typical},
     {"stems_none", true, 1, kBudgetWords, draw_stems_none},
-    {"stems_worst", true, 11u * app::kStemSources, kBudgetWords, draw_stems_worst},
+    {"stems_outputs", true, 1, kBudgetWords, draw_stems_outputs},
+    {"stems_worst", true, 12u *app::kStemSources, kBudgetWords, draw_stems_worst},
 };
 
 

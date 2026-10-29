@@ -409,12 +409,38 @@ def main():
         sys.exit("FAILED: a file with no state chunks reads as having some")
     # A newer minor of each state chunk with appended bytes is read at any length and written back without them (the state fixture again).
     for cid in parts:
-        newer = b"\x01\x02" if cid in (b"PERF", b"APPM") else b"\x01\x01"  # PERF (OS-PERFFX P1) and APPM (OS-APPUX S3) are at 1.1: their next minor is 1.2
-        rewrite_alike("%s %d.%d with appended fields" % (cid.decode(), newer[0], newer[1]), edit_part(cid, lambda p: newer + p[2:] + b"\xab" * 5000), expect=state)
+        newer = b"\x01\x02" if cid in (b"PERF", b"APPM", b"USBS") else b"\x01\x01"  # PERF (OS-PERFFX P1), APPM (OS-APPUX S3) and USBS (OS-USBOUTS) are at 1.1: their next minor is 1.2
+        if cid == b"USBS":
+            pass  # a USBS 1.1 chunk holds one more byte, so its newer-minor case is the one with the count, below
+        else:
+            rewrite_alike("%s %d.%d with appended fields" % (cid.decode(), newer[0], newer[1]), edit_part(cid, lambda p: newer + p[2:] + b"\xab" * 5000), expect=state)
         refused_alike("%s 2.0" % cid.decode(), edit_part(cid, lambda p: b"\x02\x00" + p[2:] + b"\0" * 33), "newer major version")
         refused_alike("%s version 0" % cid.decode(), edit_part(cid, lambda p: b"\x00\x00" + p[2:]))
         refused_alike("%s a byte long" % cid.decode(), edit_part(cid, lambda p: p + b"\0\0"))
         refused_alike("%s a byte short" % cid.decode(), edit_part(cid, lambda p: p[:-1]))
+    # OS-USBOUTS: USBS 1.1 (4 or 6 outputs), written by hand here from the description: P8 with 8 slots (the real masks first, then P8's factory masks), then the count.
+    def usbs11(count, masks, version=b"\x01\x01", mode=1, profile=1, slots=8, tail=b""):
+        return version + bytes([mode, profile, slots]) + b"".join(struct.pack(">H", m) for m in masks) + bytes([count]) + tail
+    p8_factory = [0x0001, 0x0002, 0x0004, 0x0008, 0x0010, 0x0020, 0x1000, 0x2000]
+    for count, real in ((4, [0x0003, 0x0002, 0x1000, 0x2000]), (6, [0x0001, 0x0002, 0x0004, 0x0008, 0x1000, 0x2000])):
+        chunk11 = usbs11(count, real + p8_factory[count:])
+        want = join_chunks(edit_part(b"USBS", lambda p: chunk11))
+        dump11 = rewrite_alike("USBS 1.1 with %d outputs" % count, edit_part(b"USBS", lambda p: chunk11), expect=want)
+        if not any(l.startswith("usb mode=1 profile=%d slots=%d masks=" % (5 if count == 4 else 6, count)) for l in dump11):
+            sys.exit("FAILED: USBS 1.1 with %d outputs reads as %r" % (count, [l for l in dump11 if l.startswith("usb ")]))
+        rewrite_alike("USBS 1.2 with appended fields (%d outputs)" % count, edit_part(b"USBS", lambda p: usbs11(count, real + p8_factory[count:], b"\x01\x02", tail=b"\xab" * 5000)), expect=want)
+        refused_alike("USBS 2.0 (%d outputs)" % count, edit_part(b"USBS", lambda p: usbs11(count, real + p8_factory[count:], b"\x02\x00")), "newer major version")
+        refused_alike("USBS 1.1 a byte short", edit_part(b"USBS", lambda p: chunk11[:-1]))
+        refused_alike("USBS 1.1 a byte long", edit_part(b"USBS", lambda p: chunk11 + b"\0"))
+        # The view of a v1.0 reader (the count is skipped as a newer-minor field): P8 with the real masks first. Both sides read the count-less 1.0 chunk as P8.
+        dump10 = rewrite_alike("USBS 1.1 read as 1.0 (%d outputs)" % count, edit_part(b"USBS", lambda p: b"\x01\x00" + chunk11[2:-1]))
+        if not any(l.startswith("usb mode=1 profile=1 slots=8 masks=") for l in dump10):
+            sys.exit("FAILED: the 1.0 view of USBS 1.1 is not P8")
+    for name, count, profile, slots in (("count 0", 0, 1, 8), ("count 2", 2, 1, 8), ("count 5", 5, 1, 8), ("count 8", 8, 1, 8), ("count 255", 255, 1, 8),
+                                        ("P10 with a count", 4, 2, 8), ("P2 with a count", 4, 0, 8)):
+        refused_alike("USBS 1.1 " + name, edit_part(b"USBS", lambda p: usbs11(count, p8_factory, profile=profile, slots=slots)))
+    for profile in (4, 5, 6, 7, 255):  # a 1.0 chunk holds the profile byte 0..3 only
+        refused_alike("USBS 1.0 profile byte %d" % profile, edit_part(b"USBS", lambda p: p[:3] + bytes([profile]) + p[4:]))
     # Order: the state chunks come after LRNB and before the CRC in the order MIDI, USBS, MIXR, PERF, APPM; an unknown chunk may be anywhere after PHDR.
     midi, usbs, mixr, perf, appm_c = sc[m0:m0 + 5]
     refused_alike("MIXR before USBS", sc[:m0] + [midi, mixr, usbs, perf, appm_c] + sc[m0 + 5:])

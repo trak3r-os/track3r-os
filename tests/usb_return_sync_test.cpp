@@ -589,3 +589,21 @@ TEST_CASE("usb boot disk: a mode change that is already in flight towards DISK i
   CHECK(m.usb.mode == Mode::Standard);
   CHECK(m.usb.enumerations == 2u);
 }
+
+// OS-USBOUTS D3: the descriptors carry the return only when the setting is On and the profile has fewer than 10 channels; the setting itself (the wish) is never changed by it.
+TEST_CASE("usb return presented: the wish counts below 10 channels only, and the boot layout carries the wish, not the presented return, for 4 and 6 as for the rest") {
+  for (const Profile p : {Profile::P2, Profile::P4, Profile::P6, Profile::P8}) {
+    CHECK(o3os::usb::return_presented(p, true));
+    CHECK_FALSE(o3os::usb::return_presented(p, false));
+  }
+  for (const Profile p : {Profile::P10, Profile::P11}) {
+    CHECK_FALSE(o3os::usb::return_presented(p, true));  // 10 OUT / 2 IN does not open behind a hub with a transaction translator (ADR 0012 amendment 5)
+    CHECK_FALSE(o3os::usb::return_presented(p, false));
+  }
+  for (const Profile p : {Profile::P4, Profile::P6, Profile::P10}) {
+    const o3os::app::UsbBootLayout b = o3os::app::usb_boot_layout(true, p, true);
+    CHECK(b.mode == Mode::Audio);
+    CHECK(b.profile == p);
+    CHECK(b.usb_return);  // the wish: it survives a stay at 10 and comes back at fewer channels
+  }
+}

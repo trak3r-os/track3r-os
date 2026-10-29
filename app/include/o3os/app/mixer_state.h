@@ -15,6 +15,9 @@ struct MixerView {
   std::uint8_t reset_row = 0;  // the cursor the question was asked on: a Delete elsewhere asks again
   std::uint8_t reset_col = 0;
   std::uint32_t reset_at = 0;
+  // OS-USBOUTS: the OUTPUTS row of the STEMS page (row 0) holds a PENDING channel count (4, 6, 8, 10; 0 none) until the apply key (F6) is pressed twice; leaving the page drops it. Starred on screen.
+  // The apply question uses reset_asked = 3 and reset_at above.
+  std::uint8_t outputs_pending = 0;
 };
 
 }  // namespace o3os::app

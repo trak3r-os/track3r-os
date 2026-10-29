@@ -250,6 +250,52 @@ TEST_CASE("native fuzz: a file with the project-level state chunks: every byte, 
   CHECK(c.failed > 0);
 }
 
+// OS-USBOUTS: the USBS 1.1 chunk (4 or 6 outputs): every payload byte at its interesting values, every cut and a few appended bytes; whatever loads must round-trip.
+TEST_CASE("native fuzz: a USBS 1.1 chunk (4 and 6 outputs): every payload byte, every cut, appended bytes") {
+  for (const std::uint8_t profile : {std::uint8_t{5}, std::uint8_t{6}}) {
+    test::fill_state(test::arena(2).project);
+    model::UsbState u;
+    model::init_usb_state(u);
+    u.profile = profile;
+    u.slots = model::kUsbProfileChannels[profile];
+    for (std::uint32_t i = 0; i < model::kStemSlots; ++i) {
+      u.mask[i] = static_cast<std::uint16_t>(i >= u.slots ? 0u : (i == u.slots - 2u ? 0x1000u : (i == u.slots - 1u ? 0x2000u : 1u << i)));
+    }
+    NEED(test::arena(2).project.set_usb(u) == model::Status::Ok);
+    Bytes base;
+    NEED(test::save(test::arena(2).project, base) == Progress::Done);
+    const std::vector<test::RawChunk> chunks = test::split_chunks(base);
+    std::size_t at = chunks.size();
+    for (std::size_t i = 0; i < chunks.size(); ++i) {
+      if (chunks[i].id == formats::native::kChunkUsbs) at = i;
+    }
+    NEED(at < chunks.size());
+    NEED(chunks[at].payload.size() == 22u);
+    Tally t;
+    const std::uint8_t values[] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0B, 0x7F, 0x80, 0xFF};
+    for (std::size_t i = 0; i < chunks[at].payload.size(); i += kThin) {
+      for (const std::uint8_t v : values) {
+        std::vector<test::RawChunk> cs = chunks;
+        cs[at].payload[i] = v;
+        run_one(test::build_file(cs, {}), 4096, t);
+      }
+    }
+    for (std::size_t n = 0; n <= chunks[at].payload.size(); n += kThin) {
+      std::vector<test::RawChunk> cs = chunks;
+      cs[at].payload.resize(n);
+      run_one(test::build_file(cs, {}), 4096, t);
+    }
+    for (std::uint8_t extra = 1; extra <= 4; ++extra) {
+      std::vector<test::RawChunk> cs = chunks;
+      for (std::uint8_t k = 0; k < extra; ++k) cs[at].payload.push_back(static_cast<std::uint8_t>(0x30 + k));
+      run_one(test::build_file(cs, {}), 4096, t);
+    }
+    MESSAGE("USBS 1.1 profile " << int(profile) << ": " << t.runs << " runs, " << t.done << " loaded, " << t.failed << " rejected");
+    CHECK(t.done > 0);
+    CHECK(t.failed > 0);
+  }
+}
+
 TEST_CASE("native fuzz: arbitrary bytes and prefixes of a maximal file") {
   test::fill_maximal(test::arena(2).project);
   Bytes big;

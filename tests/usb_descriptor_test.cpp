@@ -17,7 +17,7 @@ using namespace o3os::usb;
 
 namespace {
 
-constexpr Profile kProfiles[] = {Profile::P2, Profile::P8, Profile::P10, Profile::P11, Profile::P4S};
+constexpr Profile kProfiles[] = {Profile::P2, Profile::P8, Profile::P10, Profile::P11, Profile::P4S, Profile::P4, Profile::P6};
 
 struct Built {
   std::uint8_t bytes[kMaxConfigDescriptorSize];
@@ -89,7 +89,7 @@ unsigned endpoint_numbers(const Built& b) {
 }  // namespace
 
 TEST_CASE("usb descriptors: golden bytes for every mode x speed x profile") {
-  CHECK(std::size(usb_golden::kCases) == 12);  // STANDARD x 2 speeds, AUDIO x 2 speeds x 5 profiles
+  CHECK(std::size(usb_golden::kCases) == 16);  // STANDARD x 2 speeds, AUDIO x 2 speeds x 7 profiles
   for (const usb_golden::Case& g : usb_golden::kCases) {
     Config cfg;
     cfg.mode = g.mode;
@@ -122,8 +122,8 @@ TEST_CASE("usb descriptors: STANDARD ignores the profile; sizes are 175 and 384 
 }
 
 TEST_CASE("usb descriptors: wMaxPacketSize is channels x 2 B x 45 at FS and x 6 at HS") {
-  const std::uint16_t fs[] = {180, 720, 900, 990, 900};
-  for (std::size_t i = 0; i < 5; ++i) {
+  const std::uint16_t fs[] = {180, 720, 900, 990, 900, 360, 540};
+  for (std::size_t i = 0; i < std::size(kProfiles); ++i) {
     INFO("profile " << i);
     CHECK(in_stream_max_packet(kProfiles[i], Speed::Full) == fs[i]);
     CHECK(in_stream_max_packet(kProfiles[i], Speed::Full) <= 1023);
@@ -393,6 +393,18 @@ TEST_CASE("usb strings: language, identity, serial and channel names") {
   CHECK(std::strcmp(name, "S2 R") == 0);
   CHECK(channel_name(Profile::P4S, 8, name) == 8);
   CHECK(std::strcmp(name, "Master L") == 0);
+  // OS-USBOUTS: P4 = S1, S2, Master L/R; P6 = S1..S4, Master L/R
+  CHECK(channel_name(Profile::P4, 1, name) == 2);
+  CHECK(std::strcmp(name, "S2") == 0);
+  CHECK(channel_name(Profile::P4, 2, name) == 8);
+  CHECK(std::strcmp(name, "Master L") == 0);
+  CHECK(channel_name(Profile::P4, 3, name) == 8);
+  CHECK(std::strcmp(name, "Master R") == 0);
+  CHECK(channel_name(Profile::P4, 4, name) == 0);
+  CHECK(channel_name(Profile::P6, 3, name) == 2);
+  CHECK(std::strcmp(name, "S4") == 0);
+  CHECK(channel_name(Profile::P6, 4, name) == 8);
+  CHECK(channel_name(Profile::P6, 6, name) == 0);
   CHECK(build_string_descriptor(cfg, kStrProduct, d, 10) == 0);  // buffer too small: refuses
 }
 
@@ -692,7 +704,8 @@ TEST_CASE("usb descriptors: bandwidth per profile with and without USB RETURN, e
     unsigned in_only;       // payload bytes per frame, USB RETURN off
     unsigned with_return;   // + the 180-byte OUT packet and the 3-byte feedback
   };
-  const Row rows[] = {{Profile::P2, 180, 363}, {Profile::P8, 720, 903}, {Profile::P10, 900, 1083}, {Profile::P11, 990, 1173}, {Profile::P4S, 900, 1083}};
+  const Row rows[] = {{Profile::P2, 180, 363}, {Profile::P8, 720, 903}, {Profile::P10, 900, 1083}, {Profile::P11, 990, 1173}, {Profile::P4S, 900, 1083},
+                    {Profile::P4, 360, 543}, {Profile::P6, 540, 723}};
   constexpr unsigned kOverhead = 9;
   constexpr unsigned kFrameBytes = 1500;                 // 12 Mbit/s for 1 ms
   constexpr unsigned kPeriodicBytes = kFrameBytes * 9 / 10;  // USB 2.0 5.6.4: at most 90 % of a frame for isochronous and interrupt transfers

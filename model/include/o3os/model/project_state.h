@@ -48,8 +48,12 @@ struct MidiState {
 // ---- USB: the descriptor set, the stem profile and the slot map of the stems stream
 inline constexpr std::uint32_t kStemSlots = 11;         // usb::kMaxChannels
 inline constexpr std::uint8_t kUsbModeMax = 1;          // 0 STANDARD, 1 AUDIO (usb::Mode)
-inline constexpr std::uint8_t kUsbProfileMax = 3;       // 0 P2, 1 P8, 2 P10 (the default), 3 P11; usb::Profile::P4S is not supported by the engine and is not stored
-inline constexpr std::uint8_t kUsbProfileChannels[kUsbProfileMax + 1] = {2, 8, 10, 11};  // usb::profile_channels
+// UsbState::profile is the usb::Profile value: 0 P2, 1 P8, 2 P10 (the default), 3 P11, 5 P4, 6 P6 (OS-USBOUTS); usb::Profile::P4S (4) is not supported by the engine and is not stored.
+// The USBS chunk's profile byte is only 0..3: a P4 or P6 project is written as P8 plus a channel-count byte (USBS 1.1, formats/native_state.h).
+inline constexpr std::uint8_t kUsbProfileMax = 6;
+inline constexpr std::uint8_t kUsbProfileP4S = 4;       // never valid
+inline constexpr std::uint8_t kUsbProfileMaxChunk = 3;  // the highest profile byte of USBS 1.0
+inline constexpr std::uint8_t kUsbProfileChannels[kUsbProfileMax + 1] = {2, 8, 10, 11, 0, 4, 6};  // usb::profile_channels
 
 struct UsbState {
   std::uint8_t mode;

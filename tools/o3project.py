@@ -113,7 +113,10 @@ RANKS = {b"PHDR": 1, b"TRAK": 2, b"MODR": 3, b"SONG": 4, b"PATT": 5, b"INST": 6,
          b"MIDI": 9, b"USBS": 10, b"MIXR": 11, b"PERF": 12, b"APPM": 13, b"NOTE": 14, b"MUTE": 15, b"SCEN": 16, b"SNFX": 17, b"LAW ": 18, b"CRC ": 19}
 
 # The project-level state of OS-004d (docs/formats/o3-project.md section 3, model/project_state.h): the chunks MIDI, USBS, MIXR, PERF, APPM.
-USB_PROFILE_CHANNELS = [2, 8, 10, 11]  # P2, P8, P10, P11 (usb::profile_channels; P4S is not stored)
+USB_PROFILE_CHANNELS = [2, 8, 10, 11, 0, 4, 6]  # usb::Profile P2, P8, P10, P11, (P4S: not stored), P4, P6 (usb::profile_channels)
+USB_PROFILE_P8, USB_PROFILE_P4, USB_PROFILE_P6 = 1, 5, 6
+USB_VERSION_COUNT = 0x0101  # OS-USBOUTS: USBS 1.1 for 4 or 6 outputs: P8 with 8 slots (the real ones first, then P8's factory masks), then the real count
+USB_P8_FACTORY = [0x0001, 0x0002, 0x0004, 0x0008, 0x0010, 0x0020, 0x1000, 0x2000]
 MIX_ROUTE_MASK, MIX_ROUTE_USB = 63, 32
 STATE_PARTS = (b"MIDI", b"USBS", b"MIXR", b"PERF", b"APPM")
 
@@ -308,7 +311,7 @@ LENGTH_RANGE = {
     b"SETS": (4, 4 + SETS_ENTRY_CAP * 8),
     b"LRNB": (4, 4 + LRNB_ENTRY_CAP * 8),
     b"MIDI": (20, 20),
-    b"USBS": (5, 5 + 2 * 11),
+    b"USBS": (5, 5 + 2 * 11),  # 1.1 adds one byte (the count), below
     b"MIXR": (25, 25),
     b"PERF": (99, 99),
     b"APPM": (3, 3 + 6 * (4 + 31 + 4 * 32)),  # 1.0; APPM 1.1 (OS-APPUX S3) is bounded by 1015, below
@@ -379,6 +382,8 @@ def parse(data):
                 hi += 1  # the playback engine of version 1.2
             if cid == b"INST" and (version & 0xFF) >= 3:
                 hi += len(INST13)  # the MIDI fields and VEL> of version 1.3
+            if cid == b"USBS" and (version & 0xFF) >= 1:
+                hi += 1  # version 1.1: the channel count of a 4 or 6 output project (OS-USBOUTS)
             if cid == b"APPM" and (version & 0xFF) >= 1:
                 hi = L["app_params_bytes_max"]  # version 1.1: up to 12 apps, as many as one writer piece holds (OS-APPUX S3)
             if clen < lo or (not newer and clen > hi):
@@ -447,12 +452,12 @@ def keep_unknown(p, cid, payload, used):
 
 
 def known_minor(cid):
-    """The newest minor version of a chunk this reader knows: INST 1.4, PERF and SCEN 1.1, APPM 1.1, the others 1.0."""
+    """The newest minor version of a chunk this reader knows: INST 1.4, PERF and SCEN 1.1, APPM 1.1, USBS 1.1, the others 1.0."""
     if cid == b"INST":
         return INST_VERSION_LFO_SINE & 0xFF
     if cid in (b"PERF", b"SCEN"):
         return STATE_VERSION_FX & 0xFF
-    return 1 if cid == b"APPM" else CHUNK_VERSION & 0xFF
+    return 1 if cid in (b"APPM", b"USBS") else CHUNK_VERSION & 0xFF
 
 
 def check_version(version, cid=None):
@@ -671,8 +676,16 @@ def parse_state(p, cid, payload, newer):
         if c.bad or slots > L["stem_slots"]:
             malformed(short if c.bad else "USBS: more slots than a profile has")
         masks = [c.u16() for _ in range(slots)]
+        count = c.u8() if (version & 0xFF) >= 1 else 0  # USBS 1.1 (OS-USBOUTS): the real channel count follows the masks
         shape()
-        if mode > 1 or profile > 3 or slots != USB_PROFILE_CHANNELS[profile]:
+        if mode > 1 or profile > 3:  # the chunk's profile byte is 0..3 (P4S, and the model's P4 / P6, are not stored)
+            malformed("USBS: bad mode, profile or slot count")
+        if (version & 0xFF) >= 1:
+            if profile != USB_PROFILE_P8 or slots != 8 or count not in (4, 6):
+                malformed("USBS: bad channel count")
+            profile = USB_PROFILE_P4 if count == 4 else USB_PROFILE_P6
+            masks = masks[:count]
+        if slots != USB_PROFILE_CHANNELS[profile] and (version & 0xFF) == 0:
             malformed("USBS: bad mode, profile or slot count")
         p["usb"] = {"mode": mode, "profile": profile, "masks": masks}
     elif cid == b"MIXR":
@@ -851,7 +864,12 @@ def build_state(p, v):
                          + struct.pack(">4h", *m["in_off"], *m["out_off"])))
     if p["usb"] is not None:
         u = p["usb"]
-        out.append(chunk(b"USBS", v + bytes([u["mode"], u["profile"], len(u["masks"])]) + b"".join(struct.pack(">H", x) for x in u["masks"])))
+        if u["profile"] in (USB_PROFILE_P4, USB_PROFILE_P6):  # 1.1: P8 with 8 slots, the real masks first, then the P8 factory ones, then the count
+            full = u["masks"] + USB_P8_FACTORY[len(u["masks"]):]
+            out.append(chunk(b"USBS", struct.pack(">H", USB_VERSION_COUNT) + bytes([u["mode"], USB_PROFILE_P8, 8])
+                             + b"".join(struct.pack(">H", x) for x in full) + bytes([len(u["masks"])])))
+        else:
+            out.append(chunk(b"USBS", v + bytes([u["mode"], u["profile"], len(u["masks"])]) + b"".join(struct.pack(">H", x) for x in u["masks"])))
     if p["mix"] is not None:
         m = p["mix"]
         out.append(chunk(b"MIXR", v + bytes([len(m["route"])] + m["route"] + m["ret"] + [m["out_mode"], m["cue"], m["in"]])))

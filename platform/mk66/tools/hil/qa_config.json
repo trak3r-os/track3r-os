@@ -128,7 +128,8 @@
   {"keys": ["f6"], "gap": 0.4},
   {"keys": ["up"], "gap": 0.12, "repeat": 6, "note": "the cursor on the first row"},
   {"keys": ["down"], "gap": 0.12, "repeat": 2},
-  {"keys": ["delete"], "gap": 0.2, "note": "REC MICRO back to its default, Off (the unit keeps the settings it is left with)"}
+  {"keys": ["delete"], "gap": 0.2, "note": "REC MICRO back to its default, Off (the unit keeps the settings it is left with)"},
+  {"say": "QA-CFG-250 / 251 USB RETURN AT 10 OUTPUTS BY HAND. Precondition: USB AUDIO On, USB RETURN On, 8 outputs (Mixer > STEMS > OUTPUTS). (a) Config > USB (F5), cursor on USB RETURN: the value reads On. (b) Mixer > STEMS: OUTPUTS to 10, F6 twice. Config > USB: USB RETURN reads On (10 OUT: off), dim; the console says usb return: on and the layout has no playback stream; on the Linux computer aplay -l lists no playback device of the unit. (c) OUTPUTS back to 8, F6 twice: USB RETURN reads On, the computer sees the 2-channel playback device again; the setting was On all along (Config > INFO and the settings file unchanged). Record the three row texts and the aplay -l lines."}
  ],
  "finally": [
   {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|NAVIGATOR|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},

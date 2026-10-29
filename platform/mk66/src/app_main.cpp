@@ -664,6 +664,7 @@ app::SampleBankMem* make_bank_mem() noexcept { return new (sample_arena() + kAre
 midi::CcInput* make_cc_input() noexcept { return new (sample_arena() + kArenaSamples + kPeakSamples + kBankMemSamples) midi::CcInput(); }
 audio::LiveBox* make_live_box() noexcept { return new (sample_arena() + kArenaSamples + kPeakSamples + kBankMemSamples + kCcSamples) audio::LiveBox(); }
 app::MixBoard* make_mix_board() noexcept { return new (sample_arena() + kArenaSamples + kPeakSamples + kBankMemSamples + kCcSamples + kLiveSamples) app::MixBoard(); }
+bool usb_request_outputs(usb::Profile profile) noexcept;  // OS-USBOUTS: the STEMS page's OUTPUTS hook; defined below, after g_usb_apply
 app::PerformBoard* make_perform_board() noexcept {
   return new (sample_arena() + kArenaSamples + kPeakSamples + kBankMemSamples + kCcSamples + kLiveSamples + kMixSamples) app::PerformBoard();
 }
@@ -849,6 +850,7 @@ void make_sound(model::Project& project) noexcept {
   g_mix->meters = &audio_engine().graph().meters();  // the Mixer screen's bars follow the engine's meters (a lock-free snapshot, main loop)
   g_mix->stems = &usb0::stem_map();                  // and its STEMS page edits the USB stream's stem map (runtime only), handed on by the same hook as `diag usb map`
   g_mix->apply_stems = &usb0::apply_stem_map;
+  g_mix->request_outputs = &usb_request_outputs;     // OS-USBOUTS: its OUTPUTS row asks the driver for 2 / 4 / 6 / 8 / 10 outputs
   g_mix->tracks = &g_track_sink;                     // the TRACKS pads' deferred mutes and activity (OS-MUTE)
   g_perform = make_perform_board();
   g_perform->out = &g_perform_sink;
@@ -913,7 +915,7 @@ usb::Mode usb_mode_now() noexcept { return usb0::change_phase() != 0u ? usb0::pe
 struct UsbReturnDriver {
   bool ready() const noexcept { return usb0::attached(); }
   bool disk() const noexcept { return usb_mode_now() == usb::Mode::Disk; }  // OS-USBDISK: the boot disk's DISK set is final (app/usb_return.h): the settings were never read
-  bool target() const noexcept { return usb0::change_phase() != 0u ? usb0::pending_return() : usb0::return_enabled(); }
+  bool target() const noexcept { return usb0::return_wanted(); }  // the WISH (OS-USBOUTS): committed when a request is accepted, so no pending branch; the presented value drops at 10 channels, the setting does not
   bool request(bool on) noexcept { return usb0::request_layout(usb0::mode(), usb0::profile(), on); }
 };
 
@@ -957,6 +959,16 @@ model::UsbState g_usb_seen;
 bool g_midi_seen_valid = false;
 bool g_usb_seen_valid = false;
 app::UsbApply g_usb_apply;
+
+// OS-USBOUTS (ADR 0012 amendment 8): the number of USB outputs of the project, asked for by the Mixer's STEMS page. The profile goes to the driver with the return WISH as it is; the driver re-enumerates (AUDIO) or only
+// remembers it (STANDARD), resets the stem map to the factory slots of the new profile, and sync_project_platform_state() stores profile and map in the project (unsaved, not an undo unit). Refused (false: the page keeps
+// its pending value and says so) while a project's USB part is being applied or a change is in flight: usb0::request_layout alone would take a request in between and the apply would then fight it.
+bool usb_request_outputs(usb::Profile profile) noexcept {
+  if (g_usb_apply.pending() || usb0::change_phase() != 0u) {
+    return false;
+  }
+  return usb0::request_layout(usb0::mode(), profile, usb0::return_wanted());
+}
 
 void apply_project_platform_state() noexcept {
   if (g_midi == nullptr || g_arena == nullptr) {
@@ -2656,7 +2668,7 @@ class DiskPort final : public DiskShare::Port {
     return false;
 #endif
   }
-  DiskShare::Layout layout() const noexcept override { return DiskShare::Layout{usb0::mode(), usb0::profile(), usb0::return_enabled()}; }
+  DiskShare::Layout layout() const noexcept override { return DiskShare::Layout{usb0::mode(), usb0::profile(), usb0::return_wanted()}; }  // (the wish: leaving DISK hands it back)
   bool layout_changing() const noexcept override { return usb0::change_phase() != 0u; }
   bool enter_disk_layout(const DiskShare::Layout& to) noexcept override { return usb0::disk_layout_enter(to.profile, to.usb_return); }
   bool leave_disk_layout(const DiskShare::Layout& to) noexcept override { return usb0::disk_layout_leave(to.mode, to.profile, to.usb_return); }

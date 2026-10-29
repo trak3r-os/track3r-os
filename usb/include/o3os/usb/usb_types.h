@@ -22,7 +22,9 @@ enum class Mode : std::uint8_t { Standard, Audio, Disk };
 //   P10  T1..T8 + master L/R                10   (default)
 //   P11  T1..T9 + master L/R                11   (the largest 16-bit layout that fits a full-speed packet)
 //   P4S  4 stereo post-pan stems + master   10
-enum class Profile : std::uint8_t { P2, P8, P10, P11, P4S };
+//   P4   T1, T2 + master L/R                 4   (OS-USBOUTS: the per-project OUTPUTS choice; appended, so the values of P2..P4S stay)
+//   P6   T1..T4 + master L/R                 6
+enum class Profile : std::uint8_t { P2, P8, P10, P11, P4S, P4, P6 };
 
 inline constexpr std::uint32_t kMaxChannels = 11;
 inline constexpr std::uint32_t kReturnChannels = 2;  // the OUT (host to device) stream: stereo USB RETURN (a device setting since OS-USBRET: off drops it)
@@ -48,9 +50,17 @@ constexpr std::uint32_t profile_channels(Profile p) noexcept {
       return 11;
     case Profile::P4S:
       return 10;
+    case Profile::P4:
+      return 4;
+    case Profile::P6:
+      return 6;
   }
   return 0;
 }
+
+// OS-USBOUTS (ADR 0012 amendment 8): the return the descriptors carry. The WISH is the device setting USB RETURN (and the console's `usb return`); a layout with 10 or more channels
+// never presents it (a 10 OUT / 2 IN set does not open behind a hub with a transaction translator, amendment 5). The wish itself is never changed by this: back at 8 channels the return comes back.
+constexpr bool return_presented(Profile p, bool wish) noexcept { return wish && profile_channels(p) < 10u; }
 
 // Frames per packet. The cadence is 44/45 frames per 1 ms frame at full speed (44,100 / 1,000 = 44.1,
 // or 44.1176 at the true engine rate) and 5/6 per 125 us microframe at high speed.

@@ -1,7 +1,7 @@
 # OS-QANET A1: actions that no run of the walk saw act (the document changed, or for an action that does not edit it, the dispatcher answered Changed): the table has no state where they have something
 # to do, or the context that binds them is not reached. Each is a hole in the net (rule 1 is never asked of it), not a finding. The test fails when this list grows and when an action on it starts
 # to act (delete its line). Written by QANET_WRITE_GAPS.
-count: 71
+count: 72
 chooser.coarse
 chooser.defined
 chooser.delta
@@ -16,6 +16,7 @@ instrument.select
 learn.clear
 learn.clear_all
 learn.mode
+mixer.apply
 mixer.solo_none
 mixer.stem_set
 module.app_edit

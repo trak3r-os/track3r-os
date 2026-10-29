@@ -43,7 +43,7 @@ namespace o3os::platform::mk66::usb0 {
 // are inconsistent). Call once, in the main thread, after the clock tree, the SDRAM, the interrupt priorities and the log.
 // The descriptor set of that first enumeration is `mode` with `profile` and `usb_return` (OS-USBAUDIO: chosen before the pull-up, so the host sees one device and no STANDARD-then-AUDIO
 // switch). A profile the engine cannot feed, or descriptors that do not build, fall back to STANDARD (logged). In STANDARD the profile and the return are only remembered for a later AUDIO attach.
-bool start(o3os::usb::Mode mode, o3os::usb::Profile profile, bool usb_return) noexcept;
+bool start(o3os::usb::Mode mode, o3os::usb::Profile profile, bool wish) noexcept;  // (`wish`: the return the setting wants; the descriptors carry it only below 10 channels)
 
 // True once start() switched the pull-up on.
 bool attached() noexcept;
@@ -75,7 +75,10 @@ const o3os::midi::UsbBindStats& midi_bind_stats() noexcept;
 // (USB RETURN, OS-USBRET: false is capture only, no OUT interface and no feedback endpoint). The layout of a boot is profile 8 with the return on.
 o3os::usb::Mode mode() noexcept;
 o3os::usb::Profile profile() noexcept;
-bool return_enabled() noexcept;
+bool return_enabled() noexcept;  // the return the descriptors PRESENT: the wish, and fewer than 10 channels (OS-USBOUTS, ADR 0012 amendment 8)
+// The WISH for the return: the device setting USB RETURN / the console's `usb return`, kept whatever the profile (setting On at 10 channels presents nothing, and stays On). What the syncs, the console and
+// the DISK hand-over pass back to request_layout() / disk_layout_*(), so that a move 10 -> 4 -> 10 never stores a lost return. Main thread.
+bool return_wanted() noexcept;
 
 // Asks for another descriptor set. Non-blocking: the change is carried out by service() from the main loop, in three steps: wait a moment for the
 // console's reply to leave over the CDC port, detach (pull-up off, streams stopped, the stem tap off), wait for the host to notice, then rebuild the
@@ -83,10 +86,12 @@ bool return_enabled() noexcept;
 // False, nothing changed, when a change is already in progress, the profile is one the engine cannot feed (P4S), or the driver is not running.
 // Asking for the set that is presented now is a successful no-op. A profile different from the current one resets the stem map to that profile's
 // factory slots (the slot masks mean something else on another layout).
-bool request_mode(o3os::usb::Mode mode, o3os::usb::Profile profile) noexcept;  // keeps the current USB RETURN
+bool request_mode(o3os::usb::Mode mode, o3os::usb::Profile profile) noexcept;  // keeps the current wish for USB RETURN
 // The same with USB RETURN chosen too. In AUDIO a different mode, profile or return re-enumerates; in STANDARD (whose descriptors depend on none of them) the
 // choice is only remembered for the next AUDIO attach.
-bool request_layout(o3os::usb::Mode mode, o3os::usb::Profile profile, bool usb_return) noexcept;
+// `wish` is the setting's value; the set presented carries it only below 10 channels, and the same set asked again (a wish that changes nothing the host sees) is a no-op that keeps the wish. A refusal
+// (false) leaves the wish as it was.
+bool request_layout(o3os::usb::Mode mode, o3os::usb::Profile profile, bool wish) noexcept;
 
 // 0: nothing in progress, 1: waiting for the reply to leave, 2: detached. The target of a change in progress.
 std::uint8_t change_phase() noexcept;
@@ -129,8 +134,8 @@ DiskState disk_state() noexcept;
 // OS-USBDISK U2a (the running mode, docs/specs/OS-USBDISK.md 4.2, 6.1; DiskShare drives these). disk_layout_enter(): queues the DISK set (CDC + MIDI + MSC) over the layout presented now (request_mode's three steps:
 // the reply leaves, detach, attach); false when a change is in progress, DISK is already presented or the profile cannot be fed. disk_layout_leave(): queues the layout `mode`/`profile`/`usb_return` out of DISK, only
 // when DISK was NOT the boot layout (the boot disk's exit is a reset). request_layout()/request_mode() keep refusing every change while DISK is presented.
-bool disk_layout_enter(o3os::usb::Profile profile, bool usb_return) noexcept;
-bool disk_layout_leave(o3os::usb::Mode mode, o3os::usb::Profile profile, bool usb_return) noexcept;
+bool disk_layout_enter(o3os::usb::Profile profile, bool wish) noexcept;
+bool disk_layout_leave(o3os::usb::Mode mode, o3os::usb::Profile profile, bool wish) noexcept;
 // The computer ejected the medium (START STOP UNIT): true once. The unit's eject: the computer's next command is UNIT ATTENTION, then NOT READY, MEDIUM NOT PRESENT. Main loop.
 // Q11: the render's load in percent of the block budget, once a pass (main loop); above 85 % (smoothed, released below 80 %) disk_pass() runs the pump every 2 ms only (usb/msc_throttle.h). disk_throttled(): `diag usb` and the tests.
 void set_render_load(unsigned percent) noexcept;

@@ -53,8 +53,29 @@ TEST_CASE("stem map: the factory slots of each profile are the descriptor's chan
   CHECK(m.slot(1) == mr());
   CHECK(m.slot(2) == 0u);
 
+  // OS-USBOUTS: P4 = T1, T2, Master L/R; P6 = T1..T4, Master L/R
+  CHECK(StemMap::supported(Profile::P4));
+  CHECK(StemMap::supported(Profile::P6));
+  CHECK(m.reset(Profile::P4));
+  CHECK(m.profile() == Profile::P4);
+  CHECK(m.channels() == 4u);
+  CHECK(m.slot(0) == t(1));
+  CHECK(m.slot(1) == t(2));
+  CHECK(m.slot(2) == ml());
+  CHECK(m.slot(3) == mr());
+  CHECK(m.slot(4) == 0u);
+  CHECK_FALSE(m.set_slot(4, t(1)));
+  CHECK(m.reset(Profile::P6));
+  CHECK(m.channels() == 6u);
+  for (unsigned s = 0; s < 4u; ++s) {
+    CHECK(m.slot(s) == t(s + 1u));
+  }
+  CHECK(m.slot(4) == ml());
+  CHECK(m.slot(5) == mr());
+  CHECK(m.slot(6) == 0u);
+
   // The names the descriptors give the channels agree: every non-master channel is "S<n>" and the last two are the master.
-  for (Profile p : {Profile::P2, Profile::P8, Profile::P10, Profile::P11}) {
+  for (Profile p : {Profile::P2, Profile::P8, Profile::P10, Profile::P11, Profile::P4, Profile::P6}) {
     StemMap q;
     CHECK(q.reset(p));
     char name[10];

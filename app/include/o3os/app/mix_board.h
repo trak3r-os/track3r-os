@@ -73,6 +73,9 @@ struct MixBoard {
   const audio::MeterBank* meters = nullptr;  // the engine's meters (audio::Graph::meters())
   audio::StemMap* stems = nullptr;           // the stem map of the USB stream (usb0::stem_map())
   void (*apply_stems)() noexcept = nullptr;  // hands the map to the stem tap (usb0::apply_stem_map)
+  // OS-USBOUTS: asks the USB driver for another number of outputs (usb0::request_layout with the profile; the platform's hook refuses while a change or a project's USB apply is in flight). False: refused
+  // for now (busy, DISK, driver down): the page keeps its pending value. The driver resets the stem map to the new profile's factory slots when it attaches. Null in a bare test.
+  bool (*request_outputs)(usb::Profile profile) noexcept = nullptr;
   TrackSink* tracks = nullptr;               // the sequencer's per-track side (OS-MUTE: deferred mutes, note counters); null: mutes are immediate, no activity
 
   // OS-MUTE: each track's MUTE MODE (app::MuteMode, 0 Immediate). Since OS-PERSIST2 the project's (the MUTE chunk: App::sync_project_state copies a change into it, a load puts it back; a project

@@ -6,6 +6,8 @@
 
 #include <o3os/app/dir_scan.h>
 #include <o3os/app/firmware_view.h>
+#include <o3os/app/mix_board.h>
+#include <o3os/audio/stem_map.h>
 #include <o3os/app/screens/config_screen.h>
 #include <o3os/app/screens/sample_edit_screen.h>
 #include <o3os/app/screens/sample_load_screen.h>
@@ -407,6 +409,15 @@ struct ConfigScene {
     (void)view.params.set_pending(core::param_id(core::ParamKind::Device, 0, model::device_setting::UsbReturn), 0.0f);
     view.params.armed = armed;
   }
+  // OS-USBOUTS O3: the USB page, the cursor on USB RETURN (On), with a stem map of 10 channels: the row reads "On (10 OUT: off)", dim.
+  void show_usb_ten() {
+    show(4, true);
+    view.params.row = 1;
+    board.stems = &stems;
+    model.mix = &board;
+  }
+  app::MixBoard board;
+  audio::StemMap stems;  // the default is the 10-channel profile
   // OS-FWCONFIG: the INFO page with the firmware update dialog up, in `phase`, over the four files the simulator's `firmware on` lists (sim/src/simulator.cpp). `cursor` is the file the walk is about;
   // `fraction` (permille) is how far the check or the hand-over has read; a `failed` list carries the check's verdict on its line, as the dialog does (firmware_actions.cpp).
   void show_firmware(app::FirmwareView::Phase phase, unsigned cursor, unsigned fraction = 0, bool failed = false) {
@@ -461,6 +472,11 @@ void draw_config_usb_pending(ui::Renderer& r, unsigned) {  // OS-USBAUDIO: two v
   s.show_usb_pending(false);
   app::render_scene(s.model, s.view, r);
 }
+void draw_config_usb_ten(ui::Renderer& r, unsigned) {  // OS-USBOUTS O3: USB RETURN On at 10 OUT
+  ConfigScene& s = config_scene();
+  s.show_usb_ten();
+  app::render_scene(s.model, s.view, r);
+}
 void draw_config_usb_armed(ui::Renderer& r, unsigned) {  // OS-USBAUDIO: the first press of APPLY: the info line says the port will reconnect
   ConfigScene& s = config_scene();
   s.show_usb_pending(true);
@@ -482,7 +498,7 @@ void draw_config_fw_failed(ui::Renderer& r, unsigned) { draw_config_fw(r, app::F
 
 }  // namespace
 
-const ScreenState kConfigStates[15] = {
+const ScreenState kConfigStates[16] = {
     {"midi", true, 1, kBudgetWords, draw_config_midi},
     {"display", true, 1, kBudgetWords, draw_config_display},
     {"sd", true, 1, kBudgetWords, draw_config_sd},
@@ -492,6 +508,7 @@ const ScreenState kConfigStates[15] = {
     {"pattern", true, 1, kBudgetWords, draw_config_pattern},
     {"usb_pending", true, 1, kBudgetWords, draw_config_usb_pending},
     {"usb_armed", true, 1, kBudgetWords, draw_config_usb_armed},
+    {"usb_ten", true, 1, kBudgetWords, draw_config_usb_ten},
     {"fw_list", true, 1, kBudgetWords, draw_config_fw_list},
     {"fw_ask", true, 1, kBudgetWords, draw_config_fw_ask},
     {"fw_check", true, 1, kBudgetWords, draw_config_fw_check},

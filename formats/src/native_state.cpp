@@ -8,6 +8,18 @@ namespace o3os::formats::state_chunks {
 using native::codec::Cursor;
 using native::codec::Enc;
 
+namespace {
+
+constexpr std::uint8_t kProfileP8 = 1;  // the chunk's profile byte of P8 (usb::Profile::P8)
+
+// OS-USBOUTS: a project with 4 or 6 outputs (usb::Profile P4 = 5, P6 = 6) is written as USBS 1.1.
+bool usb_counted(const model::UsbState& u) noexcept { return u.profile == 5 || u.profile == 6; }
+
+// The factory mask of slot i of P8 (T1..T6, Master L, Master R: audio/stem_map.h; the bits are stem_src).
+std::uint16_t p8_factory_mask(std::uint32_t i) noexcept { return static_cast<std::uint16_t>(i < 6 ? 1u << i : 1u << (i == 6 ? 12 : 13)); }
+
+}  // namespace
+
 bool present(const model::Project& p, Part part) noexcept {
   switch (part) {
     case Part::Midi: return (p.state_present() & model::Project::kStateMidi) != 0;
@@ -30,7 +42,7 @@ std::size_t payload_size(const model::Project& p, Part part) noexcept {
   }
   switch (part) {
     case Part::Midi: return kMidiBytes;
-    case Part::Usb: return kUsbFixed + 2u * p.usb().slots;
+    case Part::Usb: return usb_counted(p.usb()) ? kUsbCountP8Bytes : kUsbFixed + 2u * p.usb().slots;
     case Part::Mix: return kMixBytes;
     case Part::Perf: return kPerfBytes;
     case Part::Apps: {
@@ -80,6 +92,9 @@ std::uint16_t version_of(const model::Project& p, Part part) noexcept {
   if (part == Part::Apps && p.app_params_count() > model::kAppParamSetsV10) {
     return state_chunks::kAppsVersionV11;
   }
+  if (part == Part::Usb && usb_counted(p.usb())) {
+    return state_chunks::kUsbVersionCount;
+  }
   if (part == Part::Perf && uses_fx_after_v10(p.perf())) {
     return native::kStateVersionFx;
   }
@@ -108,6 +123,13 @@ void encode(Enc& e, const model::Project& p, Part part) noexcept {
     case Part::Usb: {
       const model::UsbState& u = p.usb();
       e.u8(u.mode);
+      if (usb_counted(u)) {  // 1.1: P8 with 8 slots (the real ones, then P8's factory masks), then the real count
+        e.u8(kProfileP8);
+        e.u8(8);
+        for (std::uint32_t i = 0; i < 8; ++i) e.u16(i < u.slots ? u.mask[i] : p8_factory_mask(i));
+        e.u8(u.slots);
+        return;
+      }
       e.u8(u.profile);
       e.u8(u.slots);
       for (std::uint32_t i = 0; i < u.slots; ++i) e.u16(u.mask[i]);
@@ -219,7 +241,17 @@ const char* decode(Cursor& c, bool newer_minor, model::Project& p, Part part, st
       u.slots = c.u8();
       if (c.bad() || u.slots > model::kStemSlots) return c.bad() ? kShort : "USBS: more slots than a profile has";
       for (std::uint32_t i = 0; i < u.slots; ++i) u.mask[i] = c.u16();
+      const std::uint32_t count = chunk_minor >= 1 ? c.u8() : 0u;  // USBS 1.1 (OS-USBOUTS): the real channel count follows the masks
       if (!shape_ok(c, newer_minor)) return kShort;
+      if (u.profile > model::kUsbProfileMaxChunk) return "USBS: bad profile";  // the chunk's byte is 0..3, as in 1.0 (P4S and the model's P4 / P6 values are not stored)
+      // 1.1 is strict (P8, 8 slots, count 4 or 6, exact length); a future minor (> 1) is lenient: the count is used only when P8, 8 slots and a count of 4 or 6 are all there, else the 1.0 view
+      const bool counted = chunk_minor == 1 ? true : (chunk_minor > 1 && u.profile == kProfileP8 && u.slots == 8 && (count == 4 || count == 6));
+      if (counted) {
+        if (u.profile != kProfileP8 || u.slots != 8 || (count != 4 && count != 6)) return "USBS: bad channel count";
+        u.profile = count == 4 ? 5 : 6;
+        u.slots = static_cast<std::uint8_t>(count);
+        for (std::uint32_t i = count; i < model::kStemSlots; ++i) u.mask[i] = 0;
+      }
       if (const char* why = model::validate_usb_state(u)) return why;
       return p.set_usb(u) == model::Status::Ok ? nullptr : "USBS: rejected by the model";
     }

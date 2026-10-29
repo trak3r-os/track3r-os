@@ -77,7 +77,7 @@ extern const ScreenState kSampleEditStates[4];
 
 // The Config screen (screens_sample.cpp): the MIDI page, DISPLAY, SD with a card and without, INFO, USB, PATTERN, and (OS-FWCONFIG) the six states of the firmware update dialog over INFO: the list,
 // question 1, the check, question 2, the hand-over and a failed check.
-extern const ScreenState kConfigStates[15];
+extern const ScreenState kConfigStates[16];
 
 // The widest text the model's limits allow (screens_legibility.cpp, OS-E2E-5): the Pattern screen with the longest names, tempo 800, instrument 64 and pattern 255, the same with the
 // longest strip message, the Instrument page of instrument 64, the File screen of the longest project name and (OS-FWCONFIG) the firmware update list with twelve files of 48 characters and the
@@ -86,7 +86,7 @@ extern const ScreenState kExtremeStates[5];
 
 // The Mixer screen (screens_mixer.cpp, OS-011b): the MIXER page with the cursor on a level, a pan and the master, with no project, and the worst case (sixteen tracks
 // with every mark and every meter hot, swept over both fields of every column); the ROUTING, MASTER FX and STEMS pages, each with its typical, edge and worst states.
-extern const ScreenState kMixerStates[17];
+extern const ScreenState kMixerStates[18];
 // The Perform screen (screens_mixer.cpp, OS-011b): slots with FX latched on three tracks and a pad down, the EDIT state, no board, and the worst case (every slot at its widest, EDIT on,
 // every track affected and muted, swept over the edit place).
 extern const ScreenState kPerformStates[5];

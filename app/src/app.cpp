@@ -157,8 +157,10 @@ void App::run_once() noexcept {
       dirty_ = true;
     }
     // OS-QAFIX-9: the STEMS page's Delete question lives only while that page stays in view; a page change or leaving Mixer takes it back, so coming back never lets a Delete confirm a question that was not asked now.
-    if (state_.mixer.reset_asked != 0u && (state_.screen != ScreenId::Mixer || mixer::page_of(state_) != MixerPage::Stems)) {
+    if ((state_.mixer.reset_asked != 0u || state_.mixer.outputs_pending != 0u) && (state_.screen != ScreenId::Mixer || mixer::page_of(state_) != MixerPage::Stems)) {
       state_.mixer.reset_asked = 0;
+      state_.mixer.outputs_pending = 0;  // OS-USBOUTS: leaving the STEMS page drops a pending OUTPUTS value
+      dirty_ = true;
     }
     // The hidden INPUT TEST screen shows the raw events, before the gestures and bindings that the screen's context swallows.
     if (state_.screen == ScreenId::InputTest && state_.input_test.observe(event, clock_.now())) {

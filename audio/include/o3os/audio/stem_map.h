@@ -6,6 +6,7 @@
 //
 //   P10 (default)  S1..S8 = T1..T8, S9 = Master L, S10 = Master R      P8  S1..S6 = T1..T6, then Master L/R      (Windows shared-mode safe)
 //   P11            S1..S9 = T1..T9, then Master L/R                    P2  Master L/R
+//   P4 (OS-USBOUTS) S1..S2 = T1..T2, then Master L/R                    P6  S1..S4 = T1..T4, then Master L/R      (the per-project OUTPUTS choice of Mixer > STEMS)
 //   P4S            four STEREO POST-PAN stems: not supported by the engine yet (the StemTap is mono, pre-pan): the profile is refused here.
 // A track with no slot of its own is heard in the master pair, which every profile carries: "others heard in the master".
 //

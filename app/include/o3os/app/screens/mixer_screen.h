@@ -20,6 +20,7 @@ class MixerScreen final : public Screen {
   void render(const Model& model, const ViewState& view, ui::Renderer& r, ui::Rect covered) const noexcept override;
   ScreenId id() const noexcept override { return ScreenId::Mixer; }
   Context context() const noexcept override { return Context::Mixer; }
+  Context field_context(const Model& model, const ViewState& view) const noexcept override;  // OS-USBOUTS: the STEMS page (F6 APPLY)
   unsigned pages() const noexcept override { return kMixerPages; }
   const char* const* soft_keys() const noexcept override { return kMixerSoftKeys; }
   const char* const* soft_keys_shifted() const noexcept override { return kMixerShiftKeys; }

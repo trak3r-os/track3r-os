@@ -306,8 +306,10 @@ void usb_audio_view(shell::Shell& sh) {
   send(sh, format_usb_audio(r, buf, sizeof buf), buf);
 }
 
-void usb_request(shell::Shell& sh, o3os::usb::Mode mode, o3os::usb::Profile profile, bool usb_return) {
-  if (!usb0::request_layout(mode, profile, usb_return)) {
+// `wish` is the return the user asks for (OS-USBOUTS: the layout presents it only below 10 channels; the line says so).
+void usb_request(shell::Shell& sh, o3os::usb::Mode mode, o3os::usb::Profile profile, bool wish) {
+  const bool usb_return = o3os::usb::return_presented(profile, wish);
+  if (!usb0::request_layout(mode, profile, wish)) {
     sh.out().text(usb0::change_phase() != 0u ? "a mode change is already in progress\n"
                   : usb0::mode() == o3os::usb::Mode::Disk ? "refused: the USB DISK mode ends with a restart\n"
                                                         : "refused: profile not supported yet (4s needs post-pan stems) or driver down\n");
@@ -315,6 +317,9 @@ void usb_request(shell::Shell& sh, o3os::usb::Mode mode, o3os::usb::Profile prof
   }
   char layout[20];
   (void)usb_layout_name(profile, usb_return, layout);
+  if (wish && !usb_return) {
+    sh.out().text("usb: the return is not presented at 10 or more channels (the setting stays On; 8 channels or fewer bring it back)\n");
+  }
   if (usb0::change_phase() == 0u) {
     if (usb0::mode() == o3os::usb::Mode::Disk) {  // (accepted only because it is the layout DISK already presents)
       sh.out().text("usb: DISK mode is held by the boot disk until a restart, nothing changed: ").text(layout).nl();
@@ -375,9 +380,9 @@ void usb_subcommand(shell::Shell& sh, const shell::Args& a) {
       sh.out().text("usb mode: ").text(usb_mode_name(usb0::mode())).text(", profile ").text(usb_profile_name(usb0::profile())).text(", ").text(
           usb_layout_name(usb0::profile(), usb0::return_enabled(), layout)).nl();
     } else if (a.argc == 3 && same(a.argv[2], "audio")) {
-      usb_request(sh, o3os::usb::Mode::Audio, usb0::profile(), usb0::return_enabled());
+      usb_request(sh, o3os::usb::Mode::Audio, usb0::profile(), usb0::return_wanted());
     } else if (a.argc == 3 && same(a.argv[2], "standard")) {
-      usb_request(sh, o3os::usb::Mode::Standard, usb0::profile(), usb0::return_enabled());
+      usb_request(sh, o3os::usb::Mode::Standard, usb0::profile(), usb0::return_wanted());
     } else {
       sh.out().text("usage: usb mode [standard|audio]\n");
     }
@@ -385,22 +390,22 @@ void usb_subcommand(shell::Shell& sh, const shell::Args& a) {
     std::uint32_t channels = 0;
     o3os::usb::Profile profile = o3os::usb::Profile::P10;
     // The third word, when there is one, chooses USB RETURN with the profile: `out` is capture only ("10 OUT"), `duplex` adds the stereo return ("8 OUT / 2 IN").
-    bool usb_return = usb0::return_enabled();
+    bool usb_return = usb0::return_wanted();
     const bool word = a.argc == 4 && (same(a.argv[3], "out") || same(a.argv[3], "duplex"));
     if (word) {
       usb_return = same(a.argv[3], "duplex");
     }
-    if ((a.argc == 3 || word) && parse_dec(a.argv[2], 11u, channels) && (channels == 2u || channels == 8u || channels == 10u || channels == 11u)) {
-      profile = channels == 2u ? o3os::usb::Profile::P2 : (channels == 8u ? o3os::usb::Profile::P8 : (channels == 11u ? o3os::usb::Profile::P11 : o3os::usb::Profile::P10));
+    if ((a.argc == 3 || word) && parse_dec(a.argv[2], 11u, channels) && (channels == 2u || channels == 4u || channels == 6u || channels == 8u || channels == 10u || channels == 11u)) {
+      profile = channels == 2u ? o3os::usb::Profile::P2 : (channels == 4u ? o3os::usb::Profile::P4 : (channels == 6u ? o3os::usb::Profile::P6 : (channels == 8u ? o3os::usb::Profile::P8 : (channels == 11u ? o3os::usb::Profile::P11 : o3os::usb::Profile::P10))));
       usb_request(sh, usb0::mode(), profile, usb_return);  // in AUDIO mode this re-enumerates; in STANDARD it only sets what the next AUDIO attach uses
     } else {
-      sh.out().text("usage: usb profile <2|8|10|11> [out|duplex]   (10 = T1..T8 + master, 8 = T1..T6 + master; out = capture only: `profile 10 out` is \"10 OUT\",\n"
+      sh.out().text("usage: usb profile <2|4|6|8|10|11> [out|duplex]   (10 = T1..T8 + master, 8 = T1..T6 + master, 6 = T1..T4, 4 = T1, T2 + master; out = capture only: `profile 10 out` is \"10 OUT\",\n"
                     "       duplex adds the stereo return: `profile 8 duplex` is \"8 OUT / 2 IN\", the layout that opens both ways behind a hub)\n");
     }
   } else if (same(sub, "return")) {
     if (a.argc == 2) {
       char layout[20];
-      sh.out().text("usb return: ").text(usb0::return_enabled() ? "on" : "off").text(" (").text(usb_layout_name(usb0::profile(), usb0::return_enabled(), layout)).text(")\n");
+      sh.out().text("usb return: ").text(usb0::return_wanted() ? "on" : "off").text(" (").text(usb_layout_name(usb0::profile(), usb0::return_enabled(), layout)).text(")\n");
     } else if (a.argc == 3 && (same(a.argv[2], "on") || same(a.argv[2], "off"))) {
       usb_request(sh, usb0::mode(), usb0::profile(), same(a.argv[2], "on"));
     } else {
@@ -411,7 +416,7 @@ void usb_subcommand(shell::Shell& sh, const shell::Args& a) {
   } else if (same(sub, "ep0")) {
     usb_ep0_view(sh);
   } else {
-    sh.out().text("usage: usb [audio [reset] | mode [standard|audio] | profile <2|8|10|11> [out|duplex] | return [on|off] | map [reset | <slot> <sources>] | ep0]\n");
+    sh.out().text("usage: usb [audio [reset] | mode [standard|audio] | profile <2|4|6|8|10|11> [out|duplex] | return [on|off] | map [reset | <slot> <sources>] | ep0]\n");
   }
 }
 

@@ -268,7 +268,7 @@ TEST_CASE("project state (app): the stem map and the USB apply: mode and profile
   model::UsbState def;
   model::init_usb_state(def);
   CHECK(app::usb_state_of(map, usb::Mode::Standard) == def);  // the factory map of the default profile is the model's default
-  for (usb::Profile p : {usb::Profile::P2, usb::Profile::P8, usb::Profile::P10, usb::Profile::P11}) {
+  for (usb::Profile p : {usb::Profile::P2, usb::Profile::P8, usb::Profile::P10, usb::Profile::P11, usb::Profile::P4, usb::Profile::P6}) {
     CHECK(map.reset(p));
     const model::UsbState s = app::usb_state_of(map, usb::Mode::Audio);
     CHECK(model::validate_usb_state(s) == nullptr);

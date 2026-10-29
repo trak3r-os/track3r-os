@@ -688,6 +688,226 @@ TEST_CASE("project state: the chunks are the bytes of the description, and the f
   CHECK(inst0->payload.back() == kInstEngineAmiga);
 }
 
+namespace {
+
+// OS-USBOUTS: a USB state of `profile` (the usb::Profile value) with the factory masks of that many channels (T1.., then Master L/R), `mode` as given.
+UsbState usb_of(std::uint8_t profile, std::uint8_t mode = 1) {
+  UsbState u;
+  std::memset(&u, 0, sizeof u);
+  u.mode = mode;
+  u.profile = profile;
+  u.slots = kUsbProfileChannels[profile];
+  for (std::uint32_t i = 0; i + 2u < u.slots; ++i) {
+    u.mask[i] = static_cast<std::uint16_t>(1u << i);
+  }
+  u.mask[u.slots - 2u] = 0x1000;
+  u.mask[u.slots - 1u] = 0x2000;
+  return u;
+}
+
+const Bytes& usbs_payload(const std::vector<RawChunk>& cs) {
+  static const Bytes none;
+  const RawChunk* const c = find(cs, kChunkUsbs);
+  return c == nullptr ? none : c->payload;
+}
+
+}  // namespace
+
+TEST_CASE("project state OS-USBOUTS: 2, 8, 10 and 11 outputs are USBS 1.0 byte for byte, 4 and 6 are USBS 1.1 (P8 plus the count) and round-trip") {
+  // 1.0: profile byte 0..3, as v1.0.x wrote it
+  struct Row {
+    std::uint8_t profile;
+    std::uint8_t byte;
+    std::uint8_t slots;
+  };
+  for (const Row r : {Row{0, 0, 2}, Row{1, 1, 8}, Row{2, 2, 10}, Row{3, 3, 11}}) {
+    INFO("profile " << int(r.profile));
+    proj(0).reset();
+    const UsbState u = usb_of(r.profile);
+    NEED(proj(0).set_usb(u) == Status::Ok);
+    Bytes file;
+    NEED(test::save(proj(0), file) == Progress::Done);
+    const std::vector<RawChunk> cs = test::split_chunks(file);
+    const Bytes& pl = usbs_payload(cs);
+    NEED(pl.size() == 5u + 2u * r.slots);
+    CHECK(pl[0] == 0x01);
+    CHECK(pl[1] == 0x00);  // 1.0
+    CHECK(pl[2] == 1);
+    CHECK(pl[3] == r.byte);
+    CHECK(pl[4] == r.slots);
+    Report rep;
+    NEED(test::load(test::arena(1), file, &rep) == Progress::Done);
+    CHECK_FALSE(rep.newer_minor);
+    CHECK(proj(1).usb() == u);
+  }
+  // 1.1: 22 bytes, P8 with 8 slots, the real slots first (the user's edit of slot 0 included), then P8's factory masks, then the count
+  for (const std::uint8_t profile : {std::uint8_t{5}, std::uint8_t{6}}) {
+    const unsigned n = kUsbProfileChannels[profile];
+    INFO("channels " << n);
+    proj(0).reset();
+    UsbState u = usb_of(profile);
+    u.mask[0] = 0x0003;  // T1 + T2 on S1
+    NEED(proj(0).set_usb(u) == Status::Ok);
+    Bytes file;
+    NEED(test::save(proj(0), file) == Progress::Done);
+    const std::vector<RawChunk> cs = test::split_chunks(file);
+    const Bytes& pl = usbs_payload(cs);
+    NEED(pl.size() == 22u);
+    CHECK(pl[0] == 0x01);
+    CHECK(pl[1] == 0x01);  // 1.1
+    CHECK(pl[2] == 1);     // mode
+    CHECK(pl[3] == 1);     // P8
+    CHECK(pl[4] == 8);
+    const std::uint16_t p8[8] = {0x0001, 0x0002, 0x0004, 0x0008, 0x0010, 0x0020, 0x1000, 0x2000};
+    for (unsigned i = 0; i < 8; ++i) {
+      const std::uint16_t want = i < n ? u.mask[i] : p8[i];
+      CHECK(((pl[5 + 2 * i] << 8) | pl[6 + 2 * i]) == want);
+    }
+    CHECK(pl[21] == n);
+    Report rep;
+    NEED(test::load(test::arena(1), file, &rep) == Progress::Done);
+    CHECK_FALSE(rep.newer_minor);  // this build knows 1.1
+    CHECK(proj(1).usb() == u);
+    CHECK(proj(1).check_invariants());
+    Bytes again;
+    NEED(test::save(proj(1), again) == Progress::Done);
+    CHECK(again == file);
+
+    // The view of a v1.0 reader: it takes the known part (P8, 8 slots) and skips the count. Cut the count off and say 1.0: that is what it sees.
+    std::vector<RawChunk> old = cs;
+    for (RawChunk& c : old) {
+      if (c.id == kChunkUsbs) {
+        c.payload.pop_back();
+        c.payload[1] = 0x00;
+      }
+    }
+    NEED(test::load(test::arena(1), build(old), &rep) == Progress::Done);
+    const UsbState& v = proj(1).usb();
+    CHECK(v.profile == 1);  // P8
+    CHECK(v.slots == 8);
+    for (unsigned i = 0; i < 8; ++i) {
+      CHECK(v.mask[i] == (i < n ? u.mask[i] : p8[i]));
+    }
+    CHECK(v.mode == 1);
+  }
+  // the other parts of a project do not change the USBS version: the default project has no USBS chunk
+  proj(0).reset();
+  Bytes plain;
+  NEED(test::save(proj(0), plain) == Progress::Done);
+  CHECK(plain.size() == 186u);
+  const std::vector<RawChunk> plain_cs = test::split_chunks(plain);
+  CHECK(usbs_payload(plain_cs).empty());
+}
+
+TEST_CASE("project state OS-USBOUTS: a future USBS minor (1.2) is read leniently: P2 plus extra bytes loads as P2, an unusable count falls back to the 1.0 view") {
+  const auto load_with = [&](const Bytes& payload) -> Progress {
+    proj(0).reset();
+    Bytes file;
+    if (test::save(proj(0), file) != Progress::Done) {
+      return Progress::Failed;
+    }
+    std::vector<RawChunk> cs = test::split_chunks(file);
+    RawChunk c;
+    c.id = kChunkUsbs;
+    c.payload = payload;
+    cs.push_back(c);
+    return test::load(test::arena(1), build(cs), nullptr);
+  };
+  // 1.2, P2 (2 slots, masks 0x0001 and 0x0002), then bytes this build does not know (the first would be a count in 1.1)
+  const Bytes p2 = {0x01, 0x02, 1, 0, 2, 0x00, 0x01, 0x00, 0x02, 0x05, 0xAA, 0xBB};
+  NEED(load_with(p2) == Progress::Done);
+  CHECK(proj(1).usb().profile == 0);
+  CHECK(proj(1).usb().slots == 2);
+  CHECK(proj(1).usb().mask[0] == 0x0001);
+  CHECK(proj(1).usb().mask[1] == 0x0002);
+  CHECK(proj(1).check_invariants());
+  // 1.2, P8 with a count this build cannot use (5): the 1.0 view, P8 with 8 slots
+  Bytes p8 = {0x01, 0x02, 1, 1, 8};
+  for (unsigned i = 0; i < 8; ++i) {
+    p8.push_back(0x00);
+    p8.push_back(static_cast<std::uint8_t>(1u << (i < 6 ? i : 0)));
+  }
+  p8.push_back(5);
+  p8.push_back(0xCC);
+  NEED(load_with(p8) == Progress::Done);
+  CHECK(proj(1).usb().profile == 1);
+  CHECK(proj(1).usb().slots == 8);
+  // 1.2, P8 with a usable count (6): the count is used
+  p8[p8.size() - 2] = 6;
+  NEED(load_with(p8) == Progress::Done);
+  CHECK(proj(1).usb().profile == 6);
+  CHECK(proj(1).usb().slots == 6);
+}
+
+TEST_CASE("project state OS-USBOUTS: a hostile USBS 1.1 or a P4 / P6 / P4S byte in a 1.0 chunk is Malformed, never a project") {
+  proj(0).reset();
+  NEED(proj(0).set_usb(usb_of(5)) == Status::Ok);
+  Bytes file;
+  NEED(test::save(proj(0), file) == Progress::Done);
+  const std::vector<RawChunk> cs = test::split_chunks(file);
+  const auto refused = [&](const char* what, auto fn) {
+    INFO(what);
+    std::vector<RawChunk> out = cs;
+    for (RawChunk& c : out) {
+      if (c.id == kChunkUsbs) {
+        fn(c.payload);
+      }
+    }
+    Report rep;
+    CHECK(test::load(test::arena(1), build(out), &rep) == Progress::Failed);
+    CHECK(rep.error == Error::Malformed);
+    CHECK(proj(1).state_present() == 0);
+    CHECK(proj(1).check_invariants());
+  };
+  refused("count 0", [](Bytes& p) { p[21] = 0; });
+  refused("count 2", [](Bytes& p) { p[21] = 2; });
+  refused("count 5", [](Bytes& p) { p[21] = 5; });
+  refused("count 8", [](Bytes& p) { p[21] = 8; });
+  refused("count 255", [](Bytes& p) { p[21] = 255; });
+  refused("profile P2 with a count", [](Bytes& p) { p[3] = 0; p[4] = 2; p.resize(p.size() - 12); p[p.size() - 1] = 4; });
+  refused("profile P10 with a count", [](Bytes& p) { p[3] = 2; });
+  refused("6 slots with a count", [](Bytes& p) { p[4] = 6; p.erase(p.begin() + 17, p.begin() + 21); });
+  refused("the count byte missing", [](Bytes& p) { p.pop_back(); });
+  refused("an unused byte after the count", [](Bytes& p) { p.push_back(0); });
+  refused("a bare 1.1 header", [](Bytes& p) { p.resize(2); });
+  // a 1.0 chunk holds the profile byte 0..3 only: P4S (4), and the model's P4 / P6 values (5, 6) are not stored
+  for (const std::uint8_t profile : {std::uint8_t{4}, std::uint8_t{5}, std::uint8_t{6}, std::uint8_t{7}, std::uint8_t{255}}) {
+    INFO("1.0 profile byte " << int(profile));
+    refused("1.0 profile byte", [&](Bytes& p) {
+      p.pop_back();
+      p[1] = 0x00;
+      p[3] = profile;
+    });
+  }
+  // a 1.2 chunk (a newer minor) keeps what 1.1 means and may append more
+  {
+    std::vector<RawChunk> out = cs;
+    for (RawChunk& c : out) {
+      if (c.id == kChunkUsbs) {
+        c.payload[1] = 0x02;
+        c.payload.push_back(0x77);
+      }
+    }
+    Report rep;
+    NEED(test::load(test::arena(1), build(out), &rep) == Progress::Done);
+    CHECK(rep.newer_minor);
+    CHECK(proj(1).usb().profile == 5);
+    CHECK(proj(1).usb().slots == 4);
+  }
+  // the model refuses P4S and values past P6
+  UsbState u = usb_of(5);
+  u.profile = 4;
+  CHECK(proj(0).set_usb(u) == Status::BadValue);
+  u.profile = 7;
+  CHECK(proj(0).set_usb(u) == Status::BadValue);
+  u = usb_of(6);
+  u.slots = 4;  // not P6's
+  CHECK(proj(0).set_usb(u) == Status::BadValue);
+  u = usb_of(5);
+  u.mask[4] = 1;  // a mask past the profile's four slots
+  CHECK(proj(0).set_usb(u) == Status::BadValue);
+}
+
 TEST_CASE("project state: an older file (no state chunks, INST 1.1) reads as the defaults, and what is read is written back as it was") {
   test::fill_small(proj(0));
   Bytes old_file;
@@ -906,7 +1126,9 @@ TEST_CASE("project state: a state chunk is strict: values out of range, wrong co
   CHECK(rep.unknown_kept == 3u);  // XTRA, EMPT and this one
 
   // A newer minor: the fields of 1.0 are read, the appended bytes skipped (at any length), the report says so, and the next save writes 1.0.
-  for (std::uint32_t id : {kChunkMidi, kChunkUsbs, kChunkMixr, kChunkPerf, kChunkAppm}) {
+  // (USBS is not here: since OS-USBOUTS its 1.1 appends the channel count, so a 1.0 body with a minor of 1.1 or 1.2 is not a valid chunk; the newer-minor USBS cases are in
+  // tests/o3project_roundtrip.py, "USBS 1.2 with appended fields", read by the C++ side through o3pj_tool)
+  for (std::uint32_t id : {kChunkMidi, kChunkMixr, kChunkPerf, kChunkAppm}) {
     for (std::size_t tail : {std::size_t{1}, std::size_t{100}, std::size_t{20000}}) {
       INFO("chunk " << id << " tail " << tail);
       std::vector<RawChunk> next = cs;

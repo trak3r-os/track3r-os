@@ -57,6 +57,7 @@ std::uint32_t known_minor(std::uint32_t id) noexcept {
     case kChunkPerf:
     case kChunkScen: return kStateVersionFx & 0xFFu;
     case kChunkAppm: return state_chunks::kAppsVersionV11 & 0xFFu;
+    case kChunkUsbs: return state_chunks::kUsbVersionCount & 0xFFu;
     default: return kChunkVersion & 0xFFu;
   }
 }
@@ -76,7 +77,7 @@ void v1_bounds(std::uint32_t id, std::uint32_t minor, std::size_t& lo, std::size
     case kChunkSets: lo = settings_chunks::kFixed; hi = settings_chunks::kSetsMax; break;
     case kChunkLrnb: lo = settings_chunks::kFixed; hi = settings_chunks::kLrnbMax; break;
     case kChunkMidi: lo = hi = state_chunks::kMidiBytes; break;
-    case kChunkUsbs: lo = state_chunks::kUsbFixed; hi = state_chunks::kUsbMax; break;
+    case kChunkUsbs: lo = state_chunks::kUsbFixed; hi = state_chunks::kUsbMax + (minor >= 1 ? 1 : 0); break;  // 1.1 appends the channel count (OS-USBOUTS)
     case kChunkMixr: lo = hi = state_chunks::kMixBytes; break;
     case kChunkPerf: lo = hi = state_chunks::kPerfBytes; break;
     case kChunkAppm: lo = state_chunks::kAppsFixed; hi = minor >= 1 ? state_chunks::kAppsMax : state_chunks::kAppsMax10; break;

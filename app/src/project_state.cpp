@@ -28,7 +28,9 @@ static_assert(model::kMixStrips == kMixStrips && model::kMixRouteMask == audio::
                   model::kMixDefaultCue == 100,
               "model/project_state.h mirrors app/mix_board.h");
 static_assert(model::kStemSlots == usb::kMaxChannels && model::kUsbModeMax == static_cast<std::uint8_t>(usb::Mode::Audio) &&
-                  model::kUsbProfileMax == static_cast<std::uint8_t>(usb::Profile::P11) &&
+                  model::kUsbProfileMax == static_cast<std::uint8_t>(usb::Profile::P6) && model::kUsbProfileP4S == static_cast<std::uint8_t>(usb::Profile::P4S) &&
+                  model::kUsbProfileMaxChunk == static_cast<std::uint8_t>(usb::Profile::P11) &&
+                  model::kUsbProfileChannels[static_cast<std::uint8_t>(usb::Profile::P4)] == 4 && model::kUsbProfileChannels[static_cast<std::uint8_t>(usb::Profile::P6)] == 6 &&
                   model::kUsbProfileChannels[static_cast<std::uint8_t>(usb::Profile::P2)] == 2 && model::kUsbProfileChannels[static_cast<std::uint8_t>(usb::Profile::P8)] == 8 &&
                   model::kUsbProfileChannels[static_cast<std::uint8_t>(usb::Profile::P10)] == 10 && model::kUsbProfileChannels[static_cast<std::uint8_t>(usb::Profile::P11)] == 11,
               "model/project_state.h mirrors usb/usb_types.h");

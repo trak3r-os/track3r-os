@@ -176,8 +176,21 @@ bool MixerScreen::set_position(const Model& model, ViewState& view, int position
   return changed;
 }
 
+Context MixerScreen::field_context(const Model&, const ViewState& view) const noexcept { return mixer::page_of(view) == MixerPage::Stems ? Context::MixerStems : Context::None; }
+
 bool MixerScreen::step(const Model& model, ViewState& view, int dx, int dy) const noexcept {
   const mixer::Cursor now = mixer::cursor(model, view);
+  if (mixer::page_of(view) == MixerPage::Stems && now.row == 0u && dx != 0 && dy == 0 && model.mix != nullptr && model.mix->stems != nullptr && model.mix->request_outputs != nullptr) {
+    // OS-USBOUTS: on the OUTPUTS row Left / Right edit the pending value (the columns are for the slot rows), as the encoder does (mixer_actions.cpp outputs_turn)
+    const std::uint8_t cur = static_cast<std::uint8_t>(model.mix->stems->channels());
+    const std::uint8_t base = view.mixer.outputs_pending != 0u ? view.mixer.outputs_pending : cur;
+    const std::uint8_t next = mixer::outputs_next(base, dx);
+    const std::uint8_t pending = next == cur ? 0u : next;
+    const bool changed = pending != view.mixer.outputs_pending;
+    view.mixer.outputs_pending = pending;
+    view.mixer.reset_asked = changed ? 0u : view.mixer.reset_asked;
+    return changed;
+  }
   int col_max = 1;
   switch (mixer::page_of(view)) {
     case MixerPage::Mixer: col_max = static_cast<int>(mixer::columns(model)); break;
@@ -608,10 +621,24 @@ void draw_stems_page(const Model& model, const ViewState& view, Renderer& r, Rec
   if (!hidden(bar)) {
     r.highlight_row(bar);
   }
-  core::FixedString<8> text;
-  for (unsigned s = 0; s < slots && s < static_cast<unsigned>(kFrameRows); ++s) {
-    const bool sel = s == cur.row;
-    const int row_y = f.pane.y + static_cast<int>(s) * f.row_pitch;
+  core::FixedString<24> text;
+  {
+    // OS-USBOUTS: row 0, the number of USB outputs: "OUTPUTS  8", or "OUTPUTS  6*" with the pending value starred (applied by F6 twice)
+    const bool sel = cur.row == 0u;
+    const unsigned shown = view.mixer.outputs_pending != 0u ? view.mixer.outputs_pending : slots;
+    text.assign("OUTPUTS  ");
+    append_uint(text, shown);
+    if (view.mixer.outputs_pending != 0u) {
+      text.append("*   F6 APPLY");
+    }
+    const int row_y = f.pane.y;
+    if (!hidden({name_x, row_y + l.grid.cell_dy, static_cast<int>(text.size()) * cell_w, cell_h})) {
+      r.text(name_x, row_y + l.grid.cell_dy, text.c_str(), sel ? Color::SelText : Color::Text);
+    }
+  }
+  for (unsigned s = 0; s < slots && s + 1u < static_cast<unsigned>(kFrameRows); ++s) {
+    const bool sel = s + 1u == cur.row;
+    const int row_y = f.pane.y + static_cast<int>(s + 1u) * f.row_pitch;
     text.assign("S");
     append_uint(text, s + 1u);
     if (!hidden({name_x, row_y + l.grid.cell_dy, 3 * cell_w, cell_h})) {
@@ -766,16 +793,20 @@ void MixerScreen::render(const Model& model, const ViewState& view, Renderer& r,
         right = "Insert: add  Delete: remove  Shift+Delete: factory map  encoder: add/remove";
         if (map == nullptr) {
           left.assign("no stem map");
+        } else if (cur.row == 0u) {
+          // OS-USBOUTS: the OUTPUTS row: what the number does, and what is waiting
+          right = "Left/Right: choose  F6 twice: apply  Delete: drop";
+          left.assign(view.mixer.outputs_pending != 0u ? "OUTPUTS: USB reconnects, map to factory" : "OUTPUTS: channels to the computer");
         } else {
           // "S3 -> USB ch 3 = T3+T9": the slot, where it goes and what is in it. The hint on the right takes ~600 px of the line (the column's full name is the strip's SRC field), so
           // what the left side cannot spare is cut from the list of sources (the one text that grows), with a ".." at the cut.
           left.assign("S");
-          append_uint(left, cur.row + 1u);
+          append_uint(left, cur.row);
           left.append(" -> USB ch ");
-          append_uint(left, cur.row + 1u);
+          append_uint(left, cur.row);
           left.append(" = ");
           char buf[40];
-          std::size_t n = audio::format_sources(map->slot(cur.row), buf, sizeof buf);
+          std::size_t n = audio::format_sources(map->slot(cur.row - 1u), buf, sizeof buf);
           const int room = ui::kScreenW - 4 * m.pad - r.text_width(right, Face::Label) - 2 * m.gap - r.text_width(left.c_str(), Face::Label);
           if (r.text_width(buf, Face::Label) > room) {
             while (n > 0u && r.text_width(buf, Face::Label) + r.text_width("..", Face::Label) > room) {
@@ -798,7 +829,7 @@ void MixerScreen::render(const Model& model, const ViewState& view, Renderer& r,
     draw_info_line(r, f, left.c_str(), right);
   }
   if (!hidden(f.keys) && !view.overlay_keys()) {
-    ui::soft_keys(r, f.keys, key_row(*this, view, kMixerSoftKeys), 8);
+    ui::soft_keys(r, f.keys, key_row(*this, view, page == MixerPage::Stems ? kMixerStemKeys : kMixerSoftKeys), 8);
   }
 }
 

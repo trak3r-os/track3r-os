@@ -98,6 +98,7 @@ bool needs_engine(app::Context c) {
     case app::Context::Perform:
     case app::Context::PerformDj:
     case app::Context::Mixer:
+    case app::Context::MixerStems:
     case app::Context::Song:
     case app::Context::SongAsk:
     case app::Context::SongTools:

@@ -8,7 +8,7 @@
 //   MIXER     env = the column: T1..Tn (the active tracks), then IN, SND A, SND B, CUE, MASTER (MixBus); row = the field of a track column: 0 LEVEL, 1 PAN (the buses have LEVEL only)
 //   ROUTING   row = the source: T1..Tn, LINE IN, RET A, RET B, OUT MODE; env = the destination: MAIN, CUE, SND A, SND B, REC, USB (a return has MAIN and CUE only; OUT MODE has none)
 //   MASTER FX row = the master section's eight parameters in table order (VOLUME, DRY, REVERB, DELAY, the three mutes, LIMITER), CUE LEVEL, then the twelve controls of the send effects (OS-SENDFX) and the limiter's three (OS-LIMIT)
-//   STEMS     row = a USB slot (S1..), env = a source of the slot (T1..T12, ML, MR, SA, SB)
+//   STEMS     row 0 = OUTPUTS (OS-USBOUTS: the number of USB outputs, a pending value applied by F6 twice), row n = the USB slot Sn (S1..), env = a source of the slot (T1..T12, ML, MR, SA, SB)
 
 #include <o3os/app/mix_board.h>
 #include <o3os/app/model.h>
@@ -26,6 +26,8 @@ inline constexpr unsigned kMixerPages = 4;
 // Eight labels for F1..F8 (docs/design/product-ux.md section 4, "Mixer and routing"): F1..F4 are the pages, F5 the cue level, F6 is the mock's PRESET (no presets exist yet),
 // F7 mutes and F8 solos what the cursor is on.
 inline constexpr const char* kMixerSoftKeys[8] = {"MIXER", "ROUTING", "MST FX", "STEMS", "CUE LVL", "--", "MUTE", "SOLO"};
+// On the STEMS page F6 is APPLY: the pending OUTPUTS value (OS-USBOUTS), pressed twice because the port re-enumerates.
+inline constexpr const char* kMixerStemKeys[8] = {"MIXER", "ROUTING", "MST FX", "STEMS", "CUE LVL", "APPLY", "MUTE", "SOLO"};
 // While Shift is held (OS-SHIFTROW): F7 UNMUTE (every strip), F8 UNSOLO (every strip): mixer.mute_none / mixer.solo_none, one undo unit each. Not REDO: F8 is SOLO here. F1 NAME (OS-NAMES): the track's name.
 inline constexpr const char* kMixerShiftKeys[8] = {"NAME", "-", "-", "-", "-", "-", "UNMUTE", "UNSOLO"};
 
@@ -65,13 +67,38 @@ inline unsigned stem_rows(const Model& model) noexcept {
   return model.mix != nullptr && model.mix->stems != nullptr ? model.mix->stems->channels() : 0u;
 }
 
+// OS-USBOUTS: the numbers of outputs the OUTPUTS row offers (profile 11 is console-only and not offered).
+inline constexpr std::uint8_t kOutputChoices[5] = {2, 4, 6, 8, 10};
+// The next offered value from `base` in the direction of `delta` (the nearest above for delta > 0, below for delta < 0); `base` itself when there is none.
+inline std::uint8_t outputs_next(std::uint8_t base, int delta) noexcept {
+  std::uint8_t best = base;
+  for (const std::uint8_t c : kOutputChoices) {
+    if (delta > 0 && c > base && (best == base || c < best)) {
+      best = c;
+    } else if (delta < 0 && c < base && (best == base || c > best)) {
+      best = c;
+    }
+  }
+  return best;
+}
+// The usb::Profile of an offered value.
+inline usb::Profile outputs_profile(std::uint8_t channels) noexcept {
+  switch (channels) {
+    case 2: return usb::Profile::P2;
+    case 4: return usb::Profile::P4;
+    case 6: return usb::Profile::P6;
+    case 8: return usb::Profile::P8;
+    default: return usb::Profile::P10;
+  }
+}
+
 // Rows and columns of the cursor on a page. `rows` is the length of the list the up / down arrows walk; `cols` the length of the other axis.
 inline unsigned rows(const Model& model, const ViewState& view) noexcept {
   switch (page_of(view)) {
     case MixerPage::Mixer: return 2;                      // LEVEL, PAN
     case MixerPage::Routing: return tracks(model) + 4u;   // T1..Tn, LINE IN, RET A, RET B, OUT MODE
     case MixerPage::MasterFx: return kMasterFxRows;
-    case MixerPage::Stems: return stem_rows(model) < 1u ? 1u : stem_rows(model);
+    case MixerPage::Stems: return stem_rows(model) < 1u ? 1u : stem_rows(model) + 1u;  // the OUTPUTS row, then the slots (none without a map)
   }
   return 1;
 }

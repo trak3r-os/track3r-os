@@ -440,6 +440,8 @@ TEST_CASE("mk66 diag text: stem map and the mode names (OS-006d)") {
   CHECK(std::strcmp(console::usb_mode_name(o3os::usb::Mode::Standard), "STANDARD") == 0);
   CHECK(std::strcmp(console::usb_mode_name(o3os::usb::Mode::Audio), "AUDIO") == 0);
   CHECK(std::strcmp(console::usb_profile_name(o3os::usb::Profile::P4S), "4S") == 0);
+  CHECK(std::strcmp(console::usb_profile_name(o3os::usb::Profile::P4), "4") == 0);  // OS-USBOUTS
+  CHECK(std::strcmp(console::usb_profile_name(o3os::usb::Profile::P6), "6") == 0);
   // OS-USBRET: the user's names of the layouts.
   char layout[20];
   CHECK(std::strcmp(console::usb_layout_name(o3os::usb::Profile::P10, false, layout), "10 OUT") == 0);

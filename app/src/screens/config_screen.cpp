@@ -7,6 +7,7 @@
 #include <o3os/app/frame.h>
 #include <o3os/app/key_prompt.h>
 #include <o3os/app/mix_board.h>
+#include <o3os/app/mixer_view.h>
 #include <o3os/app/pattern_layout.h>
 #include <o3os/app/sample_bank.h>
 #include <o3os/app/text_format.h>
@@ -238,6 +239,11 @@ void ConfigScreen::render(const Model& model, const ViewState& view, Renderer& r
         text[len + 1] = '\0';
       }
       r.text(name_x, cell_y(i), d->name, sel ? Color::SelText : Color::TextDim);
+      if (rows.field[i] == model::device_setting::UsbReturn && text[0] == 'O' && text[1] == 'n' && mixer::stem_rows(model) >= 10u) {
+        // OS-USBOUTS O3: the project's profile has 10 or more channels, so the return is off whatever the setting says (the setting itself is not touched).
+        r.text(value_x, cell_y(i), pending != nullptr ? "On (10 OUT: off)*" : "On (10 OUT: off)", sel ? Color::SelText : Color::TextDim);
+        continue;
+      }
       r.text(value_x, cell_y(i), text, sel ? Color::SelText : (pending != nullptr ? Color::Accent : Color::Text));
       if (d->unit_text[0] != '\0') {
         r.text(value_x + static_cast<int>(std::strlen(text) + 1u) * cell_w, cell_y(i), d->unit_text, sel ? Color::SelText : Color::TextDim);

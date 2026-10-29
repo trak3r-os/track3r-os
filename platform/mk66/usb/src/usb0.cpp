@@ -182,10 +182,15 @@ struct Change {
   std::uint32_t since_ms = 0;
 };
 Change g_change;
-void queue_change(o3os::usb::Mode mode, o3os::usb::Profile profile, bool usb_return) noexcept {  // the three steps of service() follow; the callers have checked phase == 0
+// OS-USBOUTS (ADR 0012 amendment 8, rule 1): the WISH for the return (the device setting, the console's `usb return`) is kept apart from the PRESENTED value in g_desc.cfg.usb_return, which is
+// `wish && channels < 10` (usb::return_presented). Main thread only; set when a request is ACCEPTED (queued, or taken at once in STANDARD / the same layout), never on a refusal and never by a
+// DISK request the DISK set accepts as it is. The ISR side reads only g_desc.cfg (by reference, through the ControlPipe): it is never written outside phase 0.
+bool g_return_wish = true;
+void queue_change(o3os::usb::Mode mode, o3os::usb::Profile profile, bool wish) noexcept {  // the three steps of service() follow; the callers have checked phase == 0
+  g_return_wish = wish;  // committed at queue time: phases 1 and 2 cannot be refused
   g_change.mode = mode;
   g_change.profile = profile;
-  g_change.usb_return = usb_return;
+  g_change.usb_return = o3os::usb::return_presented(profile, wish);
   g_change.since_ms = boot::uptime_ms_low();
   g_change.phase = 1;
 }
@@ -273,7 +278,9 @@ void module_on() noexcept {
 
 }  // namespace
 
-bool start(o3os::usb::Mode mode, o3os::usb::Profile profile, bool usb_return) noexcept {
+bool start(o3os::usb::Mode mode, o3os::usb::Profile profile, bool wish) noexcept {
+  g_return_wish = wish;
+  const bool usb_return = o3os::usb::return_presented(profile, wish);  // what the descriptors carry
   const std::uintptr_t table = reinterpret_cast<std::uintptr_t>(&g_bdt);
   // 0. Preconditions. Nothing is touched, and the line stays down, if the table or the descriptors are wrong.
   if ((table & (o3os::usb::kBdtAlign - 1u)) != 0u) {
@@ -352,7 +359,8 @@ bool attached() noexcept { return g_attached; }
 
 o3os::usb::Mode mode() noexcept { return g_desc.cfg.mode; }
 o3os::usb::Profile profile() noexcept { return g_desc.cfg.profile; }
-bool return_enabled() noexcept { return g_desc.cfg.usb_return; }
+bool return_enabled() noexcept { return g_desc.cfg.usb_return; }  // the PRESENTED return
+bool return_wanted() noexcept { return g_return_wish; }            // the wish (the setting): what the syncs, the console and the DISK hand-over carry
 std::uint8_t change_phase() noexcept { return g_change.phase; }
 o3os::usb::Mode pending_mode() noexcept { return g_change.mode; }
 o3os::usb::Profile pending_profile() noexcept { return g_change.profile; }
@@ -368,9 +376,9 @@ void reset_stream_counters() noexcept {
   asm volatile("msr primask, %0" ::"r"(primask) : "memory");
 }
 
-bool request_mode(o3os::usb::Mode mode, o3os::usb::Profile profile) noexcept { return request_layout(mode, profile, g_desc.cfg.usb_return); }
+bool request_mode(o3os::usb::Mode mode, o3os::usb::Profile profile) noexcept { return request_layout(mode, profile, g_return_wish); }
 
-bool request_layout(o3os::usb::Mode mode, o3os::usb::Profile profile, bool usb_return) noexcept {
+bool request_layout(o3os::usb::Mode mode, o3os::usb::Profile profile, bool wish) noexcept {
   if (g_powered_off || g_iso == nullptr || g_change.phase != 0u || !o3os::audio::StemMap::supported(profile)) {
     return false;
   }
@@ -378,11 +386,16 @@ bool request_layout(o3os::usb::Mode mode, o3os::usb::Profile profile, bool usb_r
     // The DISK set is final until a restart (OS-USBDISK boot disk; v0.6.8: the app's mode sync took the default USB AUDIO for a change and re-enumerated the unit as AUDIO in the middle of the computer's
     // enumeration). Nothing re-enumerates away from it or inside it: the same layout asked again is Ok (nothing to do), any other is refused (usb::disk_layout_accepts, host-tested). The running mode (U2)
     // leaves DISK by its own call, not through here.
-    return o3os::usb::disk_layout_accepts(g_desc.cfg.profile, g_desc.cfg.usb_return, mode, profile, usb_return);
+    const bool ok = o3os::usb::disk_layout_accepts(g_desc.cfg.profile, g_desc.cfg.usb_return, mode, profile, o3os::usb::return_presented(profile, wish));
+    if (ok) {
+      g_return_wish = wish;  // the presented set is the same: the wish is stored (no re-enumeration), so a later layout change uses it
+    }
+    return ok;
   }
   if (mode == o3os::usb::Mode::Standard && g_desc.cfg.mode == o3os::usb::Mode::Standard) {
     // STANDARD's descriptors depend on neither the profile nor USB RETURN: nothing to re-enumerate, the next AUDIO attach uses them.
-    g_desc.cfg.usb_return = usb_return;
+    g_return_wish = wish;
+    g_desc.cfg.usb_return = o3os::usb::return_presented(profile, wish);
     if (profile != g_map.profile()) {
       g_map.reset(profile);
       g_desc.cfg.profile = profile;
@@ -390,27 +403,28 @@ bool request_layout(o3os::usb::Mode mode, o3os::usb::Profile profile, bool usb_r
     }
     return true;
   }
-  if (mode == g_desc.cfg.mode && profile == g_desc.cfg.profile && usb_return == g_desc.cfg.usb_return) {
+  if (mode == g_desc.cfg.mode && profile == g_desc.cfg.profile && o3os::usb::return_presented(profile, wish) == g_desc.cfg.usb_return) {
+    g_return_wish = wish;  // the same set is presented (a wish for the return at 10 channels changes nothing the host sees): kept, no re-enumeration
     return true;
   }
-  queue_change(mode, profile, usb_return);
+  queue_change(mode, profile, wish);
   return true;
 }
 
-bool disk_layout_enter(o3os::usb::Profile profile, bool usb_return) noexcept {
+bool disk_layout_enter(o3os::usb::Profile profile, bool wish) noexcept {
   if (g_powered_off || g_iso == nullptr || g_change.phase != 0u || g_desc.cfg.mode == o3os::usb::Mode::Disk || !o3os::audio::StemMap::supported(profile)) {
     return false;
   }
-  queue_change(o3os::usb::Mode::Disk, profile, usb_return);  // (always a re-enumeration: the Disk set is another device, even from STANDARD)
+  queue_change(o3os::usb::Mode::Disk, profile, wish);  // (always a re-enumeration: the Disk set is another device, even from STANDARD)
   return true;
 }
 
-bool disk_layout_leave(o3os::usb::Mode mode, o3os::usb::Profile profile, bool usb_return) noexcept {
+bool disk_layout_leave(o3os::usb::Mode mode, o3os::usb::Profile profile, bool wish) noexcept {
   if (g_powered_off || g_iso == nullptr || g_change.phase != 0u || g_desc.cfg.mode != o3os::usb::Mode::Disk || g_disk_boot || mode == o3os::usb::Mode::Disk ||
       !o3os::audio::StemMap::supported(profile)) {
     return false;  // the boot disk's set is final (a reset is its only exit); DISK to DISK is no way out
   }
-  queue_change(mode, profile, usb_return);
+  queue_change(mode, profile, wish);
   return true;
 }
 

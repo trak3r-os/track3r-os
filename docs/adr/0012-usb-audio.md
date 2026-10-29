@@ -225,3 +225,19 @@ Overrides amendment 4's "the mode is runtime only, STANDARD at every boot" for t
 ## Amendment 5 — D-OS-8 is the default clock (2026-10-23, OS-RATE)
 - **Decision:** the engine runs at exactly 44,100 Hz by default in release 1 (maintainer, 2026-10-23). `O3OS_RATE_44100` defaults to ON: `1800000/441` cycles per sample, MCLK = 180 MHz x 196/3125 = 11.2896 MHz. The pre-1.0 clock (4080/1, 44,117.647 Hz) is still built with `-DO3OS_RATE_44100=OFF`. The text above that names 4,080 cycles, 44,117.65 Hz or the feedback value 722,824 describes that clock; the default nominal feedback is 722,535 (0x0B0667).
 - **Gate passed [unit, verified]:** image fqa.4r (dev 5ff06aed, option ON): the true clock measured 44,100.00 Hz against 44,117.58 Hz on fqa.3 (the old clock); USB audio ran 60 s with no xrun or click; the CPU is unchanged; the MIDI clock is its own timer (48.0006 ticks/s on both). The `hw-session` gate of amendment 2 (lock and no added noise) therefore holds, and the fallback to 44,117.65 Hz is not taken.
+
+## Amendment 8 — the number of USB outputs is a per-project choice: 2, 4, 6, 8, 10 (OS-USBOUTS, 2026-10-29)
+New Community OS behaviour; maintainer request, decisions D1-D4 and defaults O1-O3 in `docs/specs/OS-USBOUTS.md`. Adds to amendment 5; nothing in it is undone.
+
+- **What changes.** The profile a project stores in `USBS` can now also be **P4** (T1, T2, Master L/R) or **P6** (T1..T4, Master L/R), chosen on the unit in Mixer > STEMS (row OUTPUTS). A change re-enumerates the port like any profile change (`usb0::request_layout`) and resets the stem map to the new profile's factory slots. The default of every boot stays "8 OUT / 2 IN" and a project without `USBS` changes nothing. Profile 11 stays console-only.
+- **The return at 10 channels is never presented.** USB RETURN stays the device setting (amendment 5). The descriptors carry the return only when the setting is On **and** the profile has fewer than 10 channels (amendment 5: "10 OUT / 2 IN" does not open behind a hub with a transaction translator). The driver keeps the *wish* (the setting) and the *presented* value (`wish && channels < 10`) apart: setting On at 10 channels stores nothing different, and going back to 8 channels brings the return back.
+- **File.** A project with 4 or 6 outputs writes `USBS` 1.1 (P8 with 8 slots, then one byte with the real count, which a 1.0 reader skips and so reads P8); 2, 8, 10 and 11 stay 1.0 byte for byte (`docs/formats/o3-project.md`).
+- **Bandwidth.** Same derivation as amendment 5 (the test builds every figure from the descriptors).
+
+| Layout | Stems IN payload | + return OUT 180 + feedback 3 | Bus B/frame, return off | Bus B/frame, return on | % of 1,500 (off / on) | Behind the hubs |
+|---|---|---|---|---|---|---|
+| 4 | 360 | 543 | 369 | 570 | 25 % / 38 % | not measured; duplex expected to open [inf] (below the 8-channel layout that does) |
+| 6 | 540 | 723 | 549 | 750 | 37 % / 50 % | not measured; duplex expected to open [inf] |
+
+- **wMaxPacketSize:** `channels x 2 x 45` (360 and 540 at full speed, 48 and 72 at high speed). The goldens for P4 and P6 (FS, HS; with the return, and the return-off sets cut out by hand) are derived by hand from the reviewed P8 arrays.
+- **Hardware checks (not done).** Linux enumerates each of 2, 4, 6, 8 and 10 channels with the return on and off (`arecord -l`, a capture and a duplex run); 10 channels with the setting On presents no return.

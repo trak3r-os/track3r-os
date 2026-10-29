@@ -87,6 +87,8 @@ Start on the USB page.
 3. Press `F7` (**APPLY**). With USB AUDIO Off, the strip says **PRESS AGAIN TO APPLY**. With USB AUDIO On, it says **USB WILL RECONNECT: PRESS AGAIN**. <!-- QA-CFG-006 --> <!-- QA-CFG-012 -->
 4. Press `F7` (**APPLY**) again. With USB AUDIO Off, the strip says **APPLIED**, and the computer sees no change. With USB AUDIO On, the strip says **USB RECONNECTING**, and the computer reconnects once. <!-- QA-CFG-007 --> <!-- QA-CFG-013 -->
 
+The return needs room on the USB bus, so it is off when the unit presents 10 outputs (the Mixer's STEMS page chooses the number). The row then reads **On (10 OUT: off)**, dim. The setting stays On: with 8 outputs or fewer the return is back. <!-- QA-CFG-250 --> <!-- QA-CFG-251 -->
+
 Not yet checked on the unit.
 
 ### Set RETURN LEVEL

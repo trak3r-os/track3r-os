@@ -4,7 +4,7 @@
 
 Status: draft
 
-The Mixer has four pages, and two are not a fader strip. **ROUTING** decides where each track goes, to the speakers, the cue output, the recorder or the USB stems. **STEMS** decides what each USB slot carries. ROUTING, STEMS, the cue output and the two output modes are new in track3r-os. Hold `Master` and turn the encoder to set the master volume from any screen, and `Shift` + `F1` names a track. The Mixer has no undo. <!-- og: open -->
+The Mixer has four pages, and two are not a fader strip. **ROUTING** decides where each track goes, to the speakers, the cue output, the recorder or the USB stems. **STEMS** decides what each USB slot carries, and, on its first row, how many outputs the USB stream has (2, 4, 6, 8 or 10). ROUTING, STEMS, the cue output and the two output modes are new in track3r-os. Hold `Master` and turn the encoder to set the master volume from any screen, and `Shift` + `F1` names a track. The Mixer has no undo. <!-- og: open -->
 
 ## What it is for
 
@@ -106,6 +106,23 @@ You should see **TRACK 03 NAMED**. The name shows on the Mixer, ROUTING and the 
 
 On Pattern or Perform, hold `Shift` and press the track's pad in the second row. Press it again to unmute. <!-- QA-MIX-020 -->
 
+### Choose how many outputs the USB stream has
+
+The USB audio device can present 2, 4, 6, 8 or 10 outputs to the computer. A project keeps its own number. This is new in track3r-os.
+
+1. Press `F4` (**STEMS**). The first row is **OUTPUTS**, with the number the computer sees now. <!-- QA-MIX-050 -->
+2. Turn the encoder, or press `Left` or `Right`, to the number you want. The row shows a star (\*). Nothing has changed yet. <!-- QA-MIX-051 -->
+3. Press `F6` (**APPLY**). The strip says **USB WILL RECONNECT: PRESS AGAIN**. <!-- QA-MIX-052 -->
+4. Press `F6` again within two seconds. The computer drops the unit for a moment and finds it again with that many outputs. The slots go back to the factory layout for that number: with 4 outputs, the first two tracks and the master pair. Re-map them on the same page if you want. <!-- QA-MIX-052 -->
+
+`Delete` on the **OUTPUTS** row drops the starred number, and so does leaving the page. If the strip says **USB BUSY: TRY AGAIN**, the USB port is still changing: wait a moment and press `F6` twice again. With nothing starred, `F6` says **NOTHING TO APPLY**. <!-- QA-MIX-053 --> <!-- QA-MIX-054 -->
+
+The number is saved with the project (File > SAVE). Projects saved with 2, 8 or 10 outputs are the same files as before. <!-- QA-MIX-057 -->
+
+A project saved before this version has no USB settings: when you open it, the unit keeps the outputs of the project you had open before it. On STEMS the built-in `F6` (**APPLY**) wins over an `F6` in a user keymap. A keymap line that names `mixer.stems` is refused by older firmware.
+
+Not yet checked on the unit: that a Linux, macOS or Windows computer sees each number. <!-- QA-MIX-056 -->
+
 ### Play the current instrument from the pads
 
 On any page of the Mixer, hold a pad: the current instrument sounds at the pad's note until you let go. Nothing on the screen changes. Config and File do the same. This is new in the Community OS. <!-- QA-MIX-040 -->
@@ -140,9 +157,9 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 | `F1` (**MIXER**) | the MIXER page, one column for each track, with the cursor on its first row | QA-MIX-010, QA-MIX-032 |
 | `F2` (**ROUTING**) | the ROUTING page, one row for each track, with the cursor on the first source | QA-MIX-033 |
 | `F3` (**MST FX**) | the MASTER FX page. The card reads **MASTER LIMITER**, **ALWAYS ON**. | QA-MIX-002 |
-| `F4` (**STEMS**) | the STEMS page, one column for each source. With no stem map the page says so. | QA-MIX-034 |
+| `F4` (**STEMS**) | the STEMS page, one column for each source. The first row is **OUTPUTS**, the slots follow. With no stem map the page says so. | QA-MIX-034, QA-MIX-050 |
 | `F5` (**CUE LVL**) | goes to the CUE LEVEL row of the MASTER FX page, from any page; on that row it changes nothing | QA-MIX-035 |
-| `F6` | nothing: the key reads `--` | QA-MIX-036 |
+| `F6` | on STEMS, **APPLY**: the number of outputs you chose, after a second press within two seconds. On the other pages nothing: the key reads `--` | QA-MIX-036, QA-MIX-052, QA-MIX-055 |
 | `F7` (**MUTE**) | mutes the track under the cursor, on MIXER, ROUTING and STEMS (the track of the column). On **SNDA** and **SNDB** it mutes the effect; on MASTER FX it mutes the bus of the DRY, REVERB or DELAY row; on STEMS **SA** and **SB** mute their effect. Anywhere else the strip says why. | QA-MIX-003, QA-MIX-037, QA-MIX-038 |
 | `F8` (**SOLO**) | solos the track under the cursor, on MIXER, ROUTING and STEMS. On MASTER FX, and on a bus, the strip says **TRACKS ONLY**. | QA-MIX-004, QA-MIX-037, QA-MIX-038 |
 | `Shift` + `F1` (**NAME**) | names the track under the cursor. On IN, SND A, SND B, CUE or MASTER, or on the MASTER FX page, the strip says **TRACKS ONLY**. | QA-MIX-010, QA-MIX-012 |

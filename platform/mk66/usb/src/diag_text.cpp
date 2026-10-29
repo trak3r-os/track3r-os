@@ -230,6 +230,10 @@ const char* usb_profile_name(o3os::usb::Profile p) noexcept {
       return "11";
     case o3os::usb::Profile::P4S:
       return "4S";
+    case o3os::usb::Profile::P4:
+      return "4";
+    case o3os::usb::Profile::P6:
+      return "6";
   }
   return "?";
 }

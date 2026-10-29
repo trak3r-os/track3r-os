@@ -82,7 +82,7 @@ const char* validate_midi_state(const MidiState& s) noexcept {
 
 const char* validate_usb_state(const UsbState& s) noexcept {
   if (s.mode > kUsbModeMax) return "USB: bad mode";
-  if (s.profile > kUsbProfileMax) return "USB: bad profile";
+  if (s.profile > kUsbProfileMax || s.profile == kUsbProfileP4S) return "USB: bad profile";
   if (s.slots != kUsbProfileChannels[s.profile] || s.reserved != 0) return "USB: slot count does not fit the profile";
   for (std::uint32_t i = s.slots; i < kStemSlots; ++i) {
     if (s.mask[i] != 0) return "USB: a stem mask past the profile's slots";

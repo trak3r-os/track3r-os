@@ -62,7 +62,8 @@ enum class Context : std::uint8_t {
   ExportProgress = 45, // OS-WAVEXP: the progress of a running export (captures: F8 CANCEL is the one key)
   FirmwareUpdate = 48, // OS-FWCONFIG: the firmware update dialog (captures: F1 and F8 answer, Up / Down / the encoder choose; any other key takes a question back)
   PerformDj = 46,      // OS-DJ A1: the Perform screen's DJ page (the screen's field level: the crossfader on the encoder and the pads' row 4, F3 CURVE, F8 RESET; the slots' keys are inert there)
-  SampleEditFx = 43,   // OS-AUDIT-15: the Sample edit screen's FX page (the screen's field level: F1 FILTER, F2 COMPRESSOR, the encoder changes the row's value)
+  MixerStems = 49,     // OS-USBOUTS: the Mixer screen's STEMS page (the screen's field level: F6 APPLY the pending OUTPUTS value; the other Mixer keys are the screen's)
+  SampleEditFx = 43,  // OS-AUDIT-15: the Sample edit screen's FX page (the screen's field level: F1 FILTER, F2 COMPRESSOR, the encoder changes the row's value)
   RecordRadio = 33,   // OS-SHIFTROW: the Record screen's RADIO page (the screen's field level: Shift + F5 / F6 tune ten channels there only)
   Help = 47,           // OS-HELP: the help overlay (captures: the arrows and the encoder scroll, F8 and every other key close it)
   None = 0xFF,         // no context: a screen without a field level

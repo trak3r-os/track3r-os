@@ -29,6 +29,7 @@ const State kSongClip = {"a song slot copied", Doc::Demo, "tap copy\ntap down\n"
 const State kInstClip = {"instrument 1 copied", Doc::Demo, "", "tap params\naction instrument.copy\ntap pattern\n"};
 const State kClipCopied = {"edit on, a step copied", Doc::Demo, "", "tap rec\ntap copy\n"};
 const State kMixTouched = {"a mixer value moved, a track muted", Doc::Demo, "action mixer.edit 3\naction mixer.mute\n"};
+const State kStemsPage = {"the STEMS page", Doc::Demo, "tap f4\n"};
 const State kToolValue = {"a tool value set", Doc::Demo, "action songtools.delta 1\n"};
 const State kUnused = {"unused instruments", Doc::Sound, ""};
 const State kName = {"a letter typed", Doc::Demo, "action text.pad 3\n"};
@@ -124,6 +125,7 @@ const std::vector<ActionEntry>& action_states() {
       A("learn.delete", {kLearn}),
       A("learn.mode", {kLearn}),
       A("learn.toggle"),
+      A("mixer.apply", {kStemsPage}),  // OS-USBOUTS: the simulator has no USB driver behind the board, so on STEMS it says NOTHING TO APPLY
       A("mixer.coarse"),
       A("mixer.cue"),
       A("mixer.edit"),
@@ -334,6 +336,7 @@ const std::vector<ContextReach>& context_reach() {
       {Context::Config, "Config", "tap config\n", nullptr},
       {Context::FirmwareUpdate, "FirmwareUpdate", "action file.save\nwait 300\ntap config\ntap f4\ntap f8\n", nullptr, "firmware on\n"},  // the update list over the simulator's update port; the seeded history left the project unsaved, which refuses the update (OS-FWCONFIG rule 2), so it is saved first
       {Context::Mixer, "Mixer", "tap master\n", nullptr},
+      {Context::MixerStems, "MixerStems", nullptr, "the Mixer's page 3: the keys walk covers it as MIXER_page_3 (the simulator has no stem map, so its arrows have nothing to move here)"},
       {Context::Perform, "Perform", "tap performance\n", nullptr},
       {Context::PerformDj, "PerformDj", "tap performance\ntap performance\n", nullptr},
       {Context::Record, "Record", "tap samplerec\n", nullptr},

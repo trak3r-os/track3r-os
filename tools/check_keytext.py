@@ -44,6 +44,9 @@ ALLOW = (
     ('app/src/screens/file_screen.cpp', 'CONFIG USB: F7 EJECT', "OS-USBDISK U2b: the CARD AS DISK row and the strips of the card that is out name their own key; the texts are spec section 9's"),
     ('app/src/screens/sample_load_screen.cpp', 'CONFIG USB: F7 EJECT', "OS-USBDISK U2b: the CARD AS DISK row and the strips of the card that is out name their own key; the texts are spec section 9's"),
     ('app/include/o3os/app/app.h', 'CARD ON COMPUTER - CONFIG USB: F7 EJECT', "OS-USBDISK U2b: the CARD AS DISK row and the strips of the card that is out name their own key; the texts are spec section 9's"),
+    # ---- OS-USBOUTS: the STEMS page's OUTPUTS row names its own key (the APPLY key twice) in the row text and in the info line
+    ('app/src/screens/mixer_screen.cpp', '*   F6 APPLY', "OS-USBOUTS: the OUTPUTS row names its own key (F6 APPLY) while a value is pending"),
+    ('app/src/screens/mixer_screen.cpp', 'Left/Right: choose  F6 twice: apply  Delete: drop', "OS-USBOUTS: the info line of the OUTPUTS row points at its own keys, as the STEMS line does"),
     # ---- the short names of the 33 buttons the INPUT TEST cells show, by button code (F1..F8 are buttons 0..7); a button's printed name, not a prompt
     ('app/src/screens/input_test_screen.cpp', 'F1', 'the short names of the 33 buttons the INPUT TEST cells show, by button code'),
     ('app/src/screens/input_test_screen.cpp', 'F2', 'the short names of the 33 buttons the INPUT TEST cells show, by button code'),

@@ -40,6 +40,10 @@ namespace {
 
 alignas(8) std::uint8_t g_ring[64 * 1024];
 unsigned g_stem_commits = 0;  // how many times the board handed the map to the stream
+// OS-USBOUTS: the board's request_outputs hook (the platform's asks usb0): how many times it was asked, with what, and whether it takes the request
+unsigned g_outputs_requests = 0;
+usb::Profile g_outputs_last = usb::Profile::P10;
+bool g_outputs_accept = true;
 
 struct Rig {
   platform::host::FakeInput input;
@@ -61,6 +65,13 @@ struct Rig {
     app->attach_param_ring(&ring);
     board->stems = &stems;
     board->apply_stems = [](void) noexcept { ++g_stem_commits; };
+    board->request_outputs = [](usb::Profile profile) noexcept {
+      g_outputs_last = profile;
+      ++g_outputs_requests;
+      return g_outputs_accept;
+    };
+    g_outputs_requests = 0;
+    g_outputs_accept = true;
     g_stem_commits = 0;
     app->attach_mix(board.get());
     tap(Button::Master);
@@ -568,6 +579,9 @@ TEST_CASE("mixer stems: the encoder adds and removes a source of a slot, the map
   Rig rig;
   rig.tap(Button::F4);
   CHECK(app::mixer::stem_rows(rig.app->model()) == 10);  // P10
+  CHECK(rig.row() == 0);  // OS-USBOUTS: row 0 is OUTPUTS, S1 is row 1
+  rig.tap(Button::Down);
+  CHECK(rig.row() == 1);
   const std::uint16_t s1 = rig.stems.slot(0);
   CHECK(s1 == 1u);  // T1
   rig.tap(Button::Right);  // T2
@@ -578,7 +592,7 @@ TEST_CASE("mixer stems: the encoder adds and removes a source of a slot, the map
   CHECK(g_stem_commits == 1);
   rig.tap(Button::Down);
   rig.tap(Button::Down);  // S3 (T3)
-  CHECK(rig.row() == 2);
+  CHECK(rig.row() == 3);
   rig.turn(-1);  // T2 is not in S3: nothing
   CHECK(rig.stems.slot(2) == (1u << 2));
   CHECK(g_stem_commits == 1);
@@ -600,7 +614,7 @@ TEST_CASE("mixer stems: the encoder adds and removes a source of a slot, the map
   for (unsigned i = 0; i < 12; ++i) {
     rig.tap(Button::Down);
   }
-  CHECK(rig.row() == 9);  // ten slots
+  CHECK(rig.row() == 10);  // OUTPUTS and ten slots
   for (unsigned i = 0; i < 20; ++i) {
     rig.tap(Button::Right);
   }
@@ -611,8 +625,9 @@ TEST_CASE("mixer stems: the encoder adds and removes a source of a slot, the map
 TEST_CASE("mixer stems: Insert sets the cursor's cell, Delete clears only that bit, Shift + Delete is the factory map, a no-op hands nothing on") {
   Rig rig;
   rig.tap(Button::F4);
-  rig.tap(Button::Down);  // S2 (T2 by default)
-  CHECK(rig.row() == 1);
+  rig.tap(Button::Down);
+  rig.tap(Button::Down);  // S2 (T2 by default; row 0 is OUTPUTS)
+  CHECK(rig.row() == 2);
   const std::uint16_t s1 = rig.stems.slot(0);
   const std::uint16_t s3 = rig.stems.slot(2);
   CHECK(rig.stems.slot(1) == (1u << 1));
@@ -649,6 +664,109 @@ TEST_CASE("mixer stems: Insert sets the cursor's cell, Delete clears only that b
   rig.shift_tap(Button::Delete);
   CHECK(rig.stems.slot(1) == (1u << 1));
   CHECK(rig.stems.slot(0) == s1);
+  CHECK(rig.app->failed_frames() == 0);
+}
+
+// OS-USBOUTS: row 0 of the STEMS page is OUTPUTS, the number of USB outputs of the project: a pending value (starred) edited by the encoder and by Left / Right, applied by F6 pressed twice.
+TEST_CASE("mixer stems OUTPUTS: the encoder and Left / Right choose a pending value, F6 asks then applies, the driver is asked once with the profile") {
+  Rig rig;
+  rig.tap(Button::F4);
+  CHECK(rig.row() == 0);
+  CHECK(rig.app->state().mixer.outputs_pending == 0);
+  CHECK(app::mixer::rows(rig.app->model(), rig.app->state()) == 11u);  // OUTPUTS and ten slots
+  rig.turn(-1);  // 10 -> 8
+  CHECK(rig.app->state().mixer.outputs_pending == 8);
+  rig.turn(-1);
+  rig.tap(Button::Left);  // 8 -> 6 -> 4 (Left is the encoder's -1 on this row)
+  CHECK(rig.app->state().mixer.outputs_pending == 4);
+  rig.tap(Button::Left);
+  CHECK(rig.app->state().mixer.outputs_pending == 2);
+  rig.tap(Button::Left);  // the lowest: nothing more
+  CHECK(rig.app->state().mixer.outputs_pending == 2);
+  rig.tap(Button::Right);
+  rig.turn(+1);
+  CHECK(rig.app->state().mixer.outputs_pending == 6);
+  CHECK(g_outputs_requests == 0);  // nothing is asked of the driver until F6
+  CHECK(rig.stems.channels() == 10u);  // and the map is as it was
+  rig.tap(Button::F6);  // the first press only asks
+  CHECK(rig.app->state().notify.last_text() == std::string("USB WILL RECONNECT: PRESS AGAIN"));
+  CHECK(g_outputs_requests == 0);
+  rig.tap(Button::F6);
+  CHECK(g_outputs_requests == 1);
+  CHECK(g_outputs_last == usb::Profile::P6);
+  CHECK(rig.app->state().mixer.outputs_pending == 0);
+  CHECK(rig.app->failed_frames() == 0);
+}
+
+TEST_CASE("mixer stems OUTPUTS: a value back at the present one is not pending, Delete and leaving the page drop it, a late second F6 asks again") {
+  Rig rig;
+  rig.tap(Button::F4);
+  rig.turn(-1);
+  CHECK(rig.app->state().mixer.outputs_pending == 8);
+  rig.turn(+1);  // back at 10: nothing pending, nothing starred
+  CHECK(rig.app->state().mixer.outputs_pending == 0);
+  rig.turn(+1);  // the top: nothing
+  CHECK(rig.app->state().mixer.outputs_pending == 0);
+  rig.tap(Button::F6);  // nothing pending: nothing asked, and the strip says why
+  CHECK(g_outputs_requests == 0);
+  CHECK(rig.app->state().notify.last_text() == std::string("NOTHING TO APPLY"));
+  rig.turn(-1);
+  rig.tap(Button::Delete);  // drops it, without a question
+  CHECK(rig.app->state().mixer.outputs_pending == 0);
+  rig.turn(-2);
+  CHECK(rig.app->state().mixer.outputs_pending == 6);
+  rig.tap(Button::F6);
+  rig.pass(2500);  // too late: asks again
+  rig.tap(Button::F6);
+  CHECK(g_outputs_requests == 0);
+  rig.tap(Button::F6);
+  CHECK(g_outputs_requests == 1);
+  rig.turn(-3);  // (the map is still the 10-output one in this rig: 10 -> 8 -> 6 -> 4)
+  CHECK(rig.app->state().mixer.outputs_pending == 4);
+  rig.tap(Button::F1);  // leaving the page drops it
+  CHECK(rig.app->state().mixer.outputs_pending == 0);
+  rig.tap(Button::F4);
+  rig.tap(Button::F6);
+  CHECK(g_outputs_requests == 1);
+  rig.turn(-1);
+  rig.tap(Button::Song);  // so does leaving the screen
+  rig.tap(Button::Master);
+  CHECK(rig.app->state().mixer.outputs_pending == 0);
+  CHECK(rig.app->failed_frames() == 0);
+}
+
+TEST_CASE("mixer stems OUTPUTS: a refused request keeps the pending value and says so; a change of the value asks again; F6 elsewhere does nothing; the slot rows are one down") {
+  Rig rig;
+  rig.tap(Button::F4);
+  rig.turn(-2);  // 6
+  g_outputs_accept = false;  // the driver is busy (a change in flight, DISK, a project's USB part)
+  rig.tap(Button::F6);
+  rig.tap(Button::F6);
+  CHECK(g_outputs_requests == 1);
+  CHECK(rig.app->state().notify.last_text() == std::string("USB BUSY: TRY AGAIN"));
+  CHECK(rig.app->state().mixer.outputs_pending == 6);  // kept
+  g_outputs_accept = true;
+  rig.turn(-1);  // another value: asked again
+  rig.tap(Button::F6);
+  CHECK(g_outputs_requests == 1);
+  rig.tap(Button::F6);
+  CHECK(g_outputs_requests == 2);
+  CHECK(g_outputs_last == usb::Profile::P4);
+  // F6 on another page does nothing, and the OUTPUTS row has no slot to edit: Insert and the map are untouched
+  rig.turn(-1);
+  rig.tap(Button::F1);
+  rig.tap(Button::F6);
+  rig.tap(Button::F6);
+  CHECK(g_outputs_requests == 2);
+  rig.tap(Button::F4);
+  rig.tap(Button::Insert);
+  CHECK(g_stem_commits == 0);
+  CHECK(rig.stems.slot(0) == 1u);
+  CHECK(app::mixer::outputs_next(11, -1) == 10);  // profile 11 (console only) is left by a turn down, never reached by one up
+  CHECK(app::mixer::outputs_next(11, +1) == 11);
+  CHECK(app::mixer::outputs_next(2, -1) == 2);
+  CHECK(app::mixer::outputs_next(10, +1) == 10);
+  CHECK(app::mixer::outputs_next(8, +1) == 10);
   CHECK(rig.app->failed_frames() == 0);
 }
 
@@ -1065,6 +1183,7 @@ TEST_CASE("mixer routing: F7 and F8 on the IN, SND A and SND B rows say TRACKS O
 TEST_CASE("mixer stems: F7 and F8 mute and solo the track of the column, SA and SB mute their effect, the rest says why") {
   Rig rig;
   rig.tap(Button::F4);
+  rig.tap(Button::Down);  // S1 (row 0 is OUTPUTS: Left / Right edit its value there)
   rig.move_to(2);  // T3
   rig.tap(Button::F7);
   CHECK(rig.project().get_param(track_id(2, tp::Mute)) == 1.0f);
@@ -1090,6 +1209,7 @@ TEST_CASE("mixer stems: F7 and F8 mute and solo the track of the column, SA and 
 TEST_CASE("mixer stems: Delete and Shift + Delete ask first; the question lapses with time, with the other key and with the cursor") {
   Rig rig;
   rig.tap(Button::F4);
+  rig.tap(Button::Down);  // S1
   const std::uint16_t s1 = rig.stems.slot(0);  // T1
   rig.tap(Button::Delete);
   CHECK(rig.app->state().notify.last_text() == std::string("DELETE AGAIN: THE SOURCE LEAVES THE SLOT"));
@@ -1125,11 +1245,13 @@ TEST_CASE("mixer stems: Delete and Shift + Delete ask first; the question lapses
 TEST_CASE("mixer stems: a page change or leaving the Mixer takes the Delete question back") {
   Rig rig;
   rig.tap(Button::F4);
+  rig.tap(Button::Down);  // S1
   const std::uint16_t s1 = rig.stems.slot(0);
   rig.tap(Button::Delete);
   CHECK(rig.app->state().notify.last_text() == std::string("DELETE AGAIN: THE SOURCE LEAVES THE SLOT"));
   rig.tap(Button::F1);
   rig.tap(Button::F4);
+  rig.tap(Button::Down);  // (back on the page the cursor is on the first row again)
   rig.tap(Button::Delete);
   CHECK(rig.stems.slot(0) == s1);
   CHECK(g_stem_commits == 0);

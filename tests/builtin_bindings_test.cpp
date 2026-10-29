@@ -54,6 +54,7 @@ constexpr ContextWord kContextWords[] = {
     {"sampleedit.fx", Context::SampleEditFx},
     {"config", Context::Config},
     {"mixer", Context::Mixer},
+    {"mixer.stems", Context::MixerStems},
     {"perform", Context::Perform},
     {"perform.dj", Context::PerformDj},
     {"record", Context::Record},

@@ -90,24 +90,47 @@ bool edit_level(ActionContext& ctx, std::uint8_t& level, int detents, bool coars
   return true;
 }
 
-// STEMS: the cursor's source added to (set) or cleared from the cursor's slot, and the map handed to the stream. A bit already as asked, no map or a row past the profile's
-// channels change nothing and hand nothing on.
+// STEMS: the cursor's source added to (set) or cleared from the cursor's slot (row 1 is S1: row 0 is the OUTPUTS row), and the map handed to the stream. A bit already as asked, no map, the
+// OUTPUTS row or a row past the profile's channels change nothing and hand nothing on.
 bool stem_cell(ActionContext& ctx, bool set) noexcept {
   MixBoard* mix = ctx.mix;
   if (mix == nullptr || mix->stems == nullptr) {
     return false;
   }
   const mixer::Cursor c = mixer::cursor(ctx.model, ctx.view);
-  if (c.row >= mix->stems->channels()) {
+  if (c.row == 0u || c.row > mix->stems->channels()) {
     return false;
   }
+  const unsigned slot = c.row - 1u;
   const std::uint32_t bit = std::uint32_t{1} << c.col;
-  const std::uint32_t now = mix->stems->slot(c.row);
+  const std::uint32_t now = mix->stems->slot(slot);
   const std::uint32_t next = set ? (now | bit) : (now & ~bit);
-  if (next == now || !mix->stems->set_slot(c.row, next)) {
+  if (next == now || !mix->stems->set_slot(slot, next)) {
     return false;
   }
   (void)mix->commit_stems();
+  return true;
+}
+
+// OS-USBOUTS: a turn on the OUTPUTS row changes the PENDING value (shown starred): from the pending value, or from the number now presented; back at the presented one it is no longer pending.
+bool outputs_turn(ActionContext& ctx, int detents) noexcept {
+  MixBoard* mix = ctx.mix;
+  if (mix == nullptr || mix->stems == nullptr || mix->request_outputs == nullptr || detents == 0) {
+    return false;
+  }
+  MixerView& mv = ctx.view.mixer;
+  const std::uint8_t now = static_cast<std::uint8_t>(mix->stems->channels());
+  const std::uint8_t base = mv.outputs_pending != 0u ? mv.outputs_pending : now;
+  std::uint8_t next = base;
+  for (int n = detents < 0 ? -detents : detents; n > 0; --n) {
+    next = mixer::outputs_next(next, detents);  // one offered value a detent
+  }
+  const std::uint8_t pending = next == now ? 0u : next;
+  if (pending == mv.outputs_pending) {
+    return false;
+  }
+  mv.outputs_pending = pending;
+  mv.reset_asked = 0;  // a changed value is asked again
   return true;
 }
 
@@ -165,6 +188,9 @@ bool edit_at_cursor(ActionContext& ctx, core::ActionArg detents, bool coarse) no
       return true;
     }
     case MixerPage::Stems:
+      if (c.row == 0u) {
+        return outputs_turn(ctx, detents);
+      }
       return detents != 0 && stem_cell(ctx, detents > 0);
   }
   return false;
@@ -247,7 +273,14 @@ bool mixer_reset(ActionContext& ctx, core::ActionArg arg) noexcept {
     case MixerPage::Stems: {
       // Final, no undo (the Mixer has none, maintainer 2026-10-22): the key asks first and the same key again within the window does it.
       MixerView& mv = ctx.view.mixer;
-      if (mix->stems == nullptr || (arg == 0 && (c.row >= mix->stems->channels() || (mix->stems->slot(c.row) & (std::uint32_t{1} << c.col)) == 0u))) {
+      if (mix->stems != nullptr && arg == 0 && c.row == 0u) {
+        // OS-USBOUTS: Delete on the OUTPUTS row drops the pending value (nothing is lost: no question)
+        const bool had = mv.outputs_pending != 0u;
+        mv.outputs_pending = 0;
+        mv.reset_asked = 0;
+        return had;
+      }
+      if (mix->stems == nullptr || (arg == 0 && (c.row == 0u || c.row > mix->stems->channels() || (mix->stems->slot(c.row - 1u) & (std::uint32_t{1} << c.col)) == 0u))) {
         return false;  // no map, or the cursor's source is not in the slot: nothing would be lost, so nothing is asked
       }
       const std::uint8_t which = arg == 0 ? 1u : 2u;
@@ -414,6 +447,30 @@ bool mixer_page(ActionContext& ctx, core::ActionArg arg) noexcept {
   }
   page = static_cast<std::uint8_t>(arg);
   ctx.view.mixer.row = 0;
+  return true;
+}
+
+// F6 APPLY on the STEMS page (OS-USBOUTS): the pending OUTPUTS value goes to the USB driver. The port re-enumerates (the computer drops the device for a moment), so the key asks first and the same
+// key again within kResetWindowMs does it (the pattern of Config's F7 APPLY). A refusal (the driver is busy, DISK) keeps the pending value and says so. Elsewhere, or with nothing pending, nothing happens.
+bool mixer_apply(ActionContext& ctx, core::ActionArg) noexcept {
+  MixBoard* mix = ctx.mix;
+  MixerView& mv = ctx.view.mixer;
+  if (ctx.view.screen != ScreenId::Mixer || mixer::page_of(ctx.view) != MixerPage::Stems) {
+    return false;  // (F6 is unlabelled on the other pages)
+  }
+  if (mix == nullptr || mix->request_outputs == nullptr || mv.outputs_pending == 0u) {
+    return ctx.view.notify.post(core::Severity::Info, "NOTHING TO APPLY", "mixer", ViewState::kMessageMs);  // labelled APPLY here, so it says why nothing happens (the qanet key rule)
+  }
+  if (mv.reset_asked != 3u || core::tick_elapsed(ctx.now, mv.reset_at) > core::ticks_from_ms(MixerView::kResetWindowMs)) {
+    mv.reset_asked = 3;
+    mv.reset_at = ctx.now;
+    return ctx.view.notify.ask(core::Severity::Warn, "USB WILL RECONNECT: PRESS AGAIN", "mixer", ViewState::kMessageMs);
+  }
+  mv.reset_asked = 0;
+  if (!mix->request_outputs(mixer::outputs_profile(mv.outputs_pending))) {
+    return ctx.view.notify.post(core::Severity::Warn, "USB BUSY: TRY AGAIN", "mixer", ViewState::kMessageMs);
+  }
+  mv.outputs_pending = 0;
   return true;
 }
 

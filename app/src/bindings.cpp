@@ -45,6 +45,7 @@ constexpr core::ContextId kSeditCtx = context_id(Context::SampleEdit);
 constexpr core::ContextId kSeditFxCtx = context_id(Context::SampleEditFx);
 constexpr core::ContextId kConfigCtx = context_id(Context::Config);
 constexpr core::ContextId kMixerCtx = context_id(Context::Mixer);
+constexpr core::ContextId kMixerStemsCtx = context_id(Context::MixerStems);  // OS-USBOUTS
 constexpr core::ContextId kPerformCtx = context_id(Context::Perform);
 constexpr core::ContextId kPerformDjCtx = context_id(Context::PerformDj);
 constexpr core::ContextId kModulesCtx = context_id(Context::Modules);
@@ -265,6 +266,7 @@ constexpr core::ActionId kMixerMute = core::action_id("mixer.mute");
 constexpr core::ActionId kMixerSolo = core::action_id("mixer.solo");
 constexpr core::ActionId kMixerPage = core::action_id("mixer.page");
 constexpr core::ActionId kMixerCue = core::action_id("mixer.cue");
+constexpr core::ActionId kMixerApply = core::action_id("mixer.apply");  // OS-USBOUTS
 constexpr core::ActionId kPerformPad = core::action_id("perform.pad");
 constexpr core::ActionId kPerformTurn = core::action_id("perform.turn");
 constexpr core::ActionId kPerformKey = core::action_id("perform.key");
@@ -788,6 +790,7 @@ constexpr core::Binding kBase[] = {
     bind(kMixerCtx, tap(button_ref(Button::F3)), kMixerPage, ArgFrom::Fixed, 2),
     bind(kMixerCtx, tap(button_ref(Button::F4)), kMixerPage, ArgFrom::Fixed, 3),
     bind(kMixerCtx, tap(button_ref(Button::F5)), kMixerCue),
+    bind(kMixerStemsCtx, tap(button_ref(Button::F6)), kMixerApply),  // OS-USBOUTS: STEMS page only (its field level): APPLY the pending OUTPUTS value (twice)
     bind(kMixerCtx, tap(button_ref(Button::F7)), kMixerMute),
     bind(kMixerCtx, tap(button_ref(Button::F8)), kMixerSolo),
     bind(kMixerCtx, tap(button_ref(Button::F1), kShift), kMixerName),  // OS-NAMES: NAME, the track under the cursor
@@ -1151,6 +1154,7 @@ constexpr ContextName kContextNames[] = {
     {"sampleedit.fx", Context::SampleEditFx},
     {"config", Context::Config},
     {"mixer", Context::Mixer},
+    {"mixer.stems", Context::MixerStems},
     {"perform", Context::Perform},
     {"record", Context::Record},
     {"song", Context::Song},

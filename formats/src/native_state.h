@@ -5,6 +5,7 @@
 //
 //   MIDI  u16 version, u8 out_ports, u8 note_ports, u8 notes_channel, u8 follow, u8 cc_number[6], i16 in_offset_dms[2], i16 out_offset_dms[2]            (20 bytes)
 //   USBS  u16 version, u8 mode, u8 profile, u8 slots, u16 mask[slots]                                                                                   (5 + 2 slots)
+//         1.1 (OS-USBOUTS, only for 4 or 6 outputs): profile 1 (P8), slots 8, u16 mask[8], u8 channels (4 or 6)                                                (22 bytes)
 //   MIXR  u16 version, u8 strips (17), u8 route[17], u8 ret_route[2], u8 out_mode, u8 cue_level, u8 in_level                                           (25 bytes)
 //   PERF  u16 version, u8 slots (12), then per slot u8 fx, u8 row, i16 value[3]                                                                         (99 bytes)
 //   APPM  u16 version, u8 count (1..6; 1.1: 1..12), then per app: str name, u8 abi_major, u8 abi_minor, u8 params (1..32), f32 value[params]  (3 .. 981; 1.1: 3 .. 1015 bytes)
@@ -45,7 +46,10 @@ inline constexpr std::uint8_t kPerfFxMaxV10 = 19;  // the last Perform FX id of 
 // Payload bounds of version 1.0: the shortest chunk of any minor, and the longest of this one (a newer minor may be longer: only this much is read).
 inline constexpr std::size_t kMidiBytes = 2 + 4 + model::kMidiCcSlots + 4 * model::kMidiPorts;  // 20
 inline constexpr std::size_t kUsbFixed = 5;
-inline constexpr std::size_t kUsbMax = kUsbFixed + 2 * model::kStemSlots;                         // 27
+inline constexpr std::size_t kUsbMax = kUsbFixed + 2 * model::kStemSlots;                         // 27: the longest USBS 1.0
+// OS-USBOUTS: USBS 1.1 appends one byte after the masks, the real channel count (4 or 6); the 1.0 part then says P8 with 8 slots (real slots first, then the P8 factory masks), which a 1.0 reader takes as P8.
+inline constexpr std::uint16_t kUsbVersionCount = 0x0101;
+inline constexpr std::size_t kUsbCountP8Bytes = kUsbFixed + 2 * 8 + 1;                            // 22: the 1.1 chunk
 inline constexpr std::size_t kMixBytes = 2 + 1 + model::kMixStrips + 2 + 3;                       // 25
 inline constexpr std::size_t kPerfBytes = 3 + model::kPerfSlots * (2 + 2 * model::kPerfStoredRows);  // 99
 inline constexpr std::size_t kAppsFixed = 3;
