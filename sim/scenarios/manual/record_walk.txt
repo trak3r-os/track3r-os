@@ -3,13 +3,13 @@
 # of the loop row, the review and the overdub are the gallery states record_loop_row, record_loop_review and record_loop_overdub (docs/manual/images.txt). The loop steps themselves are
 # proved by record_screen_test and audio_loop_test (docs/qa/catalogue/record.md, QA-REC-020 to QA-REC-031).
 
-# Step 1. Press `Sample Rec`: the Record screen opens on SOURCES. `Right` turns the page to RESAMPLE, `Left` goes back.
+# Step 1. Press `Sample Rec`: the Record screen opens on SOURCES. `Sample Rec` again turns the page to RESAMPLE, and twice more is back on SOURCES.
 tap samplerec
 wait 20
 assert state screen=RECORD
-tap right
+tap samplerec
 wait 20
 assert state screen=RECORD page=1
-tap left
+tap samplerec 2
 wait 20
 assert state screen=RECORD page=0

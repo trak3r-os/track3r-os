@@ -12,8 +12,6 @@ R2 | Shift+F5 (record.seek -10) | RECORD_page_2 | bound key changes nothing and 
 R2 | Shift+F5 (record.seek -10) | RecordRadio | bound key changes nothing and says nothing | gap:the simulator attaches no recorder (app::Recorder) to the engine rig: nothing records, nothing is under review
 R2 | Shift+F6 (record.seek 10) | RECORD_page_2 | bound key changes nothing and says nothing | gap:the simulator attaches no recorder (app::Recorder) to the engine rig: nothing records, nothing is under review
 R2 | Shift+F6 (record.seek 10) | RecordRadio | bound key changes nothing and says nothing | gap:the simulator attaches no recorder (app::Recorder) to the engine rig: nothing records, nothing is under review
-R2 | Up (nav.up 0) | Record* | bound key changes nothing and says nothing | gap:no take under review, so the page has one row
-R2 | Down (nav.down 0) | Record* | bound key changes nothing and says nothing | gap:no take under review, so the page has one row
 R2 | Shift+F* (mixer.*_none 0) | Mixer* | bound key changes nothing and says nothing | gap:nothing is muted or soloed in the state, so there is nothing to clear
 R2 | F8 (perform.key 7) | Perform* | bound key changes nothing and says nothing | gap:nothing on the board is on, so RESET has nothing to turn off
 R2 | F7 (wave.zoom -1) | Wave* | bound key changes nothing and says nothing | gap:the sample is fully zoomed out in every state, so ZOOM- has nowhere to go

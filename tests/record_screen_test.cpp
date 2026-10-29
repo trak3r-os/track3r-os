@@ -1354,28 +1354,42 @@ TEST_CASE("record screen: Shift + F5 / F6 tune ten channels down / up on the RAD
   CHECK(rig.hw.seek_calls == 1u);
 }
 
-TEST_CASE("record screen: Left / Right turn the page (SOURCES, RESAMPLE, RADIO), wrapping at both ends, each page keeping its row; the page is kept when the screen is left") {
+// OS-CFG-ARROWS (new Community OS behaviour, replaces OS-SHIFTROW rule 5 on Record): Left / Right are the encoder's detent on the row, Shift + Left / Right its coarse step; the page only turns with the
+// screen button (SOURCES, RESAMPLE, RADIO, wrapping, each page keeping its row; kept when the screen is left).
+TEST_CASE("record screen: Left / Right change the row under the cursor (Shift: coarse) and keep the page and the row; the screen button turns the pages") {
   Rig rig;
   rig.tap(Button::SampleRec);
+  rig.settle();
   const auto page = [&] { return static_cast<unsigned>(rig.state().page[app::screen_index(ScreenId::Record)]); };
   CHECK(page() == 0);
-  rig.tap(Button::Down);
-  rig.tap(Button::Down);
-  const int row0 = rig.state().record.row[0];
-  CHECK(row0 == 2);
+  CHECK(rig.rec->cfg.source == cap::Source::LineMix);
+  rig.tap(Button::Right);  // SOURCE row: one source a press
+  CHECK(rig.rec->cfg.source != cap::Source::LineMix);
   rig.tap(Button::Left);
-  CHECK(page() == 2);  // wraps to RADIO
-  rig.tap(Button::Right);
+  CHECK(rig.rec->cfg.source == cap::Source::LineMix);
   CHECK(page() == 0);
-  CHECK(rig.state().record.row[0] == row0);  // SOURCES kept its row
+  CHECK(rig.state().record.row[0] == 0);
+  rig.tap(Button::Down);  // GAIN: a percent a press, five with Shift
+  CHECK(rig.rec->gain() == 0);
   rig.tap(Button::Right);
+  CHECK(rig.rec->gain() == 1);
+  rig.shift_tap(Button::Right);
+  CHECK(rig.rec->gain() == 6);
+  rig.shift_tap(Button::Left);
+  CHECK(rig.rec->gain() == 1);
+  rig.tap(Button::Left);
+  CHECK(rig.rec->gain() == 0);
+  CHECK(page() == 0);
+  CHECK(rig.state().record.row[0] == 1);
+  // The pages are the screen button alone.
+  rig.tap(Button::SampleRec);
   CHECK(page() == 1);
-  rig.tap(Button::Right);
+  rig.tap(Button::SampleRec);
   CHECK(page() == 2);
-  rig.tap(Button::Right);
+  rig.tap(Button::SampleRec);
   CHECK(page() == 0);  // wraps to SOURCES
-  rig.tap(Button::Left);
-  rig.tap(Button::Left);
+  CHECK(rig.state().record.row[0] == 1);  // which kept its row
+  rig.tap(Button::SampleRec);
   CHECK(page() == 1);
   rig.tap(Button::Pattern);
   rig.tap(Button::SampleRec);

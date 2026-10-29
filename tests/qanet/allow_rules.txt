@@ -3,8 +3,6 @@
 # OS-QANET A2 (rule 2, tests/qanet/keys_test.cpp): a key the net would flag and a decision says is right. Same columns; a pattern (`*`, case ignored) says every state it matches is such a case.
 # The ID is the spec that decides it, or `rule:<name>` for a rule of OS-QANET section 4 that is applied by screen:
 #   rule:one-axis  a screen or page whose cursor moves along one axis (a list, a row of columns) or has nothing to move among: the arrows of the other axis are bound by Global and move nothing.
-R2 | Up (nav.up 0) | CONFIG_page_* | bound key changes nothing and says nothing | rule:one-axis
-R2 | Down (nav.down 0) | CONFIG_page_* | bound key changes nothing and says nothing | rule:one-axis
 R2 | Up (nav.up 0) | InstrumentEmpty | bound key changes nothing and says nothing | rule:one-axis
 R2 | Down (nav.down 0) | InstrumentEmpty | bound key changes nothing and says nothing | rule:one-axis
 R2 | Up (nav.up 0) | MIXER_page_3 | bound key changes nothing and says nothing | rule:one-axis

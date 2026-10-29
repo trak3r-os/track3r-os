@@ -239,7 +239,7 @@ You should see **PAGE RESET TO DEFAULTS** in the strip. Every row of the page is
 
 ### Go to another page
 
-Press `F1` to `F6` to go straight to a page, or `Left` or `Right` to turn it. The pages wrap. You should see the first row of the new page under the cursor. <!-- QA-CFG-033 -->
+Press `F1` to `F6` to go straight to a page, or press `Config` again for the next page. The pages wrap after PATTERN. With `F1` to `F6` the cursor starts on the first row of the new page; with `Config` it keeps its row (the last row if the new page is shorter). `Left` and `Right` do not turn the page: they change the value under the cursor. <!-- QA-CFG-033 -->
 
 ### Update from the unit
 <!-- sync: src=app/src/firmware_actions.cpp,app/src/screens/firmware_overlay.cpp,app/include/o3os/app/firmware_view.h qa=QA-CFG-040,QA-CFG-042,QA-CFG-044,QA-CFG-046,QA-CFG-048,QA-CFG-051,QA-CFG-054,QA-CFG-056,QA-CFG-057,QA-CFG-041,QA-CFG-043,QA-CFG-045,QA-CFG-047,QA-CFG-049,QA-CFG-050,QA-CFG-052,QA-CFG-053,QA-CFG-055,QA-CFG-058,QA-CFG-059 -->
@@ -286,7 +286,9 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 | `F8` (**UPDATE**) | on the INFO page only: opens the firmware update list. On the other pages it does nothing. | QA-CFG-040, QA-CFG-041, QA-CFG-218 |
 | `Shift` + `F7` (**DEFAULTS**) | puts the page's rows back to their defaults. Press it twice within two seconds. | QA-CFG-031, QA-CFG-032 |
 | `Shift` + `F1` to `F6`, `Shift` + `F8` | do nothing, and do not reach the page keys or APPLY | QA-CFG-015 |
-| `Left`, `Right` | turns the page. It wraps at both ends. | QA-CFG-033 |
+| `Config` (again) | goes to the next page. It wraps after PATTERN. | QA-CFG-033 |
+| `Left`, `Right` | change the value under the cursor, one click of the encoder down or up. On USB AUDIO and USB RETURN they change a pending value. New in track3r-os. | QA-CFG-240, QA-CFG-242, QA-CFG-243 |
+| `Shift` + `Left`, `Shift` + `Right` | the same in the coarse step, as `Shift` + the encoder | QA-CFG-241 |
 | `Up`, `Down` | moves the cursor between rows | QA-CFG-005, QA-CFG-017 |
 | the encoder | changes the value under the cursor. On USB AUDIO and USB RETURN it changes a pending value. | QA-CFG-002, QA-CFG-008 |
 | `Delete` | puts the row's default back. On USB AUDIO and USB RETURN, the default becomes a pending value. | QA-CFG-009, QA-CFG-019, QA-CFG-028, QA-CFG-036 |
@@ -294,7 +296,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 ## Good to know
 
 - The pads play the current instrument while you hold them, on every page of Config. No setting changes. <!-- QA-CFG-230 -->
-- A **pending value** is a USB row you changed but did not apply. It shows a star (\*). Turning the page or leaving it drops the pending value. Nothing is applied. <!-- QA-CFG-010 --> <!-- QA-CFG-033 -->
+- A **pending value** is a USB row you changed but did not apply. It shows a star (\*). Changing the page or leaving it drops the pending value. Nothing is applied. <!-- QA-CFG-010 --> <!-- QA-CFG-033 -->
 - `Delete` on USB AUDIO when it reads Off gives **On\***. The On waits for `F7`. <!-- QA-CFG-009 -->
 - Pressing `Shift` + `F7` on the SD or INFO page says **NO ROWS ON THIS PAGE**. <!-- QA-CFG-032 -->
 - REC MICRO and REC VELOCITY are new in track3r-os. <!-- QA-CFG-026 --> <!-- QA-CFG-027 -->

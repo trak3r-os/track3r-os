@@ -1815,14 +1815,14 @@ If you want to know more:
 5. Listen: both sounds play on the same bar. Press `F5` (**UNDO LYR**) and the second one goes.
 6. Press `F3` (**SAVE**) to keep the loop as an instrument, or `F4` (**DISCARD**) to throw it away.
 
-The simulator has no recorder, so its scenario `record_walk.txt` checks only the screen and the page turn, not these steps, and this walk-through has no pictures of its own: the three above come from the screen's gallery. Not yet checked on the unit.
+The simulator has no recorder, so its scenario `record_walk.txt` checks only the screen and the page turn (the `Sample Rec` button), not these steps, and this walk-through has no pictures of its own: the three above come from the screen's gallery. Not yet checked on the unit.
 
 ## The screen at a glance
 
 | Area | What it shows |
 |---|---|
 | Header | The state of a take or loop, for example **REVIEW - LOOP 4 BARS**. |
-| Rows | The settings of the page. `Up` and `Down` move the cursor; the encoder changes the value. |
+| Rows | The settings of the page. `Up` and `Down` move the cursor; the encoder, or `Left` and `Right`, changes the value. |
 | Strip | Short messages, for example **RECORDING IN 4.. 3.. 2.. 1..**. |
 | Key row | `F1` to `F8`. Under a loop review the whole row changes. |
 | Shift row | The labels drawn while `Shift` is held. See the table under "Keys on this screen". |
@@ -1970,7 +1970,9 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 | Key | What it does | Ref |
 |---|---|---|
 | `Up`, `Down` | Move the cursor between the rows. | QA-REC-012 |
-| `Left`, `Right` | Turn the page through SOURCES, RESAMPLE and RADIO, and wrap at both ends. Each page keeps its row. | QA-REC-012 |
+| `Left`, `Right` | Change the value of the row under the cursor, one click of the encoder down or up. New in track3r-os. | QA-REC-060 |
+| `Shift` + `Left`, `Shift` + `Right` | The same in the coarse step, as `Shift` + the encoder. | QA-REC-061 |
+| `Sample Rec` (again) | Turns the page through SOURCES, RESAMPLE and RADIO, and wraps after RADIO. Each page keeps its row. `Left` and `Right` never turn the page. | QA-REC-012, QA-REC-062 |
 | the encoder | Change the value of the row under the cursor. | QA-REC-020, QA-REC-031 |
 | `Shift` + the encoder | LOOP: moves four bars. FEEDBACK: moves in steps of 5. | QA-REC-020, QA-REC-031 |
 | `Delete` | LOOP: OFF. FEEDBACK and LOOP VOL: 100. | QA-REC-020, QA-REC-022, QA-REC-031 |
@@ -2811,7 +2813,7 @@ You should see **PAGE RESET TO DEFAULTS** in the strip. Every row of the page is
 
 ### Go to another page
 
-Press `F1` to `F6` to go straight to a page, or `Left` or `Right` to turn it. The pages wrap. You should see the first row of the new page under the cursor.
+Press `F1` to `F6` to go straight to a page, or press `Config` again for the next page. The pages wrap after PATTERN. With `F1` to `F6` the cursor starts on the first row of the new page; with `Config` it keeps its row (the last row if the new page is shorter). `Left` and `Right` do not turn the page: they change the value under the cursor.
 
 ### Update from the unit
 
@@ -2854,7 +2856,9 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 | `F8` (**UPDATE**) | on the INFO page only: opens the firmware update list. On the other pages it does nothing. | QA-CFG-040, QA-CFG-041, QA-CFG-218 |
 | `Shift` + `F7` (**DEFAULTS**) | puts the page's rows back to their defaults. Press it twice within two seconds. | QA-CFG-031, QA-CFG-032 |
 | `Shift` + `F1` to `F6`, `Shift` + `F8` | do nothing, and do not reach the page keys or APPLY | QA-CFG-015 |
-| `Left`, `Right` | turns the page. It wraps at both ends. | QA-CFG-033 |
+| `Config` (again) | goes to the next page. It wraps after PATTERN. | QA-CFG-033 |
+| `Left`, `Right` | change the value under the cursor, one click of the encoder down or up. On USB AUDIO and USB RETURN they change a pending value. New in track3r-os. | QA-CFG-240, QA-CFG-242, QA-CFG-243 |
+| `Shift` + `Left`, `Shift` + `Right` | the same in the coarse step, as `Shift` + the encoder | QA-CFG-241 |
 | `Up`, `Down` | moves the cursor between rows | QA-CFG-005, QA-CFG-017 |
 | the encoder | changes the value under the cursor. On USB AUDIO and USB RETURN it changes a pending value. | QA-CFG-002, QA-CFG-008 |
 | `Delete` | puts the row's default back. On USB AUDIO and USB RETURN, the default becomes a pending value. | QA-CFG-009, QA-CFG-019, QA-CFG-028, QA-CFG-036 |
@@ -2862,7 +2866,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 ## Good to know
 
 - The pads play the current instrument while you hold them, on every page of Config. No setting changes.
-- A **pending value** is a USB row you changed but did not apply. It shows a star (\*). Turning the page or leaving it drops the pending value. Nothing is applied.
+- A **pending value** is a USB row you changed but did not apply. It shows a star (\*). Changing the page or leaving it drops the pending value. Nothing is applied.
 - `Delete` on USB AUDIO when it reads Off gives **On\***. The On waits for `F7`.
 - Pressing `Shift` + `F7` on the SD or INFO page says **NO ROWS ON THIS PAGE**.
 - REC MICRO and REC VELOCITY are new in track3r-os.

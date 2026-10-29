@@ -8,7 +8,7 @@ Maintainer question, 2026-10-14: why do many views show 0/4, 1/4... when Shift i
 2. **A Shift+F key with nothing worth a key is blank and does nothing.** No dim plain label, no fall-through.
 3. **Shift+F8 = REDO wherever F8 = UNDO.** Where F8 is something else (PREVIEW, RESET, SOLO), Shift+F8 is not REDO.
 4. **Where an object has a name**, Shift+F1..F5 = NAME COPY PASTE DELETE SAVE, in that order (Instrument, through OS-INSTUI).
-5. **On a paged screen with a single column, Left/Right = previous/next page, wrapping.** The F-keys still go straight to a page. This applies to Config and Record here, and to Instrument in OS-INSTUI S1 (except a module with kits, where Left/Right select the kit).
+5. **(Withdrawn for Config and Record by OS-CFG-ARROWS, maintainer 2026-10-29, new Community OS behaviour; for Instrument by OS-INSTUI-ARROWS: Left/Right edit the row, Shift + Left/Right in the coarse step, and the pages are the F-keys or the screen button again.)** On a paged screen with a single column, Left/Right = previous/next page, wrapping. The F-keys still go straight to a page. This applies to Config and Record here, and to Instrument in OS-INSTUI S1 (except a module with kits, where Left/Right select the kit).
 
 ## 2. The rows (· = blank, no effect)
 

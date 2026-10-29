@@ -64,14 +64,14 @@ If you want to know more:
 5. Listen: both sounds play on the same bar. Press `F5` (**UNDO LYR**) and the second one goes. <!-- QA-REC-029 -->
 6. Press `F3` (**SAVE**) to keep the loop as an instrument, or `F4` (**DISCARD**) to throw it away. <!-- QA-REC-025 -->
 
-The simulator has no recorder, so its scenario `record_walk.txt` checks only the screen and the page turn, not these steps, and this walk-through has no pictures of its own: the three above come from the screen's gallery. Not yet checked on the unit.
+The simulator has no recorder, so its scenario `record_walk.txt` checks only the screen and the page turn (the `Sample Rec` button), not these steps, and this walk-through has no pictures of its own: the three above come from the screen's gallery. Not yet checked on the unit.
 
 ## The screen at a glance
 
 | Area | What it shows |
 |---|---|
 | Header | The state of a take or loop, for example **REVIEW - LOOP 4 BARS**. |
-| Rows | The settings of the page. `Up` and `Down` move the cursor; the encoder changes the value. |
+| Rows | The settings of the page. `Up` and `Down` move the cursor; the encoder, or `Left` and `Right`, changes the value. |
 | Strip | Short messages, for example **RECORDING IN 4.. 3.. 2.. 1..**. |
 | Key row | `F1` to `F8`. Under a loop review the whole row changes. |
 | Shift row | The labels drawn while `Shift` is held. See the table under "Keys on this screen". |
@@ -226,7 +226,9 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 | Key | What it does | Ref |
 |---|---|---|
 | `Up`, `Down` | Move the cursor between the rows. | QA-REC-012 |
-| `Left`, `Right` | Turn the page through SOURCES, RESAMPLE and RADIO, and wrap at both ends. Each page keeps its row. | QA-REC-012 |
+| `Left`, `Right` | Change the value of the row under the cursor, one click of the encoder down or up. New in track3r-os. | QA-REC-060 |
+| `Shift` + `Left`, `Shift` + `Right` | The same in the coarse step, as `Shift` + the encoder. | QA-REC-061 |
+| `Sample Rec` (again) | Turns the page through SOURCES, RESAMPLE and RADIO, and wraps after RADIO. Each page keeps its row. `Left` and `Right` never turn the page. | QA-REC-012, QA-REC-062 |
 | the encoder | Change the value of the row under the cursor. | QA-REC-020, QA-REC-031 |
 | `Shift` + the encoder | LOOP: moves four bars. FEEDBACK: moves in steps of 5. | QA-REC-020, QA-REC-031 |
 | `Delete` | LOOP: OFF. FEEDBACK and LOOP VOL: 100. | QA-REC-020, QA-REC-022, QA-REC-031 |

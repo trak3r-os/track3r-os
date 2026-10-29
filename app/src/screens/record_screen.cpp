@@ -197,13 +197,8 @@ int RecordScreen::position(const ViewState& view) const noexcept {
 }
 
 bool RecordScreen::step(const Model& model, ViewState& view, int dx, int dy) const noexcept {
-  if (dx == 0) {
-    return dy != 0 && set_position(model, view, position(view) + dy);
-  }
-  std::uint8_t& page = view.page[screen_index(ScreenId::Record)];
-  const unsigned pages = this->pages();
-  page = static_cast<std::uint8_t>((static_cast<unsigned>(mode_of(view)) + (dx > 0 ? 1u : pages - 1u)) % pages);  // each page keeps its own row (ViewState::record.row)
-  return true;
+  (void)dx;  // OS-CFG-ARROWS: Left / Right edit the row (record.edit); the pages are the screen button
+  return dy != 0 && set_position(model, view, position(view) + dy);
 }
 
 bool RecordScreen::set_position(const Model& model, ViewState& view, int position) const noexcept {

@@ -139,14 +139,8 @@ int ConfigScreen::count(const Model&, const ViewState& view) const noexcept { re
 int ConfigScreen::position(const ViewState& view) const noexcept { return static_cast<int>(row_of(view, rows_of(view))); }
 
 bool ConfigScreen::step(const Model& model, ViewState& view, int dx, int dy) const noexcept {
-  if (dx == 0) {
-    return dy != 0 && set_position(model, view, position(view) + dy);
-  }
-  std::uint8_t& page = view.page[screen_index(ScreenId::Config)];
-  page = static_cast<std::uint8_t>((page_of(view) + (dx > 0 ? 1u : kPages - 1u)) % kPages);
-  view.params.row = 0;  // as param.group: a page of its own rows, nothing pending carried over
-  view.params.discard_pending();
-  return true;
+  (void)dx;  // OS-CFG-ARROWS: Left / Right edit the row (param.edit); the pages are the F-keys and the screen button
+  return dy != 0 && set_position(model, view, position(view) + dy);
 }
 
 bool ConfigScreen::set_position(const Model&, ViewState& view, int position) const noexcept {

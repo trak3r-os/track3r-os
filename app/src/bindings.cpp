@@ -335,7 +335,8 @@ constexpr core::InputRef kCopyKey = button_ref(Button::Copy);
 //   Shift + Note / Instr / Vol / Fx   cursor.jump_fraction 0..3   Pattern (OS-QJUMP: the quarter jumps, 0, 1/4, 2/4, 3/4 of the pattern; Shift + Fx was pattern.fill, which has no key now: the Fill dialog is F4)
 //   Shift + encoder      param.coarse       Instrument (OS-002d; the plain encoder is param.edit there)
 //   Shift + F8           edit.redo          also Instrument
-//   Shift + Left / Right param.coarse -1 / 1  Instrument (OS-INSTUI-ARROWS: the coarse step; the plain arrows are param.edit -1 / 1 there; the empty slot's chooser keeps instrument.turn)
+//   Shift + Left / Right param.coarse -1 / 1  Instrument (OS-INSTUI-ARROWS: the coarse step; the plain arrows are param.edit -1 / 1 there; the empty slot's chooser keeps instrument.turn) and Config (OS-CFG-ARROWS)
+//   Shift + Left / Right record.coarse -1 / 1 Record (OS-CFG-ARROWS: the coarse step; the plain arrows are record.edit -1 / 1)
 //   Shift + F6           sedit.save_wav     Sample edit (OS-007n: the sample as a WAV in Samples/; the key row is full; OS-FU3 moved it from Shift + F7, which plays from the edge)
 //   Shift + F1 / F2 / F3 sedit.amiga 0 / 1, sedit.q8   Sample edit (OS-AMG1: the AMIGA conversion at 8,287 / 16,574 Hz and its 8-bit option)
 //   Shift + F4           sedit.run 7        Sample edit (OS-SEDFX: DC REMOVE, EditOp::DcRemove)
@@ -754,9 +755,15 @@ constexpr core::Binding kBase[] = {
     bind(kSeditCtx, tap(button_ref(Button::Down), kShift), kSeditAmp, ArgFrom::Fixed, -1),
 
     // ---- Config (OS-011a): the device settings pages generated from the descriptors, as PARAMS: the encoder edits the row (Shift: the coarse step), Delete puts it back to its default,
-    // F1..F6 are the six pages (MIDI, DISPLAY, SD, INFO, USB, PATTERN), F7 is APPLY (a row that re-enumerates USB only holds the turn until then). The arrows are Global's (the Cursor) -----------------------------------------------------------------------------------
+    // F1..F6 are the six pages (MIDI, DISPLAY, SD, INFO, USB, PATTERN), F7 is APPLY (a row that re-enumerates USB only holds the turn until then). Left / Right edit the row (OS-CFG-ARROWS), Up / Down are Global's (the Cursor) ---------------
     bind(kConfigCtx, tap(encoder_ref(0)), kParamEdit, ArgFrom::Value),
     bind(kConfigCtx, tap(encoder_ref(0), kShift), kParamCoarse, ArgFrom::Value),
+    // OS-CFG-ARROWS (new Community OS behaviour, replaces OS-SHIFTROW rule 5 here): Left / Right are the encoder's detent on the row (an auto-repeat is one tap per detent), Shift + Left / Right its coarse
+    // step; the page changes only with F1..F6 or the screen button (the Instrument's pattern, OS-INSTUI-ARROWS).
+    bind(kConfigCtx, tap(button_ref(Button::Left)), kParamEdit, ArgFrom::Fixed, -1),
+    bind(kConfigCtx, tap(button_ref(Button::Right)), kParamEdit, ArgFrom::Fixed, 1),
+    bind(kConfigCtx, tap(button_ref(Button::Left), kShift), kParamCoarse, ArgFrom::Fixed, -1),
+    bind(kConfigCtx, tap(button_ref(Button::Right), kShift), kParamCoarse, ArgFrom::Fixed, 1),
     bind(kConfigCtx, tap(button_ref(Button::Delete)), kParamReset),
     bind(kConfigCtx, tap(button_ref(Button::F1)), kParamGroup, ArgFrom::Fixed, 0),
     bind(kConfigCtx, tap(button_ref(Button::F2)), kParamGroup, ArgFrom::Fixed, 1),
@@ -839,9 +846,14 @@ constexpr core::Binding kBase[] = {
 
     // ---- Record (OS-011c): the sample recorder (recorder.h has the rules). The encoder changes the row under the cursor (Shift: coarse), Delete puts the row's default
     // back; F1 and Rec arm or stop the take, F2 is the monitor, F3 saves the take to the first free instrument, F4 throws it away, F5 / F6 seek on the RADIO page, F7 is the WAV file
-    // that needs the card's write layer. The arrows are Global's (the Cursor: the row), the screen button again is the next page --------------------------------------------
+    // that needs the card's write layer. Up / Down are Global's (the Cursor: the row), the screen button again is the next page --------------------------------------------
     bind(kRecordCtx, tap(encoder_ref(0)), kRecordEdit, ArgFrom::Value),
     bind(kRecordCtx, tap(encoder_ref(0), kShift), kRecordCoarse, ArgFrom::Value),
+    // OS-CFG-ARROWS (new Community OS behaviour, replaces OS-SHIFTROW rule 5 here): Left / Right are the encoder's detent on the row, Shift + Left / Right its coarse step; the pages are the screen button.
+    bind(kRecordCtx, tap(button_ref(Button::Left)), kRecordEdit, ArgFrom::Fixed, -1),
+    bind(kRecordCtx, tap(button_ref(Button::Right)), kRecordEdit, ArgFrom::Fixed, 1),
+    bind(kRecordCtx, tap(button_ref(Button::Left), kShift), kRecordCoarse, ArgFrom::Fixed, -1),
+    bind(kRecordCtx, tap(button_ref(Button::Right), kShift), kRecordCoarse, ArgFrom::Fixed, 1),
     bind(kRecordCtx, tap(button_ref(Button::Delete)), kRecordReset),
     bind(kRecordCtx, tap(pad_ref(core::kAnyId)), kRecordPad, ArgFrom::InputId, 0),  // OS-REC2: the pads play the take under review (record_view.h)
     bind(kRecordCtx, tap(button_ref(Button::F1)), kRecordToggle),

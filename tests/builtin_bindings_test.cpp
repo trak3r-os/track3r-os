@@ -326,6 +326,10 @@ TEST_CASE("builtin bindings: every Shift binding is one of these, and none of th
   expected.push_back("instrument tap shift+enc0 param.coarse @value\n");  // Shift + encoder: the coarse step (the binding line has no fixed argument)
   expected.push_back(line("instrument", "tap", "left", "param.coarse", -1));  // OS-INSTUI-ARROWS: Shift + Left / Right are the coarse step of the row
   expected.push_back(line("instrument", "tap", "right", "param.coarse", 1));
+  expected.push_back(line("config", "tap", "left", "param.coarse", -1));  // OS-CFG-ARROWS: Shift + Left / Right are the coarse step of the row on Config and Record
+  expected.push_back(line("config", "tap", "right", "param.coarse", 1));
+  expected.push_back(line("record", "tap", "left", "record.coarse", -1));
+  expected.push_back(line("record", "tap", "right", "record.coarse", 1));
   expected.push_back(line("instrument.empty", "tap", "left", "instrument.turn", -1));  // the empty slot's chooser: Shift + arrow is the plain arrow (no value to step)
   expected.push_back(line("instrument.empty", "tap", "right", "instrument.turn", 1));
   // OS-INSTUI S1, S2: Shift + pad selects without a sound; Shift + F1..F5 are NAME .. SAVE (placeholders until S5 / S7), Shift + F6 / F7 the nearest instrument in use.
@@ -533,6 +537,18 @@ TEST_CASE("builtin bindings: every Shift binding is one of these, and none of th
     CHECK_MESSAGE((turn.status == core::Resolution::Status::Bound && turn.action == core::action_id("instrument.turn") && turn.arg == dir), "chooser arrow " << dir);
     const core::Resolution turn_shift = resolve_in(chooser, core::GestureKind::Tap, arrow, true);
     CHECK_MESSAGE((turn_shift.status == core::Resolution::Status::Bound && turn_shift.action == core::action_id("instrument.turn") && turn_shift.arg == dir), "chooser Shift + arrow " << dir);
+  }
+  // OS-CFG-ARROWS: the same on Config (param.edit / param.coarse) and Record (record.edit / record.coarse); the pages are the F-keys and the screen button, never the arrows.
+  const Chain config{"config", {Context::Config, Context::Global}, false};
+  const Chain record{"record", {Context::Record, Context::Global}, false};
+  for (int dir = -1; dir <= 1; dir += 2) {
+    const Button arrow = dir < 0 ? Button::Left : Button::Right;
+    for (const bool shift : {false, true}) {
+      const core::Resolution c = resolve_in(config, core::GestureKind::Tap, arrow, shift);
+      CHECK_MESSAGE((c.status == core::Resolution::Status::Bound && c.action == core::action_id(shift ? "param.coarse" : "param.edit") && c.arg == dir), "config arrow " << dir << " shift " << shift);
+      const core::Resolution r = resolve_in(record, core::GestureKind::Tap, arrow, shift);
+      CHECK_MESSAGE((r.status == core::Resolution::Status::Bound && r.action == core::action_id(shift ? "record.coarse" : "record.edit") && r.arg == dir), "record arrow " << dir << " shift " << shift);
+    }
   }
   // In the Navigator the other F-keys are swallowed, not passed on to the screen under it.
   CHECK(resolve_in(navigator, core::GestureKind::Tap, Button::F4, false).status == core::Resolution::Status::Captured);

@@ -82,7 +82,7 @@ class ConfigScreen final : public Screen {
   int position(const ViewState& view) const noexcept override;
   int page() const noexcept override { return ParamView::kMaxRows; }
   bool set_position(const Model& model, ViewState& view, int position) const noexcept override;
-  // OS-SHIFTROW rule 5: Left / Right turn to the previous / next page, wrapping (the F-keys and the screen button still go to a page); Up / Down move the row.
+  // OS-CFG-ARROWS: Up / Down move the row; Left / Right edit it (param.edit, bound in Config's context) and never turn the page (the F-keys and the screen button do).
   bool step(const Model& model, ViewState& view, int dx, int dy) const noexcept override;
 };
 extern const ConfigScreen kConfigScreen;

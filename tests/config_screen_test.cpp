@@ -833,33 +833,56 @@ TEST_CASE("config: a move of the cursor between the two presses of Shift + F7 ta
   CHECK(rig.get(ds::ClockMode) != 1.0f);
 }
 
-TEST_CASE("config: Left / Right turn the page and wrap at both ends; the F-keys still go straight to a page; the page is kept when the screen is left") {
+// OS-CFG-ARROWS (new Community OS behaviour, replaces OS-SHIFTROW rule 5 on Config): Left / Right are the encoder's detent on the row, Shift + Left / Right its coarse step; the page never turns.
+TEST_CASE("config: Left / Right change the value under the cursor (Shift: the coarse step) and keep the page and the row; the F-keys and the screen button still go to a page") {
   Rig rig;
   CHECK(rig.page() == 0);
-  rig.tap(Button::Left);
-  CHECK(rig.page() == 5);  // wraps to PATTERN
+  rig.tap(Button::Down);
+  rig.tap(Button::Down);  // CLOCK MODE
+  CHECK(rig.get(ds::ClockMode) == 0.0f);
   rig.tap(Button::Right);
-  CHECK(rig.page() == 0);  // and back
-  for (unsigned expect : {1u, 2u, 3u, 4u, 5u, 0u}) {
-    rig.tap(Button::Right);
-    CHECK(rig.page() == expect);
+  CHECK(rig.get(ds::ClockMode) == 1.0f);
+  rig.tap(Button::Left);
+  CHECK(rig.get(ds::ClockMode) == 0.0f);
+  rig.tap(Button::Left);
+  CHECK(rig.get(ds::ClockMode) == 0.0f);  // the first choice: no wrap
+  CHECK(rig.page() == 0);
+  CHECK(rig.row() == 2);
+  // A number: one step a press, ten with Shift (METRO VOL on PATTERN).
+  rig.tap(Button::F6);
+  CHECK(rig.page() == 5);
+  for (int i = 0; i < 5; ++i) {
+    rig.tap(Button::Down);
   }
+  CHECK(rig.get(ds::MetronomeVolume) == 50.0f);
+  rig.tap(Button::Right);
+  CHECK(rig.get(ds::MetronomeVolume) == 51.0f);
+  rig.shift_tap(Button::Right);
+  CHECK(rig.get(ds::MetronomeVolume) == 61.0f);
+  rig.shift_tap(Button::Left);
+  CHECK(rig.get(ds::MetronomeVolume) == 51.0f);
+  rig.tap(Button::Left);
+  CHECK(rig.get(ds::MetronomeVolume) == 50.0f);
+  CHECK(rig.page() == 5);
+  CHECK(rig.row() == 5);
+  // The pages: F-keys, and the screen button again for the next one.
   rig.tap(Button::F5);
   CHECK(rig.page() == 4);
-  rig.tap(Button::Left);
-  CHECK(rig.page() == 3);
-  CHECK(rig.row() == 0);
+  rig.tap(Button::Config);
+  CHECK(rig.page() == 5);
   rig.tap(Button::Pattern);
   rig.tap(Button::Config);
-  CHECK(rig.page() == 3);  // kept per screen
+  CHECK(rig.page() == 5);  // kept per screen
 }
 
-TEST_CASE("config: a page turned with the arrows drops the pending USB values like any page change") {
+TEST_CASE("config: Left / Right on the USB page change the pending value like the encoder, and drop it only when the page changes") {
   Rig rig;
   rig.tap(Button::F5);  // USB
-  rig.turn(-1);
+  CHECK(rig.params().pending_n == 0u);
+  rig.tap(Button::Left);
   CHECK(rig.params().pending_n != 0u);
-  rig.tap(Button::Right);
+  CHECK(rig.page() == 4);
+  rig.tap(Button::F1);
   CHECK(rig.params().pending_n == 0u);
 }
 
@@ -903,6 +926,34 @@ TEST_CASE("config: the USB page ends with CARD AS DISK and READ ONLY; neither is
   CHECK(app::config_row(rig.app->state()) == app::ConfigRow::ReadOnly);
   rig.tap(Button::F1);  // another page: the rows are gone
   CHECK(app::config_row(rig.app->state()) == app::ConfigRow::Param);
+}
+
+// OS-CFG-ARROWS: on the rows that are not settings the arrows do what the encoder does: READ ONLY toggles, CARD AS DISK and the SD and INFO pages do nothing, and the page stays.
+TEST_CASE("config: Left / Right toggle READ ONLY like the encoder, do nothing on CARD AS DISK and on the SD and INFO pages, and never turn the page") {
+  Rig rig;
+  to_disk_row(rig);
+  rig.tap(Button::Right);  // the action row: nothing
+  rig.tap(Button::Left);
+  CHECK(rig.app->disk_read_only());
+  CHECK(rig.params().pending_n == 0u);
+  rig.tap(Button::Down);
+  NEED(app::config_row(rig.app->state()) == app::ConfigRow::ReadOnly);
+  rig.tap(Button::Left);
+  CHECK_FALSE(rig.app->disk_read_only());
+  rig.tap(Button::Right);
+  CHECK(rig.app->disk_read_only());
+  rig.shift_tap(Button::Left);
+  CHECK_FALSE(rig.app->disk_read_only());  // a toggle has no coarse step: the same
+  CHECK(rig.page() == 4);
+  for (const Button page : {Button::F3, Button::F4}) {  // SD and INFO: no rows
+    rig.tap(page);
+    const unsigned shown = rig.page();
+    rig.tap(Button::Left);
+    rig.tap(Button::Right);
+    rig.shift_tap(Button::Right);
+    CHECK(rig.page() == shown);
+    CHECK(rig.params().pending_n == 0u);
+  }
 }
 
 // OS-USBDISK U2b, 9: F7 reads SHARE or EJECT on the CARD AS DISK row (WAIT while the card changes hands), SHARE? / EJECT? once the first press has asked; every other row keeps APPLY.

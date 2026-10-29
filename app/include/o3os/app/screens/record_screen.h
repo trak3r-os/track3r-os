@@ -16,7 +16,7 @@ inline constexpr const char* kRecordSoftKeys[8] = {"REC/STOP", "MONITOR", "SAVE"
 inline constexpr const char* kRecordLoopKeys[8] = {"OVERDUB", "MONITOR", "SAVE", "DISCARD", "UNDO LYR", "-", "SAVE WAV", "LOOP ON"};
 inline constexpr const char* kRecordLoopMutedKeys[8] = {"OVERDUB", "MONITOR", "SAVE", "DISCARD", "UNDO LYR", "-", "SAVE WAV", "MUTED"};
 // While Shift is held (OS-SHIFTROW): on the RADIO page F5 / F6 are CH-10 / CH+10 (record.seek with a 10x argument: tune ten channels); the rest, and every key of the SOURCES and RESAMPLE
-// pages, does nothing but F3 (below). Left / Right turn the page.
+// pages, does nothing but F3 (below). Shift + Left / Right are the coarse step (OS-CFG-ARROWS).
 // OS-RECCROP: Shift + F3 is CROP on every page: the take under review becomes its window (it asks first; with no take it says so).
 inline constexpr const char* kRecordShiftKeys[8] = {"-", "-", "CROP", "-", "-", "-", "-", "-"};
 inline constexpr const char* kRecordRadioShiftKeys[8] = {"-", "-", "CROP", "-", "CH-10", "CH+10", "-", "-"};
@@ -54,7 +54,7 @@ class RecordScreen final : public Screen {
   int position(const ViewState& view) const noexcept override;
   int page() const noexcept override { return 6; }
   bool set_position(const Model& model, ViewState& view, int position) const noexcept override;
-  // OS-SHIFTROW rule 5: Left / Right turn to the previous / next page, wrapping (the F-keys and the screen button still go to a page); Up / Down move the row.
+  // OS-CFG-ARROWS: Up / Down move the row; Left / Right edit it (record.edit, bound in Record's context) and never turn the page (the screen button does).
   bool step(const Model& model, ViewState& view, int dx, int dy) const noexcept override;
   // OS-REC2: under review the 48 pads play the take, so they are all lit (Back), the one at the take's own pitch (C-4, record_view.h) brighter (Front); no opinion otherwise.
   bool pad_roles(const Model& model, const ViewState& view, PadRole (&roles)[48]) const noexcept override;

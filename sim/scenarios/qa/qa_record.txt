@@ -7,8 +7,8 @@ press shift
 snap qa_rec_001
 release shift
 
-# QA-REC-012 (OS-SHIFTROW): Left / Right turn the page. On SOURCES, Left wraps to RADIO (the tab underlines RADIO); Right wraps back (the page is shown in qa_rec_012).
-tap left
+# QA-REC-012 (OS-CFG-ARROWS): the screen button turns the page (the arrows edit the row, QA-REC-060). On SOURCES, the button twice is RADIO (the tab underlines RADIO); once more wraps back (the page is shown in qa_rec_012).
+tap samplerec 2
 snap qa_rec_012
 # QA-REC-001, RADIO page: - - - - CH-10 CH+10 - -.
 press shift
@@ -16,5 +16,5 @@ snap qa_rec_001_radio
 release shift
 
 # QA-REC-043 (OS-AUDIT-70): SOURCES, idle: the card under the state lines reads TIME LEFT, the free sample memory as seconds.
-tap right
+tap samplerec
 snap qa_rec_043

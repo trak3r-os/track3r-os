@@ -167,10 +167,10 @@ tap f7
 release shift
 snap qa_cfg_032
 
-# QA-CFG-033 (OS-SHIFTROW): Left / Right turn the page: Left from MIDI wraps to PATTERN, Right goes back.
-tap left
+# QA-CFG-033 (OS-CFG-ARROWS): the pages are the F-keys (and the Config button again for the next one), never the arrows: F6 from MIDI is PATTERN, F1 goes back. Left / Right edit the row: QA-CFG-240.
+tap f6
 snap qa_cfg_033
-tap right
+tap f1
 
 # OS-USBDISK U2b (docs/specs/OS-USBDISK.md 9): the USB page's CARD AS DISK and READ ONLY rows. The simulator has no USB and this scenario no card: `disk` is the platform's word to the row (idle, working, out, audio).
 # (the strip of the rows before has to run out first)
