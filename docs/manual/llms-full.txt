@@ -95,7 +95,7 @@ The bootloader is separate from the application, so a broken or unwanted applica
 3. Put the card in the unit and use the hidden reset button as in the vendor's emergency-flashing page.
 4. When the official firmware is running, create a new project if its Config looks reset, as the vendor advises after an update.
 
-track3r-os has no firmware update menu on the device: updates come from the computer or by card. The official firmware's own update menu will list an official file named `PolyendTracker...`, but that route has **not yet been verified** from track3r-os as the starting point.
+track3r-os has its own update screen on the device (Config, INFO, `F8`; see [Update from the unit](config.md#update-from-the-unit)). It lists every `.ptf` in `Firmware/`, so the official `PolyendTracker_<version>.ptf` can be chosen there, and the card can hold several files. On the unit this screen has reached **IMAGE OK**; its INSTALL step was not pressed, and it has not been tried with an official file, so it is **not yet verified** as a way back. The official firmware's own update menu will also list an official file named `PolyendTracker...`, but that route is **not yet verified** either from track3r-os as the starting point. Use the reset button above when you need the way back to be certain.
 
 **Not yet verified:** that the official firmware opens projects saved by track3r-os (it reads the original formats; the native track3r-os project format is its own), and what happens to the unit's stored settings when you switch back. Keep your original-firmware projects as they are and work on copies.
 
@@ -118,6 +118,7 @@ track3r-os has no firmware update menu on the device: updates come from the comp
 | Position of the hidden reset button | not recorded here; see the vendor page |
 | Time the flashing takes and what the screen shows | not recorded |
 | Full USB update sequence with a release file, and checklist FW-3 to FW-10 | not yet verified |
+| The update screen of track3r-os (Config, INFO, `F8`) installing the official file | IMAGE OK reached with a track3r-os file; INSTALL not pressed; not tried with an official file |
 | Official firmware's update menu as a way back from track3r-os | not yet verified |
 | Settings and project compatibility between track3r-os and the official firmware | not yet verified |
 
