@@ -6,15 +6,15 @@ Every behaviour carries one of three labels: **verified parity** (compared with 
 
 ## Where things stand
 
-**v1.0.1 fixes the pads on later Trackers (issue #1; confirmed on an affected unit, 2026-10-26). v1.0.0 (2026-10-25) was the first release.** Perform PLAYBACK and the five Perform LFO rows are in. Downloads on the Releases page: `v1.0.1` and `v1.0.0` (each the firmware file and `SHA256SUMS`), `apps-v1.0.0` (the app modules) and `fixtures-1` (test data for `tools/testdata`). What is open is checks on the unit (below), not work in the tree.
+**v1.0.1 is published and fixes the pads on later Trackers (issue #1, now closed). v1.0.0 (2026-10-25) was the first release.** Work in progress: OS-CFG-ARROWS and OS-USBOUTS. Queued: OS-BUG-FWLIST, OS-BUG-MODDRIVE (issue #2), OS-PERF-CPU2 and OS-PERF-LFO-STEP. Perform PLAYBACK and the five Perform LFO rows are in. Downloads on the Releases page: `v1.0.1` and `v1.0.0` (each the firmware file and `SHA256SUMS`), `apps-v1.0.0` (the app modules) and `fixtures-1` (test data for `tools/testdata`). What is open is checks on the unit (below), not work in the tree.
 
 | Item | State |
 |---|---|
-| Version | v1.0.0 (Config, INFO shows the BUILD ID) |
+| Version | v1.0.1 (2026-10-27; Config, INFO shows the BUILD ID). v1.0.0 (2026-10-25) was the first release; the CI and size rows below are v1.0.0's |
 | Target | Polyend Tracker hardware (NXP MK66FX1M0, 1 MiB flash, 256 KiB SRAM, 16 MiB SDRAM, FT812 display, SGTL5000 codec) |
 | Licence | GPL-3.0-or-later; the module SDK under `module/sdk/` is MIT |
 | Final CI (host, e2e, QEMU, MK66) | host 305/305, e2e 88/88, QEMU 61/61, MK66 19/19, on the code of the release |
-| Release image | `track3r-os-v1.0.0.ptf`, 2,610,089 B; SHA-256 `379bad017e1829c23040b2387e5e100cf4324c7ce6bcf9126161f90876336986`; CRC-32 `A383D7D0`. Flash image 927,932 B (FLASH 927,196 B); SRAM_L 49,608 B, SRAM_U 135,392 B, SDRAM static 154,080 B |
+| Release image | v1.0.1: `track3r-os-v1.0.1.ptf`, 2,618,578 B; SHA-256 `bc1cf7b8ca02d5b5f9f8e4abffe2d5b9f6943fe6a3ba1ad94bd26a5ff775e2de`. v1.0.0: `track3r-os-v1.0.0.ptf`, 2,610,089 B; SHA-256 `379bad017e1829c23040b2387e5e100cf4324c7ce6bcf9126161f90876336986`; CRC-32 `A383D7D0`. Flash image 927,932 B (FLASH 927,196 B); SRAM_L 49,608 B, SRAM_U 135,392 B, SDRAM static 154,080 B |
 | Image gate (`fw-gate-check`) | PASS: built twice from scratch, byte-identical; `check_image` 8/8; flash configuration field exact; 0 warnings or undefined references. Nothing was flashed by the gate |
 | Pass on the unit | A full pass on the final release candidate, whose code is identical to the release (only the build id and version strings differ; every library member is byte-identical). No firmware FAIL that blocks the release; two CPU figures are over their numbers (Known issues). See "Verified on the unit" and "Open on the unit" |
 
@@ -83,7 +83,7 @@ Not yet verified on a unit (host and simulator tests exist for most). The rows m
 Ordered for a fresh session:
 
 1. A person presses INSTALL in Update from the unit on the release file, and runs the checks under "Open on the unit"; record each result as PASS, FAIL or NOT RUN in the backlog rows.
-2. After 1.0: OS-BUG-HOTSWAP (the card-swap crash), OS-PERF-CPU2 (the Perform costs), OS-BUG-FWLIST, then the pending rows in `docs/roadmap/BACKLOG.md` and the latent issues below.
+2. After 1.0: OS-BUG-HOTSWAP (the card-swap crash), then the queued rows (OS-BUG-FWLIST, OS-BUG-MODDRIVE, OS-PERF-CPU2, OS-PERF-LFO-STEP), then the pending rows in `docs/roadmap/BACKLOG.md` and the latent issues below.
 
 Outside contributors: issues come in through the forms in `.github/ISSUE_TEMPLATE/`; pull requests target `dev` (see `CONTRIBUTING.md`).
 
