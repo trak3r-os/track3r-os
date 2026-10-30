@@ -80,7 +80,7 @@ Merged and covered by host or simulator tests; the check on the real unit is the
 
 | ID | What | Parity | Cost | Note |
 |---|---|---|---|---|
-| OS-PERF-HPBP | The HIPASS and BANDPASS Perform rows cost about 18k cycles a block in the voices | N | S | In progress: slice 1b merged (HIPASS row -16 % on the unit; BANDPASS unchanged, a loop-alignment experiment next); bit-identical cuts of the per-voice filter loop, measured on the unit first (`docs/specs/OS-PERF-HPBP.md`). A fixed-point filter that would change the sound is not pursued (the maintainer, 2026-10-30). |
+| OS-PERF-HPBP | The HIPASS and BANDPASS Perform rows cost about 18k cycles a block in the voices | N | S | Slice 1b merged (HIPASS row -16 % on the unit, BANDPASS unchanged). Slice 1c (align the loop heads) measured on the unit 2026-10-30 and dropped: no BANDPASS gain, HIPASS and LOWPASS worse. Slice 2 (a two-voice loop, bench first) waits in the queue. |
 | OS-BUG-ST15LOOP | A 15-sample Soundtracker file's loop start is read in words; real files store it in bytes | N | S | Found on the unit 2026-10-30 in two of three real files. Fix: read the start in bytes for 15-sample files, with a host test. |
 | OS-BUG-IMPTRUNC | A tagged MOD with no room for one pattern asks the NEW question, then fails TRUNCATED and leaves an empty project | N | S | Found on the unit 2026-10-30. Fix: refuse before the question. |
 | OS-SONG-VIEW2 | STAGE leaves the Song cycle (its countdown moves to TIMELINE); a simpler TIMELINE; a per-pattern note map (one tick per note) replaces the density thumbnails | N | S+M | Slices 1-2 merged (STAGE left the cycle, a simpler TIMELINE); slice 3, the note map, next. Approved by the maintainer 2026-10-30. No format change. Spec `docs/specs/OS-SONG-VIEW2.md`. |
