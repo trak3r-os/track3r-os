@@ -6,6 +6,8 @@
 #      another row" is true of a row that holds a stored value. KNOWN CASE: pinned below as the bright window after the release.
 #   2. With EDIT on (Rec) the encoder STORES the value in the row: the release leaves the filter on at the stored value (latched), until another row of the slot or row 0 is pressed. The dark window.
 #   3. Row 0 of the slot (pad 3) ends it: bright again.
+#   4. A second tap of the same pad while it is latched does NOT release it (OS-CLEANUP, QA-PRF-190: by design; the unit finding "a second tap did not release a held LFO row, only RESET did"). The slots page has no
+#      tap-again-ends rule (the DJ page's LATCH has one, QA-PRF-116 / 126): the tap selects the row that is already the slot's. The dark window after the second tap, before row 0.
 document sound
 audio on
 wait 30
@@ -33,7 +35,7 @@ pad 15 up
 wait 20
 tap rec
 wait 20
-render latch 1270
+render latch 1570
 tap play
 assert state playing=1
 wait 100
@@ -54,6 +56,11 @@ pad 15 up
 wait 20
 tap rec
 wait 300
+# a second tap of the SAME pad keeps it (4): the tap selects the row that is already the slot's, so the filter stays on at its stored value; only another row, row 0 or RESET ends it
+pad 15 down
+wait 20
+pad 15 up
+wait 280
 # row 0 of the slot ends it (3)
 pad 3
 wait 300
@@ -61,10 +68,11 @@ tap play
 wait 1
 
 # The noise is bright (centroid about 11 kHz) and falls to about 3.1 kHz, 10 dB lower in level, under the held LOWPASS (as in e2e_pro_session.txt, step 9). Times are from the render's start (the simulated
-# clock is a pure function of the script): the pad goes down at 106 ms, the encoder turns at 127, the pad is let go at 278; EDIT: down at 532, the encoder at 553, up at 654, Rec off at 675; row 0 at 977.
+# clock is a pure function of the script): the pad goes down at 106 ms, the encoder turns at 127, the pad is let go at 278; EDIT: down at 532, the encoder at 553, up at 654, Rec off at 675; row 0 at 977 in the former script; the second tap now goes down at 977 and is let go at 998, row 0 at 1277.
 assert audio latch in=10-95 centroid>8000 rms>-12
 assert audio latch in=150-250 centroid<4500 rms<-18
 assert audio latch in=320-520 centroid>8000 rms>-12
 assert audio latch in=565-650 centroid<4500 rms<-18
 assert audio latch in=700-950 centroid<4500 rms<-18
-assert audio latch in=1010-1250 centroid>8000 rms>-12
+assert audio latch in=1010-1250 centroid<4500 rms<-18
+assert audio latch in=1320-1560 centroid>8000 rms>-12

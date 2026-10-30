@@ -1,185 +1,77 @@
 {
  "name": "qa_lfostep",
- "title": "OS-PERF-LFO-STEP: the step FX 23, 24, 33 and 36 on twelve tracks: sound, the export cmp and the cpu arm. The AFFECTED tracks are set once on Performance.",
+ "title": "OS-PERF-LFO-STEP: the step FX 23, 24, 33 and 36 on twelve sampler tracks, one song per FX and the control without them (`--var PROJ=LfoStep23|24|33|36|Off`): opened from File, the AFFECTED tracks set once on Performance, `cpu reset`, Play, 8 reads of `cpu` 2.5 s apart. ASSERTS underrun 0 and guard shed 0; the mean `render last` is reported. The project must be on the card first (`o3pj_tool gen lfostep23|24|33|36|off`)",
+ "vars": {"PROJ": "LfoStep23"},
  "steps": [
-  {
-   "run": "_load_tv16"
-  },
-  {
-   "keys": [
-    "-shift"
-   ],
-   "gap": 0.2
-  },
-  {
-   "keys": [
-    "f7"
-   ],
-   "gap": 0.3,
-   "if_state": {
-    "overlay": "NAVIGATOR"
-   }
-  },
-  {
-   "keys": [
-    "f8"
-   ],
-   "gap": 0.3,
-   "if_state": {
-    "overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP)$"
-   }
-  },
-  {
-   "keys": [
-    "pattern"
-   ],
-   "gap": 0.4
-  },
-  {
-   "state": {
-    "screen": "PATTERN"
-   },
-   "within": 3
-  },
-  {
-   "run": "_stop"
-  },
-  {
-   "say": "OS-PERF-LFO-STEP (QA-PRF-180..189): the step FX Volume LFO 23, Panning LFO 24, Finetune LFO 33 and Position LFO 36. BEFORE the run: the tester's song `LfoStep` (twelve sampler tracks, a wavetable and a granular instrument among them) has the four FX in the first FX column, a note step each bar; a copy `LfoStepOff` is the same song without them. The AFFECTED tracks are set ONCE below (the helper that sets them toggles them: never run Performance windows back to back). By ear: each FX at a slow and a fast value; the Perform VOL LFO row over the FX and its release (QA-PRF-185). The exports are compared on the PC with `cmp` (QA-PRF-187)."
-  },
-  {
-   "keys": [
-    "performance"
-   ],
-   "gap": 0.5
-  },
-  {
-   "state": {
-    "screen": "PERFORM"
-   },
-   "within": 3
-  },
-  {
-   "keys": [
-    "performance"
-   ],
-   "gap": 0.5,
-   "if_state": {
-    "page": "1"
-   }
-  },
-  {
-   "state": {
-    "screen": "PERFORM",
-    "page": "0"
-   },
-   "within": 3
-  },
-  {
-   "keys": [
-    "+shift"
-   ],
-   "gap": 0.3
-  },
-  {
-   "pad": 0,
-   "note": "T1..T12 join the performance layer (AFFECTED), set once"
-  },
-  {
-   "pad": 1
-  },
-  {
-   "pad": 2
-  },
-  {
-   "pad": 3
-  },
-  {
-   "pad": 4
-  },
-  {
-   "pad": 5
-  },
-  {
-   "pad": 6
-  },
-  {
-   "pad": 7
-  },
-  {
-   "pad": 8
-  },
-  {
-   "pad": 9
-  },
-  {
-   "pad": 10
-  },
-  {
-   "pad": 11
-  },
-  {
-   "keys": [
-    "-shift"
-   ],
-   "gap": 0.3
-  },
-  {
-   "cmd": "cpu reset"
-  },
-  {
-   "run": "_play"
-  },
-  {
-   "wait": 5.0,
-   "note": "settle"
-  },
-  {
-   "mix": {
-    "channels": {
-     "MST L": {
-      "min_rms_db": -60
-     }
-    },
-    "within": 6
-   },
-   "note": "the song sounds with the four step FX held"
-  },
-  {
-   "cmd": "cpu",
-   "note": "QA-PRF-188: read `render last` and the underruns, 8 reads 2.5 s apart on the run with the step FX, then the same on `LfoStepOff`; the difference is the cost of the four FX (no more than the same Perform rows, 1.2 pp)"
-  },
-  {
-   "run": "_stop"
-  }
+  {"say": "OS-PERF-LFO-STEP (QA-PRF-180..189): the step FX Volume LFO 23, Panning LFO 24, Finetune LFO 33 and Position LFO 36 on twelve sampler tracks (four one-shot, four wavetable, four granular; the FX is on every note step at rate 8). BEFORE the run: build the songs (`o3pj_tool gen lfostep23 <dir>/LfoStep23/project.o3pj`, and `lfostep24`, `lfostep33`, `lfostep36` the same, and the control `lfostepoff` into `<dir>/LfoStepOff/project.o3pj`; each writes its samples/ folder beside it) and copy ONE folder into Projects/ per run: the four with the FX, then the control. Run with `--var PROJ=<folder name>`. Use the release image. By ear: the FX of the song at its rate (the FX 36 acts on the wavetable and granular tracks only); the Perform VOL LFO row over the FX 23 and its release (QA-PRF-185). The exports of the control and of a song are compared on the PC with `cmp` (QA-PRF-187). QA-PRF-188: the mean `render last` of each song against the control (no more than the same Perform rows, 1.2 pp, paired noise)."},
+  {"keys": ["-shift"], "gap": 0.2, "note": "(Shift released, in case a former run left it down)"},
+  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "NAVIGATOR"}, "note": "(a leftover Navigator is closed: F7 is CLOSE, F8 would GO since OS-NAV2)"},
+  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
+  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "TEXT_ENTRY"}, "note": "(the on-screen keyboard is cancelled with F7, never accepted)"},
+  {"keys": ["file"], "gap": 0.5},
+  {"state": {"screen": "FILE"}, "within": 3},
+  {"keys": ["f2"], "gap": 0.5, "note": "RESCAN"},
+  {"wait": 2.0},
+  {"keys": ["+shift", "f1", "-shift"], "gap": 0.4, "note": "the cursor to the first entry"},
+  {"keys": ["down"], "gap": 0.3, "until": {"sel": "~^${PROJ}$"}, "max": 150, "note": "Down until the cursor is on the project (150 rounds at most: more projects than that on the card and it stops here, nothing opens)"},
+  {"state": {"sel": "~^${PROJ}$"}, "within": 2},
+  {"keys": ["f1"], "gap": 0.5},
+  {"keys": ["f1"], "gap": 0.5, "if_state": {"msg": "~^UNSAVED_CHANGES"}, "note": "(only when the strip asks)"},
+  {"state": {"msg": "~(?i)^(OPENING_|PROJECT_)${PROJ}"}, "within": 4, "note": "the song is opening (the strip may already read PROJECT_<name>_OPENED on the unit)"},
+  {"cmd": "sd", "expect": "load:\\s+Projects/${PROJ}", "within": 180, "poll": 2.0, "fail_on": "FAILED"},
+  {"cmd": "sd", "expect": "pcm:\\s+.*loaded", "within": 120, "poll": 2.0, "fail_on": "FAILED"},
+  {"cmd": "sd", "expect_not": "[1-9]\\d* values reset", "soft": true, "note": "(the load line says `N values reset` when a chunk had values out of range)"},
+  {"wait": 3.0},
+  {"keys": ["pattern"], "gap": 0.5},
+  {"state": {"screen": "PATTERN"}, "within": 5},
+  {"run": "_stop"},
+  {"cmd": "mod", "expect": "tb303", "soft": true, "note": "(soft: the TB-303 and the FM instance are bound; a muted module says so here)"},
+  {"keys": ["performance"], "gap": 0.5},
+  {"state": {"screen": "PERFORM"}, "within": 3},
+  {"keys": ["performance"], "gap": 0.5, "if_state": {"page": "1"}},
+  {"state": {"screen": "PERFORM", "page": "0"}, "within": 3},
+  {"keys": ["+shift"], "gap": 0.3},
+  {"pad": 0, "note": "T1..T12 join the performance layer (AFFECTED), set once"},
+  {"pad": 1},
+  {"pad": 2},
+  {"pad": 3},
+  {"pad": 4},
+  {"pad": 5},
+  {"pad": 6},
+  {"pad": 7},
+  {"pad": 8},
+  {"pad": 9},
+  {"pad": 10},
+  {"pad": 11},
+  {"keys": ["-shift"], "gap": 0.3},
+  {"run": "_play"},
+  {"wait": 5.0, "note": "settle"},
+  {"mix": {"channels": {"MST L": {"min_rms_db": -60}}, "within": 6}, "note": "the song sounds"},
+  {"cmd": "cpu reset", "note": "the window starts"},
+  {"cmd": "cpu perf off"},
+  {"wait": 2.5},
+  {"cmd": "cpu", "expect": ["underrun 0 \\(", "guard\\s+shed 0 blocks"], "collect": {"as": "L", "re": "render last (\\d+)"}},
+  {"wait": 2.5},
+  {"cmd": "cpu", "expect": ["underrun 0 \\(", "guard\\s+shed 0 blocks"], "collect": {"as": "L", "re": "render last (\\d+)"}},
+  {"wait": 2.5},
+  {"cmd": "cpu", "expect": ["underrun 0 \\(", "guard\\s+shed 0 blocks"], "collect": {"as": "L", "re": "render last (\\d+)"}},
+  {"wait": 2.5},
+  {"cmd": "cpu", "expect": ["underrun 0 \\(", "guard\\s+shed 0 blocks"], "collect": {"as": "L", "re": "render last (\\d+)"}},
+  {"wait": 2.5},
+  {"cmd": "cpu", "expect": ["underrun 0 \\(", "guard\\s+shed 0 blocks"], "collect": {"as": "L", "re": "render last (\\d+)"}},
+  {"wait": 2.5},
+  {"cmd": "cpu", "expect": ["underrun 0 \\(", "guard\\s+shed 0 blocks"], "collect": {"as": "L", "re": "render last (\\d+)"}},
+  {"wait": 2.5},
+  {"cmd": "cpu", "expect": ["underrun 0 \\(", "guard\\s+shed 0 blocks"], "collect": {"as": "L", "re": "render last (\\d+)"}},
+  {"wait": 2.5},
+  {"cmd": "cpu", "expect": ["underrun 0 \\(", "guard\\s+shed 0 blocks"], "collect": {"as": "L", "re": "render last (\\d+)"}, "show": true, "note": "arm L: render last / max, underruns, the guard's shed blocks (the last read is kept in the report)"},
+  {"stat": "L", "show": true, "note": "QA-PRF-188: the mean of the 8 reads of `render last` (cycles): REPORTED, compare each FX song with the control `LfoStepOff`", "min_n": 8},
+  {"run": "_stop"}
  ],
  "finally": [
-  {
-   "keys": [
-    "-f4",
-    "-right",
-    "-left",
-    "-shift"
-   ],
-   "gap": 0.1
-  },
-  {
-   "keys": [
-    "f8"
-   ],
-   "gap": 0.3,
-   "if_state": {
-    "screen": "PERFORM"
-   }
-  },
-  {
-   "keys": [
-    "pattern"
-   ],
-   "gap": 0.4
-  },
-  {
-   "run": "_stop"
-  }
+  {"keys": ["-f4", "-right", "-left", "-shift"], "gap": 0.1},
+  {"keys": ["f8"], "gap": 0.3, "if_state": {"screen": "PERFORM"}},
+  {"keys": ["pattern"], "gap": 0.4},
+  {"run": "_stop"}
  ]
 }

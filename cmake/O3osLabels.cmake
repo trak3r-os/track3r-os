@@ -24,6 +24,7 @@
 set(O3OS_LABEL_RULES
   "^(layers|layers_selftest|wiring_audit|wiring_audit_selftest|unit_cover)$" "static"
   "^(keytext|keytext_selftest)$" "static,app"  # OS-KEYROWDLG S4: the key names of app/ against the key tables
+  "^hil_scenarios_sync$" "static,platform"  # OS-CLEANUP: the HIL scenarios of platform/mk66/tools/hil/ against what gen_hil.py writes (tests/hil_scenarios_sync_test.py)
   "^sim_project_drift$" "static,platform"  # OS-E2E-1b: SimProject against platform/mk66/src/app_main.cpp's load sequence (tests/sim_project_drift_test.py)
   "^qa_cover$" "static"                 # OS-E2E-3: the QA catalogue gate (tools/qa_cover.py --check); a catalogue edit maps to this label
   "^qa_cover_selftest$" "static,python" # its self-test: python, and static so that a change of the tool alone (scope map: static) runs it
@@ -63,7 +64,7 @@ set(O3OS_LABEL_RULES
   "^(fingerprint_guard_selftest|update_audio_fingerprints_selftest)$" "static,python"  # OS-E2E-4: the two tools' self-tests
   "^(font|icon|logo)_convert" "app"
   "^e2e_((card|pro)_)?fixture_fresh$" "app,formats,python"  # OS-E2E-1b, OS-E2E-13, J2: the generated cards of the journeys (tests/e2e_card_fixture_test.py, e2e_pro_fixture_test.py, e2e_og_fixture_test.py): a sim, format or python change runs them
-  "^(project_python|heavy_song_python|med_python|med_import_python|med_openmpt|mod_python|modimp_openmpt)$" "formats,python"
+  "^(project_python|heavy_song_python|hil_songs_python|med_python|med_import_python|med_openmpt|mod_python|modimp_openmpt)$" "formats,python"
   "^corefx_openmpt$" "formats,seq,audio,python"  # OS-COREFX: importer -> sequencer -> engine against libopenmpt
   "^(med_python_selftest|mod_python_selftest|manual_tools_selftest|manual_tables_selftest|starter_python|testdata_python|e2e_report_selftest|qa_sheet_python_selftest)$" "python"
   "^o3m_.*_test$" "audio"

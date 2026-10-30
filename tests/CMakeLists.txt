@@ -414,6 +414,12 @@ set_tests_properties(unit_cover PROPERTIES TIMEOUT 60)
 # OS-FINALQA FQA-7: the heavy song of the unit's CPU run (`o3pj_tool gen heavy`) against the mix of docs/architecture/cpu-budget.md section 4.
 add_test(NAME heavy_song_python COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/heavy_song_test.py $<TARGET_FILE:o3pj_tool>)
 set_tests_properties(heavy_song_python PROPERTIES TIMEOUT 60)
+# OS-CLEANUP: the songs of the step-FX CPU runs (`o3pj_tool gen lfostepNN|lfostepoff|moddriveN[off]`) against the recipe the HIL scenarios qa_lfostep and qa_cpu_moddrive expect.
+add_test(NAME hil_songs_python COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/hil_songs_test.py $<TARGET_FILE:o3pj_tool>)
+set_tests_properties(hil_songs_python PROPERTIES TIMEOUT 120)
+# OS-CLEANUP: the generated HIL scenarios are the committed ones (platform/mk66/tools/hil/gen_hil.py is the one place they are edited). Reads files only.
+add_test(NAME hil_scenarios_sync COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/hil_scenarios_sync_test.py ${PROJECT_SOURCE_DIR})
+set_tests_properties(hil_scenarios_sync PROPERTIES TIMEOUT 60)
 add_test(NAME project_python
   COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/o3project_roundtrip.py
           $<TARGET_FILE:o3pj_tool> ${PROJECT_SOURCE_DIR}/tools/o3project.py ${CMAKE_CURRENT_BINARY_DIR}/project_python)

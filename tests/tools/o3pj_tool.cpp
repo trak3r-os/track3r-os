@@ -17,6 +17,8 @@
 //   o3pj_tool gen dense8 OUT            (OS-DENSE) the lighter candidate: 4 Modern + 2 Paula + TB-303 + FM (8 tracks). heavy stays the 12-track stress song
 //   o3pj_tool gen moddrive1|moddrive4|moddrive8 OUT, and the same with `off` (moddrive4off)  (OS-BUG-MODDRIVE) 1, 4 or 8 TB-303 tracks that play a note on every step, with the step FX 38 (70) and 39 (8 bits)
 //                                       on step 1 of each track, or without them (`off`, the control of the CPU run). No samples
+//   o3pj_tool gen lfostep23|lfostep24|lfostep33|lfostep36|lfostepoff OUT  (OS-PERF-LFO-STEP) 12 sampler tracks (one-shot, wavetable, granular) with the step FX 23, 24, 33 or 36 on every note step,
+//                                       or none (`off`, the control of the CPU run); the kit's WAVs go in a `samples/` folder beside OUT
 //   o3pj_tool resave IN OUT            load a file and save it again (exit 1 with the error on failure)
 //   o3pj_tool dump IN                   print the loaded project as text (same format as `o3project.py dump`)
 //   o3pj_tool limits                    print the limits table (same format as `o3project.py limits`)
@@ -596,6 +598,74 @@ void fill_moddrive(Project& p, unsigned n, bool fx) {
   }
 }
 
+// OS-PERF-LFO-STEP follow-up: the songs of the unit's CPU run of the step-FX LFOs (the HIL scenario qa_lfostep). Twelve sampler tracks (instruments 1..12) on one 16-step pattern that loops: tracks 1..4 play the one-shot
+// pluck.wav, tracks 5..8 are wavetables (sine.wav, play mode 6, windows of 1024 frames) and tracks 9..12 granular (pluck.wav), so the Position LFO (36) has instruments to move and the other three act on every track. A note on
+// every second step. With `fx` (23 Volume LFO, 24 Panning LFO, 33 Finetune LFO or 36 Position LFO) every note step carries it in the first FX column, at rate 8 (a later note step with no FX in that column would end the LFO:
+// D3 of docs/specs/OS-PERF-LFO-STEP.md); with `fx` 0 the song is the control, the same instruments and notes with no step FX.
+void fill_lfostep(Project& p, std::uint8_t fx) {
+  constexpr unsigned kTracks = 12;
+  char name[24];
+  if (fx == 0) {
+    std::snprintf(name, sizeof name, "LfoStepOff");
+  } else {
+    std::snprintf(name, sizeof name, "LfoStep%u", static_cast<unsigned>(fx));
+  }
+  p.reset();
+  must(p.set_name(name, std::strlen(name)));
+  must(p.set_tempo_x100(12500));
+  must(p.set_default_pattern_length(16));
+  must(p.set_active_tracks(kTracks));
+  must(p.set_master(MasterSettings{90, 100, 60, 60, kMasterLimiter}));
+  must(p.create_pattern(1, 16));
+  must(p.append_order(1));
+  static const std::uint8_t kChord[12] = {0, 4, 7, 11, 12, 16, 19, 23, 24, 28, 31, 35};  // semitones above C-3
+  for (unsigned j = 0; j < kTracks; ++j) {
+    const bool wavetable = j >= 4u && j < 8u;
+    const bool granular = j >= 8u;
+    Instrument in;
+    init_instrument(in, InstrumentKind::Sample);
+    std::snprintf(in.name, sizeof in.name, "LS%02u", j + 1u);
+    std::strcpy(in.sample_path, wavetable ? "samples/sine.wav" : "samples/pluck.wav");
+    in.sample_rate = kKitSineRate;
+    SamplerParams& s = in.sampler;
+    s.play_mode = granular ? 7 : wavetable ? 6 : 0;  // one shot, wavetable (kPlayModeWavetable), granular
+    s.volume = 30;
+    s.panning = static_cast<std::uint8_t>(10u + 7u * j);
+    if (wavetable) {
+      s.sample_type = 1;
+      s.wavetable_window_size = 1024;
+    }
+    must(p.set_instrument(j, in));
+    TrackSlot t = *p.track(j);
+    t.volume = 100;
+    must(p.set_track(j, t));
+    for (unsigned k = 0; k < 16u; k += 2u) {
+      Step st = kEmptyStep;
+      st.instr = static_cast<std::uint8_t>(j + 1u);
+      st.note = static_cast<std::uint8_t>(kNoteFirst + 48u + kChord[j] + (k % 4u == 0u ? 0u : 5u));
+      if (fx != 0u) {
+        st.fx[0] = StepFx{fx, 8};
+      }
+      must(p.set_step(1, j, k, st));
+    }
+  }
+}
+
+// The suffix of `gen lfostepNN`: the step FX it holds (23, 24, 33, 36), 0 for `off`; -1 for anything else.
+int lfostep_fx(const char* suffix) {
+  if (std::strcmp(suffix, "off") == 0) {
+    return 0;
+  }
+  for (const int fx : {23, 24, 33, 36}) {
+    char want[4];
+    std::snprintf(want, sizeof want, "%d", fx);
+    if (std::strcmp(suffix, want) == 0) {
+      return fx;
+    }
+  }
+  return -1;
+}
+
 // The four WAVs of the kit, into `dir` ("<folder of the project>/samples").
 bool write_kit_samples(const std::string& dir) {
   std::vector<std::int16_t> sine(4400);  // 44 periods
@@ -682,6 +752,8 @@ int main(int argc, char** argv) {
     } else if (std::strncmp(argv[2], "moddrive", 8) == 0 && (argv[2][8] == '1' || argv[2][8] == '4' || argv[2][8] == '8') &&
                (argv[2][9] == '\0' || std::strcmp(argv[2] + 9, "off") == 0)) {
       fill_moddrive(a.project, static_cast<unsigned>(argv[2][8] - '0'), argv[2][9] == '\0');
+    } else if (std::strncmp(argv[2], "lfostep", 7) == 0 && lfostep_fx(argv[2] + 7) >= 0) {
+      fill_lfostep(a.project, static_cast<std::uint8_t>(lfostep_fx(argv[2] + 7)));
     } else if (std::strcmp(argv[2], "law") == 0) {
       // OS-BUG-PASTE24: an OG project below version 7 saved native: its OGPM and OGPN chunks and the LAW chunk (law 1, the 1.1.14 table).
       if (!gen_og(a, 16u)) {
@@ -693,7 +765,7 @@ int main(int argc, char** argv) {
         return fail("gen: the synthetic OG project did not import");
       }
     } else {
-      return fail("gen: empty, small, maximal, settings, state, midi13, persist2, lfosine, kit, heavy, dense10, dense8, og, og17 or law");
+      return fail("gen: empty, small, maximal, settings, state, midi13, persist2, lfosine, kit, heavy, dense10, dense8, moddrive1|4|8[off], lfostep23|24|33|36|off, og, og17 or law");
     }
     std::vector<std::uint8_t> out;
     if (test::save(a.project, out) != formats::native::Progress::Done) {
@@ -703,7 +775,7 @@ int main(int argc, char** argv) {
       return fail("gen: cannot write the output");
     }
     if (std::strcmp(argv[2], "kit") == 0 || std::strcmp(argv[2], "heavy") == 0 || std::strcmp(argv[2], "dense10") == 0 ||
-        std::strcmp(argv[2], "dense8") == 0) {  // the WAVs beside it, in <folder of OUT>/samples (the build makes the folder)
+        std::strcmp(argv[2], "dense8") == 0 || std::strncmp(argv[2], "lfostep", 7) == 0) {  // the WAVs beside it, in <folder of OUT>/samples (the build makes the folder)
       std::string dir = argv[3];
       const std::size_t slash = dir.find_last_of('/');  // none: OUT is in the working directory, not in the root
       dir = (slash == std::string::npos ? std::string(".") : dir.substr(0, slash)) + "/samples";

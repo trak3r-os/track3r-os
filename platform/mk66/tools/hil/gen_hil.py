@@ -437,7 +437,7 @@ def cpu_window(arm):
     reads = []
     for i in range(12):
         last = i == 11
-        reads += [W(5.0), CMD("cpu", expect="underrun 0", collect={"as": arm, "re": r"render last (\d+)"}, show=True if last else None,
+        reads += [W(5.0), CMD("cpu", expect=["underrun 0", "shed 0 blocks"] if last else "underrun 0", collect={"as": arm, "re": r"render last (\d+)"}, show=True if last else None,
                               note="arm %s: render last / max, underruns, over-budget (the last read of the 12 is kept in the report)" % arm if last else None)]
     return [W(5.0, note="settle"), CMD("voices", note="arm " + arm + ": voices at the start of the window (OS-ODD11 slice 2, section 13: `advanced` is read here and at the end; it must rise in M and H and stay equal in U)"),
             CMD("cpu reset", note="arm " + arm + ": the 60 s window starts"), CMD("cpu perf off")] + reads + [
@@ -1022,7 +1022,7 @@ for i in range(36):
 stress += [
     CMD("voices", expect=r"in use (?:\d|1[0-2])/12\s+peak (?:\d|1[0-2])\s"),
     MIX({"channels": {"MST L": {"min_rms_db": -70, "max_clip": 0}, "MST R": {"max_clip": 0}}, "within": 4}, note="the audio is intact and the master never clipped"),
-    CMD("cpu", expect=r"underrun 0\b", note="underruns stay strict: a missed audio block is a failure"),
+    CMD("cpu", expect=[r"underrun 0\b", "shed 0 blocks"], note="underruns stay strict: a missed audio block is a failure"),
     CMD("cpu", expect=r"over-budget \d+", show=True, note="REPORTED, not a failure: over-budget is the render governor's count of blocks over its budget, and a burst of 36 taps over 12 playing tracks may cost one (0.4.12 on the unit: over-budget 1, render max 60.6 %, 0 underruns, 0 mutes). Read the line in the log"),
     RUN("_stop"),
     CMD("cpu", expect=r"underrun 0\b", note="and none after"),
@@ -1171,6 +1171,7 @@ og = OG_ROW + [
     CMD("cpu", expect=r"over-budget 0\b", note="T16: the render governor's over-budget count stays 0 (the export is main-loop work, never the render's)"),
     SAY("T16 by hand: MIDI-in jitter during the export (midi_clock_tool.py, a 120 BPM clock in on the DIN: the interval's spread against the same run with no export), and the JOB stats of a project with a 22,050 Hz and an 8,287 Hz sample (add them to t-v16 first, then rerun this scenario). Record the figures in docs/STATUS.md; they decide whether the survey needs slicing"),
     SAY("QA-FIL-083: a project that loses something asks first: the strip says LOSES <n kinds>: F1 AGAIN, another key, a move, leaving the screen or 4 s takes it back; the second F1 counts again. Try it on a project with a module instrument or a 12 BIT instrument (by hand)"),
+    SAY("QA-FIL-114 (OS-LFOSINE): an instrument with an LFO of shape Sine in slots 1-48: OG PROJECT, F1: the strip and the page say `1 SINE LFO` (SINE LFO SHAPES WRITTEN AS TRIANGLE); after the export the file holds shape Triangle for that LFO (`load Export/<name> OG`, then the MOD page reads Triangle) and the project in the unit still says Sine (by hand)"),
     SAY("QA-FIL-085 and 086 by ear and `inst n`: `load Export/<name> OG`, then `diag inst n` of a resampled sample and of an Amiga one: pitch and gain against the native project (T8 on the unit); a wavetable instrument is untouched; a project of the 1.1.14 law keeps its gain"),
     SAY("QA-FIL-088: `diag load Export/<name> OG` loads the folder just made (the name is in `diag ogexp status`)"),
     SAY("QA-FIL-089 (hardware, official unit): copy the folder into Projects/ of a card for an official 1.9.x unit and open it there: T9. Until the maintainer has done it the row stays EXPERIMENTAL"),
@@ -1463,6 +1464,10 @@ prf = start_on_pattern() + [
     K("f5", gap=0.4), K("f8", gap=0.6), ST({"msg": "~^DJ_RESET$"}, within=2, note="QA-PRF-138: RESET ends the scratch"),
     PAD(31, "down"), W(1.5), silent_vs("centre", "tape", "QA-PRF-136: the mix is stopped while TAPE STOP is held"), SHOT("qa_prf_136", soft=True, note="QA-PRF-136"),
     PAD(31, "up"), back_vs("tape", "QA-PRF-136: live again at the release"),
+    SAY("QA-PRF-106: the Song restarts at order 14 (patterns 8, 9, 9, 2: at least 4 tracks sound for 40 s) so that the check below does not fall on pattern 5, which holds T01 only"),
+    RUN("_stop"), K("song", gap=0.5), ST({"screen": "SONG"}, within=3), K("down", repeat=14, gap=0.2, note="the cursor on order 14"), K("f2", gap=0.2),
+    ST({"playing": "1", "seq": "1", "order": "14"}, within=8, poll=0.3),
+] + perform_page(1) + [
     SAY("QA-PRF-106 / 114 / 117 / 127: leaving the page ends every DJ effect: fader all B, LATCH on, CUT A latched, then the slots page: the master is back, and the DJ page finds no LATCH"),
     PAD(47), K("f6", gap=0.4), PAD(17), PAD(17, "up"), silent_vs("centre", "left_cut", "QA-PRF-106: group A is cut by the fader and the latched CUT"),
 ] + perform_page(0) + [
@@ -1513,6 +1518,18 @@ rec2 = [K("-shift", gap=0.2)] + clear_overlays() + to_pattern() + [
     K("f7", gap=0.6), ST({"msg": "~^SAVE_REC_[0-9]+_DONE$"}, within=45, poll=1.0, keep={"as": "WAV", "field": "msg", "re": "^SAVE_(REC_[0-9]+)_DONE$"}, note="QA-REC-039: the strip names the file (a 1.2 MB take is at SAVE REC 001 50% after 6 s and DONE inside 40 s on the unit)"),
     CMD("ls Samples", expect=r"(?i)REC_[0-9]+\.wav", soft=True, within=4, poll=1.0, note="QA-REC-039: a REC_NNN.wav is on the card (soft: `ls` is the console's own listing; the cmd line expands {{NAME}}, an expect does not, so the name the strip gave is not repeated here)"),
     K("f4", gap=0.6), SHOT("qa_rec_036_discard", soft=True, note="QA-REC-036: after F4 DISCARD MEM is back at the level from before the take"),
+    SAY("QA-REC-045..049 (E-SREC-11, START ON LEVEL): START ON to LEVEL adds THRESHOLD and PRE-ROLL; F1 listens (WAITING FOR LEVEL) with the transport stopped; F1 again cancels with no take. THRESHOLD is set to -6 DB first so that a quiet line input does not start the take; the level start itself (a tone at the line input) is a hand check. Runtime settings only: START ON is put back to BAR at the end"),
+    # the cursor to the top row (six Ups), then three Downs: the third row, START ON (one key a step: the file is kept as the unit run left it)
+    *[K("up", gap=0.2) for _ in range(6)], *[K("down", gap=0.2) for _ in range(3)],
+    ENC(2, note="START ON: BAR, PATTERN, LEVEL"), K("down", gap=0.3),
+    SHOT("qa_rec_045", soft=True, note="QA-REC-045: START ON LEVEL, THRESHOLD -30 DB and PRE-ROLL 50 MS under it, the cursor on THRESHOLD"),
+    ENC(2, note="THRESHOLD +6 DB: -24 DB"), K("down", gap=0.3), ENC(1, note="PRE-ROLL: 100 MS"),
+    SHOT("qa_rec_046", soft=True, note="QA-REC-046: THRESHOLD -24 DB, PRE-ROLL 100 MS"),
+    K("up", gap=0.3), ENC(20, note="THRESHOLD to its top, -6 DB"), K("f1", gap=0.6), W(1.0),
+    SHOT("qa_rec_047", soft=True, note="QA-REC-047/049: the card says WAITING FOR LEVEL, the clock is 0.0 S, the transport is stopped"),
+    K("f1", gap=0.6),
+    SHOT("qa_rec_048", soft=True, note="QA-REC-048: F1 again cancels: READY, no take"),
+    K("up", gap=0.2), K("delete", gap=0.3, note="START ON back to BAR (its Delete), the two rows go"),
     K("pattern", gap=0.4), ST({"screen": "PATTERN"}, within=3),
 ]
 add("qa_record", "OS-FINALQA FQA-5a: Record: the Shift key rows (SOURCES, RADIO), the radio seek, F2 MONITOR with the input gain read back, MEM around a take, F7 SAVE WAV (writes Samples/REC_NNN.wav); the loop is qa_looper, USB is qa_usbrec",
@@ -1609,6 +1626,9 @@ sed = start_on_pattern() + sample_pick_1() + [
     SAY("QA-SED-011: Shift + Up twice reads AMP 220 %; the sample is not touched; Shift + Down twice puts it back to 200 %"),
     K("+shift", "up", "-shift", repeat=2, gap=0.3), SHOT("qa_sed_011", soft=True, note="QA-SED-011: AMP 220 % on the line under the sample"),
     K("+shift", "down", "-shift", repeat=2, gap=0.3, note="(AMP back to 200 %)"),
+    SAY("QA-SED-017: the header reads INSTRUMENT nn NAME with the hint pad / Shift+F5: change; Shift + F5 (NEXT INS) moves to the next instrument and the header and the strip's INS follow"),
+    K("+shift", "f5", "-shift", gap=0.3), SHOT("qa_sed_017", soft=True, note="QA-SED-017: INSTRUMENT 02 in the header"),
+    K("+shift", "f5", "-shift", gap=0.3, repeat=47, note="(48 presses in all: 48 goes round to 1)"), ST({"instrument": "1"}, within=2, note="QA-SED-017: the step wrapped from 48 to 1"),
     SAY("QA-SED-012: Shift + F1 converts the whole sample to 8287 Hz as one job (200 frames become 37), one undo unit; the strip names the Amiga engine"),
     shift_pick("f1"), W(4.0), CMD("inst 1", expect=r"@@never@@", soft=True, note="(after AMIGA 8287: the len is the converted one)"),
     ST({"msg": "~^AMIGA_8287_HZ,_ENGINE_AMIGA$"}, within=3, soft=True),
@@ -1625,6 +1645,29 @@ sed = start_on_pattern() + sample_pick_1() + [
 ]
 add("qa_sample_edit", "OS-FINALQA FQA-5b: Sample edit, the unit-pending rows QA-SED-002, 004..016: the selection's edge, CROP, NORMALISE / UNDO, REVERSE, FADE IN / OUT, AMPLIFY, AMP %, AMIGA 8287 and its 8-bit option, SAVE WAV (writes Samples/SMP*.wav), the held previews; instrument 1 of t-v16, undone; the finally run reloads t-v16", sed,
     finally_=[K("-shift", gap=0.2), K("-f7", gap=0.2)] + clear_overlays() + [K("pattern", gap=0.4), RUN("_load_tv16"), K("pattern", gap=0.4), RUN("_stop")])
+
+# ======================================================================================================================================
+# qa_lfostep (OS-PERF-LFO-STEP, Level C, unit-gated; QA-PRF-180..189): the step FX Volume LFO 23, Panning LFO 24, Finetune LFO 33 and Position LFO 36 on twelve sampler tracks (one-shot, wavetable and granular), the CPU of each against
+# the same song with no step FX. One run per project: LfoStep23, LfoStep24, LfoStep33, LfoStep36 and the control LfoStepOff (`o3pj_tool gen lfostep23|24|33|36|off`). The AFFECTED tracks are set once on Performance (QA-PRF-185).
+ls = open_song("~^${PROJ}$", "load:\\s+Projects/${PROJ}", "~(?i)^(OPENING_|PROJECT_)${PROJ}",
+               "OS-PERF-LFO-STEP (QA-PRF-180..189): the step FX Volume LFO 23, Panning LFO 24, Finetune LFO 33 and Position LFO 36 on twelve sampler tracks (four one-shot, four wavetable, four granular; the FX is on every note step at rate 8). "
+               "BEFORE the run: build the songs (`o3pj_tool gen lfostep23 <dir>/LfoStep23/project.o3pj`, and `lfostep24`, `lfostep33`, `lfostep36` the same, and the control `lfostepoff` into `<dir>/LfoStepOff/project.o3pj`; each writes its samples/ folder beside it) "
+               "and copy ONE folder into Projects/ per run: the four with the FX, then the control. Run with `--var PROJ=<folder name>`. Use the release image. By ear: the FX of the song at its rate (the FX 36 acts on the wavetable and granular tracks only); "
+               "the Perform VOL LFO row over the FX 23 and its release (QA-PRF-185). The exports of the control and of a song are compared on the PC with `cmp` (QA-PRF-187). QA-PRF-188: the mean `render last` of each song against the control "
+               "(no more than the same Perform rows, 1.2 pp, paired noise).") + [
+    K("performance", gap=0.5), ST({"screen": "PERFORM"}, within=3),
+    K("performance", gap=0.5, if_state={"page": "1"}), ST({"screen": "PERFORM", "page": "0"}, within=3),
+    K("+shift", gap=0.3)] + [PAD(i, **({"note": "T1..T12 join the performance layer (AFFECTED), set once"} if i == 0 else {})) for i in range(12)] + [
+    K("-shift", gap=0.3),
+    RUN("_play"), W(5.0, note="settle"),
+    MIX({"channels": {"MST L": {"min_rms_db": -60}}, "within": 6}, note="the song sounds"),
+    CMD("cpu reset", note="the window starts"), CMD("cpu perf off")] + cpu_reads(
+        8, 2.5, "L", expect=[r"underrun 0 \(", r"guard\s+shed 0 blocks"]) + [
+    STAT("L", min_n=8, show=True, note="QA-PRF-188: the mean of the 8 reads of `render last` (cycles): REPORTED, compare each FX song with the control `LfoStepOff`"),
+    RUN("_stop")]
+add("qa_lfostep", "OS-PERF-LFO-STEP: the step FX 23, 24, 33 and 36 on twelve sampler tracks, one song per FX and the control without them (`--var PROJ=LfoStep23|24|33|36|Off`): opened from File, the AFFECTED tracks set once on Performance, "
+    "`cpu reset`, Play, 8 reads of `cpu` 2.5 s apart. ASSERTS underrun 0 and guard shed 0; the mean `render last` is reported. The project must be on the card first (`o3pj_tool gen lfostep23|24|33|36|off`)",
+    ls, finally_=[K("-f4", "-right", "-left", "-shift", gap=0.1), K("f8", gap=0.3, if_state={"screen": "PERFORM"}), K("pattern", gap=0.4), RUN("_stop")], vars_={"PROJ": "LfoStep23"})
 
 for d in SCENARIOS:
     write(d)

@@ -985,6 +985,40 @@ TEST_CASE("perform latch: off, a slot acts only while its pad is held; on is our
   CHECK(b.active(0));
 }
 
+TEST_CASE("perform latch: a second tap of the same pad keeps a latched row (by design, QA-PRF-190); only another row, row 0 or RESET ends it; with LATCH off the release ended it already") {
+  o3os::test::ZeroBank b;
+  Log log;
+  b.toggle_track(0, log);
+  b.set_edit(true);
+  b.pad_down(pad(0, 1), log);
+  b.turn(+50, log);
+  b.pad_up(pad(0, 1), log);
+  b.set_edit(false);
+  CHECK(b.active(0));  // LATCH on (the default): the stored value stays on after the release
+  b.pad_down(pad(0, 1), log);  // the second tap of the same pad: the row is the slot's already, nothing is released
+  CHECK(b.active(0));
+  CHECK(b.row(0) == 1);
+  b.pad_up(pad(0, 1), log);
+  CHECK(b.active(0));
+  CHECK(b.row(0) == 1);
+  CHECK(b.live(0) == 50);
+  b.pad_down(pad(0, 0), log);  // row 0 ends it
+  b.pad_up(pad(0, 0), log);
+  CHECK_FALSE(b.active(0));
+  b.pad_down(pad(0, 1), log);  // latched again, RESET ends it
+  b.pad_up(pad(0, 1), log);
+  CHECK(b.active(0));
+  CHECK(b.all_off(log));
+  CHECK_FALSE(b.active(0));
+  b.set_latch(false);  // LATCH off: the release of the first tap ended it, there is nothing for a second tap to release
+  b.pad_down(pad(0, 1), log);
+  b.pad_up(pad(0, 1), log);
+  CHECK_FALSE(b.active(0));
+  b.pad_down(pad(0, 1), log);
+  b.pad_up(pad(0, 1), log);
+  CHECK_FALSE(b.active(0));
+}
+
 TEST_CASE("perform reset: every slot off at once, the affected tracks, the slots' FX and values and the held rate stay; the engine ends the FX") {
   o3os::test::ZeroBank b;
   Log log;
