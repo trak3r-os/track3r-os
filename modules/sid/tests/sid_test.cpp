@@ -1631,7 +1631,7 @@ TEST_CASE("sid views: the wave view draws the saw, the triangle, the pulse at it
   Views v;
   NEED(v.ok);
   const int w = 380, h = 100;
-  const int left = 6, right = w - 6, top = 16, bottom = h - 6;
+  const int left = 6, right = w - 6, top = 26, bottom = h - 6;
   const double period = (right - left) / 2;
   const char* names[8] = {"SAW", "TRIANGLE", "PULSE", "NOISE", "SAW+TRI", "PULSE+SAW", "PULSE+TRI", "P+SAW+TRI"};
   for (std::uint32_t wave = 0; wave < 8; ++wave) {
@@ -1722,6 +1722,38 @@ TEST_CASE("sid views: the wave view draws the saw, the triangle, the pulse at it
     at_bottom += gated.polys[0].xy[2 * k + 1] == bottom ? 1u : 0u;
   }
   CHECK(at_bottom > 97u / 2u);  // three quarters of each period is the pulse's low
+}
+
+TEST_CASE("sid views: OS-BUG-SIDWAVELABEL the wave's name sits above the trace, in the real Data face (10 x 20), for every wave and the pulse widths") {
+  Views v;
+  NEED(v.ok);
+  o3os::module::ViewHost::Metrics m;  // the theme's faces: Display 16 x 32, Data 10 x 20, Label 8 x 16, Micro 6 x 12
+  const std::int16_t cw[O3M_FACE_COUNT] = {16, 10, 8, 6}, ch[O3M_FACE_COUNT] = {32, 20, 16, 12};
+  for (unsigned f = 0; f < O3M_FACE_COUNT; ++f) {
+    m.cell_w[f] = cw[f];
+    m.cell_h[f] = ch[f];
+  }
+  v.host.set_metrics(m);
+  for (std::uint32_t wave = 0; wave < 8; ++wave) {
+    for (float pw : {10.0f, 50.0f, 90.0f}) {
+      v.p[SID_PARAM_WAVE] = static_cast<float>(wave);
+      v.p[SID_PARAM_PULSE_WIDTH] = pw;
+      CAPTURE(wave);
+      NEED(v.draw(SID_VIEW_WAVE, 380, 100) == ViewStatus::Ok);
+      Drawing dr;
+      v.host.replay(dr);
+      NEED(dr.texts.size() == 1u);
+      NEED(dr.polys.size() == 1u);
+      NEED(dr.rects.size() == 1u);
+      const int text_bottom = dr.texts[0].y + ch[dr.texts[0].face];
+      int trace_top = 1 << 20;
+      for (std::size_t k = 1; k < dr.polys[0].xy.size(); k += 2) {
+        trace_top = std::min<int>(trace_top, dr.polys[0].xy[k]);
+      }
+      CHECK(text_bottom < trace_top);  // no row of the name lies on the trace's rows
+      CHECK(text_bottom < dr.rects[0].y);
+    }
+  }
 }
 
 TEST_CASE("sid views: the envelope curve is the C64 table's times in order, the fall to the sustain and the release from it") {

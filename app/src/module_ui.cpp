@@ -568,8 +568,9 @@ void ModuleUi::classify(CatalogEntry& e) const noexcept {
 
 namespace {
 
-// Adds `stem` to the sorted catalog unless it is there or the catalog is full (the card's files and the built-in modules meet here: a stem is one entry).
-void add_sorted(CatalogEntry* out, unsigned& count, const char* stem) noexcept {
+// Adds `stem` to the sorted catalog unless it is there or the catalog is full (the card's files and the built-in modules meet here: a stem is one entry). `builtin`: the stem comes from the image's
+// table; an entry the card added first keeps builtin = false (the card file is there).
+void add_sorted(CatalogEntry* out, unsigned& count, const char* stem, bool builtin) noexcept {
   unsigned at = 0;
   while (at < count) {
     const int c = compare_ci(out[at].stem, stem);
@@ -589,6 +590,7 @@ void add_sorted(CatalogEntry* out, unsigned& count, const char* stem) noexcept {
   }
   copy_text(out[at].stem, sizeof out[at].stem, stem);
   out[at].state = CatalogEntry::State::Ready;
+  out[at].builtin = builtin;
   ++count;
 }
 
@@ -614,7 +616,7 @@ void ModuleUi::scan(const char* dir, unsigned kind, CatalogEntry* out, unsigned&
         if (!module::is_stem(stem)) {
           continue;
         }
-        add_sorted(out, count, stem);
+        add_sorted(out, count, stem, false);
       }
       card_->closedir(d);
     }
@@ -623,7 +625,7 @@ void ModuleUi::scan(const char* dir, unsigned kind, CatalogEntry* out, unsigned&
   for (unsigned i = 0; set_ != nullptr && i < set_->builtin_count(); ++i) {
     const module::BuiltinModule& b = *set_->builtin_at(i);
     if (module::builtin_header(b).kind == kind) {
-      add_sorted(out, count, b.stem);
+      add_sorted(out, count, b.stem, true);
     }
   }
   for (unsigned i = 0; i < count; ++i) {
@@ -638,6 +640,7 @@ void ModuleUi::scan(const char* dir, unsigned kind, CatalogEntry* out, unsigned&
     if (!have) {
       copy_text(out[count].stem, sizeof out[count].stem, name);
       out[count].state = CatalogEntry::State::Missing;
+      out[count].builtin = false;
       ++count;
     }
   }

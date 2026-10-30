@@ -102,7 +102,12 @@ struct CatalogEntry {
   };
   char stem[module::kStemMax + 1];
   State state;
+  bool builtin;  // OS-BUG-ONCARD: only the image has it (module/builtin.h), no card file of the stem; Ready then reads BUILT IN
 };
+
+// The tag of an entry that is not loaded, quarantined or missing: BUILT IN (8 characters at most, the style guide) for a module embedded in the image, ON CARD for a card file. Shared by the
+// MODULES list and the ENGINE picker.
+inline const char* catalog_ready_text(const CatalogEntry& e) noexcept { return e.builtin ? "BUILT IN" : "ON CARD"; }
 
 class ModuleUi {
  public:

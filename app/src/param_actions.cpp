@@ -613,6 +613,9 @@ bool config_page_default(ActionContext& ctx, core::ActionArg) noexcept {
     pv.defaults_armed = false;
     return say_defaults(ctx, "NO ROWS ON THIS PAGE");
   }
+  if (pv.defaults_armed && !defaults_ask_live(ctx.view)) {
+    pv.defaults_armed = false;  // OS-BUG-CFGARM: its question is gone from the strip (another message took the head): this press asks again
+  }
   if (!pv.defaults_armed || core::tick_elapsed(ctx.now, pv.defaults_at) > core::ticks_from_ms(ParamView::kDefaultsWindowMs)) {
     pv.defaults_armed = true;
     pv.defaults_at = ctx.now;
@@ -698,9 +701,13 @@ bool param_apply(ActionContext& ctx, core::ActionArg) noexcept {
     pv.armed = false;
     return say(ctx, core::Severity::Info, "NOTHING TO APPLY");
   }
+  if (pv.armed && !apply_ask_live(ctx.view)) {
+    pv.armed = false;  // OS-BUG-CFGARM: the question is gone from the strip (its time, or another message): this press asks again, it does not apply
+  }
   if (!pv.armed) {
     pv.armed = true;
-    (void)say(ctx, core::Severity::Info, pv.will_reenumerate(ctx.model.device) ? "USB WILL RECONNECT: PRESS AGAIN" : "PRESS AGAIN TO APPLY");
+    // A question: ahead of the Info news (a post() would queue behind it, and the platform's persistent disk strip keeps the head while the card is on the computer, so F7 would ask for ever). A Warn in front keeps its place for its own time only.
+    (void)ctx.view.notify.ask(core::Severity::Info, pv.will_reenumerate(ctx.model.device) ? kApplyAskStripReconnect : kApplyAskStrip, "params", ViewState::kMessageMs);
     return true;
   }
   PendingParam held[ParamView::kMaxPending];

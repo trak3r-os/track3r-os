@@ -313,6 +313,33 @@ TEST_CASE("built-in: the ENGINE picker lists the TB-303, chip, FM and SID with n
   CHECK(!set.quarantined("tb303"));
 }
 
+TEST_CASE("built-in: OS-BUG-ONCARD the ENGINE and MODULES lists say BUILT IN for a module that lives only in the image and ON CARD for one that has a card file") {
+  using o3os::app::catalog_ready_text;
+  static o3os::audio::ModuleVoices voices;
+  static o3os::app::ModuleUi ui;
+  ModuleSet set;
+  set.set_builtins(kBuiltinModules, kBuiltinModuleCount);
+  ModuleLoader loader;
+  ui.attach(set, loader, voices);
+  const auto labels = [&] {
+    std::string out;
+    for (unsigned i = 0; i < ui.instrument_count(); ++i) {
+      out += std::string(i != 0 ? " " : "") + ui.instrument_at(i)->stem + "=" + catalog_ready_text(*ui.instrument_at(i));
+    }
+    return out;
+  };
+  ui.scan_instruments(nullptr);  // no card: the four are the image's
+  CHECK(labels() == "chip=BUILT IN fm=BUILT IN sid=BUILT IN tb303=BUILT IN");
+  Rig r(blob_minor(1).file());
+  ui.set_storage(&r.card);
+  std::ofstream(r.root / "modules" / "instruments" / "tb303.tmod", std::ios::binary) << "x";  // a card copy of a built-in stem, and a card-only module
+  std::ofstream(r.root / "modules" / "instruments" / "acid.tmod", std::ios::binary) << "x";
+  ui.scan_instruments(nullptr);
+  CHECK(labels() == "acid=ON CARD chip=BUILT IN fm=BUILT IN sid=BUILT IN tb303=ON CARD");
+  CHECK(std::strlen(catalog_ready_text(*ui.instrument_at(0))) <= 8u);  // the style guide's width
+  CHECK(std::strlen(catalog_ready_text(*ui.instrument_at(1))) <= 8u);
+}
+
 TEST_CASE("built-in: a project that names the TB-303 and a module nobody has opens with no card: the first is loaded from the image, the other is reported") {
   using namespace o3os;
   static model::Project project;

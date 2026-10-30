@@ -1102,3 +1102,70 @@ TEST_CASE("config: the share request carries READ ONLY as it was at the second F
   rig.turn(1);  // taken: the platform now tells Working, but even before that the row may change again
   CHECK(rig.app->disk_read_only());
 }
+
+// OS-BUG-CFGARM: the first press of F7 or of Shift + F7 is a question that lives while its text is the head of the strip; a later press asks again, it never answers a question that is gone.
+TEST_CASE("config: F7 after its question left the strip (time, or another message) asks again and writes nothing; a second press while it is up applies") {
+  Rig rig;
+  rig.tap(Button::F5);  // USB
+  NEED(rig.page() == 4u);
+  const float audio = rig.get(ds::UsbAudio);
+  rig.turn(-1);
+  NEED(rig.pending(ds::UsbAudio) != nullptr);
+  rig.tap(Button::F7);
+  CHECK(rig.last_news() == "USB WILL RECONNECT: PRESS AGAIN");
+  CHECK(test::read_row(*rig.app).marked);
+  rig.pass(2500);  // the strip text goes
+  CHECK_FALSE(test::read_row(*rig.app).marked);
+  rig.tap(Button::F7);
+  CHECK(rig.last_news() == "USB WILL RECONNECT: PRESS AGAIN");  // asked again
+  CHECK(rig.get(ds::UsbAudio) == audio);  // and wrote nothing
+  CHECK(rig.params().pending_n != 0u);
+  CHECK(test::read_row(*rig.app).marked);
+  rig.tap(Button::F7);  // the question was up: it applies
+  CHECK(rig.get(ds::UsbAudio) != audio);
+  CHECK(rig.last_news() == "USB RECONNECTING");
+
+  // Another message takes the head of the strip (the cursor and the value stay): the same.
+  rig.turn(1);
+  NEED(rig.pending(ds::UsbAudio) != nullptr);
+  const float now = rig.get(ds::UsbAudio);
+  rig.tap(Button::F7);
+  CHECK(rig.last_news() == "USB WILL RECONNECT: PRESS AGAIN");
+  rig.shift_tap(Button::F7);  // posts RESET PAGE's question over it
+  NEED(rig.last_news() == "SHIFT+F7 AGAIN: RESET PAGE");
+  rig.tap(Button::F7);
+  CHECK(rig.last_news() == "USB WILL RECONNECT: PRESS AGAIN");
+  CHECK(rig.get(ds::UsbAudio) == now);
+}
+
+// The question takes the head of the strip at once (ask(), not post()): behind Info news, and behind the platform's persistent disk strip, which is rewritten every second while the card is on the computer.
+TEST_CASE("config: F7's question takes the head of the strip over Info news and over the card-on-computer strip; the second F7 applies") {
+  Rig rig;
+  rig.tap(Button::F5);  // USB
+  NEED(rig.page() == 4u);
+  rig.tap(Button::F7);  // nothing pending: the news "NOTHING TO APPLY" is the head
+  CHECK(rig.last_news() == "NOTHING TO APPLY");
+  rig.turn(-1);
+  NEED(rig.pending(ds::UsbAudio) != nullptr);
+  rig.tap(Button::F7);
+  CHECK(rig.last_news() == "USB WILL RECONNECT: PRESS AGAIN");
+  CHECK(test::read_row(*rig.app).marked);  // the head, so the key reads APPLY?
+  rig.tap(Button::F7);
+  CHECK(rig.get(ds::UsbAudio) == 0.0f);
+  CHECK(rig.last_news() == "USB RECONNECTING");
+
+  rig.pass(5000);
+  rig.app->disk_notice(app::App::kCardOnComputerStrip, 2500);  // the platform keeps it up, once a second
+  rig.pass(1000);
+  rig.turn(1);
+  NEED(rig.pending(ds::UsbAudio) != nullptr);
+  rig.app->disk_notice(app::App::kCardOnComputerStrip, 2500);
+  rig.pass(16);
+  rig.tap(Button::F7);
+  CHECK(rig.last_news() == "USB WILL RECONNECT: PRESS AGAIN");
+  CHECK(test::read_row(*rig.app).marked);
+  rig.app->disk_notice(app::App::kCardOnComputerStrip, 2500);  // rewritten in place: it stays behind the question
+  rig.tap(Button::F7);
+  CHECK(rig.get(ds::UsbAudio) == 1.0f);  // applied
+  CHECK(rig.last_news() == "USB RECONNECTING");
+}

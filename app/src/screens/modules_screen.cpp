@@ -18,9 +18,9 @@ using ui::Renderer;
 
 namespace {
 
-const char* state_text(CatalogEntry::State s) noexcept {
-  switch (s) {
-    case CatalogEntry::State::Ready: return "ON CARD";
+const char* state_text(const CatalogEntry& e) noexcept {
+  switch (e.state) {
+    case CatalogEntry::State::Ready: return catalog_ready_text(e);
     case CatalogEntry::State::Loaded: return "LOADED";
     case CatalogEntry::State::Quarantined: return "QUARANTINED";
     case CatalogEntry::State::Missing: return "MISSING";
@@ -86,7 +86,7 @@ void ModulesScreen::render(const Model& model, const ViewState& view, Renderer& 
     core::FixedString<kNameCols + 1> name;
     append_clipped(name, e.stem, kNameCols);
     r.text(2 * m.pad, y, name.c_str(), sel ? Color::SelText : (bad ? Color::TextDim : Color::Text));
-    r.text(2 * m.pad + (kNameCols + 1) * cell_w, ui::caps_y(t, Face::Label, row_y(i), f.row_pitch), state_text(e.state),
+    r.text(2 * m.pad + (kNameCols + 1) * cell_w, ui::caps_y(t, Face::Label, row_y(i), f.row_pitch), state_text(e),
            sel ? Color::SelText : (e.state == CatalogEntry::State::Loaded ? Color::Instr : Color::TextDim), Face::Label);
   }
   if (apps == 0 && !hidden({0, row_y(1), ui::kScreenW, t.geometry(Face::Display).cell_h + m.pad + t.geometry(Face::Label).cell_h})) {

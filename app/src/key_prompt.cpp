@@ -355,6 +355,10 @@ bool song_question_live(const ViewState& view) noexcept {
   return strip_head_is_ask(view, song_ask_kind(view.song.ask), head.c_str());
 }
 
+bool apply_ask_live(const ViewState& view) noexcept { return strip_head_is(view, kApplyAskStrip) || strip_head_is(view, kApplyAskStripReconnect); }
+
+bool defaults_ask_live(const ViewState& view) noexcept { return strip_head_is_ask(view, Ask::Defaults, ""); }
+
 PromptState prompt_in_force(const Model& model, const ViewState& view) noexcept {
   switch (view.disk_keys) {  // the boot disk's row (the app is the disk mode's screen: no overlay, no question)
     case DiskKeys::Restart: return owned(kDiskRestartPrompt, all_of(kDiskRestartPrompt), 0u);
@@ -369,9 +373,15 @@ PromptState prompt_in_force(const Model& model, const ViewState& view) noexcept 
     case ScreenId::File: return state_of(file_question(view));
     case ScreenId::Config:
       if (view.params.armed) {  // a press of F7 now writes the pending values (or hands the card over or takes it back: the CARD AS DISK row), whatever the strip says
-        return state_of(config_row(view) == ConfigRow::CardAsDisk ? (view.disk.phase == ViewState::DiskView::Phase::Out ? Ask::Eject : Ask::Share) : Ask::Apply);
+        if (config_row(view) == ConfigRow::CardAsDisk) {  // (its strip is the platform's persistent one while the card is out: the row keeps following the arm)
+          return state_of(view.disk.phase == ViewState::DiskView::Phase::Out ? Ask::Eject : Ask::Share);
+        }
+        // The pending values: the row follows the strip (OS-BUG-CFGARM, QA-CFG-034: the plain row is back when the text leaves, and param_apply drops the arm by the same test).
+        if (apply_ask_live(view)) {
+          return state_of(Ask::Apply);
+        }
       }
-      return view.params.defaults_armed && strip_head_is_ask(view, Ask::Defaults, "") ? state_of(Ask::Defaults) : PromptState{};
+      return view.params.defaults_armed && defaults_ask_live(view) ? state_of(Ask::Defaults) : PromptState{};
     case ScreenId::Modules:
       return model.modules != nullptr && model.modules->confirm_pending_for(static_cast<unsigned>(view.modules.apps)) && strip_head_is(view, model.modules->confirm_text()) ? state_of(Ask::Launch) : PromptState{};
     case ScreenId::Song: return song_question_live(view) ? state_of(song_ask_kind(view.song.ask)) : PromptState{};  // OS-SONGMAP

@@ -6,6 +6,7 @@
 
 #include <o3os/app/dir_scan.h>
 #include <o3os/app/firmware_view.h>
+#include <o3os/app/key_prompt.h>
 #include <o3os/app/mix_board.h>
 #include <o3os/audio/stem_map.h>
 #include <o3os/app/screens/config_screen.h>
@@ -408,6 +409,9 @@ struct ConfigScene {
     (void)view.params.set_pending(core::param_id(core::ParamKind::Device, 0, model::device_setting::UsbAudio), 0.0f);
     (void)view.params.set_pending(core::param_id(core::ParamKind::Device, 0, model::device_setting::UsbReturn), 0.0f);
     view.params.armed = armed;
+    if (armed) {  // the first press also puts its question on the strip, and the key row reads APPLY? only while it is there (OS-BUG-CFGARM)
+      (void)view.notify.post(core::Severity::Info, app::kApplyAskStripReconnect, "params", app::ViewState::kMessageMs);
+    }
   }
   // OS-USBOUTS O3: the USB page, the cursor on USB RETURN (On), with a stem map of 10 channels: the row reads "On (10 OUT: off)", dim.
   void show_usb_ten() {

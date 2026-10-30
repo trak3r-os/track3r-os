@@ -15,9 +15,9 @@ snap qa_cfg_002
 tap f7
 snap qa_cfg_003
 
-# QA-CFG-004: the second F7 writes it: Off with no star, "USB RECONNECTING". (A notification shows for 2 s and the next one waits behind it: the scenario waits the first out, as params.txt does.)
-wait 2500
+# QA-CFG-004: the second F7 writes it: Off with no star, "USB RECONNECTING". (A notification shows for 2 s and the next one waits behind it: the scenario waits the first out after the press, as params.txt does. The press comes while the question is up: a later one would ask again, OS-BUG-CFGARM.)
 tap f7
+wait 2500
 snap qa_cfg_004
 wait 2500
 
@@ -29,10 +29,10 @@ snap qa_cfg_005
 # QA-CFG-006: the first F7 for a lone USB RETURN change in STANDARD: no reconnect warning ("PRESS AGAIN TO APPLY"), STANDARD's descriptors do not depend on the return.
 tap f7
 snap qa_cfg_006
-wait 2500
 
 # QA-CFG-007: the second F7: "APPLIED", USB RETURN Off, no star, no "USB RECONNECTING".
 tap f7
+wait 2500
 snap qa_cfg_007
 wait 2500
 
@@ -54,8 +54,8 @@ snap qa_cfg_010
 # QA-CFG-011: USB AUDIO back On: a turn, then F7 twice: On with no star, "USB RECONNECTING".
 encoder 1
 tap f7
-wait 2500
 tap f7
+wait 2500
 snap qa_cfg_011
 wait 2500
 
@@ -64,10 +64,10 @@ tap down
 encoder 1
 tap f7
 snap qa_cfg_012
-wait 2500
 
 # QA-CFG-013: the second F7: USB RETURN On, "USB RECONNECTING".
 tap f7
+wait 2500
 snap qa_cfg_013
 
 # QA-CFG-015 (OS-UIFIX): the MIDI page (F1) with Shift held: the key row shows the Shift layer, - - - - - - DEFAULTS - (F7 is OS-SHIFTROW's page reset).

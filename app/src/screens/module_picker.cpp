@@ -25,9 +25,9 @@ Dialog picker_dialog(const ui::Theme& theme) noexcept {
   return make_dialog(theme, kPickerW, (kPickerRows + 2) * m.row_pitch);  // a line of help, the rows, the keys
 }
 
-const char* state_text(CatalogEntry::State s) noexcept {
-  switch (s) {
-    case CatalogEntry::State::Ready: return "ON CARD";
+const char* state_text(const CatalogEntry& e) noexcept {
+  switch (e.state) {
+    case CatalogEntry::State::Ready: return catalog_ready_text(e);
     case CatalogEntry::State::Loaded: return "LOADED";
     case CatalogEntry::State::Quarantined: return "QUARANTINED";
     case CatalogEntry::State::Missing: return "MISSING FROM THE CARD";
@@ -86,7 +86,7 @@ void ModulePickerOverlay::render(const Model& model, const ViewState& view, ui::
       append_voice_cost(cost, mu->voice_cost_of(e.stem));
       r.text(x + 15 * cell, ui::caps_y(t, Face::Label, y, pitch), cost.c_str(), Color::ChromeDim, Face::Label);
     }
-    const char* state = state_text(e.state);
+    const char* state = state_text(e);
     r.text(right - r.text_width(state, Face::Label), ui::caps_y(t, Face::Label, y, pitch), state, ink, Face::Label);
   }
   const int foot = d.body.y + (kPickerRows + 1) * pitch;

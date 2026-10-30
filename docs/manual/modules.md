@@ -91,7 +91,7 @@ You should see the list of apps on the card. <!-- QA-MOD-001 -->
 
 Start on the Instrument screen, on a free slot.
 
-1. Press `F4` (**MODULE**). The picker opens and lists the instrument modules on the card. <!-- QA-INS-029 -->
+1. Press `F4` (**MODULE**). The picker opens and lists the instrument modules on the card. Each row ends with its state: **BUILT IN** for the TB-303, Chip, FM and SID engines (no card file needed), **ON CARD** for a module that has a file on the card. <!-- QA-INS-029, QA-MOD-236 -->
 2. Turn the encoder to a module. `Shift` + `Down` and `Shift` + `Up` move ten rows at a time. <!-- QA-MOD-061 -->
 3. Press `F1` to choose it. <!-- QA-INS-029 -->
 

@@ -63,7 +63,8 @@ void draw_wave(o3m_canvas* c, const float* p) {
   const uint32_t wave = whole(p[SID_PARAM_WAVE], 7.0f);
   const uint32_t model = whole(p[SID_PARAM_MODEL], 1.0f);
   const float pw = clampf(p[SID_PARAM_PULSE_WIDTH], 1.0f, 99.0f) * 0.01f;
-  const int32_t left = 6, right = c->width - 6, top = 16, bottom = c->height - 6;
+  // The name takes the rows 3..22 (the Data face is 20 pixels high); the trace starts below it, so that the first edge never runs through the letters.
+  const int32_t left = 6, right = c->width - 6, top = 26, bottom = c->height - 6;
   if (right - left < 16 || bottom - top < 8) {
     return;
   }

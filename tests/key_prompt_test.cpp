@@ -215,13 +215,20 @@ TEST_CASE("key prompt: Config marks F7 APPLY? while armed, and Shift + F7 RESET?
   app::ViewState view;
   view.screen = ScreenId::Config;
   CHECK_FALSE(test::read_row(model, view, app::kConfigScreen).marked);
-  view.params.armed = true;  // a press of F7 writes the pending values now, whatever the strip says
+  view.params.armed = true;  // a press of F7 writes the pending values now (the arm has no clock), but the row follows the strip (OS-BUG-CFGARM)
+  CHECK_FALSE(test::read_row(model, view, app::kConfigScreen).marked);  // armed, but the text is not on the strip (its two seconds are over): the plain row
+  CHECK(view.notify.post(core::Severity::Info, app::kApplyAskStrip, "params", app::ViewState::kMessageMs));
   const test::RowRead apply = test::read_row(model, view, app::kConfigScreen);
   CHECK(apply.marked);
   CHECK(apply.label[6] == "APPLY?");
   CHECK(apply.hot == 0x40u);
   CHECK(apply.label[4] == "USB");  // the page keys keep their labels
   CHECK_FALSE(test::read_row(model, view, app::kConfigScreen, true).marked);
+  view.notify.clear();
+  CHECK_FALSE(test::read_row(model, view, app::kConfigScreen).marked);
+  CHECK(view.notify.post(core::Severity::Info, app::kApplyAskStripReconnect, "params", app::ViewState::kMessageMs));  // the USB AUDIO case: the apply re-enumerates
+  CHECK(test::read_row(model, view, app::kConfigScreen).marked);
+  view.notify.clear();
   view.params.armed = false;
   CHECK_FALSE(test::read_row(model, view, app::kConfigScreen).marked);
 

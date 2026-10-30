@@ -1359,7 +1359,7 @@ void finish_modules() noexcept {
   finish_load();
 }
 
-// For a project the kit fits (no sample or module instrument, nothing in slots 1-4: app::demo_kit_fits), the demo kit (the table is empty: begin_samples cleared it, the kit goes in from the start
+// For a project the kit fits (no Sample or Module instrument, and no instrument of any kind in slots 1-48: app::demo_kit_fits), the demo kit (the table is empty: begin_samples cleared it, the kit goes in from the start
 // of the arena); then the SD modules. OS-BUG-DEMOKIT: a project of module or MIDI instruments keeps them (install_demo_kit refuses it).
 void demo_then_modules() noexcept {
   if (module_load() == nullptr && install_demo(g_arena->project)) {  // (an imported song has its own instruments: a song with none stays silent, it does not get the kit)

@@ -80,6 +80,14 @@ void append_key_name(AskText& out, std::uint8_t key) noexcept;
 void ask_tail(Ask which, AskText& out) noexcept;
 void ask_text(Ask which, const char* head, AskText& out) noexcept;
 
+// The strip texts of Config's first F7 on pending values (param_apply posts them). The arm (`params.armed`) has no clock of its own: it counts only while one of these texts is the head of the strip
+// (OS-BUG-CFGARM). The key row reads APPLY? by the same test, and a press of F7 with the arm set but no text up (the two seconds are over, another message came) asks again instead of applying.
+inline constexpr const char* kApplyAskStrip = "PRESS AGAIN TO APPLY";
+inline constexpr const char* kApplyAskStripReconnect = "USB WILL RECONNECT: PRESS AGAIN";
+bool apply_ask_live(const ViewState& view) noexcept;
+// Shift + F7's question on Config (RESET PAGE): is its text the head of the strip (the same rule for its arm, `params.defaults_armed`)?
+bool defaults_ask_live(const ViewState& view) noexcept;
+
 // Sample load's question (OS-BUG-SLDOVER): up while its text is the head of the strip.
 bool sample_question_live(const ViewState& view) noexcept;
 // Is the question `which` (with `head`) the head of the strip now? A question that was answered, pushed down by another message or timed out is not up, whatever flag armed it.

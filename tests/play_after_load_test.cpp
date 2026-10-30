@@ -283,7 +283,7 @@ struct Device {
   bool stop() { return seq->commands().push(seq::Command{seq::Command::Kind::Stop, 0, 0, 0}); }
 
   // start_project_load() .. finish_samples(): the Stop, the settle (blocks until the voices are quiet), the project, the table cleared, the samples, the demo kit for a
-  // project the kit fits (app::demo_kit_fits, OS-BUG-DEMOKIT: no sample or module instrument, nothing in slots 1-4). The audio blocks run on through it, about one for each slice of the loaders. False: the project or its samples did not load.
+  // project the kit fits (app::demo_kit_fits, OS-BUG-DEMOKIT: no Sample or Module instrument, and no instrument of any kind in slots 1-48). The audio blocks run on through it, about one for each slice of the loaders. False: the project or its samples did not load.
   bool load(hs::Storage& card, const char* folder, app::OgFolderLoader& loader, app::OgSampleLoader& samples) {
     (void)stop();
     for (unsigned i = 0; i < 100u && (i < 3u || voices->voices_in_use() != 0u); ++i) {
