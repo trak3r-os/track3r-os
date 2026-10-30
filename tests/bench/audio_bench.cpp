@@ -7,6 +7,7 @@
 //
 //   o3os_audio_bench [--smoke]    the full table (build with -DCMAKE_BUILD_TYPE=Release: the sanitizer build is for correctness); --smoke
 //                                 runs every case a handful of times, as ctest does
+#include <o3os/audio/bench_stereo.h>
 #include <o3os/audio/engine.h>
 #include <o3os/audio/graph.h>
 #include <o3os/audio/kernels.h>
@@ -24,6 +25,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <vector>
@@ -738,6 +740,70 @@ void voice_lfo_dest_table() {
   }
 }
 
+// OS-STEREO step 1: the sample loop of a stereo voice (M and S, one position, L = M + S, R = M - S) against the plain voice's mono loop (audio/bench_stereo.h; the unit's rows are `diag bench voice_st`:
+// voice_mono and voice_st, both in flash). Host ns a block of 64 frames, relative figures: the host has no DSP extension and no wait states. Exits 1 when a kernel differs from the plain
+// reference, so the smoke run is also the host proof of the loops.
+__attribute__((noinline)) void st_mono_block(const std::int16_t* m, std::int16_t* ol, bench_st::Pos& p, std::uint64_t inc) {
+  bench_st::resample<false>(m, nullptr, ol, nullptr, kB, p, inc, 10066329);
+}
+__attribute__((noinline)) void st_stereo_block(const std::int16_t* m, const std::int16_t* s, std::int16_t* ol, std::int16_t* orr, bench_st::Pos& p, std::uint64_t inc) {
+  bench_st::resample<true>(m, s, ol, orr, kB, p, inc, 10066329);
+}
+
+void voice_stereo_table() {
+  constexpr std::uint32_t kFrames = 32768;
+  constexpr std::uint32_t kMaxRead = 2u * kB + 2u;
+  constexpr std::uint64_t kInc = (std::uint64_t{1} << 32) + 0x12345678u;
+  constexpr std::int32_t kAmp = 10066329;
+  static std::int16_t m[kFrames];
+  static std::int16_t s[kFrames];
+  Lcg rng;
+  for (std::uint32_t i = 0; i < kFrames; ++i) {
+    m[i] = static_cast<std::int16_t>(static_cast<std::int32_t>(rng.next() & 0xFFFFu) / 2 - 16384);
+    s[i] = static_cast<std::int16_t>(static_cast<std::int32_t>(rng.next() & 0xFFFFu) / 2 - 16384);
+  }
+  alignas(8) std::int16_t ol[kB];
+  alignas(8) std::int16_t orr[kB];
+  alignas(8) std::int16_t rl[kB];
+  alignas(8) std::int16_t rr[kB];
+  for (unsigned round = 0; round < 64u; ++round) {
+    const bench_st::Pos at{(round * 397u) % (kFrames - kMaxRead), round * 0x9E3779B9u};
+    bench_st::Pos q = at;
+    bench_st::reference(m, nullptr, rl, nullptr, kB, at, kInc, kAmp);
+    st_mono_block(m, ol, q, kInc);
+    bool ok = std::memcmp(rl, ol, sizeof rl) == 0;
+    q = at;
+    bench_st::reference(m, s, rl, rr, kB, at, kInc, kAmp);
+    st_stereo_block(m, s, ol, orr, q, kInc);
+    ok = ok && std::memcmp(rl, ol, sizeof rl) == 0 && std::memcmp(rr, orr, sizeof rr) == 0;
+    if (!ok) {
+      std::fprintf(stderr, "voice_stereo_table: a stereo-voice kernel differs from its reference (round %u)\n", round);
+      std::exit(1);
+    }
+  }
+  bench_st::Pos p{0u, 0u};
+  const auto advance = [&] {
+    if (p.idx + kMaxRead >= kFrames) {
+      p = bench_st::Pos{0u, 0u};
+    }
+  };
+  const double mono = best_ns(15, 4000, [&] {
+    advance();
+    st_mono_block(m, ol, p, kInc);
+  });
+  g_sink += ol[0];
+  p = bench_st::Pos{0u, 0u};
+  const double stereo = best_ns(15, 4000, [&] {
+    advance();
+    st_stereo_block(m, s, ol, orr, p, kInc);
+  });
+  g_sink += ol[0] + orr[0];
+  std::printf("\nstereo voice loop (OS-STEREO step 1): ns a block of 64 frames, kernel against kernel (host; the M4F cycles are `diag bench voice_st`)\n");
+  std::printf("  %-48s %10s %12s\n", "case", "host ns", "vs mono");
+  std::printf("  %-48s %10.0f %11.2fx\n", "mono: M to the output (the plain voice's loop)", mono, 1.0);
+  std::printf("  %-48s %10.0f %11.2fx\n", "stereo: M and S, one position, L = M+S, R = M-S", stereo, stereo / mono);
+}
+
 int main(int argc, char** argv) {
   for (int i = 1; i < argc; ++i) {
     g_smoke = g_smoke || std::strcmp(argv[i], "--smoke") == 0;
@@ -750,6 +816,7 @@ int main(int argc, char** argv) {
   tracker_fx_table();
   voice_lfo_table();
   voice_reverse_table();
+  voice_stereo_table();
   voice_lfo_dest_table();
   //                    name                     tracks ramping taps   centre sends  meters
   stage_table(Scenario{"input monitor only",          0,     false,  false, false, false, true});

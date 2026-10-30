@@ -241,3 +241,5 @@ Instrument file: a saved instrument, with the extension `.pti`, in the `instrume
 Euclid rhythm: a rhythm of E hits spread as evenly as possible over the steps of a track, with gaps that differ by at most one. The FILL dialog writes it with TYPE **EUCLID**.
 
 Ramp: values that move in a straight line from one end to the other, such as a volume from 127 down to 0 over a track. The FILL dialog writes it with MODE **RAMP**.
+
+Voice: one sound that is playing. Each note that sounds uses one voice, and the unit has a fixed number of voices.

@@ -20,6 +20,7 @@
 #include "internal.h"
 #include "regs.h"
 
+#include <o3os/audio/bench_stereo.h>
 #include <o3os/audio/graph.h>
 #include <o3os/audio/kernels.h>
 #include <o3os/audio/loop_mix.h>
@@ -448,6 +449,95 @@ void run_voice(const Out& out, std::uint32_t blocks, VoiceMode mode) noexcept {
   t.str("slot ").dec(original + 1u).str(", ").dec(best).str(" samples");
   out.stat_checked(name, st, note, peak, "a silent sample, or a dead voice path");
 }
+
+// `voice_st` (OS-STEREO step 1): what a stereo voice's sample loop costs against a mono one, kernel against kernel. Not the pool: the two loops of audio/bench_stereo.h run on their own, on
+// planar int16 blocks of the `ui_cache` SDRAM (read as the sample arena is: through the alias, as production does, or the variant's address), one position, the plain voice's interpolation
+// (VoicePool::fast_body) and a constant amplitude. A block is 64 frames, the step 1.07 (a fractional step, so that the interpolation works), the position moving on from block to block through
+// 32768 frames of each channel. The kernels are in FLASH (the design's placement for the stereo loop). The rows:
+//   voice_mono       one block M: M to the output (the plain voice's loop)
+//   voice_st         two blocks M and S, one position: L = M + S and R = M - S
+// and the line `BENCH voice_st_eq OK|FAIL`: both write what bench_stereo.h's plain reference writes, sample for sample, over 64 blocks. The existing `voice` row (the whole pool, one voice)
+// stays the reference for the pool's overhead (it runs the loop from SRAM_L, so `voice` against `voice_mono` also shows what the placement is worth). A `.ramfunc_l` copy of the two kernels
+// was tried and does not link: it is +312 B of hot code and the bench image has no room (ld: "hot code exceeds its SRAM_L budget"). The delta voice_st - voice_mono is the cost of the second
+// channel; it decides the cap on stereo voices (docs/specs/OS-STEREO.md).
+namespace voice_st {
+
+using audio::bench_st::Pos;
+constexpr std::uint32_t kFrames = 32768;                         // frames of each channel
+constexpr std::uint32_t kSideOffset = kFrames * 2u;              // S follows M, 64 KiB on
+constexpr std::uint64_t kInc = (std::uint64_t{1} << 32) + 0x12345678u;  // 1.07 frames a frame
+constexpr std::uint32_t kMaxRead = (kBlock * 2u) + 2u;           // frames a block can touch at most: 64 x 2 (a step under 2) plus the neighbour
+constexpr std::int32_t kAmp = 10066329;                          // 0.6 in Q24 (the usual voice level)
+static_assert(kSideOffset * 2u <= mem::kUiCacheSize && kSideOffset % 8u == 0u, "M and S fit the ui_cache region, S on a doubleword");
+static_assert(kInc < (std::uint64_t{2} << 32), "a step under 2 frames: kMaxRead holds");
+static_assert(mem::kUiCacheBase % 8u == 0u, "the blocks start on a doubleword");
+
+// Two kernels, in flash. The bodies are audio::bench_st::resample (always_inline).
+__attribute__((noinline)) void mono_flash(const std::int16_t* m, std::int16_t* ol, std::uint32_t n, Pos& p) noexcept { audio::bench_st::resample<false>(m, nullptr, ol, nullptr, n, p, kInc, kAmp); }
+__attribute__((noinline)) void st_flash(const std::int16_t* m, const std::int16_t* s, std::int16_t* ol, std::int16_t* orr, std::uint32_t n, Pos& p) noexcept {
+  audio::bench_st::resample<true>(m, s, ol, orr, n, p, kInc, kAmp);
+}
+
+void run(const Out& out, std::uint32_t blocks) noexcept {
+  if (out.variant == Variant::Sram) {
+    out.na("voice_st", "the blocks are in the SDRAM");
+    return;
+  }
+  if (out.variant == Variant::Alias && !alias_enabled()) {
+    out.na("voice_st", "the SDRAM alias is not enabled in this image");
+    return;
+  }
+  if (!stack_room(2048u)) {
+    out.na("voice_st", "not enough stack");
+    return;
+  }
+  std::int16_t* const m = reinterpret_cast<std::int16_t*>(scratch_base(out));
+  std::int16_t* const s = reinterpret_cast<std::int16_t*>(scratch_base(out) + kSideOffset);
+  Noise n;
+  for (std::uint32_t i = 0; i < kFrames; ++i) {
+    m[i] = static_cast<std::int16_t>(n.next() / 2);  // half scale: M + S and M - S stay inside 16 bits, as (L + R) / 2 and (L - R) / 2 of a 16-bit file do
+    s[i] = static_cast<std::int16_t>(n.next() / 2);
+  }
+  alignas(8) std::int16_t ol[kBlock];
+  alignas(8) std::int16_t orr[kBlock];
+  Pos p{0u, 0u};
+  const auto rewind = [&] {  // the next block stays inside the data: back to the start when it would not (untimed)
+    if (p.idx + kMaxRead >= kFrames) {
+      p = Pos{0u, 0u};
+    }
+  };
+  const auto nop = [] {};
+  const auto row = [&](const char* name, auto&& body, const char* note) {
+    p = Pos{0u, 0u};
+    out.stat(name, measure(blocks, rewind, body, nop), note);
+  };
+  row("voice_mono", [&] { mono_flash(m, ol, kBlock, p); }, "M only, flash, 64 frames");
+  row("voice_st", [&] { st_flash(m, s, ol, orr, kBlock, p); }, "M and S, flash, 64 frames");
+  {
+    bool ok = true;
+    alignas(8) std::int16_t rl[kBlock];
+    alignas(8) std::int16_t rr[kBlock];
+    alignas(8) std::int16_t xl[kBlock];
+    alignas(8) std::int16_t xr[kBlock];
+    for (unsigned round = 0; round < 64u && ok; ++round) {
+      const Pos at{(round * 397u) % (kFrames - kMaxRead), (round * 0x9E3779B9u)};
+      Pos q = at;
+      audio::bench_st::reference(m, nullptr, rl, nullptr, kBlock, at, kInc, kAmp);
+      mono_flash(m, xl, kBlock, q);
+      ok = std::memcmp(rl, xl, sizeof rl) == 0;
+      audio::bench_st::reference(m, s, rl, rr, kBlock, at, kInc, kAmp);
+      q = at;
+      st_flash(m, s, xl, xr, kBlock, q);
+      ok = ok && std::memcmp(rl, xl, sizeof rl) == 0 && std::memcmp(rr, xr, sizeof rr) == 0;
+    }
+    char line[96];
+    audio::diag::Text t(line, sizeof line);
+    t.str("BENCH voice_st_eq ").str(ok ? "OK" : "FAIL");
+    out.line(line, t.size());
+  }
+}
+
+}  // namespace voice_st
 
 // `burst` (OS-ODD11 UTAIL): the cost of a pattern step in the scene of the over-budget tail (cpu_mute_ab: 12 voices on the instrument filter, nothing muted), split in four lines on the LIVE pool
 // (it REFUSES while something sounds: stop the transport; nothing muted, so that no gate is engaged). The code under test is the one a step runs, not a kernel:
@@ -1484,6 +1574,7 @@ void run(Kernel kernel, std::uint32_t blocks, Variant variant, Emit emit, void* 
     case Kernel::VoiceBoth: run_voice(out, blocks, VoiceMode::Both); break;
     case Kernel::VoiceRev: run_voice(out, blocks, VoiceMode::Rev); break;
     case Kernel::VoicePan: run_voice(out, blocks, VoiceMode::Pan); break;
+    case Kernel::VoiceSt: voice_st::run(out, blocks); break;
     case Kernel::Tb303: run_tb303(out, blocks, kBlock); break;
     case Kernel::Tb303x128: run_tb303(out, blocks, 2u * kBlock); break;
     case Kernel::Delay: run_delay(out, blocks); break;

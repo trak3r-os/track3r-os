@@ -1403,6 +1403,20 @@ The choice is not saved with the project. It lasts until the unit is switched of
 
 (Picture: Sample load, stereo file: the cursor is on a file tagged ST, and F8 reads CH MIX. Press it to change the channel.)
 
+### Play a stereo file in stereo
+
+An instrument holds one channel, so a stereo file cannot play in stereo from one instrument. You can get the stereo image with two instruments and two tracks. Stereo instruments are planned, not built yet.
+
+Start on Sample load. Put the cursor on a stereo file.
+
+1. Press `F8` until it reads **CH LEFT**. Press `F1` (**LOAD**) to load the file into one instrument.
+2. Pick a second free instrument as the target (see above). Press `F8` until it reads **CH RIGHT**, then press `F1` to load the same file.
+3. Press `Pattern`. Write the notes on one track with the first instrument. Select the steps and press `Copy`, then move to another track and press `Shift` + `Copy` to paste them. Set the **Instr** column of the second track to the second instrument.
+4. Press `Master`, then `F1` (**MIXER**). Set the **PAN** of the first track to 0 and the **PAN** of the second to 100 (see [Mixer](mixer.md)). Leave the pan of both instruments at the centre: the instrument's pan moves the track's, so an instrument off the centre is not hard left or right.
+5. Press `Play`.
+
+You should hear the left channel from the left output and the right channel from the right output. Each note uses two voices, because each track plays one instrument. A voice is one playing sound; the unit has a fixed number of them (see the [glossary](glossary.md)). Not yet checked on the unit.
+
 ## Keys on this screen
 
 The key row, and the row drawn while `Shift` is held. `-` means the key does nothing.
@@ -3293,6 +3307,8 @@ Instrument file: a saved instrument, with the extension `.pti`, in the `instrume
 Euclid rhythm: a rhythm of E hits spread as evenly as possible over the steps of a track, with gaps that differ by at most one. The FILL dialog writes it with TYPE **EUCLID**.
 
 Ramp: values that move in a straight line from one end to the other, such as a volume from 127 down to 0 over a track. The FILL dialog writes it with MODE **RAMP**.
+
+Voice: one sound that is playing. Each note that sounds uses one voice, and the unit has a fixed number of voices.
 
 ---
 

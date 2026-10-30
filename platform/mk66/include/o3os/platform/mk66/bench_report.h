@@ -19,7 +19,7 @@
 
 namespace o3os::platform::mk66::bench {
 
-enum class Kernel : std::uint8_t { Voice, VoiceFilter, VoiceDrive, VoiceCrush, VoiceBoth, VoiceRev, VoicePan, Tb303, Tb303x128, Delay, Reverb, ReverbFull, Limiter, LimiterQuiet, Strips, Stages, Mem, Worst, Kernels, Cpuopt, Looper, Disk, Burst, DjMaster, Count };
+enum class Kernel : std::uint8_t { Voice, VoiceFilter, VoiceDrive, VoiceCrush, VoiceBoth, VoiceRev, VoicePan, VoiceSt, Tb303, Tb303x128, Delay, Reverb, ReverbFull, Limiter, LimiterQuiet, Strips, Stages, Mem, Worst, Kernels, Cpuopt, Looper, Disk, Burst, DjMaster, Count };
 
 struct KernelInfo {
   const char* name;  // lower case, digits and '_'; the argument of `bench`
@@ -34,6 +34,7 @@ inline constexpr KernelInfo kKernelInfo[] = {
     {"voice_odbit", "one sampler voice with overdrive 100 and 8 bits (OS-IFX1), a block"},
     {"voice_rev", "one sampler voice played backward (PLAYBACK, OS-PERF-CPU2), a block"},
     {"voice_pan", "one sampler voice with a pan LFO (OS-PERF-CPU2), a block"},
+    {"voice_st", "OS-STEREO: voice_mono and voice_st rows (sample loop, in flash), equality line"},
     {"tb303", "one TB-303 module instance, a block (mod load tb303; mod bind 1 tb303)"},
     {"tb303_128", "the same TB-303 instance asked for 128 frames in one call (OS-303PERF, E2)"},
     {"delay", "SND A delay, stereo taps, feedback 70, a block"},

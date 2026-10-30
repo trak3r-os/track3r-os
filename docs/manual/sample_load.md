@@ -142,6 +142,21 @@ The choice is not saved with the project. It lasts until the unit is switched of
 
 ![Sample load, stereo file: the cursor is on a file tagged ST, and F8 reads CH MIX. Press it to change the channel.](img/sample_load_stereo.png)
 
+### Play a stereo file in stereo
+<!-- sync: src=app/include/o3os/app/sample_load_view.h qa=QA-FIL-120,QA-FIL-121,QA-FIL-122,QA-FIL-123,QA-FIL-124 -->
+
+An instrument holds one channel, so a stereo file cannot play in stereo from one instrument. You can get the stereo image with two instruments and two tracks. Stereo instruments are planned, not built yet.
+
+Start on Sample load. Put the cursor on a stereo file.
+
+1. Press `F8` until it reads **CH LEFT**. Press `F1` (**LOAD**) to load the file into one instrument. <!-- QA-FIL-120 -->
+2. Pick a second free instrument as the target (see above). Press `F8` until it reads **CH RIGHT**, then press `F1` to load the same file. <!-- QA-FIL-121 -->
+3. Press `Pattern`. Write the notes on one track with the first instrument. Select the steps and press `Copy`, then move to another track and press `Shift` + `Copy` to paste them. Set the **Instr** column of the second track to the second instrument. <!-- QA-FIL-122 -->
+4. Press `Master`, then `F1` (**MIXER**). Set the **PAN** of the first track to 0 and the **PAN** of the second to 100 (see [Mixer](mixer.md)). Leave the pan of both instruments at the centre: the instrument's pan moves the track's, so an instrument off the centre is not hard left or right. <!-- QA-FIL-123 -->
+5. Press `Play`. <!-- QA-FIL-124 -->
+
+You should hear the left channel from the left output and the right channel from the right output. Each note uses two voices, because each track plays one instrument. A voice is one playing sound; the unit has a fixed number of them (see the [glossary](glossary.md)). Not yet checked on the unit.
+
 ## Keys on this screen
 
 <!-- manual-tables: keys screen=sample_load -->
