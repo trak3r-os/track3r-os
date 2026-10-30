@@ -33,6 +33,12 @@ The sample is stored as its mid M = (L + R) / 2, the same buffer a mono load mak
 2. **`voice_st` (bench only):** a new `VoiceMode::Stereo` row in platform/mk66/src/bench.cpp (`run_voice`, :322-324, next to `voice` and `voice_pan`) and a matching host row in tests/bench/audio_bench.cpp. It renders one voice reading M and S (two int16 blocks in the bench's scratch, planar) with the plain voice's interpolation and one phase, writes L and R, and is compiled only when `O3OS_BENCH` is on: the release image's flash and `.ramfunc_l` do not change. Rows at 44.1 kHz: `voice` and `voice_st` with the kernel in flash; one row with it in `.ramfunc_l`, if the bench can place it there without touching the release map, to show what the placement is worth.
 3. **Output:** the per-voice cycles of `voice_st` against `voice` on the unit (tester, bench image through `fw-gate-check`), recorded in docs/architecture/cpu-budget.md. They decide whether the cap of 4 holds and how step 2 is cut.
 
+## Step 1 outcome (2026-10-30)
+
+Merged (dev 28b7b355). On the unit the stereo loop costs 2.15x the mono one, +2.1k cycles a 64-frame block, about +0.8 pp a stereo voice in flash; the cap of 4 holds (at most about +3.2 pp) (`docs/architecture/cpu-budget.md`, OS-STEREO step 1). Nit for step 2: the console prints `BENCH voice_st_eq OK` with no line feed (`OKBENCH done`).
+
+**Step 2 (Level C, to spec):** the instrument field (version bump, backward-compatible loader, round-trip test, `.pti` export downmix), the side-car S in the arena at load, the stereo voice for the play modes of decision 3 with the cap of 4, the strip's second feed with balance, the mono paths (USB stems, sends) reading M. A risk review before the engineer.
+
 ## Done when (step 1)
 
 The manual section and its QA rows merged; `voice_st` in the bench image only (the release build's sizes unchanged, from the mk66 log); `tools/remote_ci.sh host` and `mk66` green; the unit's `voice` / `voice_st` figures in cpu-budget.md.
