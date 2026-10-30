@@ -25,9 +25,20 @@ Level C (the audio path). Approved by the maintainer on 2026-10-30. Found by OS-
 - **Slice 3 (only with the maintainer's yes): fixed point.** A Q31 SVF (SMMLA) saves about 1k a voice-block [est] but moves the output by 1-2 LSB: new digests (`audio_voice_digest_test` filter, cutoff ADSR / LFO groups; `audio_lfo_equiv_test`; `og_sample_fidelity_test`) and `audio_svf_test`'s oracle bounds. Recorded as an option.
 - Rejected: block-rate coefficients (already so); skipping at the row's neutral end (HP and BP never equal a bypass); skipping silent tails (needs exact-zero state, no help for sounding voices).
 
+## Design rules from the risk review (2026-10-30, folded)
+
+1. Keep the arithmetic text and order of svf.h:130-144 exactly (`0.5f*(x+prev) - lp - d*bp` left-associated, separate float ops, `0.5f*y`, `svf_out`); never `fmaf`. The audio library and bench.cpp build with `-ffp-contract=off` (audio/CMakeLists.txt:58, platform/mk66/CMakeLists.txt:121): keep both.
+2. Slice 1 renames temporaries only (e.g. `lp1 = lp0 + f*bp` instead of an in-place `+=`); the three types' outputs, the `prev = x` placement and the state write-back stay; one template (`hp0` is live only for High, `lp0` only for Low).
+3. Disassemble the `.ramfunc_l` `filter_run` (voices.cpp:1061, `-Os`), not the bench's inlined `svf_run`: different codegen (`cpuopt_eq_svf` and `svf_low` measure the bench copy). Record the `.ramfunc_l` bytes before and after.
+4. **Slice 1b, measured first:** separate `vmul` and `vadd` (an empty asm barrier on the product) instead of the 3-cycle `vmla`: bit-identical (the M4's `vmla` is not fused), 1 cycle each; it may beat slice 2.
+5. No per-function `optimize("O2")` (no precedent; it may refuse to inline the `always_inline` `svf_run`); a per-file flag on voices.cpp would grow all of `.ramfunc_l`. If `-O2` is wanted, `filter_run` moves to its own translation unit and the size delta is checked.
+6. Slice 2 pairs only voices with the same span, the same type and the same `m` null-ness (chunking follows `m`); the rest takes the single path (an odd leftover, the odd_span, gated and `dk` paths). One pair loop is about 150 B: pair one type only (three would be about 450 B, over the 320 B headroom) or stop for a decision. The pairing state is stack-local.
+7. Slice 2 needs a new multi-voice differential test (paired against unpaired: mixed types, different `f` and `d`, `fmod`, an odd count, split spans): the existing digests play one voice.
+8. `cpuopt_eq_svf` runs on the unit only, and the host digests use the magic-number `svf_out`, not `vcvtr`: run the unit check and the qemu digests.
+
 ## Tests
 
-The digests and SVF tests above, unchanged for slices 1 and 2; `cpuopt_eq_svf` on the unit. QA rows `QA-PRF-200..205`.
+Slice 1 and 1b: the digests and SVF tests above unchanged, the qemu digests, `cpuopt_eq_svf` on the unit. Slice 2: also the multi-voice differential test (rule 7). QA rows `QA-PRF-200..205`.
 
 ## Done when
 
