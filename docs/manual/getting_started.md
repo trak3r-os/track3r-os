@@ -44,7 +44,7 @@ A starter zip is not part of this release. If you have one, you unpack it into t
 | In the zip | What it holds |
 |---|---|
 | `Firmware/` | the update file and its checksum |
-| `modules/apps/` | apps for the TOOLS screen. The TB-303, chip and FM instruments are inside the firmware. The apps alone come in `track3r-os-<version>-apps.zip`, in the release `apps-v<version>`. |
+| `modules/apps/` | apps for the TOOLS screen. The TB-303, chip, FM and SID instruments are inside the firmware. The apps alone come in `track3r-os-<version>-apps.zip`, in the release `apps-v<version>`. |
 | `Samples/` | a drum kit and other one-shots |
 | `WTABLE/` | wavetables |
 | `Songs/` | tracker songs for the importers |

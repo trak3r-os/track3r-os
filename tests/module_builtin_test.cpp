@@ -205,8 +205,8 @@ TEST_CASE("built-in: prefers_card is a strict order of module versions, within o
   CHECK(!prefers_card(unversioned, unversioned));                     // two unversioned files: the built-in one stays
 }
 
-TEST_CASE("built-in: the TB-303, chip and FM are version 1.0.0 files of ABI 1.8 (the packer's --version, from the CMake rule; pitch, pages and labels need 1.8)") {
-  NEED(kBuiltinModuleCount == 3u);
+TEST_CASE("built-in: the TB-303, chip, FM and SID are version 1.0.0 files of ABI 1.8 (the packer's --version, from the CMake rule; pitch, pages and labels need 1.8)") {
+  NEED(kBuiltinModuleCount == 4u);
   for (unsigned i = 0; i < kBuiltinModuleCount; ++i) {
     CAPTURE(kBuiltinModules[i].stem);
     const o3m_file_header h = builtin_header(kBuiltinModules[i]);
@@ -281,8 +281,8 @@ TEST_CASE("built-in: cancel() of a running built-in load gives the arenas back a
   CHECK(r.set.count() == 0);
 }
 
-TEST_CASE("built-in: the ENGINE picker lists the TB-303, chip and FM with no card and with an empty modules/ directory, and a card file of the same stem is one entry") {
-  NEED(kBuiltinModuleCount == 3u);
+TEST_CASE("built-in: the ENGINE picker lists the TB-303, chip, FM and SID with no card and with an empty modules/ directory, and a card file of the same stem is one entry") {
+  NEED(kBuiltinModuleCount == 4u);
   static o3os::audio::ModuleVoices voices;
   static o3os::app::ModuleUi ui;
   ModuleSet set;
@@ -297,19 +297,19 @@ TEST_CASE("built-in: the ENGINE picker lists the TB-303, chip and FM with no car
     return out;
   };
   ui.scan_instruments(nullptr);  // no card layer at all
-  CHECK(names() == "chip fm tb303");
+  CHECK(names() == "chip fm sid tb303");
   o3os::test::NullStorage none;
   ui.set_storage(&none);  // a card layer with no card in the slot
   ui.scan_instruments(nullptr);
-  CHECK(names() == "chip fm tb303");
+  CHECK(names() == "chip fm sid tb303");
   Rig r(blob_minor(1).file());  // a mounted card with an empty modules/instruments/
   ui.set_storage(&r.card);
   ui.scan_instruments(nullptr);
-  CHECK(names() == "chip fm tb303");
+  CHECK(names() == "chip fm sid tb303");
   std::ofstream(r.root / "modules" / "instruments" / "tb303.tmod", std::ios::binary) << "x";  // the card's copy (any content: the picker only lists)
   std::ofstream(r.root / "modules" / "instruments" / "acid.tmod", std::ios::binary) << "x";
   ui.scan_instruments(nullptr);
-  CHECK(names() == "acid chip fm tb303");
+  CHECK(names() == "acid chip fm sid tb303");
   CHECK(!set.quarantined("tb303"));
 }
 

@@ -173,15 +173,20 @@ o3m_add_module(chip SOURCES chip/chip.cpp OPT -O2 VERSION 1.0.0)
 o3m_manifest(chip chip/module.json)
 o3m_add_test(chip chip/tests/chip_test.cpp)
 
+# OS-SID: the SID-style voice (written from scratch: saw / triangle / pulse with PWM, 23-bit noise, combined waves, sync and ring, the C64's stepped ADSR; the filter is the next slice). The loops at -O2.
+o3m_add_module(sid SOURCES sid/sid.cpp OPT -O2 VERSION 1.0.0)
+o3m_manifest(sid sid/module.json)
+o3m_add_test(sid sid/tests/sid_test.cpp)
+
 # OS-012c: the FM engine (four operators, eight algorithms, written from scratch). The audio loop at -O2.
 o3m_add_module(fm SOURCES fm/fm.cpp OPT -O2 VERSION 1.0.0)
 o3m_manifest(fm fm/module.json)
 o3m_add_test(fm fm/tests/fm_test.cpp)
 
-# OS-012d: the built-in modules. The packed .tmod files of the TB-303, chip and FM go into a generated table (tools/o3m_embed.py: the bytes as const arrays, flash on the MK66) that
+# OS-012d: the built-in modules. The packed .tmod files of the TB-303, chip, FM and SID go into a generated table (tools/o3m_embed.py: the bytes as const arrays, flash on the MK66) that
 # the images link (o3m_builtin) and hand to module::ModuleSet::set_builtins; module/builtin.h says how they meet the card's copies. The notices the code in them requires
 # (builtin/NOTICES.txt and Open303's licence text) are in the same file as a string. Without the cross compiler there are no .tmod files: the table is empty and the tests that need it say so.
-set(O3M_BUILTIN_STEMS tb303 chip fm)
+set(O3M_BUILTIN_STEMS tb303 chip fm sid)
 set(O3M_BUILTIN_CPP "${CMAKE_CURRENT_BINARY_DIR}/builtin_modules.cpp")
 set(O3M_BUILTIN_NOTICES builtin/NOTICES.txt tb303/LICENSE-Open303.txt)
 set(_embed_args "")
@@ -206,7 +211,7 @@ add_library(o3m_builtin STATIC "${O3M_BUILTIN_CPP}")
 target_link_libraries(o3m_builtin PUBLIC module)
 o3os_strict_warnings(o3m_builtin)
 if(O3M_ARM_CXX)
-  add_dependencies(o3m_builtin o3m_tb303_tmod o3m_chip_tmod o3m_fm_tmod)
+  add_dependencies(o3m_builtin o3m_tb303_tmod o3m_chip_tmod o3m_fm_tmod o3m_sid_tmod)
 endif()
 
 # OS-012b: the example app (ABI 1.1): input and a view, under /modules/apps on the card.

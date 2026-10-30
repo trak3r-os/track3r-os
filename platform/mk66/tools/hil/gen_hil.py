@@ -808,7 +808,7 @@ mods = [
     CMD("mod notice", expect=r"(?i)licen[cs]e|copyright|MIT|GPL|BSD", soft=True, note="(soft: the notices of the built-in modules)"),
 ]
 # Free slots of t-v16 (instruments 33..35): a console bind on a slot that holds a project instrument (t-v16's 49..64 are MIDI) is refused (OS-BUGS4: the gate follows the project)
-for slot, stem, note_no in ((33, "tb303", 36), (34, "chip", 48), (35, "fm", 48)):
+for slot, stem, note_no in ((33, "tb303", 36), (34, "chip", 48), (35, "fm", 48), (36, "sid", 48)):
     mods += [
         SAY("built-in module %s on instrument %d" % (stem, slot)),
         CMD("mod load %s" % stem, expect=r"mod: %s: (started|already loaded)" % stem),
@@ -836,8 +836,8 @@ mods += [
     CMD("cpu", expect=r"underrun 0\b"),
     K("pattern", gap=0.4),
 ]
-add("modules", "built-in modules: `mod` listing, load tb303 / chip / fm, bind each to a free instrument (33..35), `mod note` sounds on track 16 (meters rise), `mod off`, the engine picker opens", mods,
-    finally_=clear_overlays() + [K("pattern", gap=0.4), CMD("mod off 33"), CMD("mod off 34"), CMD("mod off 35"), RUN("_stop")])
+add("modules", "built-in modules: `mod` listing, load tb303 / chip / fm / sid, bind each to a free instrument (33..36), `mod note` sounds on track 16 (meters rise), `mod off`, the engine picker opens", mods,
+    finally_=clear_overlays() + [K("pattern", gap=0.4), CMD("mod off 33"), CMD("mod off 34"), CMD("mod off 35"), CMD("mod off 36"), RUN("_stop")])
 
 # ======================================================================================================================================
 # 11. sample_edit_undo

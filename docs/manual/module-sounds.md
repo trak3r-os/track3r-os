@@ -7,7 +7,7 @@ Only the parameters this version adds are written here. Modules are not in the s
 
 Status: draft
 
-The TB-303 has a second page, **MODS**, with a tuning, an octave shift, an accent threshold, filter tracking and an accent decay. The FM has sixteen algorithms instead of eight, and a Detune that reaches a whole octave either way. The Chip's wave and duty can now follow a MIDI controller. All of this is new in track3r-os. A project saved earlier sounds the same, because every new value starts where the old sound is.
+The TB-303 has a second page, **MODS**, with a tuning, an octave shift, an accent threshold, filter tracking and an accent decay. The FM has sixteen algorithms instead of eight, and a Detune that reaches a whole octave either way. The Chip's wave and duty can now follow a MIDI controller. SID is a new sound in the same family: a chip voice with its own filter on every track. All of this is new in track3r-os. A project saved earlier sounds the same, because every new value starts where the old sound is.
 
 ## What it is for
 
@@ -60,6 +60,39 @@ The FM has four operators, which are four sine waves. A modulator is an operator
 
 **WAVE** and **DUTY** can now be bound to a MIDI controller with Learn (`Vol` and `Fx` together, see [The panel](panel.md)). Turning the controller steps through the four waves or the four duties. Before, these two rows refused Learn. <!-- QA-MOD-141 -->
 
+### SID: a chip voice with four pages
+<!-- sync: src=modules/sid/module.json,modules/sid/sid_dsp.h qa=QA-MOD-210,QA-MOD-216,QA-MOD-217,QA-MOD-218 -->
+
+SID is a voice in the style of the Commodore 64's sound chip. It is an imitation, not a copy of the chip. Pick it with `F1` (**ENGINE**) on the Instrument screen. It plays one note at a time, so play chords on several tracks. <!-- QA-MOD-210 -->
+
+It has four pages, one per `F` key under the rows:
+
+| Page | What is on it |
+|---|---|
+| **OSC** | the wave (saw, triangle, pulse, noise and four combined waves), the pulse width and its slow movement (**PWM DEPTH**, **PWM RATE**), **SYNC**, **RING**, **MOD PITCH**, **MOD FINE** |
+| **ENV** | **ATTACK**, **DECAY**, **SUSTAIN**, **RELEASE** (sixteen steps each, the label shows the time), volume, velocity, transpose and fine tune |
+| **FILTER** | **MODE**, **CUTOFF**, **RESONANCE**, **KEY TRACK**, **ENV AMOUNT**, **MODEL**, **DRIVE** |
+| **PITCH** | **SWEEP**, vibrato and a three-note arpeggio |
+
+<!-- QA-MOD-218 -->
+The three views under the rows show the wave, the envelope and the filter's response.
+
+### SID: sweep the sync, the pitch stays
+
+**SYNC** restarts the main oscillator every time a second oscillator completes a cycle. The second oscillator always plays the key you press, so the pitch you hear is the key's. **MOD PITCH** sets how far above or below the key the main oscillator runs. Hold a note and turn **MOD PITCH** from 0 to +24: the pitch does not move and the tone sweeps from mellow to sharp and buzzy. That is the classic sync lead. A modulation source on **MOD PITCH** does the same sweep for you. <!-- QA-MOD-216 -->
+
+With **SYNC** off, **MOD PITCH** sets the pitch of the second oscillator for **RING**. Ring makes a triangle sound like a bell, and it only affects the triangle. <!-- QA-MOD-217 -->
+
+### SID: the filter, one on every track
+
+The filter mixes a low pass, a band pass and a high pass. **MODE** picks the mix: **OFF**, **LP**, **BP**, **HP**, **NOTCH**, **LP+BP**, **BP+HP** or **ALL**. With **OFF** the filter is skipped and costs nothing. <!-- QA-MOD-226 -->
+
+- **CUTOFF** is where the filter works, from dull to open. **KEY TRACK** moves it with the key (100 % keeps the same tone on every note). **ENV AMOUNT** opens it with the envelope, or closes it when it is negative. <!-- QA-MOD-227 QA-MOD-229 QA-MOD-230 -->
+- **RESONANCE** (0 to 15) adds a peak at the cutoff. At 15 it whistles, and the level stays under control. <!-- QA-MOD-228 -->
+- **MODEL** picks 6581 or 8580. The 6581 has a rounder curve, saturates earlier and sounds grittier. The 8580 is cleaner and brighter. **DRIVE** pushes the sound into the saturation before the filter. <!-- QA-MOD-231 QA-MOD-232 -->
+
+The real chip has one filter shared by its three voices. Here every track has its own filter. After you release a key, a resonant filter rings on for a moment. <!-- QA-MOD-234 -->
+
 Not yet checked on the unit: everything in this chapter.
 
 ## Try it
@@ -87,12 +120,20 @@ You should hear the high notes open up and the low notes close in.
 | FM | **ALGORITHM** | 1 to 16 (was 1 to 8) | 5 | QA-MOD-149 |
 | FM | **DETUNE** (each operator) | -1200 to 1200 cents (was -100 to 100) | 0, 0, 4, 0 | QA-MOD-150 |
 | Chip | **WAVE**, **DUTY** | can be learned | as before | QA-MOD-141 |
+| SID | **MODE** | OFF, LP, BP, HP, NOTCH, LP+BP, BP+HP, ALL | OFF | QA-MOD-226 |
+| SID | **CUTOFF** | 0 to 100 % | 50 | QA-MOD-227 |
+| SID | **RESONANCE** | 0 to 15 | 0 | QA-MOD-228 |
+| SID | **KEY TRACK** | 0 to 100 % | 0 | QA-MOD-229 |
+| SID | **ENV AMOUNT** | -100 to 100 % | 0 | QA-MOD-230 |
+| SID | **MODEL**, **DRIVE** | 6581 or 8580, 0 to 100 % | 6581, 0 | QA-MOD-231 |
 
 ## Good to know
 
 - The five TB-303 values act on the next note, not on a note that is sounding. **ACC DECAY** acts on the next accented note. <!-- QA-MOD-145 QA-MOD-148 -->
 - Transposing a note past the top or the bottom of the MIDI range holds it at the end of the range. <!-- QA-MOD-145 -->
 - None of the new TB-303 values can be driven by the modulation matrix. <!-- QA-MOD-144 -->
+- SID's **CUTOFF** can be driven by the modulation matrix, so a controller or an LFO can sweep the filter. The other filter values cannot. <!-- QA-MOD-227 -->
+- **MOD PITCH** never changes the pitch you hear. With **SYNC** on it changes the tone, with **SYNC** off it matters only for **RING**. <!-- QA-MOD-216 QA-MOD-217 -->
 - A MIDI controller bound to **DETUNE** sweeps the whole 2400 cents. Hold `Shift` while turning the encoder for steps of 10 cents. <!-- QA-MOD-150 -->
 
 ## See also

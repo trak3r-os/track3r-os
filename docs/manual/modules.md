@@ -6,7 +6,7 @@ Chapter: Modules (deep). Rules: .claude/skills/manual-writing/SKILL.md. Sources:
 
 Status: draft
 
-Modules are files on the card that add to the OS without a firmware update: sound engines for instrument slots, and apps that edit the pattern or show you what the unit is doing. The TB-303, Chip and FM engines are built in and need no card; every other module is a `.tmod` file. The **MODULES** screen lists the apps. Module instruments and apps are new in track3r-os. <!-- og: new -->
+Modules are files on the card that add to the OS without a firmware update: sound engines for instrument slots, and apps that edit the pattern or show you what the unit is doing. The TB-303, Chip, FM and SID engines are built in and need no card; every other module is a `.tmod` file. The **MODULES** screen lists the apps. Module instruments and apps are new in track3r-os. <!-- og: new -->
 
 ## What it is for
 
@@ -153,7 +153,7 @@ Back up the card first. See [Installing track3r-os](install.md).
 2. Put the card in the unit.
 3. For an app, press `F2` (**RESCAN**) on the Modules screen. <!-- QA-MOD-001 -->
 
-**RESCAN** reads the apps again, and the strip says how many it found (**READ AGAIN: 3 APPS**). It does not touch the engine picker. The picker reads the card each time you open it, so a new instrument module shows there without a rescan. The TB-303, Chip and FM are built into the firmware and are listed with no card.
+**RESCAN** reads the apps again, and the strip says how many it found (**READ AGAIN: 3 APPS**). It does not touch the engine picker. The picker reads the card each time you open it, so a new instrument module shows there without a rescan. The TB-303, Chip, FM and SID are built into the firmware and are listed with no card.
 
 ## Keys on this screen
 
@@ -209,6 +209,6 @@ Not yet checked on the unit: the picker, the pages, the value names, the apps' k
 ## See also
 
 - [Installing track3r-os](install.md): backing up the card and installing an image.
-- [TB-303, FM and Chip: new parameters](module-sounds.md): what the new values of the three built-in sounds do.
+- [TB-303, FM and Chip: new parameters](module-sounds.md): what the new values of the three older built-in sounds do, and the new SID sound.
 - [Step FX on module instruments](module-instrument-fx.md): which FX a module instrument obeys.
 - [The panel](panel.md): where the keys are on the unit.

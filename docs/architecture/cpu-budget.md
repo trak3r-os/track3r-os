@@ -25,7 +25,7 @@ Units: points = percent of one render block (64 frames at 689 Hz, about 261k cyc
 - The rest of the audio library is `-Os` with `-ffp-contract=off` (`audio/CMakeLists.txt:36,48`).
 - Already done: idle skips for delay and reverb, sends at 0 skipped per strip, silent strips settle (`audio/src/graph.cpp:588-640`); a check-free sampler loop; float SVF with coefficients every 16 samples; no double or libm on the render path (`-Wdouble-promotion`, `-fsingle-precision-constant`).
 - Each live strip copies its feed block before sends and pan (`graph.cpp:622`); mixer SIMD uses ssub16/sel/pkhbt/ssat, no SMLAD.
-- SRAM_L hot code has 864 B left (27 KiB budget); the module slab is 14 KiB with about 8 KiB used by the three built-in hot parts and scratch [the study's count].
+- SRAM_L hot code has 864 B left (27 KiB budget); the module slab is 14 KiB with about 8 KiB used by the three built-in hot parts and scratch [the study's count; SID, the fourth, adds its hot part, OS-SID: the slab net of the voices' 1,280 B of output blocks is 13,056 B].
 
 ## 3. Ranked optimisations
 
@@ -384,6 +384,22 @@ The HIPASS 90 and BANDPASS 70 rows cost +18.8k and +18.4k cycles a block, all in
 
 - `diag bench cpuopt` rows moved by less than 30 cycles; `cpuopt_eq_svf` and `cpuopt_eq_svf_span` OK in 3 of 3; the Dense8 export byte-identical; 0 underruns.
 - Reading: the alignment of the loop heads is not the cause of the BANDPASS gap; the in-voice cost moves with the code placement of `filter_run` and its neighbours, which the flash bench cannot show. The three rows now cost the same (about 3.0k a voice-block), which suggests the hpbp.1 HIPASS gain was partly a placement accident too. **Open research question**; a `.ramfunc_l` bench row (spec, slice 1c) would be the tool to study it.
+
+## SID instrument measured on the unit (OS-SID, 2026-10-30)
+
+Source: `build-images/v1.0.1-sid.1/REPORT.md` (tester, not in git), image `v1.0.1-sid.1` (feat/OS-SID 1bba2a7b; the later review fold changes no DSP cost). Idle floor 11.2 %. `diag mod`: sid 4,448 B, tb303 3,520, chip 2,096, fm 1,952 in the slab, 12,016 of 13,056 B (92 %), the same after a three-track song. 0 underruns in every window.
+
+| One held voice | Cycles a block | % of a block |
+|---|---|---|
+| Chip (reference) | 7.2k | 2.7 |
+| SID SAW / TRIANGLE / NOISE | 6.8k / 7.1k / 5.6k | 2.6 / 2.7 / 2.1 |
+| SID PULSE (PWM 50) / PULSE+SAW | 8.6k / 9.3k | 3.3 / 3.5 |
+| SID PULSE, filter LP res 8 / BP | 13.5k / 13.4k | 5.1 / 5.1 |
+| SID SAW, Sync + Ring, filter LP | 12.5k | 4.7 |
+
+- The filter adds about 4.8k cycles a voice-block (1.8 %). S8 (at most 5 % a voice with the filter, stop above 6 %) holds.
+- Songs on the sequencer path: one SID track 18.5 % mean (5.1 % a voice); three tracks 29.8 % mean, worst 40.5 %; eight tracks 56.6 % mean, worst 73.8 %. In the songs the first track costs about 2k more than the others (13.4k against 11.2k): **open research question**. The other tracks cost 4.2 to 4.7 %.
+- Eight SID tracks fill `kMaxModuleInstances` (8), so no other module fits beside them; after a cold Play the governor drops 7 notes in the first 15 to 30 s (`CPU_FULL`), then all eight sound with no drops.
 
 ## Perform arms measured on the final candidate (fqa.15, 2026-10-25)
 

@@ -796,7 +796,7 @@ void make_modules() noexcept {
   hooks.enter = &stamp_module;
   hooks.log = &module_log;
   m->voices.set_hooks(hooks);
-  m->set.set_builtins(module::kBuiltinModules, module::kBuiltinModuleCount);  // OS-012d: the TB-303, chip and FM, bytes in flash, loaded like a card's file (module/builtin.h)
+  m->set.set_builtins(module::kBuiltinModules, module::kBuiltinModuleCount);  // OS-012d: the TB-303, chip, FM and SID, bytes in flash, loaded like a card's file (module/builtin.h)
   m->ui.attach(m->set, m->loader, m->voices);  // OS-012b
   m->ui.set_storage(&storage::device::storage());
   m->ui.set_sync(&sync_code);

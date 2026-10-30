@@ -165,12 +165,12 @@ Heard hear(const char* stem, unsigned note, unsigned track) {
 constexpr struct {
   const char* stem;
   unsigned note;
-} kModules[] = {{"tb303", 36}, {"chip", 60}, {"fm", 60}};
+} kModules[] = {{"tb303", 36}, {"chip", 60}, {"fm", 60}, {"sid", 60}};
 
 }  // namespace
 
 TEST_CASE("module chain: each built-in module, played by audition() on the audition track (16) as `mod note` does, is audible at the engine's output") {
-  NEED(module::kBuiltinModuleCount == 3u);
+  NEED(module::kBuiltinModuleCount == 4u);
   CHECK(audio::kAuditionTrack == 15u);  // track 16: the spare strip, outside the twelve of a new project
   for (const auto& k : kModules) {
     CAPTURE(k.stem);
@@ -188,7 +188,7 @@ TEST_CASE("module chain: each built-in module, played by audition() on the audit
 }
 
 TEST_CASE("module chain: the same through an ordinary track (4): the OS-PERF3 placement of the module state and voices changes nothing the render makes") {
-  NEED(module::kBuiltinModuleCount == 3u);
+  NEED(module::kBuiltinModuleCount == 4u);
   for (const auto& k : kModules) {
     CAPTURE(k.stem);
     const Heard h = hear(k.stem, k.note, 3u);
@@ -320,7 +320,7 @@ Heard play_pattern(Chain& c, model::Project& project, unsigned track, unsigned b
 }  // namespace
 
 TEST_CASE("module chain: a pattern step of a bound Module instrument (1..48, bound at run time) plays the module through the strip") {
-  NEED(module::kBuiltinModuleCount == 3u);
+  NEED(module::kBuiltinModuleCount == 4u);
   for (const auto& k : kModules) {
     CAPTURE(k.stem);
     Chain c;

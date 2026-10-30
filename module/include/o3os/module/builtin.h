@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-// The modules that travel inside the firmware image (OS-012d, new Community OS behaviour): the TB-303, chip and FM .tmod files, as bytes in flash. A built-in module is the very
+// The modules that travel inside the firmware image (OS-012d, new Community OS behaviour): the TB-303, chip, FM and SID .tmod files, as bytes in flash. A built-in module is the very
 // file the card would hold, loaded by the same ModuleLoader through the same checks (header, relocation, CRC, descriptor), into the same arenas (hot part in the SRAM_L slab,
 // the rest in SDRAM); the only difference is where the bytes are read from. The image's composition root hands the table to ModuleSet::set_builtins(); this layer does not link it.
 //

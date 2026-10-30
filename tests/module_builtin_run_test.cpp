@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// OS-012d: the built-in modules (module/builtin.h): the TB-303, chip and FM .tmod files that are bytes in the image, loaded with NO card by the module loader into
+// OS-012d: the built-in modules (module/builtin.h): the TB-303, chip, FM and SID .tmod files that are bytes in the image, loaded with NO card by the module loader into
 // the arenas it uses for a card's file, and (where this process can call them: the Cortex-M4F, so the QEMU suite) played through audio::ModuleVoices: a note renders
 // audible audio. On the host the module code is Thumb and cannot be called: the loads and the arena accounting are checked, the render is skipped. The card's side of the
 // rule (a newer copy wins, an older or broken one is ignored) is module_builtin_test.cpp.
@@ -56,11 +56,12 @@ struct Rig {
 
 }  // namespace
 
-TEST_CASE("built-in modules: the table has the TB-303, chip and FM, and the image carries Open303's notice") {
-  NEED(module::kBuiltinModuleCount == 3u);
+TEST_CASE("built-in modules: the table has the TB-303, chip, FM and SID, and the image carries Open303's notice") {
+  NEED(module::kBuiltinModuleCount == 4u);
   CHECK(std::strcmp(module::kBuiltinModules[0].stem, "tb303") == 0);
   CHECK(std::strcmp(module::kBuiltinModules[1].stem, "chip") == 0);
   CHECK(std::strcmp(module::kBuiltinModules[2].stem, "fm") == 0);
+  CHECK(std::strcmp(module::kBuiltinModules[3].stem, "sid") == 0);
   CHECK(std::strstr(module::kBuiltinNotices, "Copyright (c) 2009 Robin Schmidt") != nullptr);
   CHECK(std::strstr(module::kBuiltinNotices, "THE SOFTWARE IS PROVIDED \"AS IS\"") != nullptr);
   CHECK(std::strstr(module::kBuiltinNotices, "track3r-os") != nullptr);
@@ -76,7 +77,7 @@ TEST_CASE("built-in modules: the stem matches whatever its case, as FAT and the 
 }
 
 TEST_CASE("built-in modules: each loads with no card, like a card's file, and the slab holds them all (hot budget)") {
-  NEED(module::kBuiltinModuleCount == 3u);
+  NEED(module::kBuiltinModuleCount == 4u);
   Rig r;
   std::uint32_t hot_total = 0;
   for (unsigned i = 0; i < module::kBuiltinModuleCount; ++i) {
@@ -97,11 +98,11 @@ TEST_CASE("built-in modules: each loads with no card, like a card's file, and th
                 static_cast<unsigned>(r.set.hot().size()), static_cast<unsigned>(r.set.hot().size() - r.set.hot().used()));
   }
   CHECK(r.set.hot().used() >= hot_total);
-  CHECK(r.set.count() == 3u);
+  CHECK(r.set.count() == 4u);
 }
 
 TEST_CASE("built-in modules: a note renders audible audio (where the module code can run)") {
-  NEED(module::kBuiltinModuleCount == 3u);
+  NEED(module::kBuiltinModuleCount == 4u);
   Rig r;
   static audio::ModuleVoices mv;
   mv.attach_scratch(g_scratch, sizeof g_scratch);
@@ -109,7 +110,7 @@ TEST_CASE("built-in modules: a note renders audible audio (where the module code
   const struct {
     const char* stem;
     unsigned note;
-  } kNotes[] = {{"tb303", 36}, {"chip", 60}, {"fm", 60}};
+  } kNotes[] = {{"tb303", 36}, {"chip", 60}, {"fm", 60}, {"sid", 60}};
   unsigned slot = 0;
   for (const auto& k : kNotes) {
     CAPTURE(k.stem);
@@ -149,7 +150,7 @@ TEST_CASE("built-in modules: a note renders audible audio (where the module code
 // envelope, the coefficient update every kCtl samples). The unit's cycles are the bench's (`diag bench tb303`); a change to the voice quotes both.
 #if defined(__arm__)
 TEST_CASE("built-in tb303: instructions per block of the module's render alone and through ModuleVoices (QEMU icount)") {
-  NEED(module::kBuiltinModuleCount == 3u);
+  NEED(module::kBuiltinModuleCount == 4u);
   Rig r;
   static audio::ModuleVoices mv;
   mv.attach_scratch(g_scratch, sizeof g_scratch);
@@ -249,7 +250,7 @@ constexpr std::uint32_t kTb303AudioGolden = 0xf910ea28u;
 }  // namespace
 
 TEST_CASE("built-in tb303: the packed module's output is bit for bit the old loop's (golden hash of the ceec397 module, on the Cortex-M4F); the voice's bytes are pinned since ABI 1.8") {
-  NEED(module::kBuiltinModuleCount == 3u);
+  NEED(module::kBuiltinModuleCount == 4u);
   Rig r;
   static audio::ModuleVoices mv;
   NEED(r.load("tb303"));

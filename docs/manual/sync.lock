@@ -66,6 +66,7 @@ module-sounds.md#filter-tracking QA-MOD-147=9f77297bfddd modules/tb303/module.js
 module-sounds.md#fm-sixteen-algorithms-and-a-wide-detune QA-MOD-143=df7e54c26573 QA-MOD-149=e23fd479d7c2 QA-MOD-150=6adfce5f2151 modules/fm/fm_dsp.h=776d4e81f00c modules/fm/module.json=11fda67d7f88
 module-sounds.md#how-it-works QA-MOD-144=a513dba0c974 modules/chip/module.json=df884cfad0d8 modules/fm/module.json=11fda67d7f88 modules/tb303/module.json=522f308c45a9
 module-sounds.md#old-projects-keep-their-sound QA-MOD-144=a513dba0c974 modules/fm/module.json=11fda67d7f88 modules/tb303/module.json=522f308c45a9
+module-sounds.md#sid-a-chip-voice-with-four-pages QA-MOD-210=03ac5749b1e1 QA-MOD-216=b0b67a511cac QA-MOD-217=62cae9e35ba8 QA-MOD-218=092c49a09d4c modules/sid/module.json=2a3533f50aa3 modules/sid/sid_dsp.h=79a7ca621f6f
 module-sounds.md#the-tb-303s-mods-page QA-MOD-144=a513dba0c974 QA-MOD-145=d2ac253ab3a1 modules/tb303/module.json=522f308c45a9 modules/tb303/tb303_dsp.h=6faf0078c8ed
 module-sounds.md#try-it QA-MOD-145=d2ac253ab3a1 QA-MOD-146=8570e435a7b6 QA-MOD-147=9f77297bfddd QA-MOD-148=8670b32f44ac modules/tb303/module.json=522f308c45a9 modules/tb303/tb303_dsp.h=6faf0078c8ed
 module_app.md#app-pages QA-APP-001=f8b99280134b QA-APP-002=6f9afe89ca2b QA-APP-003=6566f24458ae QA-APP-004=97800d345bb6 QA-APP-009=31b268aa7215 app/src/module_ui.cpp=551b20530001 app/src/screens/modules_screen.cpp=09d1aa47f995

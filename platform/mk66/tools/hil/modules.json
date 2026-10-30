@@ -1,6 +1,6 @@
 {
  "name": "modules",
- "title": "built-in modules: `mod` listing, load tb303 / chip / fm, bind each to a free instrument (33..35), `mod note` sounds on track 16 (meters rise), `mod off`, the engine picker opens",
+ "title": "built-in modules: `mod` listing, load tb303 / chip / fm / sid, bind each to a free instrument (33..36), `mod note` sounds on track 16 (meters rise), `mod off`, the engine picker opens",
  "steps": [
   {"say": "the outputs must be open for a module note: the first Play opens them"},
   {"keys": ["-shift"], "gap": 0.2},
@@ -55,6 +55,20 @@
   {"cmd": "mod off 35", "expect": "mod: off queued"},
   {"wait": 2.5},
   {"cmd": "mix", "expect_not": "(?m)^\\s*T16\\s", "within": 5, "poll": 0.5, "soft": true, "note": "the audition's meter is empty after its release"},
+  {"say": "built-in module sid on instrument 36"},
+  {"cmd": "mod load sid", "expect": "mod: sid: (started|already loaded)"},
+  {"cmd": "mod", "expect": "mod: sid (v\\d+\\.\\d+\\.\\d+|unversioned) ABI", "within": 10, "poll": 1.0, "note": "it is in the listing once its (built-in) load is done"},
+  {"cmd": "mod bind 36 sid", "expect": "mod: bind (ok|that instrument is bound already)", "note": "(a second run finds it bound already: fine)"},
+  {"mix": {"channels": {"MST L": {}}, "snap": "before_sid"}},
+  {"cmd": "mod note 36 48 110", "expect": "mod: note queued"},
+  {"cmd": "mod", "expect": "(?i)mod: instrument 36: sid (sounding|held)", "within": 3, "poll": 0.5, "soft": true},
+  {"mix": {"channels": {"T16": {"min_rms_db": -75}, "MAIN L": {"min_rms_db": -75}}, "within": 4}, "note": "the audition plays on track 16: its meter and the main bus rise"},
+  {"mix": {"rise": {"channel": "MST L", "field": "hold", "from": "before_sid", "min_db": 6}, "within": 3}, "soft": true, "note": "(soft: only if nothing else was sounding)"},
+  {"cmd": "mod set 36 0 0.5", "expect": "mod: queued", "soft": true, "note": "parameter 0 of the module (soft: the bind may not have a parameter 0 of that range)"},
+  {"wait": 0.5},
+  {"cmd": "mod off 36", "expect": "mod: off queued"},
+  {"wait": 2.5},
+  {"cmd": "mix", "expect_not": "(?m)^\\s*T16\\s", "within": 5, "poll": 0.5, "soft": true, "note": "the audition's meter is empty after its release"},
   {"say": "the same through the UI: PARAMS, a free slot (instrument 17), F4 opens the engine picker listing the modules (OS-INSTUI S5: F1 is the SOURCE page now)"},
   {"keys": ["params"], "gap": 0.5},
   {"state": {"screen": "INSTRUMENT"}, "within": 3},
@@ -78,6 +92,7 @@
   {"cmd": "mod off 33"},
   {"cmd": "mod off 34"},
   {"cmd": "mod off 35"},
+  {"cmd": "mod off 36"},
   {"run": "_stop"}
  ]
 }

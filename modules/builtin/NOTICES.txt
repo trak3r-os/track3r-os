@@ -1,8 +1,8 @@
-Built-in modules of track3r-os (TB-303, chip, FM): .tmod files inside the
+Built-in modules of track3r-os (TB-303, chip, FM, SID): .tmod files inside the
 firmware image, loaded like the same file from the SD card.
 
 tb303: a single-precision port of the algorithms and constants of Open303
 (github.com/maddanio/open303), whose licence follows.
-chip, fm: written for this project. MIT licence, Copyright (c) 2026 the track3r-os
+chip, fm, sid: written for this project. MIT licence, Copyright (c) 2026 the track3r-os
 authors (the terms of the module SDK, module/sdk/LICENSE).
 
