@@ -40,7 +40,7 @@ Open = rows with neither a sim nor a unit PASS. The table is generated: `python3
 | Instrument | [instrument.md](instrument.md) | 126 | 50 | 11 | 67 |
 | Mixer | [mixer.md](mixer.md) | 37 | 17 | 0 | 20 |
 | Module app | [module_app.md](module_app.md) | 9 | 5 | 0 | 4 |
-| Modules | [modules.md](modules.md) | 151 | 21 | 1 | 129 |
+| Modules | [modules.md](modules.md) | 151 | 21 | 6 | 124 |
 | Pattern | [pattern.md](pattern.md) | 220 | 107 | 9 | 105 |
 | Perform | [perform.md](perform.md) | 112 | 35 | 7 | 70 |
 | Record | [record.md](record.md) | 38 | 6 | 1 | 31 |
@@ -48,7 +48,7 @@ Open = rows with neither a sim nor a unit PASS. The table is generated: `python3
 | Sample load | [sample_load.md](sample_load.md) | 46 | 8 | 8 | 31 |
 | Song | [song.md](song.md) | 67 | 50 | 7 | 17 |
 | Wave | [wave.md](wave.md) | 26 | 20 | 0 | 6 |
-| **Total** | | **1131** | **454** | **67** | **629** |
+| **Total** | | **1131** | **454** | **72** | **624** |
 
 <!-- /qa-cover -->
 

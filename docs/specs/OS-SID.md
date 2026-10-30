@@ -65,7 +65,8 @@ Merged on dev 2cf9741b. CPU on the unit (`v1.0.1-sid.1`): 2.1 to 3.5 % of a bloc
 Found, and recorded:
 - In songs the first SID track costs about 2k cycles more than the others: open research question.
 - Eight SID tracks fill `kMaxModuleInstances` (8); the governor drops a few notes in the first 15 to 30 s after a cold Play, then all sound.
-- The tester's generated project did not bind module instruments in slots 1-4 (slots 5 and up did). To confirm with a project saved by the OS before calling it a bug.
+- The tester's generated project did not bind module instruments in slots 1-4 (slots 5 and up did): the boot's demo kit overwrote slots 1-4 of a project with no sample instrument. Not the module: `OS-BUG-DEMOKIT`.
 - Latent, from the review: turning Mode on mid-chunk runs up to 31 samples on degenerate coefficients (about 0.7 ms; a low pass is silent, a high pass unfiltered). A cleaner fix computes the true exponent in the MODE case.
 - An 8580 at resonance 15 peaks about +22 dB over Mode OFF at the cutoff (a property of the resonant filter; Drive does not add to it). A listening item.
-- Still open: the ear check of the waves, the filter curves and the resonance law (own choices, no parity claim), and the Instrument pages and views on the panel.
+- Unit on `v1.0.1-sid.2` (2026-10-30): the four Instrument pages and the three views PASS; Drive from 0 to 100 adds at most +4.8 dB rms and +3.7 dB peak; Sweep, vibrato (which fades in over its delay, as Chip's) and Arp measured right from a USB capture. Two cosmetic rows: `OS-BUG-SIDWAVELABEL`, `OS-BUG-ONCARD`.
+- Still open: the ear check of the waves, the filter curves and the resonance law (own choices, no parity claim).
