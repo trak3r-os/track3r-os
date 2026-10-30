@@ -69,7 +69,8 @@ void draw_wave(o3m_canvas* c, const float* p) {
   const o3m_draw_api* api = c->draw;
   const uint32_t wave = static_cast<uint32_t>(clampf(p[CHIP_PARAM_WAVE], 0.0f, 3.0f) + 0.5f);
   const uint32_t duty = static_cast<uint32_t>(clampf(p[CHIP_PARAM_DUTY], 0.0f, 3.0f) + 0.5f);
-  const int32_t left = 6, right = c->width - 6, top = 16, bottom = c->height - 6;
+  // The name takes the rows 3..22 (the Data face is 20 pixels high); the trace starts below it, so that the first edge never runs through the letters (OS-BUG-CHIPWAVELABEL; the Wave view's min height is 64, so the trace keeps 32 rows).
+  const int32_t left = 6, right = c->width - 6, top = 26, bottom = c->height - 6;
   if (right - left < 16 || bottom - top < 8) {
     return;
   }

@@ -640,7 +640,7 @@ TEST_CASE("chip views: the wave view draws the duty, the triangle and the noise 
   Views v;
   NEED(v.ok);
   const int w = 380, h = 100;
-  const int left = 6, right = w - 6, top = 16, bottom = h - 6;
+  const int left = 6, right = w - 6, top = 26, bottom = h - 6;
   const char* names[4] = {"PULSE 12.5%", "PULSE 25%", "PULSE 50%", "PULSE 75%"};
   const double duty[4] = {0.125, 0.25, 0.5, 0.75};
   v.p[CHIP_PARAM_WAVE] = 0.0f;
@@ -706,6 +706,47 @@ TEST_CASE("chip views: the wave view draws the duty, the triangle and the noise 
     }
     CAPTURE(k);
     CHECK_FALSE(flat);
+  }
+}
+
+TEST_CASE("chip views: OS-BUG-CHIPWAVELABEL the wave's name sits above the trace, in the real Data face (10 x 20), for every wave and duty, at the view's smallest and preferred sizes") {
+  Views v;
+  NEED(v.ok);
+  ViewHost::Metrics m;  // the theme's faces: Display 16 x 32, Data 10 x 20, Label 8 x 16, Micro 6 x 12
+  const std::int16_t cw[O3M_FACE_COUNT] = {16, 10, 8, 6}, ch[O3M_FACE_COUNT] = {32, 20, 16, 12};
+  for (unsigned f = 0; f < O3M_FACE_COUNT; ++f) {
+    m.cell_w[f] = cw[f];
+    m.cell_h[f] = ch[f];
+  }
+  v.host.set_metrics(m);
+  const int sizes[3][2] = {{160, 64}, {380, 90}, {380, 100}};  // module.json: the Wave view's min_size, preferred_size, and the tests' usual canvas
+  for (const auto& sz : sizes) {
+    for (std::uint32_t wave = 0; wave < 4; ++wave) {
+      for (std::uint32_t duty = 0; duty < 4; ++duty) {
+        v.p[CHIP_PARAM_WAVE] = static_cast<float>(wave);
+        v.p[CHIP_PARAM_DUTY] = static_cast<float>(duty);
+        CAPTURE(sz[0]);
+        CAPTURE(sz[1]);
+        CAPTURE(wave);
+        CAPTURE(duty);
+        NEED(v.draw(CHIP_VIEW_WAVE, sz[0], sz[1]) == ViewStatus::Ok);
+        Drawing dr;
+        v.host.replay(dr);
+        NEED(dr.texts.size() == 1u);
+        NEED(dr.polys.size() == 1u);
+        NEED(dr.rects.size() == 1u);
+        const int text_bottom = dr.texts[0].y + ch[dr.texts[0].face];
+        int trace_top = 1 << 20, trace_bottom = -(1 << 20);
+        for (std::size_t k = 1; k < dr.polys[0].xy.size(); k += 2) {
+          trace_top = std::min<int>(trace_top, dr.polys[0].xy[k]);
+          trace_bottom = std::max<int>(trace_bottom, dr.polys[0].xy[k]);
+        }
+        CHECK(text_bottom < trace_top);  // no row of the name lies on the trace's rows
+        CHECK(text_bottom < dr.rects[0].y);
+        CHECK(trace_bottom < sz[1]);  // and the trace, moved down, still fits the view
+        CHECK(trace_top < trace_bottom);
+      }
+    }
   }
 }
 
