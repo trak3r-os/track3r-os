@@ -492,8 +492,8 @@ add("cpu_mute_ab", "OS-ODD11 A/B: the CPU of t-v16 (FILTER On x16, pattern 9 loo
 CPU_READ_RE = r"render last (\d+)"
 
 
-def open_song(sel, load, opened, before):
-    """Opens a generated project from the File screen and starts it: `sel` is the regex of the strip's `sel`, `load` that of the `sd` line, `opened` that of the strip message, `before` the SAY."""
+def open_song(sel, load, opened, before, pcm=True):
+    """Opens a generated project from the File screen and starts it: `sel` is the regex of the strip's `sel`, `load` that of the `sd` line, `opened` that of the strip message, `before` the SAY; `pcm` False for a song without samples (it prints no pcm line)."""
     return [SAY(before),
             K("-shift", gap=0.2, note="(Shift released, in case a former run left it down)")] + clear_overlays() + [
         K("file", gap=0.5), ST({"screen": "FILE"}, within=3),
@@ -504,7 +504,7 @@ def open_song(sel, load, opened, before):
         K("f1", gap=0.5), K("f1", gap=0.5, if_state={"msg": "~^UNSAVED_CHANGES"}, note="(only when the strip asks)"),
         ST({"msg": opened}, within=4, note="the song is opening (the strip may already read PROJECT_<name>_OPENED on the unit)"),
         CMD("sd", expect=load, within=180, poll=2.0, fail_on="FAILED"),
-        CMD("sd", expect="pcm:\\s+.*loaded", within=120, poll=2.0, fail_on="FAILED"),
+        ] + ([CMD("sd", expect="pcm:\\s+.*loaded", within=120, poll=2.0, fail_on="FAILED")] if pcm else []) + [
         CMD("sd", expect_not="[1-9]\\d* values reset", soft=True, note="(the load line says `N values reset` when a chunk had values out of range)"),
         W(3.0), K("pattern", gap=0.5), ST({"screen": "PATTERN"}, within=5), RUN("_stop"),
         CMD("mod", expect="tb303", soft=True, note="(soft: the TB-303 and the FM instance are bound; a muted module says so here)")]
@@ -571,20 +571,20 @@ add("qa_cpu_dense", "OS-DENSE: the 1.0 CPU target on the dense reference project
 
 # qa_cpu_moddrive (OS-BUG-MODDRIVE, Level C, unit-gated): the cost of Overdrive and Bit depth (step FX 38 / 39) on module instruments. One run per project: ModDrive1, ModDrive4, ModDrive8 (1, 4, 8 TB-303 tracks
 # with the FX on step 1) and the same three with `off` in the folder name (no FX: the control). Compare the mean `render last` of each pair; underrun 0 and guard shed 0 are asserted.
-md = open_song("~^ModDrive(1|4|8)(off)?$", "load:\\s+Projects/ModDrive(1|4|8)(off)?", "~(?i)^(OPENING_MODDRIVE|PROJECT_MODDRIVE)(1|4|8)(OFF)?_?(OPENED)?",
+md = open_song("~^${PROJ}$", "load:\\s+Projects/${PROJ}", "~(?i)^(OPENING_|PROJECT_)${PROJ}",
                "QA-MOD-209 (OS-BUG-MODDRIVE): the CPU of FX 38 / 39 on module tracks. BEFORE the run: build the songs (`o3pj_tool gen moddrive4 <dir>/ModDrive4/project.o3pj`, `gen moddrive4off <dir>/ModDrive4off/project.o3pj`, "
-               "and 1 and 8 the same; no samples) and copy ONE folder into Projects/ per run, 1, 4 and 8 with the FX, then each control. Use the release image.") + [
+               "and 1 and 8 the same; no samples) and copy ONE folder into Projects/ per run, 1, 4 and 8 with the FX, then each control. Run with `--var PROJ=<folder name>`. Use the release image.", pcm=False) + [
     RUN("_play"), W(5.0, note="settle"),
     MIX({"channels": {"MST L": {"min_rms_db": -60}}, "within": 6}, note="the song sounds"),
     CMD("cpu reset", note="the window starts"), CMD("cpu perf off")] + cpu_reads(
         8, 2.5, "M", expect=[r"underrun 0 \(", r"guard\s+shed 0 blocks"]) + [
     STAT("M", min_n=8, show=True, note="the mean of the 8 reads of `render last` (cycles): REPORTED, compare the FX project with its `off` control"),
-    CMD("mod", soft=True, note="module instances and cycles per voice"),
+    CMD("mod", soft=True, show=True, note="module instances and cycles per voice"),
     CMD("mod gov", soft=True, show=True, note="the governor: how many instances it admits (the shaping lands in its base)"),
     RUN("_stop")]
 add("qa_cpu_moddrive", "OS-BUG-MODDRIVE: the CPU of the step FX 38 / 39 on 1, 4 and 8 TB-303 tracks against the same song without them: opened from File, `cpu reset`, Play, 8 reads of `cpu` 2.5 s apart. "
     "ASSERTS underrun 0 and guard shed 0; the mean `render last` is reported. The project must be on the card first (`o3pj_tool gen moddrive1|4|8` and the `off` controls)",
-    md, finally_=[K("-shift", gap=0.2)] + clear_overlays() + [K("pattern", gap=0.4), RUN("_stop")])
+    md, finally_=[K("-shift", gap=0.2)] + clear_overlays() + [K("pattern", gap=0.4), RUN("_stop")], vars_={"PROJ": "ModDrive1"})
 
 # ======================================================================================================================================
 # 5. slices_pads (OS-SLICEFIX)

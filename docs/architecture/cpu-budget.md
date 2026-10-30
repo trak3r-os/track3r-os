@@ -271,7 +271,7 @@ Measured [unit, tester, 2026-10-30, image `v1.0.1-moddrive.1` = 3091e535; tables
 | ModDrive4 | 45,642 | 48,476 | +2,835 cycles (+1.09 pp) | 0 / 0 | below the 4 x 1.3k estimate |
 | ModDrive8 | 174,779 | 176,980 | +2,201 cycles | 0 / 0 | not a like-for-like pair: eight TB-303 instances sit at the module limit and the governor drops notes in both songs (212 off, 424 shaped); over-budget 13,877 / 13,876 blocks; window max 256,748 cycles (98 %) |
 
-Underrun 0 and guard shed 0 in all six runs. Ordinary projects with no FX 38 / 39: t-v16-copy mean 64,994 cycles, no underrun; Dense8 mean 225,692, +746 against `v1.0.1-arrows.1` (224,946), an image without OS-USBOUTS and OS-BUG-FWLIST; the A/B against `v1.0.1-usbouts.1` (the "cost when off" check) is open. The shipped `qa_cpu_moddrive.json` needs fixing before it runs as is (its pcm step needs samples; its regex stops at the first ModDrive folder): the tester ran a corrected copy.
+Underrun 0 and guard shed 0 in all six runs. Ordinary projects with no FX 38 / 39: t-v16-copy mean 64,994 cycles, no underrun; Dense8 mean 225,692, +746 against `v1.0.1-arrows.1` (224,946), an image without OS-USBOUTS and OS-BUG-FWLIST; the A/B against `v1.0.1-usbouts.1` (the "cost when off" check) is open. Run it per project with `--var PROJ=ModDrive1|1off|4|4off|8|8off` (the folder name under `Projects/`; the default is `ModDrive1`).
 
 ## Perform arms measured on the final candidate (fqa.15, 2026-10-25)
 
