@@ -22,6 +22,7 @@ Merged and covered by host or simulator tests; the check on the real unit is the
 
 | ID | What | Check left on the unit |
 |---|---|---|
+| OS-IMPORT-ANY | File IMPORT reads a module by its header: F2 toggles MODULES / ALL FILES, Amiga prefix names (`mod.title`) list as modules, 15-sample Soundtracker MODs import | A module with no extension, a `mod.*` file, a real 15-sample file, the F2 toggle, and a non-module refused with the project untouched |
 | OS-SONG-STAGE | Song STAGE page: the playing slot and the next one in large type, a bar countdown to the next slot, a progress bar (live use, low vision) | N | S | Merged 2026-10-30; checks on the unit pending: legibility at a distance, the bar countdown against the audio. New Community OS behaviour; defaults to confirm by the maintainer (`docs/specs/OS-SONG-VIEW.md`). After the unit check the maintainer drops STAGE from the Song cycle (OS-SONG-VIEW2); its countdown moves to TIMELINE. |
 | OS-SONG-TIMELINE | Song TIMELINE: slots as blocks scaled to bars, a colour per pattern, per-track note density, an energy curve over the song | N | M | Merged 2026-10-30; checks on the unit pending: how the colours, the density thumbnails and the energy curve read. The display list is bounded by construction. New Community OS behaviour; defaults to confirm by the maintainer (`docs/specs/OS-SONG-VIEW.md`). |
 | OS-PERF-LFO-STEP | The step-effect LFO columns 23, 24, 33 and 36 start the matching LFO on a sampler track, as FX 35 does | Passed on the unit (`v1.0.1-lfostep.1`): sound by capture for 23, 24 and 33; FX 24 wins over FX 31 in both orders; step rows cost no more than the layer rows; FX 36 on plain samples +0.14 pp; underrun 0; the export carries the LFO and two exports are byte-identical. Left: FX 36 on wavetable and granular, by ear; QA-PRF-186 and 189; "the next Play ends it"; "layer at 0". The step-against-layer CPU gate held only for VOL (the other layer rows measured were default slots); re-check in OS-PERF-CPU3 step 0. |
@@ -80,8 +81,8 @@ Merged and covered by host or simulator tests; the check on the real unit is the
 ## QUEUED
 
 | ID | What | Parity | Cost | Note |
-| OS-IMPORT-ANY | File IMPORT: a MODULES / ALL FILES toggle, the reader chosen by the file's header when the name says nothing, Amiga prefix names (`mod.title`) listed; 15-sample Soundtracker MODs | N | S | Approved by the maintainer 2026-10-30. No format change. |
 |---|---|---|---|---|
+| OS-SID | A SID-style instrument as a new `sid.tmod` (Chip unchanged): saw, triangle, pulse with PWM, noise, combined waves, sync and ring, the stepped ADSR, an LP/BP/HP filter with a 6581 / 8580 switch | N | M | Queued by the maintainer 2026-10-30. Spec `docs/specs/OS-SID.md`; radar card `docs/vision/radar/sid-instrument.md`. Merges after its CPU is measured on the unit. |
 
 ## APPROVED (in order)
 
@@ -124,7 +125,6 @@ Proposals. The maintainer decides; nobody codes an IDEA.
 | OG-V17-EVIDENCE | Update `docs/formats/og.md` with project v17 / firmware 1.9.2 facts from the tracker-lib template | OG | S | Level A, after the maintainer agrees. Cite the source and its MIT licence in `THIRD_PARTY.md`. |
 | OS-SONG-FLOW | Song flow rows: LOOP n, HALT (wait for the player), JUMP, a chance per slot | N | M | Kept out of OS-SONG-SLOTDATA for now; its chunk keeps room for them. |
 | OS-SONG-IDEAS | More Song ideas from the 2026-10-30 research: tempo ramps; a pattern per track per slot (lanes); a living song with a fixed seed and FREEZE into a plain order list; arrangement versions A/B; a fill on a queued jump; cues on the CUE output; a rule-based song co-pilot; text to arrangement on the computer; browsing the song by ear; a high-contrast theme | N | ? | The maintainer moves pieces out. |
-| OS-SID | A SID-style instrument as a new `sid.tmod` (Chip unchanged): saw, triangle, pulse with PWM, noise, combined waves, sync and ring, the stepped ADSR, an LP/BP/HP filter with a 6581 / 8580 switch. Radar card `docs/vision/radar/sid-instrument.md` | N | M | Estimate 4.9 % of a block a voice; written from scratch under MIT. Open: own approximate combined-wave tables (no emulator data); numbers from datasheets before coding. |
 | OS-GTIMPORT | Import GoatTracker 2 `.sng` songs as projects with SID tracks (notes, patterns, order, tempo, static instruments). Radar card `docs/vision/radar/goattracker-import.md` | N | M | After OS-SID. Lossy without the per-frame tables, which would need new persisted data. |
 
 Not a source: the unlicensed reverse-engineering repository polyend-tracker-re (no licence, cites firmware addresses). Nothing from it goes into this repository (`CLAUDE.md`, hard rule).

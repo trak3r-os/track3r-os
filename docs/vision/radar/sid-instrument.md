@@ -1,7 +1,7 @@
 # SID-style instrument — radar card
-Maintainer's words: "podemos abrir SID, es facil?" then, after being told a .sid file is 6502 code and a SID-style instrument makes more sense: "si, quiza convierte el instrumento chip en SID, tiene sentido?" · 2026-10-30 · Status: candidate
+Maintainer's words: "podemos abrir SID, es facil?" then, after being told a .sid file is 6502 code and a SID-style instrument makes more sense: "si, quiza convierte el instrumento chip en SID, tiene sentido?" · 2026-10-30 · Status: planned
 
-Related card: `goattracker-import` (depends on this one). Backlog row: OS-SID (IDEA; the maintainer moves rows).
+Related card: `goattracker-import` (depends on this one). Backlog row: OS-SID (QUEUED 2026-10-30; spec `docs/specs/OS-SID.md`).
 
 Scope notes. The NES engine is out of scope by maintainer decision and this card does not propose one. Chip already exists and stays as it is. Playing `.sid` files (6502 code plus the chip) is not proposed here: the maintainer agreed a SID-style instrument makes more sense.
 
