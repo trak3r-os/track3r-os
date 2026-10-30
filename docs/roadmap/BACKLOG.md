@@ -10,7 +10,9 @@ What is not finished. One row per package. Finished work (DONE) is not listed he
 
 ## IN PROGRESS
 
-Nothing is in progress (2026-10-30).
+| ID | What | Parity | Cost | Note |
+|---|---|---|---|---|
+| OS-PERF-CPU3 | Perform LFO rows cost, corrected figures | N | ? | Approved by the maintainer 2026-10-30. The first premises are retracted: "POS +13 pp" and "PAN in strips and buses" were the REVERB 100 and DELAY 100 rows, because the Performance slots revert to their defaults on boot (`docs/architecture/cpu-budget.md`, the retraction). Step 0 is being redone on the unit with the real LFO rows assigned in EDIT. Slice 1 (the note_on tail to flash, about 100 B of `.ramfunc_l` back, bit-identical) is in progress; slice 2 is skipped. Side finding: a REVERB send at 100 costs +13 pp and a DELAY send at 100 costs +4.8 pp. Level C. Spec: `docs/specs/OS-PERF-CPU3.md`. |
 
 ## UNIT PENDING
 
@@ -18,7 +20,7 @@ Merged and covered by host or simulator tests; the check on the real unit is the
 
 | ID | What | Check left on the unit |
 |---|---|---|
-| OS-PERF-LFO-STEP | The step-effect LFO columns 23, 24, 33 and 36 start the matching LFO on a sampler track, as FX 35 does | Passed on the unit (`v1.0.1-lfostep.1`): sound by capture for 23, 24 and 33; FX 24 wins over FX 31 in both orders; step rows cost no more than the layer rows; FX 36 on plain samples +0.14 pp; underrun 0; the export carries the LFO and two exports are byte-identical. Left: FX 36 on wavetable and granular, by ear; QA-PRF-186 and 189; "the next Play ends it"; "layer at 0" |
+| OS-PERF-LFO-STEP | The step-effect LFO columns 23, 24, 33 and 36 start the matching LFO on a sampler track, as FX 35 does | Passed on the unit (`v1.0.1-lfostep.1`): sound by capture for 23, 24 and 33; FX 24 wins over FX 31 in both orders; step rows cost no more than the layer rows; FX 36 on plain samples +0.14 pp; underrun 0; the export carries the LFO and two exports are byte-identical. Left: FX 36 on wavetable and granular, by ear; QA-PRF-186 and 189; "the next Play ends it"; "layer at 0". The step-against-layer CPU gate held only for VOL (the other layer rows measured were default slots); re-check in OS-PERF-CPU3 step 0. |
 | OS-PERF-CPU2 | Cheaper Perform effects, after v1.0.0: reversed voices take a fast path, bit-identical (REV12 +0.23 pp on the unit, against +6.19 pp; gate 3 pp) | Left: by ear |
 | OS-BUG-FWLIST | The update dialog (Config, INFO, `F8`) reaches every file of `Firmware/`: it pages through them twelve at a time and shows `FILE n / total` | QA-CFG-265: 19 `.ptf` files on a card, page through them and choose the 18th; how long a page change takes with a large folder |
 | OS-CFG-ARROWS | Left and Right edit the value under the cursor on Config and Record (Shift: the coarse step); the pages change only with the F-keys or the screen button | Passed on the unit (tester image `v1.0.1-arrows.1`): install, smoke and the changed HIL steps. Left: the feel and auto-repeat of the arrows on Config and Record, Shift + arrow (coarse), the USB pending value with F7, and the READ ONLY row |
@@ -73,7 +75,9 @@ Merged and covered by host or simulator tests; the check on the real unit is the
 
 ## QUEUED
 
-Nothing is queued (2026-10-30).
+| ID | What | Parity | Cost | Note |
+|---|---|---|---|---|
+| OS-STEREO | Stereo samples (opt-in per instrument) | N | L | Approved by the maintainer 2026-10-30, in stages (approach D). The maintainer's answers (the recommended defaults): opt-in per instrument, MIX stays the default; a cap of 4 stereo voices, beyond which the mid plays; forward one-shot and loop, Modern engine only; USB stems and sends stay mono, offline stems stay stereo; pan becomes balance with the same law; a new INST field, and `.pti` export downmixes; the two-track workaround is documented first. CPU: +20-30 % per stereo voice [est]; Dense8 has no CPU headroom (86 % mean). Step 1 (S): the workaround in the manual and a bench-only `voice_st` to measure real cycles on the unit. Starts after OS-PERF-CPU3 slice 1. Today a stereo file is mixed to mono, or to L or R with F8 (OS-LOADCH). |
 
 ## APPROVED (in order)
 
@@ -110,7 +114,6 @@ Proposals. The maintainer decides; nobody codes an IDEA.
 | OS-WTLFO-DEFAULT | Wavetable position automation on by default | R | S | One real wavetable instrument has envelope slot 3 enabled as a triangle LFO; this OS leaves it off. Needs a look on the unit first. |
 | OG-16TRACK-MTP | Read Tracker+ and Mini 16-track pattern files (reading only) | OG | M | The track block size follows from the published pattern layout (MIT tracker-lib); a real file and the CRC rule are missing. Touches an OG format: the maintainer decides. |
 | OG-V17-EVIDENCE | Update `docs/formats/og.md` with project v17 / firmware 1.9.2 facts from the tracker-lib template | OG | S | Level A, after the maintainer agrees. Cite the source and its MIT licence in `THIRD_PARTY.md`. |
-| OS-PERF-CPU3 | Perform LFO rows cost, corrected figures | N | ? | The per-row figures measured on fqa.15 were invalid (the set-up switched off the tracks under test). Measured on v1.0.1-cpu2.1: VOL LFO +4.1 pp, TUNE +7.3, FLT +6.2, LOWPASS +6.6, POS LFO +13.0 on a plain sample (where it moves nothing), all five together +30 pp; LFO12 +28.39 pp. PAN LFO +4.8 pp alone, in the strips and buses rather than the voices. Leads: skip a POS LFO on a plain sample; the strip pan path. Level C. Figures: `docs/architecture/cpu-budget.md`. |
 
 Not a source: the unlicensed reverse-engineering repository polyend-tracker-re (no licence, cites firmware addresses). Nothing from it goes into this repository (`CLAUDE.md`, hard rule).
 
