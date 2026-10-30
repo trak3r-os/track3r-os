@@ -32,6 +32,10 @@ Level C (the audio path). Approved by the maintainer on 2026-10-30. Follow-up of
 - **Slice 2 (optional, after slice 1): the MODDRIVE gate** (engine.cpp around :410, `shape_mask` voices.h:865, +48 B): a one-byte cached mask written by every writer of `ifx_on_[1]`, `ifx_on_[2]`, `perf_.on[0..1]` (FxReset, `perf_clear`, `perf_restore` included), about -15 B [est]; or fold it into the `pan_mods_pending` test (about -40 B [est], an ordering check: the shaping must stay after the modules' `end_block`).
 - **Slice 3 (after step 0 and D2):** the PAN fix, if any, and the POS cause.
 
+## Step 0 outcome (2026-10-30)
+
+Source: `build-images/v1.0.1-cpu2.1/REPORT-cpu3-step0.md`; figures in `docs/architecture/cpu-budget.md`, OS-PERF-CPU3 section. D1 is settled: POS does no work on a plain sample (the stages move by -45 cycles a block). Slice 3 is not needed: the PAN fix F1/F2 is worth at most 2.3 pp at a fast rate and would change the sound, so it is recorded as not pursued (default, to confirm by the maintainer). The HIPASS/BANDPASS +18k cycles a block in the voices is a latent finding (IDEA row OS-PERF-HPBP).
+
 ## Design rules from the risk review (2026-10-30, folded)
 
 1. **Slice 1: the tail goes last in `mods_start`, unconditionally** (voices.cpp:1710-1762): not inside `if (v.mode != kModeGranular)`, not inside `if (perf_lfo_held)`, not before `perf_dest`. `mods_start` has one caller (:1410); the early returns (:1316, :1334, :1345) come before it and skip the tail either way; nothing between :1410 and :1411 reads or writes the tail's fields (`mods_start`, `glide_start`, `shape_set`, `perf_dest`, `mod_start` read none of `playing`, `age`, `env_stage`, `amp_step`, `ramp_left`, `dk`, `gated_`).

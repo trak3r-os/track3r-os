@@ -308,6 +308,47 @@ No new per-block code: a held step FX drives the Perform layer's LFO code (`perf
 
 Measured [unit, tester, 2026-10-30, image `v1.0.1-lfostep.1` = 932e8fff; `build-images/v1.0.1-lfostep.1/REPORT.md`, not in git]: the tester's own songs, six one-shot voices (base 21 to 22 %), `cpu reset`, `cpu perf off`, 60 s windows, one ON window per row, step row minus the same layer row held: VOL +0.12 pp (valid); PAN +0.39, TUNE -4.65, POS -13.21 compared the step FX with DELAY 100, HIPASS 90 and REVERB 100 (default slots, see the retraction above), so only the VOL gate is shown; the step FX costs themselves are PAN LFO +4.63, TUNE LFO +1.83, POS LFO +0.14 pp; the gate against the real layer rows is re-measured in OS-PERF-CPU3 step 0; FX 36 alone on plain samples +0.14 pp against off (it starts nothing); underrun 0 in all 18 windows. (The negative TUNE and POS figures came from comparing against DSP rows, not LFO rows.) Not the Dense8 one-shot scene of the sections above.
 
+## OS-PERF-CPU3 (2026-10-30; `docs/specs/OS-PERF-CPU3.md`): the Perform LFO rows, step 0
+
+**Step 0 (unit, 2026-10-30).** Tester report `build-images/v1.0.1-cpu2.1/REPORT-cpu3-step0.md` (no code change; bench image `v1.0.1-cpu2.1` 4d436077 for the layer rows, release `v1.0.1-lfostep.1` 932e8fff for the step FX). Scene: Dense8 with `REC_001` (13.5 s one-shot) in the six sampler tracks, six voices sounding. The LFO rows were assigned in EDIT and a screenshot confirmed each held slot before its window. Underrun 0 and mute 0 in every window. Each figure is the delta against the neighbouring off windows; stage figures are cycles a block (mean over 4096 blocks). [unit, tester, 2026-10-30]
+
+| Row (+3 unless said) | mean delta | stages, cycles a block | where |
+|---|---|---|---|
+| VOL LFO | +5.62 pp | +9,679 (3.7 pp) | voices +9,734 |
+| PAN LFO fast (+3) | +2.31 pp | +4,443 (1.7 pp) | strips +2,588, voices +1,067, drain +803, buses -7 |
+| PAN LFO slow (-8) | +0.47 pp | -997 (about 0) | strips -1,583, drain -328, voices +898 |
+| TUNE LFO | +1.68 pp | +2,941 (1.1 pp) | voices +2,908 |
+| FLT LFO | +0.39 pp | +1,127 (0.4 pp) | voices +1,133 |
+| POS LFO (plain samples) | +1.16 pp (reads; noise) | -45 (0) | voices -29 |
+
+The five real rows add up to about 7 pp (VOL 3.7, PAN fast 1.7, TUNE 1.1, FLT 0.4). That total is arithmetic: the rows were not held together in one window. POS on a plain sample costs nothing, as the code reading says. The slow PAN LFO costs about nothing.
+
+The send and filter rows measured in step 0 were the old misreads. The row names below are the real ones, at row 3 with the instrument's own sends at 0 unless stated.
+
+| Row (pad) | stage total, cycles a block | where |
+|---|---|---|
+| REVERB 100 (43) | +34,442 (+13.3 pp) | buses +29,332, strips +3,530 |
+| DELAY 100 (42) | +11,908 (+4.6 pp) | buses +7,549, strips +3,523 |
+| HIPASS 90 (40) | +18,762 (+6.9 pp) | voices +18,765 |
+| BANDPASS 70 (41) | +18,408 (+7.5 pp) | voices +18,416 |
+| REVERB 100, sends already at 30 (Scene A) | +1,174 (reads +0.54 pp) | strips (send gain) |
+| DELAY 100, sends already at 30 (Scene A) | +1,150 (reads -0.42 pp) | strips (send gain) |
+
+A reverb send that becomes non-zero on a project with none costs about +29k cycles a block in the buses (the reverb loop); a delay send about +7.5k. A send that is already on costs only the strips' gain (about +1.2k). HIPASS and BANDPASS are the per-voice instrument filters, about 3.1k cycles each over six voices: a latent finding, no item yet (IDEA row OS-PERF-HPBP).
+
+**The step-FX gate (OS-PERF-LFO-STEP) passes with real rows.** Step FX must not exceed its layer row by more than 1.2 pp.
+
+| Step FX / layer row | step FX, mean delta | layer row, mean delta | gate |
+|---|---|---|---|
+| FX 23 / VOL LFO | +3.27 pp | +5.62 pp | PASS |
+| FX 24 (22.2 Hz) / PAN LFO fast | +1.53 pp | +2.31 pp | PASS |
+| FX 33 / TUNE LFO | +1.26 pp | +1.68 pp | PASS |
+| FX 36 / POS LFO | -0.42 pp | 0 (stages) | PASS |
+
+Noise: the same songs on the cpu2.1 bench, where the step FX does nothing, read +0.26, -0.52, +0.01 and -0.26 pp, so the noise is about +-0.5 pp; read-based deltas carry about +-0.7 pp (report, section 1).
+
+Not done: a static off-centre pan by step FX 31 (no song measured); POS LFO on a wavetable or granular track (none in the scene); the five real rows held in one window.
+
 ## Perform arms measured on the final candidate (fqa.15, 2026-10-25)
 
 Source: `build-images/v1.0.0-fqa.15/REPORT.md`, sections C1 to C5 (tester, on the unit; the scripts and captures are in `build-hil/v1.0.0-fqa.15/`, not in git). The release image is `o3os-v1.0.0-fqa.15-854e58d.ptf`, the code of `merge/batch-0125g` 854e58dd. Per window: `cpu reset`, `cpu perf off`, 5 s settle, then 12 reads of `cpu` 5 s apart (about 60 s). Arms alternated off, ON, off, ON. Notes for these arms are played from `Master` or `Song`: leaving Performance for any other screen ends every Perform effect (QA-PRF-016).
