@@ -10,7 +10,9 @@ What is not finished. One row per package. Finished work (DONE) is not listed he
 
 ## IN PROGRESS
 
-Nothing at the moment.
+| ID | What | Parity | Cost | Note |
+|---|---|---|---|---|
+| OS-BUG-MODDRIVE | Overdrive and Bit depth do not shape module instruments (TB-303, FM, Chip) | N | ? | Issue [#2](https://github.com/trak3r-os/track3r-os/issues/2) (2026-10-26). Cause known: the drive and bit-depth pass (`shape_span` in `audio/src/voices.cpp`) runs in the sampler voices only, so the step FX 38 and 39, the Perform OVERDRV and BITDEPTH and the instrument's OVERDRIVE row do not reach module instruments or MIDI tracks. The manual does not say so yet (`docs/manual/module-instrument-fx.md`). Fix: the same pass on a module voice's output; Level C (audio path), its CPU measured on the unit. Workaround: export PATT STEMS and load the track's WAV as a sample. In progress: the design is being written (Level C, audio path); the manual now says these effects do not shape module instruments yet. |
 
 ## UNIT PENDING
 
@@ -72,7 +74,6 @@ Merged and covered by host or simulator tests; the check on the real unit is the
 
 | ID | What | Parity | Cost | Note |
 |---|---|---|---|---|
-| OS-BUG-MODDRIVE | Overdrive and Bit depth do not shape module instruments (TB-303, FM, Chip) | N | ? | Issue [#2](https://github.com/trak3r-os/track3r-os/issues/2) (2026-10-26). Cause known: the drive and bit-depth pass (`shape_span` in `audio/src/voices.cpp`) runs in the sampler voices only, so the step FX 38 and 39, the Perform OVERDRV and BITDEPTH and the instrument's OVERDRIVE row do not reach module instruments or MIDI tracks. The manual does not say so yet (`docs/manual/module-instrument-fx.md`). Fix: the same pass on a module voice's output; Level C (audio path), its CPU measured on the unit. Workaround: export PATT STEMS and load the track's WAV as a sample. |
 | OS-PERF-CPU2 | Cheaper Perform effects, after v1.0.0: (a) the reversed-voice path has no fast path (PLAYBACK about 0.89 pp of a block per reversed voice); (b) PAN LFO costs +4.3 pp where about 0.15 k cycles a voice-block were estimated, and the five LFO rows with LOWPASS held cost +18.11 pp on twelve tracks | N | M | Follow-up of the v1.0.0 Perform rows, accepted there as known issues. Level C (audio path): `rt-optimize`, then the measurement on the unit. Figures and method: `docs/architecture/cpu-budget.md`. |
 | OS-PERF-LFO-STEP | The step-effect LFO columns 23, 24, 33 and 36 have no consumer yet | N | ? | Follow-up of OS-PERF-LFO. |
 

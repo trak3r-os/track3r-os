@@ -2598,6 +2598,7 @@ The Sampler column is what the FX specs say; the module column is checked on the
 - A module of ABI 1.7 or below, or a 1.8 module that does not export `pitch`, ignores Glide and Slide as before; the notes are ordinary notes.
 - The TB-303's own Slide and Legato Slide parameters are for live legato keys; on a pattern note the slide time comes from the Glide value or the Slide speed.
 - The FX stay in the pattern as written; nothing is changed by the instrument being a module.
+- Overdrive (FX 38), Bit depth (FX 39), the Perform OVERDRV and BITDEPTH rows, and the instrument's OVERDRIVE row do not change the sound of module instruments yet. A fix is in progress (OS-BUG-MODDRIVE). Workaround: export the track with PATT STEMS and load its WAV as a sample.
 
 ## See also
 

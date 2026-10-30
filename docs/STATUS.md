@@ -85,7 +85,7 @@ Not yet verified on a unit (host and simulator tests exist for most). The rows m
 Ordered for a fresh session:
 
 1. A person presses INSTALL in Update from the unit on the release file, and runs the checks under "Open on the unit"; record each result as PASS, FAIL or NOT RUN in the backlog rows.
-2. After 1.0: OS-BUG-HOTSWAP (the card-swap crash), then OS-BUG-FWLIST (merged, unit check pending), then the queued rows (OS-BUG-MODDRIVE, OS-PERF-CPU2, OS-PERF-LFO-STEP), then the pending rows in `docs/roadmap/BACKLOG.md` and the latent issues below.
+2. After 1.0: OS-BUG-HOTSWAP (the card-swap crash), then OS-BUG-FWLIST (merged, unit check pending), then OS-BUG-MODDRIVE (in progress), then the queued rows (OS-PERF-CPU2, OS-PERF-LFO-STEP), then the pending rows in `docs/roadmap/BACKLOG.md` and the latent issues below.
 
 Outside contributors: issues come in through the forms in `.github/ISSUE_TEMPLATE/`; pull requests target `dev` (see `CONTRIBUTING.md`).
 
