@@ -813,8 +813,8 @@ void make_modules() noexcept {
 // The demo kit into the start of the arena and the voices' table, its four instruments into the project and, if pattern 1 is empty, its pattern. Only
 // into an empty table: it is for when there is nothing else to play (the boot, a project with no sample instrument). File > NEW does not come here any more (OS-NEWKEEP: a new project has
 // the instruments the user chose, or none).
-void install_demo(model::Project& project) noexcept {
-  (void)app::install_demo_kit(g_bank, audio_voices(), project, sample_arena(), kArenaSamples);  // SDRAM: 61 KB of the 10.8 MB arena (OS-BUG-PASTE24: app/sample_bank.h; the instruments at unity under the document's law)
+bool install_demo(model::Project& project) noexcept {
+  return app::install_demo_kit(g_bank, audio_voices(), project, sample_arena(), kArenaSamples);  // SDRAM: 61 KB of the 10.8 MB arena (OS-BUG-PASTE24: app/sample_bank.h; the instruments at unity under the document's law)
 }
 
 // The sound of a fresh document: the demo kit when the project holds nothing (a project load replaces it later), then the sequencer and the engine's wiring.
@@ -824,7 +824,7 @@ void make_sound(model::Project& project) noexcept {
   g_bank.init(voices, *g_arena, *make_bank_mem(), sample_arena(), kArenaSamples, peak_storage(), kPeakSamples);
   g_bank.set_preview_buffer(preview_storage(), kPreviewSamples);  // OS-FU2: Sample load's F5
   if (project.instrument_count() == 0) {
-    install_demo(project);
+    (void)install_demo(project);
   }
   g_seq = new (g_seq_storage) seq::Sequencer(project);
   g_seq->attach_order_store(g_seq_order);
@@ -1266,16 +1266,6 @@ void finish_load() noexcept {
 }
 
 #if !O3OS_AUDIO_TEST
-bool has_sample_instrument(const model::Project& project) noexcept {
-  for (std::uint32_t i = 0; i < model::kMaxInstruments; ++i) {
-    const model::Instrument* in = project.instrument(i);
-    if (in != nullptr && in->kind == model::InstrumentKind::Sample) {
-      return true;
-    }
-  }
-  return false;
-}
-
 void begin_modules() noexcept;  // (below: begin_samples starts it for a new project)
 
 // The voices' sample table emptied (the previous document's PCM, or the demo kit's: nothing is playing, the transport has been stopped since the load began, the Settle is over).
@@ -1369,10 +1359,10 @@ void finish_modules() noexcept {
   finish_load();
 }
 
-// For a project with no sample instrument, the demo kit (the table is empty: begin_samples cleared it, the kit goes in from the start of the arena); then the SD modules.
+// For a project the kit fits (no sample or module instrument, nothing in slots 1-4: app::demo_kit_fits), the demo kit (the table is empty: begin_samples cleared it, the kit goes in from the start
+// of the arena); then the SD modules. OS-BUG-DEMOKIT: a project of module or MIDI instruments keeps them (install_demo_kit refuses it).
 void demo_then_modules() noexcept {
-  if (module_load() == nullptr && !has_sample_instrument(g_arena->project)) {  // (an imported song has its own instruments: a song with none stays silent, it does not get the kit)
-    install_demo(g_arena->project);
+  if (module_load() == nullptr && install_demo(g_arena->project)) {  // (an imported song has its own instruments: a song with none stays silent, it does not get the kit)
     console::log("boot: the project has no sample instrument: demo kit");
   }
   begin_modules();

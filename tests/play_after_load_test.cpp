@@ -24,6 +24,7 @@
 #include <o3os/app/og_folder.h>
 #include <o3os/app/og_samples.h>
 #include <o3os/app/project_state.h>
+#include <o3os/app/sample_bank.h>
 #include <o3os/audio/demo_kit.h>
 #include <o3os/audio/engine.h>
 #include <o3os/audio/meters.h>
@@ -281,18 +282,8 @@ struct Device {
   bool play(unsigned pattern) { return seq->commands().push(seq::Command{seq::Command::Kind::PlayPattern, static_cast<std::uint8_t>(pattern), 0, 0}); }
   bool stop() { return seq->commands().push(seq::Command{seq::Command::Kind::Stop, 0, 0, 0}); }
 
-  bool has_sample_instrument() const {
-    for (std::uint32_t i = 0; i < model::kMaxInstruments; ++i) {
-      const model::Instrument* x = arena->project.instrument(i);
-      if (x != nullptr && x->kind == model::InstrumentKind::Sample) {
-        return true;
-      }
-    }
-    return false;
-  }
-
   // start_project_load() .. finish_samples(): the Stop, the settle (blocks until the voices are quiet), the project, the table cleared, the samples, the demo kit for a
-  // project with no sample instrument. The audio blocks run on through it, about one for each slice of the loaders. False: the project or its samples did not load.
+  // project the kit fits (app::demo_kit_fits, OS-BUG-DEMOKIT: no sample or module instrument, nothing in slots 1-4). The audio blocks run on through it, about one for each slice of the loaders. False: the project or its samples did not load.
   bool load(hs::Storage& card, const char* folder, app::OgFolderLoader& loader, app::OgSampleLoader& samples) {
     (void)stop();
     for (unsigned i = 0; i < 100u && (i < 3u || voices->voices_in_use() != 0u); ++i) {
@@ -318,7 +309,7 @@ struct Device {
       (void)samples.step(16 * 1024);
       block();
     }
-    if (!has_sample_instrument()) {
+    if (app::demo_kit_fits(arena->project)) {
       install_demo();
     }
     return true;

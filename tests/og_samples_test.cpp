@@ -20,6 +20,7 @@
 #include <o3os/core/audio_clock.h>
 #include <o3os/formats/crc32.h>
 #include <o3os/hal/storage.h>
+#include <o3os/model/demo.h>
 #include <o3os/model/project.h>
 #include <o3os/platform/host/dir_storage.h>
 
@@ -27,6 +28,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -1090,6 +1092,103 @@ TEST_CASE("og samples: a project with no sample instrument loads, gets the demo 
     CHECK(text.find("vol " + std::to_string(kick->sampler.volume) + " gain +0.0 dB") != std::string::npos);
     CHECK(text.find(version >= 7u ? " law 12" : " law 1114") != std::string::npos);
     CHECK(text.find(" demo") != std::string::npos);
+  }
+}
+
+// OS-BUG-DEMOKIT: the kit goes only into a project it fits (no sample or module instrument, no instrument of any kind in slots 0..47). A project of module instruments (SID, TB-303, Chip, FM) or of
+// MIDI instruments in 0..47 has no sample instrument, and the kit was written over its instruments 1-4 at boot (a later save made the loss permanent). Only MIDI instruments in 48..63 (every OG
+// project holds the 16 channels there) do not stop the kit and are kept. Pattern 1 and the tempo are the kit's only when the kit is installed and pattern 1 was empty.
+TEST_CASE("og samples: the demo kit only goes where it overwrites no instrument and the project has no sample or module instrument (OS-BUG-DEMOKIT)") {
+  using o3os::model::Instrument;
+  using o3os::model::InstrumentKind;
+  struct Put {
+    unsigned slot;
+    InstrumentKind kind;
+  };
+  struct Case {
+    const char* what;
+    std::vector<Put> have;
+    bool kit;
+  };
+  const Case cases[] = {
+      {"empty", {}, true},
+      {"modules only", {{0, InstrumentKind::Module}, {1, InstrumentKind::Module}, {2, InstrumentKind::Module}, {3, InstrumentKind::Module}}, false},
+      {"one module", {{5, InstrumentKind::Module}}, false},
+      {"MIDI only", {{0, InstrumentKind::Midi}, {1, InstrumentKind::Midi}}, false},
+      {"MIDI in slot 4 (outside the kit's slots, inside 0..47)", {{4, InstrumentKind::Midi}}, false},
+      {"MIDI in slot 5", {{5, InstrumentKind::Midi}}, false},
+      {"MIDI in slot 47, the last non-channel slot", {{47, InstrumentKind::Midi}}, false},
+      {"MIDI in slot 47 and the channels", {{47, InstrumentKind::Midi}, {48, InstrumentKind::Midi}, {63, InstrumentKind::Midi}}, false},
+      {"MIDI in slot 48 only, the first channel slot", {{48, InstrumentKind::Midi}}, true},
+      {"MIDI channels only, as every OG project", {{48, InstrumentKind::Midi}, {49, InstrumentKind::Midi}, {63, InstrumentKind::Midi}}, true},
+      {"modules and the MIDI channels", {{0, InstrumentKind::Module}, {48, InstrumentKind::Midi}}, false},
+      {"one sample", {{0, InstrumentKind::Sample}}, false},
+      {"one sample far from 1-4", {{20, InstrumentKind::Sample}}, false},
+      {"one module far from 1-4", {{20, InstrumentKind::Module}}, false},
+      {"mixed", {{0, InstrumentKind::Module}, {1, InstrumentKind::Midi}, {2, InstrumentKind::Sample}}, false},
+  };
+  for (unsigned run = 0; run < 2 * (sizeof cases / sizeof cases[0]); ++run) {
+    const Case& c = cases[run / 2];
+    const bool notes = (run & 1u) != 0;  // second pass of each case: pattern 1 already holds a note
+    CAPTURE(c.what);
+    CAPTURE(notes);
+    o3os::model::ModelArena& model = o3os::test::og::arena(0);
+    model.project.reset();
+    constexpr std::uint32_t kTempo = 13700;  // not the kit's tempo
+    NEED(model.project.set_tempo_x100(kTempo) == o3os::model::Status::Ok);
+    if (notes) {
+      o3os::model::Step s = o3os::model::kEmptyStep;
+      s.note = 61;
+      s.instr = 9;
+      NEED(model.project.create_pattern(1, 16) == o3os::model::Status::Ok);
+      NEED(model.project.set_step(1, 5, 7, s) == o3os::model::Status::Ok);
+    }
+    NEED(model.project.add_module("tb303", 5, 1, 0) == o3os::model::Status::Ok);
+    std::vector<Instrument> before;
+    for (const Put& p : c.have) {
+      Instrument in;
+      o3os::model::init_instrument(in, p.kind);
+      std::snprintf(in.name, sizeof in.name, "X%u", p.slot);
+      if (p.kind == InstrumentKind::Midi) {
+        in.midi_channel = 1;
+      }
+      if (p.kind == InstrumentKind::Module) {
+        in.module_index = 0;
+      }
+      NEED(model.project.set_instrument(p.slot, in) == o3os::model::Status::Ok);
+      before.push_back(in);
+    }
+    LawRig rig(model);
+    CHECK(o3os::app::install_demo_kit(rig.bank, *rig.voices, model.project, rig.arena.data(), static_cast<std::uint32_t>(rig.arena.size())) == c.kit);
+    CHECK(rig.bank.demo_kit() == c.kit);
+    CHECK(rig.voices->has_samples() == c.kit);
+    if (c.kit) {
+      NEED(model.project.instrument(0) != nullptr);
+      CHECK(std::strcmp(model.project.instrument(0)->name, "KICK") == 0);
+    }
+    CHECK(model.project.instrument_count() == before.size() + (c.kit ? 4u : 0u));
+    // Pattern 1 and the tempo: the kit's own only when it was installed into an empty pattern 1; untouched when the kit was refused or pattern 1 already had a note.
+    if (c.kit && !notes) {
+      CHECK_FALSE(o3os::model::demo::pattern_is_empty(model.project, 1));
+      CHECK(model.project.tempo_x100() != kTempo);
+    } else {
+      CHECK(model.project.tempo_x100() == kTempo);
+      if (notes) {
+        NEED(model.project.pattern(1) != nullptr);
+        const o3os::model::Step& s = model.project.pattern(1)->steps[5][7];
+        CHECK(s.note == 61);
+        CHECK(s.instr == 9);
+        CHECK(model.project.pattern(1)->steps[0][0].note == o3os::model::kEmptyStep.note);  // no kick of the kit's pattern
+      } else {
+        CHECK(o3os::model::demo::pattern_is_empty(model.project, 1));
+      }
+    }
+    for (std::size_t i = 0; i < before.size(); ++i) {  // what the project had is as it was, with the kit or without
+      const Instrument* now = model.project.instrument(c.have[i].slot);
+      NEED(now != nullptr);
+      CHECK(now->kind == before[i].kind);
+      CHECK(std::strcmp(now->name, before[i].name) == 0);
+    }
   }
 }
 

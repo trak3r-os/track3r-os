@@ -4,6 +4,7 @@
 #include <o3os/app/og_samples.h>
 
 #include <o3os/audio/demo_kit.h>
+#include <o3os/formats/og.h>
 #include <o3os/model/demo.h>
 
 #include <cstring>
@@ -982,8 +983,19 @@ bool SampleBank::audio_redone(unsigned slot) noexcept {
   return w.valid;
 }
 
+bool demo_kit_fits(const model::Project& project) noexcept {
+  for (std::uint32_t i = 0; i < model::kMaxInstruments; ++i) {
+    const model::Instrument* in = project.instrument(i);  // (null for an empty slot)
+    // A MIDI instrument stops the kit too unless it is in an OG channel slot (48..63, which every OG project holds): a MIDI-only project keeps its slots 0..47, its tempo and its pattern 1.
+    if (in != nullptr && (in->kind != model::InstrumentKind::Midi || i < formats::og::kMidiFirstSlot)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool install_demo_kit(SampleBank& bank, audio::VoicePool& voices, model::Project& project, std::int16_t* arena, std::uint32_t arena_samples) noexcept {
-  if (voices.has_samples()) {
+  if (voices.has_samples() || !demo_kit_fits(project)) {
     return false;
   }
   audio::DemoKit kit;  // 84 bytes, only while the kit is made

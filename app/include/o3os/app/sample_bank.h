@@ -521,8 +521,13 @@ class SampleBank {
 };
 
 // OS-BUG-PASTE24: the demo kit into the start of the arena and the voices' table, its four instruments into `project` (at the level that is 0 dB under the document's law: the kit is bound at unity,
-// so a rebuild from the project must give the same gain) and, if pattern 1 is empty, its pattern. Only into an empty voices table. True when it was installed. This is the platform's
+// so a rebuild from the project must give the same gain) and, if pattern 1 is empty, its pattern. Only into an empty voices table and a project the kit fits in (demo_kit_fits).
+// True when it was installed. This is the platform's
 // install_demo, here so that the host can hold it to the rebuild invariant.
+// OS-BUG-DEMOKIT: the kit's four instruments go into slots 0..3, so it fits only a project that holds no sample or module instrument (it would have sounds of its own) and nothing
+// at all in slots 0..47 (a project of module or MIDI instruments lost them to the kit). Only MIDI instruments in slots 48..63 do not stop it: every OG project holds the 16 MIDI channels there.
+bool demo_kit_fits(const model::Project& project) noexcept;
+
 bool install_demo_kit(SampleBank& bank, audio::VoicePool& voices, model::Project& project, std::int16_t* arena, std::uint32_t arena_samples) noexcept;
 
 }  // namespace o3os::app

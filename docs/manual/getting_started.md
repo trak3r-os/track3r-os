@@ -79,7 +79,7 @@ You should see the version you installed. The boot screen shows the same version
 1. Turn the unit on.
 2. The boot screen shows a logo with **Track3r** and the build under it. It stays for at least 0.8 s, until the start-up work is done.
 3. The unit opens the project you had open last (the newest of the File screen's RECENT list) if it is still on the card. With none, and a `Workspace/project.mt` file on the card, it loads that. When the last project cannot be read (a damaged file, a project from a newer OS), the unit starts empty and the strip says `PROJECT <name> FAILED` and why; it does not fall back to the Workspace, and it tries the same project on every start until you open another one in File. The strip shows the end of the load: `PROJECT <name> OPENED`.
-4. If no project loads, or the loaded project has no sample instrument, the unit starts the demo kit: four instruments and pattern 1. Press `Play` to start pattern 1.
+4. If no project loads, or the loaded project has no sample or module instrument and no instrument at all in slots 1 to 48 (MIDI instruments in slots 49 to 64, the 16 MIDI channels of every project from the official firmware, do not stop it), the unit starts the demo kit: four instruments and pattern 1. This is new Community OS behaviour, a default the maintainer still has to confirm. Press `Play` to start pattern 1.
 
 To open another project from the card, press `File`. See [File](file.md). For where each key is, see [The panel](panel.md). On any screen, hold `Shift` and tap `Config` to read a help page for it ([the help page](panel.md#the-help-page)). <!-- QA-GLB-141 -->
 

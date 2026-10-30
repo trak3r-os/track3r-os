@@ -162,7 +162,7 @@ Firmware file: the file with the `.ptf` extension that holds a firmware image. T
 
 Workspace: the card folder that holds the project the unit loads at boot. The project is in the original firmware format.
 
-Demo kit: four instruments and pattern 1, built in. The unit uses them when no project loads, or when the loaded project has no sample instrument.
+Demo kit: four instruments and pattern 1, built in. The unit uses them when no project loads, or when the loaded project has no sample or module instrument and no instrument at all in slots 1 to 48 (the MIDI channels in slots 49 to 64 do not count). A project with a module instrument anywhere, or a MIDI instrument in slots 1 to 48, keeps its instruments, tempo and pattern 1. This is new Community OS behaviour, a default the maintainer still has to confirm.
 
 Starter zip: an optional zip that goes next to the firmware file, with folders, samples, wavetables and demo projects. It is not part of this release.
 
