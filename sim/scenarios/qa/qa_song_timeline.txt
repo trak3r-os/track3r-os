@@ -1,6 +1,6 @@
-# OS-SONG-TIMELINE (docs/specs/OS-SONG-VIEW.md): the Song screen's TIMELINE page, QA-SNG-073..082, docs/qa/catalogue/song.md. Goldens are keyed qa_song_timeline/<snap>.
+# OS-SONG-TIMELINE (docs/specs/OS-SONG-VIEW.md): the Song screen's TIMELINE page, QA-SNG-073..082 and 083..087 (OS-SONG-VIEW2), docs/qa/catalogue/song.md. Goldens are keyed qa_song_timeline/<snap>.
 # OS-SONG-TIMELINE (new Community OS behaviour): the Song button's third page. QA-SNG-073: four slots (patterns 1 to 4) as blocks as wide as they have bars, a colour and the pattern's number on each, the thumbnails of the
-# tracks' note density under them, the cursor's block in a white frame; the header says TIMELINE 3/4 and the info line the cursor's slot, its start bar, pattern and length.
+# tracks' note density under them, the cursor's block in a white frame; the header says TIMELINE 3/3 and the info line the cursor's slot, its start bar, pattern and length.
 document
 audio on
 wait 20
@@ -27,3 +27,47 @@ tap play
 wait 700
 assert state playing=1
 snap qa_sng_077
+
+# QA-SNG-083 (OS-SONG-VIEW2 V2; the countdown that was STAGE's): while it plays the info line starts with the bars left in the playing pattern, NEXT IN n BARS, and counts down; the cursor's slot follows.
+wait 2800
+assert state playing=1
+snap qa_sng_083
+
+# QA-SNG-084: a live jump (Rec with the cursor on another slot while the song plays) replaces NEXT with JUMP: the info line says JUMP IN n BARS (the JUMP QUEUED message covers it for its first two seconds).
+tap down 2
+tap rec
+wait 2500
+snap qa_sng_084
+
+# QA-SNG-085: playing the song's last slot the info line says LOOP IN n BARS (the song loops to slot 0).
+tap play
+wait 100
+press shift
+tap f5
+release shift
+tap play
+wait 300
+assert state playing=1
+snap qa_sng_085
+
+# QA-SNG-086: stopped, the info line is the cursor's slot, its start bar, pattern and length (no countdown).
+tap play
+wait 100
+assert state playing=0
+snap qa_sng_086
+
+# QA-SNG-087: the page key turns ORDER, ARRANGEMENT, TIMELINE (the header says n/3), back to ORDER; a peek of Song from another screen shows the page it was left on.
+tap song
+assert state screen=SONG page=0
+snap qa_sng_087
+tap song
+tap song
+assert state screen=SONG page=2
+tap master
+press song
+wait 500
+assert state screen=SONG page=2
+snap qa_sng_087_peek
+release song
+wait 5
+assert state screen=MIXER

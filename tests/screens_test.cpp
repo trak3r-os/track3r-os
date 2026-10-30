@@ -321,9 +321,7 @@ TEST_CASE("screens: the screen buttons take the base screen from Pattern to Song
   rig.tap(Button::Song);
   CHECK(rig.state().page[app::screen_index(ScreenId::Song)] == 2);  // OS-SONG-TIMELINE: the third page
   rig.tap(Button::Song);
-  CHECK(rig.state().page[app::screen_index(ScreenId::Song)] == 3);  // OS-SONG-STAGE: the fourth
-  rig.tap(Button::Song);
-  CHECK(rig.state().page[app::screen_index(ScreenId::Song)] == 0);  // four pages, wrapping
+  CHECK(rig.state().page[app::screen_index(ScreenId::Song)] == 0);  // OS-SONG-VIEW2: three pages, wrapping (STAGE is gone)
   rig.tap(Button::Pattern);
   CHECK(rig.screen() == ScreenId::Pattern);
   const std::uint32_t frames_back = rig.app->frames();

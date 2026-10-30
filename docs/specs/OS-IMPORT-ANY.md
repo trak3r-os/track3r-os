@@ -24,7 +24,7 @@ Level B (main loop, the File screen and the module importer; no format change, n
 
 ## Plan (one branch `feat/OS-IMPORT-ANY`, two commits)
 
-1. **ALL FILES and the header** (I1-I5): the filter, the toggle, the reader choice, the refusal; host tests (a module under a wrong or empty name imports; a WAV renamed `.mod` refuses; a `mod.title` lists and imports; nothing changes on a refusal); a sim scenario for the toggle; QA rows; the manual section in `docs/manual/file.md` (or the chapter that holds IMPORT), with a line on converting other formats with OpenMPT (pending the maintainer's word on XM).
+1. **ALL FILES and the header** (I1-I5): the filter, the toggle, the reader choice, the refusal; host tests (a module under a wrong or empty name imports; a WAV renamed `.mod` refuses; a `mod.title` lists and imports; nothing changes on a refusal); a sim scenario for the toggle; QA rows; the manual section in `docs/manual/file.md` (or the chapter that holds IMPORT), with a short section on converting other formats (XM, IT, Oktalyzer, MTM, 669...) with OpenMPT on a computer: open, change the module type to S3M (or MOD for 4 channels), save, import (the maintainer parked native XM on 2026-10-30; check the steps against OpenMPT's own documentation).
 2. **15-sample Soundtracker** (I6, I7): the reader path, host tests with a synthetic 15-sample file built in the test (no third-party file in git) and the edges (length 0, an order of 64, a truncated sample, a 31-sample M.K. file unchanged), the `docs/formats/mod.md` note.
 
 ## Tests and Done when

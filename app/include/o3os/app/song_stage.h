@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-// The Song screen's STAGE page (OS-SONG-STAGE, docs/specs/OS-SONG-VIEW.md): the arithmetic behind it, pure and main loop only. What is playing, what comes next, how many bars are
-// left before it does, and how far the playhead is through the pattern. Nothing here allocates, draws or is saved.
+// The countdown of the Song screen's TIMELINE info line (OS-SONG-VIEW2 V2; it was the STAGE page's, OS-SONG-STAGE): the arithmetic behind it, pure and main loop only. What is playing, what
+// comes next and how many bars are left before it does. Nothing here allocates, draws or is saved.
 
 #include <o3os/app/song_source.h>
 #include <o3os/audio/play_position.h>
@@ -12,7 +12,6 @@
 namespace o3os::app {
 
 inline constexpr unsigned kStageStepsPerBar = 16;    // four beats of four steps (seq::kStepsPerBar; the app does not link the sequencer's header)
-inline constexpr unsigned kStageMicrosteps = 48;     // a step (audio::PlayPosition::Value::ustep is 0..47)
 
 // Bars left in a pattern of `steps` steps with the playhead on step `step` (0-based): the bars still to run, the one the playhead is in counted, so the last bar says 1. 0 for a pattern with no
 // steps; a playhead past the end (a pattern shortened while it played) counts as the last bar.
@@ -22,27 +21,6 @@ constexpr unsigned stage_bars_left(unsigned steps, unsigned step) noexcept {
   }
   const unsigned left = step < steps ? steps - step : 1u;
   return (left + kStageStepsPerBar - 1u) / kStageStepsPerBar;
-}
-
-// The bar the playhead is in, 1-based and counted from the pattern's start, so it agrees with the bar ticks: step / 16, and a playhead past the end is the last bar. 0 for a pattern with no steps.
-constexpr unsigned stage_bar_of(unsigned steps, unsigned step) noexcept {
-  if (steps == 0u) {
-    return 0u;
-  }
-  const unsigned bars = (steps + kStageStepsPerBar - 1u) / kStageStepsPerBar;
-  const unsigned bar = step / kStageStepsPerBar;
-  return (bar < bars ? bar : bars - 1u) + 1u;
-}
-
-// The filled part of a bar `width` pixels wide: the playhead's place in the pattern, to the microstep (so it moves smoothly). 0..width; a pattern with no steps fills nothing.
-constexpr unsigned stage_progress(unsigned steps, unsigned step, unsigned ustep, unsigned width) noexcept {
-  if (steps == 0u || width == 0u) {
-    return 0u;
-  }
-  const unsigned total = steps * kStageMicrosteps;
-  const unsigned done = (step < steps ? step : steps) * kStageMicrosteps + (ustep < kStageMicrosteps ? ustep : kStageMicrosteps - 1u);
-  const unsigned at = done < total ? done : total;
-  return (at * width) / total;  // (at most 6144 x a width of a few hundred: inside 32 bits, so no software 64-bit divide a frame)
 }
 
 // What the page says. `Stopped`: the cursor's slot is NOW, nothing counts. `Song`: the song row that plays. `Pattern`: a single pattern loops (no song row, or a row the list no longer has).

@@ -2,14 +2,11 @@
 #include "song_pages.h"
 
 #include <o3os/app/pattern_view.h>
-#include <o3os/app/song_stage.h>
 #include <o3os/app/song_timeline.h>
 #include <o3os/app/text_format.h>
 #include <o3os/core/fixed_string.h>
 #include <o3os/ui/components.h>
 #include <o3os/ui/theme.h>
-
-#include <cstring>
 
 namespace o3os::app {
 
@@ -20,67 +17,12 @@ using ui::Renderer;
 
 namespace {
 
-constexpr unsigned kDemoPatternSteps = 16;  // a pattern-mode playback with no project (the demo list): one bar
-
-// The caption of the NEXT block: why it is next. Words, not colour (colour is never the only cue).
-constexpr const char* next_caption(StageNext k) noexcept {
-  return k == StageNext::Jump ? "JUMP" : (k == StageNext::Loop ? "LOOP" : "NEXT");
-}
-
-// "SLOT 05", or "--" for a block with no slot (Pattern mode, an empty list).
-void slot_text(core::FixedString<24>& text, int slot) noexcept {
-  text.clear();
-  if (slot < 0) {
-    text.assign("--");
-    return;
-  }
-  text.assign("SLOT ");
-  append_dec(text, static_cast<unsigned>(slot), slot > 99 ? 3u : 2u);
-}
-
-// One block: a caption in the Label face, the slot and the pattern's name in the Display face (the largest), and a line in the Label face under them. `ink` is the text, `dim` the caption.
-void draw_block(Renderer& r, const Rect& box, const SongSource& src, int slot, unsigned pattern, const char* caption, unsigned steps, Color ink, Color dim) noexcept {
-  const ui::Theme& t = r.theme();
-  const int g = t.metrics.row_pitch / 3;
-  const int lab_h = t.geometry(Face::Label).cell_h;
-  const int disp_h = t.geometry(Face::Display).cell_h;
-  const int disp_w = t.geometry(Face::Display).cell_w;
-  const int x = box.x + 2 * g;
-  int y = box.y + g;
-  r.text(x, y, caption, dim, Face::Label);
-  y += lab_h + g;
-  core::FixedString<24> text;
-  slot_text(text, slot);
-  r.text(x, y, text.c_str(), ink, Face::Display);
-  y += disp_h + g;
-  const int fit = (box.w - 4 * g) / disp_w;  // characters of the Display face that fit
-  text.clear();
-  const char* name = slot >= 0 ? src.name(slot) : "";
-  if (pattern == 0u) {
-    text.assign("--");
-  } else if (name[0] != '\0') {
-    const std::size_t n = std::strlen(name);
-    text.append(name, n < static_cast<std::size_t>(fit) ? n : static_cast<std::size_t>(fit));  // cut to the block
-  } else {
-    text.assign("PATTERN ");
-    append_dec(text, pattern, pattern > 99u ? 3u : 2u);
-  }
-  r.text(x, y, text.c_str(), ink, Face::Display);
-  y += disp_h + g;
-  text.clear();
-  if (pattern != 0u) {
-    text.assign("PATTERN ");
-    append_dec(text, pattern, pattern > 99u ? 3u : 2u);
-    text.append("   ");
-    append_uint(text, (steps + kStageStepsPerBar - 1u) / kStageStepsPerBar);
-    text.append(steps <= kStageStepsPerBar ? " BAR" : " BARS");
-  }
-  r.text(x, y, text.c_str(), dim, Face::Label);
-}
-
-// OS-SONG-TIMELINE: a colour per pattern, four fills by (pattern - 1) % 4, with the text of the pair the contrast table lists for each (colour is never the only cue: the number is on the block).
+// OS-SONG-TIMELINE: a colour per pattern, four by (pattern - 1) % 4, each a pair the contrast table lists against the pane (colour is never the only cue: the number is on the block). OS-SONG-VIEW2 V3: it
+// is drawn as a strip of kStripH pixels at the foot of the block, not as its fill.
 constexpr Color kPatternFill[4] = {Color::Sel, Color::Play, Color::Accent, Color::Rec};
-constexpr Color kPatternInk[4] = {Color::SelText, Color::PlayText, Color::AccentText, Color::SelText};
+constexpr int kStripH = 4;
+// OS-SONG-VIEW2 V5: the energy curve is a thin row of this many pixels at the foot of the page.
+constexpr int kEnergyH = 10;
 
 }  // namespace
 
@@ -115,22 +57,38 @@ void draw_song_timeline(Renderer& r, const Frame& f, const Model& model, const V
     return Rect{x0, y0, x1 - x0 > 2 ? x1 - x0 - 1 : 1, bh};
   };
 
-  // The slots as blocks as wide as they have bars; one that names a pattern the project does not have is an outline.
-  for (unsigned i = 0; i < w.count; ++i) {
-    const int slot = w.first + static_cast<int>(i);
-    const unsigned pattern = src.pattern(slot);
-    const Rect blk = block_of(i);
-    const unsigned colour = (pattern + 3u) % 4u;
-    const bool exists = src.exists(slot);
-    if (exists) {
-      r.panel(blk, kPatternFill[colour]);
-    } else {
-      r.frame(blk, Color::Empty);
+  // The slots as blocks as wide as they have bars (OS-SONG-VIEW2 V3): a neutral fill (the pane's own) under a rule along the top, the pattern's number in Text and, under it, the pattern's colour as a
+  // strip of kStripH pixels (the colour repeats are what it is for; the number is the cue). A slot whose pattern the project does not have has a dimmer rule, a dim number and no strip. The passes
+  // go by colour (rules, strips, numbers) so the display list holds one colour change per colour, not per slot.
+  const int strip_h = kStripH;
+  for (unsigned pass = 0; pass < 2; ++pass) {  // the rules: existing patterns in TextDim, then the missing ones in Empty
+    for (unsigned i = 0; i < w.count; ++i) {
+      if (src.exists(w.first + static_cast<int>(i)) == (pass == 0)) {
+        const Rect blk = block_of(i);
+        r.panel(Rect{blk.x, blk.y, blk.w, 1}, pass == 0 ? Color::TextDim : Color::Empty);
+      }
     }
-    text.clear();
-    append_uint(text, pattern);
-    if (r.text_width(text.c_str(), Face::Micro) + 6 <= blk.w) {  // the number when it fits
-      r.text(blk.x + 3, y0 + (bh - micro_h) / 2, text.c_str(), exists ? kPatternInk[colour] : Color::TextDim, Face::Micro);
+  }
+  for (unsigned colour = 0; colour < 4; ++colour) {  // the strips, one colour at a time
+    for (unsigned i = 0; i < w.count; ++i) {
+      const int slot = w.first + static_cast<int>(i);
+      if (src.exists(slot) && (src.pattern(slot) + 3u) % 4u == colour) {
+        const Rect blk = block_of(i);
+        r.panel(Rect{blk.x, blk.y + bh - strip_h, blk.w, strip_h}, kPatternFill[colour]);
+      }
+    }
+  }
+  for (unsigned pass = 0; pass < 2; ++pass) {  // the numbers: on every block, whatever its colour, in Text (the missing ones dim); only a block narrower than the number itself (a one-bar slot of a 48-bar window with a 3-digit id) goes without
+    for (unsigned i = 0; i < w.count; ++i) {
+      const int slot = w.first + static_cast<int>(i);
+      if (src.exists(slot) == (pass == 0)) {
+        const Rect blk = block_of(i);
+        text.clear();
+        append_uint(text, src.pattern(slot));
+        if (r.text_width(text.c_str(), Face::Micro) + 2 <= blk.w) {
+          r.text(blk.x + 2, blk.y + 1 + (bh - strip_h - 1 - micro_h) / 2, text.c_str(), pass == 0 ? Color::Text : Color::TextDim, Face::Micro);
+        }
+      }
     }
   }
 
@@ -152,7 +110,7 @@ void draw_song_timeline(Renderer& r, const Frame& f, const Model& model, const V
   if (model.project != nullptr && tracks > 0u) {
     const int top = under + 4 + g;
     const int floor_y = f.pane.y + f.pane.h - g;                 // the bottom of the page: the energy curve stands on it
-    const int curve_h = 2 * m.row_pitch;                         // its tallest column
+    const int curve_h = kEnergyH;                                // its tallest column: a thin row (V5)
     const int bottom = floor_y - curve_h - (micro_h + 2) - g;    // the lanes end above the curve's caption
     int lane = (bottom - top) / static_cast<int>(tracks);
     lane = lane > m.row_pitch ? m.row_pitch : lane;
@@ -164,7 +122,7 @@ void draw_song_timeline(Renderer& r, const Frame& f, const Model& model, const V
           const unsigned d = SongDensity::nibble(dens, tr);
           if (d != 0u) {
             const int h = 1 + static_cast<int>(d) * (lane - 2) / static_cast<int>(SongDensity::kMax);
-            r.panel(Rect{blk.x, top + static_cast<int>(tr) * lane + (lane - 1 - h), blk.w, h}, Color::Text);
+            r.panel(Rect{blk.x, top + static_cast<int>(tr) * lane + (lane - 1 - h), blk.w, h}, Color::TextDim);  // dimmed (V3): the lanes are the background of the blocks' numbers and colours
           }
         }
       }
@@ -207,78 +165,6 @@ void draw_song_timeline(Renderer& r, const Frame& f, const Model& model, const V
     const int px = blk.x + (steps > 0 ? blk.w * at / steps : 0);
     r.panel(Rect{px, y0, 2, f.pane.y + f.pane.h - g - y0}, Color::Text);
   }
-}
-
-void draw_song_stage(Renderer& r, const Frame& f, const Model& model, const ViewState& view, Rect covered) noexcept {
-  if (covers(covered, f.pane.x, f.pane.y, f.pane.w, f.pane.h)) {
-    return;
-  }
-  const ui::Theme& t = r.theme();
-  const ui::Metrics& m = t.metrics;
-  const SongSource src(model);
-  unsigned pattern_steps = kDemoPatternSteps;
-  if (model.project != nullptr) {
-    const std::uint32_t len = model.project->pattern_length(view.play.pattern);
-    pattern_steps = len != 0u ? len : model.project->default_pattern_length();
-  }
-  const StageState s = stage_state(src, view.play, view.song.clamped_pos(src.count()), pattern_steps);
-  const bool running = s.mode != StageMode::Stopped;
-
-  const int g = m.row_pitch / 3;
-  const int lab_h = t.geometry(Face::Label).cell_h;
-  const int disp_h = t.geometry(Face::Display).cell_h;
-  const int mx = ui::kScreenW / 32;
-  const int bw = (ui::kScreenW - 3 * mx) / 2;
-  const int bh = 5 * g + 2 * lab_h + 2 * disp_h;
-  const int y0 = f.pane.y + g;
-
-  // NOW: a solid block in the playing green (the transport's colour) while it plays, in the selection blue as the cursor's preview while stopped.
-  const Rect now = {mx, y0, bw, bh};
-  const Color now_fill = running ? Color::Play : Color::Sel;
-  const Color now_ink = running ? Color::PlayText : Color::SelText;
-  r.panel(now, now_fill);
-  draw_block(r, now, src, s.now_slot, s.now_pattern, running ? (s.mode == StageMode::Pattern ? "PATTERN" : "NOW") : "CURSOR", s.steps, now_ink, now_ink);
-
-  // NEXT: an outlined block on the pane (two pixels), orange for a live jump that waits.
-  const Rect next = {2 * mx + bw, y0, bw, bh};
-  const Color edge = s.next_kind == StageNext::Jump ? Color::Accent : Color::Sel;
-  r.frame(next, edge);
-  r.frame(Rect{next.x + 1, next.y + 1, next.w - 2, next.h - 2}, edge);
-  const unsigned next_steps = s.next_slot >= 0 ? static_cast<unsigned>(src.steps(s.next_slot)) : s.steps;
-  draw_block(r, next, src, s.next_slot, s.next_pattern, next_caption(s.next_kind), next_steps, Color::Text, Color::TextDim);
-
-  // The countdown: the bars left in Display type, in words. Stopped it says so.
-  int y = y0 + bh + 2 * g;
-  r.text(mx, y, running ? (s.next_kind == StageNext::Jump ? "JUMP IN" : (s.next_kind == StageNext::Loop ? "LOOP IN" : "NEXT IN")) : "TRANSPORT", Color::TextDim, Face::Label);
-  y += lab_h + g;
-  core::FixedString<24> text;
-  if (running) {
-    append_uint(text, s.bars_left);
-    text.append(s.bars_left == 1u ? " BAR" : " BARS");
-  } else {
-    text.assign("STOPPED");
-  }
-  r.text(mx, y, text.c_str(), Color::Text, Face::Display);
-  y += disp_h + 2 * g;
-
-  // The progress bar over the pattern that plays, a tick at every bar line, and under it the bar the playhead is in.
-  const int bar_w = ui::kScreenW - 2 * mx;
-  const Rect bar = {mx, y, bar_w, disp_h};
-  const unsigned fill = running ? stage_progress(s.steps, s.step, s.ustep, static_cast<unsigned>(bar_w)) : 0u;
-  ui::bar(r, bar, fill, static_cast<unsigned>(bar_w), Color::Empty, Color::Play);
-  const unsigned bars = (s.steps + kStageStepsPerBar - 1u) / kStageStepsPerBar;
-  for (unsigned b = 1; b < bars; ++b) {
-    r.panel(Rect{mx + static_cast<int>(static_cast<unsigned>(bar_w) * b * kStageStepsPerBar / s.steps), y, 2, disp_h}, Color::Pane);
-  }
-  y += disp_h + g;
-  text.clear();
-  if (running && bars > 0u) {
-    text.assign("BAR ");
-    append_uint(text, stage_bar_of(s.steps, s.step));
-    text.append(" OF ");
-    append_uint(text, bars);
-  }
-  r.text(mx, y, text.c_str(), Color::TextDim, Face::Label);
 }
 
 }  // namespace o3os::app

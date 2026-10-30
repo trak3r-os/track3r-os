@@ -28,7 +28,6 @@ using app::ViewState;
 constexpr unsigned kPageOrder = 0;
 constexpr unsigned kPageArrangement = 1;
 constexpr unsigned kPageTimeline = 2;
-constexpr unsigned kPageStage = 3;
 
 // ---- content ---------------------------------------------------------------------------------------------------
 
@@ -308,8 +307,7 @@ void draw_song_document_ask(ui::Renderer& r, unsigned) {
   scene(r, d.model, v);
 }
 
-// OS-SONG-STAGE: the STAGE page over the document. The typical one plays slot 2 (a 64-step pattern) at bar 2 with slot 3 next; the dearest sweeps stopped, next, a live jump, the loop at the
-// song's end and a pattern-mode playback, with the playhead at the start, in the middle and at the end of the pattern.
+// The transport playing slot `order` (pattern `pattern`) at `step`, for the pages that show it.
 void song_stage_play(ViewState& v, unsigned order, unsigned pattern, unsigned step) {
   v.playing = true;
   v.play.playing = true;
@@ -317,31 +315,6 @@ void song_stage_play(ViewState& v, unsigned order, unsigned pattern, unsigned st
   v.play.pattern = static_cast<std::uint8_t>(pattern);
   v.play.step = static_cast<std::uint16_t>(step);
   v.play.ustep = 24;
-}
-
-void draw_song_stage_document(ui::Renderer& r, unsigned) {
-  SongDoc& d = song_doc(false);
-  ViewState v = song_doc_view(kPageStage, 0);
-  song_stage_play(v, 2, 3, 21);
-  scene(r, d.model, v);
-}
-
-void draw_song_stage_worst(ui::Renderer& r, unsigned variant) {
-  SongDoc& d = song_doc(true);
-  ViewState v = song_doc_view(kPageStage, 5);
-  const unsigned kind = variant % 5;
-  const unsigned step = (variant / 5 % 3) * 31;  // 0, 31, 62 of 64
-  if (kind == 1) {
-    song_stage_play(v, 2, 3, step);
-  } else if (kind == 2) {
-    song_stage_play(v, 2, 3, step);
-    v.play.queued = 7;
-  } else if (kind == 3) {
-    song_stage_play(v, 39, 8, step);
-  } else if (kind == 4) {
-    song_stage_play(v, audio::PlayPosition::kNoOrder, 3, step);
-  }
-  scene(r, d.model, v);
 }
 
 // OS-SONG-TIMELINE: the TIMELINE page. The typical one is the 12-track document with the cursor on slot 12, slot 14 playing at step 20. The dearest is the slot cap (timeline_slot_cap): every
@@ -682,7 +655,7 @@ const ScreenState kInputTestStates[2] = {
 };
 
 // Every state is held to the standard budget in every theme and both modes: the typical ones are one-variant worst cases.
-const ScreenState kSongStates[16] = {
+const ScreenState kSongStates[14] = {
     {"typical", true, 1, kBudgetWords, draw_song_typical},
     {"arrangement", true, 1, kBudgetWords, draw_song_arrangement, false},
     {"worst", true, kSongWorstVariants, kBudgetWords, draw_song_worst},
@@ -702,8 +675,6 @@ const ScreenState kSongStates[16] = {
     // OS-SONG-TIMELINE: the TIMELINE page playing, and the dearest sweep (the thumbnail cap, four variants).
     {"timeline", true, 1, kBudgetWords, draw_song_timeline_document},
     {"timeline_worst", true, 64, kBudgetWords, draw_song_timeline_worst, false},
-    {"stage", true, 1, kBudgetWords, draw_song_stage_document},
-    {"stage_worst", true, 15, kBudgetWords, draw_song_stage_worst, false},
 };
 
 // The `_worst` sweeps (and the arrangement page, which the song scenario shows) are measured but not rendered to the

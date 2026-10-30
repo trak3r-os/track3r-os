@@ -25,7 +25,6 @@ snap qa_sng_003
 document
 tap song
 tap song
-tap song
 assert state screen=SONG page=0
 press shift
 tap f6
@@ -192,7 +191,6 @@ tap right 16
 snap qa_sng_047
 tap song
 tap song
-tap song
 assert state screen=SONG page=0
 
 # OS-SONGSHARE S1 (docs/specs/OS-SONGSHARE.md): the shared-pattern mark. The list is 1 1 2 3 3: ADD SLOT repeats the pattern, DUP PAT makes patterns 2 and 3 (copies); the cursor goes up to slot 3.
@@ -219,7 +217,6 @@ snap qa_sng_051
 tap up 2
 tap song
 snap qa_sng_052
-tap song
 tap song
 tap song
 assert state screen=SONG page=0

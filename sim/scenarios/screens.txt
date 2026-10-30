@@ -11,7 +11,6 @@ snap song_page2
 assert state screen=SONG page=1
 tap song
 tap song
-tap song
 assert state screen=SONG page=0
 snap song_page1
 

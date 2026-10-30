@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// OS-SONG-VIEW (docs/specs/OS-SONG-VIEW.md; new Community OS behaviour): the pure logic of the Song screen's STAGE page (the countdown arithmetic, what is NOW and NEXT).
+// OS-SONG-VIEW, OS-SONG-VIEW2 (docs/specs/OS-SONG-VIEW.md, OS-SONG-VIEW2.md; new Community OS behaviour): the pure logic behind the countdown on the Song TIMELINE's info line (bars left, what is NOW and NEXT).
 #include <doctest/doctest.h>
 
 #include <o3os/app/model.h>
@@ -55,31 +55,6 @@ TEST_CASE("stage: bars left count the bar the playhead is in, so the last bar sa
   CHECK(app::stage_bars_left(24, 16) == 1u);
   CHECK(app::stage_bars_left(0, 0) == 0u);    // no steps: nothing to count
   CHECK(app::stage_bars_left(16, 40) == 1u);  // a pattern shortened under the playhead: the last bar
-}
-
-TEST_CASE("stage: the bar the playhead is in counts from the start, agreeing with the bar ticks, also for lengths that are not a multiple of 16") {
-  CHECK(app::stage_bar_of(64, 0) == 1u);
-  CHECK(app::stage_bar_of(64, 16) == 2u);
-  CHECK(app::stage_bar_of(64, 63) == 4u);
-  CHECK(app::stage_bar_of(24, 8) == 1u);   // was "BAR 2 OF 2" when counted back from the end
-  CHECK(app::stage_bar_of(24, 16) == 2u);
-  CHECK(app::stage_bar_of(24, 23) == 2u);
-  CHECK(app::stage_bar_of(40, 8) == 1u);
-  CHECK(app::stage_bar_of(40, 32) == 3u);  // the short last bar
-  CHECK(app::stage_bar_of(40, 39) == 3u);
-  CHECK(app::stage_bar_of(40, 90) == 3u);  // past the end: the last bar
-  CHECK(app::stage_bar_of(0, 5) == 0u);
-}
-
-TEST_CASE("stage: the progress bar follows the playhead to the microstep and stays inside the bar") {
-  CHECK(app::stage_progress(16, 0, 0, 480) == 0u);
-  CHECK(app::stage_progress(16, 8, 0, 480) == 240u);
-  CHECK(app::stage_progress(16, 8, 24, 480) == 255u);  // half a step more: 8.5 / 16 of 480
-  CHECK(app::stage_progress(16, 15, 47, 480) < 480u);
-  CHECK(app::stage_progress(16, 99, 0, 480) == 480u);  // past the end: full, never over
-  CHECK(app::stage_progress(0, 3, 3, 480) == 0u);
-  CHECK(app::stage_progress(16, 3, 3, 0) == 0u);
-  CHECK(app::stage_progress(128, 127, 47, 760) <= 760u);
 }
 
 TEST_CASE("stage: stopped, the cursor's slot is NOW and the one after it NEXT; the last loops to slot 0") {

@@ -8,7 +8,7 @@ Song is an editor, not only a list. Adding a slot with `F3` (**ADD SLOT**) works
 
 ## What it is for
 
-Use Song to arrange patterns in time. Press `Song`. The order list holds the slots, and each slot holds one pattern number. The song plays the slots from the top. Press `Song` again for the **ARRANGEMENT** page, again for the **TIMELINE** page, which draws the song as blocks along the page, and once more for the **STAGE** page, which shows what is playing in large type.
+Use Song to arrange patterns in time. Press `Song`. The order list holds the slots, and each slot holds one pattern number. The song plays the slots from the top. Press `Song` again for the **ARRANGEMENT** page, and again for the **TIMELINE** page, which draws the song as blocks along the page. Three pages in all; the header says which one you are on (**ORDER 1/3**, **ARRANGEMENT 2/3**, **TIMELINE 3/3**).
 
 ## How it works
 <!-- sync: src=app/src/song_actions.cpp,app/src/screens/song_screen.cpp spec=docs/specs/SONG-UX.md,docs/specs/OS-SONGSHARE.md qa=QA-SNG-034,QA-SNG-036,QA-SNG-037,QA-SNG-040,QA-SNG-043,QA-SNG-050 -->
@@ -88,8 +88,7 @@ Not yet checked on the unit.
 |---|---|
 | Main area | The order list: **POS**, **PAT**, **NAME** (12 characters) and **LEN**, and the `*` mark. The track map sits to the right. |
 | Arrangement | **START** (bar), **BARS** and a **LENGTH** bar for each slot. The info line gives the bars in all. |
-| Timeline | The slots as blocks as wide as they have bars, with the pattern's colour and number, and a lane per track under them that shows how many notes the track plays, and an **ENERGY** curve under the lanes. The info line gives the cursor's slot, its start bar, its pattern and its length. |
-| Stage | **NOW** and **NEXT** blocks in large type, the bars left, and a progress bar. The info line gives the slots and bars of the song and, while it plays, the slot the cursor is on (**cursor nn**: Up and Down move it, and Rec jumps to it). |
+| Timeline | The slots as blocks as wide as they have bars, with the pattern's number and a strip in its colour, and a lane per track under them that shows how many notes the track plays, and a thin **ENERGY** row at the foot. The info line gives the cursor's slot, its start bar, its pattern and its length; while the song plays it gives the bars left before the next slot instead (see "Read the song on the Timeline page"). |
 | Info line | A note on the last key, or on the cursor's slot or track. |
 | Strip | Messages, for example **PATTERN 03 NAMED**. |
 | Key row | `F1` to `F8`. See the table under "Keys on this screen". |
@@ -136,36 +135,20 @@ New in track3r-os. The Timeline page shows the song as you would draw it on pape
 
 Start on Song.
 
-1. Press `Song` until the header says **TIMELINE 3/4**. The blocks run from four slots before the cursor. <!-- QA-SNG-073 -->
+1. Press `Song` until the header says **TIMELINE 3/3**. The blocks run from four slots before the cursor. <!-- QA-SNG-073 -->
    A slot is as wide as it has bars (a bar is 16 steps). The page is always at least 16 bars wide, so a short song stays small and does not stretch.
-2. Look at the colours. Each pattern has one of four colours, and its number is on the block when the block is wide enough. A slot whose pattern does not exist yet is an outline. <!-- QA-SNG-074 -->
-3. Look under the blocks. Each track has a lane, and each slot has a bar in it. A tall bar means the track plays many notes in that pattern. No bar means no notes. The bars follow your edits in Pattern. <!-- QA-SNG-075 -->
+2. Look at the blocks. Each one carries its pattern's number, and under the number a short strip in the pattern's colour: there are four colours, so patterns 1 and 5 share one. The strip tells you when a pattern comes back; the number tells you which it is. A very narrow block (one bar in a long view) may be too small for a three-digit number. A slot whose pattern does not exist yet has a dim number and no strip. <!-- QA-SNG-074 -->
+3. Look under the blocks. Each track has a lane, and each slot has a dim bar in it. A tall bar means the track plays many notes in that pattern. No bar means no notes. The bars follow your edits in Pattern. <!-- QA-SNG-075 -->
 4. Press `Up`, `Down`, `Left` or `Right`. The cursor moves one slot and the white frame follows it. The info line says, for example, **timeline slot 02 bar 5 pattern 02 4 bars**. <!-- QA-SNG-076, QA-SNG-080 -->
 5. Press `Play`. A green bar under a block and a white line mark the slot and the step that play. <!-- QA-SNG-077 -->
-6. Look at the strip **ENERGY** at the bottom. It has one column for each slot, as high as the slot is busy and loud: for each track, how many notes it plays, times how loud they are, times the track's volume. A muted track adds nothing, and while a track is soloed only the soloed tracks add. The tallest slot in view fills the strip, so the curve shows the shape of the song around the cursor, not a level you can compare between two views. <!-- QA-SNG-081, QA-SNG-082 -->
+   The info line now counts down: **timeline NEXT IN 2 BARS cursor slot 02**. It counts the bars left in the pattern that plays, and the last bar says **1 BAR**. <!-- QA-SNG-083 -->
+   When you queue a jump (put the cursor on another slot with `Up` or `Down`, then press `Rec`) it says **JUMP IN**. On the last slot, where the song starts again at slot 0, it says **LOOP IN**; a single pattern playing says **LOOP IN** too. Stop, and the line goes back to the cursor's slot. <!-- QA-SNG-084, QA-SNG-085, QA-SNG-086 -->
+6. Look at the thin row **ENERGY** at the foot of the page. It has one column for each slot, as high as the slot is busy and loud: for each track, how many notes it plays, times how loud they are, times the track's volume. A muted track adds nothing, and while a track is soloed only the soloed tracks add. The tallest slot in view fills the row, so the curve shows the shape of the song around the cursor, not a level you can compare between two views. <!-- QA-SNG-081, QA-SNG-082 -->
 
 The page draws the tracks Pattern can show, at most 12, and at most 40 slots and 48 bars: with 12 tracks it shows 34 slots. The cursor's slot is always in view. <!-- QA-SNG-078 -->
 The page does not edit anything: the keys work as on the other pages.
 
-Not yet checked on the unit: how the colours and the thumbnails read on the panel.
-
-### Watch the song on the Stage page
-
-New in track3r-os. The Stage page is for live use, or when you stand back from the unit. It shows the slot that plays and the slot that comes next in the largest type the screen has, and counts the bars until the song moves on.
-
-Start on Song.
-
-1. Press `Song` until the header says **STAGE 4/4**. <!-- QA-SNG-072 -->
-   Stopped, the left block says **CURSOR** and shows the slot under the cursor. The right block says **NEXT** and shows the slot after it. The line under them says **STOPPED**. <!-- QA-SNG-067 -->
-2. Press `Play`. The left block turns green and says **NOW**. <!-- QA-SNG-068 -->
-3. Read the line **NEXT IN**. It counts bars, and the last bar says **1 BAR**. The bar under it fills as the pattern plays. Its ticks are bar lines, and **BAR 2 OF 4** says where you are. <!-- QA-SNG-068 -->
-4. While the song plays, put the cursor on another slot with `Up` or `Down`, then press `Rec`. The right block says **JUMP** and has an orange frame, and the line reads **JUMP IN**. <!-- QA-SNG-069 -->
-
-On the last slot the right block says **LOOP**: the song starts again at slot 0. <!-- QA-SNG-070 -->
-When you play a single pattern, the left block says **PATTERN** and the right block says **LOOP**. <!-- QA-SNG-071 -->
-Every cue is also written in words, so you do not need the colours. A slot with no name shows **PATTERN** and its number. The page does not edit anything: the keys work as on the other pages.
-
-Not yet checked on the unit: the type size at a distance, and the countdown against the sound.
+Not yet checked on the unit: how the colours and the thumbnails read on the panel, and the countdown against the sound.
 
 ### Look at Song and come back
 

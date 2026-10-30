@@ -7,6 +7,7 @@
 #include <o3os/app/frame.h>
 #include <o3os/app/key_prompt.h>
 #include <o3os/app/pattern_layout.h>
+#include <o3os/app/song_stage.h>
 #include <o3os/app/text_format.h>
 #include <o3os/core/fixed_string.h>
 #include <o3os/ui/components.h>
@@ -24,6 +25,7 @@ namespace {
 constexpr int kRows = SongView::kVisibleRows;
 constexpr int kStepsPerBar = 16;   // a bar is four beats of four steps (the pattern view's bar rule)
 constexpr int kBarGraphMax = 128;  // steps that fill the arrangement's bar graphic
+constexpr unsigned kDemoPatternSteps = 16;  // a pattern-mode playback with no project (the demo list): one bar
 
 // Two decimal digits in a hex tile: a position or a pattern number past 99 (a project's list has up to 255) shows its low two, as append_dec does.
 constexpr unsigned bcd(int n) noexcept { return static_cast<unsigned>((((n % 100) / 10) << 4) | (n % 10)); }
@@ -115,7 +117,7 @@ int song_map_cells(const Model& model, const ViewState& view) noexcept {
     return 0;
   }
   if (!list_page(view)) {
-    return 0;  // OS-SONG-STAGE: no list, no map
+    return 0;  // TIMELINE: no list, no map
   }
   const bool arrangement = view.page[screen_index(ScreenId::Song)] == static_cast<std::uint8_t>(SongPage::Arrangement);
   return map_cells_of(make_song_layout(ui::theme(view.theme)), arrangement, model);
@@ -176,7 +178,6 @@ void SongScreen::render(const Model& model, const ViewState& view, Renderer& r, 
   const int length = src.count();
   SongView sv = view.song;
   (void)sv.fit(length);  // drawn inside the list whatever the view says: the project may have changed since the cursor last moved
-  const bool stage = page_of(view) == SongPage::Stage;
   const bool timeline = page_of(view) == SongPage::Timeline;
   const bool lists = list_page(view);  // OS-SONG-STAGE: a page with a pane of its own draws no rows, cursor block or map
   const int map_cells = lists ? map_cells_of(l, view.page[screen_index(ScreenId::Song)] == static_cast<std::uint8_t>(SongPage::Arrangement), model) : 0;
@@ -288,9 +289,7 @@ void SongScreen::render(const Model& model, const ViewState& view, Renderer& r, 
     }
   }
 
-  if (stage) {
-    draw_song_stage(r, f, model, view, covered);
-  } else if (timeline) {
+  if (timeline) {
     draw_song_timeline(r, f, model, view, covered);
   }
 
@@ -355,7 +354,7 @@ void SongScreen::render(const Model& model, const ViewState& view, Renderer& r, 
       }
     }
     core::FixedString<24> page;
-    page.assign(arrangement ? "ARRANGEMENT 2/4" : (timeline ? "TIMELINE 3/4" : (stage ? "STAGE 4/4" : "ORDER 1/4")));
+    page.assign(arrangement ? "ARRANGEMENT 2/3" : (timeline ? "TIMELINE 3/3" : "ORDER 1/3"));
     r.text(ui::kScreenW - 2 * m.pad - r.text_width(page.c_str(), Face::Label), cap_y, page.c_str(), Color::ChromeText,
            Face::Label);
   }
@@ -373,23 +372,22 @@ void SongScreen::render(const Model& model, const ViewState& view, Renderer& r, 
         text.append(" slots");
       }
     };
-    if (stage) {  // OS-SONG-STAGE: the song's size; what plays is the pane's
-      int bars = 0;
-      for (int i = 0; i < length; ++i) {
-        bars += bars_of(src.steps(i));
-      }
-      text.assign("stage   ");
-      append_dec(text, static_cast<unsigned>(length), digits_of(length));
-      text.append(" slots, ");
-      append_uint(text, static_cast<unsigned>(bars));
-      text.append(" bars");
-      if (view.playing || view.play.playing) {  // the cursor is not drawn here, yet Up / Down move it and Rec jumps to it: say where it is
-        text.append("   cursor ");
-        append_dec(text, static_cast<unsigned>(view.song.clamped_pos(length)), digits_of(length));
-      }
-    } else if (timeline) {  // OS-SONG-TIMELINE: the cursor's slot, where it starts and how long it is
+    if (timeline) {  // OS-SONG-TIMELINE: the cursor's slot, where it starts and how long it is; OS-SONG-VIEW2 V2: while it plays, the bars to the next slot first
       if (length <= 0) {
         text.assign("timeline   no slots");
+      } else if (view.play.playing) {
+        unsigned pattern_steps = kDemoPatternSteps;  // a pattern-mode playback: the pattern's own length (the demo list has no project)
+        if (model.project != nullptr) {
+          const std::uint32_t len = model.project->pattern_length(view.play.pattern);
+          pattern_steps = len != 0u ? len : model.project->default_pattern_length();
+        }
+        const StageState s = stage_state(src, view.play, sv.pos(), pattern_steps);
+        text.assign("timeline   ");
+        text.append(s.next_kind == StageNext::Jump ? "JUMP IN " : (s.next_kind == StageNext::Loop ? "LOOP IN " : "NEXT IN "));
+        append_uint(text, s.bars_left);
+        text.append(s.bars_left == 1u ? " BAR" : " BARS");
+        text.append("   cursor slot ");
+        append_dec(text, static_cast<unsigned>(sv.pos()), digits_of(length));
       } else {
         int start = 0;
         for (int i = 0; i < sv.pos(); ++i) {

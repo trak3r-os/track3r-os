@@ -661,6 +661,10 @@ void App::poll_play_position() noexcept {
   if (state_.screen == ScreenId::Song && (v.playing != old.playing || play_order(v) != play_order(old))) {
     dirty_ = true;
   }
+  // OS-SONG-VIEW2 V2: the TIMELINE page's playhead and its info line's countdown (bars to the next slot) follow the step, so a step is a redraw there (the other Song pages show no step).
+  if (state_.screen == ScreenId::Song && moved && state_.page[screen_index(ScreenId::Song)] == static_cast<std::uint8_t>(SongPage::Timeline)) {
+    dirty_ = true;
+  }
 }
 
 // OS-METRO: the count-in's visuals, from the published position (audio/play_position.h count_in: the steps of it still to run, the running one included). A beat is four steps, so `beat` is the beats

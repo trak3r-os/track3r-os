@@ -21,7 +21,7 @@
 namespace o3os::sim {
 
 // The Song screen: typical (its first page), arrangement (the second), worst (a sweep), over a document with the track map (OS-SONG1), and (OS-SONGMAP) with the cursor in the map, its dearest case and the question up.
-extern const ScreenState kSongStates[16];
+extern const ScreenState kSongStates[14];
 // The overlays: Learn, the Navigator and a notification over the Pattern screen, a notification over the Song screen.
 // Each has a typical state and a `_worst` sweep over the dearest content under it. Since OS-009 P1a.1 also the three choosers of the Pattern screen; since OS-SONGMAP the Song screen's TOOLS dialog.
 extern const ScreenState kOverlayStates[14];
