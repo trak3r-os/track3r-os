@@ -56,10 +56,10 @@ Design pass 2026-10-30 (dev 34dc272a, read only). Every slice keeps mono project
 
 | # | Question | Default |
 |---|---|---|
-| S1 | The field | INST 1.5 appends one byte `stereo` after `vel_sens` (`Instrument` 716 -> 720 B; the undo unit and pool grow with it); the writer emits 1.5 only when a stereo flag is set, so mono projects keep their bytes; older chunks read 0; values above 1 clamp |
+| S1 | The field | INST 1.5 appends one byte `stereo` after `vel_sens` (`Instrument` 716 -> 720 B; the undo unit and pool grow with it); the writer emits 1.5 only when a stereo flag is set, so mono projects keep their bytes; older chunks read 0; a value above 1 reads 0, as `engine` does (native_reader.cpp:721-724) |
 | S2 | Where S is saved | `samples/<stem>.wav` stays M (older builds and other tools read it unchanged); S goes to a sibling `samples/<stem>_s.wav`; a missing or mismatched S file loads the instrument as mono with a strip message |
 | S3 | S | S = L - M, clamped to int16: L = M + S is exact; R = 2M - L is 1 LSB off when L + R is odd (only on an export back to stereo; stable after one pass) |
-| S4 | Who decides that S exists | The bank slot (`Slot::side`), never the model flag alone: a flag with no S plays M (no read past the block); `adopt`, `edit_commit`, a take and a paste clear or carry it |
+| S4 | Who decides that S exists | Stereo is the flag AND the bank slot's `Slot::side`: a flag with no S plays M (no read past the block); `adopt`, `edit_commit`, a take and a paste clear or carry it; the flag is reconciled at save and at load (rule 4) |
 | S5 | A stereo note with the filter, drive, crush or tremolo on | Plays M (mono) for step 2: the effects run on one block. Stereo effects (both blocks, about +3.1k cycles a voice-block for the filter) are a later option |
 | S6 | Decision 4 (outputs) in detail | The track's own outputs stay mono (the USB track stems, the sends, the inserts, CUE and REC taps); the master, the headphones, the USB master pair, MIX and the offline stems are stereo (they read MAIN) |
 | S7 | Editor operations on a stereo sample | Crop, Reverse, Fade in / out and Amplify act on both blocks; Normalise takes its gain from the L / R peak; DC remove and Filter run per block; Compressor and the Amiga ops are refused with a strip message ("STEREO: MAKE MONO FIRST") |
@@ -72,6 +72,20 @@ Design pass 2026-10-30 (dev 34dc272a, read only). Every slice keeps mono project
 - **(c) The voice and the mix:** `st_off` in the sample descriptor; `v.st` decided in `mods_start` (mode ONE SHOT / LOOP FWD / SLICE / BEAT SLICE forward, engine Modern, S present, fewer than 4 stereo voices, no effect of S5); `run_st` in flash (the step 1 kernel plus a checked tail for the end and the loop wrap); one branch in `render_seg`; `Graph::feed_side` and a flash `gain_pan_st` into MAIN. An effect that turns on mid-note drops S with a block fade. Tests: a stereo voice with S = 0 equals the mono render; L / R against a reference; the cap; steals.
 - **(d) The editor operations** of S7.
 - **(e) The `.pti` export:** a "stereo, mid written" count in its report.
+
+### Design rules from the risk review (2026-10-30, folded)
+
+1. INST 1.5 raises `known_minor` (native_reader.cpp:54) AND extends `v1_bounds`' upper bound (:75) by one byte for minor >= 5, or a 1.5 chunk is Malformed (:262, :940). Update `inst_size`, the encoder and `kInstMax`. A 1.4 build reads 1.5 as newer and skips the byte (safe); its next save drops the flag (by design).
+2. 1.5 carries the full 1.3 block (engine byte and the 12 MIDI bytes); the Sine LFO gate stays `minor >= 4`. Emit 1.5 only for a Sample instrument with the flag set; `validate_instrument` rejects the flag on other kinds.
+3. Pins: `kModelArenaBytes` (project.cpp:89, 1,933,504 -> 1,933,760) and its mirror (mem_map.h:107), mem_map_test:109, model_test:41-42, inst_midi_format_test:107, os-tree.md, o3-project.md:335; the undo unit 1,464 -> 1,472 B (editor.cpp:90; undo is RAM only).
+4. Stereo = flag AND `Slot::side`. Reconcile before `native_.set` at save, and at load when S is missing: clear the flag, so a 1 is never saved without its file. The toggle row is refused without S.
+5. RECLAIM (`reclaim` in sample_bank.cpp) moves only `frames` and tests `pcm + even == used_`; `rebind_now`, `stage_step` and `make_sample_desc` take only `(pcm, frames)`. All must use the whole block (`own_len` = 2 x even) and `side`; the simplest is to refuse a reclaim of a slot with `side`.
+6. `Step`, `Audio`, `Swap`, `clip_audio`, `referenced()` and the `block_in_history` ranges carry and cover the S block, or undo, paste and a spare-buffer reuse can overwrite S or leave it dangling. The project load (`OgSampleLoader::bind`, og_samples.cpp:511-518) is a second path besides app.cpp:2166: the slice table goes after S, and S is a second open per slot.
+7. The reader takes S's offset from the header's frame count; it fails with LimitExceeded unless the capacity is at least 2 x even(frames) (never a clip) and passes an explicit `side` pointer to `commit_load`.
+8. Save order: the M job, the S job, then the project file; a failed S write aborts the project write. `held` (`samples_to_write`) tests S too. `<stem>_s` fits `kNameMax` and never equals another instrument's `sample_path`.
+9. The voice: S gets its own residual and declick, so a stop, a retrigger (`tracker_retrigger`), a steal or a one-shot end does not step S; the voice stays live while S's residual is non-zero; S's slots are freed at `end_block` only. S is dropped when a module or Amiga feed replaces the track, when the voice is gated or a track insert is active; a dropped S stays dropped for the note.
+10. `Graph` gets an S centre accumulator and applies the strip's level ramp `lv` to S; a centred stereo strip does not take the mono centre path; mute and a closed fader skip S. Read `.ramfunc_l` from the mk66 log (the 320 B figure is only a starting point).
+11. The edit pool (S7) needs 2x per step: refuse cleanly when room runs out, and swap both blocks in one handover.
 
 ### Costs [est]
 
