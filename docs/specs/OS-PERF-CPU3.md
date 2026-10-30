@@ -32,11 +32,21 @@ Level C (the audio path). Approved by the maintainer on 2026-10-30. Follow-up of
 - **Slice 2 (optional, after slice 1): the MODDRIVE gate** (engine.cpp around :410, `shape_mask` voices.h:865, +48 B): a one-byte cached mask written by every writer of `ifx_on_[1]`, `ifx_on_[2]`, `perf_.on[0..1]` (FxReset, `perf_clear`, `perf_restore` included), about -15 B [est]; or fold it into the `pan_mods_pending` test (about -40 B [est], an ordering check: the shaping must stay after the modules' `end_block`).
 - **Slice 3 (after step 0 and D2):** the PAN fix, if any, and the POS cause.
 
+## Design rules from the risk review (2026-10-30, folded)
+
+1. **Slice 1: the tail goes last in `mods_start`, unconditionally** (voices.cpp:1710-1762): not inside `if (v.mode != kModeGranular)`, not inside `if (perf_lfo_held)`, not before `perf_dest`. `mods_start` has one caller (:1410); the early returns (:1316, :1334, :1345) come before it and skip the tail either way; nothing between :1410 and :1411 reads or writes the tail's fields (`mods_start`, `glide_start`, `shape_set`, `perf_dest`, `mod_start` read none of `playing`, `age`, `env_stage`, `amp_step`, `ramp_left`, `dk`, `gated_`).
+2. The tail uses the `note_on` locals `env` and `i`: use `v.env` and pass `i` as an argument (not `&v - v_`, a multiply by `sizeof(Voice)` in flash); update the declaration (voices.h:1189).
+3. `gated_` was put in SRAM_L for CPU only (commit 05a5c86e: the flash cost per note on an over-budget tail), not for correctness. Keep the order `gated_`, `age`, `playing`; reword the comment; measure a note-on-heavy block on the unit (not only the +2.4k estimate).
+4. `env_enter` stays HOT (`noinline`, `long_call`): a call to it from flash is allowed. The bytes come from the tail's instructions and literals and from fewer callee-saved registers across the call: about 80 to 110 B [est]; the real figure from the mk66 map and `check_ramfunc.py` (host and qemu build `O3OS_AUDIO_COLD` empty).
+5. `note_on` runs in the render context only (engine.cpp:149, :303, the bench): no ISR concern.
+6. Tests: `audio_voices_test`, `audio_voices_dir_test`, `audio_gate_test` (a gated voice reused mid-block), `audio_perflfo_test`, `audio_perform_test`, `module_voices_test`; plus a differential test of the note-on voice state that covers the steal order by `age`, `stats_.note_ons`, a granular note, a reversed note and a retrigger.
+7. **Slice 2: skipped.** `clear_slide_fxs`, a writer of `ifx_on_[1]` / `[2]`, is inlined into the HOT `Engine::dispatch` (engine.cpp:217): the mask update there costs the ~15 B it would save, and a missed writer (voices.cpp:2083, :2171, :2173, `perf_clear`, `perf_restore`) would silently stop module drive.
+
 ## Tests
 
 - Slice 1 and 2, bit-identical: the existing hash scenes (`audio_voices_test`, `audio_voices_dir_test`, `audio_perflfo_test`, `audio_perform_test`, `module_voices_test` with FX 38 / 39 on module tracks); a randomized differential test of the note-on voice state (random notes, FX, retriggers, gated tracks) against a copy of today's `note_on`.
 - Slice 3 (if audible): a bound on the pan-gain error against the reference; a QA ear check.
-- QA rows `QA-PRF-190..199`.
+- QA rows `QA-PRF-191..199` (190 went to the OS-CLEANUP pad check).
 
 ## Done when
 
