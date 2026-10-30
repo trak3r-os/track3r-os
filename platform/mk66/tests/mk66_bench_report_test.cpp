@@ -12,7 +12,7 @@ namespace bench = o3os::platform::mk66::bench;
 
 TEST_CASE("mk66 bench: every kernel has a name that find_kernel returns, in the table's order") {
   constexpr std::size_t kCount = static_cast<std::size_t>(bench::Kernel::Count);
-  CHECK(kCount == 22u);  // (OS-303PERF: tb303_128 joined; OS-LOOPER L2b: looper; OS-USBDISK U1d: disk; OS-ODD11 UTAIL: burst; OS-DJ: dj)
+  CHECK(kCount == 24u);  // (OS-303PERF: tb303_128 joined; OS-LOOPER L2b: looper; OS-USBDISK U1d: disk; OS-ODD11 UTAIL: burst; OS-DJ: dj; OS-PERF-CPU2: voice_rev, voice_pan)
   for (std::size_t i = 0; i < kCount; ++i) {
     const bench::KernelInfo& k = bench::kKernelInfo[i];
     INFO(k.name);
@@ -37,6 +37,8 @@ TEST_CASE("mk66 bench: every kernel has a name that find_kernel returns, in the 
   CHECK(bench::find_kernel("voice_od") == bench::Kernel::VoiceDrive);  // OS-IFX1: the sampler voice with the overdrive, the bit depth, both
   CHECK(bench::find_kernel("voice_bit") == bench::Kernel::VoiceCrush);
   CHECK(bench::find_kernel("voice_odbit") == bench::Kernel::VoiceBoth);
+  CHECK(bench::find_kernel("voice_rev") == bench::Kernel::VoiceRev);  // OS-PERF-CPU2: the reversed voice
+  CHECK(bench::find_kernel("voice_pan") == bench::Kernel::VoicePan);  // OS-PERF-CPU2: the voice with a pan LFO
   CHECK(bench::find_kernel("limiter") == bench::Kernel::Limiter);
   CHECK(bench::find_kernel("limiter_q") == bench::Kernel::LimiterQuiet);
   CHECK(bench::find_kernel("reverb_full") == bench::Kernel::ReverbFull);

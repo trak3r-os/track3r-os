@@ -317,11 +317,11 @@ void run_reverb(const Out& out, std::uint32_t blocks, bool full) noexcept {
 
 // `shape`: what the voice is asked to do on top of the plain sample: its instrument filter, the overdrive at 100, the bit depth at 8, or both of the last two (OS-IFX1: the cost of the
 // two passes over the voice's block is the difference to `voice`; with both OFF the pass is skipped, which is the `voice` line).
-enum class VoiceMode : std::uint8_t { Plain, Filter, Drive, Crush, Both };
+enum class VoiceMode : std::uint8_t { Plain, Filter, Drive, Crush, Both, Rev, Pan };  // Rev (OS-PERF-CPU2): the plain sample played backward (the PLAYBACK layer on track 16), the backward loop of run_dir
 
 void run_voice(const Out& out, std::uint32_t blocks, VoiceMode mode) noexcept {
   const bool filtered = mode == VoiceMode::Filter;
-  const char* const name = mode == VoiceMode::Filter ? "voice_f" : (mode == VoiceMode::Drive ? "voice_od" : (mode == VoiceMode::Crush ? "voice_bit" : (mode == VoiceMode::Both ? "voice_odbit" : "voice")));
+  const char* const name = mode == VoiceMode::Filter ? "voice_f" : (mode == VoiceMode::Drive ? "voice_od" : (mode == VoiceMode::Crush ? "voice_bit" : (mode == VoiceMode::Both ? "voice_odbit" : (mode == VoiceMode::Rev ? "voice_rev" : (mode == VoiceMode::Pan ? "voice_pan" : "voice")))));
   audio::VoicePool& vp = audio_voices();
   if (out.variant == Variant::Sram || (out.variant == Variant::Alias && !alias_enabled())) {
     out.na(name, out.variant == Variant::Sram ? "the sample does not fit SRAM" : "the SDRAM alias is not enabled in this image");
@@ -351,7 +351,7 @@ void run_voice(const Out& out, std::uint32_t blocks, VoiceMode mode) noexcept {
   // A forced variant: the voice reads the same PCM through the other address, from a copy of the descriptor in the audition's spare slot (put back at the end).
   audio::SampleDesc kept;
   bool borrowed = false;
-  if (out.forced() || mode != VoiceMode::Plain) {
+  if (out.forced() || (mode != VoiceMode::Plain && mode != VoiceMode::Rev)) {
     audio::SampleDesc copy = vp.sample(original);
     const std::uint32_t a = static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(copy.data));
     if (filtered) {  // the instrument's filter: a low-pass, cutoff 0.6, resonance 2 (Q 2.7), no modulator
@@ -367,6 +367,16 @@ void run_voice(const Out& out, std::uint32_t blocks, VoiceMode mode) noexcept {
     }
     if (mode == VoiceMode::Crush || mode == VoiceMode::Both) {
       copy.bit_depth = 8;
+    }
+    if (mode == VoiceMode::Pan) {  // OS-PERF-CPU2: the instrument's pan LFO, a saw of 8 steps at amount 0.8 (the host bench's): the voice evaluates it every block; the strip's pan chain (Engine::apply_pan_mods) is not in this line
+      audio::FilterMod m;
+      m.kind = audio::kFmodLfo;
+      m.shape = 1;
+      m.rate = 8;
+      m.amount = 0.8f;
+      m.lfo_amount = 0.8f;
+      m.lfo = true;
+      copy.pan_mod = m;
     }
     const std::uint32_t off = a >= mem::kSdramAliasBase && a < mem::kSdramAliasBase + mem::kSdramSize ? a - mem::kSdramAliasBase
                               : (a >= mem::kSdramBase && a < mem::kSdramBase + mem::kSdramSize ? a - mem::kSdramBase : 0xFFFFFFFFu);
@@ -386,6 +396,19 @@ void run_voice(const Out& out, std::uint32_t blocks, VoiceMode mode) noexcept {
     slot = audio::kPreviewSlot;
   }
   constexpr unsigned kTrack = audio::kAuditionTrack;  // track 16, the strip a `mod note` plays on
+  const auto reverse_layer = [&](bool on) {  // OS-PERF-CPU2: the PLAYBACK layer of track 16 (the next note starts backward), and its end
+    audio::SeqEvent e{};
+    e.kind = on ? audio::EventKind::ModSet : audio::EventKind::ModEnd;
+    e.track = static_cast<std::uint8_t>(kTrack);
+    e.flags = audio::kModGroupReverse;
+    e.c = audio::kLayerPerf;
+    e.value = on ? 1 : 0;
+    HoldRender hold;
+    vp.fx_event(kTrack, e);
+  };
+  if (mode == VoiceMode::Rev) {
+    reverse_layer(true);
+  }
   bool started = false;
   Peak peak;  // the voice's block, looked at outside the timed part (OS-MODSILENT: a cycle count is not a sound)
   const Stat st = measure(
@@ -401,6 +424,9 @@ void run_voice(const Out& out, std::uint32_t blocks, VoiceMode mode) noexcept {
         vp.end_block();
       },
       [&] { peak.add_q15(vp.feed(kTrack), kBlock); });
+  if (mode == VoiceMode::Rev) {
+    reverse_layer(false);
+  }
   {
     HoldRender hold;
     vp.cut(kTrack);
@@ -1456,6 +1482,8 @@ void run(Kernel kernel, std::uint32_t blocks, Variant variant, Emit emit, void* 
     case Kernel::VoiceDrive: run_voice(out, blocks, VoiceMode::Drive); break;
     case Kernel::VoiceCrush: run_voice(out, blocks, VoiceMode::Crush); break;
     case Kernel::VoiceBoth: run_voice(out, blocks, VoiceMode::Both); break;
+    case Kernel::VoiceRev: run_voice(out, blocks, VoiceMode::Rev); break;
+    case Kernel::VoicePan: run_voice(out, blocks, VoiceMode::Pan); break;
     case Kernel::Tb303: run_tb303(out, blocks, kBlock); break;
     case Kernel::Tb303x128: run_tb303(out, blocks, 2u * kBlock); break;
     case Kernel::Delay: run_delay(out, blocks); break;

@@ -7,6 +7,7 @@
 //
 //   o3os_audio_bench [--smoke]    the full table (build with -DCMAKE_BUILD_TYPE=Release: the sanitizer build is for correctness); --smoke
 //                                 runs every case a handful of times, as ctest does
+#include <o3os/audio/engine.h>
 #include <o3os/audio/graph.h>
 #include <o3os/audio/kernels.h>
 #include <o3os/audio/loop_player.h>
@@ -591,6 +592,152 @@ void voice_lfo_table() {
   }
 }
 
+// OS-PERF-CPU2 (A1): what a reversed voice (PLAYBACK, Voice::mode 4: run_dir) costs against a forward one (run_steady), 12 one-shot voices of a plain sample played at the root and a fifth above (host
+// ns a block, relative figures; the unit's are measured with `diag cpu` and `diag bench voice_rev`). The voices are started again when they have ended, so every block renders 12 sounding voices.
+void voice_reverse_table() {
+  static std::int16_t pcm[65536];
+  for (unsigned i = 0; i < 65536u; ++i) {
+    pcm[i] = static_cast<std::int16_t>(((i * 37u) & 0x3FFFu) - 8192);
+  }
+  struct Row {
+    const char* name;
+    bool reversed;
+    unsigned note;
+    double ns;
+  } rows[] = {{"12 forward one-shot voices, root", false, 60, 0.0},
+              {"12 reversed one-shot voices, root", true, 60, 0.0},
+              {"12 forward one-shot voices, a fifth up", false, 67, 0.0},
+              {"12 reversed one-shot voices, a fifth up", true, 67, 0.0}};
+  for (Row& r : rows) {
+    auto pool = std::make_unique<VoicePool>();
+    SampleDesc d{};
+    d.data = pcm;
+    d.length = 65536;
+    d.gain = 65536;
+    pool->set_sample(0, d);
+    if (r.reversed) {
+      SeqEvent e{};
+      e.kind = EventKind::ModSet;
+      e.flags = kModGroupReverse;
+      e.c = kLayerPerf;
+      e.value = 1;
+      for (unsigned t = 0; t < 12; ++t) {
+        e.track = static_cast<std::uint8_t>(t);
+        pool->fx_event(t, e);
+      }
+    }
+    const auto start = [&] {
+      for (unsigned t = 0; t < 12; ++t) {
+        pool->note_on(t, r.note, 0, 100);
+      }
+    };
+    start();
+    r.ns = best_ns(15, 400, [&] {
+      if (!pool->track_playing(0)) {
+        start();
+      }
+      pool->begin_block();
+      pool->render(0, kB);
+      pool->end_block();
+    });
+    g_sink += pool->feed(0) != nullptr ? pool->feed(0)[0] : 0;
+  }
+  std::printf("\nreversed voices (OS-PERF-CPU2 A1): ns a block of 12 one-shot voices (host; the M4F cost is measured on the unit)\n");
+  std::printf("  %-48s %10s %12s\n", "case", "host ns", "vs forward");
+  for (unsigned i = 0; i < 4u; ++i) {
+    std::printf("  %-48s %10.0f %11.2fx\n", rows[i].name, rows[i].ns, rows[i].ns / rows[i & 2u].ns);
+  }
+}
+
+// OS-PERF-CPU2 (P1): what each LFO destination costs through the whole engine (the voices, then Engine::apply_pan_mods and the graph's pan retarget for the pan), 12 voices of one looping instrument with
+// one modulator each, the transport running (host ns a block, relative figures; the unit's are `diag bench voice_pan` and `diag cpu`). The same table before and after "the pan is sent only when it
+// changed" is the figure of P1: the pan row's pan value is a whole number 0..100 that repeats for several blocks at this rate.
+void voice_lfo_dest_table() {
+  static std::int16_t pcm[4096];
+  static std::int16_t stack[8 * 256];
+  for (unsigned i = 0; i < 4096; ++i) {
+    pcm[i] = static_cast<std::int16_t>(((i * 37u) & 0x3FFFu) - 8192);
+  }
+  for (unsigned i = 0; i < 8u * 256u; ++i) {
+    stack[i] = static_cast<std::int16_t>((i / 256u + 1u) * 1000u);
+  }
+  const auto lfo = [](unsigned rate) {
+    FilterMod m;
+    m.kind = kFmodLfo;
+    m.shape = 1;
+    m.rate = static_cast<std::uint8_t>(rate);
+    m.amount = 0.8f;
+    m.lfo_amount = 0.8f;
+    m.lfo = true;
+    return m;
+  };
+  enum Dest : unsigned { kNone, kAmp, kPan, kTune, kCut, kPos, kPosNone };
+  struct Row {
+    const char* name;
+    Dest dest;
+    double ns;
+  } rows[] = {{"12 voices, no modulator", kNone, 0.0},
+              {"... VOL LFO (tremolo)", kAmp, 0.0},
+              {"... PAN LFO", kPan, 0.0},
+              {"... TUNE LFO (finetune)", kTune, 0.0},
+              {"... FLT LFO (cutoff)", kCut, 0.0},
+              {"12 wavetable voices, no modulator", kPosNone, 0.0},
+              {"... POS LFO (window)", kPos, 0.0}};
+  static o3os::audio::TapMem taps;
+  alignas(8) static std::int16_t in[ha::kBlockSamples];
+  alignas(8) static std::int16_t out[ha::kBlockSamples];
+  for (Row& r : rows) {
+    auto pool = std::make_unique<VoicePool>();
+    auto engine = std::make_unique<Engine>(&clock_ns, taps);
+    SampleDesc d{};
+    d.data = pcm;
+    d.length = 4096;
+    d.loop_end = 4096;
+    d.gain = 65536;
+    d.filter.enable = d.filter.wanted = true;
+    d.filter.cutoff = 0.6f;
+    if (r.dest == kPos || r.dest == kPosNone) {
+      d.wt_size = 256;
+      d.wt_windows = 8;
+      d.data = stack + 3 * 256;
+      d.length = 256;
+      d.loop_end = 256;
+      d.wt_pos = 3;
+    }
+    switch (r.dest) {
+      case kAmp: d.amp_mod = lfo(5); break;
+      case kPan: d.pan_mod = lfo(8); break;
+      case kTune: d.tune_mod = lfo(9); break;
+      case kCut: d.filter.mod = lfo(7); break;
+      case kPos: d.pos_mod = lfo(7); break;
+      default: break;
+    }
+    pool->set_sample(0, d);
+    pool->set_tempo_x100(12000);
+    pool->restart_clock();
+    pool->on_step(0);
+    engine->attach_voices(pool.get());
+    for (unsigned t = 0; t < 12; ++t) {
+      pool->note_on(t, 48 + t, 0, 100);
+    }
+    unsigned n = 0;
+    r.ns = best_ns(15, 200, [&] {
+      if ((++n & 31u) == 0u) {
+        pool->on_step(n);
+      }
+      ha::BlockReport report{};
+      const ha::BlockIo io{in, out, 0u, &report};
+      engine->render_block(io);
+      g_sink += out[17];
+    });
+  }
+  std::printf("\nvoice LFO destinations through the engine (OS-PERF-CPU2 P1): ns a block of 12 voices (host; the M4F cost is measured on the unit)\n");
+  std::printf("  %-48s %10s %10s\n", "case", "host ns", "vs none");
+  for (const Row& r : rows) {
+    std::printf("  %-48s %10.0f %9.2fx\n", r.name, r.ns, r.ns / rows[r.dest == kPos || r.dest == kPosNone ? 5 : 0].ns);
+  }
+}
+
 int main(int argc, char** argv) {
   for (int i = 1; i < argc; ++i) {
     g_smoke = g_smoke || std::strcmp(argv[i], "--smoke") == 0;
@@ -602,7 +749,9 @@ int main(int argc, char** argv) {
   limiter_table();
   tracker_fx_table();
   voice_lfo_table();
-  //                         name                     tracks ramping taps   centre sends  meters
+  voice_reverse_table();
+  voice_lfo_dest_table();
+  //                    name                     tracks ramping taps   centre sends  meters
   stage_table(Scenario{"input monitor only",          0,     false,  false, false, false, true});
   stage_table(Scenario{"steady, no sends, no consumers", 12, false,  false, false, false, false});
   stage_table(Scenario{"steady, meters on",           12,    false,  false, false, false, true});

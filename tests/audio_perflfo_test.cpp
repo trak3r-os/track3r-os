@@ -688,3 +688,84 @@ TEST_CASE("perform lfo: an export with the five rows held is byte for byte the e
   CHECK(again.exported == held.exported);  // deterministic
   CHECK(again.live_note == held.live_note);
 }
+
+// ---- OS-PERF-CPU2 P1: the pan is sent to the strip only when it changed -----------------------------------------------------------------------------------------------
+//
+// The engine output of a held PAN LFO (the instrument's own, and the Perform row), of all five rows, of a Panning FX over a held LFO and the FX's end, and of a live instrument-pan edit under an LFO that is
+// clamped at 0 / 100, as a hash over every output sample. The expected values were captured on dev (599c4b7c) before Engine::apply_pan_mods compared the pan with the strip's own: the change is
+// bit-identical, so they must not move. The other writers of the strip's pan (Panning FX, its end, the instrument edit) are the reason the comparison is with the strip's value and not a cached one.
+
+namespace {
+
+std::uint64_t fnv_mix(std::uint64_t h, std::uint16_t x) {
+  h ^= x;
+  return h * 1099511628211ull;
+}
+
+SeqEvent pan_fx(std::uint8_t value) { return mod_set(audio::kModGroupPanning, 0, audio::kFxPanning, value, audio::kLayerFx1, 0); }
+
+std::uint64_t pan_scene(unsigned scene) {
+  Rig r;
+  r.p.perf_clear();
+  r.p.cut(0);
+  if (scene >= 5u) {  // an instrument at the edge of the range and an LFO deep enough to be held at 0 / 100 for part of its period
+    SampleDesc d = desc_for(kCut, lfo(2, 6, 0.5f));
+    d.filter.mod = audio::FilterMod{};
+    d.pan = static_cast<std::uint8_t>(scene == 5u ? 100u : (scene == 6u ? 0u : 70u));
+    d.pan_mod = lfo(2, 3, scene >= 7u ? 0.004f : 1.0f);  // 7 / 8: an LFO too shallow to move the pan (the value is the same every block, whole pan units): the FX alone moves it, or would, if the LFO did not put its value over it
+    r.p.set_sample(0, d);
+  }
+  r.live({});
+  const SeqEvent row = mod_set(audio::kModGroupLfoPanning, 0, 0, 0, audio::kLayerPerf, 3);
+  if (scene == 1u || scene == 4u) {
+    r.live({row});
+  } else if (scene == 2u) {
+    r.live({row, mod_set(audio::kModGroupLfoVolume, 0, 0, 0, audio::kLayerPerf, 4), mod_set(audio::kModGroupLfoFinetune, 0, 0, 0, audio::kLayerPerf, 6),
+            mod_set(audio::kModGroupLfoFilter, 0, 0, 0, audio::kLayerPerf, 2), mod_set(audio::kModGroupLfoPosition, 0, 0, 0, audio::kLayerPerf, 3)});
+  }
+  r.live({note_on_ev()});
+  std::uint64_t h = 1469598103934665603ull;
+  for (unsigned b = 0; b < 56; ++b) {
+    const bool fx = scene == 3u || scene == 4u || scene == 7u;
+    if (fx && b == 12u) {
+      r.live({pan_fx(20)});
+    } else if (fx && b == 30u) {
+      r.live({mod_end(0, audio::kModGroupPanning)});
+    } else if ((scene == 5u || scene == 6u) && (b == 10u || b == 22u || b == 34u)) {
+      const float v = b == 10u ? 30.0f : (b == 22u ? 100.0f : 0.0f);
+      CHECK(r.engine.params().push(o3os::core::ParamChange{o3os::core::param_id(o3os::core::ParamKind::Instrument, 0, audio::inst_param::Panning), v, 0u}));
+      r.live({});
+    } else {
+      r.live({});
+    }
+    for (unsigned i = 0; i < haudio::kBlockSamples; ++i) {
+      h = fnv_mix(h, static_cast<std::uint16_t>(Rig::out[i]));
+    }
+  }
+  r.live({mod_end(0, audio::kModGroupLfoPanning), mod_end(0, audio::kModGroupLfoVolume), mod_end(0, audio::kModGroupLfoFinetune), mod_end(0, audio::kModGroupLfoFilter),
+          mod_end(0, audio::kModGroupLfoPosition)});
+  r.p.perf_clear();
+  return h;
+}
+
+}  // namespace
+
+TEST_CASE("perform lfo: the engine output with the pan sent only when it changed is what it was (the instrument's and the Perform PAN LFO, all five rows, a Panning FX over the LFO and its end, a live pan edit under a clamped LFO)") {
+  // captured on dev before the change (OS-PERF-CPU2 P1); 0: the instrument's LFO, 1: the PAN row, 2: all five rows, 3: a Panning FX over the LFO, then its end, 4: the same over the row, 5 / 6: a live pan edit
+  // under an LFO held at 100 / 0
+  // (3 and 4 equal 0 and 1: while the LFO holds the pan, it puts its value over the FX's at every block, before the graph renders; a cached "last sent" pan would let the FX show through)
+  constexpr std::uint64_t kExpect[7] = {11680965860270691895ull, 2424177774905447162ull, 15266661993918184244ull, 11680965860270691895ull,
+                                        2424177774905447162ull,  16334462511641850661ull, 11915491318002011819ull};
+  std::uint64_t got[9];
+  for (unsigned s = 0; s < 9u; ++s) {
+    got[s] = pan_scene(s);
+  }
+  for (unsigned s = 0; s < 7u; ++s) {
+    CAPTURE(s);
+    CHECK(got[s] == kExpect[s]);
+  }
+  CHECK(got[7] == got[8]);  // a Panning FX under a held LFO whose value never changes is not heard, and not heard after its end either: the LFO's pan wins every block (rule 1: no cached "last sent" pan)
+  CHECK(got[0] != got[1]);  // the scenes act: a hash of silence, or of a pan that does not move, would prove nothing
+  CHECK(got[1] != got[2]);
+  CHECK(got[5] != got[6]);
+}

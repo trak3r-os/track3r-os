@@ -295,6 +295,35 @@ O3OS_AUDIO_INLINE std::uint32_t VoicePool::run(Voice& v, std::int16_t* out, std:
     if (rev && static_cast<std::int64_t>(phase) < lim_lo) {
       return 0;  // the stop came at the last sample of the previous call: nothing is left
     }
+    // OS-PERF-CPU2 (A1): the backward twin of the forward fast path below. A voice that moves backward and whose first sample and its neighbour are inside the loop (phase >= loop_start,
+    // idx0 + 2 <= end: a loop edit can raise loop_start above the phase of a mode 1 or 2 voice, and the voice's first sample after a jump to the end sits at end - 1) walks k = floor((idx0 - loop_start) / ip)
+    // steps with ip = floor(inc) + 1 without a test: the step is below ip samples, so after j <= k steps q_j > (idx0 - j x ip) << 32 >= lim_lo (no stop, no turn, no clamp) and idx <= idx0 <= end - 2
+    // (the sample and its neighbour idx + 1 are inside). Those steps are fast_steady / fast_ramp's with the increment negated: q - inc = q + (2^64 - inc) in the same two-word add, exact modulo 2^64
+    // (inc 0 and a zero integer part included). The voice's own inc carries the negated value through the call and is put back at once (nothing in between reads it: the render is one context). The
+    // step's arithmetic is the checked loop's, so the output and the state are the same bit for bit; the checked loop takes over for the rest (the sample at end - 1, the turn, the stop).
+    // phase >= lim_lo (signed) is the signed high word >= loop_start (the low word of lim_lo is 0), which also rejects the negative position a stop leaves; then idx0 < 2^31 and idx0 + 2 cannot wrap. An
+    // integer part of the step above 0x7FFFFFFF is held to it: ip = 2^31 > idx0 - loop_start, so k = 0 and the checked loop runs (and ip cannot wrap to 0).
+    const std::uint32_t idx0 = static_cast<std::uint32_t>(phase >> 32);
+    if (bwd && static_cast<std::int32_t>(idx0) >= static_cast<std::int32_t>(loop_start) && idx0 + 2u <= end) {
+      const std::uint32_t inc_hi = static_cast<std::uint32_t>(inc >> 32);
+      const std::uint32_t ip_m1 = inc_hi < 0x7FFFFFFFu ? inc_hi : 0x7FFFFFFFu;
+      std::uint32_t k = (idx0 - loop_start) / (ip_m1 + 1u);
+      k = k < n ? k : n;
+      if (k != 0u) {
+        v.phase = phase;
+        v.amp = amp;
+        v.inc = std::uint64_t{0} - inc;
+        if (step == 0 && static_cast<std::uint32_t>(amp) <= static_cast<std::uint32_t>(top)) {  // 0 <= amp <= top (top >= 0): the cap and the floor leave amp alone
+          fast_steady(v, out, k, top);
+        } else {
+          fast_ramp(v, out, k, top);
+        }
+        v.inc = inc;
+        phase = v.phase;
+        amp = v.amp;
+        i = k;
+      }
+    }
   }
   if constexpr (!Dir) {
     // OS-PERF3: the samples that cannot reach the end of the data (nor its loop point) need none of the checks below. The position moves less than ip = floor(inc) + 1 samples a step, so

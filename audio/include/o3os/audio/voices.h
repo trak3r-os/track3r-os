@@ -1064,6 +1064,7 @@ class VoicePool {
   }
 
  private:
+  friend struct VoiceRunTest;  // tests/audio_voices_dir_test.cpp: drives run_dir on a hand-made Voice (the differential test of OS-PERF-CPU2 A1); no code
   struct Voice {
     const std::int16_t* data = nullptr;
     std::uint64_t phase = 0;      // Q32.32 position in samples

@@ -52,7 +52,7 @@ if(O3OS_PLATFORM STREQUAL "qemu")
     TIMEOUT 120)
   # OS-005d lite: the sampler voices on the Cortex-M4F: the pitch increment and the interpolation against a double reference, and a note's exact sample
   # through the engine (a scripted event source, the real graph). Left out: audio_demo_test.cpp (the demo pattern end to end: a 1.9 MB project, host only).
-  o3os_target_suite(audio_voices DEPENDS audio usb SOURCES audio_voices_test.cpp TIMEOUT 120)
+  o3os_target_suite(audio_voices DEPENDS audio usb SOURCES audio_voices_test.cpp audio_voices_dir_test.cpp TIMEOUT 120)
   # OS-WAVEXP: the engine's offline render (render_offline against render_block, bit for bit; the park, the lease, what is put away and restored) with a scripted event source. The
   # sequencer's side (seq_offline_test.cpp: a project of 1.9 MB) and the file's (export_wav_test.cpp: an in-memory card) are host only.
   o3os_target_suite(audio_offline DEPENDS audio usb SOURCES audio_offline_test.cpp TIMEOUT 120)

@@ -273,6 +273,24 @@ Measured [unit, tester, 2026-10-30, image `v1.0.1-moddrive.1` = 3091e535; tables
 
 Underrun 0 and guard shed 0 in all six runs. Ordinary projects with no FX 38 / 39: t-v16-copy mean 64,994 cycles, no underrun; Dense8 mean 225,692, +746 against `v1.0.1-arrows.1` (224,946), an image without OS-USBOUTS and OS-BUG-FWLIST; the A/B against `v1.0.1-usbouts.1` (the "cost when off" check) is open. Run it per project with `--var PROJ=ModDrive1|1off|4|4off|8|8off` (the folder name under `Projects/`; the default is `ModDrive1`).
 
+## OS-PERF-CPU2 (2026-10-30; `docs/specs/OS-PERF-CPU2.md`): the backward fast path (A1) and the pan sent only when it changed (P1)
+
+Both are bit-identical (hashes captured before the change, a randomized differential test for A1; `audio_voices_dir_test.cpp`, `audio_perflfo_test.cpp`). Sizes are from `tools/remote_ci.sh mk66` against dev 599c4b7c (release image; the bench image `-DO3OS_BENCH=ON` in the last column):
+
+| Part | `.ramfunc_l` release | `.ramfunc_l` bench | FLASH release | SRAM_L | Note |
+|---|---|---|---|---|---|
+| A1 (b5b0b46b) | 27,380 -> 27,472 B (+92) | 27,416 -> 27,508 B (+92) | 932,984 -> 933,076 B | 49,656 -> 49,744 B | D1: up to +96 B, the fourth exception to the net-zero rule; headroom 268 -> 176 B; `fast_steady` 98 B and `fast_ramp` 120 B unchanged |
+| P1 (tried, dropped) | 0 | 0 | 0 (it was +64 B) | 0 | the code is reverted (orchestrator, 2026-10-30: no gain, see below); its tests and the bench rows stay; the bench image holds `voice_pan` |
+
+Host bench (`tests/bench/audio_bench.cpp`, Release, ns a block of 12 voices; relative figures, the M4F differs):
+
+- A1, 12 reversed one-shot voices against forward ones: 1.25x before, 1.00x after (the same fast loop).
+- P1, per LFO destination through the whole engine (voices, `apply_pan_mods`, the graph's pan retarget), before / after in two runs each: no modulator 12,629 / 12,607 ns; VOL LFO 1.05x / 1.05x; **PAN LFO 1.04x / 1.04x (13,155 and 13,162 ns before, 13,139 and 13,193 ns after: no measurable difference)**; TUNE 1.01x; FLT 1.01x; POS 1.01x of the wavetable row.
+
+Why P1 saves next to nothing: `Graph::set_voice_pan` already compared the pan with `Strip::pan_offset` and returned when equal (graph.cpp:312), so a repeated value never reached `retarget_pan`; P1 only saves the call into that function (a dozen cycles a voice-block). The cost of the PAN LFO is then in the voice-side work every LFO destination pays (`mod_block` in flash: `flfo_eval`, `dmod`) and in the retarget of the blocks where the whole pan unit does change. P1's code was therefore reverted (no gain for 64 B of flash; the smallest change that does the job). Its nine hash scenes in `audio_perflfo_test.cpp` (`pan sent only when it changed`: a Panning FX over a held LFO, its end, a live pan edit under a clamped LFO) stay as regression tests of today's behaviour, and the bench rows stay for the unit split.
+
+Unit figures: **open** (QA-PRF-171 REV12 against the 3 pp gate, QA-PRF-172 `voice_rev`, QA-PRF-173..175 `voice_pan`, the PAN LFO row and the P0 stage split on the bench image: `diag bench worst` on the PAN-only window). `diag bench voice_pan` renders one voice with an instrument pan LFO on the pool alone: it measures the voice side, not `Engine::apply_pan_mods`; the strips' share is in `diag bench worst` / `diag cpu` (the "strips" stage).
+
 ## Perform arms measured on the final candidate (fqa.15, 2026-10-25)
 
 Source: `build-images/v1.0.0-fqa.15/REPORT.md`, sections C1 to C5 (tester, on the unit; the scripts and captures are in `build-hil/v1.0.0-fqa.15/`, not in git). The release image is `o3os-v1.0.0-fqa.15-854e58d.ptf`, the code of `merge/batch-0125g` 854e58dd. Per window: `cpu reset`, `cpu perf off`, 5 s settle, then 12 reads of `cpu` 5 s apart (about 60 s). Arms alternated off, ON, off, ON. Notes for these arms are played from `Master` or `Song`: leaving Performance for any other screen ends every Perform effect (QA-PRF-016).

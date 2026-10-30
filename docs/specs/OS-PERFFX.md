@@ -426,6 +426,8 @@ The state is one more set of `PerfSlots` and a reconcile function in flash; no p
 
 ### 11.6 As built (OS-PERF-LFO, 2026-10-25)
 
+(Follow-up OS-PERF-CPU2, `docs/specs/OS-PERF-CPU2.md`: the reversed-voice fast path, bit-identical (a pan skip in `Engine::apply_pan_mods` was tried and dropped: no gain), the figures in `docs/architecture/cpu-budget.md`, QA-PRF-170..175.)
+
 **Code.** `audio/include/o3os/audio/events.h` (`kModGroupLfo*`), `voices.h` / `voices.cpp` (`PerfSlots` of 10 slots, `perf_index` / `perf_dest` / `perf_sync` / `lfo_rerate` / `remod_k`, `Voice::pmask`, `kPerfLfoMod`, `dmod`; the hooks in `mods_start`, `layer_event`, `remod`, `lfo_live`, `refilter`, `filter_set_impl`, `lfo_set_impl`), `engine.cpp` (the two group-14 branches of `dispatch` removed: `layer_event` calls `lfo_set_impl` with the Filter LFO FX's own rules), `seq/perform.h` (rows 12..16 `live`), `model/project_state.h` (defaults -8 / -3 / +3).
 
 **Risk review (coordinator, findings 1 to 8).** 1 a slot that stores no audible amount plays `kPerfLfoMod` (`pmask`, `dmod`; test "a slot that stores no audible amount"); 2 the FLT LFO sets `Voice::fmod` when a filter runs and its end goes through `refilter` / `lfo_set_impl` (test "the layer's end puts the cutoff back"); 3 the SRAM_U arithmetic is below; 4 the amp table's rate base is absolute (`perf_index`), the clamps of both tables and the three defaults (indices 6, 11, 17) are tested; 5 the layer's value is held to +-28 (`lim`); 6 the group 14 keeps the Filter LFO FX's rules (a ModSet starts the LFO only when `a` is 35, a ModEnd ends it; test); 7 the extra tests are in `tests/audio_perflfo_test.cpp`; 8 the manual row says that VOL LFO at the default 50 % peaks at -6 dB.
