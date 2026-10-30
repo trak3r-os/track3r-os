@@ -852,6 +852,21 @@ class VoicePool {
     return track < kVoiceTracks && perf_slot_of(group) < kPerfSlots && ((perf_.on[perf_slot_of(group)] >> track) & 1u) != 0u;
   }
   int perf_value(unsigned track, unsigned group) const noexcept { return group == kModGroupReverse ? (perf_held(track, group) ? 1 : 0) : (perf_held(track, group) ? perf_.val[track][perf_slot_of(group)] : 0); }
+  // OS-BUG-MODDRIVE: the Overdrive and Bit depth of a MODULE instrument's track (Engine::shape_modules). shape_mask: the tracks that hold either FX, the step FX's or the layer's (a bit a track; zero: nothing to
+  // shape, the engine makes no call). shape_track: the drive and depth in force on `track` (the layer over the step FX over the instrument's `od_inst` / `bits_inst`, `engine_bits` the sampler engine's cap
+  // 0 / 4 / 8; a module track passes the neutral instrument values and 0), the rule of shape_set, which calls it. shape_pcm: the passes over n samples in place (the sampler's, shape_span calls it too);
+  // it returns at once for a drive and a depth of none. Both in flash: shape_pcm once a block per shaped module track, shape_track beside it (audio/hot.h exceptions).
+  struct Shape {
+    std::uint16_t drive;
+    std::uint8_t crush;
+    std::uint8_t round;
+  };
+  O3OS_AUDIO_INLINE std::uint16_t shape_mask() const noexcept {
+    static_assert(perf_slot_of(kModGroupOverdrive) == 0u && perf_slot_of(kModGroupBitDepth) == 1u, "shape_mask reads the layer's slots 0 and 1");
+    return static_cast<std::uint16_t>(ifx_on_[1] | ifx_on_[2] | perf_.on[0] | perf_.on[1]);
+  }
+  O3OS_AUDIO_COLD Shape shape_track(unsigned track, unsigned od_inst, unsigned bits_inst, unsigned engine_bits) const noexcept;
+  O3OS_AUDIO_COLD static void shape_pcm(std::int16_t* io, std::uint32_t n, unsigned drive_q11, unsigned crush, bool round) noexcept;
   // OS-PERF-REVERSE: does the step FX 26 (Reverse) hold on `track` (a test and `diag`); a note on the track starts backward when this or perf_held(track, kModGroupReverse) says so.
   bool step_reverse(unsigned track) const noexcept { return track < kVoiceTracks && ((step_rev_ >> track) & 1u) != 0u; }
   // The export (Engine::offline_enter / offline_leave), main loop with the render parked, in flash: put the layer away, clear it (the slots, and the performance filter of every track), bring it back.

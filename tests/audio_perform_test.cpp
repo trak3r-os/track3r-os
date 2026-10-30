@@ -593,6 +593,33 @@ TEST_CASE("perform layer: OVERDRV and BITDEPTH act on the note, and a note start
   b.perf_clear();
 }
 
+// OS-BUG-MODDRIVE: the engine's gate for the module tracks' shaping is VoicePool::shape_mask: a bit for every track that holds the Overdrive or Bit depth FX (step or layer), and only those. FxReset
+// ends the step FX, not the layer; the export's put-away clears the layer's, its restore brings it back (model: the P5 test below).
+TEST_CASE("perform layer (OS-BUG-MODDRIVE): shape_mask names the tracks that hold an Overdrive or Bit depth FX, FxReset leaves the layer's, the export puts it away and back") {
+  using audio::kLayerFx1;
+  using audio::kLayerPerf;
+  using audio::kModGroupBitDepth;
+  using audio::kModGroupOverdrive;
+  VoicePool& p = pool(0);
+  CHECK(p.shape_mask() == 0u);
+  p.fx_event(2, mod_set(kModGroupOverdrive, 2, audio::kFxOverdrive, 30, kLayerFx1, 0));
+  p.fx_event(5, mod_set(kModGroupBitDepth, 5, audio::kFxBitDepth, 8, kLayerFx1, 0));
+  p.fx_event(9, mod_set(kModGroupBitDepth, 9, 0, 0, kLayerPerf, 4));
+  p.fx_event(11, mod_set(audio::kModGroupTune, 11, 0, 0, kLayerPerf, 3));  // another group: not the shaper's
+  CHECK(p.shape_mask() == ((1u << 2) | (1u << 5) | (1u << 9)));
+  p.clear_slide_fxs();  // FxReset: the step FX end, the layer stays
+  CHECK(p.shape_mask() == (1u << 9));
+  VoicePool::PerfSave away{};
+  p.perf_save(away);
+  p.perf_clear();
+  CHECK(p.shape_mask() == 0u);
+  p.perf_restore(away);
+  CHECK(p.shape_mask() == (1u << 9));
+  p.fx_event(9, mod_end(9, kModGroupBitDepth));
+  CHECK(p.shape_mask() == 0u);
+  p.perf_clear();
+}
+
 // OS-PERFFX P5: TUNE has the third slot (kPerfTuneSlot), held to -48..48 (the others to a byte), per track, across FxReset and Stopped; the slot and the byte are the voices' alone: 54 B for the three.
 TEST_CASE("perform layer (P5): the voices hold the layer's TUNE per track in a slot of its own, held to -48..48, across FxReset and Stopped; a step ModSet or a ModEnd lets it go, and the other slots are left alone") {
   using audio::kLayerFx1;

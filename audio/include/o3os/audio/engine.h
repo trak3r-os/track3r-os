@@ -163,6 +163,9 @@ class Engine {
   // change that was on the ring when the export began (the render has no other way to hand it over). True when either took it.
   static bool offline_param(void* self, const ParamChange& change) noexcept;
   O3OS_AUDIO_COLD void apply_pan_mods() noexcept;  // OS-MOD: the autopan's per-block pan to the graph (flash)
+  // OS-BUG-MODDRIVE: Overdrive / Bit depth (step FX 38 / 39, Perform OVERDRV / BITDEPTH) on the module instruments' blocks, in place, between the modules' end_block() and the feed. `mask`: VoicePool::shape_mask()
+  // (non-zero, the caller's test). In flash, once a block while any track holds either FX, plus one shape_pcm per shaped module track (hot.h exceptions).
+  O3OS_AUDIO_COLD void shape_modules(std::uint16_t mask) noexcept;
   // OS-CPU10: flash (1,468 B of SRAM_L back). play_block() makes the empty-queue test inline and calls this only when the main loop has queued a live event (a pad press).
   O3OS_AUDIO_COLD void play_live() noexcept;
   O3OS_AUDIO_COLD bool live_amiga_on(unsigned track, unsigned note, unsigned slot, unsigned velocity) noexcept;

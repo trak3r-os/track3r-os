@@ -975,3 +975,202 @@ TEST_CASE("module binder: a project's module instruments are bound, the ones who
   r.mv->release_all();
   fs::remove_all(root);
 }
+
+// ---- OS-BUG-MODDRIVE: Overdrive and Bit depth (step FX 38 / 39, Perform OVERDRV / BITDEPTH) shape a module instrument's track ---------------------------------
+namespace {
+
+using audio::kFxBitDepth;
+using audio::kFxOverdrive;
+using audio::kLayerFx1;
+using audio::kLayerPerf;
+using audio::kModGroupBitDepth;
+using audio::kModGroupOverdrive;
+
+// A held voice that renders the same 64-sample figure every block (a scrambled ramp over most of the range), so that one block of a run without FX is the oracle's input for every other run.
+std::uint32_t ramp_render(void* s, const float*, float* out, std::uint32_t n) {
+  const DcState* d = static_cast<const DcState*>(s);
+  for (std::uint32_t i = 0; i < n; ++i) {
+    out[i] = d->gate != 0u ? static_cast<float>((i * 37u) % 64u) / 64.0f * 1.8f - 0.9f : 0.0f;
+  }
+  return d->gate != 0u ? 1u : 0u;
+}
+const o3m_module kRamp = {O3M_ABI_MAJOR, O3M_ABI_MINOR, O3M_KIND_INSTRUMENT, sizeof(o3m_module), "ramp", sizeof(DcState), 0, nullptr,
+                          dc_init, ramp_render, dc_set_param, dc_note_on, dc_note_off, dc_shutdown, nullptr, 0};
+
+SeqEvent drive_set(unsigned group, std::uint8_t track, std::uint8_t a, std::uint8_t b, std::uint8_t layer, std::int32_t value) {
+  SeqEvent e{};
+  e.kind = EventKind::ModSet;
+  e.track = track;
+  e.a = a;
+  e.b = b;
+  e.c = layer;
+  e.flags = static_cast<std::uint8_t>(group);
+  e.value = value;
+  return e;
+}
+SeqEvent step_od(std::uint8_t track, unsigned v) { return drive_set(kModGroupOverdrive, track, kFxOverdrive, static_cast<std::uint8_t>(v), kLayerFx1, 0); }
+SeqEvent step_bits(std::uint8_t track, unsigned v) { return drive_set(kModGroupBitDepth, track, kFxBitDepth, static_cast<std::uint8_t>(v), kLayerFx1, 0); }
+SeqEvent layer_od(std::uint8_t track, int v) { return drive_set(kModGroupOverdrive, track, 0, 0, kLayerPerf, v); }
+SeqEvent layer_bits(std::uint8_t track, int shift) { return drive_set(kModGroupBitDepth, track, 0, 0, kLayerPerf, shift); }
+SeqEvent drive_end(std::uint8_t track, unsigned group) {
+  SeqEvent e{};
+  e.kind = EventKind::ModEnd;
+  e.track = track;
+  e.flags = static_cast<std::uint8_t>(group);
+  return e;
+}
+
+struct DriveCue {
+  std::uint32_t block;
+  SeqEvent ev;
+};
+
+// The feeds of `track` over `blocks` blocks of a ramp module bound to slot 3: a note at block 0 (after the block-0 events in `cues`; the others as cued) that stays held. `hook`, if set, runs
+// before each block with its index (the export's put-away and restore).
+std::vector<std::vector<std::int16_t>> ramp_run(unsigned track, const std::vector<DriveCue>& cues, unsigned blocks, void (*hook)(VoicePool&, unsigned) = nullptr) {
+  Rig r;
+  std::vector<std::vector<std::int16_t>> feeds;
+  if (r.mv->bind(3, kRamp, 0x8003, &r.dc[0], nullptr, 0) != ModuleVoices::Bind::Ok) {
+    FAIL("the ramp module did not bind");
+    return feeds;
+  }
+  for (const DriveCue& c : cues) {
+    cue(c.block, c.ev);
+  }
+  cue(0, event(0, EventKind::NoteOn, static_cast<std::uint8_t>(track), 60, 3, 127));
+  for (unsigned b = 0; b < blocks; ++b) {
+    if (hook != nullptr) {
+      hook(*r.pool, b);
+    }
+    r.block();
+    feeds.push_back(r.feed(track));
+  }
+  r.mv->retire_all();
+  r.block();
+  r.block();
+  r.mv->release_all();
+  return feeds;
+}
+
+// The oracle: the pure curves of voices.h over the unshaped block, as the sampler's tests hold them (the drive 0: none; the shift 0: none).
+std::vector<std::int16_t> shaped(const std::vector<std::int16_t>& in, unsigned od, unsigned shift) {
+  std::vector<std::int16_t> out(in.size());
+  const std::int32_t g = audio::overdrive_gain_q11(od);
+  for (std::size_t i = 0; i < in.size(); ++i) {
+    std::int32_t x = in[i];
+    x = g != 0 ? audio::overdrive_sample(x, g) : x;
+    x = shift != 0u ? audio::bit_depth_sample(x, shift) : x;
+    out[i] = static_cast<std::int16_t>(x);
+  }
+  return out;
+}
+
+const std::vector<std::int16_t>& unshaped_block() {
+  static const std::vector<std::int16_t> ref = [] {
+    const auto f = ramp_run(0, {}, 2);
+    return f.size() == 2 ? f[1] : std::vector<std::int16_t>();
+  }();
+  return ref;
+}
+
+}  // namespace
+
+TEST_CASE("module drive: with no FX the block is the module's own, and shape_pcm leaves a drive and a depth of none alone (OS-BUG-MODDRIVE)") {
+  const std::vector<std::int16_t>& ref = unshaped_block();
+  NEED(ref.size() == kBlk);
+  CHECK(ref[1] != ref[2]);  // the figure is not flat: a shaper would show
+  // a layer BITDEPTH of 0 (16 bits), a step FX 39 of 16 bits and a FX 38 of 0 are neutral: the block is byte-equal (the guard of shape_pcm: a gain of 0 would otherwise zero it)
+  const auto f = ramp_run(0, {{0, layer_bits(0, 0)}, {0, step_bits(0, 16)}, {0, step_od(0, 0)}}, 2);
+  NEED(f.size() == 2);
+  CHECK(f[1] == ref);
+  std::int16_t buf[8] = {5, -5, 32767, -32768, 100, 0, 1, -1};
+  std::int16_t keep[8];
+  std::memcpy(keep, buf, sizeof buf);
+  VoicePool::shape_pcm(buf, 8, 0u, 0u, false);
+  CHECK(std::memcmp(buf, keep, sizeof buf) == 0);
+  VoicePool::shape_pcm(buf, 8, 0u, 0u, true);
+  CHECK(std::memcmp(buf, keep, sizeof buf) == 0);
+}
+
+TEST_CASE("module drive: the step FX 38 and 39 on a module track give the sampler's curve over the module's block (OS-BUG-MODDRIVE)") {
+  const std::vector<std::int16_t>& ref = unshaped_block();
+  NEED(ref.size() == kBlk);
+  for (unsigned od : {1u, 50u, 100u}) {
+    const auto f = ramp_run(0, {{0, step_od(0, od)}}, 2);
+    NEED(f.size() == 2);
+    CHECK_MESSAGE(f[1] == shaped(ref, od, 0u), "FX 38 at " << od);
+    CHECK(f[1] != ref);
+  }
+  for (unsigned bits : {12u, 1u}) {
+    const auto f = ramp_run(0, {{0, step_bits(0, bits)}}, 2);
+    NEED(f.size() == 2);
+    CHECK_MESSAGE(f[1] == shaped(ref, 0u, 16u - bits), "FX 39 at " << bits);
+    CHECK(f[1] != ref);
+  }
+  const auto both = ramp_run(0, {{0, step_od(0, 50)}, {0, step_bits(0, 12)}}, 2);
+  NEED(both.size() == 2);
+  CHECK(both[1] == shaped(ref, 50u, 4u));
+  // the same through shape_pcm on the unshaped block: one curve
+  std::vector<std::int16_t> direct = ref;
+  VoicePool::shape_pcm(direct.data(), kBlk, audio::overdrive_gain_q11(50), 4u, false);
+  CHECK(direct == both[1]);
+  // the FX of another track shapes nothing of this one
+  const auto other = ramp_run(0, {{0, step_od(5, 100)}}, 2);
+  NEED(other.size() == 2);
+  CHECK(other[1] == ref);
+}
+
+TEST_CASE("module drive: the Perform layer's OVERDRV and BITDEPTH win over the step FX, the BITDEPTH value is the shift, and the audition track is shaped too (OS-BUG-MODDRIVE)") {
+  const std::vector<std::int16_t>& ref = unshaped_block();
+  NEED(ref.size() == kBlk);
+  const auto f = ramp_run(0, {{0, step_od(0, 100)}, {0, step_bits(0, 12)}, {0, layer_od(0, 10)}, {0, layer_bits(0, 7)}}, 2);
+  NEED(f.size() == 2);
+  CHECK(f[1] == shaped(ref, 10u, 7u));
+  const auto g = ramp_run(0, {{0, layer_od(0, 40)}}, 2);  // the layer's overdrive alone, nothing under it
+  NEED(g.size() == 2);
+  CHECK(g[1] == shaped(ref, 40u, 0u));
+  const auto a = ramp_run(audio::kAuditionTrack, {{0, step_od(audio::kAuditionTrack, 70)}, {0, step_bits(audio::kAuditionTrack, 8)}}, 2);  // the spare strip
+  NEED(a.size() == 2);
+  CHECK(a[1] == shaped(ref, 70u, 8u));
+}
+
+TEST_CASE("module drive: FxReset ends the step FX and leaves the layer, Stopped ends neither, a ModEnd lets go (OS-BUG-MODDRIVE)") {
+  const std::vector<std::int16_t>& ref = unshaped_block();
+  NEED(ref.size() == kBlk);
+  SeqEvent reset{};
+  reset.kind = EventKind::FxReset;
+  SeqEvent stopped{};
+  stopped.kind = EventKind::Stopped;
+  const SeqEvent note = event(0, EventKind::NoteOn, 0, 60, 3, 127);
+  const auto f = ramp_run(0,
+                          {{0, step_od(0, 100)}, {0, layer_bits(0, 4)},          // blocks 0, 1: the FX 38 at 100 and the layer's 12 bits
+                           {2, reset}, {2, note},                                // blocks 2, 3: the FX is gone, the layer is not
+                           {4, stopped}, {5, note},                              // block 5: Stopped ended neither
+                           {6, drive_end(0, kModGroupBitDepth)}, {6, note}},     // blocks 6, 7: nothing is left
+                          8);
+  NEED(f.size() == 8);
+  CHECK(f[1] == shaped(ref, 100u, 4u));
+  CHECK(f[3] == shaped(ref, 0u, 4u));
+  CHECK(f[5] == shaped(ref, 0u, 4u));
+  CHECK(f[7] == ref);
+}
+
+TEST_CASE("module drive: the export puts the layer away and brings it back (OS-BUG-MODDRIVE)") {
+  const std::vector<std::int16_t>& ref = unshaped_block();
+  NEED(ref.size() == kBlk);
+  static VoicePool::PerfSave away;
+  const auto f = ramp_run(0, {{0, layer_od(0, 60)}}, 6, [](VoicePool& p, unsigned b) {
+    if (b == 2u) {
+      p.perf_save(away);
+      p.perf_clear();  // offline_enter: the export is heard without the layer
+    } else if (b == 4u) {
+      p.perf_restore(away);  // offline_leave
+    }
+  });
+  NEED(f.size() == 6);
+  CHECK(f[1] == shaped(ref, 60u, 0u));
+  CHECK(f[2] == ref);
+  CHECK(f[3] == ref);
+  CHECK(f[4] == shaped(ref, 60u, 0u));
+  CHECK(f[5] == shaped(ref, 60u, 0u));
+}

@@ -241,6 +241,14 @@ class ModuleVoices {
     const std::uint8_t i = owner_[track];
     return i != kNone && in_[i].track == track && ((touched_ >> i) & 1u) != 0u ? block_[i] : nullptr;
   }
+  // OS-BUG-MODDRIVE: the same block to change in place (Engine::shape_modules, between end_block() and the engine's feed): the same selection as feed(), one instance a track, so no block is reached twice.
+  O3OS_AUDIO_INLINE std::int16_t* feed_mut(unsigned track) noexcept {
+    if (track >= kModuleTracks) {
+      return nullptr;
+    }
+    const std::uint8_t i = owner_[track];
+    return i != kNone && in_[i].track == track && ((touched_ >> i) & 1u) != 0u ? block_[i] : nullptr;
+  }
 
  private:
   static constexpr std::uint8_t kNone = 0xFF;

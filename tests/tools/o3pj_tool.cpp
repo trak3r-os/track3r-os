@@ -15,6 +15,8 @@
 //                                       folder beside OUT. No modulation matrix (OS-MODMX is parked) and no looper (a loop is not file state). Not a round-trip fixture
 //   o3pj_tool gen dense10 OUT           (OS-DENSE) the realistic reference of the 1.0 CPU target, the recipe and the WAVs of heavy: 6 Modern + 2 Paula sampler voices + TB-303 + FM (10 tracks)
 //   o3pj_tool gen dense8 OUT            (OS-DENSE) the lighter candidate: 4 Modern + 2 Paula + TB-303 + FM (8 tracks). heavy stays the 12-track stress song
+//   o3pj_tool gen moddrive1|moddrive4|moddrive8 OUT, and the same with `off` (moddrive4off)  (OS-BUG-MODDRIVE) 1, 4 or 8 TB-303 tracks that play a note on every step, with the step FX 38 (70) and 39 (8 bits)
+//                                       on step 1 of each track, or without them (`off`, the control of the CPU run). No samples
 //   o3pj_tool resave IN OUT            load a file and save it again (exit 1 with the error on failure)
 //   o3pj_tool dump IN                   print the loaded project as text (same format as `o3project.py dump`)
 //   o3pj_tool limits                    print the limits table (same format as `o3project.py limits`)
@@ -560,6 +562,40 @@ void fill_heavy(Project& p, const Mix& mix) {
   must(p.set_track_name(voices + 1u, "FM", 2));
 }
 
+// OS-BUG-MODDRIVE: the CPU run of Overdrive and Bit depth on module instruments (the HIL scenario qa_cpu_moddrive). `n` TB-303 tracks (instruments 1..n, all the module "tb303"), a note on every step of
+// one 16-step pattern that loops; with `fx` the first step of every track carries the step FX 38 (Overdrive 70) and 39 (Bit depth 8), held until the end of the song: the same song without them is the control.
+void fill_moddrive(Project& p, unsigned n, bool fx) {
+  char name[24];
+  std::snprintf(name, sizeof name, "ModDrive%u%s", n, fx ? "" : " off");
+  p.reset();
+  must(p.set_name(name, std::strlen(name)));
+  must(p.set_tempo_x100(12500));
+  must(p.set_default_pattern_length(16));
+  must(p.set_active_tracks(static_cast<std::uint8_t>(n)));
+  must(p.set_master(MasterSettings{90, 100, 60, 60, kMasterLimiter}));
+  must(p.add_module("tb303", 5, 1, 8));
+  must(p.create_pattern(1, 16));
+  must(p.append_order(1));
+  static const std::uint8_t kAcid[16] = {0, 0, 12, 0, 3, 0, 7, 10, 0, 12, 0, 3, 5, 7, 0, 15};  // semitones above C-2
+  for (unsigned j = 0; j < n; ++j) {
+    Instrument in;
+    init_instrument(in, InstrumentKind::Module);
+    in.module_index = 0;
+    std::snprintf(in.name, sizeof in.name, "ACID%u", j + 1u);
+    must(p.set_instrument(j, in));
+    for (unsigned k = 0; k < 16u; ++k) {
+      Step st = kEmptyStep;
+      st.instr = static_cast<std::uint8_t>(j + 1u);
+      st.note = static_cast<std::uint8_t>(kNoteFirst + 36u + kAcid[(k + j) % 16u]);
+      if (fx && k == 0u) {
+        st.fx[0] = StepFx{38, 70};
+        st.fx[1] = StepFx{39, 8};
+      }
+      must(p.set_step(1, j, k, st));
+    }
+  }
+}
+
 // The four WAVs of the kit, into `dir` ("<folder of the project>/samples").
 bool write_kit_samples(const std::string& dir) {
   std::vector<std::int16_t> sine(4400);  // 44 periods
@@ -643,6 +679,9 @@ int main(int argc, char** argv) {
       fill_heavy(a.project, kDense10);
     } else if (std::strcmp(argv[2], "dense8") == 0) {
       fill_heavy(a.project, kDense8);
+    } else if (std::strncmp(argv[2], "moddrive", 8) == 0 && (argv[2][8] == '1' || argv[2][8] == '4' || argv[2][8] == '8') &&
+               (argv[2][9] == '\0' || std::strcmp(argv[2] + 9, "off") == 0)) {
+      fill_moddrive(a.project, static_cast<unsigned>(argv[2][8] - '0'), argv[2][9] == '\0');
     } else if (std::strcmp(argv[2], "law") == 0) {
       // OS-BUG-PASTE24: an OG project below version 7 saved native: its OGPM and OGPN chunks and the LAW chunk (law 1, the 1.1.14 table).
       if (!gen_og(a, 16u)) {

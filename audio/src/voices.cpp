@@ -1937,8 +1937,17 @@ void VoicePool::glide_start(Voice& v, const SampleDesc& s, unsigned track) noexc
 // instrument's; an engine of 12 or 8 bits caps the depth (the larger shift applies) and, when it is the one in force, ROUNDS (crush_round); the Bit Depth parameter / FX truncates. The gain is
 // 1 + 15 (value / 100)^2 in Q11 (2048..32768), 0 for none; the shift is 16 - bits (0 for 16 bits). The layer's Bit depth value IS that shift (0..15: the table of seq/perform.h), so its bits are 16 - value.
 void VoicePool::shape_set(Voice& v, const SampleDesc& s, unsigned track) const noexcept {
-  unsigned od = ((ifx_on_[1] >> track) & 1u) != 0u ? ifx_val_[track][1] : s.overdrive;
-  unsigned bits = ((ifx_on_[2] >> track) & 1u) != 0u ? ifx_val_[track][2] : s.bit_depth;
+  const unsigned eng = s.engine == kEngineBits12 ? 4u : (s.engine == kEngineBits8 ? 8u : 0u);
+  const Shape sh = shape_track(track, s.overdrive, s.bit_depth, eng);
+  v.drive = sh.drive;
+  v.crush = sh.crush;
+  v.crush_round = sh.round;
+}
+
+// shape_set's rule for any track (OS-BUG-MODDRIVE: the module instruments' too, Engine::shape_modules): `engine_bits` is the sampler engine's cap, 4 or 8 (0 none).
+VoicePool::Shape VoicePool::shape_track(unsigned track, unsigned od_inst, unsigned bits_inst, unsigned engine_bits) const noexcept {
+  unsigned od = ((ifx_on_[1] >> track) & 1u) != 0u ? ifx_val_[track][1] : od_inst;
+  unsigned bits = ((ifx_on_[2] >> track) & 1u) != 0u ? ifx_val_[track][2] : bits_inst;
   if (perf_held(track, kModGroupOverdrive)) {
     const int pv = perf_value(track, kModGroupOverdrive);
     od = pv < 0 ? 0u : static_cast<unsigned>(pv);
@@ -1950,11 +1959,12 @@ void VoicePool::shape_set(Voice& v, const SampleDesc& s, unsigned track) const n
   od = od > 100u ? 100u : od;
   bits = bits < 1u ? 1u : bits;
   bits = bits > 16u ? 16u : bits;
-  const unsigned eng = s.engine == kEngineBits12 ? 4u : (s.engine == kEngineBits8 ? 8u : 0u);
   const unsigned usr = 16u - bits;
-  v.drive = overdrive_gain_q11(od);
-  v.crush = static_cast<std::uint8_t>(eng > usr ? eng : usr);
-  v.crush_round = static_cast<std::uint8_t>(eng != 0u && eng >= usr);
+  Shape r;
+  r.drive = overdrive_gain_q11(od);
+  r.crush = static_cast<std::uint8_t>(engine_bits > usr ? engine_bits : usr);
+  r.round = static_cast<std::uint8_t>(engine_bits != 0u && engine_bits >= usr);
+  return r;
 }
 
 namespace {
@@ -1982,12 +1992,18 @@ void shape_loop(std::int16_t* io, std::uint32_t n, std::int32_t g, unsigned sh) 
 }
 }  // namespace
 
-void VoicePool::shape_span(const Voice& v, std::int16_t* io, std::uint32_t n) noexcept {
-  const std::int32_t g = v.drive;
-  const unsigned sh = v.crush;
+void VoicePool::shape_span(const Voice& v, std::int16_t* io, std::uint32_t n) noexcept { shape_pcm(io, n, v.drive, v.crush, v.crush_round != 0u); }
+
+// The passes over n samples in place (OS-BUG-MODDRIVE: the module instruments' too, one curve). A drive and a depth of none leave the block as it is (the sampler never asks, post_stages; a gain of 0 would zero it).
+void VoicePool::shape_pcm(std::int16_t* io, std::uint32_t n, unsigned drive_q11, unsigned crush, bool round) noexcept {
+  const std::int32_t g = static_cast<std::int32_t>(drive_q11);
+  const unsigned sh = crush;
+  if ((drive_q11 | crush) == 0u) {
+    return;
+  }
   if (sh == 0u) {
     shape_loop<true, false, false>(io, n, g, sh);
-  } else if (v.crush_round != 0u) {
+  } else if (round) {
     if (g != 0) {
       shape_loop<true, true, true>(io, n, g, sh);
     } else {

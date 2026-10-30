@@ -255,6 +255,24 @@ The five rows start, re-rate and end the voices' existing LFO generators (`mod_s
 
 Measure on the unit (the tester; the Dense8 song of section 5): `diag cpu reset`, `diag cpu perf off`, a 60 s window with the five rows off and one with VOL LFO, PAN LFO, TUNE LFO, FLT LFO (with a held LOWPASS) and POS LFO (wavetable instrument) held at +3 on the twelve AFFECTED tracks (arm LFO12, LATCH on), alternated twice. Accept: the rise within the estimate (7 % of a block) with no underrun, off within the noise (+-1.2 pp) of the previous image. Then by ear (QA-PRF-160) and the export check (QA-PRF-161, `cmp`). Measured on fqa.15, section below: LFO12 +18.11 pp, over the accept line; accepted on 2026-10-25.
 
+## OS-BUG-MODDRIVE (2026-10-30; `docs/specs/OS-BUG-MODDRIVE.md`): Overdrive and Bit depth on module instruments
+
+`Engine::play_block` tests `VoicePool::shape_mask()` once a block (four loads and three ORs, in `.ramfunc_l`) and, only while a track holds FX 38 / 39 or the layer's OVERDRV / BITDEPTH, calls `Engine::shape_modules` (flash), which runs the sampler's own `shape_pcm` over every shaped module track's 64-sample block. With nothing held the cost is the test. The cost falls on the governor's `base` (engine cycles less instance cycles), so admission narrows for every module while it runs, and a shaped track is not shed for it.
+
+Size (mk66, scoped build vs dev before the change): `.ramfunc_l` 27,332 -> 27,380 B (+48 B, at the 48 B ceiling the orchestrator accepted; headroom under the 27 KiB budget 316 -> 268 B), a third exception to the net-zero rule after P7 and P8; SRAM_L +48 B (49,608 -> 49,656); FLASH +256 B (932,728 -> 932,984); SRAM_U and SDRAM_STATIC unchanged. Follow-up: moving the gate's call into an existing flash function would give the bytes back.
+
+Expected [est, not measured]: about 1.1k / 0.5k / 1.3k cycles a block per shaped module track (drive / depth / both: 0.42 / 0.20 / 0.49 % of 261,120), about 3.9 % at eight shaped tracks. Measure on the unit (the tester): `qa_cpu_moddrive.json` on `ModDrive1`, `ModDrive4`, `ModDrive8` (`o3pj_tool gen moddrive<n>`) against their `off` controls, the mean `render last` of each pair; `bench voice_od|voice_bit|voice_odbit` for the per-sample cost; `diag mod gov`.
+
+Measured [unit, tester, 2026-10-30, image `v1.0.1-moddrive.1` = 3091e535; tables in `build-images/v1.0.1-moddrive.1/REPORT.md`, not in git], mean `render last`, shaped minus off:
+
+| Pair | Off | Shaped | Delta | Underrun / shed | Note |
+|---|---|---|---|---|---|
+| ModDrive1 | 34,031 | 34,160 | +128 cycles (+0.05 pp) | 0 / 0 | below the estimate |
+| ModDrive4 | 45,642 | 48,476 | +2,835 cycles (+1.09 pp) | 0 / 0 | below the 4 x 1.3k estimate |
+| ModDrive8 | 174,779 | 176,980 | +2,201 cycles | 0 / 0 | not a like-for-like pair: eight TB-303 instances sit at the module limit and the governor drops notes in both songs (212 off, 424 shaped); over-budget 13,877 / 13,876 blocks; window max 256,748 cycles (98 %) |
+
+Underrun 0 and guard shed 0 in all six runs. Ordinary projects with no FX 38 / 39: t-v16-copy mean 64,994 cycles, no underrun; Dense8 mean 225,692, +746 against `v1.0.1-arrows.1` (224,946), an image without OS-USBOUTS and OS-BUG-FWLIST; the A/B against `v1.0.1-usbouts.1` (the "cost when off" check) is open. The shipped `qa_cpu_moddrive.json` needs fixing before it runs as is (its pcm step needs samples; its regex stops at the first ModDrive folder): the tester ran a corrected copy.
+
 ## Perform arms measured on the final candidate (fqa.15, 2026-10-25)
 
 Source: `build-images/v1.0.0-fqa.15/REPORT.md`, sections C1 to C5 (tester, on the unit; the scripts and captures are in `build-hil/v1.0.0-fqa.15/`, not in git). The release image is `o3os-v1.0.0-fqa.15-854e58d.ptf`, the code of `merge/batch-0125g` 854e58dd. Per window: `cpu reset`, `cpu perf off`, 5 s settle, then 12 reads of `cpu` 5 s apart (about 60 s). Arms alternated off, ON, off, ON. Notes for these arms are played from `Master` or `Song`: leaving Performance for any other screen ends every Perform effect (QA-PRF-016).

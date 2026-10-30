@@ -73,6 +73,23 @@ void Engine::apply_pan_mods() noexcept {
   }
 }
 
+// OS-BUG-MODDRIVE: the module instruments' Overdrive and Bit depth, the sampler's curve (VoicePool::shape_pcm) over the instance's block in place, after its own render and filter (the sampler shapes after its
+// filter too) and before the feed. Only the tracks of `mask` that a module sounds on this block (ModuleVoices::feed_mut, as feed() selects). The instrument's value of a module track is neutral (no row for it;
+// OVERDRIVE 0, BIT DEPTH 16), so the step FX 38 / 39 and the layer decide. One call a block, in flash; the values at the block's end apply to the whole block (an event can act up to one block early).
+void Engine::shape_modules(std::uint16_t mask) noexcept {
+  for (unsigned t = 0; t < kModuleTracks; ++t) {
+    if (((mask >> t) & 1u) == 0u) {
+      continue;
+    }
+    std::int16_t* io = modules_->feed_mut(t);
+    if (io == nullptr) {
+      continue;
+    }
+    const VoicePool::Shape s = voices_->shape_track(t, 0u, 16u, 0u);
+    VoicePool::shape_pcm(io, kBlock, s.drive, s.crush, s.round != 0u);
+  }
+}
+
 bool Engine::instrument_hook(void* self, const ParamChange& change) noexcept {
   Engine& e = *static_cast<Engine*>(self);
   const unsigned slot = core::param_index(change.id);
@@ -391,6 +408,10 @@ void Engine::play_block() noexcept {
   if (modules_ != nullptr) {
     modules_->render(cursor, kBlock);
     modules_->end_block();
+    const std::uint16_t shaping = voices_->shape_mask();  // OS-BUG-MODDRIVE: FX 38 / 39 or the layer's OVERDRV / BITDEPTH held on some track: one flash call a block (shape_modules), else none
+    if (shaping != 0u) {
+      shape_modules(shaping);
+    }
   }
   if (modules_ != nullptr || amiga_ != nullptr) {
     for (unsigned t = 0; t < kTracks; ++t) {

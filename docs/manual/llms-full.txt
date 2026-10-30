@@ -2591,6 +2591,7 @@ The Sampler column is what the FX specs say; the module column is checked on the
 | Slide up (41), Slide down (42) | slide the pitch | the pitch slides to the distance (sixteenths of a semitone) in one step of the tempo, as a legato note; on a row with no note the sounding note slides from where it is; a Slide beats a Glide; a Slide of 0 changes nothing; the end of the FX puts the note's pitch back | host tests; unit open |
 | Arp (21) | plays the arpeggio | **plays the arpeggio**, but only with a Chord (14) in the other FX column (as on a sampler): each tone is a new, retriggered note. An Arp alone does nothing | host test of the event stream (OS-MODPITCH step 1); unit open. Earlier text that said Arp had no effect on a module was an FX-column mistake |
 | Chord (14) | plays the root alone | plays the root alone (a module is one voice a track); use CHORDS in SPREAD mode for a chord | `QA-MOD-083` |
+| Overdrive (38), Bit depth (39) | drive and bit reduction of the voice | the same curves over the module's output: the drive gain 1 + 15 (v / 100)^2, the depth cuts the low 16 minus bits bits; a value of 0 (Overdrive) or 16 (Bit depth) changes nothing; the Perform OVERDRV and BITDEPTH rows win over the FX | host tests (`QA-MOD-200..205`); unit open |
 | Chance (4), Micro-move (2) | as in the Pattern chapter | not verified either way | open research question |
 
 ## Notes
@@ -2598,7 +2599,10 @@ The Sampler column is what the FX specs say; the module column is checked on the
 - A module of ABI 1.7 or below, or a 1.8 module that does not export `pitch`, ignores Glide and Slide as before; the notes are ordinary notes.
 - The TB-303's own Slide and Legato Slide parameters are for live legato keys; on a pattern note the slide time comes from the Glide value or the Slide speed.
 - The FX stay in the pattern as written; nothing is changed by the instrument being a module.
-- Overdrive (FX 38), Bit depth (FX 39), the Perform OVERDRV and BITDEPTH rows, and the instrument's OVERDRIVE row do not change the sound of module instruments yet. A fix is in progress (OS-BUG-MODDRIVE). Workaround: export the track with PATT STEMS and load its WAV as a sample.
+- Overdrive (FX 38), Bit depth (FX 39) and the Perform OVERDRV and BITDEPTH rows shape a module instrument's sound exactly as they shape a sampler's: the same curves, applied to the module's output after its own filter. New in track3r-os.
+- A module instrument has no OVERDRIVE or BIT DEPTH row of its own: its Params page shows only the module's parameters, so the amount comes from the FX or the Perform rows. Without one of them the sound is the module's, untouched.
+- The shaping is applied once per audio block (about 1.45 ms) with the values in force at the end of the block, so an FX can start up to one block early, on the tail of the previous note. The Stopped state does not end a held FX 38 or 39 (as on a sampler); the next FxReset does.
+- The shaping costs processor time for each shaped module track (about 0.2 to 0.5 % of the budget each, estimated; the measurement on the unit is open). It also narrows how many module notes the engine admits at once, for every module, while it runs. The export (PATT STEMS and the song export) hears the same shaping as playback, except that the Perform rows are off during an export, as for sampler tracks.
 
 ## See also
 

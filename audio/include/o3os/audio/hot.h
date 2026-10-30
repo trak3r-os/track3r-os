@@ -27,6 +27,9 @@
 // which tools/check_ramfunc.py allows as it does any indirect call. THE EXCEPTION LIST of the "SRAM_L calls nothing in flash" rule is exactly the functions
 // marked O3OS_AUDIO_COLD (grep for it); each states its call rate beside the declaration, and nothing marked COLD may be called more than once per event or
 // per block per strip/voice that changed. Per-sample and per-block kernels stay O3OS_AUDIO_HOT. On the host and on QEMU the macro is empty.
+// Named exceptions to the call rate (a flash call on the per-block path, each with its rate): VoicePool::shape_span (once a span a sampler voice that shapes; calls shape_pcm), and, OS-BUG-MODDRIVE,
+// Engine::shape_modules (once a block, only while some track holds the Overdrive or Bit depth FX or the layer's rows: the gate is one inline test of VoicePool::shape_mask) with VoicePool::shape_track
+// and VoicePool::shape_pcm (once each per shaped module track in that call).
 #if defined(O3OS_AUDIO_RAMFUNC) && O3OS_AUDIO_RAMFUNC
 #define O3OS_AUDIO_COLD [[gnu::noinline, gnu::long_call]]
 #else

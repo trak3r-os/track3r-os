@@ -1689,6 +1689,46 @@ TEST_CASE("ifx: the voice's block is the overdrive curve and the bit depth appli
   p.set_sample(0, ifx_desc(sine));
 }
 
+// OS-BUG-MODDRIVE: shape_pcm is the one curve the sampler's voices (shape_span) and the module tracks (Engine::shape_modules) run. Over a sweep of the whole range, every kind (drive alone, depth by
+// truncation, depth by the 12 / 8 bit engines' rounding, both) equals the pure functions of voices.h sample for sample; a drive and a depth of none leave the block alone.
+TEST_CASE("ifx: shape_pcm equals the pure curves for every kind, and a drive and depth of none leaves the block (OS-BUG-MODDRIVE)") {
+  using o3os::audio::overdrive_gain_q11;
+  using o3os::audio::overdrive_sample;
+  constexpr std::uint32_t kN = 256;
+  std::int16_t base[kN];
+  for (std::uint32_t i = 0; i < kN; ++i) {
+    base[i] = static_cast<std::int16_t>(-32768 + static_cast<std::int32_t>(i) * 257);  // -32768 .. 32767
+  }
+  for (unsigned od : {0u, 1u, 50u, 100u}) {
+    for (unsigned sh : {0u, 1u, 4u, 8u, 15u}) {
+      for (bool round : {false, true}) {
+        if (round && sh == 0u) {
+          continue;  // (the rounding is the 12 / 8 bit engines': a shift of 4 or 8)
+        }
+        const std::int32_t g = overdrive_gain_q11(od);
+        std::int16_t got[kN];
+        std::memcpy(got, base, sizeof base);
+        VoicePool::shape_pcm(got, kN, static_cast<unsigned>(g), sh, round);
+        bool same = true;
+        for (std::uint32_t i = 0; i < kN; ++i) {
+          std::int32_t x = base[i];
+          if (g == 0 && sh == 0u) {
+            // untouched
+          } else {
+            x = g != 0 ? overdrive_sample(x, g) : x;
+            if (sh != 0u) {
+              const std::int32_t mask = ~((std::int32_t{1} << sh) - 1);
+              x = round ? (((x + (std::int32_t{1} << (sh - 1u))) & mask) > 32767 ? 32767 : ((x + (std::int32_t{1} << (sh - 1u))) & mask)) : (x & mask);
+            }
+          }
+          same = same && got[i] == static_cast<std::int16_t>(x);
+        }
+        CHECK_MESSAGE(same, "od " << od << " shift " << sh << (round ? " rounding" : ""));
+      }
+    }
+  }
+}
+
 // ---- OS-PERFFX P1: the Perform layer's OVERDRV and BITDEPTH (voices.h PERFORMANCE LAYER, THE REST OF THE GROUPS). The layer's value wins over the step FX's and the instrument's, for the voice
 // sounding now and for the track's next notes; its end brings the step FX back, and the step FX's end the instrument's. The curves are OS-IFX1's, so the checks are against its pure functions.
 
