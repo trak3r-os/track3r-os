@@ -35,7 +35,7 @@
   {"keys": ["f4"], "gap": 0.4, "note": "QA-MIX-056: the STEMS page, OUTPUTS is row 0"},
   {"say": "QA-MIX-056 LINUX ENUMERATION BY HAND, for N in 4, 6, 2, 8, 10 in turn: on the unit, STEMS, the cursor on OUTPUTS, turn to N (the row shows N*), F6 twice (USB WILL RECONNECT: PRESS AGAIN, then the port re-enumerates). On the computer: arecord -l lists the card, then arecord -D hw:<card> -c N -f S16_LE -r 44100 -d 3 x.wav succeeds and has N channels, and one duplex run (arecord and aplay together) works for N up to 8 with USB RETURN On. Console cross-check after each: usb audio says profile and (N ch). Repeat once with Config > USB > USB RETURN Off: no playback device at any N. Record the card line and the channel count of each in the report."},
   {"cmd": "usb audio", "expect": ["usb audio: AUDIO, profile \\d+ \\(\\d+ ch\\)"], "soft": true, "note": "QA-MIX-056: the profile after the last apply (the channel count is the one the computer saw)"},
-  {"cmd": "usb profile 8 out", "soft": true, "note": "(back to the default layout, 8 OUT / 2 IN)"}
+  {"cmd": "usb profile 8 duplex", "soft": true, "note": "(back to the default layout, 8 OUT / 2 IN)"}
  ],
  "finally": [
   {"keys": ["-master"], "gap": 0.2, "note": "(a Master left down by a failed run is let go)"},

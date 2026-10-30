@@ -66,6 +66,7 @@ Choices the implementation made where the decisions above leave room; each is a 
 | C5 | The simulator has no stem map, so no scenario can apply a value: the OUTPUTS row is covered by `mixer_test`, the gallery pictures (`mixer_stems_outputs`, `mixer_stems_worst`) and the unit steps | the simulator's audio board is the engine without the USB stream |
 | C6 | Profile 11 (console-only) counts as 10 or more channels for the return rule (D3, O3) and is not offered on the OUTPUTS row | it has more channels than 10 |
 | C7 | A change of the wish (USB RETURN setting) survives the layout changes: 10 to 4 and back to 10 gives the return at 4, none at 10, the setting On throughout (`usb0` keeps the wish; `usb::return_presented`) | the setting is the user's, the layout only decides what the descriptors carry |
+| C8 | In DISK, the console's `usb return on|off` changes the wish only until the eject: leaving DISK applies the Config USB RETURN setting again (seen on the unit with v1.0.1-usbouts.1, 2026-10-30: `usb return off` at 10 outputs, then `disk eject`, gives the wish On). The Config setting is the one stored value | the settings sync is blocked in DISK, so a console change there is never stored; Config stays the place to change the setting |
 
 ## Project load during a change
 
