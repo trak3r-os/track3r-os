@@ -179,7 +179,7 @@ void SongScreen::render(const Model& model, const ViewState& view, Renderer& r, 
   SongView sv = view.song;
   (void)sv.fit(length);  // drawn inside the list whatever the view says: the project may have changed since the cursor last moved
   const bool timeline = page_of(view) == SongPage::Timeline;
-  const bool lists = list_page(view);  // OS-SONG-STAGE: a page with a pane of its own draws no rows, cursor block or map
+  const bool lists = list_page(view);  // the TIMELINE page has a pane of its own: it draws no rows, cursor block or map
   const int map_cells = lists ? map_cells_of(l, view.page[screen_index(ScreenId::Song)] == static_cast<std::uint8_t>(SongPage::Arrangement), model) : 0;
   (void)sv.fit_cols(length > 0 ? map_cells : 0);  // the column inside the map as it is drawn
   const bool in_map = sv.in_map();

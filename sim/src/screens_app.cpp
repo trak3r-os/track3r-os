@@ -308,7 +308,7 @@ void draw_song_document_ask(ui::Renderer& r, unsigned) {
 }
 
 // The transport playing slot `order` (pattern `pattern`) at `step`, for the pages that show it.
-void song_stage_play(ViewState& v, unsigned order, unsigned pattern, unsigned step) {
+void song_play_at(ViewState& v, unsigned order, unsigned pattern, unsigned step) {
   v.playing = true;
   v.play.playing = true;
   v.play.order = static_cast<std::uint16_t>(order);
@@ -350,7 +350,7 @@ SongDoc& song_doc_short() {
 void draw_song_timeline_document(ui::Renderer& r, unsigned) {
   SongDoc& d = song_doc(false);
   ViewState v = song_doc_view(kPageTimeline, 12);
-  song_stage_play(v, 14, 7, 20);
+  song_play_at(v, 14, 7, 20);
   scene(r, d.model, v);
 }
 
@@ -361,7 +361,7 @@ void draw_song_timeline_worst(ui::Renderer& r, unsigned variant) {
   (void)d.arena->project.set_active_tracks(variant / 4 + 1u);
   ViewState v = song_doc_view(kPageTimeline, variant % 2 == 0 ? 0 : 20);
   if (variant / 2 % 2 == 1) {
-    song_stage_play(v, variant % 2 == 0 ? 3 : 22, 2, 9);
+    song_play_at(v, variant % 2 == 0 ? 3 : 22, 2, 9);
   }
   scene(r, d.model, v);
 }
@@ -671,7 +671,6 @@ const ScreenState kSongStates[14] = {
     {"document_map_empty", true, 1, kBudgetWords, draw_song_document_map_empty},
     {"document_map_16", true, 1, kBudgetWords, draw_song_document_map_16},
     {"document_map_churn", true, 8, kBudgetWords, draw_song_document_map_churn, false},
-    // OS-SONG-STAGE: the STAGE page playing, and the dearest sweep (five modes x three playhead places).
     // OS-SONG-TIMELINE: the TIMELINE page playing, and the dearest sweep (the thumbnail cap, four variants).
     {"timeline", true, 1, kBudgetWords, draw_song_timeline_document},
     {"timeline_worst", true, 64, kBudgetWords, draw_song_timeline_worst, false},

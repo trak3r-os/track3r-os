@@ -31,6 +31,19 @@ STAGE fails its own brief: about 20 px type that the header already duplicates, 
   - Re-measure `song/timeline_worst` (estimate about 800 words of 1792).
   - Host tests on the bitmap bits (a step with a note sets its bit; empty steps and tracks past 12 clear it; the cache invalidates on every pattern writer).
 
+## Unit check of slices 1 and 2 (2026-10-30, `build-images/v1.0.1-songview2.1/REPORT.md`, not in git)
+
+PASS: the cycle reads 1/3 to 3/3 with STAGE gone; the countdown agrees with the playhead and reads 1 in the last bar; LOOP and JUMP as specified; a 12-track, 34-slot song for 90 s with no display garbage and 0 underruns. Simpler than the `songview.1` build, by the tester's panel shots (Amiga, Black, White). Inputs for slice 3:
+- the 12 dim lanes still fill about two thirds of the page as grey rectangles and show no rhythm: the note map replaces them;
+- the numbers are about 7 px; at 48 bars the one-bar blocks run together (`7 8 1 2`);
+- the strip has 4 colours only, so patterns 1 and 5 look alike: consider more strip colours, or the number alone as the key;
+- the energy row is nearly flat on the test songs: rescale it or drop it;
+- in the White theme the lanes read heavy.
+
 ## Done when
 
 Each slice is merged with its scenario, goldens, QA rows and manual section; the display-list worst case is measured; slice 3's RAM_G use is recorded. Unit: how the note map reads on the panel, and that the frame stays clean at the worst case.
+
+## Deviations from the decisions (found in review; defaults to confirm by the maintainer)
+
+- **V3, "the pattern number always drawn":** a block narrower than its number (a one-bar slot of a 48-bar window with a 3-digit pattern id: about 9 px of block for a number about 14 px wide) goes without its number. Drawing it anyway would run over the next block's number, and a second row for it would grow the display list; the colour strip and the cursor's info line still name the pattern. Default: keep the omission. Confirm, or ask for a clipped or abbreviated number.

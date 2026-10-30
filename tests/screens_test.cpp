@@ -22,6 +22,7 @@
 #include <o3os/app/song_data.h>
 #include <o3os/app/song_view.h>
 #include <o3os/app/view_state.h>
+#include <o3os/audio/play_position.h>
 #include <o3os/core/input_event.h>
 #include <o3os/platform/host/fakes.h>
 
@@ -306,6 +307,50 @@ TEST_CASE("screens: a screen button switches, its own button cycles the pages, a
   CHECK(std::string(view.notify.head().text.c_str()) == "SOON IS NOT AVAILABLE YET");
   CHECK(view.notify.head().severity == core::Severity::Info);
   CHECK_FALSE(app::navigate_to(table, model, view, ScreenId::Config));  // not in this table at all
+}
+
+// OS-SONG-VIEW2 V2: the TIMELINE page's playhead and countdown follow the step, so a step is a redraw there and only there: not a frame per pass, not on the other Song pages, not while stopped.
+TEST_CASE("screens: the Song screen redraws on a step only on TIMELINE and while it plays (OS-SONG-VIEW2 V2)") {
+  Rig rig;
+  audio::PlayPosition position;
+  rig.app->attach_play_position(&position);
+  const unsigned song = app::screen_index(ScreenId::Song);
+  const auto go_to = [&](app::SongPage page) {
+    rig.tap(Button::Song);
+    for (unsigned i = 0; i < app::kSongPages && rig.state().page[song] != static_cast<std::uint8_t>(page); ++i) {
+      rig.tap(Button::Song);
+    }
+    CHECK(rig.state().page[song] == static_cast<std::uint8_t>(page));
+  };
+  const auto steps_redraw = [&](unsigned expect_per_step) {  // 3 steps of the same slot, each followed by two idle passes
+    position.publish(true, 1, 0, 12000, 0);  // the transport starts: its own redraw
+    rig.pass(1);
+    rig.pass(1);
+    std::uint32_t frames = rig.app->frames();
+    for (unsigned step = 1; step <= 3; ++step) {
+      position.publish(true, 1, step, 12000, 0);
+      rig.pass(1);
+      frames += expect_per_step;
+      CHECK(rig.app->frames() == frames);
+      rig.pass(1);
+      rig.pass(1);
+      CHECK(rig.app->frames() == frames);  // the passes between steps draw nothing
+    }
+    position.publish(false, 1, 4, 12000, 0);  // the stop redraws; a step that moves after it does not
+    rig.pass(1);
+    rig.pass(1);
+    frames = rig.app->frames();
+    position.publish(false, 1, 5, 12000, 0);
+    rig.pass(1);
+    CHECK(rig.app->frames() == frames);
+  };
+  go_to(app::SongPage::Timeline);
+  steps_redraw(1u);
+  go_to(app::SongPage::Order);
+  steps_redraw(0u);
+  go_to(app::SongPage::Arrangement);
+  steps_redraw(0u);
+  CHECK(rig.app->failed_frames() == 0u);
 }
 
 TEST_CASE("screens: the screen buttons take the base screen from Pattern to Song and back, and Song again cycles its pages") {
