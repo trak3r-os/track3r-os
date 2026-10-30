@@ -42,13 +42,13 @@ Open = rows with neither a sim nor a unit PASS. The table is generated: `python3
 | Module app | [module_app.md](module_app.md) | 9 | 5 | 0 | 4 |
 | Modules | [modules.md](modules.md) | 125 | 21 | 0 | 104 |
 | Pattern | [pattern.md](pattern.md) | 220 | 107 | 9 | 105 |
-| Perform | [perform.md](perform.md) | 103 | 35 | 5 | 63 |
+| Perform | [perform.md](perform.md) | 106 | 35 | 7 | 64 |
 | Record | [record.md](record.md) | 38 | 6 | 1 | 31 |
 | Sample edit | [sample_edit.md](sample_edit.md) | 23 | 13 | 0 | 10 |
 | Sample load | [sample_load.md](sample_load.md) | 40 | 8 | 8 | 25 |
 | Song | [song.md](song.md) | 52 | 38 | 0 | 14 |
 | Wave | [wave.md](wave.md) | 26 | 20 | 0 | 6 |
-| **Total** | | **1063** | **436** | **51** | **584** |
+| **Total** | | **1066** | **436** | **53** | **585** |
 
 <!-- /qa-cover -->
 

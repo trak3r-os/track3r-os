@@ -651,6 +651,60 @@ void voice_reverse_table() {
   }
 }
 
+// OS-PERF-CPU3 (slice 1): what a note start costs: 12 cut + note_on pairs, one a track, of a plain sample, an enveloped one and a looped one with a filter and the pan LFO (host ns for the 12 pairs, no
+// render; per note = ns / 12; relative before / after "the note_on tail in mods_start", the unit's figure is `diag bench` and `diag cpu` on a note-on-heavy song). Each pass cuts the voices first, so every
+// note allocates and none retriggers a voice of the pass before.
+void note_on_table() {
+  static std::int16_t pcm[8192];
+  for (unsigned i = 0; i < 8192u; ++i) {
+    pcm[i] = static_cast<std::int16_t>(((i * 37u) & 0x3FFFu) - 8192);
+  }
+  struct Row {
+    const char* name;
+    int kind;
+    double ns;
+  } rows[] = {{"12 note-ons, plain sample", 0, 0.0}, {"12 note-ons, amplitude envelope", 1, 0.0}, {"12 note-ons, loop + filter + pan LFO", 2, 0.0}};
+  for (Row& r : rows) {
+    auto pool = std::make_unique<VoicePool>();
+    SampleDesc d{};
+    d.data = pcm;
+    d.length = 8192;
+    d.gain = 65536;
+    if (r.kind == 1) {
+      d.env.enable = true;
+      d.env.attack = 20;
+      d.env.decay = 40;
+      d.env.release = 30;
+      d.env.sustain = kEnvOne / 2u;
+    } else if (r.kind == 2) {
+      d.loop_start = 100;
+      d.loop_end = 8000;
+      d.filter.enable = true;
+      d.filter.wanted = true;
+      d.filter.cutoff = 0.4f;
+      d.filter.resonance = 1.0f;
+      d.pan_mod.kind = kFmodLfo;
+      d.pan_mod.lfo = true;
+      d.pan_mod.rate = 12;
+      d.pan_mod.amount = 0.6f;
+    }
+    pool->set_sample(0, d);
+    r.ns = best_ns(15, 2000, [&] {
+      for (unsigned t = 0; t < 12; ++t) {
+        pool->cut(t);
+      }
+      for (unsigned t = 0; t < 12; ++t) {
+        g_sink += pool->note_on(t, 48 + t, 0, 100) ? 1 : 0;
+      }
+    });
+  }
+  std::printf("\nnote starts (OS-PERF-CPU3): ns for 12 cut + note_on pairs, one a track (host; the M4F cost is measured on the unit)\n");
+  std::printf("  %-48s %10s %12s\n", "case", "host ns", "ns a note");
+  for (const Row& r : rows) {
+    std::printf("  %-48s %10.0f %12.1f\n", r.name, r.ns, r.ns / 12.0);
+  }
+}
+
 // OS-PERF-CPU2 (P1): what each LFO destination costs through the whole engine (the voices, then Engine::apply_pan_mods and the graph's pan retarget for the pan), 12 voices of one looping instrument with
 // one modulator each, the transport running (host ns a block, relative figures; the unit's are `diag bench voice_pan` and `diag cpu`). The same table before and after "the pan is sent only when it
 // changed" is the figure of P1: the pan row's pan value is a whole number 0..100 that repeats for several blocks at this rate.
@@ -816,6 +870,7 @@ int main(int argc, char** argv) {
   tracker_fx_table();
   voice_lfo_table();
   voice_reverse_table();
+  note_on_table();
   voice_stereo_table();
   voice_lfo_dest_table();
   //                    name                     tracks ramping taps   centre sends  meters

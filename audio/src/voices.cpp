@@ -1407,26 +1407,7 @@ bool VoicePool::note_on(unsigned track, unsigned note, unsigned slot, unsigned v
   }
   v.slot = static_cast<std::uint8_t>(slot);
   v.track = static_cast<std::uint8_t>(track);  // before mods_start: slide_start reads it for the layer's TUNE (a voice reused from another track would carry that track's)
-  mods_start(v, s, retrigger, track);  // OS-MOD: the pan, finetune and tremolo modulators of the instrument, if it has any (flash, once a note)
-  if (env != nullptr) {
-    v.releasing = false;
-    v.amp_step = 0;
-    v.ramp_left = 0;  // the envelope takes the place of the attack ramp
-    env_enter(v, kEnvDelay, env->delay);
-  } else {
-    v.env_stage = kEnvOff;
-    v.amp_step = (v.gain / static_cast<std::int32_t>(kAttackSamples)) * 256;
-    v.ramp_left = kAttackSamples;
-  }
-  v.last = 0;
-  v.dk = 0;  // OS-ODD11: a new note owes no re-entry
-  // OS-ODD11: the voice's gate bit is the new track's. A voice reused in the middle of a block (the gated one ended earlier in it, or the oldest voice of a gated track was stolen) would keep its previous occupant's
-  // bit, and the new note's first block would not be fed (its attack ramp used up unheard). (In SRAM_L, six instructions: the flash cost of mods_start, where it sat, was paid by every note of a step.)
-  gated_ = static_cast<std::uint16_t>((gated_ & ~(1u << i)) | (((gate_ >> track) & 1u) << i));
-  v.age = ++age_;
-  v.playing = true;
-  v.releasing = false;
-  ++stats_.note_ons;
+  mods_start(v, s, retrigger, track, i);  // OS-MOD: the pan, finetune and tremolo modulators of the instrument, if it has any, and (last, OS-PERF-CPU3) the rest of the note's start: the envelope or attack ramp, the gate bit, age, playing (flash, once a note)
   return true;
 }
 
@@ -1710,7 +1691,7 @@ struct ModSlots {
 O3OS_AUDIO_INLINE ModSlots mod_slots(const SampleDesc& s) noexcept { return ModSlots{{&s.pan_mod, &s.tune_mod, &s.amp_mod, &s.pos_mod}}; }
 }  // namespace
 
-void VoicePool::mods_start(Voice& v, const SampleDesc& s, bool retrigger, unsigned track) noexcept {
+void VoicePool::mods_start(Voice& v, const SampleDesc& s, bool retrigger, unsigned track, unsigned i) noexcept {
   v.pmask = 0;  // OS-PERF-LFO: a new note starts with the instrument's modulators; perf_dest (end of this function) takes the layer's
   if (v.mode != kModeGranular) {
     v.gstart = static_cast<std::uint32_t>(v.phase >> 32);  // OS-PERFFX P7: the window's start, for tracker_retrigger (gstart is a granular voice's; here in flash: note_on, in SRAM_L, pays no store)
@@ -1759,6 +1740,27 @@ void VoicePool::mods_start(Voice& v, const SampleDesc& s, bool retrigger, unsign
       (void)perf_dest(v, d, false);  // OS-PERF-LFO: the layer's LFOs over the instrument's modulators (a fresh phase: the note's)
     }
   }
+  // OS-PERF-CPU3: the tail of note_on, here so that note_on (SRAM_L) loses its instructions: last and unconditional (nothing above reads or writes these fields; the early returns of note_on come before the call).
+  if (v.env != nullptr) {
+    v.releasing = false;
+    v.amp_step = 0;
+    v.ramp_left = 0;  // the envelope takes the place of the attack ramp
+    env_enter(v, kEnvDelay, v.env->delay);  // (HOT, noinline, long_call: a call from flash)
+  } else {
+    v.env_stage = kEnvOff;
+    v.amp_step = (v.gain / static_cast<std::int32_t>(kAttackSamples)) * 256;
+    v.ramp_left = kAttackSamples;
+  }
+  v.last = 0;
+  v.dk = 0;  // OS-ODD11: a new note owes no re-entry
+  // OS-ODD11: the voice's gate bit is the new track's. A voice reused in the middle of a block (the gated one ended earlier in it, or the oldest voice of a gated track was stolen) would keep its previous occupant's
+  // bit, and the new note's first block would not be fed (its attack ramp used up unheard). (gated_ sat in SRAM_L for CPU only, commit 05a5c86e, the flash cost on a tail that was over budget; here it is flash again,
+  // not for correctness: keep the order gated_, age, playing.)
+  gated_ = static_cast<std::uint16_t>((gated_ & ~(1u << i)) | (((gate_ >> track) & 1u) << i));
+  v.age = ++age_;
+  v.playing = true;
+  v.releasing = false;
+  ++stats_.note_ons;
 }
 
 // OS-PERFFX P7: a percent of a part of `len` frames, floor, in 32 bits: a positive value counts from the start, a negative one |v| back from the end (f = 100 - |v|). The slot's layer is not held: `fallback`.

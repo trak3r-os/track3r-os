@@ -1067,6 +1067,7 @@ class VoicePool {
  private:
   friend struct VoiceRunTest;  // tests/audio_voices_dir_test.cpp: drives run_dir on a hand-made Voice (the differential test of OS-PERF-CPU2 A1); no code
   friend struct LfoStepTest;   // tests/audio_perflfo_test.cpp: reads a voice's modulator mask and step_lfo_ (OS-PERF-LFO-STEP); no code
+  friend struct NoteOnStateTest;  // tests/audio_noteon_state_test.cpp: hashes the voices' whole state after each note_on (OS-PERF-CPU3); no code
   struct Voice {
     const std::int16_t* data = nullptr;
     std::uint64_t phase = 0;      // Q32.32 position in samples
@@ -1186,7 +1187,7 @@ class VoicePool {
   O3OS_AUDIO_COLD bool gated_span(Voice& v, std::uint32_t begin, std::uint32_t end) noexcept;  // OS-ODD11 slice 2: a gated span of a plain voice in closed form (flash, a call a gated voice and span); false: not that kind, nothing done
   O3OS_AUDIO_INLINE void gate_mark(Voice& v, unsigned i, std::uint32_t n) noexcept;  // a span of n samples that was gated: the voice's bit, the re-entry owed, the cutoff clock (odd_span, gated_span)
   O3OS_AUDIO_INLINE void post_stages(Voice& v, std::int16_t* block, std::uint32_t begin, std::uint32_t end) noexcept;  // the tremolo, the filter and the shaper (render and odd_span)
-  O3OS_AUDIO_COLD void mods_start(Voice& v, const SampleDesc& s, bool retrigger, unsigned track) noexcept;
+  O3OS_AUDIO_COLD void mods_start(Voice& v, const SampleDesc& s, bool retrigger, unsigned track, unsigned i) noexcept;  // OS-PERF-CPU3: also the note's envelope / attack ramp, gate bit, age, playing (voice index `i`), last
   O3OS_AUDIO_COLD void slide_start(Voice& v, int sixteenths) noexcept;  // OS-PFX: the ramp to `sixteenths` from where the voice's offset is, over one step of the tempo (flash, per FX event and per note)
   // OS-PERFFX P5 (PERFORMANCE LAYER, TUNE): the layer's pitch base of `track` in 1/65536 semitone (0: the layer holds none). Flash. Every writer of Voice::slide_q16 / slide_tgt keeps it as the offset's zero.
   O3OS_AUDIO_COLD std::int32_t tune_base_q16(unsigned track) const noexcept;
