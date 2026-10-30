@@ -104,11 +104,41 @@ void upper_label(char* out, std::size_t cap, const char* text) noexcept {
 
 }  // namespace
 
+bool stereo_side_path(const model::Project& project, unsigned slot, const char* sample_path, char* out, std::size_t cap) noexcept {
+  constexpr char kSuffix[] = "_s.wav";
+  if (sample_path == nullptr || out == nullptr) {
+    return false;
+  }
+  const std::size_t dir = sizeof guard::kProjectSamplesDir - 1u;
+  const std::size_t ext = sizeof guard::kWavSuffix - 1u;
+  const std::size_t n = std::strlen(sample_path);
+  if (n <= dir + 1u + ext || sample_path[dir] != '/' || !guard::detail::same(sample_path, dir, guard::kProjectSamplesDir) || !guard::detail::same(sample_path + n - ext, ext, guard::kWavSuffix)) {
+    return false;
+  }
+  const std::size_t stem = n - ext;          // "samples/<name>"
+  const std::size_t name = stem - dir - 1u;  // <name>
+  if (name + 2u > guard::kNameMax || stem + sizeof kSuffix > cap) {
+    return false;
+  }
+  std::memcpy(out, sample_path, stem);
+  std::memcpy(out + stem, kSuffix, sizeof kSuffix);
+  if (!guard::detail::valid_name(out + dir + 1u, name + 2u)) {
+    return false;
+  }
+  for (unsigned i = 0; i < model::kMaxInstruments; ++i) {
+    const model::Instrument* other = project.instrument(i);
+    if (i != slot && other != nullptr && same_ci(other->sample_path, out)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // ---- Sources -----------------------------------------------------------------------------------------------------------------------------------
 
 void NativeSaveSource::begin(core::ByteSink& sink) noexcept {
   if (project_ != nullptr) {
-    writer_.begin(*project_, sink);
+    writer_.begin(*project_, sink, stereo_mask_);
   }
 }
 
@@ -487,6 +517,9 @@ SaveService::Start SaveService::save_project(core::JobRunner& jobs, const model:
     return Start::NotWritable;
   }
   save_epoch_ = ~remount_epoch_;  // (OS-BUG-REMOUNT) this save has checked no sample yet (never equal to remount_epoch_): a value left by an earlier save that failed must not make the beliefs current at this one's end
+  side_ = SidePlan{};             // OS-STEREO (b): what this save owes the side files (samples_to_write fills it when there is a bank)
+  mono_count_ = 0;
+  mono_name_[0] = '\0';
   const char* loaded = loaded_folder != nullptr ? loaded_folder : "";
   char name[guard::kNameMax + 1] = {};
   bool replace = false;
@@ -521,8 +554,13 @@ SaveService::Start SaveService::save_project(core::JobRunner& jobs, const model:
     const bool from_folder = !as_new && project_name_of(loaded, loaded_name) && same_ci(loaded_name, name);
     forget_other_card();
     save_epoch_ = remount_epoch_;  // the samples are checked below, against the card as it is now
-    const std::uint64_t todo = samples_to_write(project, *bank, name, from_folder);
-    if (todo != 0u) {
+    const std::uint64_t todo = samples_to_write(project, *bank, name, from_folder, side_);
+    for (unsigned slot = 0; slot < model::kMaxInstruments; ++slot) {
+      if (((side_.refused >> slot) & 1u) != 0u) {
+        note_mono(project, slot);
+      }
+    }
+    if (todo != 0u || side_.todo != 0u) {
       plan_ = Plan{};
       plan_.active = true;
       plan_.bank = bank;
@@ -545,10 +583,11 @@ SaveService::Start SaveService::save_project(core::JobRunner& jobs, const model:
       return first;
     }
   }
-  native_.set(project);
+  native_.set(project, side_.ok);  // (no bank: side_ is the default, every flag goes as it is)
   pending_generation_ = project.generation();
   const Start started = launch(jobs, dir, guard::kProjectFile, replace ? AtomicSave::Mode::Replace : AtomicSave::Mode::NewOnly, native_, name, Kind::Project, false);
   if (started == Start::Started) {
+    proj_job_ = slot_;
     std::strcpy(pending_name_, name);
     std::strncpy(pending_anchor_, loaded, sizeof pending_anchor_ - 1);
     pending_anchor_[sizeof pending_anchor_ - 1] = '\0';
@@ -562,11 +601,15 @@ SaveService::Start SaveService::save_project(core::JobRunner& jobs, const model:
 
 // The slots whose audio Projects/<name>/samples does not hold yet: every sample instrument that has audio in the bank and a path the guard takes, except one that an earlier save
 // wrote into that folder at this version of the audio, or (`read_from_folder`: the project came from this very folder) one the loader read from it and that has not changed since.
-std::uint64_t SaveService::samples_to_write(const model::Project& project, const SampleBank& bank, const char* name, bool read_from_folder) const noexcept {
+std::uint64_t SaveService::samples_to_write(const model::Project& project, const SampleBank& bank, const char* name, bool read_from_folder, SidePlan& side) const noexcept {
   std::uint64_t todo = 0;
+  side = SidePlan{};
   const bool known_here = same_ci(known_dir_, name);
   for (unsigned slot = 0; slot < 64u; ++slot) {
     const model::Instrument* in = project.instrument(slot);
+    if (in != nullptr && in->stereo != 0u) {
+      side.ok &= ~(std::uint64_t{1} << slot);  // (rule 4: a flagged slot keeps its flag only where its side file is held or written, set below)
+    }
     if (in == nullptr || in->kind != model::InstrumentKind::Sample) {
       continue;
     }
@@ -594,21 +637,45 @@ std::uint64_t SaveService::samples_to_write(const model::Project& project, const
     if (!held) {
       todo |= std::uint64_t{1} << slot;
     }
+    // OS-STEREO (b), rule 8: a stereo instrument (flag set, side signal in the bank) also owes its S file, unless the folder holds it (written at this version by an earlier save, or read from the folder with the mid). After a remount nothing
+    // is believed about it (no stamp is kept for S): it is written again, once.
+    char side_path[model::kSamplePathMax + 8];
+    if (in->stereo != 0u && pcm.side != nullptr) {  // (an instrument set back to MONO keeps no side file: a reopen would not read it)
+      if (stereo_side_path(project, slot, in->sample_path, side_path, sizeof side_path)) {
+        const bool held_side = !revalidate_ && ((known_here && known_side_[slot] == version) || loaded_here);
+        if (!held_side) {
+          side.todo |= std::uint64_t{1} << slot;
+        }
+        side.ok |= std::uint64_t{1} << slot;  // (held, or written before the project file: advance_plan takes it back if that fails)
+      } else {
+        side.refused |= std::uint64_t{1} << slot;  // a name that collides or does not fit: saved mono, never silently
+      }
+    }
   }
   return todo;
 }
 
 // One sample of the plan as a job: the bank's audio as a 16-bit mono WAV into Projects/<name>/samples, the file the instrument names, a new file or, over one, a replacing save
 // (the old one stays as <file>.bak). TooBig: this one cannot be a WAV file; the plan skips it.
-SaveService::Start SaveService::start_sample(core::JobRunner& jobs, unsigned slot) noexcept {
+// OS-STEREO (b): `side` writes the instrument's side signal instead, as <stem>_s.wav beside the mid (stereo_side_path: the one naming rule), the same way; Empty when the instrument has no side signal or no side name.
+SaveService::Start SaveService::start_sample(core::JobRunner& jobs, unsigned slot, bool side) noexcept {
   const model::Instrument* in = plan_.project->instrument(slot);
   const SampleBank::Pcm pcm = plan_.bank->pcm(slot);
   char file[guard::kNameMax + 8];
   if (in == nullptr || !sample_file_of(in->sample_path, file) || pcm.data == nullptr || pcm.frames == 0u) {
     return Start::Empty;
   }
-  watch_ = Watch{plan_.bank, slot, plan_.bank->version(slot), nullptr, pcm.data, pcm.frames};
-  if (!wav_.set(pcm.data, pcm.frames, 1, in->sample_rate != 0u ? in->sample_rate : 44100u, &SaveService::watch_ok, &watch_)) {
+  const std::int16_t* audio = pcm.data;
+  if (side) {
+    char side_path[model::kSamplePathMax + 8];
+    if (in->stereo == 0u || pcm.side == nullptr || !stereo_side_path(*plan_.project, slot, in->sample_path, side_path, sizeof side_path)) {
+      return Start::Empty;
+    }
+    audio = pcm.side;
+    std::strcpy(file, side_path + sizeof guard::kProjectSamplesDir);  // the name after "samples/" (the guard bounds it: stereo_side_path)
+  }
+  watch_ = Watch{plan_.bank, slot, plan_.bank->version(slot), nullptr, pcm.data, pcm.frames};  // (the slot's version and block say it is still this audio, side signal too: they move together)
+  if (!wav_.set(audio, pcm.frames, 1, in->sample_rate != 0u ? in->sample_rate : 44100u, &SaveService::watch_ok, &watch_)) {
     return Start::TooBig;
   }
   char dir[guard::kPathCap];
@@ -620,19 +687,27 @@ SaveService::Start SaveService::start_sample(core::JobRunner& jobs, unsigned slo
   // OS-BUG-OGSAVE: a file that is there, for audio that nothing says the folder holds (the project came from this folder, the slot was not read from it and no earlier save wrote it: an OG project's .pti), may already hold
   // this very audio in another form (the official firmware's WAV beside its .pti): the job reads it first and leaves it alone when it does. An audio the folder held before and that has
   // changed since is not asked: the file is the old one.
-  const bool unknown = plan_.from_folder && plan_.bank->card_version(slot) == 0u && !(same_ci(known_dir_, plan_.name) && known_[slot] != 0u);
+  const bool unknown = !side && plan_.from_folder && plan_.bank->card_version(slot) == 0u && !(same_ci(known_dir_, plan_.name) && known_[slot] != 0u);  // (a side file was never read by the official firmware: nothing to ask)
   char label[guard::kNameMax + 8];
   std::memcpy(label, file, std::strlen(file) - (sizeof guard::kWavSuffix - 1));  // the file without ".wav": the strip's label
   label[std::strlen(file) - (sizeof guard::kWavSuffix - 1)] = '\0';
   const Start started = launch(jobs, dir, file, exists ? AtomicSave::Mode::Replace : AtomicSave::Mode::NewOnly, wav_, label, Kind::Sample, false, "SAVE ", exists && unknown ? &wav_ : nullptr);
   if (started == Start::Started) {
     smp_slot_ = slot;
+    smp_side_ = side;
     smp_version_ = watch_.version;
     smp_card_ = writer_->card_id();  // (the job holds its card: it fails when another is mounted)
     std::strncpy(smp_path_, path, sizeof smp_path_ - 1u);
     smp_path_[sizeof smp_path_ - 1u] = '\0';
   }
   return started;
+}
+
+void SaveService::note_mono(const model::Project& project, unsigned slot) noexcept {
+  const model::Instrument* in = project.instrument(slot);
+  if (mono_count_++ == 0u && in != nullptr) {
+    upper_label(mono_name_, sizeof mono_name_, in->name[0] != '\0' ? in->name : "INSTRUMENT");
+  }
 }
 
 // The next job of a plan: the next sample, or, when there is none left, the project file. Started: a job runs (or, from poll, nothing is left to do); anything else that is not
@@ -652,7 +727,7 @@ SaveService::Start SaveService::advance_plan(core::JobRunner& jobs) noexcept {
     while (((plan_.todo >> slot) & 1u) == 0u) {
       ++slot;
     }
-    const Start s = start_sample(jobs, slot);
+    const Start s = start_sample(jobs, slot, false);
     if (s == Start::Started) {
       plan_.todo &= ~(std::uint64_t{1} << slot);
       return Start::Started;
@@ -662,16 +737,34 @@ SaveService::Start SaveService::advance_plan(core::JobRunner& jobs) noexcept {
     }
     plan_.todo &= ~(std::uint64_t{1} << slot);  // TooBig, Empty: this sample is skipped
   }
+  while (side_.todo != 0u) {  // OS-STEREO (b), rule 8: every mid is down, then the side files, then the project file (a failed side file ends the plan like a failed sample)
+    unsigned slot = 0;
+    while (((side_.todo >> slot) & 1u) == 0u) {
+      ++slot;
+    }
+    const Start s = start_sample(jobs, slot, true);
+    if (s == Start::Started) {
+      side_.todo &= ~(std::uint64_t{1} << slot);
+      return Start::Started;
+    }
+    if (s == Start::NoJobSlot) {
+      return s;
+    }
+    side_.todo &= ~(std::uint64_t{1} << slot);
+    side_.ok &= ~(std::uint64_t{1} << slot);  // Empty, TooBig, NoName: no side file of this save (nor held): the flag is not written (rule 4), and the strip says so
+    note_mono(*plan_.project, slot);
+  }
   char dir[kFolderChars + 1];
   if (!guard::join(dir, sizeof dir, guard::kProjectsDir, plan_.name)) {
     plan_.active = false;
     end_save();
     return Start::NoName;
   }
-  native_.set(*plan_.project);
+  native_.set(*plan_.project, side_.ok);  // (what the plan wrote or found held, not the bank as it is now: an undo in between must not make a flag without its file)
   pending_generation_ = plan_.project->generation();
   const Start started = launch(jobs, dir, guard::kProjectFile, plan_.replace ? AtomicSave::Mode::Replace : AtomicSave::Mode::NewOnly, native_, plan_.name, Kind::Project, false);
   if (started == Start::Started) {
+    proj_job_ = slot_;
     std::strcpy(pending_name_, plan_.name);
     std::strcpy(pending_anchor_, plan_.anchor);
     guard::join(last_, sizeof last_, dir);
@@ -1519,6 +1612,7 @@ void SaveService::forget_other_card() noexcept {
   const std::uint32_t id = writer_->card_id();
   if (id != known_card_) {
     std::memset(known_, 0, sizeof known_);
+    std::memset(known_side_, 0, sizeof known_side_);
     known_dir_[0] = '\0';
     known_card_ = id;
   }
@@ -1699,13 +1793,16 @@ void SaveService::reconcile() noexcept {
     if (job_.done()) {  // the folder holds this version of the slot's audio now
       if (!same_ci(known_dir_, plan_.name) || smp_card_ != known_card_) {
         std::memset(known_, 0, sizeof known_);
+        std::memset(known_side_, 0, sizeof known_side_);
         for (hal::storage::FileStamp& f : known_file_) {
           f = hal::storage::FileStamp{};
         }
         std::strcpy(known_dir_, plan_.name);
         known_card_ = smp_card_;
       }
-      if (smp_slot_ < 64u) {
+      if (smp_slot_ < 64u && smp_side_) {
+        known_side_[smp_slot_] = smp_version_;  // (no stamp: after a remount the side file is written again)
+      } else if (smp_slot_ < 64u) {
         known_[smp_slot_] = smp_version_;
         hal::storage::FileStamp written;
         known_file_[smp_slot_] = card_ != nullptr && card_->stat(smp_path_, written) == hal::storage::Status::Ok ? written : hal::storage::FileStamp{};  // (what it looks like now, for a later remount)
@@ -1913,7 +2010,8 @@ SaveService::Move SaveService::move_ready() noexcept {
 
 void SaveService::forget_dir(const char* name) noexcept {
   if (same_ci(known_dir_, name)) {
-    std::memset(known_, 0, sizeof known_);  // a new folder of this name must not be taken for the one that was here: its samples are not on the card
+    std::memset(known_, 0, sizeof known_);
+    std::memset(known_side_, 0, sizeof known_side_);  // a new folder of this name must not be taken for the one that was here: its samples are not on the card
     known_dir_[0] = '\0';
   }
 }

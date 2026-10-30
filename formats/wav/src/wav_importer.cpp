@@ -135,7 +135,7 @@ const char* error_name(Error e) noexcept {
 }
 
 void Importer::begin(core::ByteSource& source, std::int16_t* dst, std::size_t capacity_samples,
-                     bool keep_stereo, bool clip, std::uint8_t channel) noexcept {
+                     bool keep_stereo, bool clip, std::uint8_t channel, bool side) noexcept {
   source_ = &source;
   dst_ = dst;
   capacity_ = dst != nullptr ? capacity_samples : 0;
@@ -156,10 +156,13 @@ void Importer::begin(core::ByteSource& source, std::int16_t* dst, std::size_t ca
   data_seen_ = false;
   float_ = false;
   keep_stereo_ = keep_stereo;
-  clip_ = clip;
+  want_side_ = side && !keep_stereo;
+  side_ = false;
+  side_off_ = 0;
+  clip_ = clip && !want_side_;
   clipped_ = false;
   downmix_ = false;
-  pick_ = channel <= 2u ? channel : std::uint8_t{0};
+  pick_ = channel <= 2u && !want_side_ ? channel : std::uint8_t{0};
   out_channels_ = 0;
   bps_ = 0;
   unit_ = 0;
@@ -519,6 +522,15 @@ void Importer::on_chunk_head() noexcept {
         fail(Error::LimitExceeded, "the audio does not fit the sample buffer");  // nothing was written
         return;
       }
+      if (side_) {  // OS-STEREO (b): S follows M at the even index after it and never clips: both fit, or the import fails before a byte is written
+        side_off_ = (frames + 1u) & ~1u;
+        if (2ull * side_off_ > capacity_) {
+          fail(Error::LimitExceeded, "the audio and its side signal do not fit the sample buffer");
+          return;
+        }
+        info_.side = true;
+        info_.side_offset = side_off_;
+      }
       data_seen_ = true;
       data_samples_ = static_cast<std::uint32_t>(samples);
       convert_left_ = frames * block;
@@ -628,6 +640,7 @@ void Importer::on_fmt() noexcept {
   unit_ = downmix_ ? static_cast<std::uint8_t>(2u * bytes) : static_cast<std::uint8_t>(bytes);
   info_.channels = out_channels_;
   info_.downmixed = downmix_;
+  side_ = want_side_ && downmix_;
   info_.bits = static_cast<std::uint8_t>(bits);
   info_.format = float_ ? SampleFormat::Float : SampleFormat::Pcm;
 }
@@ -752,6 +765,7 @@ bool Importer::step_data() noexcept {
 // quantised (dithered where it is not a whole 16-bit step).
 void Importer::convert_downmix(const std::uint8_t* src, std::size_t frames) noexcept {
   std::int16_t* out = dst_ + out_;
+  std::int16_t* const side = side_ ? dst_ + side_off_ + out_ : nullptr;  // (the output is mono here: out_ counts frames)
   bool dithered = false;
   for (std::size_t i = 0; i < frames; ++i) {
     std::int32_t l;
@@ -776,6 +790,9 @@ void Importer::convert_downmix(const std::uint8_t* src, std::size_t frames) noex
     }
     // round half up: |l + r| < 2^24, no overflow; OS-LOADCH: or one channel alone, at the same 24-bit precision (a 16-bit file passes bit-exact)
     out[i] = quantise24(pick_ == 1u ? l : (pick_ == 2u ? r : (l + r + 1) >> 1), rng_, dithered);
+    if (side != nullptr) {  // S = L - M, L rounded to 16 bits with no dither (the mid's dither stream is untouched): L = M + S exactly unless the sum clamps (S3 of docs/specs/OS-STEREO.md)
+      side[i] = clamp16(((l + 128) >> 8) - out[i]);
+    }
   }
   info_.dithered = info_.dithered || dithered;
   out_ += static_cast<std::uint32_t>(frames);

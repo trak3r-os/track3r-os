@@ -40,8 +40,9 @@ std::size_t song_size(const Project& p) noexcept { return kSongFixed + p.song_le
 // (OS-INSTUI S8b + S9). The version is the smallest one that holds what the instrument has, so a project that never used the newer fields is the file it was.
 // 1.4 (OS-LFOSINE: the 1.3 layout, whole) for an instrument with a Sine LFO.
 // 1.5 (OS-STEREO step 2: the 1.3 layout, whole, and the stereo byte) for a Sample instrument with the stereo flag; it covers a Sine LFO too (1.5 is above the 1.4 gate).
-std::uint16_t inst_version(const Instrument& in) noexcept {
-  if (in.stereo != 0 && in.kind == model::InstrumentKind::Sample) {
+// `stereo`: the flag as it is to be written (Writer::begin's mask may hold it back: the flag is saved only with its side file, OS-STEREO (b)).
+std::uint16_t inst_version(const Instrument& in, bool stereo) noexcept {
+  if (stereo && in.kind == model::InstrumentKind::Sample) {
     return kInstVersionStereo;
   }
   if (model::inst_uses_sine(in)) {
@@ -50,8 +51,8 @@ std::uint16_t inst_version(const Instrument& in) noexcept {
   return !model::inst_v13_default(in) ? kInstVersionMidi : (in.engine != model::kInstEngineAuto ? kInstVersionEngine : kInstVersion);
 }
 
-std::size_t inst_size(const Instrument& in) noexcept {
-  const std::uint16_t v = inst_version(in);
+std::size_t inst_size(const Instrument& in, bool stereo) noexcept {
+  const std::uint16_t v = inst_version(in, stereo);
   return kInstFixed + text_len(in.name, model::kInstrumentNameMax) + text_len(in.sample_path, model::kSamplePathMax) + in.param_len + kInstRate + (v >= kInstVersionEngine ? kInstEngine : 0) +
          (v >= kInstVersionMidi ? kInstMidi : 0) + (v >= kInstVersionStereo ? kInstStereo : 0);
 }
@@ -69,8 +70,9 @@ void put_pad(Enc& e, std::size_t payload) noexcept {
 
 }  // namespace
 
-void Writer::begin(const Project& project, core::ByteSink& sink) noexcept {
+void Writer::begin(const Project& project, core::ByteSink& sink, std::uint64_t stereo_mask) noexcept {
   project_ = &project;
+  stereo_mask_ = stereo_mask;
   sink_ = &sink;
   progress_ = Progress::Running;
   report_ = Report{};
@@ -160,7 +162,7 @@ bool Writer::measure(std::size_t& budget) noexcept {
           measure_id_ = 0;
           break;
         }
-        measure_total_ += chunk_total(inst_size(*p.instrument(measure_id_)));
+        measure_total_ += chunk_total(inst_size(*p.instrument(measure_id_), stereo_written(measure_id_)));
         spent += 128;  // the two names
         ++measure_id_;
         break;
@@ -346,10 +348,11 @@ bool Writer::build_piece() noexcept {
           break;
         }
         const Instrument& in = *p.instrument(cursor_);
-        const std::size_t payload = inst_size(in);
+        const bool stereo = stereo_written(cursor_);
+        const std::size_t payload = inst_size(in, stereo);
         report_.chunk = kChunkInst;
         put_header(e, kChunkInst, payload);
-        const std::uint16_t version = inst_version(in);
+        const std::uint16_t version = inst_version(in, stereo);
         e.u16(version);
         e.u8(static_cast<std::uint8_t>(cursor_));
         e.u8(static_cast<std::uint8_t>(in.kind));
@@ -376,7 +379,7 @@ bool Writer::build_piece() noexcept {
           e.u8(in.vel_sens);
         }
         if (version >= kInstVersionStereo) {
-          e.u8(in.stereo);
+          e.u8(stereo ? std::uint8_t{1} : std::uint8_t{0});
         }
         put_pad(e, payload);
         ++cursor_;

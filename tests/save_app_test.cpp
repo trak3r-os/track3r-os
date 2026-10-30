@@ -2520,3 +2520,284 @@ TEST_CASE("save: the shutdown does not wait for settings that a hold or the Host
   rig.settle();
   CHECK(rig.card.has("Settings/device.o3st"));
 }
+
+// ---- OS-STEREO step 2, slice (b): the side file samples/<stem>_s.wav ----------------------------------------------------------------------------------
+
+namespace {
+
+// A stereo sample instrument in `slot`: the mid as put_sample() writes it, S[i] = -(i % 11) - 1, both in the bank as one block (S at pcm + even(frames)); the instrument's stereo flag is set.
+void put_stereo(Rig& rig, unsigned slot, std::uint32_t frames, int seed, bool flag = true, const char* path = nullptr) {
+  model::Project& project = test::arena(1).project;
+  model::Instrument in;
+  model::init_instrument(in, model::InstrumentKind::Sample);
+  if (path != nullptr) {
+    std::strncpy(in.sample_path, path, sizeof in.sample_path - 1);
+  } else {
+    std::snprintf(in.sample_path, sizeof in.sample_path, "samples/instr%02u.wav", slot + 1u);
+  }
+  in.stereo = flag ? 1u : 0u;
+  NEED(project.set_instrument(slot, in) == model::Status::Ok);
+  std::int16_t* pcm = rig.memory.data() + slot * 4000u;
+  const std::uint32_t even = (frames + 1u) & ~1u;
+  for (std::uint32_t i = 0; i < frames; ++i) {
+    pcm[i] = static_cast<std::int16_t>(seed + static_cast<int>(i % 200u) * 7);
+    pcm[even + i] = static_cast<std::int16_t>(-static_cast<int>(i % 11u) - 1);
+  }
+  rig.bank.adopt(slot, pcm, frames, 2u * even, pcm + even);
+}
+
+// What a WAV save of the slot's side signal makes.
+Bytes side_wav_of(const Rig& rig, unsigned slot, std::uint32_t rate = 44100) {
+  const app::SampleBank::Pcm pcm = rig.bank.pcm(slot);
+  Bytes out(app::WavSaveSource::kHeaderBytes);
+  app::WavSaveSource::make_header(out.data(), pcm.frames, 1, rate);
+  const std::uint8_t* raw = reinterpret_cast<const std::uint8_t*>(pcm.side);
+  out.insert(out.end(), raw, raw + pcm.frames * 2u);
+  return out;
+}
+
+// The native project and the sample loader over `folder` of the rig's card, as the device reopens a project: into arena 2, a fresh bank (`bank2` in `mem2`, 60,000 samples of `memory2`).
+struct Reopen {
+  model::ModelArena& arena2 = test::arena(2);
+  std::unique_ptr<audio::VoicePool> voices = std::make_unique<audio::VoicePool>();
+  std::vector<std::int16_t> memory2 = std::vector<std::int16_t>(60000);
+  std::unique_ptr<app::SampleBankMem> mem2 = std::make_unique<app::SampleBankMem>();
+  app::SampleBank bank2;
+  app::OgSampleLoader loader;
+  bool open(Rig& rig, const char* folder) {
+    app::NativeFolderLoader native;
+    if (!native.begin(rig.card, folder, arena2)) {
+      return false;
+    }
+    for (unsigned i = 0; i < 2000 && native.state() == app::NativeFolderLoader::State::Running; ++i) {
+      (void)native.step(4096);
+    }
+    if (native.state() != app::NativeFolderLoader::State::Done) {
+      return false;
+    }
+    bank2.init(*voices, arena2, *mem2, memory2.data(), static_cast<std::uint32_t>(memory2.size()));
+    if (!loader.begin(rig.card, folder, arena2.project, 0, *voices, memory2.data(), static_cast<std::uint32_t>(memory2.size()), audio::LevelLaw::Og12, &bank2, true)) {
+      return false;
+    }
+    for (unsigned i = 0; i < 4000 && loader.state() == app::OgSampleLoader::State::Running; ++i) {
+      (void)loader.step(4096);
+    }
+    return loader.state() == app::OgSampleLoader::State::Done;
+  }
+};
+
+}  // namespace
+
+TEST_CASE("save stereo: Save As writes each stereo sample's mid, then its side file, then the project file; a mono sample has no side file") {
+  Rig rig;
+  put_stereo(rig, 0, 600, 100);
+  put_sample(rig, 2, 900, -2000);
+  save_as(rig, "Mine");
+  CHECK(rig.message() == "SAVE MINE DONE");
+  CHECK(rig.card.same("Projects/Mine/samples/instr01.wav", wav_of(rig, 0)));  // M: the file an older build and any other tool reads, unchanged
+  CHECK(rig.card.same("Projects/Mine/samples/instr01_s.wav", side_wav_of(rig, 0)));
+  CHECK(rig.card.same("Projects/Mine/samples/instr03.wav", wav_of(rig, 2)));
+  CHECK_FALSE(rig.card.has("Projects/Mine/samples/instr03_s.wav"));
+  CHECK(rig.card.same("Projects/Mine/project.o3pj", rig.native_bytes()));  // the flag is written: its S file is
+  const std::size_t m = index_of(rig.card, "rename Projects/Mine/samples/_o3save.tmp>Projects/Mine/samples/instr01.wav");
+  const std::size_t m3 = index_of(rig.card, "rename Projects/Mine/samples/_o3save.tmp>Projects/Mine/samples/instr03.wav");
+  const std::size_t s = index_of(rig.card, "rename Projects/Mine/samples/_o3save.tmp>Projects/Mine/samples/instr01_s.wav");
+  const std::size_t p = index_of(rig.card, "rename Projects/Mine/_o3save.tmp>Projects/Mine/project.o3pj");
+  CHECK(m < s);
+  CHECK(m3 < s);  // every mid, then the side files
+  CHECK(s < p);
+  CHECK(p < rig.card.log.size());
+  CHECK(rig.card.violations == 0);
+  // A plain Save writes no sample again, the side file included.
+  rig.card.log.clear();
+  rig.go(ScreenId::File);
+  rig.tap(Button::F4);
+  rig.settle();
+  for (const std::string& line : rig.card.log) {
+    CHECK(line.find("samples") == std::string::npos);
+  }
+  // A new version of the audio replaces both files, the old ones kept as .bak.
+  const Bytes old_side = side_wav_of(rig, 0);
+  put_stereo(rig, 0, 650, 500);
+  rig.card.log.clear();
+  rig.expire();
+  rig.tap(Button::F4);
+  rig.settle();
+  CHECK(rig.card.same("Projects/Mine/samples/instr01.wav", wav_of(rig, 0)));
+  CHECK(rig.card.same("Projects/Mine/samples/instr01_s.wav", side_wav_of(rig, 0)));
+  CHECK(rig.card.same("Projects/Mine/samples/instr01_s.wav.bak", old_side));
+  CHECK(rig.card.violations == 0);
+}
+
+TEST_CASE("save stereo: the reopen of the folder has the mid and the side bit for bit, the flag, and the loader's belief that the folder holds them") {
+  Rig rig;
+  put_stereo(rig, 0, 1201, 321);  // odd: S starts at 1202
+  put_sample(rig, 3, 800, -1500);
+  save_as(rig, "Reopen");
+  NEED(rig.card.has("Projects/Reopen/samples/instr01_s.wav"));
+  const app::SampleBank::Pcm a0 = rig.bank.pcm(0);
+  Reopen re;
+  NEED(re.open(rig, "Projects/Reopen"));
+  CHECK(re.loader.report().loaded == 2u);
+  CHECK(re.loader.report().stereo_lost == 0u);
+  const app::SampleBank::Pcm b0 = re.bank2.pcm(0);
+  NEED(b0.frames == a0.frames);
+  NEED(b0.side != nullptr);
+  CHECK(b0.side == b0.data + 1202);
+  CHECK(std::memcmp(b0.data, a0.data, a0.frames * 2u) == 0);
+  CHECK(std::memcmp(b0.side, a0.side, a0.frames * 2u) == 0);
+  CHECK(re.arena2.project.instrument(0)->stereo == 1u);
+  CHECK_FALSE(re.bank2.has_side(3));
+  CHECK(re.arena2.project.instrument(3)->stereo == 0u);
+  CHECK(re.bank2.card_version(0) == re.bank2.version(0));
+  // The mono sample after it is where it should be (the slot after a stereo block).
+  CHECK(re.bank2.pcm(3).frames == 800u);
+  CHECK(std::memcmp(re.bank2.pcm(3).data, rig.bank.pcm(3).data, 1600u) == 0);
+}
+
+TEST_CASE("save stereo: a missing, shorter or other-rate side file, or one that is not mono, loads the instrument mono with the flag cleared and the loss counted") {
+  const auto reopen_with = [](const char* what, auto&& spoil) {
+    INFO(what);
+    Rig rig;
+    put_stereo(rig, 0, 700, 50);
+    save_as(rig, "Spoiled");
+    NEED(rig.card.has("Projects/Spoiled/samples/instr01_s.wav"));
+    spoil(rig);
+    Reopen re;
+    NEED(re.open(rig, "Projects/Spoiled"));
+    CHECK(re.loader.report().loaded == 1u);
+    CHECK(re.loader.report().stereo_lost == 1u);
+    CHECK(re.bank2.pcm(0).frames == 700u);
+    CHECK(std::memcmp(re.bank2.pcm(0).data, rig.bank.pcm(0).data, 1400u) == 0);  // the mid is the sample, as an older build loads it
+    CHECK_FALSE(re.bank2.has_side(0));
+    CHECK(re.arena2.project.instrument(0)->stereo == 0u);  // rule 4: a 1 is never kept without its S
+  };
+  reopen_with("missing", [](Rig& rig) { rig.card.files.erase("projects/spoiled/samples/instr01_s.wav"); });
+  reopen_with("shorter", [](Rig& rig) {
+    Bytes b(app::WavSaveSource::kHeaderBytes);
+    app::WavSaveSource::make_header(b.data(), 600, 1, 44100);
+    b.insert(b.end(), 1200u, 0);
+    rig.card.put("Projects/Spoiled/samples/instr01_s.wav", std::string(b.begin(), b.end()));
+  });
+  reopen_with("longer", [](Rig& rig) {
+    Bytes b(app::WavSaveSource::kHeaderBytes);
+    app::WavSaveSource::make_header(b.data(), 800, 1, 44100);
+    b.insert(b.end(), 1600u, 0);
+    rig.card.put("Projects/Spoiled/samples/instr01_s.wav", std::string(b.begin(), b.end()));
+  });
+  reopen_with("other rate", [](Rig& rig) {
+    Bytes b(app::WavSaveSource::kHeaderBytes);
+    app::WavSaveSource::make_header(b.data(), 700, 1, 22050);
+    b.insert(b.end(), 1400u, 0);
+    rig.card.put("Projects/Spoiled/samples/instr01_s.wav", std::string(b.begin(), b.end()));
+  });
+  reopen_with("not mono", [](Rig& rig) {
+    Bytes b(app::WavSaveSource::kHeaderBytes);
+    app::WavSaveSource::make_header(b.data(), 700, 2, 44100);
+    b.insert(b.end(), 2800u, 0);
+    rig.card.put("Projects/Spoiled/samples/instr01_s.wav", std::string(b.begin(), b.end()));
+  });
+  reopen_with("not a WAV", [](Rig& rig) { rig.card.put("Projects/Spoiled/samples/instr01_s.wav", std::string("garbage garbage garbage")); });
+}
+
+TEST_CASE("save stereo: rule 4 at save: a flag with no S in the bank is written as 0 and the document keeps it; mono projects are the bytes they were") {
+  {
+    Rig rig;
+    put_stereo(rig, 0, 500, 7, true);
+    put_sample(rig, 1, 400, 9);
+    const Bytes with_flag_and_side = rig.native_bytes();
+    // the audio loses its S (an edit's mono result, a take): the flag stays in the document
+    rig.bank.adopt(0, rig.memory.data(), 500);
+    NEED(test::arena(1).project.instrument(0)->stereo == 1u);
+    save_as(rig, "Rule4");
+    CHECK(rig.message() == "SAVE RULE4 DONE");
+    CHECK_FALSE(rig.card.has("Projects/Rule4/samples/instr01_s.wav"));
+    CHECK(test::arena(1).project.instrument(0)->stereo == 1u);  // the document is untouched
+    // The file on the card is the project with the flag at 0.
+    model::Instrument cleared = *test::arena(1).project.instrument(0);
+    cleared.stereo = 0;
+    NEED(test::arena(1).project.set_instrument(0, cleared) == model::Status::Ok);
+    const Bytes mono_bytes = rig.native_bytes();
+    CHECK(rig.card.same("Projects/Rule4/project.o3pj", mono_bytes));
+    CHECK(mono_bytes != with_flag_and_side);
+  }
+  {  // another instrument names the side file as its own sample: the side file is not written, and no flag either
+    Rig rig;
+    put_stereo(rig, 0, 300, 3, true);
+    model::Instrument other;
+    model::init_instrument(other, model::InstrumentKind::Sample);
+    std::strcpy(other.sample_path, "samples/instr01_s.wav");
+    NEED(test::arena(1).project.set_instrument(5, other) == model::Status::Ok);
+    save_as(rig, "Clash");
+    CHECK_FALSE(rig.card.has("Projects/Clash/samples/instr01_s.wav"));
+    Reopen re;
+    NEED(re.open(rig, "Projects/Clash"));
+    CHECK(re.arena2.project.instrument(0)->stereo == 0u);
+  }
+}
+
+TEST_CASE("save stereo: a side name that another instrument has (any case) or that does not fit saves the instrument mono and says so; no other instrument's file is touched") {
+  const auto run = [](const char* what, const char* stereo_path, const char* other_path) {
+    INFO(what);
+    Rig rig;
+    put_stereo(rig, 0, 300, 3, true, stereo_path);
+    if (other_path != nullptr) {
+      put_sample(rig, 5, 400, 77, other_path);  // a mono sample with audio of its own: its file is the side name
+    }
+    save_as(rig, "Clash");
+    CHECK(rig.message().rfind("STEREO SAVED MONO: ", 0) == 0u);
+    CHECK(rig.message().size() <= 48u);
+    if (other_path != nullptr) {
+      CHECK(rig.card.same("Projects/Clash/samples/instr01_s.wav", wav_of(rig, 5)));  // the other instrument's audio, not S
+    }
+    CHECK(rig.card.violations == 0);
+    Reopen re;
+    NEED(re.open(rig, "Projects/Clash"));
+    CHECK(re.loader.report().stereo_lost == 0u);  // the flag was not written, so nothing is lost at load
+    CHECK(re.arena2.project.instrument(0)->stereo == 0u);
+    CHECK_FALSE(re.bank2.has_side(0));
+    CHECK(re.bank2.pcm(0).frames == 300u);
+    if (other_path != nullptr) {
+      CHECK(re.bank2.pcm(5).frames == 400u);
+    }
+  };
+  run("sibling", nullptr, "samples/instr01_s.wav");
+  run("other case", nullptr, "samples/instr01_S.wav");
+  run("all upper case", nullptr, "samples/INSTR01_S.WAV");
+  run("stem too long", "samples/abcdefghijklmnopqrstuvwxyz0123.wav", nullptr);  // 30 characters: "_s" makes 32 of the guard's 31
+  Rig fits;  // 29 characters is the longest stem that has a side name: no message
+  put_stereo(fits, 0, 300, 3, true, "samples/abcdefghijklmnopqrstuvwxyz012.wav");
+  save_as(fits, "Fits");
+  CHECK(fits.message() == "SAVE FITS DONE");
+  CHECK(fits.card.has("Projects/Fits/samples/abcdefghijklmnopqrstuvwxyz012_s.wav"));
+}
+
+TEST_CASE("save stereo: the flag is written only where the plan wrote or found the side file, not where the bank has a side signal by the time the project file starts") {
+  Rig rig;
+  put_stereo(rig, 0, 400, 5, true);
+  put_sample(rig, 2, 3500, 9);  // a long mid after it: the plan has several passes to go
+  const std::uint32_t even = 400;
+  std::int16_t* const pcm0 = rig.memory.data();
+  rig.bank.adopt(0, pcm0, 400);  // the side signal is gone at the start (an edit's result): the flag stays in the document
+  NEED(test::arena(1).project.instrument(0)->stereo == 1u);
+  rig.go(ScreenId::File);
+  rig.tap(Button::F5);
+  auto& entry = const_cast<app::TextEntry&>(rig.app->state().text.entry);
+  entry.set("Undone");
+  rig.tap(Button::F8);
+  bool restored = false;
+  for (unsigned i = 0; i < 400 && !rig.card.has("Projects/Undone/project.o3pj"); ++i) {
+    rig.pass();
+    if (!restored && rig.card.has("Projects/Undone/samples/instr01.wav") && !rig.card.has("Projects/Undone/project.o3pj")) {
+      rig.bank.adopt(0, pcm0, 400, 2u * even, pcm0 + even);  // an undo brings S back between the plan's start and the project job
+      restored = true;
+    }
+  }
+  rig.settle();
+  NEED(restored);
+  CHECK_FALSE(rig.card.has("Projects/Undone/samples/instr01_s.wav"));
+  Reopen re;
+  NEED(re.open(rig, "Projects/Undone"));
+  CHECK(re.loader.report().stereo_lost == 0u);
+  CHECK(re.arena2.project.instrument(0)->stereo == 0u);  // never a flag without its file
+}

@@ -158,7 +158,7 @@ void SampleReader::begin(core::ByteSource& source, model::ModelArena& arena, con
     fail(FormatError::LimitExceeded, "no room was given for the audio");
     return;
   }
-  importer_.begin(source, params.pcm, params.pcm_capacity, params.keep_stereo, false, params.channel);
+  importer_.begin(source, params.pcm, params.pcm_capacity, params.keep_stereo, false, params.channel, params.side);
 }
 
 formats::Progress SampleReader::step(std::size_t byte_budget) noexcept {
@@ -197,6 +197,7 @@ void SampleReader::finish() noexcept {
   report_.instruments = 1;
   report_.pcm_frames = info.frames;
   report_.pcm_channels = info.channels;
+  report_.pcm_side = info.side;
   // What the file had that is not in the instrument: never silent.
   report_.sanitised = (r.smpl_ignored ? 1u : 0u) + (r.cue_ignored ? 1u : 0u) + r.loops_dropped + r.slices_dropped + (r.clm_ignored ? 1u : 0u) + (unusable ? 1u : 0u) + (tail != 0u ? 1u : 0u) +
                       (frame != 0u && (info.has_loop || info.slice_count != 0u) ? 1u : 0u);  // a wavetable has no loop or slices of the file's

@@ -1238,3 +1238,188 @@ TEST_CASE("sample bank: a direct write takes back the cell staged for its slot, 
   rig.render(1);
   CHECK(rig.voices->sample(2).length == 3000u);
 }
+
+// ---- OS-STEREO step 2, slice (b): the side signal S follows M in the same block --------------------------------------------------------------------
+
+namespace {
+// A stereo sample in slot `slot`: M as make() writes it, S[i] = -(i % 7) - 1, committed through commit_load with S as one unit.
+void make_stereo(Rig& rig, unsigned slot, std::uint32_t frames) {
+  model::Instrument in;
+  model::init_instrument(in, model::InstrumentKind::Sample);
+  in.stereo = 1;
+  CHECK(rig.arena->project.set_instrument(slot, in) == model::Status::Ok);
+  std::uint32_t cap = 0;
+  std::int16_t* p = rig.bank.reserve(cap);
+  NEED(p != nullptr);
+  const std::uint32_t even = (frames + 1u) & ~1u;
+  for (std::uint32_t i = 0; i < frames; ++i) {
+    p[i] = static_cast<std::int16_t>(1000 + static_cast<int>(i % 50));
+    p[even + i] = static_cast<std::int16_t>(-static_cast<int>(i % 7) - 1);
+  }
+  CHECK(rig.bank.commit_load(slot, p, frames, p + even));
+}
+bool side_is_intact(const SampleBank& bank, unsigned slot, std::uint32_t frames) {
+  const SampleBank::Pcm p = bank.pcm(slot);
+  if (p.frames != frames || p.side == nullptr || p.side != p.data + ((frames + 1u) & ~1u)) {
+    return false;
+  }
+  for (std::uint32_t i = 0; i < frames; ++i) {
+    if (p.side[i] != static_cast<std::int16_t>(-static_cast<int>(i % 7) - 1)) {
+      return false;
+    }
+  }
+  return true;
+}
+}  // namespace
+
+TEST_CASE("sample bank: a load with a side signal commits M and S as one block of 2 x even(frames); a mono load has none") {
+  Rig rig(5000);
+  rig.make(0, 100);
+  CHECK_FALSE(rig.bank.has_side(0));
+  CHECK(rig.bank.pcm(0).side == nullptr);
+  make_stereo(rig, 1, 999);
+  CHECK(rig.bank.has_side(1));
+  CHECK(rig.bank.free_samples() == 5000u - 100u - 2000u);  // 999 rounds up to 1000, twice
+  CHECK(pcm_is_intact(rig.bank, 1, 999));                  // M is what a mono load writes
+  CHECK(side_is_intact(rig.bank, 1, 999));
+  CHECK_FALSE(rig.bank.has_side(2));
+  // Refusals change nothing: S not where it must be, or no room for both.
+  std::uint32_t cap = 0;
+  std::int16_t* p = rig.bank.reserve(cap);
+  NEED(p != nullptr);
+  CHECK_FALSE(rig.bank.commit_load(2, p, 100, p + 50));
+  CHECK_FALSE(rig.bank.commit_load(2, p, 100, p + 102));
+  CHECK_FALSE(rig.bank.commit_load(2, p, 1500, p + 1500));  // M fits (1500 <= 2900) but both (3000) do not
+  CHECK(rig.bank.pcm(2).frames == 0u);
+  CHECK(rig.bank.free_samples() == 5000u - 100u - 2000u);
+  // clear() forgets it.
+  rig.bank.clear();
+  CHECK_FALSE(rig.bank.has_side(1));
+}
+
+TEST_CASE("sample bank: adopt takes S only at pcm + even(frames) inside the arena; the block it owns covers both") {
+  Rig rig;
+  std::uint32_t cap = 0;
+  std::int16_t* p = rig.bank.reserve(cap);
+  NEED(p != nullptr);
+  rig.bank.adopt(1, p, 100, 200, p + 50);  // not the second half: ignored, a mono sample
+  CHECK_FALSE(rig.bank.has_side(1));
+  rig.bank.adopt(1, p, 100, 200, p + 100);
+  CHECK(rig.bank.has_side(1));
+  CHECK(rig.bank.pcm(1).side == p + 100);
+  rig.bank.adopt(2, p + 200, 100, 100, p + 300);  // the block (100) is too small for both: S is taken, the block is not the slot's to move
+  CHECK(rig.bank.has_side(2));
+  rig.bank.adopt(3, p + 400, 100, 0, nullptr);
+  CHECK_FALSE(rig.bank.has_side(3));
+  rig.bank.adopt(1, p, 100, 100);  // adopted again as mono: S is gone
+  CHECK_FALSE(rig.bank.has_side(1));
+}
+
+TEST_CASE("sample bank: RECLAIM never moves a block with S, and wins back a stereo block a mono load replaced (OS-STEREO (b), rule 5)") {
+  {  // a stereo load over a mono block: not moved, both blocks intact
+    Rig rig;
+    rig.make(3, 1000);
+    CHECK(handover(rig, 100));
+    make_stereo(rig, 3, 600);
+    CHECK(handover(rig, 1000));
+    CHECK(rig.bank.reclaims() == 0u);
+    CHECK(side_is_intact(rig.bank, 3, 600));
+    CHECK(rig.bank.free_samples() == 20000u - 1000u - 1200u);
+  }
+  {  // a stereo load over a stereo block: not moved
+    Rig rig;
+    make_stereo(rig, 3, 500);
+    CHECK(handover(rig, 100));
+    make_stereo(rig, 3, 400);
+    CHECK(handover(rig, 1000));
+    CHECK(rig.bank.reclaims() == 0u);
+    CHECK(side_is_intact(rig.bank, 3, 400));
+  }
+  {  // a mono load over a stereo block: the whole old block (M and S) is the room, the audio moves down intact and S is gone
+    Rig rig;
+    make_stereo(rig, 3, 500);
+    CHECK(handover(rig, 100));
+    std::int16_t* const first = const_cast<std::int16_t*>(rig.bank.pcm(3).data);
+    rig.make(3, 600);
+    CHECK(handover(rig, 1000));
+    CHECK(rig.bank.reclaims() == 1u);
+    CHECK(rig.bank.pcm(3).data == first);
+    CHECK(pcm_is_intact(rig.bank, 3, 600));
+    CHECK_FALSE(rig.bank.has_side(3));
+    CHECK(rig.bank.free_samples() == 20000u - 600u);
+    CHECK(arena_ok(rig));
+  }
+  {  // the clipboard reads the stereo block (through S as well): a mono load does not overwrite it
+    Rig rig;
+    rig.loaded(1, 100);
+    make_stereo(rig, 3, 500);
+    rig.bank.clip_set(*rig.arena->project.instrument(3), 3);
+    const SampleBank::Pcm held = rig.bank.pcm(3);
+    rig.make(3, 300);
+    CHECK(handover(rig, 100));
+    CHECK(rig.bank.reclaims() == 0u);
+    CHECK(held.side[0] == -1);
+    CHECK(held.side[499] == static_cast<std::int16_t>(-static_cast<int>(499 % 7) - 1));
+    CHECK(held.data[499] == static_cast<std::int16_t>(1000 + 499 % 50));
+  }
+}
+
+TEST_CASE("sample bank: a paste shares M and S; undo and redo of a load or an edit give the slot its S back") {
+  Rig rig;
+  make_stereo(rig, 1, 500);
+  CHECK(handover(rig, 100));
+  rig.bank.clip_set(*rig.arena->project.instrument(1), 1);
+  CHECK(rig.bank.paste_audio(2));
+  CHECK(rig.bank.has_side(2));
+  CHECK(rig.bank.pcm(2).side == rig.bank.pcm(1).side);
+  CHECK(rig.bank.audio_undone(2));  // the paste's undo: the slot is empty again
+  CHECK_FALSE(rig.bank.has_side(2));
+  CHECK(rig.bank.audio_redone(2));
+  CHECK(side_is_intact(rig.bank, 2, 500));
+  // An undoable (mono) load over the stereo slot drops S; its undo brings it back, its redo drops it again.
+  std::uint32_t cap = 0;
+  std::int16_t* p = rig.bank.reserve(cap);
+  NEED(p != nullptr);
+  for (std::uint32_t i = 0; i < 300; ++i) {
+    p[i] = 7;
+  }
+  CHECK(rig.bank.commit_load_undoable(1, p, 300));
+  CHECK_FALSE(rig.bank.has_side(1));
+  CHECK(rig.bank.audio_undone(1));
+  CHECK(side_is_intact(rig.bank, 1, 500));
+  CHECK(rig.bank.audio_redone(1));
+  CHECK_FALSE(rig.bank.has_side(1));
+  CHECK(rig.bank.audio_undone(1));
+  CHECK(side_is_intact(rig.bank, 1, 500));
+  // A sample edit's result is mono; the edit's undo and redo carry S.
+  app::PointsRec rec;
+  std::int16_t* buf = rig.bank.edit_begin(1, 500);
+  NEED(buf != nullptr);
+  for (std::uint32_t i = 0; i < 500; ++i) {
+    buf[i] = 3;
+  }
+  CHECK(rig.bank.edit_commit(1, buf, 500, rec, rec));
+  CHECK_FALSE(rig.bank.has_side(1));
+  CHECK(rig.bank.edit_undo(1, rec));
+  CHECK(side_is_intact(rig.bank, 1, 500));
+  CHECK(rig.bank.edit_redo(1, rec));
+  CHECK_FALSE(rig.bank.has_side(1));
+  CHECK(rig.bank.edit_undo(1, rec));
+  CHECK(side_is_intact(rig.bank, 1, 500));
+  // The blocks of the history are not overwritten by a later handover: S is still what it was.
+  CHECK(handover(rig, 2000));
+  CHECK(side_is_intact(rig.bank, 1, 500));
+}
+
+TEST_CASE("sample bank: reconcile_stereo clears the flag of an instrument whose slot has no S, and keeps one that has it") {
+  Rig rig;
+  make_stereo(rig, 1, 200);  // flag set, S there
+  rig.make(2, 200);
+  model::Instrument in = *rig.arena->project.instrument(2);
+  in.stereo = 1;  // flag set, no S
+  CHECK(rig.arena->project.set_instrument(2, in) == model::Status::Ok);
+  CHECK(rig.bank.reconcile_stereo() == 1u);
+  CHECK(rig.arena->project.instrument(1)->stereo == 1u);
+  CHECK(rig.arena->project.instrument(2)->stereo == 0u);
+  CHECK(rig.bank.reconcile_stereo() == 0u);
+}

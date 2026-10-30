@@ -72,6 +72,12 @@
 // its version. The records are two bounded stacks (kSwaps each: done, undone), newest first; a new paste or load empties the undone one (the journal drops its redo units the same way). A swap that
 // has been pushed out of the stack (more than kSwaps units back) is replaced by a mark (Swap::valid false) when its unit is undone or redone, so that the pairing holds: the instrument comes back with the audio the slot has then (nothing is lost: the block is still in the arena), and no newer swap of the slot is taken for it.
 //
+// THE SIDE SIGNAL (OS-STEREO step 2, slice (b); docs/specs/OS-STEREO.md). A stereo sample is its mid M, the block every mono path reads, and a side S = L - M that follows it in the SAME block: M at
+// pcm[0 .. frames), S at pcm[even(frames) .. 2 * even(frames)). Slot::side (and Audio::side, Step::side) points at S, nullptr for every mono sample; a block with S is 2 x even(frames) samples long (own_len
+// too). commit_load() and adopt() take S with M as one unit: it is never added to a block later. What carries S: a share (paste, the clipboard), a swap record (undo of a load or paste), an edit step (undo of an
+// edit); what drops it: a new mono audio in the slot (an edit's result, a take, a mono load), which the edit's undo puts back. RECLAIM never moves a block that has S (rule 5 of the risk review: the new audio, or
+// the one it would replace, is then kept where it is). The voices do not read S yet (slice (c)): a stereo instrument still plays M.
+//
 // Contexts: main loop only. No heap.
 
 #include <o3os/app/og_folder.h>
@@ -104,6 +110,7 @@ struct SampleBankMem {
   struct Slot {
     std::int16_t* pcm = nullptr;
     std::uint32_t frames = 0;
+    std::int16_t* side = nullptr;   // OS-STEREO (b): the side signal S at pcm + even(frames) (frames long), nullptr: a mono sample
     std::uint32_t version = 0;
     std::int16_t* bound = nullptr;  // the audio the voices' descriptor was last built over: the engine may be playing it, so nothing may overwrite it
     std::int16_t* table = nullptr;  // the slot's slice table in the arena (kTableSamples), made when a beat slice instrument first needs it
@@ -119,6 +126,7 @@ struct SampleBankMem {
   struct Step {
     std::int16_t* pcm = nullptr;
     std::uint32_t frames = 0;
+    std::int16_t* side = nullptr;  // the version's S (OS-STEREO (b))
     PointsRec before;
     PointsRec after;
   };
@@ -163,6 +171,7 @@ struct SampleBankMem {
   struct Audio {
     std::int16_t* pcm = nullptr;
     std::uint32_t frames = 0;
+    std::int16_t* side = nullptr;  // OS-STEREO (b): the audio's S, or nullptr
   };
   struct Swap {
     std::uint8_t slot = 0;
@@ -194,6 +203,7 @@ class SampleBank {
   struct Pcm {
     const std::int16_t* data = nullptr;
     std::uint32_t frames = 0;
+    const std::int16_t* side = nullptr;  // OS-STEREO (b): S, `frames` long, or nullptr (a mono sample)
   };
 
   SampleBank() = default;
@@ -252,18 +262,18 @@ class SampleBank {
   void new_project(bool keep_audio) noexcept;
   // Slot `slot`'s whole sample is `frames` samples at `pcm` (inside the arena). The version moves. `block` (OS-ARENA-RECLAIM): the loader placed the sample in a block of its own of that many
   // samples (even, >= frames; the PCM and its padding, not the slice table that follows it): the slot owns it from then on, and a later load can reuse its room (RECLAIM). 0: not ours to move.
-  void adopt(unsigned slot, std::int16_t* pcm, std::uint32_t frames, std::uint32_t block = 0) noexcept;
+  // `side` (OS-STEREO (b)): the sample's side signal, which must be `pcm + even(frames)` (anything else is ignored), and `block` then covers both (>= 2 x even(frames), else the slot does not own the block).
+  void adopt(unsigned slot, std::int16_t* pcm, std::uint32_t frames, std::uint32_t block = 0, std::int16_t* side = nullptr) noexcept;
   // The arena is in use up to `samples` (rounded up to even): the loaders' high-water mark. Never moves backward.
   void set_used(std::uint32_t samples) noexcept;
 
   // ---- Reading ----
   Pcm pcm(unsigned slot) const noexcept;
   // OS-STEREO step 2: whether the slot's audio also has a side signal S (decision S4 of docs/specs/OS-STEREO.md: an instrument plays stereo only with the flag AND S). The STEREO row of the source page asks it.
-  // TODO(OS-STEREO slice (b)): the bank's `Slot::side`; nothing provides S before it, so the answer is always no and the row refuses STEREO.
-  bool has_side(unsigned slot) const noexcept {
-    (void)slot;
-    return false;
-  }
+  bool has_side(unsigned slot) const noexcept { return mem_ != nullptr && slot < kSlots && mem_->slots[slot].pcm != nullptr && mem_->slots[slot].side != nullptr; }
+  // Rule 4 of the risk review, the load half: every sample instrument of the document whose stereo flag is set and whose slot has no S gets the flag cleared (the document's own write, no undo unit: a load has
+  // just made the document). Returns how many were cleared. The OgSampleLoader calls it when a project's samples are in.
+  unsigned reconcile_stereo() noexcept;
   std::uint32_t version(unsigned slot) const noexcept { return mem_ != nullptr && slot < kSlots ? mem_->slots[slot].version : 0u; }
   // OS-FU2 (save_service.h, A PROJECT'S SAMPLES): the audio of `slot` was just read from the project's own folder (samples/<file>.wav), so that folder holds it as it is now:
   // a save into that folder has nothing to write for the slot until the audio changes (its version moves). card_version() is 0 for a slot with no such audio.
@@ -312,7 +322,8 @@ class SampleBank {
   std::int16_t* reserve(std::uint32_t& capacity) noexcept;
   // The sample read into reserve()'s memory is `frames` long and is slot `slot`'s now: the arena grows over it (even), the slot is adopted and a rebind is
   // requested. False (nothing changed) when `pcm` is not the tail, or `frames` is 0 or does not fit.
-  bool commit_load(unsigned slot, std::int16_t* pcm, std::uint32_t frames) noexcept;
+  // `side` (OS-STEREO (b)): the load has S as well, at `pcm + even(frames)`: both blocks are the slot's as one unit, the arena grows over 2 x even(frames) (False, nothing changed, when `side` is not there or they do not fit).
+  bool commit_load(unsigned slot, std::int16_t* pcm, std::uint32_t frames, std::int16_t* side = nullptr) noexcept;
   // `samples` more from the tail (an edit's buffer, a slice table), even; nullptr when it does not fit.
   std::int16_t* alloc(std::uint32_t samples) noexcept;
 
@@ -391,7 +402,7 @@ class SampleBank {
   void clip_set(const model::Instrument& in, unsigned slot) noexcept;
   bool clip_valid() const noexcept { return mem_ != nullptr && mem_->clip_valid; }
   const model::Instrument& clip_instrument() const noexcept { return mem_->clip_inst; }
-  Pcm clip_pcm() const noexcept { return mem_ != nullptr && mem_->clip_valid ? Pcm{mem_->clip_audio.pcm, mem_->clip_audio.frames} : Pcm{}; }
+  Pcm clip_pcm() const noexcept { return mem_ != nullptr && mem_->clip_valid ? Pcm{mem_->clip_audio.pcm, mem_->clip_audio.frames, mem_->clip_audio.side} : Pcm{}; }
   // PASTE, the audio half: `slot` reads the clipboard's block (a sample instrument on the clipboard; for another kind the slot's audio is left as it is, as a DELETE leaves it). Its version moves, the
   // handover is requested, the sample edit's history is dropped (it belongs to the audio that was replaced). A swap is recorded for every paste (one per undo unit); true when the audio changed.
   // False with no clipboard, or when the slot already read that block.
@@ -493,7 +504,7 @@ class SampleBank {
   std::uint32_t rebinds_ = 0;
   bool alive(const std::int16_t* p) const noexcept;
   void drop_oldest_undo() noexcept;
-  void set_audio(unsigned slot, std::int16_t* pcm, std::uint32_t frames) noexcept;
+  void set_audio(unsigned slot, std::int16_t* pcm, std::uint32_t frames, std::int16_t* side = nullptr) noexcept;
   bool reclaim(unsigned slot) noexcept;  // RECLAIM: true when the stale block's room was won back (and the slot rebound), the mark done with
   bool block_in_history(const std::int16_t* from, const std::int16_t* to) const noexcept;
   // Does anything but slot `skip` (or any holder when `skip` is kSlots) read from [from, to)? (a slot's audio or bound descriptor, the clipboard, a swap record): RECLAIM must not move or overwrite it.

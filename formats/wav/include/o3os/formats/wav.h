@@ -77,6 +77,8 @@ struct Info {
   std::uint8_t channels = 0;    // of the output: 1 or 2 (interleaved); 1 for a stereo file that was downmixed
   std::uint8_t source_channels = 0;  // of the file
   bool downmixed = false;       // a stereo file was mixed to mono (keep_stereo was off)
+  bool side = false;            // OS-STEREO (b): the side signal S was written too, at dst[side_offset ...) (a stereo file read with `side`); false for a mono file or with `side` off
+  std::uint32_t side_offset = 0;  // the index in dst where S starts: the frame count rounded up to even, so that S is word aligned too (valid when `side`)
   std::uint8_t bits = 0;        // of the file: 8, 16, 24, or 32 for float
   SampleFormat format = SampleFormat::Pcm;
   bool dithered = false;        // TPDF dither was applied to at least one sample
@@ -115,7 +117,10 @@ class Importer {
   // stereo file takes half of that when it is downmixed). Both must stay valid until Done, Failed or cancel(). Any run in
   // progress is abandoned. `keep_stereo` keeps a stereo file stereo; the default mixes it to mono, or (OS-LOADCH) `channel` 1 / 2 takes the left / right channel alone (0: the mean). `clip` (OS-FU2, the Sample load audition): a data chunk that does not fit is
   // not an error: its first whole frames that do fit are read and the import ends there, Done, with Report::trailing_ignored (loops and cues after the audio are not read).
-  void begin(core::ByteSource& source, std::int16_t* dst, std::size_t capacity_samples, bool keep_stereo = false, bool clip = false, std::uint8_t channel = 0) noexcept;
+  // OS-STEREO (b), `side`: a STEREO file is read as its mid M, the same mono mix as ever (bit for bit, dither included), at dst[0 .. frames), AND its side S = L - M (L as 16 bits, S clamped to 16 bits) at
+  // dst[even(frames) .. 2 * even(frames)). Room for both is checked when the data chunk begins and the import fails LimitExceeded otherwise: it never clips (`clip` and `channel` are ignored with it;
+  // `keep_stereo` wins over it). A mono file reads as ever. Info::side says whether S was written.
+  void begin(core::ByteSource& source, std::int16_t* dst, std::size_t capacity_samples, bool keep_stereo = false, bool clip = false, std::uint8_t channel = 0, bool side = false) noexcept;
   // Consumes at most about `byte_budget` source bytes (at least one read is always made). Running: call again, on a later
   // pass of the main loop.
   Progress step(std::size_t byte_budget = kDefaultStepBudget) noexcept;
@@ -185,6 +190,9 @@ class Importer {
   bool clip_ = false;             // OS-FU2: a too long data chunk is cut to the buffer instead of refused
   bool clipped_ = false;          // ... and it was
   bool downmix_ = false;          // a stereo file being mixed to mono
+  bool want_side_ = false;        // OS-STEREO (b): begin() asked for the side signal
+  bool side_ = false;             // ... and this file is stereo and takes it: convert_downmix() writes S at dst_ + side_off_
+  std::uint32_t side_off_ = 0;    // even(frames of the data chunk)
   std::uint8_t pick_ = 0;         // OS-LOADCH: ... or reduced to one channel (1 left, 2 right; 0 the mean)
   std::uint8_t out_channels_ = 0;
   std::uint8_t bps_ = 0;          // bytes per sample: 1, 2, 3 or 4

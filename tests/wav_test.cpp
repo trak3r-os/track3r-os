@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <vector>
 
 #include "support/memory_io.h"
 #include "support/need.h"
@@ -1171,4 +1172,128 @@ TEST_CASE("wav: random damage to a rich file: always terminates, always inside t
   g_keep_stereo = true;
   CHECK(done > kRounds / 20);   // the damage is not always fatal (a hit in the audio itself, in a skipped chunk...)
   CHECK(failed > kRounds / 20); // and often it is
+}
+
+// ---- OS-STEREO step 2, slice (b): the side signal -------------------------------------------------------------------------------------------------
+
+namespace {
+struct SideRun {
+  wav::Importer imp;
+  std::vector<std::int16_t> out;
+  wav::Progress result = wav::Progress::Running;
+};
+// Reads g_file into `capacity` samples with the given mode; steps of `budget` bytes.
+void side_run(SideRun& r, std::size_t capacity, bool side, std::uint8_t channel = 0, bool keep = false, std::size_t budget = 4096) {
+  r.out.assign(capacity + 4u, 0x5A5A);
+  test::MemorySource src(g_file.b, g_file.n);
+  r.imp.begin(src, r.out.data(), capacity, keep, false, channel, side);
+  r.result = wav::Progress::Running;
+  for (unsigned steps = 0; r.result == wav::Progress::Running && steps < 200000u; ++steps) {
+    r.result = r.imp.step(budget);
+  }
+}
+// A stereo 16-bit file: L = a ramp, R = another one with a different slope (the side is neither zero nor constant).
+void make_stereo16(std::uint32_t frames) {
+  g_file.riff().fmt(1, 2, 44100, 16).data_header(frames * 4);
+  for (std::uint32_t i = 0; i < frames; ++i) {
+    g_file.u16(static_cast<std::uint32_t>(ramp_value(i)) & 0xFFFFu);
+    g_file.u16(static_cast<std::uint32_t>(ramp_value(i, 900) * -3) & 0xFFFFu);
+  }
+  g_file.end();
+}
+std::int16_t clamp_s16(std::int32_t v) { return static_cast<std::int16_t>(v > 32767 ? 32767 : (v < -32768 ? -32768 : v)); }
+}  // namespace
+
+TEST_CASE("wav: side mode reads the mid bit for bit as the mono load does, and S = L - M after it at the even index") {
+  for (const std::uint32_t frames : {300u, 301u}) {
+    make_stereo16(frames);
+    SideRun mono;
+    side_run(mono, 4000, false);
+    NEED(mono.result == wav::Progress::Done);
+    SideRun st;
+    side_run(st, 4000, true);
+    NEED(st.result == wav::Progress::Done);
+    const wav::Info& info = st.imp.info();
+    CHECK(info.frames == frames);
+    CHECK(info.channels == 1);
+    CHECK(info.side);
+    const std::uint32_t even = (frames + 1u) & ~1u;
+    CHECK(info.side_offset == even);
+    CHECK_FALSE(mono.imp.info().side);
+    bool m_same = true;
+    bool s_ok = true;
+    bool l_ok = true;
+    for (std::uint32_t i = 0; i < frames; ++i) {
+      m_same = m_same && st.out[i] == mono.out[i];
+      const std::int16_t l = ramp_value(i);
+      s_ok = s_ok && st.out[even + i] == clamp_s16(static_cast<std::int32_t>(l) - st.out[i]);
+      l_ok = l_ok && clamp_s16(static_cast<std::int32_t>(st.out[i]) + st.out[even + i]) == l;  // L = M + S, exact (it does not clamp here)
+    }
+    CHECK(m_same);
+    CHECK(s_ok);
+    CHECK(l_ok);
+    if (even != frames) {
+      CHECK(st.out[frames] == 0x5A5A);  // the gap between M and S is not written
+    }
+    CHECK(st.out[even + frames] == 0x5A5A);  // nothing past S
+    // Small steps give the same bytes.
+    SideRun small;
+    side_run(small, 4000, true, 0, false, 7);
+    NEED(small.result == wav::Progress::Done);
+    CHECK(small.out == st.out);
+  }
+}
+
+TEST_CASE("wav: side mode needs room for both blocks and fails before writing a byte, never clipping") {
+  make_stereo16(301);  // even 302: M and S take 604
+  SideRun r;
+  side_run(r, 603, true);
+  CHECK(r.result == wav::Progress::Failed);
+  CHECK(r.imp.report().error == wav::Error::LimitExceeded);
+  bool untouched_all = true;
+  for (std::size_t i = 0; i < r.out.size(); ++i) {
+    untouched_all = untouched_all && r.out[i] == 0x5A5A;
+  }
+  CHECK(untouched_all);
+  side_run(r, 604, true);
+  CHECK(r.result == wav::Progress::Done);
+  // The mono load of the same file needs 301.
+  side_run(r, 301, false);
+  CHECK(r.result == wav::Progress::Done);
+}
+
+TEST_CASE("wav: side mode with a 24-bit file keeps the mid's dither stream, and a mono file or keep_stereo has no S") {
+  const std::uint32_t frames = 500;
+  g_file.riff().fmt(1, 2, 44100, 24).data_header(frames * 6);
+  for (std::uint32_t i = 0; i < frames; ++i) {
+    const std::uint32_t l = (i * 12345u + 77u) & 0xFFFFFFu;
+    const std::uint32_t r = (i * 54321u + 5u) & 0xFFFFFFu;
+    g_file.u8(l); g_file.u8(l >> 8); g_file.u8(l >> 16);
+    g_file.u8(r); g_file.u8(r >> 8); g_file.u8(r >> 16);
+  }
+  g_file.end();
+  SideRun mono;
+  side_run(mono, 4000, false);
+  SideRun st;
+  side_run(st, 4000, true, 2 /* a channel pick is ignored with side */);
+  NEED(mono.result == wav::Progress::Done);
+  NEED(st.result == wav::Progress::Done);
+  CHECK(st.imp.info().dithered);
+  bool same = true;
+  for (std::uint32_t i = 0; i < frames; ++i) {
+    same = same && st.out[i] == mono.out[i];
+  }
+  CHECK(same);
+
+  make_pcm16(200);  // a mono file: as ever, no S
+  side_run(st, 4000, true);
+  NEED(st.result == wav::Progress::Done);
+  CHECK_FALSE(st.imp.info().side);
+  CHECK(st.imp.info().frames == 200u);
+
+  make_stereo16(100);  // keep_stereo wins: interleaved, no S
+  side_run(st, 4000, true, 0, true);
+  NEED(st.result == wav::Progress::Done);
+  CHECK_FALSE(st.imp.info().side);
+  CHECK(st.imp.info().channels == 2);
 }

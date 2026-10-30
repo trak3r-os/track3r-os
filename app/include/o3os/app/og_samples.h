@@ -74,6 +74,7 @@ struct SampleLoadReport {
   std::uint32_t no_room = 0;       // silent: the arena was full (the one that did not fit and the ones after it)
   std::uint32_t approximated = 0;  // loaded, but their play mode is one the voices do not have yet: played as one shot (none since OS-GRAN: a beat slice whose table had no room)
   std::uint32_t samples = 0;       // int16 samples placed in the arena (each sample starts on an even index)
+  std::uint32_t stereo_lost = 0;   // OS-STEREO (b): stereo instruments (flag set) whose side file was missing, unreadable or did not match: loaded mono, the flag cleared
   hal::storage::Status storage_error = hal::storage::Status::Ok;  // a card error that ended the load
   Problem problems[kMaxProblems];  // the first problems, in the order they were found
   std::uint8_t problem_count = 0;  // how many of them are filled in (at most kMaxProblems)
@@ -191,7 +192,7 @@ class OgSampleLoader {
   const SampleLoadReport& report() const noexcept { return report_; }
 
  private:
-  enum class Stage : std::uint8_t { ListOpen, ListNext, PtiRead, WavNext, WavRead, Finish, FeedNext, FeedRead };
+  enum class Stage : std::uint8_t { ListOpen, ListNext, PtiRead, WavNext, WavRead, SideNext, SideRead, Finish, FeedNext, FeedRead };
 
   void advance(std::size_t room) noexcept;
   void list_open() noexcept;
@@ -202,7 +203,11 @@ class OgSampleLoader {
   void feed_next() noexcept;
   void feed_read(std::size_t room) noexcept;
   bool open_file(const char* sub, const char* name, std::uint8_t slot) noexcept;  // path_ = base_/sub/name, open it into file_; false: the slot is settled
-  void bind(std::uint8_t slot, std::uint32_t frames, std::uint32_t rate_hz = 0) noexcept;  // `rate_hz`: the WAV's rate (0: the instrument's)
+  // `rate_hz`: the WAV's rate (0: the instrument's). `side` (OS-STEREO (b)): S follows M in the arena (at used_ + even(frames)) and the slot owns both.
+  void bind(std::uint8_t slot, std::uint32_t frames, std::uint32_t rate_hz = 0, bool side = false) noexcept;
+  void side_next() noexcept;   // OS-STEREO (b): opens the side file of the instrument whose M was just read; no usable S binds M alone
+  void side_read(std::size_t room) noexcept;
+  void bind_and_mark(bool side) noexcept;  // bind(slot_, m_frames_, m_rate_, side) and, from a folder, the slot's audio is on the card as it stands
   void settle(std::uint8_t slot, SampleProblem why) noexcept;  // the slot stays silent: counted, remembered, never tried again
   void card_failed(hal::storage::Status s) noexcept;
   void finish() noexcept;
@@ -231,6 +236,9 @@ class OgSampleLoader {
   std::uint32_t pti_left_ = 0;           // bytes of PCM of the .pti still to read
   std::uint32_t pti_frames_ = 0;
   std::uint32_t pti_bytes_ = 0;          // bytes read straight into the arena (wraps: only differences are used)
+  std::uint32_t m_frames_ = 0;           // OS-STEREO (b): the mid just read, while its side file is read after it
+  std::uint32_t m_rate_ = 0;
+  hal::storage::FileStamp m_stamp_{};
   hal::storage::FileHandle file_{};
   hal::storage::DirHandle dir_{};
   SampleLoadReport report_{};

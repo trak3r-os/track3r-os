@@ -71,6 +71,8 @@ struct FormatReport {
   // Readers of sample formats (.wav, OS-002c): the frames written to ReadParams::pcm and their channel count (1 or 2).
   // Nothing was written when pcm_frames is 0. The rate, loop and slices went into the sample instrument.
   std::uint8_t pcm_channels = 0;
+  // OS-STEREO (b): ReadParams::side was set and the file is stereo: the side signal S is at ReadParams::pcm + even(pcm_frames), pcm_frames long (the mid is at pcm, as in every mono load).
+  bool pcm_side = false;
 };
 
 // Which part of a project a file holds, so the app knows how to use the strategy: Project is a whole project in
@@ -104,6 +106,9 @@ struct ReadParams {
   // OS-LOADCH: how a stereo file becomes the mono sample (ignored when it is mono or keep_stereo is set): 0 the mean (L + R) / 2, 1 the left channel, 2 the right. Read at the conversion:
   // it needs no more room than the mix does.
   std::uint8_t channel = 0;
+  // OS-STEREO (b), the WAV reader only: a stereo file also yields its side signal S = L - M after the mid (wav::Importer::begin `side`): `pcm_capacity` must hold 2 x even(frames) or the read fails LimitExceeded,
+  // FormatReport::pcm_side says S is there. `channel` is ignored with it. Other readers ignore it (pcm_side stays false).
+  bool side = false;
   // OS-GRAN, WAV and .wt: whether the file is a wavetable (formats/wav_sample.h, WAVETABLE FRAMES). kWtAuto (0): a file that says it is (a Serum 'clm ' chunk, a Surge .wt) is, any other WAV is
   // a sample. kWtDetect (1): as a wavetable whatever the file says, the frame size by its marker or else by its length (the largest of 2048, 1024, 256 that divides it). 32..2048, a power of two:
   // that frame size (over the marker's). kWtOff: never (a marked WAV loads as a plain sample).

@@ -1396,6 +1396,9 @@ void finish_samples() noexcept {
   if (r.no_room != 0u) {
     console::log_dec("load: sample arena full, instruments silent", r.no_room);
   }
+  if (r.stereo_lost != 0u) {
+    console::log_dec("load: stereo samples without a usable side file, loaded mono", r.stereo_lost);
+  }
   if (r.approximated != 0u) {
     console::log_dec("load: instruments played one shot (a play mode the voices lack)", r.approximated);
   }

@@ -385,7 +385,7 @@ TEST_CASE("source page: rows that do not apply are dimmed with the reason, not h
   CHECK(rig.app->failed_frames() == 0u);
 }
 
-// OS-STEREO step 2 (INST 1.5): the STEREO row, a virtual field after PLAY ENGINE. Nothing provides a side signal before slice (b), so STEREO is refused on the strip while the bank has none, and MONO is always
+// OS-STEREO step 2 (INST 1.5): the STEREO row, a virtual field after PLAY ENGINE. STEREO is refused on the strip while the slot's audio has no side signal, and MONO is always
 // allowed (a flag a file carried is the way back).
 TEST_CASE("stereo row: STEREO is refused while the bank holds no side signal, the strip says why, and the instrument stays mono") {
   Rig rig;
@@ -403,6 +403,27 @@ TEST_CASE("stereo row: STEREO is refused while the bank holds no side signal, th
   rig.turn(-1);  // MONO stays MONO: no refusal, no write
   CHECK(rig.inst().stereo == 0);
   CHECK(rig.note().empty());
+}
+
+// Slice (b): the bank can hold S now, and with it the row accepts STEREO (one undo unit); the audio moving to a mono block does not touch the flag (the row says what the instrument wants).
+TEST_CASE("stereo row: STEREO is accepted once the slot's audio has a side signal, as one undo unit") {
+  Rig rig;
+  rig.clear_notes();
+  std::uint32_t cap = 0;
+  std::int16_t* p = rig.bank.reserve(cap);
+  NEED(p != nullptr);
+  const std::uint32_t even = (kFrames + 1u) & ~1u;
+  for (std::uint32_t i = 0; i < even; ++i) {
+    p[even + i] = 0;
+  }
+  NEED(rig.bank.commit_load(kSlot, p, kFrames, p + even));  // the mid is what load() put there; S follows
+  CHECK(rig.bank.has_side(kSlot));
+  NEED(rig.field_at(2) == ip::PlayStereo);
+  rig.turn(1);  // MONO -> STEREO
+  CHECK(rig.inst().stereo == 1);
+  CHECK(rig.note().empty());
+  (void)rig.invoke("edit.undo");
+  CHECK(rig.inst().stereo == 0);
 }
 
 TEST_CASE("stereo row: the row reads the instrument, and MONO clears a flag a file carried, as one undo unit") {

@@ -7,7 +7,7 @@ namespace o3os::app {
 
 // F1..F8 of the Sample load screen: at most 8 characters. F3 ENTER (enters a
 // folder), F4 ADD (adds the file as the next instrument) and F5 PLAY (previews) are this screen's keys.
-inline constexpr const char* kSampleLoadSoftKeys[8] = {"LOAD", "UP", "ENTER", "ADD", "PLAY", "RESCAN", "WT AUTO", "CH MIX"};  // F7: OS-GRAN, how a WAV becomes a wavetable (the label follows the mode: wavetable_key_label); F8: OS-LOADCH, the channel of a stereo file (CH MIX / CH LEFT / CH RIGHT, channel_key_label; "CH MONO" while the file under the cursor is mono, "--" with no file)
+inline constexpr const char* kSampleLoadSoftKeys[8] = {"LOAD", "UP", "ENTER", "ADD", "PLAY", "RESCAN", "WT AUTO", "CH MIX"};  // F7: OS-GRAN, how a WAV becomes a wavetable (the label follows the mode: wavetable_key_label); F8: OS-LOADCH, the channel of a stereo file (CH MIX / CH LEFT / CH RIGHT / STEREO, channel_key_label; "CH MONO" while the file under the cursor is mono, "--" with no file)
 // While Shift is held (OS-SHIFTROW): the quarter jumps and the end, then the target instrument one back / on (OS-SLDTARGET), bound in this screen's context; F6 does nothing.
 inline constexpr const char* kSampleLoadShiftKeys[8] = {"0/4", "1/4", "2/4", "3/4", "END", "-", "INST -", "INST +"};
 
@@ -23,7 +23,7 @@ inline constexpr const char* kSampleLoadShiftKeys[8] = {"0/4", "1/4", "2/4", "3/
 //                    (sample_bank.h, THE HANDOVER). The card is read only: the change lives in memory until a later slice saves the project.
 //   F2 UP / F3 ENTER the parent folder / the folder under the cursor     F4 ADD   as LOAD, into the first free instrument     F6 RESCAN   read the folder again
 //   F7 WT            how a WAV is read as a wavetable (sample_load_view.h): AUTO (only a Serum-marked file), LEN (the frame size by the length: 2048, 1024, 256), 256 .. 2048, OFF; a .wt (Surge) is always one
-//   F8 CH            OS-LOADCH: which channel of a STEREO file is loaded: MIX ((L + R) / 2, as always), LEFT or RIGHT; the key shows "CH MIX" / "CH LEFT" / "CH RIGHT" while the file under the cursor is stereo ("ST" in the
+//   F8 CH            OS-LOADCH: which channel of a STEREO file is loaded: MIX ((L + R) / 2, as always), LEFT, RIGHT or STEREO (the mix and the side signal, OS-STEREO (b)); the key shows "CH MIX" / "CH LEFT" / "CH RIGHT" / "STEREO" while the file under the cursor is stereo ("ST" in the
 //                    list, from its header) and "--" otherwise. The audition follows it. The result is an ordinary mono sample. The choice stays for the session (WavView::channel), it is not saved.
 //   F5 PLAY          the audition (OS-FU2, app/src/audition.cpp): while the key is held, the first seconds (4 s at 44.1 kHz, mono) of the file under the cursor play through the
 //                    engine's live notes, on a descriptor that is no instrument's (sample_bank.h, "The audition"); the release, a cursor move or leaving the screen stops it

@@ -1107,6 +1107,10 @@ TEST_CASE("sample load: F8 CHANNEL acts only on a stereo file, cycles MIX, LEFT,
   rig.settle();
   CHECK(rig.app->state().wav.channel == 2u);
   rig.select("st.wav");
+  rig.tap(Button::F8);  // OS-STEREO (b), S8: the fourth choice, only here (a stereo file is under the cursor)
+  CHECK(rig.message() == "STEREO FILE LOADS: STEREO (MID + SIDE)");
+  CHECK(rig.app->state().wav.channel == app::kChannelStereo);
+  rig.expire();
   rig.tap(Button::F8);
   CHECK(rig.message() == "STEREO FILE LOADS: MIX (L+R)/2");
   CHECK(rig.app->state().wav.channel == 0u);
@@ -1114,6 +1118,10 @@ TEST_CASE("sample load: F8 CHANNEL acts only on a stereo file, cycles MIX, LEFT,
   CHECK(std::string(app::channel_key_label(0)) == "CH MIX");
   CHECK(std::string(app::channel_key_label(1)) == "CH LEFT");
   CHECK(std::string(app::channel_key_label(2)) == "CH RIGHT");
+  CHECK(std::string(app::channel_key_label(app::kChannelStereo)) == "STEREO");
+  for (std::uint8_t c = 0; c <= app::kChannelStereo; ++c) {
+    CHECK(std::strlen(app::channel_key_label(c)) <= 8u);  // style-guide.md: a key label has at most 8 characters
+  }
   CHECK(std::string(app::kSampleLoadSoftKeys[7]) == "CH MIX");
 }
 
@@ -1170,6 +1178,120 @@ TEST_CASE("sample load: F1 loads the LEFT or the RIGHT channel of a stereo WAV a
   CHECK(pcm_is(rig.bank.pcm(5), frames, [](std::uint32_t i) { return ramp(i); }));
   // a RIGHT or LEFT load takes no more room than the mono file it makes
   CHECK(rig.bank.pcm(2).frames == frames);
+  CHECK(rig.card.open_files() == 0u);
+}
+
+TEST_CASE("sample load: CH STEREO loads the mid exactly as MIX does and the side signal after it, sets the instrument's flag; a mono file, an AIFF, and a load that does not fit both say so (OS-STEREO (b))") {
+  Rig rig;
+  const std::uint32_t frames = 3000;
+  write_file(rig.dir.root / "st.wav", stereo_wav_bytes(frames));
+  write_file(rig.dir.root / "st.aif", stereo_aiff_bytes(frames));
+  write_file(rig.dir.root / "mono.wav", wav_bytes(frames));
+  rig.go(ScreenId::SampleLoad);
+  rig.settle();
+  const auto load = [&](const char* file, unsigned slot, const char* done) {
+    rig.invoke("instrument.select", static_cast<core::ActionArg>(slot + 1));
+    rig.select(file);
+    rig.invoke("sample.load", 0);
+    const bool ok = rig.until(done);
+    rig.expire();
+    return ok;
+  };
+  const auto stereo_mode = [&](const char* file) {
+    rig.select(file);
+    for (unsigned i = 0; i < 4 && rig.app->state().wav.channel != app::kChannelStereo; ++i) {
+      rig.tap(Button::F8);
+    }
+    CHECK(rig.app->state().wav.channel == app::kChannelStereo);
+    rig.expire();
+  };
+  // MIX first: the mid every other mode of this file would make
+  NEED(load("st.wav", 0, "PEAKS ST.WAV DONE"));
+  CHECK_FALSE(rig.bank.has_side(0));
+  CHECK(rig.arena->project.instrument(0)->stereo == 0u);
+  const std::vector<std::int16_t> mix(rig.bank.pcm(0).data, rig.bank.pcm(0).data + frames);
+  stereo_mode("st.wav");
+  NEED(load("st.wav", 1, "PEAKS ST.WAV DONE"));
+  const app::SampleBank::Pcm st = rig.bank.pcm(1);
+  NEED(st.frames == frames);
+  NEED(st.side != nullptr);
+  CHECK(st.side == st.data + frames);  // 3000 is even
+  CHECK(std::memcmp(st.data, mix.data(), frames * 2u) == 0);  // M is bit-identical to the mono load
+  bool side_ok = true;
+  for (std::uint32_t i = 0; i < frames; ++i) {
+    side_ok = side_ok && st.side[i] == static_cast<std::int16_t>(left_of(i) - st.data[i]);
+  }
+  CHECK(side_ok);
+  CHECK(rig.arena->project.instrument(1)->stereo == 1u);
+  CHECK(rig.arena->project.instrument(1)->sample_rate == 44100u);
+  CHECK(rig.bank.free_samples() == rig.bank.arena_samples() - 3u * frames);  // the MIX load (3000) and the mid + side (6000)
+  // Loading MIX over it again makes a mono instrument (a fresh one: flag 0)
+  const_cast<app::ViewState&>(rig.app->state()).wav.channel = 0;
+  rig.invoke("instrument.select", 2);
+  rig.select("st.wav");
+  rig.invoke("sample.load", 0);  // over an instrument that is there: asks first
+  rig.invoke("sample.load", 0);
+  NEED(rig.until("PEAKS ST.WAV DONE"));
+  rig.expire();
+  CHECK_FALSE(rig.bank.has_side(1));
+  CHECK(rig.arena->project.instrument(1)->stereo == 0u);
+  // A mono file ignores the mode: no S, no flag, no message.
+  stereo_mode("st.wav");
+  NEED(load("mono.wav", 2, "PEAKS MONO.WAV DONE"));
+  CHECK_FALSE(rig.bank.has_side(2));
+  CHECK(rig.arena->project.instrument(2)->stereo == 0u);
+  // An AIFF is read mono by its reader: loaded as such, and the strip says so.
+  NEED(load("st.aif", 3, "PEAKS ST.AIF DONE"));
+  CHECK_FALSE(rig.bank.has_side(3));
+  CHECK(rig.arena->project.instrument(3)->stereo == 0u);
+  CHECK(rig.card.open_files() == 0u);
+}
+
+TEST_CASE("sample load: STEREO is refused with a strip message when another instrument's sample has the side file's name, and nothing is loaded; MIX still loads (OS-STEREO (b))") {
+  Rig rig;
+  write_file(rig.dir.root / "st.wav", stereo_wav_bytes(3000));
+  model::Instrument other;
+  model::init_instrument(other, model::InstrumentKind::Sample);
+  std::strcpy(other.sample_path, "samples/Instr05_S.wav");  // the name the side file of slot 5 (index 4) would take, in another case
+  NEED(rig.arena->project.set_instrument(7, other) == model::Status::Ok);
+  rig.go(ScreenId::SampleLoad);
+  rig.settle();
+  rig.invoke("instrument.select", 5);
+  rig.select("st.wav");
+  const_cast<app::ViewState&>(rig.app->state()).wav.channel = app::kChannelStereo;
+  rig.invoke("sample.load", 0);
+  CHECK(rig.message() == "STEREO REFUSED: SIDE FILE NAME TAKEN");
+  rig.settle();
+  CHECK(rig.bank.pcm(4).frames == 0u);
+  CHECK(rig.card.open_files() == 0u);
+  rig.expire();
+  const_cast<app::ViewState&>(rig.app->state()).wav.channel = 0;  // MIX has no side file: it loads
+  rig.invoke("sample.load", 0);
+  CHECK(rig.until("PEAKS ST.WAV DONE"));
+  CHECK(rig.bank.pcm(4).frames == 3000u);
+}
+
+TEST_CASE("sample load: CH STEREO on a file whose mid fits but whose mid and side do not fails as a too long file does, and the slot is untouched (OS-STEREO (b))") {
+  Rig rig(7000);  // 3000 frames: the mid alone fits twice, mid + side (6000) once
+  write_file(rig.dir.root / "st.wav", stereo_wav_bytes(3000));
+  rig.go(ScreenId::SampleLoad);
+  rig.settle();
+  rig.select("st.wav");
+  for (unsigned i = 0; i < 4 && rig.app->state().wav.channel != app::kChannelStereo; ++i) {
+    rig.tap(Button::F8);
+  }
+  rig.expire();
+  rig.invoke("instrument.select", 1);
+  rig.invoke("sample.load", 0);
+  NEED(rig.until("PEAKS ST.WAV DONE"));  // 6000 of 7000: both fit
+  CHECK(rig.bank.has_side(0));
+  rig.expire();
+  rig.invoke("instrument.select", 2);
+  rig.invoke("sample.load", 0);
+  rig.passes(40);
+  CHECK(rig.message().find("IMPORT ST.WAV FAILED") == 0u);  // 1000 left: not even the mid
+  CHECK(rig.arena->project.instrument(1) == nullptr);
+  CHECK_FALSE(rig.bank.wav_open());
   CHECK(rig.card.open_files() == 0u);
 }
 

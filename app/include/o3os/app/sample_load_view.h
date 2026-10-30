@@ -72,13 +72,17 @@ struct WavView {
   std::uint16_t wavetable = formats::kWtAuto;
   // OS-LOADCH: which channel of a stereo file the next LOAD / ADD (and the audition) takes: 0 MIX ((L + R) / 2, as before), 1 LEFT, 2 RIGHT (formats::ReadParams::channel). F8 cycles it while the file under
   // the cursor is stereo (DirIndex::stereo); a mono file ignores it. Remembered for the session, never saved.
+  // OS-STEREO (b), S8: 3 is STEREO (kChannelStereo): the load keeps the mid (the same sample as MIX) AND the side signal, and sets the instrument's stereo flag (ReadParams::side). The audition plays the mix.
   std::uint8_t channel = 0;
 };
 
-// F8's cycle (MIX, LEFT, RIGHT, round), its key label (at most 8 characters) and its notice.
-inline std::uint8_t next_channel(std::uint8_t c) noexcept { return c >= 2u ? std::uint8_t{0} : static_cast<std::uint8_t>(c + 1u); }
-inline const char* channel_key_label(std::uint8_t c) noexcept { return c == 1u ? "CH LEFT" : (c == 2u ? "CH RIGHT" : "CH MIX"); }
-inline const char* channel_notice(std::uint8_t c) noexcept { return c == 1u ? "STEREO FILE LOADS: LEFT" : (c == 2u ? "STEREO FILE LOADS: RIGHT" : "STEREO FILE LOADS: MIX (L+R)/2"); }
+// F8's cycle (MIX, LEFT, RIGHT, STEREO, round), its key label (at most 8 characters) and its notice.
+inline constexpr std::uint8_t kChannelStereo = 3;
+inline std::uint8_t next_channel(std::uint8_t c) noexcept { return c >= kChannelStereo ? std::uint8_t{0} : static_cast<std::uint8_t>(c + 1u); }
+inline const char* channel_key_label(std::uint8_t c) noexcept { return c == 1u ? "CH LEFT" : (c == 2u ? "CH RIGHT" : (c == kChannelStereo ? "STEREO" : "CH MIX")); }
+inline const char* channel_notice(std::uint8_t c) noexcept {
+  return c == 1u ? "STEREO FILE LOADS: LEFT" : (c == 2u ? "STEREO FILE LOADS: RIGHT" : (c == kChannelStereo ? "STEREO FILE LOADS: STEREO (MID + SIDE)" : "STEREO FILE LOADS: MIX (L+R)/2"));
+}
 
 // F7's cycle and its words: AUTO, LEN, 256, 512, 1024, 2048, OFF, and round (the key label, at most 8 characters; the notice).
 inline std::uint16_t next_wavetable_mode(std::uint16_t m) noexcept {

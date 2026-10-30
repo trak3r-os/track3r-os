@@ -527,6 +527,7 @@ class App {
   };
   WavBatch wav_batch_;
   std::int16_t* wav_pcm_ = nullptr;  // where that import reads the audio to (the arena's tail)
+  bool wav_side_ = false;            // OS-STEREO (b): the import was asked for the side signal as well (F8 CH STEREO): finish_import sets the instrument's flag when it came
   std::uint16_t mute_pending_seen_ = 0;  // the sequencer's pending-mute bits at the last poll_mute_blink()
   std::uint32_t theme_generation_ = 0;  // the generation of the device setting THEME at the last poll_theme()
   std::uint32_t pad_offset_generation_ = 0;  // ... of PAD OFFSET at the last poll_pad_offset()

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <o3os/app/og_samples.h>
+#include <o3os/app/save_service.h>
 #include <o3os/app/wave_math.h>
 
 #include <o3os/core/fast_math.h>
@@ -474,6 +475,8 @@ void OgSampleLoader::advance(std::size_t room) noexcept {
     case Stage::PtiRead: pti_read(room); return;
     case Stage::WavNext: wav_next(); return;
     case Stage::WavRead: wav_read(room); return;
+    case Stage::SideNext: side_next(); return;
+    case Stage::SideRead: side_read(room); return;
     case Stage::Finish: finish(); return;
     case Stage::FeedNext: feed_next(); return;
     case Stage::FeedRead: feed_read(room); return;
@@ -502,21 +505,22 @@ bool OgSampleLoader::open_file(const char* sub, const char* name, std::uint8_t s
 
 // What the slot's audio is, once it is in the arena at used_: the voices' table, the accounting. A window with no sound leaves the arena as it was. A beat slice
 // instrument's slice table follows its PCM (slice_table_samples: even, so the next sample is on an even index too); an instrument whose table does not fit is silent.
-void OgSampleLoader::bind(std::uint8_t slot, std::uint32_t frames, std::uint32_t rate_hz) noexcept {
+void OgSampleLoader::bind(std::uint8_t slot, std::uint32_t frames, std::uint32_t rate_hz, bool side) noexcept {
   if (frames > arena_samples_) {
     settle(slot, SampleProblem::NoRoom);  // (before the rounding: a count near 2^32 would wrap to 0)
     return;
   }
   const model::Instrument* in = project_->instrument(slot);
   const std::uint32_t pcm_samples = (frames + 1u) & ~1u;
+  const std::uint32_t block = side ? 2u * pcm_samples : pcm_samples;  // OS-STEREO (b): M, then S (the slice table follows both)
   const std::uint32_t table_samples = in != nullptr ? slice_table_samples(*in) : 0u;
-  if (table_samples > arena_samples_ - used_ - pcm_samples) {
+  if (block > arena_samples_ - used_ || table_samples > arena_samples_ - used_ - block) {
     settle(slot, SampleProblem::NoRoom);
     return;
   }
   bool approximated = false;
   audio::SampleDesc desc =
-      in != nullptr ? make_sample_desc(*in, arena_ + used_, frames, &approximated, table_samples != 0u ? arena_ + used_ + pcm_samples : nullptr, law_) : audio::SampleDesc{};
+      in != nullptr ? make_sample_desc(*in, arena_ + used_, frames, &approximated, table_samples != 0u ? arena_ + used_ + block : nullptr, law_) : audio::SampleDesc{};
   if (desc.length == 0u) {
     settle(slot, SampleProblem::Unusable);
     return;
@@ -529,9 +533,9 @@ void OgSampleLoader::bind(std::uint8_t slot, std::uint32_t frames, std::uint32_t
   }
   voices_->set_sample(slot, desc);
   if (bank_ != nullptr) {
-    bank_->adopt(slot, arena_ + used_, frames, pcm_samples);  // (OS-ARENA-RECLAIM: the slot owns its block; a later load reuses its room)
+    bank_->adopt(slot, arena_ + used_, frames, block, side ? arena_ + used_ + pcm_samples : nullptr);  // (OS-ARENA-RECLAIM: the slot owns its block; a later load reuses its room)
   }
-  used_ += pcm_samples + table_samples;
+  used_ += block + table_samples;
   report_.samples = used_;
   ++report_.loaded;
   if (approximated) {
@@ -687,14 +691,69 @@ void OgSampleLoader::wav_read(std::size_t room) noexcept {
     settle(slot, SampleProblem::Unusable);
     return;
   }
-  bind(slot, info.frames, info.sample_rate);
-  if (bank_ != nullptr) {
-    hal::storage::FileStamp stamp;
-    if (storage_->stat(path_, stamp) != Status::Ok) {
-      stamp = hal::storage::FileStamp{};  // unknown: a remount cannot confirm it, the next save writes the slot
-    }
-    bank_->mark_on_card(slot, stamp.size, stamp.stamp);  // read from the project's own folder: a save into it has nothing to write for this slot until the audio changes (OS-FU2), nor after a remount while the file still looks as it did (OS-BUG-REMOUNT)
+  m_frames_ = info.frames;
+  m_rate_ = info.sample_rate;
+  m_stamp_ = hal::storage::FileStamp{};
+  if (bank_ != nullptr && storage_->stat(path_, m_stamp_) != Status::Ok) {
+    m_stamp_ = hal::storage::FileStamp{};  // unknown: a remount cannot confirm it, the next save writes the slot
   }
+  if (native_ && bank_ != nullptr && in != nullptr && in->stereo != 0u) {  // OS-STEREO (b): a stereo instrument's side file follows its mid; bound together or not at all
+    stage_ = Stage::SideNext;
+    return;
+  }
+  bind_and_mark(false);
+}
+
+void OgSampleLoader::bind_and_mark(bool side) noexcept {
+  bind(slot_, m_frames_, m_rate_, side);
+  if (bank_ != nullptr) {
+    bank_->mark_on_card(slot_, m_stamp_.size, m_stamp_.stamp);  // read from the project's own folder: a save into it has nothing to write for this slot until the audio changes (OS-FU2), nor after a remount while the file still looks as it did (OS-BUG-REMOUNT)
+  }
+}
+
+// OS-STEREO (b), S2: the side file of the instrument whose mid was just read, samples/<stem>_s.wav, goes into the arena right after the mid. Anything wrong with it (not there, would not open, not mono, another length
+// or rate than the mid, no room) binds the mid alone, counted in the report (stereo_lost); the flag is cleared when the loader finishes (SampleBank::reconcile_stereo). A card fault ends the load as always.
+void OgSampleLoader::side_next() noexcept {
+  stage_ = Stage::WavNext;
+  const model::Instrument* in = project_->instrument(slot_);
+  const std::uint32_t even = (m_frames_ + 1u) & ~1u;
+  const std::uint32_t rest = arena_samples_ - used_;
+  char side_path[model::kSamplePathMax + 8];
+  if (in != nullptr && even <= rest && even <= rest - even && stereo_side_path(*project_, slot_, in->sample_path, side_path, sizeof side_path) && join(side_path, nullptr)) {
+    const Status s = storage_->open(path_, file_);
+    if (s == Status::Ok) {
+      source_.attach(*storage_, file_);
+      source_.clear_error();
+      importer_.begin(source_, arena_ + used_ + even, rest - even);
+      stage_ = Stage::SideRead;
+      return;
+    }
+    if (card_fault(s)) {
+      card_failed(s);
+      return;
+    }
+  }
+  ++report_.stereo_lost;
+  bind_and_mark(false);
+}
+
+void OgSampleLoader::side_read(std::size_t room) noexcept {
+  const formats::wav::Progress p = importer_.step(room);
+  if (p == formats::wav::Progress::Running) {
+    return;
+  }
+  storage_->close(file_);
+  stage_ = Stage::WavNext;
+  if (p == formats::wav::Progress::Failed && source_.error() != Status::Ok) {
+    card_failed(source_.error());
+    return;
+  }
+  const formats::wav::Info& info = importer_.info();
+  const bool match = p == formats::wav::Progress::Done && info.frames == m_frames_ && info.source_channels == 1u && info.sample_rate == m_rate_;
+  if (!match) {
+    ++report_.stereo_lost;
+  }
+  bind_and_mark(match);
 }
 
 // ---- a PcmFeed: the next sample instrument, then its frames in pieces ------------------------------------------------------------------------
@@ -751,6 +810,7 @@ void OgSampleLoader::finish() noexcept {
   close_all();
   if (bank_ != nullptr) {
     bank_->set_used(used_);
+    (void)bank_->reconcile_stereo();  // OS-STEREO (b), rule 4: a flag with no S in the bank is cleared (a mono load; the document is the load's own)
   }
   for (unsigned slot = 0; slot < kSlots; ++slot) {
     if (is_sample_slot(slot) && ((settled_ >> slot) & 1u) == 0u) {
@@ -766,6 +826,9 @@ std::size_t describe_samples(const SampleLoadReport& r, char* out, std::size_t c
   line.str("samples ").dec(r.loaded).str(" loaded, ").dec(r.missing).str(" missing, ").dec((r.samples * 2u + 512u) / 1024u).str(" KB");
   if (r.no_room != 0u) {
     line.str(", ").dec(r.no_room).str(" no room");
+  }
+  if (r.stereo_lost != 0u) {
+    line.str(", ").dec(r.stereo_lost).str(" stereo lost");
   }
   if (r.storage_error != Status::Ok) {
     line.str(", ").str(hal::storage::status_name(r.storage_error));

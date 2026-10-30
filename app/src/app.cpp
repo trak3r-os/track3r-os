@@ -1028,9 +1028,11 @@ void App::finish_import(core::SlotState state, bool& chained) noexcept {
     // -20 dB, so it is born at the table's 0 dB, 100, as a recording is. Under the 1.2+ law 50 is 0 dB and nothing changes.
     model::Project& doc_project = samples_->project_arena().project;
     const model::Instrument* born = doc_project.instrument(slot);
-    if (born != nullptr && born->sampler.volume != unity_level(project_law(doc_project))) {
+    const bool stereo = wav_side_ && import_job_.report()->pcm_side;  // OS-STEREO (b), S8: CH STEREO and the reader found a stereo file: the instrument wants to play stereo
+    if (born != nullptr && (born->sampler.volume != unity_level(project_law(doc_project)) || (stereo && born->stereo == 0u))) {
       model::Instrument fresh = *born;
       fresh.sampler.volume = unity_level(project_law(doc_project));
+      fresh.stereo = stereo ? std::uint8_t{1} : fresh.stereo;
       (void)doc_project.set_instrument(slot, fresh);
     }
   }
@@ -1062,13 +1064,18 @@ void App::finish_import(core::SlotState state, bool& chained) noexcept {
       }
     }
     if (state == core::SlotState::Done && rep != nullptr) {
-      (void)samples_->commit_load(slot, wav_pcm_, rep->pcm_frames);  // OS-RATEPITCH: the rate is the instrument's now, and the rebind gives the voices its factor: no "PITCH IS OFF" warning
+      std::int16_t* const side = rep->pcm_side ? wav_pcm_ + ((rep->pcm_frames + 1u) & ~1u) : nullptr;  // OS-STEREO (b): S follows M in the same block
+      (void)samples_->commit_load(slot, wav_pcm_, rep->pcm_frames, side);  // OS-RATEPITCH: the rate is the instrument's now, and the rebind gives the voices its factor: no "PITCH IS OFF" warning
     }
     peaks_slot_ = slot;  // the peak job chained below builds the cache of exactly this PCM
     peaks_version_ = samples_->version(slot);
     samples_->close_wav();
     wav_slot_ = -1;
     wav_pcm_ = nullptr;
+    if (state == core::SlotState::Done && wav_side_ && rep != nullptr && !rep->pcm_side) {  // asked for stereo, got the mid alone (a file the reader keeps mono): never silent
+      (void)state_.notify.upsert(core::Severity::Info, "NO SIDE SIGNAL: LOADED MONO", "sample", ViewState::kMessageMs);
+    }
+    wav_side_ = false;
     if (state == core::SlotState::Done && state_.wav.back_to_params && state_.screen == ScreenId::SampleLoad) {  // OS-INSTUI S5: the type chooser sent us here: back to the instrument that took the sample
       state_.instrument = static_cast<int>(slot) + 1;
       (void)switch_screen(screen_registry(), model_, state_, ScreenId::Instrument);
@@ -1213,7 +1220,29 @@ void App::report_jobs() noexcept {
       core::Severity severity = core::Severity::Info;
       std::uint32_t ttl = kMessageMs;
       const bool pti_clipped = saves_ != nullptr && saves_->take_pti_clipped(slot);  // (taken at every end, so that the runner's slot is not taken for the .pti save's later)
-      if (st == core::SlotState::Done) {
+      unsigned mono_count = 0;
+      const char* mono_first = "";
+      const bool stereo_mono = saves_ != nullptr && saves_->take_stereo_mono(slot, mono_count, mono_first);  // (taken at every end, like the .pti's)
+      if (st == core::SlotState::Done && stereo_mono) {
+        // OS-STEREO (b), rule 4: the project is saved, but a stereo instrument went down mono (its side file's name collides with another sample or does not fit): never silent. "STEREO SAVED MONO: NAME (+N)"
+        text.assign("STEREO SAVED MONO: ");
+        core::FixedString<8> tail;
+        if (mono_count > 1u) {
+          tail.assign(" +");
+          append_uint(tail, mono_count - 1u);
+        }
+        const std::size_t room = core::kNotifyTextChars - text.size() - tail.size();
+        char shown[model::kInstrumentNameMax + 1];
+        std::strncpy(shown, mono_first, sizeof shown - 1u);
+        shown[sizeof shown - 1u] = '\0';
+        if (std::strlen(shown) > room) {
+          shown[room] = '\0';
+        }
+        text.append(shown);
+        text.append(tail.c_str());
+        severity = core::Severity::Warn;
+        ttl = 4000;
+      } else if (st == core::SlotState::Done) {
         compose(text, job->name(), pti_clipped ? " DONE (CLIPPED)" : " DONE");  // (OS-FILES-C C1b: the resampler saturated samples)
       } else if (st == core::SlotState::Cancelled) {
         compose(text, job->name(), " CANCELLED");
@@ -2146,6 +2175,17 @@ bool App::start_wav_load(int pos) noexcept {
     say(core::Severity::Warn, "THE PATH IS TOO LONG");
     return false;
   }
+  if (state_.wav.channel == kChannelStereo && index.stereo(static_cast<unsigned>(pos)) && model_.project != nullptr) {
+    // OS-STEREO (b), S8: the load names the instrument's sample "samples/instrNN.wav"; with no side name for it (another instrument's sample has it) a save could not keep the side signal: refused here, not lost later
+    char own[] = "samples/instr00.wav";
+    own[13] = static_cast<char>('0' + (state_.wav.slot + 1) / 10);
+    own[14] = static_cast<char>('0' + (state_.wav.slot + 1) % 10);
+    char side[model::kSamplePathMax + 8];
+    if (!stereo_side_path(*model_.project, static_cast<unsigned>(state_.wav.slot), own, side, sizeof side)) {
+      say(core::Severity::Warn, "STEREO REFUSED: SIDE FILE NAME TAKEN");
+      return false;
+    }
+  }
   SampleBank::WavPlan plan;
   const hal::storage::Status opened = samples_->open_wav(*storage_, path, plan);
   if (opened != hal::storage::Status::Ok) {
@@ -2171,7 +2211,10 @@ bool App::start_wav_load(int pos) noexcept {
   rq.params.pcm = plan.pcm;
   rq.params.pcm_capacity = plan.pcm_capacity;
   rq.params.wavetable = state_.wav.wavetable;  // OS-GRAN: F7's way of reading a WAV as a wavetable
-  rq.params.channel = index.stereo(static_cast<unsigned>(pos)) ? state_.wav.channel : std::uint8_t{0};  // OS-LOADCH: F8's channel, for a stereo file only
+  const bool stereo_file = index.stereo(static_cast<unsigned>(pos));
+  const bool want_side = stereo_file && state_.wav.channel == kChannelStereo;  // OS-STEREO (b), S8: CH STEREO keeps the mid (= MIX) and the side signal
+  rq.params.channel = stereo_file && !want_side ? state_.wav.channel : std::uint8_t{0};  // OS-LOADCH: F8's channel, for a stereo file only
+  rq.params.side = want_side;
   rq.peak_storage = samples_->peak_storage();
   rq.peak_elems = samples_->peak_elems();
   if (!start_import(rq)) {  // it has said why
@@ -2181,6 +2224,7 @@ bool App::start_wav_load(int pos) noexcept {
   wav_slot_ = state_.wav.slot;
   wav_synced_ = session_.document() != nullptr && session_.document()->in_sync();  // finish_import(): a load that finds the history in step keeps it
   wav_pcm_ = plan.pcm;
+  wav_side_ = want_side;
   return true;
 }
 

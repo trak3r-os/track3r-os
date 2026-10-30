@@ -56,6 +56,7 @@ void SampleBank::clear() noexcept {
   for (SampleBankMem::Slot& s : mem_->slots) {
     s.pcm = nullptr;
     s.frames = 0;
+    s.side = nullptr;
     ++s.version;  // a peak cache of what was there is stale
     s.card_version = 0;
     s.table = nullptr;
@@ -123,7 +124,7 @@ void SampleBank::new_project(bool keep_audio) noexcept {
   mem_->over_frames = 0;
 }
 
-void SampleBank::adopt(unsigned slot, std::int16_t* pcm, std::uint32_t frames, std::uint32_t block) noexcept {
+void SampleBank::adopt(unsigned slot, std::int16_t* pcm, std::uint32_t frames, std::uint32_t block, std::int16_t* side) noexcept {
   if (slot >= kSlots || mem_ == nullptr) {
     return;
   }
@@ -131,10 +132,13 @@ void SampleBank::adopt(unsigned slot, std::int16_t* pcm, std::uint32_t frames, s
   SampleBankMem::Slot& s = mem_->slots[slot];
   s.pcm = frames != 0u ? pcm : nullptr;
   s.frames = pcm != nullptr ? frames : 0u;
+  const std::uint32_t even = (frames + 1u) & ~1u;
+  // OS-STEREO (b): S is the block's second half, or it is not S (a pointer anywhere else would make a read past the block): M and S are one unit, so a bad S leaves a mono sample
+  s.side = (side != nullptr && s.pcm != nullptr && side == s.pcm + even && arena_ != nullptr && s.pcm >= arena_ && static_cast<std::uint64_t>(s.pcm - arena_) + 2ull * even <= arena_samples_) ? side : nullptr;
   s.bound = s.pcm;  // a loader that adopts has bound the voices itself (the engine is quiet then)
   s.own = nullptr;  // (commit_load() claims the block after this call)
   s.own_len = 0;
-  if (block != 0u && s.pcm != nullptr && arena_ != nullptr && s.pcm >= arena_ && block >= ((frames + 1u) & ~1u) && (block & 1u) == 0u && block <= arena_samples_ &&
+  if (block != 0u && s.pcm != nullptr && arena_ != nullptr && s.pcm >= arena_ && block >= (s.side != nullptr ? 2u * even : even) && (block & 1u) == 0u && block <= arena_samples_ &&
       static_cast<std::uint32_t>(s.pcm - arena_) <= arena_samples_ - block) {
     s.own = s.pcm;  // OS-ARENA-RECLAIM: a loader's block of its own, the slot's to reuse
     s.own_len = block;
@@ -151,11 +155,29 @@ void SampleBank::set_used(std::uint32_t samples) noexcept {
   }
 }
 
+unsigned SampleBank::reconcile_stereo() noexcept {
+  if (project_ == nullptr || mem_ == nullptr) {
+    return 0;
+  }
+  unsigned cleared = 0;
+  for (unsigned slot = 0; slot < kSlots; ++slot) {
+    const model::Instrument* in = project_->project.instrument(slot);
+    if (in != nullptr && in->stereo != 0u && !has_side(slot)) {
+      model::Instrument fresh = *in;
+      fresh.stereo = 0;
+      if (project_->project.set_instrument(slot, fresh) == model::Status::Ok) {
+        ++cleared;
+      }
+    }
+  }
+  return cleared;
+}
+
 SampleBank::Pcm SampleBank::pcm(unsigned slot) const noexcept {
   if (slot >= kSlots || mem_ == nullptr) {
     return {};
   }
-  return Pcm{mem_->slots[slot].pcm, mem_->slots[slot].frames};
+  return Pcm{mem_->slots[slot].pcm, mem_->slots[slot].frames, mem_->slots[slot].side};
 }
 
 hal::storage::Status SampleBank::open_wav(hal::storage::Storage& storage, const char* path, WavPlan& plan) noexcept {
@@ -221,9 +243,10 @@ std::int16_t* SampleBank::reserve(std::uint32_t& capacity) noexcept {
   return (arena_ != nullptr && capacity != 0u) ? arena_ + used_ : nullptr;
 }
 
-bool SampleBank::commit_load(unsigned slot, std::int16_t* pcm, std::uint32_t frames) noexcept {
+bool SampleBank::commit_load(unsigned slot, std::int16_t* pcm, std::uint32_t frames, std::int16_t* side) noexcept {
   const std::uint32_t even = (frames + 1u) & ~1u;
-  if (slot >= kSlots || mem_ == nullptr || arena_ == nullptr || pcm != arena_ + used_ || frames == 0u || even > free_samples()) {
+  const std::uint32_t block = side != nullptr ? 2u * even : even;  // OS-STEREO (b): M and S are one block
+  if (slot >= kSlots || mem_ == nullptr || arena_ == nullptr || pcm != arena_ + used_ || frames == 0u || even > free_samples() || (side != nullptr && (side != pcm + even || even > free_samples() - even))) {
     return false;
   }
   if (hist_slot_ == slot) {  // OS-BUG-SLDOVER: the sample edit's history is of the audio this load replaces (set_slot_audio does the same)
@@ -240,10 +263,10 @@ bool SampleBank::commit_load(unsigned slot, std::int16_t* pcm, std::uint32_t fra
   // the block of the first load stays where it is (a hole until the next project load). reclaim() re-checks every holder of the original block.
   std::int16_t* const first_stale = (s.stale != nullptr && (mem_->reclaim_marks & (std::uint64_t{1} << slot)) != 0u && s.stale < pcm) ? s.stale : nullptr;
   const std::uint32_t first_len = s.stale_len;
-  used_ += even;
-  adopt(slot, pcm, frames);
+  used_ += block;
+  adopt(slot, pcm, frames, 0, side);
   s.own = pcm;
-  s.own_len = even;
+  s.own_len = block;
   if (first_stale != nullptr) {
     s.stale = first_stale;
     s.stale_len = first_len;
@@ -408,11 +431,12 @@ void SampleBank::drop_oldest_undo() noexcept {
   }
 }
 
-void SampleBank::set_audio(unsigned slot, std::int16_t* pcm, std::uint32_t frames) noexcept {
+void SampleBank::set_audio(unsigned slot, std::int16_t* pcm, std::uint32_t frames, std::int16_t* side) noexcept {
   demo_kit_ = false;  // (OS-BUG-PASTE24: another sound in a slot of the kit)
   SampleBankMem::Slot& s = mem_->slots[slot];
   s.pcm = pcm;
   s.frames = frames;
+  s.side = pcm != nullptr ? side : nullptr;
   ++s.version;
   request_rebind(slot);
 }
@@ -463,6 +487,7 @@ bool SampleBank::edit_commit(unsigned slot, std::int16_t* buf, std::uint32_t fra
   SampleBankMem::Step step;
   step.pcm = mem_->slots[slot].pcm;
   step.frames = mem_->slots[slot].frames;
+  step.side = mem_->slots[slot].side;  // the edit's result is mono (S goes with the version it belongs to, and comes back with its undo; slice (d) edits both blocks)
   step.before = before;
   step.after = after;
   redo_n_ = 0;
@@ -470,7 +495,7 @@ bool SampleBank::edit_commit(unsigned slot, std::int16_t* buf, std::uint32_t fra
     drop_oldest_undo();
   }
   mem_->undo[undo_n_++] = step;
-  set_audio(slot, buf, frames);
+  set_audio(slot, buf, frames, nullptr);
   return true;
 }
 
@@ -482,9 +507,10 @@ bool SampleBank::edit_undo(unsigned slot, PointsRec& restore) noexcept {
   SampleBankMem::Step redo = step;
   redo.pcm = mem_->slots[slot].pcm;  // the version being left is what redo comes back to
   redo.frames = mem_->slots[slot].frames;
+  redo.side = mem_->slots[slot].side;
   restore = step.before;
   mem_->redo[redo_n_++] = redo;
-  set_audio(slot, step.pcm, step.frames);
+  set_audio(slot, step.pcm, step.frames, step.side);
   return true;
 }
 
@@ -496,9 +522,10 @@ bool SampleBank::edit_redo(unsigned slot, PointsRec& restore) noexcept {
   SampleBankMem::Step undo = step;
   undo.pcm = mem_->slots[slot].pcm;
   undo.frames = mem_->slots[slot].frames;
+  undo.side = mem_->slots[slot].side;
   restore = step.after;
   mem_->undo[undo_n_++] = undo;
-  set_audio(slot, step.pcm, step.frames);
+  set_audio(slot, step.pcm, step.frames, step.side);
   return true;
 }
 
@@ -629,13 +656,14 @@ void SampleBank::rebind_now(unsigned slot) noexcept {
 
 // RECLAIM (sample_bank.h): the history's steps (the old versions edit undo and redo would put back) that lie in [from, to).
 bool SampleBank::block_in_history(const std::int16_t* from, const std::int16_t* to) const noexcept {
+  const auto in = [&](const std::int16_t* p) { return p != nullptr && p >= from && p < to; };  // (a step's S lies in its own block: it is covered too)
   for (unsigned i = 0; i < undo_n_; ++i) {
-    if (mem_->undo[i].pcm >= from && mem_->undo[i].pcm < to) {
+    if (in(mem_->undo[i].pcm) || in(mem_->undo[i].side)) {
       return true;
     }
   }
   for (unsigned i = 0; i < redo_n_; ++i) {
-    if (mem_->redo[i].pcm >= from && mem_->redo[i].pcm < to) {
+    if (in(mem_->redo[i].pcm) || in(mem_->redo[i].side)) {
       return true;
     }
   }
@@ -647,7 +675,8 @@ bool SampleBank::block_in_history(const std::int16_t* from, const std::int16_t* 
 bool SampleBank::reclaim(unsigned slot) noexcept {
   SampleBankMem::Slot& s = mem_->slots[slot];
   const std::uint32_t even = (s.frames + 1u) & ~1u;
-  if (s.stale == nullptr || s.pcm == nullptr || s.pcm != s.own || s.stale + s.stale_len > s.pcm || s.pcm + even != arena_ + used_ || s.frames > kReclaimMax ||
+  // OS-STEREO (b), rule 5: a block with S (the slot's new audio) is never moved. A stale block with S is only room: it is released whole, and every holder of M or S is tested below.
+  if (s.stale == nullptr || s.pcm == nullptr || s.side != nullptr || s.pcm != s.own || s.stale + s.stale_len > s.pcm || s.pcm + even != arena_ + used_ || s.frames > kReclaimMax ||
       block_in_history(s.stale, s.stale + s.stale_len) || referenced(s.stale, s.stale + s.stale_len, slot) ||
       referenced(s.pcm, s.pcm + even, slot)) {  // (OS-INSTUI S7: another slot, the clipboard or a swap record reads the old block or the new one)
     return false;
@@ -803,20 +832,22 @@ unsigned SampleBank::pcm_refs(const std::int16_t* p) const noexcept {
 bool SampleBank::referenced(const std::int16_t* from, const std::int16_t* to, unsigned skip) const noexcept {
   const auto in = [&](const std::int16_t* p) { return p != nullptr && p >= from && p < to; };
   for (unsigned i = 0; i < kSlots; ++i) {
-    if (i != skip && (in(mem_->slots[i].pcm) || in(mem_->slots[i].bound))) {
+    if (i != skip && (in(mem_->slots[i].pcm) || in(mem_->slots[i].bound) || in(mem_->slots[i].side))) {
       return true;
     }
   }
-  if (mem_->clip_valid && in(mem_->clip_audio.pcm)) {
+  if (mem_->clip_valid && (in(mem_->clip_audio.pcm) || in(mem_->clip_audio.side))) {
     return true;
   }
   for (unsigned i = 0; i < mem_->swaps_done_n; ++i) {
-    if (in(mem_->swaps_done[i].before.pcm) || in(mem_->swaps_done[i].after.pcm)) {
+    const SampleBankMem::Swap& w = mem_->swaps_done[i];
+    if (in(w.before.pcm) || in(w.after.pcm) || in(w.before.side) || in(w.after.side)) {
       return true;
     }
   }
   for (unsigned i = 0; i < mem_->swaps_undone_n; ++i) {
-    if (in(mem_->swaps_undone[i].before.pcm) || in(mem_->swaps_undone[i].after.pcm)) {
+    const SampleBankMem::Swap& w = mem_->swaps_undone[i];
+    if (in(w.before.pcm) || in(w.after.pcm) || in(w.before.side) || in(w.after.side)) {
       return true;
     }
   }
@@ -832,6 +863,7 @@ void SampleBank::clip_set(const model::Instrument& in, unsigned slot) noexcept {
   if (in.kind == model::InstrumentKind::Sample && slot < kSlots) {
     mem_->clip_audio.pcm = mem_->slots[slot].pcm;
     mem_->clip_audio.frames = mem_->slots[slot].pcm != nullptr ? mem_->slots[slot].frames : 0u;
+    mem_->clip_audio.side = mem_->slots[slot].pcm != nullptr ? mem_->slots[slot].side : nullptr;
   }
   mem_->clip_valid = true;
 }
@@ -840,7 +872,7 @@ void SampleBank::clip_set(const model::Instrument& in, unsigned slot) noexcept {
 // owned again; whatever was waiting to be reclaimed below the old audio is dropped (the new audio is not that block).
 void SampleBank::set_slot_audio(unsigned slot, const SampleBankMem::Audio& a) noexcept {
   SampleBankMem::Slot& s = mem_->slots[slot];
-  if (s.pcm == a.pcm && s.frames == a.frames) {
+  if (s.pcm == a.pcm && s.frames == a.frames && s.side == a.side) {
     return;  // the same block (a unit that did not change the audio): nothing moves, no version, no rebind
   }
   s.stale = nullptr;
@@ -852,7 +884,7 @@ void SampleBank::set_slot_audio(unsigned slot, const SampleBankMem::Audio& a) no
     undo_n_ = 0;
     redo_n_ = 0;
   }
-  set_audio(slot, a.pcm, a.frames);
+  set_audio(slot, a.pcm, a.frames, a.side);
 }
 
 void SampleBank::push_swap(unsigned slot, const SampleBankMem::Audio& before, const SampleBankMem::Audio& after) noexcept {
@@ -876,13 +908,13 @@ bool SampleBank::paste_audio(unsigned slot) noexcept {
     return false;
   }
   SampleBankMem::Slot& s = mem_->slots[slot];
-  const SampleBankMem::Audio before{s.pcm, s.frames};
+  const SampleBankMem::Audio before{s.pcm, s.frames, s.side};
   // Every paste is one swap on record, also one that leaves the audio alone (a MIDI instrument, a slot that already reads that block): undo and redo pair the units of the journal with the swaps
   // one for one, and a unit without its swap would be given another unit's.
   const SampleBankMem::Audio after = mem_->clip_inst.kind == model::InstrumentKind::Sample ? mem_->clip_audio : before;
   push_swap(slot, before, after);
   set_slot_audio(slot, after);
-  return before.pcm != after.pcm || before.frames != after.frames;
+  return before.pcm != after.pcm || before.frames != after.frames || before.side != after.side;
 }
 
 bool SampleBank::commit_load_undoable(unsigned slot, std::int16_t* pcm, std::uint32_t frames) noexcept {
@@ -890,11 +922,11 @@ bool SampleBank::commit_load_undoable(unsigned slot, std::int16_t* pcm, std::uin
     return false;
   }
   const SampleBankMem::Slot& s = mem_->slots[slot];
-  const SampleBankMem::Audio before{s.pcm, s.frames};
+  const SampleBankMem::Audio before{s.pcm, s.frames, s.side};
   if (!commit_load(slot, pcm, frames)) {
     return false;
   }
-  push_swap(slot, before, SampleBankMem::Audio{mem_->slots[slot].pcm, mem_->slots[slot].frames});
+  push_swap(slot, before, SampleBankMem::Audio{mem_->slots[slot].pcm, mem_->slots[slot].frames, mem_->slots[slot].side});
   return true;
 }
 

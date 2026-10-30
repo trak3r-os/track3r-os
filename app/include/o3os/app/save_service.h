@@ -79,7 +79,11 @@ class Recorder;
 // The source of a project file: the native writer over the project, stepped a budget at a time.
 class NativeSaveSource final : public SaveSource {
  public:
-  void set(const model::Project& project) noexcept { project_ = &project; }
+  // `stereo_mask`: bit n lets instrument n's stereo flag be written (formats::native::Writer::begin): SaveService holds a flag back where the side file is not saved.
+  void set(const model::Project& project, std::uint64_t stereo_mask = ~std::uint64_t{0}) noexcept {
+    project_ = &project;
+    stereo_mask_ = stereo_mask;
+  }
   void begin(core::ByteSink& sink) noexcept override;
   formats::Progress step(std::size_t byte_budget) noexcept override;
   const char* failure() const noexcept override;
@@ -87,6 +91,7 @@ class NativeSaveSource final : public SaveSource {
 
  private:
   const model::Project* project_ = nullptr;
+  std::uint64_t stereo_mask_ = ~std::uint64_t{0};
   formats::native::Writer writer_;
 };
 
@@ -228,6 +233,13 @@ struct WavRequest {
   const Recorder* take = nullptr;        // ... or when it is a take under review: it must stay the take (the recorder in Review with the same data)
 };
 
+// OS-STEREO step 2, slice (b), decision S2 of docs/specs/OS-STEREO.md: where the side signal S of instrument `slot` lives; the one naming rule of the loader (og_samples.cpp), the save and the load screen (it lives here
+// because the name guard is the save layer's: tools/check_layers.py rule 8). `sample_path` is the path the instrument has or will have ("samples/instr01.wav"); `out` (`cap` bytes) gets "samples/instr01_s.wav"
+// (the stem and "_s.wav"; the extension is matched without case). False when the path is not a "samples/<name>.wav" the save guard takes, when "<name>_s" is longer than the guard's kNameMax, when the result does
+// not fit `cap`, or when another instrument's sample_path is that name (in any case): the side file would be that instrument's audio, so this one is mono. An older build never reads a file of that name (it is no
+// instrument's sample_path).
+bool stereo_side_path(const model::Project& project, unsigned slot, const char* sample_path, char* out, std::size_t cap) noexcept;
+
 class SaveService {
  public:
   static constexpr std::uint32_t kSettingsDebounceMs = 1500;
@@ -316,6 +328,17 @@ class SaveService {
     }
     pti_job_ = -1;
     return pti_.clipped() != 0u;
+  }
+  // OS-STEREO (b), rule 4: true once, for the runner's `slot` when it is the project file's job of a save in which stereo instruments went down mono (a side name that collides with another instrument's sample or
+  // does not fit the guard, or a side file that could not be written); `count` is how many, `first` the first one's name (upper case, valid until the next save). The app says it on the strip.
+  bool take_stereo_mono(unsigned slot, unsigned& count, const char*& first) noexcept {
+    if (proj_job_ != static_cast<int>(slot)) {
+      return false;
+    }
+    proj_job_ = -1;
+    count = mono_count_;
+    first = mono_name_;
+    return mono_count_ != 0u;
   }
   // The file name (without ".pti") an instrument called `name` is saved under: the name sanitised to what the guard takes (anything else becomes '_', no ".." and no dot or space at either end, cut to
   // `cap` - 1 bytes, at most guard::kNameMax); "Instrument NN" when nothing is left (`slot` + 1). Pure, for the tests.
@@ -492,9 +515,20 @@ class SaveService {
     char name[hal::storage::save::kNameMax + 1] = {};
     char anchor[64] = {};
   };
-  std::uint64_t samples_to_write(const model::Project& project, const SampleBank& bank, const char* name, bool read_from_folder) const noexcept;
+  // OS-STEREO (b), rules 4 and 8, what a project save owes the side files: `todo` the slots whose side file is to be written, `ok` the slots whose stereo flag may go into the project file (bit n set: its side file is
+  // held by the folder or written by this save; every bit but those of the flagged slots without one), `refused` the flagged slots with a side signal whose side name was refused (they are saved mono: the strip says so).
+  struct SidePlan {
+    std::uint64_t todo = 0;
+    std::uint64_t ok = ~std::uint64_t{0};
+    std::uint64_t refused = 0;
+  };
+  SidePlan side_;  // the running plan's (side_.todo: the side files still to be written, after every mid), or the last project save's
+  std::uint64_t samples_to_write(const model::Project& project, const SampleBank& bank, const char* name, bool read_from_folder, SidePlan& side) const noexcept;
+  // A flagged slot saved without its side file: counted for the strip (take_stereo_mono), the first one named (the instrument's name, upper case).
+  void note_mono(const model::Project& project, unsigned slot) noexcept;
   Start advance_plan(core::JobRunner& jobs) noexcept;
-  Start start_sample(core::JobRunner& jobs, unsigned slot) noexcept;
+  // One sample of the plan as a job: its mid, or (`side`) its side file.
+  Start start_sample(core::JobRunner& jobs, unsigned slot, bool side) noexcept;
   // OS-FILES part B
   // OS-FILES part B
   Move move_ready() noexcept;
@@ -541,6 +575,9 @@ class SaveService {
   WavSaveSource wav_;
   PtiSaveSource pti_;
   int pti_job_ = -1;  // the runner's slot of the .pti save in progress (take_pti_clipped)
+  int proj_job_ = -1;                              // the runner's slot of the project file's job (take_stereo_mono)
+  unsigned mono_count_ = 0;                        // OS-STEREO (b): instruments of this project save written mono although they were stereo (their side name was refused or their side file could not be written)
+  char mono_name_[model::kInstrumentNameMax + 1] = {};  // the first of them
   std::uint32_t pti_hz_ = 0;  // save_instrument: the rate the .pti in progress was resampled from, 0 when it is written as it is
   BufferSaveSource buffer_;
   BufferSaveSource recent_source_;
@@ -630,6 +667,7 @@ class SaveService {
   // The audio each slot's file holds in Projects/<known_dir_>/samples, as the bank's version of it (0: unknown): what earlier saves wrote, so that a later one skips it.
   char known_dir_[hal::storage::save::kNameMax + 1] = {};
   std::uint32_t known_[64] = {};
+  std::uint32_t known_side_[64] = {};  // OS-STEREO (b): the same for each slot's side file (<stem>_s.wav)
   hal::storage::FileStamp known_file_[64] = {};  // OS-BUG-REMOUNT: what Projects/<known_dir_>/samples/<file> looked like when that save finished (size 0 and stamp 0: unknown)
   std::uint32_t remount_epoch_ = 0;  // card_remounted() calls so far; save_epoch_: the value when the running save checked its samples (an event in between leaves the beliefs to be checked again)
   std::uint32_t save_epoch_ = 0;
@@ -637,6 +675,7 @@ class SaveService {
   char smp_path_[hal::storage::save::kPathCap] = {};            // the file of the sample job in progress
   std::uint32_t known_card_ = 0;  // the writer's card_id() that known_ was written on: another card forgets it (OS-FU5)
   std::uint32_t smp_card_ = 0;    // the card of the sample job in progress
+  bool smp_side_ = false;   // OS-STEREO (b): the sample job in progress writes the slot's side file
   unsigned smp_slot_ = 64;  // the slot of the sample job in progress, and the version it was started on
   std::uint32_t smp_version_ = 0;
 };

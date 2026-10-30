@@ -6,6 +6,7 @@
 #include <doctest/doctest.h>
 
 #include "support/iff.h"
+#include "support/memory_io.h"
 #include "support/need.h"
 #include "support/project_fixture.h"
 
@@ -548,4 +549,36 @@ TEST_CASE("inst 1.5: the maximal project with every sample instrument stereo fit
   Report rep;
   NEED(test::load(test::arena(1), file, &rep) == Progress::Done);
   CHECK(saved(proj(1)) == file);
+}
+
+// ---- OS-STEREO step 2, slice (b), rule 4 at save: Writer::begin's stereo mask holds a flag back without touching the project --------------------------
+
+namespace {
+Bytes saved_masked(const Project& p, std::uint64_t mask) {
+  test::VectorSink sink;
+  Writer w;
+  w.begin(p, sink, mask);
+  Progress pr = Progress::Running;
+  for (unsigned guard = 0; pr == Progress::Running && guard < 1000000u; ++guard) {
+    pr = w.step();
+  }
+  CHECK(pr == Progress::Done);
+  return sink.bytes;
+}
+}  // namespace
+
+TEST_CASE("inst 1.5: the stereo mask is invisible with the flag clear, the default writes the flag, and a masked flag is the file of the same project with the flag at 0 (byte for byte)") {
+  test::fill_small(proj(0));
+  const Bytes mono = saved(proj(0));
+  CHECK(saved_masked(proj(0), ~std::uint64_t{0}) == mono);  // no flag set: the mask changes nothing, whatever it holds
+  CHECK(saved_masked(proj(0), 0) == mono);
+  Instrument s = *proj(0).instrument(0);
+  s.stereo = 1;
+  NEED(proj(0).set_instrument(0, s) == Status::Ok);
+  const Bytes flagged = saved(proj(0));
+  CHECK(flagged != mono);
+  CHECK(saved_masked(proj(0), ~std::uint64_t{0}) == flagged);  // the default is what it was
+  CHECK(saved_masked(proj(0), ~std::uint64_t{1}) == mono);     // slot 0 held back: the mono project's bytes (the sizing pre-pass agrees: the writer would fail otherwise)
+  CHECK(saved_masked(proj(0), 1) == flagged);                  // only slot 0 allowed
+  CHECK(proj(0).instrument(0)->stereo == 1);                   // the project is not touched
 }

@@ -128,15 +128,17 @@ You should see the cursor move. These keys do not load a sample.
 Not yet checked on the unit.
 
 ### Load one channel of a stereo file
-<!-- sync: src=app/include/o3os/app/sample_load_view.h qa=QA-SLD-011,QA-SLD-012,QA-SLD-013 -->
+<!-- sync: src=app/include/o3os/app/sample_load_view.h qa=QA-SLD-011,QA-SLD-012,QA-SLD-013,QA-FIL-131,QA-FIL-132,QA-FIL-133,QA-FIL-134 -->
 
 Start on Sample load. Put the cursor on a stereo file. Its name shows **ST** at the right. A mono file does not.
 
-1. Press `F8` (**CH MIX**). Each press moves on: **CH LEFT**, then **CH RIGHT**, then **CH MIX**. <!-- QA-SLD-011 -->
+1. Press `F8` (**CH MIX**). Each press moves on: **CH LEFT**, then **CH RIGHT**, then **STEREO**, then **CH MIX**. <!-- QA-SLD-011 --> <!-- QA-FIL-131 -->
 2. Press `F1` (**LOAD**). The instrument gets only the channel the key shows. <!-- QA-SLD-012 --> <!-- QA-SLD-013 -->
 3. Press `F1` on another stereo file. The key still shows the same choice. <!-- QA-SLD-013 -->
 
-You should see the strip say what the file will load: **STEREO FILE LOADS: LEFT**, **STEREO FILE LOADS: RIGHT** or **STEREO FILE LOADS: MIX (L+R)/2**. **CH MIX** loads the mix of both channels, (left + right) / 2. **CH LEFT** and **CH RIGHT** load one channel alone, with no mixing.
+You should see the strip say what the file will load: **STEREO FILE LOADS: LEFT**, **STEREO FILE LOADS: RIGHT**, **STEREO FILE LOADS: STEREO (MID + SIDE)** or **STEREO FILE LOADS: MIX (L+R)/2**. **CH MIX** loads the mix of both channels, (left + right) / 2. **CH LEFT** and **CH RIGHT** load one channel alone, with no mixing.
+
+**STEREO** (new in the Community OS) loads the same mix as **CH MIX** and also keeps the difference between the channels, the side signal, next to it in sample memory. It takes twice the memory of a mono load and the instrument's **STEREO** row switches to **STEREO**. A project that is saved with such an instrument writes the sample as before, `samples/<name>.wav` (the mix, which any tool and any older version reads), plus `samples/<name>_s.wav` for the side signal. If the second file is missing or does not match when the project is opened, the instrument opens as a mono sample and the log says how many. If another instrument already has the name the second file would take, **STEREO** is refused (**STEREO REFUSED: SIDE FILE NAME TAKEN**), and a save of such a project writes that instrument as mono and says **STEREO SAVED MONO**. The voices do not play the side signal yet: a stereo instrument still sounds as the mix until stereo playback arrives. <!-- QA-FIL-132 --> <!-- QA-FIL-133 --> <!-- QA-FIL-134 --> <!-- QA-FIL-136 -->
 
 The choice is not saved with the project. It lasts until the unit is switched off.
 
@@ -188,7 +190,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 | `F6` (**RESCAN**) | Read the folder again. The strip says **READ AGAIN: n ITEMS** when it is done. | QA-SLD-025 |
 | `F7` (**WT AUTO**) | Choose how the next WAV is read as a wavetable: **AUTO** (a Serum-style table by its windows), by length, 256, 512, 1024 or 2048 frames, or **OFF**. The strip names the choice. | QA-SLD-018 |
 | `F5` (**PLAY**) | Audition the file under the cursor, without loading it: it starts at once and plays while you hold the key. Move the cursor with the key held to hear the next file. | QA-SLD-006, QA-SLD-023 |
-| `F8` (**CH MIX**) | Choose the channel of a stereo file: **CH MIX**, **CH LEFT**, **CH RIGHT**. On a mono file the key shows `--`. | QA-SLD-011, QA-SLD-013 |
+| `F8` (**CH MIX**) | Choose the channel of a stereo file: **CH MIX**, **CH LEFT**, **CH RIGHT**, **STEREO**. On a mono file the key shows `--`. | QA-SLD-011, QA-SLD-013 |
 | `Shift` + `F1` (**0/4**) | Jump the cursor to the start of the list. | QA-SLD-015 |
 | `Shift` + `F2` (**1/4**), `F3` (**2/4**), `F4` (**3/4**) | Jump the cursor to that quarter of the list. | QA-SLD-015 |
 | `Shift` + `F5` (**END**) | Jump the cursor to the last entry. | QA-SLD-001, QA-SLD-015 |

@@ -82,7 +82,7 @@ OG PROJECT: the EXPORT row that writes a project folder in the original firmware
 
 Stereo file: a file with a left and a right channel. Sample load shows **ST** after its name.
 
-Channel: one side of a stereo file. On Sample load, `F8` (**CH MIX**, **CH LEFT**, **CH RIGHT**) chooses what loads.
+Channel: one side of a stereo file. On Sample load, `F8` (**CH MIX**, **CH LEFT**, **CH RIGHT**, **STEREO**) chooses what loads.
 
 Audition: playing a file without loading it. On Sample load, `F5` (**PLAY**) auditions the file under the cursor.
 

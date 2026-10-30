@@ -218,7 +218,9 @@ class Writer {
   Writer(const Writer&) = delete;
   Writer& operator=(const Writer&) = delete;
 
-  void begin(const model::Project& project, core::ByteSink& sink) noexcept;
+  // `stereo_mask` (OS-STEREO (b)): bit n lets instrument slot n's stereo flag be written. The app holds a flag back where the sample has no side signal on the card (rule 4 of docs/specs/OS-STEREO.md: a 1 is
+  // never saved without its file); the project itself is not touched. The default writes every flag as it is.
+  void begin(const model::Project& project, core::ByteSink& sink, std::uint64_t stereo_mask = ~std::uint64_t{0}) noexcept;
   Progress step(std::size_t byte_budget = kDefaultStepBudget) noexcept;
   Progress progress() const noexcept { return progress_; }
   const Report& report() const noexcept { return report_; }
@@ -234,7 +236,13 @@ class Writer {
   bool build_piece() noexcept;
   void fail(Error e, const char* detail) noexcept;
 
+  bool stereo_written(std::uint32_t slot) const noexcept {
+    const model::Instrument* in = project_->instrument(slot);
+    return in != nullptr && in->stereo != 0 && slot < 64u && ((stereo_mask_ >> slot) & 1u) != 0u;
+  }
+
   const model::Project* project_ = nullptr;
+  std::uint64_t stereo_mask_ = ~std::uint64_t{0};
   core::ByteSink* sink_ = nullptr;
   Progress progress_ = Progress::Failed;
   Report report_;

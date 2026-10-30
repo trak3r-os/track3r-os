@@ -132,7 +132,7 @@ struct Instrument {
   std::uint8_t midi_cc[kMidiCcSlotsPerInstrument];
   std::uint8_t vel_sens;
   // OS-STEREO step 2 (INST 1.5, NEW COMMUNITY OS BEHAVIOUR): 1 = the instrument is a stereo sample (kInstStereoMax); a Sample instrument's only, 0 for every other kind. It is the instrument's wish: the sample
-  // plays stereo only while the bank also holds its side signal (decision S4 of docs/specs/OS-STEREO.md), which nothing provides before slice (b). One byte after VEL>: the struct grows to 720 B.
+  // plays stereo only while the bank also holds its side signal (decision S4 of docs/specs/OS-STEREO.md), which a stereo load (slice (b)) provides. One byte after VEL>: the struct grows to 720 B.
   std::uint8_t stereo;
   // The three bytes that would be tail padding, made explicit so a whole-instrument memcmp (Editor::set_instrument, PASTE, the instrument-file load) compares defined bytes. Always 0: init_instrument zeroes them
   // and Project::set_instrument stores them zero (the canonical form); the file has no field for them.
