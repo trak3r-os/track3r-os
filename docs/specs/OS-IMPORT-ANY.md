@@ -42,3 +42,14 @@ Scoped host CI green, `remote_ci mk66` for the size, one firmware-reviewer; both
 - **OpenMPT section of the manual:** the steps follow OpenMPT's own wiki ("Saving and exporting": saving keeps the current type, Song Properties holds the type; "Module formats": MOD has 64 rows, no instruments, 8-bit samples).
 - **I6 (commit 2):** "every order below 64" is applied to the orders the song plays (the song length's worth); the entries behind it may be junk, as in a 31-sample file, and only count toward the pattern total when the whole table fits the file. The printable rule is bytes 0x20..0x7E or NUL for the title and the 15 sample names. The structural test is `formats::mod::is_soundtracker15`, used by `Module::open` (any caller of the reader) and by `ModuleImport::decide` (name says MOD or nothing); a name that says S3M or OctaMED never tries it. The model gets 15 instruments (`sample_count` 15), not 31 with 16 empty; the restart byte is ignored (a Soundtracker file keeps another value there, usually 120).
 - **I7, open research questions, not handled:** Ultimate Soundtracker's effect numbering (1 arpeggio, 2 pitch bend) and the unit of the sample loop start (bytes in the oldest files, words in ProTracker's): both need a real file to decide, and none is in git.
+
+## Unit check (2026-10-30, `build-images/v1.0.1-importany.1/REPORT.md`, not in git)
+
+PASS: a module with no extension imports from ALL FILES (TYPE `?`); `mod.*`, `MOD.*`, `s3m.*` and `med.*` names list and import; three real 15-sample files import and play as 4 channels with 0 underruns; a WAV or text file under a module name or no extension is refused with no question and the Song and Pattern screens unchanged; cuts at 700, 1,000 and 1,083 bytes get the same refusal.
+
+Found:
+- **Loop start in bytes:** in two of the three real 15-sample files the loop only fits the sample when its start is read in bytes. Fix queued as OS-BUG-ST15LOOP.
+- **Effect numbering:** one file uses effects 1 and 2 about 18 times; still an open research question (it needs listening).
+- **A tagged MOD of exactly 1,084 bytes** (no patterns) passes the header, asks the NEW question, then fails `IMPORT FAILED: TRUNCATED` and leaves an empty project. Fix queued as OS-BUG-IMPTRUNC: refuse before the question when the file cannot hold one pattern.
+- **I1, amended (default, to confirm by the maintainer):** another screen and back keeps ALL FILES and the cursor, because the File screen keeps its state; leaving the IMPORT page with F6 resets it to MODULES; the mode is never saved. The unit showed this and it matches the rest of the screen, so the spec follows the build.
+

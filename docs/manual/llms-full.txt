@@ -2135,7 +2135,7 @@ You should see **NEW PROJECT**, then the Pattern screen. With **KEEP INSTRUMENTS
 A module is a song file from an Amiga or PC tracker: ProTracker (MOD), Scream Tracker 3 (S3M) or OctaMED (MED, MMD0 to MMD3). Start on the File screen.
 
 1. Press `F6` (**IMPORT**). The list is the card from its root, with every folder and the module files. A file counts as a module when its name ends in `.mod`, `.s3m`, `.med` or `.mmd0` to `.mmd3`, or starts with `mod.`, `s3m.`, `med.` or `mmd0.` to `mmd3.`, as many Amiga files do. The **TYPE** column says which.
-2. If the file has no type in its name, press `F2` (**ALL**). The list shows every file, and **TYPE** says **?** for a name that tells nothing. `F2` again (**MODULES**) goes back. The list is read again each time, and the page is on **MODULES** whenever you come back to it.
+2. If the file has no type in its name, press `F2` (**ALL**). The list shows every file, and **TYPE** says **?** for a name that tells nothing. `F2` again (**MODULES**) goes back. The list is read again each time. Leaving the page with `F6` puts it back on **MODULES**; another screen and back keeps the list as it was.
 3. Press `Up` or `Down` to the file and press `F1` (**IMPORT**). On a folder `F1` (**ENTER**) opens it, and `F3` (**UP**) goes up.
 4. If the project has changes that no save has taken, press `F1` again, as for **OPEN**.
 
