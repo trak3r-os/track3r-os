@@ -6,7 +6,7 @@ Every behaviour carries one of three labels: **verified parity** (compared with 
 
 ## Where things stand
 
-**v1.0.1 is published and fixes the pads on later Trackers (issue #1, now closed). v1.0.0 (2026-10-25) was the first release.** Merged, checks on the unit pending: OS-CFG-ARROWS, OS-BUG-FWLIST and OS-USBOUTS (USB outputs of 2, 4, 6, 8 or 10 channels per project). In progress: OS-BUG-FWLIST. Queued: OS-BUG-MODDRIVE (issue #2), OS-PERF-CPU2 and OS-PERF-LFO-STEP. Perform PLAYBACK and the five Perform LFO rows are in. Downloads on the Releases page: `v1.0.1` and `v1.0.0` (each the firmware file and `SHA256SUMS`), `apps-v1.0.0` (the app modules) and `fixtures-1` (test data for `tools/testdata`). What is open is checks on the unit (below) and the rows in progress or queued.
+**v1.0.1 is published and fixes the pads on later Trackers (issue #1, now closed). v1.0.0 (2026-10-25) was the first release.** Merged, checks on the unit pending: OS-CFG-ARROWS, OS-BUG-FWLIST and OS-USBOUTS (USB outputs of 2, 4, 6, 8 or 10 channels per project). Fixed on dev, in the next release: OS-BUG-MODDRIVE (issue #2). In progress: OS-PERF-CPU2. Queued: OS-PERF-LFO-STEP. Perform PLAYBACK and the five Perform LFO rows are in. Downloads on the Releases page: `v1.0.1` and `v1.0.0` (each the firmware file and `SHA256SUMS`), `apps-v1.0.0` (the app modules) and `fixtures-1` (test data for `tools/testdata`). What is open is checks on the unit (below) and the rows in progress or queued.
 
 | Item | State |
 |---|---|
@@ -54,7 +54,8 @@ Run on real hardware by a person or `o3hil` (names are QA catalogue rows or back
 Not yet verified on a unit (host and simulator tests exist for most). The rows marked UNIT PENDING in `docs/roadmap/BACKLOG.md` name each check.
 
 - Config and Record arrows (OS-CFG-ARROWS, tester image `v1.0.1-arrows.1`): install, smoke and the changed HIL steps passed. By hand: the feel and auto-repeat of the arrows on Config and Record, Shift + arrow (coarse), the USB pending value with F7, and the READ ONLY row.
-- USB outputs of 2, 4, 6, 8 or 10 channels per project (OS-USBOUTS, Mixer › STEMS): Linux enumeration at each count with the USB return on and off (QA-MIX-056), and `usb return off` in the DISK screen. The tester image `v1.0.1-usbouts.1` is being gated.
+- USB outputs of 2, 4, 6, 8 or 10 channels per project (OS-USBOUTS, Mixer › STEMS): checked on Linux (2026-10-30). Left: macOS and Windows enumeration (reports welcome).
+- Module instrument drive (OS-BUG-MODDRIVE, issue #2): fixed on dev (2026-10-30), in the next release. Left: the cost check with the shaping off (Dense8 against v1.0.1-usbouts.1), and listening for QA-MOD-207 and QA-MOD-208.
 - Feel of the DJ scratch and of encoder acceleration; scratch still-to-moving sound (OS-SCRATCH, OS-SCRATCH-IDLE, OS-SCRATCH-IDLE2, QA-PRF-150). The Instrument arrow keys (OS-INSTR-ARROWS) and the LFO picture (OS-LFO-GRAPH) are by hand.
 - HIGH PASS and BAND PASS were checked on earlier candidates; the compressor variations (RATIO, ATTACK, RELEASE, MAKEUP, DETECTOR) and the "back to size before the load" half of QA-SLD-035 stay open.
 - Perform: a multi-slice instrument with SMP POS and SMP END, the +100 and -100 values, live pad notes with PLAYBACK from Master or Song, Retrigger (55) on a backward note, an instrument with its own LFO under the LFO rows, POS LFO on wavetable and granular instruments, step effect 35 with a held FLT LFO (QA-PRF-151, 153, 160). QA-INS-219.
@@ -85,7 +86,7 @@ Not yet verified on a unit (host and simulator tests exist for most). The rows m
 Ordered for a fresh session:
 
 1. A person presses INSTALL in Update from the unit on the release file, and runs the checks under "Open on the unit"; record each result as PASS, FAIL or NOT RUN in the backlog rows.
-2. After 1.0: OS-BUG-HOTSWAP (the card-swap crash), then OS-BUG-FWLIST (merged, unit check pending), then OS-BUG-MODDRIVE (in progress), then the queued rows (OS-PERF-CPU2, OS-PERF-LFO-STEP), then the pending rows in `docs/roadmap/BACKLOG.md` and the latent issues below.
+2. After 1.0: OS-BUG-HOTSWAP (the card-swap crash), then OS-BUG-FWLIST (merged, unit check pending), then OS-BUG-MODDRIVE (fixed on dev, unit check pending), then OS-PERF-CPU2 (in progress) and the queued OS-PERF-LFO-STEP, then the pending rows in `docs/roadmap/BACKLOG.md` and the latent issues below.
 
 Outside contributors: issues come in through the forms in `.github/ISSUE_TEMPLATE/`; pull requests target `dev` (see `CONTRIBUTING.md`).
 
