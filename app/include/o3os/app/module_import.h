@@ -80,13 +80,22 @@ void module_strip_text(const ModuleSummary& s, char* out, std::size_t cap) noexc
 class ModuleImport final : public PcmFeed {
  public:
   enum class State : std::uint8_t { Idle, Running, Done, Failed };
-  enum class Start : std::uint8_t { Started, BadPath };
+  enum class Start : std::uint8_t { Started, BadPath, NotModule };
+  // OS-IMPORT-ANY I3: what a file is, from its first bytes and its name. The name's word (extension or prefix, module_name_kind) must agree with the bytes (a MOD and an S3M are one reader's: either name takes
+  // either); a name that says nothing is decided by the bytes. NotModule: no reader of this OS takes the file. Unreadable: it would not open or read (begin() then fails with its own words).
+  enum class Probe : std::uint8_t { Mod, S3m, Med, NotModule, Unreadable };
+  // Reads at most formats::kSniffBytes of `path` (UTF-8, relative to the card's root) and says what it is; a file the card does not give is Unreadable. READ ONLY, nothing else is touched: the File screen asks
+  // it before the NEW question, so that a file that is no module never asks it. `path` that is not a valid path is NotModule.
+  static Probe probe(hal::storage::Storage& storage, const char* path) noexcept;
+  // The decision alone, from the bytes read (`head`, `n` of them) of a file of `size` bytes called `name` (a path or a bare name), for the tests.
+  static Probe decide(const char* name, const std::uint8_t* head, std::size_t n, std::uint32_t size) noexcept;
 
   static constexpr std::size_t kMinCells = 256;   // a step always moves this much, whatever budget it was given
   static constexpr std::size_t kFillCells = 128;  // what one card read of the window costs in the step budget (a hostile MMD's jumping offsets seek backward on every cell)
 
-  // Starts importing `path` (UTF-8, relative to the card's root, "MOD/song.mod") into `arena`'s project. The reader is chosen by the name's extension (.mod .s3m: MOD / S3M, by signature; .med .mmd0..3:
-  // OctaMED). BadPath: not a valid path or not a module extension (nothing changed). A file that will not open is a Failed state at once (the document is untouched). Nothing is written to `arena` here: the reader starts at the first step().
+  // Starts importing `path` (UTF-8, relative to the card's root, "MOD/song.mod") into `arena`'s project. The reader is chosen by the file's first bytes, through probe() (OS-IMPORT-ANY I3: MOD and S3M
+  // by their signatures, OctaMED by MMD0..3; a name with an extension or a prefix that says otherwise is refused, a name that says nothing is decided by the bytes). BadPath: not a valid path; NotModule: no
+  // module reader takes the file (nothing changed, the last import's report stays). A file that will not open is a Failed state at once (the document is untouched). Nothing is written to `arena` here: the reader starts at the first step().
   // `storage` and `arena` must outlive the import and the sample phase.
   Start begin(hal::storage::Storage& storage, const char* path, model::ModelArena& arena, ImportEngine engine) noexcept;
   // A slice of the work: about `byte_budget` / 8 cells (at least kMinCells) of the reader, a card read (a window fill) counting kFillCells. The first call resets the document.

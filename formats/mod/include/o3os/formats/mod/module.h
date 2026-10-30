@@ -12,8 +12,8 @@ namespace o3os::formats::mod {
 // random-access source and never trusts a number: every offset is range-checked in 64-bit arithmetic, every count is capped by `caps`, nothing recurses, nothing allocates, integers are
 // decoded by hand (never by struct punning), and a file of any content ends in a typed Status. Nothing here knows the project model: the mapping is import.h.
 //
-// MOD: M.K., M!K!, M&K!, N.T. (4 channels), FLT4, FLT8 (8 channels, patterns stored in pairs), 1CHN..9CHN and 10CH..32CH. The 15-sample Soundtracker files have no signature and are refused
-// (BadMagic). S3M: the "SCRM" header, PCM instruments (8 or 16 bit, signed or unsigned, a stereo sample reads its left channel), packed patterns; AdLib instruments and ADPCM-packed samples are
+// MOD: M.K., M!K!, M&K!, N.T. (4 channels), FLT4, FLT8 (8 channels, patterns stored in pairs), 1CHN..9CHN and 10CH..32CH. The 15-sample Soundtracker files have no signature: open() takes one when its structure holds
+// (is_soundtracker15, OS-IMPORT-ANY I6), sniff_kind() never claims it. S3M: the "SCRM" header, PCM instruments (8 or 16 bit, signed or unsigned, a stereo sample reads its left channel), packed patterns; AdLib instruments and ADPCM-packed samples are
 // reported and refused. Contexts: main loop only (a job); a Module is about 11 KB (the decoded S3M pattern in view is in it), the rest is read on demand.
 
 namespace caps {
@@ -89,7 +89,7 @@ struct SampleInfo {
   char name[caps::kSampleNameMax + 1] = {};  // sanitised: bytes outside 0x20..0x7E are '?'
 };
 
-enum class Variant : std::uint8_t { None, Mk, Mk2, Nt, Flt4, Flt8, Chn, S3m };
+enum class Variant : std::uint8_t { None, Mk, Mk2, Nt, Flt4, Flt8, Chn, S3m, St15 };  // St15: a 15-sample Soundtracker file (no tag; read as 4 channels)
 
 struct ModuleInfo {
   Kind kind = Kind::None;
@@ -170,6 +170,12 @@ class Module {
 // What the first `n` bytes of a file say it is: an S3M ("SCRM" at 44, 0x1A and type 16 before it: needs 48 bytes) or a MOD whose tag is one this reader takes (at 1,080: needs 1,084 bytes).
 // Kind::None when they say neither, and for a head too short to tell.
 Kind sniff_kind(const std::uint8_t* head, std::size_t n) noexcept;
+
+// OS-IMPORT-ANY I6: does the structure of a file say it is a 15-sample Soundtracker module? Such a file has no signature, so this never decides a listing or a sniff (sniff_kind says None): a caller asks it
+// when the name says MOD or says nothing. `head` holds the first `n` bytes (the 600-byte header at least) and `file_size` is the file's. True when: the song length is 1..128; every order the song plays is below 64;
+// every sample volume is at most 64; the title and the sample names are printable ASCII or NUL; and the file holds the header, the patterns (the highest order of the table + 1, or of the played ones when the whole
+// table does not fit) of 1,024 bytes each, and the samples, the last one allowed to be short. open() reads such a file as a 4-channel M.K. module with 15 samples (Variant::St15).
+bool is_soundtracker15(const std::uint8_t* head, std::size_t n, std::uint32_t file_size) noexcept;
 
 // The Paula period of ProTracker's table at finetune 0 for the 36 notes C-1 .. B-3: index 0..35.
 extern const std::uint16_t kPeriodTable[36];

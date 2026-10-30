@@ -366,7 +366,9 @@ TEST_CASE("module import: a file cut short fails with its reason and the strip s
   Rig q;
   const Bytes med = med_bytes();
   q.card.add_file("MED/cut.med", Bytes(med.begin(), med.begin() + 40));
-  CHECK(q.run("MED/cut.med") == ModuleImport::State::Failed);
+  CHECK(q.run("MED/cut.med") == ModuleImport::State::Idle);  // OS-IMPORT-ANY: too short to be a song, so the header refuses it (the registry's sniff floor)
+  q.card.add_file("MED/mid.med", Bytes(med.begin(), med.begin() + 900));  // past the floor (header + song), inside the body
+  CHECK(q.run("MED/mid.med") == ModuleImport::State::Failed);
   CHECK_FALSE(std::string(q.import->summary().error).empty());
 }
 
@@ -377,8 +379,10 @@ TEST_CASE("module import: bytes that are no module, a missing file and a wrong e
     noise[i] = static_cast<std::uint8_t>(i * 131u + 7u);
   }
   r.card.add_file("MOD/noise.mod", noise);
-  CHECK(r.run("MOD/noise.mod") == ModuleImport::State::Failed);
-  CHECK(std::string(r.import->summary().error) == "UNKNOWN FILE TYPE");
+  // OS-IMPORT-ANY I3: the bytes are read before anything starts: noise under a module's name is refused outright (it used to fail after the reset, with UNKNOWN FILE TYPE)
+  CHECK(r.run("MOD/noise.mod") == ModuleImport::State::Idle);
+  CHECK(r.import->begin(r.card, "MOD/noise.mod", *r.arena, ImportEngine::Auto) == ModuleImport::Start::NotModule);
+  CHECK_FALSE(r.import->summary().valid);
 
   // a card without the file: the document is not touched
   Rig m;
@@ -391,14 +395,15 @@ TEST_CASE("module import: bytes that are no module, a missing file and a wrong e
   Rig w;
   w.card.add_file("MOD/readme.txt", Bytes(100, 1));
   CHECK(w.run("MOD/readme.txt") == ModuleImport::State::Idle);  // not a module name: nothing started
-  CHECK(w.import->begin(w.card, "MOD/readme.txt", *w.arena, ImportEngine::Auto) == ModuleImport::Start::BadPath);
+  CHECK(w.import->begin(w.card, "MOD/readme.txt", *w.arena, ImportEngine::Auto) == ModuleImport::Start::NotModule);
   CHECK(w.import->begin(w.card, "../x.mod", *w.arena, ImportEngine::Auto) == ModuleImport::Start::BadPath);
 
   // a refused start keeps the last import's report
   Rig k;
+  k.card.add_file("MOD/readme.txt", Bytes(100, 1));
   k.card.add_file("MOD/kc_test.mod", mod_bytes());
   NEED(k.run("MOD/kc_test.mod") == ModuleImport::State::Done);
-  CHECK(k.import->begin(k.card, "MOD/readme.txt", *k.arena, ImportEngine::Auto) == ModuleImport::Start::BadPath);
+  CHECK(k.import->begin(k.card, "MOD/readme.txt", *k.arena, ImportEngine::Auto) == ModuleImport::Start::NotModule);
   CHECK(k.import->summary().ok);
   CHECK(std::string(k.import->summary().name) == "KC_TEST.MOD");
 }
@@ -441,14 +446,132 @@ TEST_CASE("module import: begin() writes nothing to the document; the importer's
   CHECK(m.arena->project.generation() == before);
   CHECK(m.arena->project.song_length() == 1);
 
-  // A bad signature is found by the reader, after the reset: the document is empty (and the platform empties the voices' table and the bank).
+  // Noise under a module's name never reaches the reader (OS-IMPORT-ANY I3): begin() refuses it and the document is as it was.
   Rig n;
   n.card.add_file("MOD/noise.mod", Bytes(5000, 0x5A));
   NEED(n.arena->project.create_pattern(1, 32) == model::Status::Ok);
   NEED(n.arena->project.append_order(1) == model::Status::Ok);
-  CHECK(n.run("MOD/noise.mod") == ModuleImport::State::Failed);
-  CHECK(n.import->document_touched());
-  CHECK(n.arena->project.song_length() == 0);
+  const std::uint32_t kept = n.arena->project.generation();
+  CHECK(n.run("MOD/noise.mod") == ModuleImport::State::Idle);
+  CHECK_FALSE(n.import->document_touched());
+  CHECK(n.arena->project.generation() == kept);
+  CHECK(n.arena->project.song_length() == 1);
+
+  // A bad file the header cannot tell from a module is found by the reader, after the reset: the document is empty (and the platform empties the voices' table and the bank).
+  Rig t;
+  Bytes cut = mod_bytes();
+  cut.resize(1100);  // the signature is there, the patterns are not
+  t.card.add_file("MOD/cut.mod", cut);
+  NEED(t.arena->project.create_pattern(1, 32) == model::Status::Ok);
+  NEED(t.arena->project.append_order(1) == model::Status::Ok);
+  CHECK(t.run("MOD/cut.mod") == ModuleImport::State::Failed);
+  CHECK(t.import->document_touched());
+  CHECK(t.arena->project.song_length() == 0);
+}
+
+// OS-IMPORT-ANY I3: the reader is chosen by the file's bytes, and the name only has to agree.
+TEST_CASE("module import: a module under a wrong or empty name imports by its header; a name that disagrees with the bytes refuses (OS-IMPORT-ANY I3)") {
+  struct Case {
+    const char* path;
+    int kind;  // 0 MOD, 1 S3M, 2 MED
+    bool imports;
+  };
+  const Case cases[] = {
+      {"X/song", 0, true},         {"X/song.dat", 0, true},     {"X/mod.title", 0, true},  {"X/MOD.title", 0, true},     {"X/s3m.title", 1, true}, {"X/song.s3m", 0, true},
+      {"X/song.mod", 1, true},     {"X/noext", 1, true},        {"X/med.title", 2, true},  {"X/mmd1.title", 2, true},    {"X/song", 2, true},      {"X/song.med", 0, false},
+      {"X/song.mod", 2, false},    {"X/mod.title", 2, false},   {"X/med.title", 0, false}, {"X/song.s3m", 2, false},
+  };
+  for (const Case& c : cases) {
+    Rig r;
+    r.card.add_file(c.path, c.kind == 0 ? mod_bytes() : (c.kind == 1 ? s3m_bytes() : med_bytes()));
+    const ModuleImport::State end = r.run(c.path);
+    INFO(c.path << " kind " << c.kind);
+    if (c.imports) {
+      CHECK(end == ModuleImport::State::Done);
+      CHECK(r.import->summary().ok);
+    } else {
+      CHECK(end == ModuleImport::State::Idle);
+      CHECK(r.import->begin(r.card, c.path, *r.arena, ImportEngine::Auto) == ModuleImport::Start::NotModule);
+    }
+  }
+}
+
+TEST_CASE("module import: a file that is no module is refused by probe() whatever its name, and nothing is touched (OS-IMPORT-ANY I3, I4)") {
+  Rig r;
+  Bytes wav(2000, 0);
+  std::memcpy(wav.data(), "RIFF", 4);
+  std::memcpy(wav.data() + 8, "WAVE", 4);
+  r.card.add_file("X/kick.mod", wav);   // a WAV renamed .mod
+  r.card.add_file("X/kick", wav);       // no name
+  r.card.add_file("X/empty.mod", Bytes{});
+  r.card.add_file("X/tiny", Bytes(10, 'M'));
+  Bytes mmd = med_bytes();
+  mmd.resize(16);  // a bare MMD0 header, too short to be a song
+  r.card.add_file("X/short.med", mmd);
+  for (const char* p : {"X/kick.mod", "X/kick", "X/empty.mod", "X/tiny", "X/short.med"}) {
+    INFO(p);
+    CHECK(ModuleImport::probe(r.card, p) == ModuleImport::Probe::NotModule);
+  }
+  r.card.add_file("X/good.mod", mod_bytes());
+  CHECK(ModuleImport::probe(r.card, "X/good.mod") == ModuleImport::Probe::Mod);
+  CHECK(ModuleImport::probe(r.card, "X/absent.mod") == ModuleImport::Probe::Unreadable);
+  CHECK(ModuleImport::probe(r.card, "../x.mod") == ModuleImport::Probe::NotModule);
+  // a failed probe changes nothing: the document and the last report
+  NEED(r.arena->project.create_pattern(1, 32) == model::Status::Ok);
+  const std::uint32_t generation = r.arena->project.generation();
+  CHECK(r.import->begin(r.card, "X/kick.mod", *r.arena, ImportEngine::Auto) == ModuleImport::Start::NotModule);
+  CHECK_FALSE(r.import->summary().valid);
+  CHECK(r.arena->project.generation() == generation);
+}
+
+// OS-IMPORT-ANY I6, I7: a 15-sample Soundtracker file (no signature) imports when the name says MOD or says nothing, as a 4-channel module with 15 instruments.
+TEST_CASE("module import: a 15-sample Soundtracker file imports under a MOD name or none, never under another format's name (OS-IMPORT-ANY I6)") {
+  const Bytes mk = mod_bytes();
+  Bytes st(mk.begin(), mk.begin() + 470);  // the title and 15 sample headers, then the song length, restart and orders, then the rest (the 16 later headers and the tag cut out)
+  st.insert(st.end(), mk.begin() + 950, mk.begin() + 1080);
+  st.insert(st.end(), mk.begin() + 1084, mk.end());
+  st[471] = 120;
+  struct Case {
+    const char* path;
+    bool imports;
+  };
+  const Case cases[] = {{"X/old.mod", true}, {"X/mod.old", true}, {"X/old", true},      {"X/old.dat", true},  {"X/MOD.OLD", true},
+                        {"X/old.s3m", false}, {"X/s3m.old", false}, {"X/old.med", false}, {"X/mmd1.old", false}};
+  for (const Case& c : cases) {
+    Rig r;
+    r.card.add_file(c.path, st);
+    INFO(c.path);
+    if (c.imports) {
+      NEED(r.run(c.path) == ModuleImport::State::Done);
+      CHECK(r.import->summary().ok);
+      CHECK(r.import->summary().channels == 4);
+      CHECK(r.import->summary().format == app::ModuleSummary::Format::Mod);
+      CHECK(r.arena->project.song_length() == 1);
+      CHECK(ModuleImport::probe(r.card, c.path) == ModuleImport::Probe::Mod);
+    } else {
+      CHECK(r.run(c.path) == ModuleImport::State::Idle);
+      CHECK(ModuleImport::probe(r.card, c.path) == ModuleImport::Probe::NotModule);
+    }
+  }
+  // the samples phase: the one sample is the file's, 64 frames
+  Rig s;
+  s.card.add_file("X/old.mod", st);
+  NEED(s.run("X/old.mod") == ModuleImport::State::Done);
+  CHECK(s.samples());
+  CHECK(s.import->summary().samples_loaded == 1);
+  // a header that fails the structure (song length 0) is not guessed: noise-like, refused under every name
+  Bytes bad = st;
+  bad[470] = 0;
+  Rig n;
+  n.card.add_file("X/bad.mod", bad);
+  n.card.add_file("X/bad", bad);
+  CHECK(n.run("X/bad.mod") == ModuleImport::State::Idle);
+  CHECK(n.run("X/bad") == ModuleImport::State::Idle);
+  // the 31-sample file under no name is a MOD as before
+  Rig k;
+  k.card.add_file("X/new", mk);
+  NEED(k.run("X/new") == ModuleImport::State::Done);
+  CHECK(k.import->summary().channels == 4);
 }
 
 namespace {

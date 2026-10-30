@@ -245,14 +245,68 @@ void ModuleImport::fail(const char* text) noexcept {
   state_ = State::Failed;
 }
 
+ModuleImport::Probe ModuleImport::decide(const char* name, const std::uint8_t* head, std::size_t n, std::uint32_t size) noexcept {
+  // What the bytes are: the registry's own tests (formats/src/builtin_formats.cpp sniff_med, sniff_mod, sniff_s3m; the S3M and MOD ones are formats::mod::sniff_kind).
+  Probe seen = Probe::NotModule;
+  if (n >= 4u && std::memcmp(head, "MMD", 3) == 0 && head[3] >= '0' && head[3] <= '3' && size >= med::caps::kHeaderBytes + med::caps::kSongBytes) {
+    seen = Probe::Med;
+  } else {
+    const mod::Kind k = mod::sniff_kind(head, n);
+    seen = k == mod::Kind::Mod ? Probe::Mod : (k == mod::Kind::S3m ? Probe::S3m : Probe::NotModule);
+  }
+  const char* base = name;
+  for (const char* p = name; *p != '\0'; ++p) {
+    base = *p == '/' ? p + 1 : base;
+  }
+  const ModuleName said = module_name_kind(base);
+  // OS-IMPORT-ANY I6: a 15-sample Soundtracker file has no signature, so it is tried only when the name says MOD or says nothing (the sniff never claims it).
+  if (seen == Probe::NotModule && (said == ModuleName::None || said == ModuleName::Mod) && mod::is_soundtracker15(head, n, size)) {
+    seen = Probe::Mod;
+  }
+  if (seen == Probe::NotModule) {
+    return seen;
+  }
+  if (said != ModuleName::None && (said == ModuleName::Med) != (seen == Probe::Med)) {
+    return Probe::NotModule;  // the name says OctaMED and the bytes a MOD / S3M, or the other way round (a .mod that holds an S3M is one reader's: it goes on)
+  }
+  return seen;
+}
+
+ModuleImport::Probe ModuleImport::probe(hal::storage::Storage& storage, const char* path) noexcept {
+  if (path == nullptr || !hal::storage::valid_path(path)) {
+    return Probe::NotModule;
+  }
+  hal::storage::FileHandle file{};
+  std::uint32_t size = 0;
+  if (storage.open(path, file) != Status::Ok) {
+    return Probe::Unreadable;
+  }
+  std::uint8_t head[formats::kSniffBytes];
+  std::size_t have = 0;
+  Status s = storage.size(file, size);
+  const std::size_t want = size < sizeof head ? size : sizeof head;
+  while (s == Status::Ok && have < want) {
+    std::size_t got = 0;
+    s = storage.read(file, head + have, want - have, got);
+    if (s == Status::Ok && (got == 0u || got > want - have)) {
+      s = Status::Io;
+    }
+    have += s == Status::Ok ? got : 0u;
+  }
+  storage.close(file);
+  return s == Status::Ok ? decide(path, head, have, size) : Probe::Unreadable;
+}
+
 ModuleImport::Start ModuleImport::begin(hal::storage::Storage& storage, const char* path, model::ModelArena& arena, ImportEngine engine) noexcept {
   if (path == nullptr || !hal::storage::valid_path(path)) {
     return Start::BadPath;  // (nothing changes: the last import's report stays)
   }
-  const bool med_ext = DirScan::ends_with_any_ci(path, ".med .mmd0 .mmd1 .mmd2 .mmd3");
-  if (!med_ext && !DirScan::ends_with_any_ci(path, ".mod .s3m")) {
-    return Start::BadPath;
+  // OS-IMPORT-ANY I3: the reader is the bytes' (the name only has to agree). A file the card will not give (Unreadable) goes on: the open below fails with its own words, as it always has.
+  const Probe seen = probe(storage, path);
+  if (seen == Probe::NotModule) {
+    return Start::NotModule;
   }
+  const bool med_ext = seen == Probe::Med || (seen == Probe::Unreadable && module_name_kind(path) == ModuleName::Med);
   close();
   state_ = State::Idle;
   summary_ = ModuleSummary{};

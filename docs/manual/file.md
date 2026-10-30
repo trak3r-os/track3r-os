@@ -1,7 +1,7 @@
 <!-- manual-sync: 67c2869a -->
 <!--
 Chapter: File. Rules: .claude/skills/manual-writing/SKILL.md. Scope: projects, saving and loading, the card on a computer. Sources: docs/qa/catalogue/file.md (QA-FIL-001, 002, 012, 013, 032 to 042, 060 to 062, 070 to 073, 080, 084, 087, 088, 091, 093, 094), docs/qa/catalogue/global.md (QA-GLB-008, 009, 011), docs/ui/ui-map.md (File row).
-Not in this chapter: the IMPORT page (QA-FIL-003 to 011), the EXPORT page and WAV export (QA-FIL-020 to 025), stems (QA-FIL-050 to 057), the OG PROJECT row (QA-FIL-082, 083, 085, 086, 089; see export.md).
+Not in this chapter: the IMPORT page beyond the module task (QA-FIL-005 to 011, the engine, the report), the EXPORT page and WAV export (QA-FIL-020 to 025), stems (QA-FIL-050 to 057), the OG PROJECT row (QA-FIL-082, 083, 085, 086, 089; see export.md).
 Dropped rows, not written: QA-FIL-030, 031, 043 (RENAME of a project folder). Open rows, not written: none. QA-FIL-010, 011, 044 and 064 are host PASS with unit open.
 Brief tier (skill section 0): no How it works and no Try it. The USB disk tasks moved to usb_disk.md (C4 fold); the console export task keeps the chapter over the 800-word brief cap.
 -->
@@ -65,6 +65,30 @@ You should see **NEW PROJECT**, then the Pattern screen. With **KEEP INSTRUMENTS
 
 > **Careful**: **ALL** removes every instrument and frees the sample memory. Save first if you want to keep them.
 
+### Import a module file
+<!-- sync: src=app/src/file_actions.cpp qa=QA-FIL-003,QA-FIL-125,QA-FIL-126,QA-FIL-127,QA-FIL-128,QA-FIL-129 -->
+
+A module is a song file from an Amiga or PC tracker: ProTracker (MOD), Scream Tracker 3 (S3M) or OctaMED (MED, MMD0 to MMD3). Start on the File screen.
+
+1. Press `F6` (**IMPORT**). The list is the card from its root, with every folder and the module files. A file counts as a module when its name ends in `.mod`, `.s3m`, `.med` or `.mmd0` to `.mmd3`, or starts with `mod.`, `s3m.`, `med.` or `mmd0.` to `mmd3.`, as many Amiga files do. The **TYPE** column says which. <!-- QA-FIL-003, QA-FIL-125 -->
+2. If the file has no type in its name, press `F2` (**ALL**). The list shows every file, and **TYPE** says **?** for a name that tells nothing. `F2` again (**MODULES**) goes back. The list is read again each time, and the page is on **MODULES** whenever you come back to it. <!-- QA-FIL-126 -->
+3. Press `Up` or `Down` to the file and press `F1` (**IMPORT**). On a folder `F1` (**ENTER**) opens it, and `F3` (**UP**) goes up. <!-- QA-FIL-004 -->
+4. If the project has changes that no save has taken, press `F1` again, as for **OPEN**. <!-- QA-FIL-008 -->
+
+You should see **IMPORTING** and the name, then **IMPORTED** and the name. The module replaces the project; **SAVE AS** names it. The OS reads the first bytes of the file, not its name, to know what it is. A file that no reader takes says **NOT A MODULE THIS OS READS**, asks nothing and changes nothing. A real module cut off inside its header or song list says the same, not a more precise reason; the project stays as it was. A name that says one format over bytes of another is refused the same way, except that a MOD and an S3M may swap names. <!-- QA-FIL-127, QA-FIL-128 --> The oldest Soundtracker modules have 15 samples and no tag. They import when the name says MOD or says nothing, as a 4-channel song. Their own effect numbers are not handled. <!-- QA-FIL-129 --> New in track3r-os. Not yet checked on the unit.
+
+### Convert other module formats with OpenMPT
+
+The OS reads MOD, S3M and OctaMED. Formats such as XM, IT, MTM, 669 or Oktalyzer are not read. OpenMPT, a free tracker for a computer, opens many of them and can save a copy as S3M, or as MOD for four channels. <!-- sync: src=app/src/module_import.cpp qa=QA-FIL-128 -->
+<!-- OpenMPT manual, "Saving and exporting" and "Module formats": Song Properties holds the type; saving keeps the current type; MOD: 64 rows, no instruments, 8-bit samples -->
+
+1. Open the file in OpenMPT.
+2. Open the Song Properties dialog and choose the new module type, S3M or MOD. OpenMPT warns about what the type cannot hold. A MOD has 64 rows to a pattern and plain 8-bit samples, so instruments are turned into samples. Other features may be lost too, and the song may sound different.
+3. Save the file from the **File** menu, under a new name, and keep the original.
+4. Put the copy on the card and import it as above.
+
+Listen to the result and compare it with the original in OpenMPT. The conversion is OpenMPT's, not the OS's.
+
 ### Delete a project
 
 Start on the PROJECTS page. Deleting hides a project. It does not erase it.
@@ -120,7 +144,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 <!-- /manual-tables -->
 
 <!-- manual-tables: hand -->
-The table shows the PROJECTS and EXPORT pages. The IMPORT page (`F6`) has a key row of its own, which changes while you use it, so it is not in the table. `F1` reads **ENTER** while the cursor is on a folder and **IMPORT** on a file. `F2` is **RESCAN**, `F3` **UP**, `F4` **SAVE**, `F5` **SAVE AS** and `F6` **PROJECTS**. `F7` shows the engine the module's commands go to: **FX AUTO**, **FX AMIGA** or **FX MODRN**. `F8` is **REPORT**, and **LIST** while the report is open. Its Shift row is the last column. <!-- QA-FIL-003, QA-FIL-007, QA-FIL-009 -->
+The table shows the PROJECTS and EXPORT pages. The IMPORT page (`F6`) has a key row of its own, which changes while you use it, so it is not in the table. `F1` reads **ENTER** while the cursor is on a folder and **IMPORT** on a file. `F2` is **ALL**, or **MODULES** once the list shows every file, `F3` **UP**, `F4` **SAVE**, `F5` **SAVE AS** and `F6` **PROJECTS**. `F7` shows the engine the module's commands go to: **FX AUTO**, **FX AMIGA** or **FX MODRN**. `F8` is **REPORT**, and **LIST** while the report is open. Its Shift row is the last column. <!-- QA-FIL-003, QA-FIL-007, QA-FIL-009 -->
 
 | Key | What it does | Ref |
 |---|---|---|
@@ -129,7 +153,7 @@ The table shows the PROJECTS and EXPORT pages. The IMPORT page (`F6`) has a key 
 | `F3` (**NEW**) | asks which new project. `F3` again is **ALL**. `F1` is **KEEP INSTRUMENTS** | QA-FIL-070, QA-FIL-071 |
 | `F4` (**SAVE**) | saves the project | QA-FIL-072 |
 | `F5` (**SAVE AS**) | saves under a new name | QA-FIL-061 |
-| `F6` (**IMPORT**) | opens the IMPORT page. Its keys are in the note above the table; the page itself is not described in this manual yet | QA-FIL-003 |
+| `F6` (**IMPORT**) | opens the IMPORT page. Its keys are in the note above the table; [Import a module file](#import-a-module-file) describes the page | QA-FIL-003 |
 | `F7` (**EXPORT**) | opens the EXPORT page. Its keys are in the EXPORT column above; the page is described in [Export](export.md) | QA-FIL-020 |
 | `Shift` + `F1` to `F4` (**0/4** to **3/4**) | move the cursor to a quarter of the list | QA-FIL-002 |
 | `Shift` + `F5` (**END**) | moves the cursor to the last project | QA-FIL-002 |

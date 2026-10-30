@@ -311,9 +311,10 @@ TEST_CASE("sim card: File > IMPORT of a module replaces the document with its so
   CHECK(holds(head + "tap f7\ntap f7\ntap f1\nwait 800\nassert state msg=~^IMPORTED_REF.MOD\nassert model pat.1.0.1.fx1=46:55\n"));
 }
 
-TEST_CASE("sim card: a module that is not one fails the import, the strip says why, and the document is the empty one the importer leaves") {
+TEST_CASE("sim card: a file that is not a module is refused before anything starts (OS-IMPORT-ANY I3): the strip says why, the document stays, and the NEW question is never asked") {
   ScratchDir scratch("simcard-badmod");
   NEED(scratch.ok());
   write_file(fs::path(scratch.path()) / "junk.mod", std::vector<std::uint8_t>(300, 0x5A));
-  CHECK(holds("document\ncard \"" + scratch.path() + "\"\ntap file\nwait 50\ntap f6\nwait 100\ntap f1\nwait 600\nassert state screen=FILE msg=~^IMPORT_JUNK.MOD_FAILED\nassert model order.len=0\n"));
+  CHECK(holds("document\ncard \"" + scratch.path() + "\"\ntap file\nwait 50\ntap f6\nwait 100\ntap f1\nwait 300\nassert state screen=FILE msg=NOT_A_MODULE_THIS_OS_READS\n"
+                     "assert model inst.1.name=KICK\nassert model order.len=1\n"));  // (the demo document, untouched: the old importer left an empty one)
 }

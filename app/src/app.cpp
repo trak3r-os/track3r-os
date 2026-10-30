@@ -1664,7 +1664,7 @@ void App::start_files_scan() noexcept {
     saves_->recent_refresh();  // OS-FILES part B: the projects are being listed; the RECENT file of this card is read (a few bytes) before they are
   }
   const DirScan::Begin begun = wavs      ? files_.begin(*storage_, state_.wav.folder, state_.wav.pti ? kPtiFilter : kWavFilter)
-                               : modules ? files_.begin(*storage_, state_.import.folder, kModuleFilter)
+                               : modules ? files_.begin(*storage_, state_.import.folder, state_.import.all ? kAllFilesFilter : kModuleFilter)  // (OS-IMPORT-ANY I1)
                                          : files_.begin(*storage_, kProjectsFolder, kProjectFilter);
   if (begun == DirScan::Begin::BadPath) {
     // a folder name the card layer will not take: back to the root, the next pass scans that

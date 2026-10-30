@@ -93,6 +93,10 @@ SimProject::Start SimProject::import_module(const char* file, app::ImportEngine 
   return Start::Started;
 }
 
+bool SimProject::module_file(const char* file) noexcept {
+  return !card_.mounted() || app::ModuleImport::probe(card_, file) != app::ModuleImport::Probe::NotModule;
+}
+
 // platform/mk66/src/app_main.cpp begin_replace: the transport stops (a Stop on the sequencer's ring) and the badge says so, the live notes are let go, and the voices are let to die away (Settle) before the
 // first slice. Without the engine (`audio on` not run) there is the badge only and nothing to wait for.
 void SimProject::begin_replace() noexcept {

@@ -1,0 +1,38 @@
+# OS-IMPORT-ANY (docs/specs/OS-IMPORT-ANY.md): the File screen's IMPORT page on a card of three files, docs/qa/catalogue/file.md QA-FIL-125..128. One snap per row; goldens are keyed qa_file_import/qa_fil_NNN.
+# Its own scenario: a run holds one card (qa_file.txt has its own).
+
+# QA-FIL-125..128: the IMPORT page lists the prefix names ("mod.title") and F2 switches it to ALL FILES. The card e2e_import_any holds mod.title (a MOD), tune (an S3M whose name says nothing)
+# and README.txt (text). MODULES lists mod.title alone, the key row says ALL (the mode F2 goes to).
+document
+card e2e_import_any
+tap file
+wait 50
+tap f6
+wait 300
+assert state screen=FILE sel=mod.title
+snap qa_fil_125
+# F2: ALL (the key says MODULES afterwards). README.txt and tune are listed, their TYPE is ?, the key row says MODULES.
+tap f2
+wait 300
+assert state screen=FILE sel=mod.title
+snap qa_fil_126
+# F1 on README.txt: the first bytes are read and no reader takes them: the strip says so, nothing starts, the document stays.
+tap down
+assert state sel=README.txt
+tap f1
+wait 100
+assert state screen=FILE msg=NOT_A_MODULE_THIS_OS_READS
+snap qa_fil_127
+# F1 on tune: no type in the name, but the bytes are a Scream Tracker module: it imports.
+tap down
+assert state sel=tune
+tap f1
+wait 800
+assert state screen=FILE msg=~^IMPORTED_TUNE
+assert model order.len=1
+snap qa_fil_128
+# F2 again: MODULES.
+tap f2
+wait 300
+assert state screen=FILE sel=mod.title
+snap qa_fil_129

@@ -104,6 +104,36 @@ bool DirScan::ends_with_ci(const char* name, const char* tail) noexcept {
   return true;
 }
 
+ModuleName module_name_kind(const char* name) noexcept {
+  if (DirScan::ends_with_ci(name, ".mod")) {
+    return ModuleName::Mod;
+  }
+  if (DirScan::ends_with_ci(name, ".s3m")) {
+    return ModuleName::S3m;
+  }
+  if (DirScan::ends_with_any_ci(name, ".med .mmd0 .mmd1 .mmd2 .mmd3")) {
+    return ModuleName::Med;
+  }
+  // The prefix names ("mod.title"): the word, a '.', and at least one more character.
+  struct Prefix {
+    const char* word;
+    ModuleName kind;
+  };
+  static constexpr Prefix kPrefixes[] = {{"mod.", ModuleName::Mod},   {"s3m.", ModuleName::S3m},   {"med.", ModuleName::Med},   {"mmd0.", ModuleName::Med},
+                                         {"mmd1.", ModuleName::Med}, {"mmd2.", ModuleName::Med}, {"mmd3.", ModuleName::Med}};
+  for (const Prefix& p : kPrefixes) {
+    const std::size_t n = std::strlen(p.word);
+    std::size_t i = 0;
+    while (i < n && name[i] != '\0' && fold_ascii(static_cast<unsigned char>(name[i])) == static_cast<unsigned char>(p.word[i])) {
+      ++i;
+    }
+    if (i == n && name[n] != '\0') {
+      return p.kind;
+    }
+  }
+  return ModuleName::None;
+}
+
 bool DirScan::ends_with_any_ci(const char* name, const char* list) noexcept {
   while (*list != '\0') {
     const char* end = list;
@@ -154,7 +184,7 @@ DirScan::Begin DirScan::begin(hal::storage::Storage& storage, const char* folder
   if (state_ == State::Done && storage_ == &storage && std::strlen(folder_) == len && std::memcmp(folder_, folder, len) == 0 &&
       filter_ != nullptr && same_text_or_null(filter_->extension, filter.extension) && same_text_or_null(filter_->extension2, filter.extension2) && same_text_or_null(filter_->probe, filter.probe) &&
       same_text_or_null(filter_->skip_probe, filter.skip_probe) && same_text_or_null(filter_->native_probe, filter.native_probe) && same_text_or_null(filter_->recover_probe, filter.recover_probe) &&
-      filter_->skip_hidden == filter.skip_hidden) {
+      filter_->skip_hidden == filter.skip_hidden && filter_->all_files == filter.all_files && filter_->module_names == filter.module_names) {
     return Begin::Cached;
   }
   close_dir();  // a scan that is running is abandoned (through the old storage: it owns the handle)
@@ -275,7 +305,8 @@ unsigned DirScan::take(const DirEntry& entry) noexcept {
       }
     }
   } else {
-    listed = filter_->extension != nullptr && (ends_with_any_ci(entry.name, filter_->extension) || (filter_->extension2 != nullptr && ends_with_ci(entry.name, filter_->extension2)));
+    listed = filter_->all_files || (filter_->extension != nullptr && (ends_with_any_ci(entry.name, filter_->extension) || (filter_->extension2 != nullptr && ends_with_ci(entry.name, filter_->extension2)))) ||
+             (filter_->module_names && module_name_kind(entry.name) != ModuleName::None);
     if (listed && filter_->tag_stereo && index_.count() < DirIndex::kMaxEntries && ends_with_any_ci(entry.name, ".wav .aif .aiff .aifc")) {
       cost += kProbeUnits;
       stereo = probe_stereo(entry.name);

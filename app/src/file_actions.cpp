@@ -84,13 +84,18 @@ bool import_go(ActionContext& ctx, bool armed) noexcept {
   if (ctx.saves != nullptr && ctx.saves->busy()) {
     return say(ctx, core::Severity::Info, "A SAVE IS RUNNING: TRY AGAIN WHEN IT ENDS");
   }
-  if (!armed && ctx.saves != nullptr && ctx.saves->dirty(*ctx.model.project)) {
-    ctx.view.file.confirm_new = true;
-    return ask_discard(ctx);
-  }
   char path[hal::storage::kPathMax + 1];
   if (!join_path(path, scan->folder(), index.name(static_cast<unsigned>(pos)))) {
     return say(ctx, core::Severity::Warn, "THE PATH IS TOO LONG");
+  }
+  // OS-IMPORT-ANY I3, I4: the file's first bytes decide whether a module reader takes it, before the unsaved-changes question: a file that is none never asks it and nothing changes.
+  if (!ctx.project->module_file(path)) {
+    ctx.view.file.ask_clear();
+    return say(ctx, core::Severity::Warn, "NOT A MODULE THIS OS READS");
+  }
+  if (!armed && ctx.saves != nullptr && ctx.saves->dirty(*ctx.model.project)) {
+    ctx.view.file.confirm_new = true;
+    return ask_discard(ctx);
   }
   switch (ctx.project->import_module(path, ctx.view.import.engine)) {
     case ProjectSink::Start::Started: {
@@ -314,11 +319,13 @@ bool file_page(ActionContext& ctx, core::ActionArg) noexcept {
     ctx.view.xport.page = false;
     ctx.view.import.page = true;
     ctx.view.import.report = false;
+    ctx.view.import.all = false;  // OS-IMPORT-ANY I1: MODULES at every visit
     ctx.view.import.go = FileImport::Go::None;
     return true;
   }
   ctx.view.import.page = !ctx.view.import.page;
   ctx.view.import.report = false;
+  ctx.view.import.all = false;
   ctx.view.import.go = FileImport::Go::None;
   return true;
 }
@@ -365,9 +372,13 @@ bool file_name(ActionContext& ctx, core::ActionArg) noexcept {
   return name_open(ctx, TextEntryView::Target::Project, 0, ctx.model.project != nullptr ? ctx.model.project->name() : "", model::kProjectNameMax);
 }
 
-// F2 RESCAN: read the folder again. The request is the view's; the App's pass owns the card and the job, and starts it.
+// F2 RESCAN: read the folder again. The request is the view's; the App's pass owns the card and the job, and starts it. On the IMPORT page (OS-IMPORT-ANY I1) F2 switches the list between MODULES and
+// ALL FILES (the key says the mode a press goes to) and reads the folder again as it does so.
 bool file_rescan(ActionContext& ctx, core::ActionArg) noexcept {
   ctx.view.file.ask_clear();
+  if (ctx.view.import.page && !ctx.view.import.report) {
+    ctx.view.import.all = !ctx.view.import.all;  // (the key row and the info line say the mode; the scan's end says the count)
+  }
   ctx.view.file.rescan = true;
   return true;
 }

@@ -275,12 +275,11 @@ TEST_CASE("modimp reader: MOD samples: volume, finetune, loops, short files, nam
   const Opened c(test::modimp::build(t));
   NEED(c.ok());
   std::uint32_t total = 0;
-  unsigned trimmed = 0, empty_after = 0;
+  unsigned trimmed = 0;
   for (unsigned i = 0; i < 31; ++i) {
     NEED(module().sample(i, s).ok());
     total += s.frames;
     trimmed += (s.notes & kNoteTrimmed) != 0 ? 1u : 0u;
-    empty_after += (s.kind == SampleKind::Empty && (s.notes & kNoteTrimmed) != 0) ? 1u : 0u;
   }
   CHECK(trimmed >= 1);
   CHECK(total == 40 * 4 + 4 - 30);
@@ -902,5 +901,168 @@ TEST_CASE("modimp reader: random bytes are not a module") {
     b[28] = 0x1A;
     b[29] = 16;
     walk(b);
+  }
+}
+
+// ---- OS-IMPORT-ANY I6: the 15-sample Soundtracker file ------------------------------------------------------------------------------------------------------------------------------------
+// A synthetic one, built here from the layout of a 31-sample file (no third-party file): the title and 15 sample headers, then the song length at 470, the restart byte, 128 orders, and the patterns.
+
+namespace {
+
+// A 31-sample M.K. file with only samples 1..15 in use, as a Soundtracker file: samples 16..31 and the tag are cut out of it.
+Bytes soundtracker15(const Bytes& mk) {
+  Bytes out(mk.begin(), mk.begin() + 470);
+  out.insert(out.end(), mk.begin() + 950, mk.begin() + 1080);
+  out.insert(out.end(), mk.begin() + 1084, mk.end());
+  out[471] = 120;  // what a Soundtracker file keeps in the restart byte: not a position
+  return out;
+}
+
+ModSpec soundtracker_spec() {
+  ModSpec m = simple_mod();
+  m.patterns[1] = {{{63, 0}, test::modimp::note(0, 2, 0x0F, 0x06)}};  // (sample 2: a 15-sample file has no sample 31)
+  return m;
+}
+
+}  // namespace
+
+TEST_CASE("modimp reader: a 15-sample Soundtracker file reads as a 4-channel module with 15 samples, cells and samples as the 31-sample file's") {
+  const Bytes mk = test::modimp::build(soundtracker_spec());
+  const Bytes st = soundtracker15(mk);
+  CHECK(sniff_kind(st.data(), st.size()) == Kind::None);  // the sniff never claims it
+  CHECK(is_soundtracker15(st.data(), st.size() < 1084 ? st.size() : 1084, static_cast<std::uint32_t>(st.size())));
+  CHECK_FALSE(is_soundtracker15(mk.data(), 1084, static_cast<std::uint32_t>(mk.size())));  // (the 31-sample one has a tag, and its byte 470 is a name)
+  const Opened o(st);
+  NEED(o.ok());
+  const ModuleInfo& g = o.info();
+  CHECK(g.kind == Kind::Mod);
+  CHECK(g.variant == Variant::St15);
+  CHECK(std::string(g.tag) == "ST15");
+  CHECK(g.channels == 4);
+  CHECK(g.order_count == 3);
+  CHECK(g.pattern_count == 2);
+  CHECK(g.sample_count == 15);
+  CHECK(g.restart == 127);  // (120 in the file is no position)
+  CHECK(std::string(g.name) == "reference");
+  CHECK(module().order(0) == 0);
+  CHECK(module().order(1) == 1);
+  CHECK(module().order(2) == 0);
+  Cell cells[caps::kMaxChannels];
+  NEED(module().read_line(0, 0, cells).ok());
+  CHECK(cells[0].period == 428);
+  CHECK(cells[0].instrument == 1);
+  CHECK(cells[0].effect == 0x0C);
+  CHECK(cells[0].param == 0x20);
+  NEED(module().read_line(1, 63, cells).ok());
+  CHECK(cells[0].instrument == 2);
+  CHECK(cells[0].effect == 0x0F);
+  SampleInfo s;
+  NEED(module().sample(0, s).ok());
+  CHECK(std::string(s.name) == "sine");
+  CHECK(s.frames == 32);
+  CHECK(s.has_loop);
+  std::int16_t pcm[32];
+  NEED(module().read_pcm(s, 0, 32, pcm).ok());
+  const Bytes sine = test::modimp::sine8(32);
+  for (unsigned i = 0; i < 32; ++i) {
+    CHECK(pcm[i] == static_cast<std::int16_t>(static_cast<std::int8_t>(sine[i]) * 256));
+  }
+  NEED(module().sample(1, s).ok());
+  CHECK(std::string(s.name) == "second");
+  CHECK(s.volume == 40);
+  CHECK_FALSE(module().sample(15, s).ok());  // there are 15
+  // the 31-sample file is as it was
+  const Opened k(mk);
+  NEED(k.ok());
+  CHECK(k.info().variant == Variant::Mk);
+  CHECK(k.info().sample_count == 31);
+}
+
+TEST_CASE("modimp reader: Soundtracker edges: length 0, an order of 64, a volume of 65, a name that is not text, a short pattern area, a short last sample, a short earlier one") {
+  const Bytes st = soundtracker15(test::modimp::build(soundtracker_spec()));
+  auto refused = [](const Bytes& b) {
+    const Opened o(b);
+    CHECK_FALSE(o.ok());
+    CHECK(o.status.error == Error::BadMagic);
+    CHECK(module().info().kind == Kind::None);
+  };
+  Bytes b = st;
+  b[470] = 0;  // song length 0
+  refused(b);
+  b = st;
+  b[470] = 129;
+  refused(b);
+  b = st;
+  b[472 + 1] = 64;  // a played order of 64 (patterns 0..63 only)
+  refused(b);
+  b = st;
+  b[20 + 25] = 65;  // the first sample's volume
+  refused(b);
+  b = st;
+  b[3] = 0x07;  // the title is not text
+  refused(b);
+  b = st;
+  b[20 + 30 * 14 + 3] = 0xE9;  // the last sample header's name
+  refused(b);
+  // an order past the song length that is 64 or more is junk, not a refusal: the patterns the played orders name are all that count
+  b = st;
+  b[472 + 5] = 99;
+  CHECK(Opened(b).ok());
+  CHECK(module().info().pattern_count == 2);
+  // the file ends inside the patterns: not a Soundtracker file
+  refused(Bytes(st.begin(), st.begin() + 600 + 1024));
+  refused(Bytes(st.begin(), st.begin() + 600));
+  // the last sample may be short (trimmed, flagged); an earlier one may not
+  const Bytes data_end(st.begin(), st.end() - 10);  // the second sample is the last with data: 10 bytes of its 64 are gone
+  const Opened trimmed(data_end);
+  NEED(trimmed.ok());
+  SampleInfo s;
+  NEED(module().sample(1, s).ok());
+  CHECK(s.frames == 54);
+  CHECK((s.notes & kNoteTrimmed) != 0);
+  refused(Bytes(st.begin(), st.begin() + 600 + 2 * 1024 + 20));  // the first sample (32 bytes) is cut to 20 and nothing follows it
+  // a 31-sample file with an unknown tag is still refused as before
+  Bytes octa = test::modimp::build(soundtracker_spec());
+  std::memcpy(&octa[1080], "OCTA", 4);
+  const Opened o(octa);
+  CHECK_FALSE(o.ok());
+  CHECK(o.status.error == Error::BadMagic);
+  // ... also when its 16th sample's name is spaces and the file is long: the old reading took the first space as a song length of 32, the rest as orders of 32 (33 patterns fit)
+  Bytes flt6 = test::modimp::build(soundtracker_spec());
+  std::memcpy(&flt6[1080], "FLT6", 4);
+  std::fill(flt6.begin() + 470, flt6.begin() + 492, std::uint8_t{0x20});  // the 16th sample's name
+  std::fill(flt6.begin() + 492, flt6.begin() + 504, std::uint8_t{0});     // its length, finetune, volume, loop; the 17th's name begins
+  flt6.resize(600 + 33 * 1024 + 64, 0);
+  CHECK_FALSE(is_soundtracker15(flt6.data(), 1084, static_cast<std::uint32_t>(flt6.size())));
+  const Opened f(flt6);
+  CHECK_FALSE(f.ok());
+  CHECK(f.status.error == Error::BadMagic);
+  // a loop that starts past the end of its sample is no sample header
+  b = st;
+  b[20 + 26] = 0x40;  // the first sample (16 words): a loop start of 0x4000 words, a loop length of 16
+  refused(b);
+}
+
+TEST_CASE("modimp reader: a Soundtracker file with a junk order past the song length counts the patterns the song plays, as the structure check does, however long the file") {
+  // a file long enough (over 100 KB, trailing bytes) to hold the 100 patterns the junk order 99 would name: the check and the reader must agree on the 2 patterns the song plays (orders 0, 1, 0),
+  // or the samples are read from the wrong place without an error
+  Bytes big = soundtracker15(test::modimp::build(soundtracker_spec()));
+  big[472 + 5] = 99;  // an order past the song length (3)
+  big.resize(600 + 100 * 1024 + 64, 0);
+  const auto size = static_cast<std::uint32_t>(big.size());
+  CHECK(is_soundtracker15(big.data(), 1084, size));
+  const Opened o(big);
+  NEED(o.ok());
+  CHECK(o.info().variant == Variant::St15);
+  CHECK(o.info().pattern_count == 2);
+  SampleInfo s;
+  NEED(module().sample(0, s).ok());
+  CHECK(std::string(s.name) == "sine");
+  CHECK(s.frames == 32);
+  std::int16_t pcm[32];  // the data itself: read from where the 2 patterns end
+  NEED(module().read_pcm(s, 0, 32, pcm).ok());
+  const Bytes sine = test::modimp::sine8(32);
+  for (unsigned i = 0; i < 32; ++i) {
+    CHECK(pcm[i] == static_cast<std::int16_t>(static_cast<std::int8_t>(sine[i]) * 256));
   }
 }

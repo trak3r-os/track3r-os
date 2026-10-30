@@ -54,6 +54,7 @@ class SimProject final : public app::ProjectSink {
   Start start_new_keeping_instruments() noexcept override { return begin_fresh(true); }
   // OS-E2E-9: File > IMPORT (platform/mk66/src/app_main.cpp start_module_import): the module file replaces the document through the same hand-over.
   Start import_module(const char* file, app::ImportEngine engine) noexcept override;
+  bool module_file(const char* file) noexcept override;  // OS-IMPORT-ANY I4: the platform's, over the simulator's card
   const app::ModuleSummary* import_summary() const noexcept override { return &module_->summary(); }
   bool busy() const noexcept override { return phase_ != Phase::Idle; }
   const char* folder() const noexcept override;

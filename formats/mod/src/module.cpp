@@ -19,6 +19,22 @@ inline std::uint32_t le32(const std::uint8_t* p) noexcept {
 }
 inline Status fail(Error e, std::uint32_t offset, const char* detail) noexcept { return Status{e, offset, detail}; }
 
+// The 15-sample Soundtracker layout (OS-IMPORT-ANY I6): the title (20) and 15 sample headers (30 each) as in a 31-sample file, then the song length at 470, the restart byte, 128 orders at 472: 600 bytes.
+constexpr std::uint32_t kSt15Samples = 15;
+constexpr std::uint32_t kSt15HeaderBytes = 600;
+constexpr std::uint32_t kSt15SongAt = 470;
+constexpr std::uint32_t kMkSongAt = 950;  // the same fields of a 31-sample file
+constexpr std::uint32_t kSt15PatternBytes = caps::kRows * 4u * 4u;
+
+bool printable_or_nul(const std::uint8_t* p, std::size_t n) noexcept {
+  for (std::size_t i = 0; i < n; ++i) {
+    if (p[i] != 0 && (p[i] < 0x20 || p[i] > 0x7E)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // A fixed-width name field: up to the first NUL, trailing spaces cut, bytes outside 0x20..0x7E as '?'. `out` has room for cap + 1.
 void copy_name(const std::uint8_t* field, std::size_t field_len, char* out, std::size_t cap) noexcept {
   std::size_t n = 0;
@@ -84,6 +100,58 @@ Kind sniff_kind(const std::uint8_t* head, std::size_t n) noexcept {
   return Kind::None;
 }
 
+bool is_soundtracker15(const std::uint8_t* head, std::size_t n, std::uint32_t file_size) noexcept {
+  if (n < kSt15HeaderBytes || file_size < kSt15HeaderBytes || !printable_or_nul(head, 20)) {
+    return false;
+  }
+  std::uint64_t data = 0;
+  std::uint32_t last = 0;  // the data of the last sample that has any
+  for (std::uint32_t i = 0; i < kSt15Samples; ++i) {
+    const std::uint8_t* rec = head + 20 + 30 * i;
+    if (!printable_or_nul(rec, 22) || rec[25] > 64) {
+      return false;
+    }
+    const std::uint32_t len_words = be16(rec + 22);
+    // a loop that starts beyond the sample is nonsense whatever the unit of its start (words, or bytes in the oldest files): not a sample header
+    if (len_words != 0 && be16(rec + 28) > 1 && be16(rec + 26) > 2u * len_words) {
+      return false;
+    }
+    const std::uint32_t len = 2u * len_words;
+    data += len;
+    last = len != 0 ? len : last;
+  }
+  const std::uint32_t song_len = head[kSt15SongAt];
+  if (song_len == 0 || song_len > caps::kMaxModOrders) {
+    return false;
+  }
+  // 22 bytes of printable text with no NUL at the song length is the name of the 16th sample of a 31-sample file with a tag this reader does not know
+  // (a song length of 32..126, a restart byte and 20 orders that are all patterns 32 and up is not a song)
+  bool name_like = true;
+  for (std::uint32_t i = 0; i < 22; ++i) {
+    name_like = name_like && head[kSt15SongAt + i] >= 0x20 && head[kSt15SongAt + i] <= 0x7E;
+  }
+  if (name_like) {
+    return false;
+  }
+  std::uint32_t max_all = 0, max_used = 0;
+  for (std::uint32_t i = 0; i < caps::kMaxModOrders; ++i) {
+    const std::uint32_t v = head[kSt15SongAt + 2 + i];
+    max_all = std::max(max_all, v);
+    if (i < song_len) {
+      if (v >= 64) {
+        return false;
+      }
+      max_used = std::max(max_used, v);
+    }
+  }
+  std::uint32_t count = max_all < 64 ? max_all + 1 : max_used + 1;
+  if (static_cast<std::uint64_t>(kSt15HeaderBytes) + static_cast<std::uint64_t>(count) * kSt15PatternBytes > file_size) {
+    count = max_used + 1;  // a few tools leave junk behind the song length (as for a 31-sample file)
+  }
+  const std::uint64_t fixed = static_cast<std::uint64_t>(kSt15HeaderBytes) + static_cast<std::uint64_t>(count) * kSt15PatternBytes;
+  return fixed <= file_size && data - last <= file_size - fixed;  // every sample whole but the last
+}
+
 // ---- plumbing ----------------------------------------------------------------------------------------------------------
 
 Status Module::get(std::uint32_t offset, void* dst, std::uint32_t n) const noexcept {
@@ -133,10 +201,19 @@ Status Module::open(RandomSource& source) noexcept {
 Status Module::open_mod(const std::uint8_t* h) noexcept {
   Variant v = Variant::None;
   std::uint8_t channels = 0;
-  if (!mod_tag(h + 1080, v, channels)) {
-    return fail(Error::BadMagic, 1080, "not a module this reader knows: no M.K., M!K!, N.T., FLT4/8, xCHN or xxCH signature (15-sample Soundtracker files have none and are refused)");
+  // A file with no tag this reader knows is a 15-sample Soundtracker module when its structure says so (OS-IMPORT-ANY I6): the same fields, 600 bytes of header, 15 samples, 4 channels.
+  const bool st15 = !mod_tag(h + 1080, v, channels);
+  if (st15) {
+    if (!is_soundtracker15(h, info_.file_size < caps::kModHeaderBytes ? info_.file_size : caps::kModHeaderBytes, info_.file_size)) {
+      return fail(Error::BadMagic, 1080, "not a module this reader knows: no M.K., M!K!, N.T., FLT4/8, xCHN or xxCH signature, and not the structure of a 15-sample Soundtracker file");
+    }
+    v = Variant::St15;
+    channels = 4;
   }
-  const std::uint32_t song_len = h[950];
+  const std::uint32_t head_bytes = st15 ? kSt15HeaderBytes : caps::kModHeaderBytes;  // the header, where the patterns begin
+  const std::uint32_t song_at = st15 ? kSt15SongAt : kMkSongAt;                      // the song length; the restart byte follows it and then the 128 orders
+  const std::uint32_t samples = st15 ? kSt15Samples : caps::kModSamples;
+  const std::uint32_t song_len = h[song_at];
   if (song_len == 0 || song_len > caps::kMaxModOrders) {
     return fail(Error::Malformed, 950, "the song length is 0 or above 128");
   }
@@ -145,9 +222,9 @@ Status Module::open_mod(const std::uint8_t* h) noexcept {
   // behind the song length, so when that count does not fit the file, the entries the song plays are all that count.
   std::uint32_t max_all = 0, max_used = 0;
   for (std::uint32_t i = 0; i < caps::kMaxModOrders; ++i) {
-    max_all = std::max<std::uint32_t>(max_all, h[952 + i]);
+    max_all = std::max<std::uint32_t>(max_all, h[song_at + 2 + i]);
     if (i < song_len) {
-      max_used = std::max<std::uint32_t>(max_used, h[952 + i]);
+      max_used = std::max<std::uint32_t>(max_used, h[song_at + 2 + i]);
     }
   }
   if (max_all > caps::kMaxModPatternNumber && max_used > caps::kMaxModPatternNumber) {
@@ -155,17 +232,23 @@ Status Module::open_mod(const std::uint8_t* h) noexcept {
   }
   const std::uint32_t pat_bytes = caps::kRows * channels * 4u;
   auto count_of = [flt8](std::uint32_t max) { return flt8 ? (max >> 1) + 1u : max + 1u; };
-  std::uint32_t count = max_all <= caps::kMaxModPatternNumber ? count_of(max_all) : count_of(max_used);
-  if (static_cast<std::uint64_t>(caps::kModHeaderBytes) + static_cast<std::uint64_t>(count) * pat_bytes > info_.file_size) {
+  // (a 15-sample file counts the whole table only when none of it is junk, 64 and up: the same rule as is_soundtracker15's)
+  const bool whole_table = st15 ? max_all < 64 : max_all <= caps::kMaxModPatternNumber;
+  std::uint32_t count = whole_table ? count_of(max_all) : count_of(max_used);
+  if (static_cast<std::uint64_t>(head_bytes) + static_cast<std::uint64_t>(count) * pat_bytes > info_.file_size) {
     count = count_of(max_used);
   }
-  if (static_cast<std::uint64_t>(caps::kModHeaderBytes) + static_cast<std::uint64_t>(count) * pat_bytes > info_.file_size) {
-    return fail(Error::Truncated, caps::kModHeaderBytes, "the file ends inside the pattern data");
+  if (static_cast<std::uint64_t>(head_bytes) + static_cast<std::uint64_t>(count) * pat_bytes > info_.file_size) {
+    return fail(Error::Truncated, head_bytes, "the file ends inside the pattern data");
   }
   info_.kind = Kind::Mod;
   info_.variant = v;
-  std::memcpy(info_.tag, h + 1080, 4);
-  info_.tag[4] = '\0';
+  if (st15) {
+    std::memcpy(info_.tag, "ST15", 5);  // no signature in the file: this says what it was read as
+  } else {
+    std::memcpy(info_.tag, h + 1080, 4);
+    info_.tag[4] = '\0';
+  }
   for (int i = 0; i < 4; ++i) {
     if (info_.tag[i] < 0x20 || info_.tag[i] > 0x7E) {
       info_.tag[i] = '?';
@@ -174,16 +257,16 @@ Status Module::open_mod(const std::uint8_t* h) noexcept {
   info_.channels = channels;
   info_.order_count = static_cast<std::uint16_t>(song_len);
   info_.pattern_count = static_cast<std::uint16_t>(count);
-  info_.sample_count = caps::kModSamples;
-  info_.restart = h[951];
+  info_.sample_count = static_cast<std::uint16_t>(samples);
+  info_.restart = st15 ? std::uint8_t{127} : h[song_at + 1];  // (a Soundtracker file keeps another value there: none)
   copy_name(h, 20, info_.name, 20);
   for (std::uint32_t i = 0; i < song_len; ++i) {
-    order_[i] = static_cast<std::uint8_t>(flt8 ? h[952 + i] >> 1 : h[952 + i]);
+    order_[i] = static_cast<std::uint8_t>(flt8 ? h[song_at + 2 + i] >> 1 : h[song_at + 2 + i]);
   }
-  pat_offset_ = caps::kModHeaderBytes;
-  sample_offset_ = caps::kModHeaderBytes + count * pat_bytes;
+  pat_offset_ = head_bytes;
+  sample_offset_ = head_bytes + count * pat_bytes;
   std::uint32_t at = sample_offset_;  // the data of the samples follow one another, in the order of the headers
-  for (std::uint32_t i = 0; i < caps::kModSamples; ++i) {
+  for (std::uint32_t i = 0; i < samples; ++i) {
     smp_off_[i] = at;
     at += 2u * be16(h + 20 + 30 * i + 22);  // at most 31 x 131,070 bytes on top of a 16 MiB bound: no overflow
   }

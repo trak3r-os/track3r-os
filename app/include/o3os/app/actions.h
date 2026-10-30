@@ -202,6 +202,12 @@ class ProjectSink {
     (void)engine;
     return Start::NoDocument;
   }
+  // OS-IMPORT-ANY I4: false only when the sink READ the first bytes of `file` and no module reader takes it (ModuleImport::probe); true when it is one, when the file would not read (the import then says
+  // why) and for a sink that cannot tell. Asked before the NEW question, so that a file that is no module never asks it. Nothing is changed.
+  virtual bool module_file(const char* file) noexcept {
+    (void)file;
+    return true;
+  }
   // The report of the last module import (valid() false before any), nullptr when the sink has none.
   virtual const ModuleSummary* import_summary() const noexcept { return nullptr; }
 

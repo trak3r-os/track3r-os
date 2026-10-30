@@ -23,6 +23,7 @@ struct FileImport {
 
   bool page = false;
   bool report = false;
+  bool all = false;  // OS-IMPORT-ANY I1: the list shows every file (F2 ALL FILES), not only the module names; MODULES at every visit to the page, never saved
   ImportEngine engine = ImportEngine::Auto;
   Go go = Go::None;
   char folder[kFolderChars] = "";

@@ -43,6 +43,9 @@ class FakeProject final : public app::ProjectSink {
   ImportEngine last_engine = ImportEngine::Auto;
   unsigned imports = 0;
   unsigned opens = 0;
+  bool module = true;  // OS-IMPORT-ANY I4: what the sink's header read says
+  unsigned probes = 0;
+  std::string probed;
   app::ModuleSummary summary;
   Start start_new() noexcept override { return Start::NoDocument; }
   Start open(const char*, Format) noexcept override {
@@ -57,6 +60,11 @@ class FakeProject final : public app::ProjectSink {
       is_busy = true;
     }
     return result;
+  }
+  bool module_file(const char* file) noexcept override {
+    ++probes;
+    probed = file;
+    return module;
   }
   const app::ModuleSummary* import_summary() const noexcept override { return &summary; }
   bool busy() const noexcept override { return is_busy; }
@@ -184,6 +192,102 @@ TEST_CASE("module filter: folders to enter and the module files, any case; not t
   for (const char* not_want : {"j.xm", "k.it", "l.mmd ", "m.mod.bak", "n.txt", ".hidden", "._o", " mod "}) {
     CHECK_MESSAGE(listed.find(not_want) == std::string::npos, listed);
   }
+}
+
+// OS-IMPORT-ANY I2: the prefix names the Amiga programs use count as module names.
+TEST_CASE("module filter: the prefix names (mod.title, MED.title, s3m.title, mmd0.title .. mmd3.title) are listed, any case; the bare word and look-alikes are not") {
+  platform::host::FakeStorage card;
+  for (const char* n : {"mod.title", "MOD.Other", "s3m.title", "S3M.x", "med.title", "MED.song", "mmd0.a", "mmd1.b", "MMD2.c", "mmd3.d", "mod.", "mod", "modx.y", "mmd4.z", "mmd.z", "xmod.y", "title.mod.bak", "song.xm"}) {
+    card.add_file(n, 10);
+  }
+  app::DirScan scan;
+  NEED(scan.begin(card, "", app::kModuleFilter) == app::DirScan::Begin::Started);
+  for (unsigned i = 0; i < 100 && scan.step(1000000) == core::JobStatus::Running; ++i) {
+  }
+  std::string listed;
+  for (unsigned i = 0; i < scan.index().count(); ++i) {
+    listed += std::string(scan.index().name(i)) + " ";
+  }
+  CHECK(scan.index().count() == 10);
+  for (const char* want : {"mod.title ", "MOD.Other ", "s3m.title ", "S3M.x ", "med.title ", "MED.song ", "mmd0.a ", "mmd1.b ", "MMD2.c ", "mmd3.d "}) {
+    CHECK_MESSAGE(listed.find(want) != std::string::npos, listed);
+  }
+  CHECK(app::module_name_kind("mod.title") == app::ModuleName::Mod);
+  CHECK(app::module_name_kind("S3M.x") == app::ModuleName::S3m);
+  CHECK(app::module_name_kind("MMD2.c") == app::ModuleName::Med);
+  CHECK(app::module_name_kind("song.mod") == app::ModuleName::Mod);  // the extension first
+  CHECK(app::module_name_kind("mod.song.s3m") == app::ModuleName::S3m);
+  CHECK(app::module_name_kind("mod.") == app::ModuleName::None);
+  CHECK(app::module_name_kind("kick") == app::ModuleName::None);
+  // ALL FILES lists every file but the hidden ones, and a scan of the same folder with the other filter is not the cache
+  card.add_file(".hidden", 10);
+  NEED(scan.begin(card, "", app::kAllFilesFilter) == app::DirScan::Begin::Started);
+  for (unsigned i = 0; i < 100 && scan.step(1000000) == core::JobStatus::Running; ++i) {
+  }
+  CHECK(scan.index().count() == 18);
+}
+
+// OS-IMPORT-ANY I1: F2 on the IMPORT page switches the list between MODULES and ALL FILES.
+TEST_CASE("file import: F2 switches the list between MODULES and ALL FILES, rescanning as it does; MODULES again at every visit") {
+  Rig rig;
+  rig.card.add_file("README", 10);
+  rig.card.add_file("tune", 10);
+  rig.card.add_file("mod.old", 10);
+  rig.import_page();
+  CHECK_FALSE(rig.app->state().import.all);
+  CHECK(rig.names().find("mod.old") != std::string::npos);  // the prefix name is a module name
+  CHECK(rig.names().find("README") == std::string::npos);
+  rig.tap(Button::F2);
+  rig.settle();
+  CHECK(rig.app->state().import.all);
+  CHECK(rig.names().find("README") != std::string::npos);
+  CHECK(rig.names().find("tune") != std::string::npos);
+  CHECK(rig.names().find("song.xm") != std::string::npos);
+  rig.tap(Button::F2);
+  rig.settle();
+  CHECK_FALSE(rig.app->state().import.all);
+  CHECK(rig.names().find("README") == std::string::npos);
+  // a folder keeps the mode; leaving the page and coming back is MODULES
+  rig.tap(Button::F2);
+  rig.settle();
+  NEED(rig.to("MOD"));
+  rig.tap(Button::F1);
+  rig.settle();
+  CHECK(rig.app->state().import.all);
+  CHECK(rig.names().find("notes.txt") != std::string::npos);
+  rig.tap(Button::F6);  // PROJECTS
+  rig.settle();
+  rig.tap(Button::F6);  // IMPORT again
+  rig.settle();
+  CHECK_FALSE(rig.app->state().import.all);
+  CHECK(rig.names().find("README") == std::string::npos);
+}
+
+// OS-IMPORT-ANY I3, I4, I5: a file that says nothing is imported by its bytes; one that is no module is refused before the NEW question.
+TEST_CASE("file import: a file whose name says nothing is offered to the import by ALL FILES, and a file that is no module is refused before the question") {
+  Rig rig;
+  rig.card.add_file("tune", 100);
+  rig.import_page();
+  rig.tap(Button::F2);
+  rig.settle();
+  NEED(rig.to("tune"));
+  model::Project& project = test::arena(1).project;
+  CHECK(project.set_name("edited", 6) == model::Status::Ok);  // a change no save has taken: the question would be asked
+  rig.project.module = false;
+  rig.tap(Button::F1);
+  CHECK(rig.project.probes == 1);
+  CHECK(rig.project.probed == "tune");
+  CHECK(rig.message() == "NOT A MODULE THIS OS READS");
+  CHECK_FALSE(rig.app->state().file.confirm_new);  // no question
+  CHECK(rig.project.imports == 0);
+  rig.project.module = true;
+  rig.expire();
+  rig.tap(Button::F1);  // a module: now the question, and then the import
+  CHECK(rig.message() == "UNSAVED CHANGES: F1 AGAIN TO DISCARD THEM");
+  CHECK(rig.project.imports == 0);
+  rig.tap(Button::F1);
+  CHECK(rig.project.imports == 1);
+  CHECK(rig.project.last_file == "tune");
 }
 
 TEST_CASE("file import: F6 opens the IMPORT page, which lists the card's root with the module filter; F6 again is the project list") {
@@ -325,7 +429,7 @@ TEST_CASE("file import: with unsaved changes the first F1 only asks, the second 
   NEED(rig.to("root.mod"));
   rig.tap(Button::F1);
   CHECK(rig.project.imports == 0);
-  rig.tap(Button::F2);  // RESCAN is another key
+  rig.tap(Button::F8);  // REPORT is another key (F2 is the MODULES / ALL switch on this page)
   CHECK_FALSE(rig.app->state().file.confirm_new);
   rig.settle();
   NEED(rig.to("root.mod"));

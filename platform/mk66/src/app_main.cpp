@@ -1154,6 +1154,15 @@ class CardProject final : public app::ProjectSink {
     }
     return Start::BadPath;
   }
+  bool module_file(const char* file) noexcept override {  // OS-IMPORT-ANY I4: the first bytes of the file, before the NEW question
+#if !O3OS_AUDIO_TEST
+    hal::storage::Storage& card = storage::device::storage();
+    return !card.mounted() || app::ModuleImport::probe(card, file) != app::ModuleImport::Probe::NotModule;
+#else
+    (void)file;
+    return true;
+#endif
+  }
   const app::ModuleSummary* import_summary() const noexcept override {
 #if !O3OS_AUDIO_TEST
     return &g_module->summary();

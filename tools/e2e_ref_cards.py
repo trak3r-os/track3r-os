@@ -10,6 +10,7 @@ writes, under DIR (the build's sim/cards, where `o3sim --cards` looks), one card
   e2e_ref_s3m/ref.s3m      a Scream Tracker 3 module on the Modern engine's tracker FX (16-frame sine, C2SPD 8363)
   e2e_ref_med/ref.med      an OctaMED MMD1 module with the commands the MED tick processor and libopenmpt share
   e2e_ref_paula/paula.mod  a MOD whose one voice plays a bright saw at three periods: the Paula sound (band energy and aliasing)
+  e2e_import_any/          OS-IMPORT-ANY (sim/scenarios/qa/qa_file.txt): mod.title (a MOD named by prefix), tune (an S3M with no type in its name) and README.txt (not a module)
   e2e_ref_export/tones.s3m an S3M of five pure tones from 689 Hz to 9.3 kHz, for the 44.1 kHz export (the resampler's gain, pitch and error against a band-limited reference)
 
 Nothing in them is a real module: every note, name and sample is made up from tools/mod_build.py and tools/mmd_build.py (stdlib only; run with `python3 -I`). The same bytes are what
@@ -196,6 +197,7 @@ def cards():
         "e2e_ref_med": {"ref.med": med_ref()},
         "e2e_ref_paula": {"paula.mod": paula_mod()},
         "e2e_ref_export": {"tones.s3m": tones_s3m()},
+        "e2e_import_any": {"mod.title": mod_ref(), "tune": s3m_ref(), "README.txt": b"This is not a module.\n"},
     }
 
 

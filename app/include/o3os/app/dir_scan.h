@@ -47,7 +47,14 @@ struct ListFilter {
   const char* extension2 = nullptr;     // OS-GRAN: a second extension listed as well (".wt", Surge wavetables, in the Sample load screen)
   bool tag_stereo = false;              // OS-LOADCH: a listed .wav / .aif / .aiff / .aifc is opened and its header read (a probe's cost) to tag the stereo ones (DirIndex::stereo)
   const char* skip_probe = nullptr;     // OS-FILES part B: ".deleted": a folder that holds this file is not listed (checked before the others: DELETE marks a project folder with it)
+  bool module_names = false;            // OS-IMPORT-ANY I2: a file whose name says a module (module_name_kind: the prefix names, "mod.title"; the extensions are `extension`'s) is listed as well
+  bool all_files = false;               // OS-IMPORT-ANY I1: every file is listed (the IMPORT page's ALL FILES mode)
 };
+
+// OS-IMPORT-ANY I2: what a file name says about a module. The extension (".mod", ".s3m", ".med", ".mmd0" .. ".mmd3") or, when there is none of those, the prefix the Amiga programs put before the title
+// ("mod.title", "MED.title", "s3m.title", "mmd1.title"), any case; None when the name says nothing. The bytes of the file have the last word (ModuleImport::begin): this is what a listing may know without reading.
+enum class ModuleName : std::uint8_t { None, Mod, S3m, Med };
+ModuleName module_name_kind(const char* name) noexcept;
 
 // The File screen's: the folders that hold a project.o3pj (a native project, OS-004a), only a project.o3pj.bak (a native project whose save was cut between its two renames: RECOVER,
 // OS-007o) or a project.mt (an OG project, docs/formats/og.md section 1).
@@ -58,8 +65,11 @@ inline constexpr ListFilter kWavFilter = {".wav .aif .aiff .aifc .8svx .svx .iff
 // The Sample load screen's when the type chooser's LOAD opened it for an instrument file (OS-INSTUI S7): every folder, and the OG's .pti files.
 inline constexpr ListFilter kPtiFilter = {".pti", nullptr, true};
 
-// The File screen's IMPORT page (OS-FILES part A): every folder (to be entered) and the module files the importers read (OS-MODIMP, OS-008b): ProTracker .mod, Scream Tracker .s3m, OctaMED .med and .mmd0..3.
-inline constexpr ListFilter kModuleFilter = {".mod .s3m .med .mmd0 .mmd1 .mmd2 .mmd3", nullptr, true, nullptr, nullptr};
+// The File screen's IMPORT page (OS-FILES part A): every folder (to be entered) and the module files the importers read (OS-MODIMP, OS-008b): ProTracker .mod, Scream Tracker .s3m, OctaMED .med and .mmd0..3,
+// and (OS-IMPORT-ANY I2) the prefix names of the Amiga programs ("mod.title").
+inline constexpr ListFilter kModuleFilter = {".mod .s3m .med .mmd0 .mmd1 .mmd2 .mmd3", nullptr, true, nullptr, nullptr, nullptr, false, nullptr, true};
+// The same page in its ALL FILES mode (OS-IMPORT-ANY I1): every folder and every file (hidden names still not), for modules that carry no type in their name.
+inline constexpr ListFilter kAllFilesFilter = {nullptr, nullptr, true, nullptr, nullptr, nullptr, false, nullptr, false, true};
 
 // OS-FILES part B: does `folder` ("Projects/<name>") hold the DELETE marker, an empty FILE called .deleted? A folder of that name is not a marker (it is a folder of the user's: it is listed, it opens, and DELETE
 // on its project fails with "name exists"). The one question every project load asks before it starts: the File screen's open, a RECENT row, `diag load`, the boot (platform/mk66 start_project_load), so

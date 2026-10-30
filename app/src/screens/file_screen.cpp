@@ -104,15 +104,16 @@ const char* tag_text(EntryTag tag) noexcept {
   return "";
 }
 
-// The type column of a module file: by its extension (the importer decides by the file's signature).
+// The type column of a module file: by its name, the extension or the prefix ("mod.title"; the importer decides by the file's bytes), and `?` for a file whose name says nothing (ALL FILES mode: a
+// listing never reads the contents of a file, OS-IMPORT-ANY I5).
 const char* module_tag(const char* name) noexcept {
-  if (DirScan::ends_with_ci(name, ".mod")) {
-    return "MOD";
+  switch (module_name_kind(name)) {
+    case ModuleName::Mod: return "MOD";
+    case ModuleName::S3m: return "S3M";
+    case ModuleName::Med: return "MED";
+    case ModuleName::None: break;
   }
-  if (DirScan::ends_with_ci(name, ".s3m")) {
-    return "S3M";
-  }
-  return DirScan::ends_with_any_ci(name, ".med .mmd0 .mmd1 .mmd2 .mmd3") ? "MED" : "";
+  return "?";
 }
 
 int cell_w_label(const ui::Theme& t) noexcept { return t.geometry(Face::Label).cell_w; }
@@ -347,6 +348,9 @@ void FileScreen::render(const Model& model, const ViewState& view, Renderer& r, 
     } else {
       append_uint(text, static_cast<unsigned>(items));
       text.append(imp ? (items == 1 ? " entry" : " entries") : (items == 1 ? " project" : " projects"));
+      if (imp && view.import.all) {
+        text.append(", all files");  // OS-IMPORT-ANY I1
+      }
     }
     draw_info_line(r, f, text.c_str(), exp ? (view.xport.running ? "F8 cancel" : "F1 export   F6 import   F7 projects") : (imp ? "F1 import   F3 up   F7 fx" : "left / right: letter   F2 rescan   Delete: delete"));
   }
@@ -357,6 +361,7 @@ void FileScreen::render(const Model& model, const ViewState& view, Renderer& r, 
     }
     if (imp) {  // OS-FILES: the IMPORT page's keys; F4 and F5 are the same SAVE and SAVE AS
       keys[0] = length > 0 && index != nullptr && index->is_dir(static_cast<unsigned>(fv.pos())) ? "ENTER" : "IMPORT";
+      keys[1] = view.import.all ? "MODULES" : "ALL";  // OS-IMPORT-ANY I1: the mode a press goes to ("ALL FILES" is one character too wide for a key)
       keys[2] = "UP";
       keys[5] = "PROJECTS";
       keys[6] = engine_key_label(view.import.engine);
