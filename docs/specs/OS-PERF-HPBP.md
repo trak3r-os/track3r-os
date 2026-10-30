@@ -14,7 +14,7 @@ Level C (the audio path). Approved by the maintainer on 2026-10-30. Found by OS-
 
 | # | Question | Default |
 |---|---|---|
-| D1 | Bit-identical only, or may the filter's output move | Slice 1 is bit-identical; any change of the output (slice 3) needs the maintainer's yes |
+| D1 | Bit-identical only, or may the filter's output move | Bit-identical only: slice 3 is not pursued (the maintainer, 2026-10-30) |
 | D2 | Order | Measure each candidate with the `cpuopt` svf rows on the unit before it goes into the voice |
 | D3 | `.ramfunc_l` | No growth beyond the headroom (about 320 B after OS-PERF-CPU3); a candidate that needs more stops for a decision |
 
@@ -22,7 +22,7 @@ Level C (the audio path). Approved by the maintainer on 2026-10-30. Found by OS-
 
 - **Slice 1 (bit-identical): the register copies.** Restructure `svf_run` so the compiler drops the three copy `vmov` (a rotation of the state variables per oversampled step; check `-O2` for that function if `MinSizeRel` keeps them). About 3-5 cycles a sample, 200-300 a voice-block [est]; SRAM_L -8 to -24 B [est]. Proof: the disassembly before and after, `audio_voice_digest_test` "filter" digests unchanged, `audio_svf_test`, `audio_svf_cache_test`, `cpuopt_eq_svf` OK on the unit.
 - **Slice 2 (measure first): two voices in one loop.** A bench-only `svf_run2` (two independent chains interleaved to hide the multiply-accumulate latency) as a `cpuopt` row. Only if the unit shows at least 15 % does it go into `render` (pairing filtered voices; SRAM_L +120 to +200 B [est], within D3). Bit-identical.
-- **Slice 3 (only with the maintainer's yes): fixed point.** A Q31 SVF (SMMLA) saves about 1k a voice-block [est] but moves the output by 1-2 LSB: new digests (`audio_voice_digest_test` filter, cutoff ADSR / LFO groups; `audio_lfo_equiv_test`; `og_sample_fidelity_test`) and `audio_svf_test`'s oracle bounds. Recorded as an option.
+- **Slice 3: fixed point, not pursued (the maintainer, 2026-10-30).** A Q31 SVF (SMMLA) would save about 1k a voice-block [est] but moves the output by 1-2 LSB: new digests (`audio_voice_digest_test` filter, cutoff ADSR / LFO groups; `audio_lfo_equiv_test`; `og_sample_fidelity_test`) and `audio_svf_test`'s oracle bounds, plus the low-cutoff hazards of a fixed-point Chamberlin SVF. It comes back only on an underrun with filters, or a filtered scene above 80 % mean.
 - Rejected: block-rate coefficients (already so); skipping at the row's neutral end (HP and BP never equal a bypass); skipping silent tails (needs exact-zero state, no help for sounding voices).
 
 ## Design rules from the risk review (2026-10-30, folded)
