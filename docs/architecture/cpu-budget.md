@@ -372,7 +372,18 @@ The HIPASS 90 and BANDPASS 70 rows cost +18.8k and +18.4k cycles a block, all in
 
 - `diag bench cpuopt` minima, 3 runs: `svf_low` 2,571 against `svf_ref_low` 3,322 (-751); `svf_high` 2,699 against 3,113 to 3,134 (-420 to -435); `svf_band` 2,856 against 3,305 to 3,312 (-450). `cpuopt_eq_svf` and `cpuopt_eq_svf_span` OK in 3 of 3.
 - Exports of DenseRec0 and Dense8 byte-identical to the songview.1 build; 0 underruns and 0 mutes in 27 windows. On DenseRec0 a held HIPASS or BANDPASS row lowers the load on both builds (its instruments already filter), so LfoStepOff is the clean scene.
-- The HIPASS gain in the voice matches the bench's `svf_high` gain. The BANDPASS row's in-voice time does not follow the bench's `svf_band`: **open research question**, under investigation (the row may not run the loop the bench times).
+- The HIPASS gain in the voice matches the bench's `svf_high` gain. The BANDPASS row's in-voice time does not follow the bench's `svf_band`: **open research question**. Slice 1c (the loop heads aligned) did not explain it; see below.
+
+**Slice 1c, measured and dropped (2026-10-30, `build-images/v1.0.1-hpbp1c.1/REPORT.md`, not in git; same scene and slots).** The three svf loop heads of `filter_run` were moved to 0 mod 4 (Band had been at 2), with `filter_run` in its own translation unit at `-O1 -falign-loops=4` (`.ramfunc_l` +148 B; branch `feat/OS-PERF-HPBP-1c`, c5b4a93c, not merged):
+
+| Row | hpbp.1 bench | hpbp1c.1 bench | Delta |
+|---|---|---|---|
+| HIPASS 90 | voices +15,692 | voices +17,831 | **+2,139, worse** (release windows +0.8 pp) |
+| BANDPASS 70 | voices +18,808 | voices +18,246 | -562 (3 %; release windows +0.1 pp, nothing) |
+| LOWPASS (slot 4) | not measured | | release windows +1.0 pp against importany.1 (about 2.6k), worse |
+
+- `diag bench cpuopt` rows moved by less than 30 cycles; `cpuopt_eq_svf` and `cpuopt_eq_svf_span` OK in 3 of 3; the Dense8 export byte-identical; 0 underruns.
+- Reading: the alignment of the loop heads is not the cause of the BANDPASS gap; the in-voice cost moves with the code placement of `filter_run` and its neighbours, which the flash bench cannot show. The three rows now cost the same (about 3.0k a voice-block), which suggests the hpbp.1 HIPASS gain was partly a placement accident too. **Open research question**; a `.ramfunc_l` bench row (spec, slice 1c) would be the tool to study it.
 
 ## Perform arms measured on the final candidate (fqa.15, 2026-10-25)
 
