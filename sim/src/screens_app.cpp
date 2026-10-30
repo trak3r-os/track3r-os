@@ -27,6 +27,8 @@ using app::ViewState;
 
 constexpr unsigned kPageOrder = 0;
 constexpr unsigned kPageArrangement = 1;
+constexpr unsigned kPageTimeline = 2;
+constexpr unsigned kPageStage = 3;
 
 // ---- content ---------------------------------------------------------------------------------------------------
 
@@ -303,6 +305,91 @@ void draw_song_document_ask(ui::Renderer& r, unsigned) {
   app::song_ask_head(v.song.ask, head);
   app::ask_text(app::Ask::Shared, head.c_str(), text);
   (void)v.notify.post(core::Severity::Warn, text.c_str(), "song", 4000);
+  scene(r, d.model, v);
+}
+
+// OS-SONG-STAGE: the STAGE page over the document. The typical one plays slot 2 (a 64-step pattern) at bar 2 with slot 3 next; the dearest sweeps stopped, next, a live jump, the loop at the
+// song's end and a pattern-mode playback, with the playhead at the start, in the middle and at the end of the pattern.
+void song_stage_play(ViewState& v, unsigned order, unsigned pattern, unsigned step) {
+  v.playing = true;
+  v.play.playing = true;
+  v.play.order = static_cast<std::uint16_t>(order);
+  v.play.pattern = static_cast<std::uint8_t>(pattern);
+  v.play.step = static_cast<std::uint16_t>(step);
+  v.play.ustep = 24;
+}
+
+void draw_song_stage_document(ui::Renderer& r, unsigned) {
+  SongDoc& d = song_doc(false);
+  ViewState v = song_doc_view(kPageStage, 0);
+  song_stage_play(v, 2, 3, 21);
+  scene(r, d.model, v);
+}
+
+void draw_song_stage_worst(ui::Renderer& r, unsigned variant) {
+  SongDoc& d = song_doc(true);
+  ViewState v = song_doc_view(kPageStage, 5);
+  const unsigned kind = variant % 5;
+  const unsigned step = (variant / 5 % 3) * 31;  // 0, 31, 62 of 64
+  if (kind == 1) {
+    song_stage_play(v, 2, 3, step);
+  } else if (kind == 2) {
+    song_stage_play(v, 2, 3, step);
+    v.play.queued = 7;
+  } else if (kind == 3) {
+    song_stage_play(v, 39, 8, step);
+  } else if (kind == 4) {
+    song_stage_play(v, audio::PlayPosition::kNoOrder, 3, step);
+  }
+  scene(r, d.model, v);
+}
+
+// OS-SONG-TIMELINE: the TIMELINE page. The typical one is the 12-track document with the cursor on slot 12, slot 14 playing at step 20. The dearest is the slot cap (timeline_slot_cap): every
+// pattern one bar (16 steps) long with notes in every track, as many slots as the budget allows for the track count, with and without the playhead and the cursor at the start and in the middle.
+SongDoc& song_doc_short() {
+  static SongDoc d;
+  if (!d.arena) {
+    d.arena = std::make_unique<model::ModelArena>();
+    std::memset(d.arena.get(), 0, sizeof(model::ModelArena));
+    model::Project& p = d.arena->project;
+    p.reset();
+    (void)p.set_active_tracks(16u);
+    model::Step note = model::kEmptyStep;
+    note.note = 61;
+    note.instr = 1;
+    for (unsigned id = 1; id <= 8; ++id) {
+      (void)p.create_pattern(id, 16u);
+      for (unsigned t = 0; t < model::kMaxTracks; ++t) {
+        for (unsigned s = 0; s <= (t + id) % 8u; ++s) {
+          (void)p.set_step(id, t, s, note);
+        }
+      }
+    }
+    for (unsigned i = 0; i < 40; ++i) {
+      (void)p.append_order(1 + i % 8);
+    }
+    d.model.project = &p;
+    d.model.undo_depth = 4;
+  }
+  return d;
+}
+
+void draw_song_timeline_document(ui::Renderer& r, unsigned) {
+  SongDoc& d = song_doc(false);
+  ViewState v = song_doc_view(kPageTimeline, 12);
+  song_stage_play(v, 14, 7, 20);
+  scene(r, d.model, v);
+}
+
+// The sweep covers every count of active tracks (1 to 16: the slots in view are min(40, budget / (tracks + overhead)), so the dearest corner moves with the count), the cursor at the start
+// and in the middle of the 40 one-bar slots, and the playhead off and on. Single-digit ids cycling 1..8 change the colour at every slot and fit their number on every block.
+void draw_song_timeline_worst(ui::Renderer& r, unsigned variant) {
+  SongDoc& d = song_doc_short();
+  (void)d.arena->project.set_active_tracks(variant / 4 + 1u);
+  ViewState v = song_doc_view(kPageTimeline, variant % 2 == 0 ? 0 : 20);
+  if (variant / 2 % 2 == 1) {
+    song_stage_play(v, variant % 2 == 0 ? 3 : 22, 2, 9);
+  }
   scene(r, d.model, v);
 }
 
@@ -595,7 +682,7 @@ const ScreenState kInputTestStates[2] = {
 };
 
 // Every state is held to the standard budget in every theme and both modes: the typical ones are one-variant worst cases.
-const ScreenState kSongStates[12] = {
+const ScreenState kSongStates[16] = {
     {"typical", true, 1, kBudgetWords, draw_song_typical},
     {"arrangement", true, 1, kBudgetWords, draw_song_arrangement, false},
     {"worst", true, kSongWorstVariants, kBudgetWords, draw_song_worst},
@@ -611,6 +698,12 @@ const ScreenState kSongStates[12] = {
     {"document_map_empty", true, 1, kBudgetWords, draw_song_document_map_empty},
     {"document_map_16", true, 1, kBudgetWords, draw_song_document_map_16},
     {"document_map_churn", true, 8, kBudgetWords, draw_song_document_map_churn, false},
+    // OS-SONG-STAGE: the STAGE page playing, and the dearest sweep (five modes x three playhead places).
+    // OS-SONG-TIMELINE: the TIMELINE page playing, and the dearest sweep (the thumbnail cap, four variants).
+    {"timeline", true, 1, kBudgetWords, draw_song_timeline_document},
+    {"timeline_worst", true, 64, kBudgetWords, draw_song_timeline_worst, false},
+    {"stage", true, 1, kBudgetWords, draw_song_stage_document},
+    {"stage_worst", true, 15, kBudgetWords, draw_song_stage_worst, false},
 };
 
 // The `_worst` sweeps (and the arrangement page, which the song scenario shows) are measured but not rendered to the

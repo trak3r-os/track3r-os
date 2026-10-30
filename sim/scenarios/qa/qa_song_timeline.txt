@@ -1,0 +1,29 @@
+# OS-SONG-TIMELINE (docs/specs/OS-SONG-VIEW.md): the Song screen's TIMELINE page, QA-SNG-073..082, docs/qa/catalogue/song.md. Goldens are keyed qa_song_timeline/<snap>.
+# OS-SONG-TIMELINE (new Community OS behaviour): the Song button's third page. QA-SNG-073: four slots (patterns 1 to 4) as blocks as wide as they have bars, a colour and the pattern's number on each, the thumbnails of the
+# tracks' note density under them, the cursor's block in a white frame; the header says TIMELINE 3/4 and the info line the cursor's slot, its start bar, pattern and length.
+document
+audio on
+wait 20
+tap song
+press shift
+tap insert
+tap insert
+tap insert
+release shift
+tap up 3
+tap song
+tap song
+assert state screen=SONG
+snap qa_sng_073
+
+# QA-SNG-076: Left and Right (like Up and Down) walk the cursor slot along the page; the frame, the info line and the window follow.
+tap right 2
+tap down
+snap qa_sng_076
+
+# QA-SNG-077: playing, the slot that plays has a green bar under its block and a white playhead line crosses its block and the lanes at the playing step.
+tap up
+tap play
+wait 700
+assert state playing=1
+snap qa_sng_077

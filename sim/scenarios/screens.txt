@@ -10,6 +10,9 @@ tap song
 snap song_page2
 assert state screen=SONG page=1
 tap song
+tap song
+tap song
+assert state screen=SONG page=0
 snap song_page1
 
 # Quarter jumps in the Song screen: Shift + F4 is three quarters through the 24 positions, Shift + F5 the last (OS-SHIFTROW: the slot with a copy of the pattern is Shift + Insert).

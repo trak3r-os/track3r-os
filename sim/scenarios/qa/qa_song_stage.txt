@@ -1,0 +1,50 @@
+# OS-SONG-STAGE (docs/specs/OS-SONG-VIEW.md): the Song screen's STAGE page, QA-SNG-067..072, docs/qa/catalogue/song.md. Goldens are keyed qa_song_stage/<snap>.
+# OS-SONG-STAGE (docs/specs/OS-SONG-VIEW.md; new Community OS behaviour): the Song button's fourth page, STAGE. QA-SNG-067: stopped, the cursor's slot is CURSOR and the next slot NEXT, the countdown line says STOPPED.
+document
+audio on
+wait 20
+tap song
+tap f3
+tap f3
+tap up 2
+tap song
+tap song
+tap song
+assert state screen=SONG page=3
+snap qa_sng_067
+
+# QA-SNG-068: playing, the slot that plays is NOW (the green block), NEXT is the slot after it, the countdown says the bars left and the progress bar and the BAR n OF m line follow the playhead.
+tap play
+wait 700
+assert state playing=1
+snap qa_sng_068
+
+# QA-SNG-069: a live jump (Rec with the cursor on another slot while the song plays) replaces NEXT: captioned JUMP, an orange frame, the countdown line JUMP IN.
+tap down 2
+tap rec
+wait 20
+snap qa_sng_069
+
+# QA-SNG-070: at the song's last slot NEXT is slot 0, captioned LOOP, the countdown line LOOP IN (stopped: the cursor on the last slot).
+tap play
+wait 100
+press shift
+tap f5
+release shift
+snap qa_sng_070
+
+# QA-SNG-072: the page key turns the pages in order: ORDER, ARRANGEMENT, TIMELINE, STAGE, back to ORDER (the header says n/4); a peek of Song from another screen shows the page it was left on.
+tap song
+assert state screen=SONG page=0
+snap qa_sng_072
+tap song
+tap song
+tap song
+tap master
+press song
+wait 500
+assert state screen=SONG page=3
+snap qa_sng_072_peek
+release song
+wait 5
+assert state screen=MIXER

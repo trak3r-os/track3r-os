@@ -17,6 +17,10 @@ R2 | Left (nav.left 0) | Modules | bound key changes nothing and says nothing | 
 R2 | Right (nav.right 0) | Modules | bound key changes nothing and says nothing | rule:one-axis
 R2 | Shift+* (song.select_tracks *) | PadsTracks | bound key changes nothing and says nothing | OS-SONGMAP
 R2 | Shift+* (song.select_tracks *) | SONG_page_1 | bound key changes nothing and says nothing | OS-SONGMAP
+R2 | Left (nav.left 0) | SONG_page_3 | bound key changes nothing and says nothing | OS-SONG-STAGE
+R2 | Right (nav.right 0) | SONG_page_3 | bound key changes nothing and says nothing | OS-SONG-STAGE
+R2 | Shift+* (song.select_tracks *) | SONG_page_2 | bound key changes nothing and says nothing | OS-SONG-TIMELINE
+R2 | Shift+* (song.select_tracks *) | SONG_page_3 | bound key changes nothing and says nothing | OS-SONG-STAGE
 R2 | Shift+* (popup.page *) | StepPopup | bound key changes nothing and says nothing | OS-FU3
 R2 | F1 (dj.key 0) | PerformDj | bound key changes nothing and says nothing | OS-DJ
 R2 | F1 (dj.key 0) | PERFORM_page_1 | bound key changes nothing and says nothing | OS-DJ

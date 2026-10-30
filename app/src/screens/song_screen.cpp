@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <o3os/app/screens/song_screen.h>
 
+#include "song_pages.h"
+
 #include <o3os/app/chrome.h>
 #include <o3os/app/frame.h>
 #include <o3os/app/key_prompt.h>
@@ -96,6 +98,10 @@ int map_cells_of(const SongLayout& l, bool arrangement, const Model& model) noex
   return x + cells * l.map_pitch > ui::kScreenW ? 0 : cells;
 }
 
+// The page in view; the pages that draw the order list (and its track map) are ORDER and ARRANGEMENT, the others draw a pane of their own (song_pages.cpp).
+constexpr SongPage page_of(const ViewState& view) noexcept { return static_cast<SongPage>(view.page[screen_index(ScreenId::Song)]); }
+constexpr bool list_page(const ViewState& view) noexcept { return page_of(view) == SongPage::Order || page_of(view) == SongPage::Arrangement; }
+
 // The colour of a row's text: the selected row is all SelText (the cursor's own field AccentText, chosen by the caller).
 constexpr Color ink_of(bool selected, Color normal) noexcept { return selected ? Color::SelText : normal; }
 
@@ -107,6 +113,9 @@ void SongScreen::enter(const Model& model, ViewState& view) const noexcept { (vo
 int song_map_cells(const Model& model, const ViewState& view) noexcept {
   if (model.project == nullptr || SongSource(model).count() <= 0) {
     return 0;
+  }
+  if (!list_page(view)) {
+    return 0;  // OS-SONG-STAGE: no list, no map
   }
   const bool arrangement = view.page[screen_index(ScreenId::Song)] == static_cast<std::uint8_t>(SongPage::Arrangement);
   return map_cells_of(make_song_layout(ui::theme(view.theme)), arrangement, model);
@@ -123,6 +132,9 @@ bool song_sync(const Model& model, ViewState& view) noexcept {
 Context SongScreen::field_context(const Model&, const ViewState& view) const noexcept { return song_question_live(view) ? Context::SongAsk : Context::None; }
 
 bool SongScreen::step(const Model& model, ViewState& view, int dx, int dy) const noexcept {
+  if (page_of(view) == SongPage::Timeline) {
+    return (dx + dy) != 0 && set_position(model, view, position(view) + dx + dy);  // OS-SONG-TIMELINE: the slots run along the page, so Left / Right walk them as Up / Down do
+  }
   if (dx == 0) {
     return dy != 0 && set_position(model, view, position(view) + dy);
   }
@@ -164,7 +176,10 @@ void SongScreen::render(const Model& model, const ViewState& view, Renderer& r, 
   const int length = src.count();
   SongView sv = view.song;
   (void)sv.fit(length);  // drawn inside the list whatever the view says: the project may have changed since the cursor last moved
-  const int map_cells = map_cells_of(l, view.page[screen_index(ScreenId::Song)] == static_cast<std::uint8_t>(SongPage::Arrangement), model);
+  const bool stage = page_of(view) == SongPage::Stage;
+  const bool timeline = page_of(view) == SongPage::Timeline;
+  const bool lists = list_page(view);  // OS-SONG-STAGE: a page with a pane of its own draws no rows, cursor block or map
+  const int map_cells = lists ? map_cells_of(l, view.page[screen_index(ScreenId::Song)] == static_cast<std::uint8_t>(SongPage::Arrangement), model) : 0;
   (void)sv.fit_cols(length > 0 ? map_cells : 0);  // the column inside the map as it is drawn
   const bool in_map = sv.in_map();
   const int marker = src.marker(view.play);
@@ -179,7 +194,7 @@ void SongScreen::render(const Model& model, const ViewState& view, Renderer& r, 
   const bool arrangement = view.page[screen_index(ScreenId::Song)] == static_cast<std::uint8_t>(SongPage::Arrangement);
   const int cell_h = t.geometry(Face::Data).cell_h;
   const int cell_w = t.geometry(Face::Data).cell_w;
-  const int visible = length - sv.top() < kRows ? length - sv.top() : kRows;
+  const int visible = !lists ? 0 : (length - sv.top() < kRows ? length - sv.top() : kRows);
   const int slot = sv.pos() - sv.top();
   const int cursor_slot = slot < 0 ? 0 : (slot >= kRows ? kRows - 1 : slot);  // inside the window whatever the view says
   const auto hidden = [&](const Rect& rect) { return covers(covered, rect.x, rect.y, rect.w, rect.h); };
@@ -200,7 +215,7 @@ void SongScreen::render(const Model& model, const ViewState& view, Renderer& r, 
                        l.grid.cursor_h};
   const int o = l.grid.cursor_outline;
   const Rect outline = {block.x - o, block.y - o, block.w + 2 * o, block.h + 2 * o};
-  if (length > 0 && !in_map && !hidden(outline)) {  // (in the map the cursor is a cell's: the PAT block is drawn as unselected)
+  if (lists && length > 0 && !in_map && !hidden(outline)) {  // (in the map the cursor is a cell's: the PAT block is drawn as unselected)
     r.panel(outline, Color::AccentText);
     r.panel(block, Color::Accent);
   }
@@ -273,6 +288,12 @@ void SongScreen::render(const Model& model, const ViewState& view, Renderer& r, 
     }
   }
 
+  if (stage) {
+    draw_song_stage(r, f, model, view, covered);
+  } else if (timeline) {
+    draw_song_timeline(r, f, model, view, covered);
+  }
+
   // The status strip: the title in the Display face, the transport badge, fields in the Data face, CPU at the right edge.
   if (!hidden(f.strip)) {
     StatusStrip strip(r, f);
@@ -317,22 +338,24 @@ void SongScreen::render(const Model& model, const ViewState& view, Renderer& r, 
     };
     const int under_x = in_map ? map_x : l.pat_x - l.grid.cursor_pad_x;  // the selection underline of the cursor's column
     const int under_w = in_map ? map_cells * l.map_pitch - m.gap : l.hex_w + 2 * l.grid.cursor_pad_x;
-    r.panel({under_x, f.header.y + f.header.h - 2 * m.border, under_w, 2 * m.border}, Color::Sel);
-    caption(l.pos_x, "POS", false);
-    caption(l.pat_x, "PAT", !in_map);
-    if (arrangement) {
-      caption(l.start_x, "START", false);
-      caption(l.bars_x, "BARS", false);
-      caption(l.graph_x, "LENGTH", false);
-    } else {
-      caption(l.name_x, "NAME", false);
-      caption(l.len_x, "LEN", false);
-    }
-    if (map_cells > 0) {
-      caption(map_x, "TRACKS", in_map);
+    if (lists) {
+      r.panel({under_x, f.header.y + f.header.h - 2 * m.border, under_w, 2 * m.border}, Color::Sel);
+      caption(l.pos_x, "POS", false);
+      caption(l.pat_x, "PAT", !in_map);
+      if (arrangement) {
+        caption(l.start_x, "START", false);
+        caption(l.bars_x, "BARS", false);
+        caption(l.graph_x, "LENGTH", false);
+      } else {
+        caption(l.name_x, "NAME", false);
+        caption(l.len_x, "LEN", false);
+      }
+      if (map_cells > 0) {
+        caption(map_x, "TRACKS", in_map);
+      }
     }
     core::FixedString<24> page;
-    page.assign(arrangement ? "ARRANGEMENT 2/2" : "ORDER 1/2");
+    page.assign(arrangement ? "ARRANGEMENT 2/4" : (timeline ? "TIMELINE 3/4" : (stage ? "STAGE 4/4" : "ORDER 1/4")));
     r.text(ui::kScreenW - 2 * m.pad - r.text_width(page.c_str(), Face::Label), cap_y, page.c_str(), Color::ChromeText,
            Face::Label);
   }
@@ -350,7 +373,40 @@ void SongScreen::render(const Model& model, const ViewState& view, Renderer& r, 
         text.append(" slots");
       }
     };
-    if (in_map) {
+    if (stage) {  // OS-SONG-STAGE: the song's size; what plays is the pane's
+      int bars = 0;
+      for (int i = 0; i < length; ++i) {
+        bars += bars_of(src.steps(i));
+      }
+      text.assign("stage   ");
+      append_dec(text, static_cast<unsigned>(length), digits_of(length));
+      text.append(" slots, ");
+      append_uint(text, static_cast<unsigned>(bars));
+      text.append(" bars");
+      if (view.playing || view.play.playing) {  // the cursor is not drawn here, yet Up / Down move it and Rec jumps to it: say where it is
+        text.append("   cursor ");
+        append_dec(text, static_cast<unsigned>(view.song.clamped_pos(length)), digits_of(length));
+      }
+    } else if (timeline) {  // OS-SONG-TIMELINE: the cursor's slot, where it starts and how long it is
+      if (length <= 0) {
+        text.assign("timeline   no slots");
+      } else {
+        int start = 0;
+        for (int i = 0; i < sv.pos(); ++i) {
+          start += bars_of(src.steps(i));
+        }
+        const int bars = bars_of(src.steps(sv.pos()));
+        text.assign("timeline   slot ");
+        append_dec(text, static_cast<unsigned>(sv.pos()), digits_of(length));
+        text.append("   bar ");
+        append_uint(text, static_cast<unsigned>(start + 1));
+        text.append("   pattern ");
+        append_dec(text, cursor_pattern, digits_of(static_cast<int>(cursor_pattern)));
+        text.append("   ");
+        append_uint(text, static_cast<unsigned>(bars));
+        text.append(bars == 1 ? " bar" : " bars");
+      }
+    } else if (in_map) {
       text.assign("track ");
       append_dec(text, static_cast<unsigned>(sv.track() + 1), 2);
       if (sv.selecting() || sv.track_selecting()) {

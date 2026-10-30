@@ -239,6 +239,8 @@ TEST_CASE("budget: the Song screen and every overlay over the Pattern and Song s
       {"song", "typical"},           {"song", "arrangement"},         {"song", "worst"},
       {"song", "document_map"},      {"song", "document_ask"},        {"overlay", "song_tools"},   {"overlay", "song_tools_worst"},   // OS-SONGMAP
       {"song", "document_map_empty"}, {"song", "document_map_16"},    {"song", "document_map_churn"},   // OS-BUG-SONGMAPCUR: the empty cells' ticks, 12 and 16 tracks, the dearest sweep
+      {"song", "timeline"},          {"song", "timeline_worst"},  // OS-SONG-TIMELINE
+      {"song", "stage"},            {"song", "stage_worst"},   // OS-SONG-STAGE
       {"overlay", "pattern_learn"},  {"overlay", "pattern_learn_worst"},
       {"overlay", "pattern_navigator"}, {"overlay", "pattern_navigator_worst"},
       {"overlay", "pattern_notify"}, {"overlay", "pattern_notify_worst"},

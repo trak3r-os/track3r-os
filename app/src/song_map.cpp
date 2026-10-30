@@ -45,6 +45,59 @@ std::uint32_t SongTrackMap::get(const model::Project& project, unsigned id) cons
   return e.map;
 }
 
+void SongDensity::scan(const model::Pattern& pattern, std::uint64_t& density, std::uint64_t& loudness) noexcept {
+  density = 0;
+  loudness = 0;
+  for (unsigned t = 0; t < kTracks; ++t) {
+    const unsigned length = pattern.track_length[t] < model::kMaxPatternLength ? pattern.track_length[t] : model::kMaxPatternLength;
+    unsigned notes = 0;
+    unsigned volume_sum = 0;
+    for (unsigned s = 0; s < length; ++s) {
+      const model::Step& step = pattern.steps[t][s];
+      if (step.note >= model::kNoteFirst && step.note <= model::kNoteLast) {
+        ++notes;
+        volume_sum += step.vol <= model::kVolumeMax ? step.vol : model::kVolumeMax;  // (unset: the loudest)
+      }
+    }
+    density |= static_cast<std::uint64_t>(level(notes, length)) << (4u * t);
+    loudness |= static_cast<std::uint64_t>(loud(volume_sum, notes)) << (4u * t);
+  }
+}
+
+std::uint64_t SongDensity::compute(const model::Pattern& pattern) noexcept {
+  std::uint64_t density = 0;
+  std::uint64_t loudness = 0;
+  scan(pattern, density, loudness);
+  return density;
+}
+
+bool SongDensity::refresh(const model::Project& project, unsigned id) const noexcept {
+  if (id < 1u || id > model::kMaxPatternId) {
+    return false;
+  }
+  if (&project != project_) {
+    project_ = &project;  // another project: nothing cached is its
+    for (std::uint32_t& g : generation_) {
+      g = 0;
+    }
+  }
+  const model::Pattern* pattern = project.pattern(id);
+  if (pattern == nullptr) {
+    return false;
+  }
+  const std::uint32_t generation = project.pattern_generation(id);
+  if (generation_[id] != generation || generation == 0u) {
+    scan(*pattern, dens_[id], loud_[id]);
+    generation_[id] = generation;
+    ++computed_;
+  }
+  return true;
+}
+
+std::uint64_t SongDensity::get(const model::Project& project, unsigned id) const noexcept { return refresh(project, id) ? dens_[id] : 0u; }
+
+std::uint64_t SongDensity::loudness(const model::Project& project, unsigned id) const noexcept { return refresh(project, id) ? loud_[id] : 0u; }
+
 unsigned SongUseCount::get(const model::Project& project, unsigned id) const noexcept {
   if (id < 1u || id > model::kMaxPatternId) {
     return 0;

@@ -7,9 +7,10 @@
 namespace o3os::app {
 
 // The Song screen's pages (pressing Song again cycles them): the order list, and the same list as an arrangement with
-// each pattern's start bar, length in bars and a proportional bar.
-enum class SongPage : std::uint8_t { Order = 0, Arrangement = 1 };
-inline constexpr unsigned kSongPages = 2;
+// each pattern's start bar, length in bars and a proportional bar. OS-SONG-TIMELINE: the visible slots as blocks scaled to bars, with a thumbnail of each track's note density.
+// OS-SONG-STAGE: the playing slot and the next one in large type with a bar countdown (both new Community OS behaviour). The cycle is ORDER, ARRANGEMENT, TIMELINE, STAGE.
+enum class SongPage : std::uint8_t { Order = 0, Arrangement = 1, Timeline = 2, Stage = 3 };
+inline constexpr unsigned kSongPages = 4;
 
 // F1..F8 of the song screen: at most 8 characters, what a key-cap of the row has room for (the F-number box and the label
 // fit 100 px). OS-SONG1: the row (Play Pattern, Play Song, Undo, Add Slot, Delete Slot, Pattern -, Pattern +,
