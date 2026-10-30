@@ -186,8 +186,109 @@ TEST_CASE("firmware: an empty Firmware folder says so, F1 has nothing to choose,
   }
   rig.tap(Button::F8);
   CHECK(rig.fw().n == FirmwareView::kMax);
-  CHECK(rig.fw().more);
-  CHECK(rig.sink.count("list_end") == 1u);  // (a list that is cut is closed all the same; the calls were cleared before)
+  CHECK(rig.fw().entries == FirmwareView::kMax + 3);  // (the window holds 12, the folder's count is known)
+  CHECK(rig.sink.count("list_end") == 1u);  // (the pass is closed all the same; the calls were cleared before)
+  rig.tap(Button::F8);
+}
+
+TEST_CASE("firmware: a folder of 19 files is paged through: every entry can be chosen, the window of 12 follows the cursor, and the position is shown") {
+  Rig rig;
+  rig.sink.clear_files();
+  for (unsigned i = 0; i < 19; ++i) {
+    rig.sink.add("F" + std::to_string(i) + ".PTF", 1000u + i);
+  }
+  rig.tap(Button::F8);
+  NEED(rig.fw().n == FirmwareView::kMax);  // (no SRAM growth: the window stays 12)
+  CHECK(rig.fw().entries == 19);
+  CHECK(rig.fw().first == 0);
+  CHECK(rig.sink.count("list_begin") == 1u);
+  CHECK(rig.sink.count("list_end") == 1u);
+  CHECK(rig.fw().files[0].reset_target);
+  for (unsigned i = 0; i < 11; ++i) {
+    rig.tap(Button::Down);
+  }
+  CHECK(rig.fw().cursor == 11);
+  CHECK(rig.sink.count("list_begin") == 1u);  // (inside the window: no scan)
+  rig.tap(Button::Down);  // past the last entry of a full window: the next window
+  CHECK(rig.sink.count("list_begin") == 2u);
+  CHECK(rig.sink.count("list_end") == 2u);
+  CHECK(rig.fw().first == 12);
+  CHECK(rig.fw().n == 7);
+  CHECK(rig.fw().entries == 19);
+  CHECK(rig.fw().cursor == 0);
+  CHECK(std::string(rig.fw().chosen()) == "F12.PTF");
+  CHECK_FALSE(rig.fw().files[0].reset_target);  // (only the first file of the folder is the reset target)
+  for (unsigned i = 0; i < 5; ++i) {
+    rig.tap(Button::Down);
+  }
+  CHECK(std::string(rig.fw().chosen()) == "F17.PTF");  // entry 18
+  rig.tap(Button::F1);
+  CHECK(rig.fw().phase == Phase::AskUpdate);
+  CHECK(std::string(rig.fw().chosen()) == "F17.PTF");
+  rig.tap(Button::F1);
+  CHECK(rig.fw().phase == Phase::Checking);
+  CHECK(rig.sink.count("begin_check F17.PTF") == 1u);
+  rig.tap(Button::F8);  // CANCEL: the list again, on the same entry
+  CHECK(rig.fw().phase == Phase::List);
+  CHECK(std::string(rig.fw().chosen()) == "F17.PTF");
+  rig.tap(Button::Down);  // the last, and no further
+  CHECK(std::string(rig.fw().chosen()) == "F18.PTF");
+  rig.tap(Button::Down);
+  CHECK(std::string(rig.fw().chosen()) == "F18.PTF");
+  // Up past the first entry of the second window: the window before, on its last entry.
+  for (unsigned i = 0; i < 6; ++i) {
+    rig.tap(Button::Up);
+  }
+  CHECK(std::string(rig.fw().chosen()) == "F12.PTF");
+  rig.tap(Button::Up);
+  CHECK(rig.fw().first == 0);
+  CHECK(rig.fw().n == FirmwareView::kMax);
+  CHECK(std::string(rig.fw().chosen()) == "F11.PTF");
+  // A big move reaches any entry at once, in either direction (the encoder accelerates in a list: any turn this size ends at the end).
+  rig.turn(100);
+  CHECK(std::string(rig.fw().chosen()) == "F18.PTF");
+  rig.turn(-100);
+  CHECK(std::string(rig.fw().chosen()) == "F0.PTF");
+  CHECK(rig.fw().first == 0);
+  CHECK(rig.fw().files[rig.fw().cursor].reset_target);
+  rig.tap(Button::F8);
+  CHECK(rig.overlay() == OverlayId::None);
+}
+
+TEST_CASE("firmware: a window that cannot be loaded keeps the list as it was and says why; a folder that shrank is followed") {
+  Rig rig;
+  rig.sink.clear_files();
+  for (unsigned i = 0; i < 19; ++i) {
+    rig.sink.add("F" + std::to_string(i) + ".PTF", 1000u + i);
+  }
+  rig.tap(Button::F8);
+  rig.sink.list_refusal = Refusal::StorageBusy;
+  rig.turn(100);  // the last entry is in the second window, which the busy card cannot give
+  CHECK(rig.fw().phase == Phase::List);
+  CHECK(rig.fw().first == 0);
+  CHECK(rig.fw().n == FirmwareView::kMax);
+  CHECK(std::string(rig.fw().msg.c_str()) == "THE CARD IS BUSY: TRY AGAIN");
+  CHECK(rig.fw().bad);
+  rig.sink.list_refusal = Refusal::None;
+  rig.sink.clear_files();  // the folder shrank to 14 files while the dialog was up
+  for (unsigned i = 0; i < 14; ++i) {
+    rig.sink.add("G" + std::to_string(i) + ".PTF", 1000u + i);
+  }
+  rig.turn(100);
+  CHECK(rig.fw().first == 12);
+  CHECK(rig.fw().n == 2);
+  CHECK(rig.fw().entries == 14);
+  CHECK(std::string(rig.fw().chosen()) == "G13.PTF");  // the end it asked for (entry 19) is past the folder: the last entry that exists is 14
+  rig.sink.clear_files();
+  for (unsigned i = 0; i < 5; ++i) {
+    rig.sink.add("H" + std::to_string(i) + ".PTF", 1000u + i);
+  }
+  rig.tap(Button::Up);  // (G12, the first of the window)
+  rig.tap(Button::Up);  // the window before: read from the folder as it is now (5 files), the cursor on the last entry that exists
+  CHECK(std::string(rig.fw().chosen()) == "H4.PTF");
+  CHECK(rig.fw().entries == 5);
+  CHECK(rig.fw().first == 0);
+  CHECK(std::string(rig.fw().chosen()) == "H4.PTF");
   rig.tap(Button::F8);
 }
 

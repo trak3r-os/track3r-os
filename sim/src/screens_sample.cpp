@@ -437,6 +437,7 @@ struct ConfigScene {
       v.files[i].reset_target = i == 0;
     }
     v.n = 4;
+    v.entries = 4;
     v.cursor = static_cast<std::uint8_t>(cursor);
     v.phase = phase;
     v.total = kFiles[cursor].size;
@@ -447,6 +448,22 @@ struct ConfigScene {
       v.bad = true;
       v.msg.assign("NOT A VALID IMAGE: FLASH CONFIGURATION FIELD IS NOT THE REQUIRED ONE AT 1104");
     }
+  }
+  // OS-BUG-FWLIST: a folder of 19 files, the second window (entries 13..19) held, the cursor on entry 18: the list shows where it is ("FILE 18 / 19").
+  void show_firmware_paged() {
+    show_firmware(app::FirmwareView::Phase::List, 0);
+    app::FirmwareView& v = view.firmware;
+    static const char* const kNames[7] = {"TRACKER_13.PTF", "TRACKER_14.PTF", "TRACKER_15.PTF", "TRACKER_16.PTF", "TRACKER_17.PTF", "TRACKER_18.PTF", "TRACKER_19.PTF"};
+    for (unsigned i = 0; i < 7; ++i) {
+      std::memset(v.files[i].name, 0, sizeof v.files[i].name);
+      std::strncpy(v.files[i].name, kNames[i], sizeof v.files[i].name - 1);
+      v.files[i].size = 810000u - 1000u * i;
+      v.files[i].reset_target = false;
+    }
+    v.n = 7;
+    v.first = 12;
+    v.entries = 19;
+    v.cursor = 5;
   }
 };
 
@@ -495,10 +512,15 @@ void draw_config_fw_check(ui::Renderer& r, unsigned) { draw_config_fw(r, app::Fi
 void draw_config_fw_install(ui::Renderer& r, unsigned) { draw_config_fw(r, app::FirmwareView::Phase::AskInstall, 0); }
 void draw_config_fw_installing(ui::Renderer& r, unsigned) { draw_config_fw(r, app::FirmwareView::Phase::Installing, 3, 500); }
 void draw_config_fw_failed(ui::Renderer& r, unsigned) { draw_config_fw(r, app::FirmwareView::Phase::List, 2, 0, true); }
+void draw_config_fw_paged(ui::Renderer& r, unsigned) {
+  ConfigScene& s = config_scene();
+  s.show_firmware_paged();
+  app::render_scene(s.model, s.view, r);
+}
 
 }  // namespace
 
-const ScreenState kConfigStates[16] = {
+const ScreenState kConfigStates[17] = {
     {"midi", true, 1, kBudgetWords, draw_config_midi},
     {"display", true, 1, kBudgetWords, draw_config_display},
     {"sd", true, 1, kBudgetWords, draw_config_sd},
@@ -515,6 +537,7 @@ const ScreenState kConfigStates[16] = {
     {"fw_install", true, 1, kBudgetWords, draw_config_fw_install},
     {"fw_installing", true, 1, kBudgetWords, draw_config_fw_installing},
     {"fw_failed", true, 1, kBudgetWords, draw_config_fw_failed},
+    {"fw_paged", true, 1, kBudgetWords, draw_config_fw_paged},
 };
 
 namespace {

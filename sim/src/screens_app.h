@@ -77,7 +77,7 @@ extern const ScreenState kSampleEditStates[4];
 
 // The Config screen (screens_sample.cpp): the MIDI page, DISPLAY, SD with a card and without, INFO, USB, PATTERN, and (OS-FWCONFIG) the six states of the firmware update dialog over INFO: the list,
 // question 1, the check, question 2, the hand-over and a failed check.
-extern const ScreenState kConfigStates[16];
+extern const ScreenState kConfigStates[17];
 
 // The widest text the model's limits allow (screens_legibility.cpp, OS-E2E-5): the Pattern screen with the longest names, tempo 800, instrument 64 and pattern 255, the same with the
 // longest strip message, the Instrument page of instrument 64, the File screen of the longest project name and (OS-FWCONFIG) the firmware update list with twelve files of 48 characters and the

@@ -81,6 +81,53 @@ const char* blocked(ActionContext& ctx) noexcept {
   return nullptr;
 }
 
+// One pass over the folder, after a list_begin() that said None: the window of kMax entries that starts at the folder's index `first` is copied (the entries before it are read and dropped: the
+// card has one directory handle and no seek), the entries are counted, and list_end() closes the pass. Bounded: at most kScanMax list_next() calls, kMax copies.
+void scan(FirmwareView& v, FirmwareSink& sink, unsigned first) noexcept {
+  v.n = 0;
+  unsigned i = 0;
+  hal::firmware::File f;
+  while (i < FirmwareView::kScanMax && sink.list_next(f)) {
+    if (i >= first && v.n < FirmwareView::kMax) {
+      v.files[v.n++] = f;
+    }
+    ++i;
+  }
+  sink.list_end();
+  v.first = static_cast<std::uint16_t>(first);
+  v.entries = static_cast<std::uint16_t>(i);
+}
+
+// The window the cursor was sent to (v.want, outside the one held) is loaded: the folder is scanned again. The windows are multiples of kMax, so moving down past the last entry of a full window
+// lands on the first of the next, and moving up past the first lands on the last of the one before. A folder that lost files since the last pass ends the cursor on its last entry; a card that cannot
+// give the list now keeps the window as it was and says why on the line.
+void load_want(FirmwareView& v, FirmwareSink& sink) noexcept {
+  unsigned target = v.want;
+  v.want = FirmwareView::kNoWant;
+  to_list(v, "");
+  for (unsigned attempt = 0; attempt < 2; ++attempt) {  // (the second only when the folder shrank under the wanted window)
+    const Refusal why = sink.list_begin();
+    if (why != Refusal::None) {
+      to_list(v, refusal_text(why));
+      v.bad = true;
+      if (attempt != 0) {  // (the first pass had already replaced the window with an empty one)
+        v.n = 0;
+        v.cursor = 0;
+        v.first = 0;
+        v.entries = 0;
+      }
+      return;
+    }
+    const unsigned first = target / FirmwareView::kMax * FirmwareView::kMax;
+    scan(v, sink, first);
+    if (v.n != 0 || v.entries == 0) {
+      break;
+    }
+    target = v.entries - 1u;
+  }
+  v.cursor = v.n == 0 ? 0 : static_cast<std::uint8_t>(target - v.first < v.n ? target - v.first : v.n - 1u);
+}
+
 void leave(ActionContext& ctx) noexcept {
   if (ctx.firmware != nullptr) {
     ctx.firmware->cancel();  // (nothing may be left running or waiting behind a closed dialog)
@@ -110,12 +157,7 @@ bool firmware_open(ActionContext& ctx, core::ActionArg) noexcept {
   }
   FirmwareView& v = ctx.view.firmware;
   v.close();
-  while (v.n < FirmwareView::kMax && sink->list_next(v.files[v.n])) {
-    ++v.n;
-  }
-  hal::firmware::File beyond;
-  v.more = v.n == FirmwareView::kMax && sink->list_next(beyond);
-  sink->list_end();
+  scan(v, *sink, 0);
   v.phase = FirmwareView::Phase::List;
   ctx.view.overlay = OverlayId::FirmwareUpdate;
   return true;
@@ -130,6 +172,10 @@ bool firmware_go(ActionContext& ctx, core::ActionArg) noexcept {
   }
   switch (v.phase) {
     case FirmwareView::Phase::List:
+      if (v.want != FirmwareView::kNoWant) {  // (the cursor moved out of the window in this very pass: the list shows the entry before it is asked about)
+        load_want(v, *sink);
+        return true;
+      }
       if (v.n == 0) {
         return false;
       }
@@ -228,6 +274,10 @@ bool firmware_poll(ViewState& view, FirmwareSink& sink, core::Tick now) noexcept
     }
     sink.cancel();  // before INSTALL nothing may be left running or waiting behind a closed dialog (a power switch-off is App::power_begin's, which calls firmware_abandon)
     v.close();
+    return true;
+  }
+  if (v.phase == FirmwareView::Phase::List && v.want != FirmwareView::kNoWant) {  // the cursor left the window (FirmwareOverlay::set_position has no sink): the window it went to is read now, one pass
+    load_want(v, sink);
     return true;
   }
   if (v.phase != FirmwareView::Phase::Checking && v.phase != FirmwareView::Phase::AskInstall && v.phase != FirmwareView::Phase::Installing) {

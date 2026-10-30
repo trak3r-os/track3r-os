@@ -151,7 +151,7 @@ void draw_firmware(ui::Renderer& r, unsigned) {
   app::FirmwareView& f = v.firmware;
   f.phase = app::FirmwareView::Phase::List;
   f.n = app::FirmwareView::kMax;
-  f.more = true;
+  f.entries = app::FirmwareView::kScanMax;  // (the widest "FILE n / 999" position line)
   f.bad = true;
   f.cursor = 5;
   for (unsigned i = 0; i < app::FirmwareView::kMax; ++i) {

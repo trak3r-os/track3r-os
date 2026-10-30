@@ -10,9 +10,7 @@ What is not finished. One row per package. Finished work (DONE) is not listed he
 
 ## IN PROGRESS
 
-| ID | What | Parity | Cost | Note |
-|---|---|---|---|---|
-| OS-BUG-FWLIST | The update dialog (Config, INFO, `F8`) lists only the first 12 files of `Firmware/`, and says MORE FILES ON THE CARD ARE NOT LISTED, so later files cannot be chosen | N | S | Found on a card with 19 images. Interim: keep 12 or fewer `.ptf` files in `Firmware/`. Fix: page through every file, a 12-entry window (default, to confirm). Level B (UI). In progress. |
+Nothing at the moment.
 
 ## UNIT PENDING
 
@@ -20,6 +18,7 @@ Merged and covered by host or simulator tests; the check on the real unit is the
 
 | ID | What | Check left on the unit |
 |---|---|---|
+| OS-BUG-FWLIST | The update dialog (Config, INFO, `F8`) reaches every file of `Firmware/`: it pages through them twelve at a time and shows `FILE n / total` | QA-CFG-265: 19 `.ptf` files on a card, page through them and choose the 18th; how long a page change takes with a large folder |
 | OS-CFG-ARROWS | Left and Right edit the value under the cursor on Config and Record (Shift: the coarse step); the pages change only with the F-keys or the screen button | Passed on the unit (tester image `v1.0.1-arrows.1`): install, smoke and the changed HIL steps. Left: the feel and auto-repeat of the arrows on Config and Record, Shift + arrow (coarse), the USB pending value with F7, and the READ ONLY row |
 | OS-USBOUTS | USB audio outputs of 2, 4, 6, 8 or 10 channels, chosen per project on Mixer › STEMS (row OUTPUTS); the USB return only below 10 channels | Left: Linux enumeration at 2, 4, 6, 8 and 10 outputs with the USB return on and off (QA-MIX-056), and `usb return off` in the DISK screen. The tester image `v1.0.1-usbouts.1` is being gated |
 | OS-PERF-SMP | Perform SMP POS and SMP END act at note start (spec: `docs/specs/OS-PERFFX.md` section 10) | Passed on the unit (final release candidate): note start and stop measured on a one-shot and a looped sample, CPU with both held on twelve tracks +0.39 and +0.48 pp (noise), 0 underruns, export byte-identical to Perform off. Left: a multi-slice instrument, and the +100 / -100 values (QA-PRF-151, QA-PRF-152) |

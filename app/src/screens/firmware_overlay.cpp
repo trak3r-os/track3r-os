@@ -51,19 +51,28 @@ std::uint16_t permille_of(std::uint32_t done, std::uint32_t total) noexcept {
 
 Rect FirmwareOverlay::rect(const ui::Theme& theme) const noexcept { return firmware_dialog(theme).outer; }
 
-int FirmwareOverlay::count(const Model&, const ViewState& view) const noexcept { return view.firmware.phase == FirmwareView::Phase::List ? static_cast<int>(view.firmware.n) : 0; }
-int FirmwareOverlay::position(const ViewState& view) const noexcept { return view.firmware.cursor; }
+// The cursor runs over the whole folder (OS-BUG-FWLIST), not over the window held: count() is the folder's, position() the folder's index.
+int FirmwareOverlay::count(const Model&, const ViewState& view) const noexcept { return view.firmware.phase == FirmwareView::Phase::List ? static_cast<int>(view.firmware.entries) : 0; }
+int FirmwareOverlay::position(const ViewState& view) const noexcept { return static_cast<int>(view.firmware.position()); }
 int FirmwareOverlay::page() const noexcept { return kRows; }
 
+// A position inside the window moves the cursor; one outside records where it goes (`want`) and the App's next pass loads that window (this call has no sink). Several moves in one pass add up.
 bool FirmwareOverlay::set_position(const Model&, ViewState& view, int position) const noexcept {
   FirmwareView& v = view.firmware;
-  if (v.phase != FirmwareView::Phase::List || v.n == 0) {
+  if (v.phase != FirmwareView::Phase::List || v.entries == 0) {
     return false;
   }
-  const int to = position < 0 ? 0 : (position >= static_cast<int>(v.n) ? static_cast<int>(v.n) - 1 : position);
-  const bool changed = to != v.cursor;
-  v.cursor = static_cast<std::uint8_t>(to);
-  return changed;
+  const unsigned to = position < 0 ? 0u : (position >= static_cast<int>(v.entries) ? v.entries - 1u : static_cast<unsigned>(position));
+  if (to == v.position()) {
+    return false;
+  }
+  if (to >= v.first && to < static_cast<unsigned>(v.first) + v.n) {
+    v.cursor = static_cast<std::uint8_t>(to - v.first);
+    v.want = FirmwareView::kNoWant;
+  } else {
+    v.want = static_cast<std::uint16_t>(to);
+  }
+  return true;
 }
 
 void FirmwareOverlay::render(const Model& model, const ViewState& view, ui::Renderer& r) const noexcept {
@@ -173,9 +182,13 @@ void FirmwareOverlay::render(const Model& model, const ViewState& view, ui::Rend
   }
   const int foot = d.body.y + (kLine + kRows) * pitch;
   (void)draw_prompt_hints(r, x, foot, pitch, prompt_in_force(model, view), 2);
-  if (v.phase == Phase::List && v.more) {
-    const char* note = "MORE FILES ON THE CARD ARE NOT LISTED";
-    body.put(kLine + kRows, right - r.text_width(note, Face::Label), note, Face::Label, Color::ChromeDim);
+  if (v.phase == Phase::List && v.entries > FirmwareView::kMax) {  // a folder that is paged through: where the cursor is ("FILE 14 / 19")
+    Text where;
+    where.assign("FILE ");
+    append_uint(where, v.position() + 1u);
+    where.append(" / ");
+    append_uint(where, v.entries);
+    body.put(kLine + kRows, right - r.text_width(where.c_str(), Face::Label), where.c_str(), Face::Label, Color::ChromeDim);
   }
 }
 
