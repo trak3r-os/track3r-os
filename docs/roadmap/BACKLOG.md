@@ -82,6 +82,7 @@ Merged and covered by host or simulator tests; the check on the real unit is the
 
 | ID | What | Parity | Cost | Note |
 |---|---|---|---|---|
+| OS-BUG-DEMOKIT | A project whose instruments are all modules (or all MIDI) gets the demo kit written over instruments 1-4 at boot; a later save makes the loss permanent | N | S | Found on the unit 2026-10-30. Workaround until fixed: keep one sample instrument in such a project. Fix: the kit only goes into a project with no instrument at all. |
 | OS-PERF-HPBP | The HIPASS and BANDPASS Perform rows cost about 18k cycles a block in the voices | N | S | Slice 1b merged (HIPASS row -16 % on the unit, BANDPASS unchanged). Slice 1c (align the loop heads) measured on the unit 2026-10-30 and dropped: no BANDPASS gain, HIPASS and LOWPASS worse. Slice 2 (a two-voice loop, bench first) waits in the queue. |
 | OS-SONG-VIEW2 | STAGE leaves the Song cycle (its countdown moves to TIMELINE); a simpler TIMELINE; a per-pattern note map (one tick per note) replaces the density thumbnails | N | S+M | Slices 1-2 merged (STAGE left the cycle, a simpler TIMELINE); slice 3, the note map, next. Approved by the maintainer 2026-10-30. No format change. Spec `docs/specs/OS-SONG-VIEW2.md`. |
 
