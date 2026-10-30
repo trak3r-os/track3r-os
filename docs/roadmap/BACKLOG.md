@@ -12,7 +12,7 @@ What is not finished. One row per package. Finished work (DONE) is not listed he
 
 | ID | What | Parity | Cost | Note |
 |---|---|---|---|---|
-| OS-PERF-CPU2 | Cheaper Perform effects, after v1.0.0: (a) the reversed-voice path has no fast path (PLAYBACK about 0.89 pp of a block per reversed voice); (b) PAN LFO costs +4.3 pp where about 0.15 k cycles a voice-block were estimated, and the five LFO rows with LOWPASS held cost +18.11 pp on twelve tracks | N | M | In progress (2026-10-30), spec phase. Follow-up of the v1.0.0 Perform rows, accepted there as known issues. Level C (audio path): `rt-optimize`, then the measurement on the unit. Figures and method: `docs/architecture/cpu-budget.md`. |
+| OS-PERF-LFO-STEP | The step-effect LFO columns 23, 24, 33 and 36 have no consumer yet | N | ? | In progress (2026-10-30). Follow-up of OS-PERF-LFO. Level C (audio path). |
 
 ## UNIT PENDING
 
@@ -20,13 +20,14 @@ Merged and covered by host or simulator tests; the check on the real unit is the
 
 | ID | What | Check left on the unit |
 |---|---|---|
+| OS-PERF-CPU2 | Cheaper Perform effects, after v1.0.0: reversed voices take a fast path, bit-identical (REV12 +0.23 pp on the unit, against +6.19 pp; gate 3 pp) | Left: by ear |
 | OS-BUG-FWLIST | The update dialog (Config, INFO, `F8`) reaches every file of `Firmware/`: it pages through them twelve at a time and shows `FILE n / total` | QA-CFG-265: 19 `.ptf` files on a card, page through them and choose the 18th; how long a page change takes with a large folder |
 | OS-CFG-ARROWS | Left and Right edit the value under the cursor on Config and Record (Shift: the coarse step); the pages change only with the F-keys or the screen button | Passed on the unit (tester image `v1.0.1-arrows.1`): install, smoke and the changed HIL steps. Left: the feel and auto-repeat of the arrows on Config and Record, Shift + arrow (coarse), the USB pending value with F7, and the READ ONLY row |
 | OS-USBOUTS | USB audio outputs of 2, 4, 6, 8 or 10 channels, chosen per project on Mixer › STEMS (row OUTPUTS); the USB return only below 10 channels | Left: macOS and Windows enumeration (reports welcome) |
-| OS-BUG-MODDRIVE | Overdrive and Bit depth shape module instruments (TB-303, FM, Chip); issue [#2](https://github.com/trak3r-os/track3r-os/issues/2) | Fixed on dev (2026-10-30), in the next release. Left: the cost check with the shaping off (Dense8 against v1.0.1-usbouts.1), and listening for QA-MOD-207 and QA-MOD-208 |
+| OS-BUG-MODDRIVE | Overdrive and Bit depth shape module instruments (TB-303, FM, Chip); issue [#2](https://github.com/trak3r-os/track3r-os/issues/2) | Fixed on dev (2026-10-30), in the next release. The cost with the shaping off passed (Dense8 +0.3 % against v1.0.1-usbouts.1). Left: listening for QA-MOD-207 and QA-MOD-208 |
 | OS-PERF-SMP | Perform SMP POS and SMP END act at note start (spec: `docs/specs/OS-PERFFX.md` section 10) | Passed on the unit (final release candidate): note start and stop measured on a one-shot and a looped sample, CPU with both held on twelve tracks +0.39 and +0.48 pp (noise), 0 underruns, export byte-identical to Perform off. Left: a multi-slice instrument, and the +100 / -100 values (QA-PRF-151, QA-PRF-152) |
-| OS-PERF-REVERSE | Perform PLAYBACK acts: the next notes play backward from the end of the window to its start and stop there; one-shot and beat-slice sampler voices only; the step effect Reverse (26) does the same (spec: `docs/specs/OS-PERFFX.md` section 10.5). Shipped in v1.0.0 | Passed on the unit: one-shot, window and beat slice play backward, effect 26 on one step, export byte-identical. **CPU over its gate:** about 0.89 pp of a block per reversed voice, +5.34 pp with six reversed voices against a gate of 3 pp (QA-PRF-154); accepted as a known issue, follow-up OS-PERF-CPU2. Left: live pad notes played from Master or Song, Retrigger (55) on a backward note |
-| OS-PERF-LFO | Perform LFO rows act: VOL, PAN, TUNE, FLT and POS LFO change the speed of the track's LFO for that target; a slot that is Off or an envelope runs the instrument's stored LFO, or a 50 % triangle when the stored amount is under 5 % (spec: `docs/specs/OS-PERFFX.md` section 11). Shipped in v1.0.0 | Passed on the unit: effect on sound measured for each row on an instrument with no LFO, export byte-identical. **CPU over its estimate:** the five rows plus a held LOWPASS cost +18.11 pp on twelve tracks (+9.5 pp over LOWPASS alone; the estimate was 6 to 7 %); PAN LFO is the dearest (+4.3 pp); accepted as a known issue, follow-up OS-PERF-CPU2. Left: an instrument with its own LFO, POS LFO on wavetable and granular instruments, step effect 35 with a held FLT LFO |
+| OS-PERF-REVERSE | Perform PLAYBACK acts: the next notes play backward from the end of the window to its start and stop there; one-shot and beat-slice sampler voices only; the step effect Reverse (26) does the same (spec: `docs/specs/OS-PERFFX.md` section 10.5). Shipped in v1.0.0 | Passed on the unit: one-shot, window and beat slice play backward, effect 26 on one step, export byte-identical. **CPU:** the reversed voices were over their 3 pp gate (+5.34 pp, QA-PRF-154) and were accepted as a known issue; OS-PERF-CPU2 brought the cost to +0.23 pp on the unit. Left: live pad notes played from Master or Song, Retrigger (55) on a backward note |
+| OS-PERF-LFO | Perform LFO rows act: VOL, PAN, TUNE, FLT and POS LFO change the speed of the track's LFO for that target; a slot that is Off or an envelope runs the instrument's stored LFO, or a 50 % triangle when the stored amount is under 5 % (spec: `docs/specs/OS-PERFFX.md` section 11). Shipped in v1.0.0 | Passed on the unit: effect on sound measured for each row on an instrument with no LFO, export byte-identical. **CPU over its estimate:** the five rows with a held LOWPASS cost +28.39 pp on twelve tracks (`v1.0.1-cpu2.1`; the estimate was 6 to 7 %); PAN LFO alone +4.8 pp. Accepted as a known issue; OS-PERF-CPU2 moved it from +29.09 pp to +28.39 pp, and the corrected figures are proposed as OS-PERF-CPU3 (IDEA). Left: an instrument with its own LFO, POS LFO on wavetable and granular instruments, step effect 35 with a held FLT LFO |
 | OS-SCRATCH | DJ platter scratch: velocity from count timing, 25 ms inertia, Hermite read | the feel; CPU with SCR on |
 | OS-SCRATCH-IDLE, OS-SCRATCH-IDLE2 | Scratch with the hand still skips the read loop (bit-exact; the second makes the idle path cheaper) | CPU passed on the unit (SCR on with the hand still: +0.3 pp over off). Left: listen at still-to-moving (QA-PRF-150) |
 | OS-INSTR-ARROWS | Instrument: Left and Right edit the row by the fine step, Shift + arrows by the coarse step | the feel |
@@ -73,9 +74,7 @@ Merged and covered by host or simulator tests; the check on the real unit is the
 
 ## QUEUED
 
-| ID | What | Parity | Cost | Note |
-|---|---|---|---|---|
-| OS-PERF-LFO-STEP | The step-effect LFO columns 23, 24, 33 and 36 have no consumer yet | N | ? | Follow-up of OS-PERF-LFO. |
+Nothing is queued (2026-10-30).
 
 ## APPROVED (in order)
 
@@ -112,6 +111,7 @@ Proposals. The maintainer decides; nobody codes an IDEA.
 | OS-WTLFO-DEFAULT | Wavetable position automation on by default | R | S | One real wavetable instrument has envelope slot 3 enabled as a triangle LFO; this OS leaves it off. Needs a look on the unit first. |
 | OG-16TRACK-MTP | Read Tracker+ and Mini 16-track pattern files (reading only) | OG | M | The track block size follows from the published pattern layout (MIT tracker-lib); a real file and the CRC rule are missing. Touches an OG format: the maintainer decides. |
 | OG-V17-EVIDENCE | Update `docs/formats/og.md` with project v17 / firmware 1.9.2 facts from the tracker-lib template | OG | S | Level A, after the maintainer agrees. Cite the source and its MIT licence in `THIRD_PARTY.md`. |
+| OS-PERF-CPU3 | Perform LFO rows cost, corrected figures | N | ? | The per-row figures measured on fqa.15 were invalid (the set-up switched off the tracks under test). Measured on v1.0.1-cpu2.1: VOL LFO +4.1 pp, TUNE +7.3, FLT +6.2, LOWPASS +6.6, POS LFO +13.0 on a plain sample (where it moves nothing), all five together +30 pp; LFO12 +28.39 pp. PAN LFO +4.8 pp alone, in the strips and buses rather than the voices. Leads: skip a POS LFO on a plain sample; the strip pan path. Level C. Figures: `docs/architecture/cpu-budget.md`. |
 
 Not a source: the unlicensed reverse-engineering repository polyend-tracker-re (no licence, cites firmware addresses). Nothing from it goes into this repository (`CLAUDE.md`, hard rule).
 
