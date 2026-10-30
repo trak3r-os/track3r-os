@@ -12,8 +12,8 @@ What is not finished. One row per package. Finished work (DONE) is not listed he
 
 | ID | What | Parity | Cost | Note |
 |---|---|---|---|---|
+| OS-SID | A SID-style instrument as a new `sid.tmod` (Chip unchanged): saw, triangle, pulse with PWM, noise, combined waves, sync and ring, the stepped ADSR, an LP/BP/HP filter with a 6581 / 8580 switch | N | M | Queued by the maintainer 2026-10-30. Spec `docs/specs/OS-SID.md`; radar card `docs/vision/radar/sid-instrument.md`. Merges after its CPU is measured on the unit. |
 | OS-PERF-HPBP | The HIPASS and BANDPASS Perform rows cost about 18k cycles a block in the voices | N | S | In progress: slice 1b merged (HIPASS row -16 % on the unit; BANDPASS unchanged, a loop-alignment experiment next); bit-identical cuts of the per-voice filter loop, measured on the unit first (`docs/specs/OS-PERF-HPBP.md`). A fixed-point filter that would change the sound is not pursued (the maintainer, 2026-10-30). |
-| OS-SONG-VIEW2 | STAGE leaves the Song cycle (its countdown moves to TIMELINE); a simpler TIMELINE; a per-pattern note map (one tick per note) replaces the density thumbnails | N | S+M | Slices 1-2 merged (STAGE left the cycle, a simpler TIMELINE); slice 3, the note map, next. Approved by the maintainer 2026-10-30. No format change. Spec `docs/specs/OS-SONG-VIEW2.md`. |
 | OS-STEREO | Stereo samples (opt-in per instrument) | N | L | In progress: step 2 slice (a) merged (INST 1.5, the stereo flag). Approved by the maintainer 2026-10-30, in stages (approach D). The maintainer's answers (the recommended defaults): opt-in per instrument, MIX stays the default; a cap of 4 stereo voices, beyond which the mid plays; forward one-shot and loop, Modern engine only; USB stems and sends stay mono, offline stems stay stereo; pan becomes balance with the same law; a new INST field, and `.pti` export downmixes; the two-track workaround is documented first. CPU: +20-30 % per stereo voice [est]; Dense8 has no CPU headroom (86 % mean). Step 1 (S): the workaround in the manual and a bench-only `voice_st` to measure real cycles on the unit. Starts after OS-PERF-CPU3 slice 1. Today a stereo file is mixed to mono, or to L or R with F8 (OS-LOADCH). Step 1 is merged: the manual's two-track workaround (Sample load) and a bench-only `voice_st` row; the next step follows its figures on the unit. Step 2 (the stereo instrument: a new instrument field, the second channel beside the mid, the stereo voice) is specified with its risk review; on the unit a stereo voice costs about +0.8 pp. |
 
 ## UNIT PENDING
@@ -82,7 +82,7 @@ Merged and covered by host or simulator tests; the check on the real unit is the
 
 | ID | What | Parity | Cost | Note |
 |---|---|---|---|---|
-| OS-SID | A SID-style instrument as a new `sid.tmod` (Chip unchanged): saw, triangle, pulse with PWM, noise, combined waves, sync and ring, the stepped ADSR, an LP/BP/HP filter with a 6581 / 8580 switch | N | M | Queued by the maintainer 2026-10-30. Spec `docs/specs/OS-SID.md`; radar card `docs/vision/radar/sid-instrument.md`. Merges after its CPU is measured on the unit. |
+| OS-SONG-VIEW2 | STAGE leaves the Song cycle (its countdown moves to TIMELINE); a simpler TIMELINE; a per-pattern note map (one tick per note) replaces the density thumbnails | N | S+M | Slices 1-2 merged (STAGE left the cycle, a simpler TIMELINE); slice 3, the note map, next. Approved by the maintainer 2026-10-30. No format change. Spec `docs/specs/OS-SONG-VIEW2.md`. |
 
 ## APPROVED (in order)
 
