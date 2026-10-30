@@ -6,7 +6,7 @@ Every behaviour carries one of three labels: **verified parity** (compared with 
 
 ## Where things stand
 
-**v1.0.1 is published and fixes the pads on later Trackers (issue #1, now closed). v1.0.0 (2026-10-25) was the first release.** Merged, checks on the unit pending: OS-CFG-ARROWS, OS-BUG-FWLIST, OS-USBOUTS (USB outputs of 2, 4, 6, 8 or 10 channels per project) and OS-PERF-CPU2 (cheaper reversed voices; the listening is left). Fixed on dev, in the next release: OS-BUG-MODDRIVE (issue #2). In progress: OS-PERF-LFO-STEP. Perform PLAYBACK and the five Perform LFO rows are in. Downloads on the Releases page: `v1.0.1` and `v1.0.0` (each the firmware file and `SHA256SUMS`), `apps-v1.0.0` (the app modules) and `fixtures-1` (test data for `tools/testdata`). What is open is checks on the unit (below) and the rows in progress or queued.
+**v1.0.1 is published and fixes the pads on later Trackers (issue #1, now closed). v1.0.0 (2026-10-25) was the first release.** Merged, checks on the unit pending: OS-CFG-ARROWS, OS-BUG-FWLIST, OS-USBOUTS (USB outputs of 2, 4, 6, 8 or 10 channels per project) OS-PERF-CPU2 (cheaper reversed voices; the listening is left) and OS-PERF-LFO-STEP (step-effect LFOs 23, 24, 33 and 36). Fixed on dev, in the next release: OS-BUG-MODDRIVE (issue #2). Perform PLAYBACK and the five Perform LFO rows are in. Downloads on the Releases page: `v1.0.1` and `v1.0.0` (each the firmware file and `SHA256SUMS`), `apps-v1.0.0` (the app modules) and `fixtures-1` (test data for `tools/testdata`). What is open is checks on the unit (below) and the rows in progress or queued.
 
 | Item | State |
 |---|---|
@@ -87,7 +87,7 @@ Not yet verified on a unit (host and simulator tests exist for most). The rows m
 Ordered for a fresh session:
 
 1. A person presses INSTALL in Update from the unit on the release file, and runs the checks under "Open on the unit"; record each result as PASS, FAIL or NOT RUN in the backlog rows.
-2. After 1.0: OS-BUG-HOTSWAP (the card-swap crash), then OS-BUG-FWLIST (merged, unit check pending), then OS-BUG-MODDRIVE (fixed on dev, unit check pending), then OS-PERF-CPU2 (merged; listening left) and OS-PERF-LFO-STEP (in progress), then the pending rows in `docs/roadmap/BACKLOG.md` and the latent issues below.
+2. After 1.0: OS-BUG-HOTSWAP (the card-swap crash), then OS-BUG-FWLIST (merged, unit check pending), then OS-BUG-MODDRIVE (fixed on dev, unit check pending), then OS-PERF-CPU2 (merged; listening left) and OS-PERF-LFO-STEP (merged; unit checks left), then the pending rows in `docs/roadmap/BACKLOG.md` and the latent issues below.
 
 Outside contributors: issues come in through the forms in `.github/ISSUE_TEMPLATE/`; pull requests target `dev` (see `CONTRIBUTING.md`).
 

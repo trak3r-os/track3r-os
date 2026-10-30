@@ -10,9 +10,7 @@ What is not finished. One row per package. Finished work (DONE) is not listed he
 
 ## IN PROGRESS
 
-| ID | What | Parity | Cost | Note |
-|---|---|---|---|---|
-| OS-PERF-LFO-STEP | The step-effect LFO columns 23, 24, 33 and 36 have no consumer yet | N | ? | In progress (2026-10-30). Follow-up of OS-PERF-LFO. Level C (audio path). |
+Nothing is in progress (2026-10-30).
 
 ## UNIT PENDING
 
@@ -20,6 +18,7 @@ Merged and covered by host or simulator tests; the check on the real unit is the
 
 | ID | What | Check left on the unit |
 |---|---|---|
+| OS-PERF-LFO-STEP | The step-effect LFO columns 23, 24, 33 and 36 start the matching LFO on a sampler track, as FX 35 does | Passed on the unit (`v1.0.1-lfostep.1`): sound by capture for 23, 24 and 33; FX 24 wins over FX 31 in both orders; step rows cost no more than the layer rows; FX 36 on plain samples +0.14 pp; underrun 0; the export carries the LFO and two exports are byte-identical. Left: FX 36 on wavetable and granular, by ear; QA-PRF-186 and 189; "the next Play ends it"; "layer at 0" |
 | OS-PERF-CPU2 | Cheaper Perform effects, after v1.0.0: reversed voices take a fast path, bit-identical (REV12 +0.23 pp on the unit, against +6.19 pp; gate 3 pp) | Left: by ear |
 | OS-BUG-FWLIST | The update dialog (Config, INFO, `F8`) reaches every file of `Firmware/`: it pages through them twelve at a time and shows `FILE n / total` | QA-CFG-265: 19 `.ptf` files on a card, page through them and choose the 18th; how long a page change takes with a large folder |
 | OS-CFG-ARROWS | Left and Right edit the value under the cursor on Config and Record (Shift: the coarse step); the pages change only with the F-keys or the screen button | Passed on the unit (tester image `v1.0.1-arrows.1`): install, smoke and the changed HIL steps. Left: the feel and auto-repeat of the arrows on Config and Record, Shift + arrow (coarse), the USB pending value with F7, and the READ ONLY row |
