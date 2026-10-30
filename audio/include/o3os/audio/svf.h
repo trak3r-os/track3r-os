@@ -119,7 +119,18 @@ O3OS_AUDIO_INLINE std::int16_t svf_out(float v) noexcept {
 #endif
 }
 
-// n samples of `io` through the filter, in place. Type is kFilterLow, kFilterHigh or kFilterBand.
+// A product the compiler must keep as a rounded value of its own (OS-PERF-HPBP): the empty asm stops GCC from folding a multiply and the add or subtract after it into VMLA / VMLS / VNMLS, which
+// take 3 cycles; the separate VMUL and VADD take 1 + 1, and a product that does not depend on the step before issues ahead of it. The result is bit for bit the same: the M4's VMLA is not a fused
+// multiply-add (it rounds the product first), so the operations and their order are those of the written expression. Elsewhere it is the identity.
+O3OS_AUDIO_INLINE float svf_product(float p) noexcept {
+#if defined(__ARM_FP)
+  __asm__("" : "+t"(p));
+#endif
+  return p;
+}
+
+// n samples of `io` through the filter, in place. Type is kFilterLow, kFilterHigh or kFilterBand. The arithmetic is the BEHAVIOUR text above, operation for operation (the same expressions,
+// left to right, no fused multiply-add: the library builds with -ffp-contract=off), in single-assignment form so that no register copy is needed; the loop is a do-while (the n == 0 case first).
 template <std::uint8_t Type>
 O3OS_AUDIO_INLINE void svf_run(Svf& s, std::int16_t* io, std::uint32_t n) noexcept {
   const float f = s.f;
@@ -127,20 +138,22 @@ O3OS_AUDIO_INLINE void svf_run(Svf& s, std::int16_t* io, std::uint32_t n) noexce
   float lp = s.lp;
   float bp = s.bp;
   float prev = s.prev;
-  for (std::uint32_t k = 0; k < n; ++k) {
-    const float x = static_cast<float>(io[k]);
-    lp += f * bp;
-    float hp = 0.5f * (x + prev) - lp - d * bp;
-    prev = x;
-    bp += f * hp;
-    const float lp0 = lp;
-    const float bp0 = bp;
-    const float hp0 = hp;
-    lp += f * bp;
-    hp = x - lp - d * bp;
-    bp += f * hp;
-    const float y = Type == kFilterLow ? lp + lp0 : (Type == kFilterHigh ? hp + hp0 : bp + bp0);
-    io[k] = svf_out(0.5f * y);
+  if (n != 0u) {
+    std::uint32_t k = 0;
+    do {
+      const float x = static_cast<float>(io[k]);
+      const float lp0 = lp + svf_product(f * bp);                         // lp += f bp
+      const float hp0 = svf_product(0.5f * (x + prev)) - lp0 - svf_product(d * bp);  // hp = (x + prev) / 2 - lp - d bp
+      prev = x;
+      const float bp0 = bp + svf_product(f * hp0);                        // bp += f hp
+      const float lp1 = lp0 + svf_product(f * bp0);                       // the second half step
+      const float hp1 = x - lp1 - svf_product(d * bp0);
+      const float bp1 = bp0 + svf_product(f * hp1);
+      const float y = Type == kFilterLow ? lp1 + lp0 : (Type == kFilterHigh ? hp1 + hp0 : bp1 + bp0);
+      io[k] = svf_out(0.5f * y);
+      lp = lp1;
+      bp = bp1;
+    } while (++k < n);
   }
   s.lp = lp;
   s.bp = bp;

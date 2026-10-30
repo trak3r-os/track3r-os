@@ -942,6 +942,13 @@ void run(const Out& out, std::uint32_t blocks) noexcept {
   out.stat("svf_low", measure(blocks, [&] { std::memcpy(tx, src, sizeof src); }, [&] { audio::svf_run<audio::kFilterLow>(s, tx, kBlock); }, nop), "64 samples, resonance 2");
   out.stat("svf_high", measure(blocks, [&] { std::memcpy(tx, src, sizeof src); }, [&] { audio::svf_run<audio::kFilterHigh>(s, tx, kBlock); }, nop), "64 samples, resonance 2");
   out.stat("svf_band", measure(blocks, [&] { std::memcpy(tx, src, sizeof src); }, [&] { audio::svf_run<audio::kFilterBand>(s, tx, kBlock); }, nop), "64 samples, resonance 2");
+  // OS-PERF-HPBP slice 1b: ref_svf (the loop as it was, with VMLA) for the other two types, the A/B of svf_high and svf_band (the HIPASS and BANDPASS rows) against the production loop without VMLA
+  audio::Svf rh;
+  audio::Svf rb;
+  audio::svf_set(rh, 0.4f, 2.0f);
+  audio::svf_set(rb, 0.4f, 2.0f);
+  out.stat("svf_ref_high", measure(blocks, [&] { std::memcpy(tx, src, sizeof src); }, [&] { ref_svf<audio::kFilterHigh>(rh, tx, kBlock); }, nop), "plain products, 64 samples, resonance 2");
+  out.stat("svf_ref_band", measure(blocks, [&] { std::memcpy(tx, src, sizeof src); }, [&] { ref_svf<audio::kFilterBand>(rb, tx, kBlock); }, nop), "plain products, 64 samples, resonance 2");
   {
     bool ok = true;
     for (unsigned type = 0; type < 3u && ok; ++type) {
@@ -976,6 +983,49 @@ void run(const Out& out, std::uint32_t blocks) noexcept {
     char line[96];
     audio::diag::Text t(line, sizeof line);
     t.str("BENCH cpuopt_eq_svf ").str(ok ? "OK" : "FAIL");
+    out.line(line, t.size());
+  }
+  // OS-PERF-HPBP slice 1b: svf_run against ref_svf, bit for bit (output and state), the three types, spans of 64, 63, 1 and 0 samples (the span of a gated or split voice is not always the block),
+  // then 64 blocks of silence so the state decays through the denormal range (flush-to-zero) for the faster cutoffs
+  {
+    bool ok = true;
+    static constexpr std::uint32_t kSpans[4] = {kBlock, kBlock - 1u, 1u, 0u};
+    static constexpr unsigned kNoiseBlocks = 8u;
+    static constexpr unsigned kSilentBlocks = 64u;
+    for (unsigned type = 0; type < 3u && ok; ++type) {
+      for (unsigned round = 0; round < 40u && ok; ++round) {
+        audio::Svf x;
+        audio::Svf y;
+        const float cut = static_cast<float>((round * 53u) % 100u) * 0.01f;
+        const float res = static_cast<float>(round % 5u);
+        audio::svf_set(x, cut, res);
+        audio::svf_set(y, cut, res);
+        alignas(8) std::int16_t ia[kBlock];
+        alignas(8) std::int16_t ib[kBlock];
+        for (unsigned blk = 0; blk < kNoiseBlocks + kSilentBlocks && ok; ++blk) {
+          const bool silent = blk >= kNoiseBlocks;
+          const std::uint32_t span = silent ? kBlock : kSpans[blk & 3u];
+          for (std::uint32_t i = 0; i < kBlock; ++i) {
+            ia[i] = ib[i] = silent ? std::int16_t{0} : static_cast<std::int16_t>(round % 7u == 0u ? ((n.next() & 1) ? 32767 : -32768) : n.next());
+          }
+          if (type == audio::kFilterLow) {
+            ref_svf<audio::kFilterLow>(x, ia, span);
+            audio::svf_run<audio::kFilterLow>(y, ib, span);
+          } else if (type == audio::kFilterHigh) {
+            ref_svf<audio::kFilterHigh>(x, ia, span);
+            audio::svf_run<audio::kFilterHigh>(y, ib, span);
+          } else {
+            ref_svf<audio::kFilterBand>(x, ia, span);
+            audio::svf_run<audio::kFilterBand>(y, ib, span);
+          }
+          ok = std::memcmp(ia, ib, sizeof ia) == 0 && std::memcmp(&x.lp, &y.lp, sizeof(float)) == 0 && std::memcmp(&x.bp, &y.bp, sizeof(float)) == 0 &&
+               std::memcmp(&x.prev, &y.prev, sizeof(float)) == 0;
+        }
+      }
+    }
+    char line[96];
+    audio::diag::Text t(line, sizeof line);
+    t.str("BENCH cpuopt_eq_svf_span ").str(ok ? "OK" : "FAIL");
     out.line(line, t.size());
   }
 }
