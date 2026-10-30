@@ -144,7 +144,7 @@ Start on Song.
 5. Press `Play`. A green bar under a block and a white line mark the slot and the step that play. <!-- QA-SNG-077 -->
 6. Look at the strip **ENERGY** at the bottom. It has one column for each slot, as high as the slot is busy and loud: for each track, how many notes it plays, times how loud they are, times the track's volume. A muted track adds nothing, and while a track is soloed only the soloed tracks add. The tallest slot in view fills the strip, so the curve shows the shape of the song around the cursor, not a level you can compare between two views. <!-- QA-SNG-081, QA-SNG-082 -->
 
-The page shows at most 40 slots, at most 48 bars and at most 480 thumbnail bars, so with 16 active tracks it shows 30 slots. The cursor's slot is always in view. <!-- QA-SNG-078 -->
+The page draws the tracks Pattern can show, at most 12, and at most 40 slots and 48 bars: with 12 tracks it shows 34 slots. The cursor's slot is always in view. <!-- QA-SNG-078 -->
 The page does not edit anything: the keys work as on the other pages.
 
 Not yet checked on the unit: how the colours and the thumbnails read on the panel.

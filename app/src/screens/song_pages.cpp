@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "song_pages.h"
 
+#include <o3os/app/pattern_view.h>
 #include <o3os/app/song_stage.h>
 #include <o3os/app/song_timeline.h>
 #include <o3os/app/text_format.h>
@@ -93,7 +94,9 @@ void draw_song_timeline(Renderer& r, const Frame& f, const Model& model, const V
   const int g = m.row_pitch / 3;
   const int mx = ui::kScreenW / 32;
   const int width = ui::kScreenW - 2 * mx;
-  const unsigned tracks = model.project != nullptr ? model.project->active_tracks() : 0u;
+  // The tracks Pattern can show (at most 12): a project that declares more active tracks does not draw thumbnails Pattern cannot reach.
+  const unsigned active = model.project != nullptr ? model.project->active_tracks() : 0u;
+  const unsigned tracks = active < static_cast<unsigned>(PatternView::kMaxVisibleTracks) ? active : static_cast<unsigned>(PatternView::kMaxVisibleTracks);
   const int cursor = view.song.clamped_pos(src.count());
   const TimelineWindow w = timeline_window(src, cursor, tracks);
   if (w.count == 0u) {
