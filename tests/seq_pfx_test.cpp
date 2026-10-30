@@ -302,6 +302,29 @@ TEST_CASE("seq pfx: Chord on a step without a note does nothing and leaves the c
   CHECK(g_col.count(EventKind::MidiNoteOn) == 0u);
 }
 
+TEST_CASE("seq pfx: the step FX 23, 24, 33 and 36 reach the voices as the ModSet the LFO rows read (OS-PERF-LFO-STEP: a = the FX, b = the value, c = the step layer, flags = the group)") {
+  struct Row {
+    std::uint8_t fx;
+    std::uint8_t group;
+    std::uint8_t value;
+  };
+  const Row rows[4] = {{fx::kVolumeLfo, audio::kModGroupLfoVolume, 7}, {fx::kPanningLfo, audio::kModGroupLfoPanning, 12}, {fx::kFinetuneLfo, audio::kModGroupLfoFinetune, 20},
+                       {fx::kPositionLfo, audio::kModGroupLfoPosition, 28}};
+  for (const Row& r : rows) {
+    pattern16();
+    CHECK(seq_project().set_step(1, 0, 0, make_step(60, 1, r.fx, r.value)) == model::Status::Ok);
+    seq::Sequencer& s = make();
+    s.play_pattern(1);
+    g_col.run(s, 0, at_us(2, 0), 64);
+    const Rec* set = find_at(EventKind::ModSet, 0, at_us(0, 0));
+    NEED(set != nullptr);
+    CHECK(set->ev.a == r.fx);
+    CHECK(set->ev.b == r.value);
+    CHECK(set->ev.c == audio::kLayerFx1);
+    CHECK(set->ev.flags == r.group);
+  }
+}
+
 TEST_CASE("seq pfx: Arp plays the chord a note at a time, up, down or at random, at the rate's microsteps, from the note's own sample") {
   std::uint8_t n[8];
   // Up, rate 48 (value 6): 60 64 67 60 ... one note a step, the note before it ending as the next begins

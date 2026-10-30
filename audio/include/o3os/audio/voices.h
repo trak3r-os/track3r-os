@@ -834,6 +834,7 @@ class VoicePool {
     std::uint8_t filter_type[kVoiceTracks];
     std::int8_t filter_off[kVoiceTracks];
     std::uint16_t rev;  // OS-PERF-REVERSE: perf_rev_
+    std::uint8_t step_lfo[4][kVoiceTracks];  // OS-PERF-LFO-STEP: step_lfo_ (the export puts the step FX away, as it does the layer)
   };
   // The slot of a ModSet group (events.h kModGroup*) that the voices keep the layer's value for; kPerfSlots: none.
   static constexpr unsigned perf_slot_of(unsigned group) noexcept {
@@ -1065,6 +1066,7 @@ class VoicePool {
 
  private:
   friend struct VoiceRunTest;  // tests/audio_voices_dir_test.cpp: drives run_dir on a hand-made Voice (the differential test of OS-PERF-CPU2 A1); no code
+  friend struct LfoStepTest;   // tests/audio_perflfo_test.cpp: reads a voice's modulator mask and step_lfo_ (OS-PERF-LFO-STEP); no code
   struct Voice {
     const std::int16_t* data = nullptr;
     std::uint64_t phase = 0;      // Q32.32 position in samples
@@ -1239,7 +1241,8 @@ class VoicePool {
     for (unsigned d = 0; d < kLfoDests; ++d) {
       any |= perf_.on[kPerfLfoSlot + d];
     }
-    return track < kVoiceTracks && ((any >> track) & 1u) != 0u;
+    // OS-PERF-LFO-STEP: a held step FX 23 / 24 / 33 / 36 counts too (inlined into mods_start only, flash)
+    return track < kVoiceTracks && (((any >> track) & 1u) != 0u || (step_lfo_[0][track] | step_lfo_[1][track] | step_lfo_[2][track] | step_lfo_[3][track]) != 0u);
   }
   int perf_index(const Voice& v, unsigned d) const noexcept;
   bool perf_dest(Voice& v, unsigned d, bool live) noexcept;
@@ -1339,6 +1342,11 @@ class VoicePool {
   std::uint16_t perf_rev_ = 0;
   std::uint16_t step_rev_ = 0;
   PerfSlots perf_ = {};  // OS-PERFFX P0, render context (layer_event) and the main loop with the render parked (perf_save / perf_clear / perf_restore): the performance layer's values (PERFORMANCE LAYER, THE REST OF THE GROUPS)
+  // (declared last: a member added in the middle moved the offsets that .ramfunc_l code encodes, +8 B)
+  // OS-PERF-LFO-STEP: the step FX Volume LFO 23, Panning LFO 24, Finetune LFO 33 and Position LFO 36 per track (rows 0..3 = VOL, PAN, TUNE, POS; the FLT's is fx_lfo_): 0 none, else the rate index + 1
+  // (VOL: the index in the amp's table of 24, perf_index adds 5). Single writer: layer_event / lfo_set_impl / perf_clear / perf_restore, render context (or the main loop with the render parked); read in flash
+  // (perf_index, perf_lfo_held). The Perform layer's value wins while it is held and not 0; FxReset ends them, Stopped does not (docs/specs/OS-PERF-LFO-STEP.md).
+  std::uint8_t step_lfo_[4][kVoiceTracks] = {};
 };
 
 }  // namespace o3os::audio

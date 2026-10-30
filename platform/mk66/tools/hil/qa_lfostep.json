@@ -1,0 +1,185 @@
+{
+ "name": "qa_lfostep",
+ "title": "OS-PERF-LFO-STEP: the step FX 23, 24, 33 and 36 on twelve tracks: sound, the export cmp and the cpu arm. The AFFECTED tracks are set once on Performance.",
+ "steps": [
+  {
+   "run": "_load_tv16"
+  },
+  {
+   "keys": [
+    "-shift"
+   ],
+   "gap": 0.2
+  },
+  {
+   "keys": [
+    "f7"
+   ],
+   "gap": 0.3,
+   "if_state": {
+    "overlay": "NAVIGATOR"
+   }
+  },
+  {
+   "keys": [
+    "f8"
+   ],
+   "gap": 0.3,
+   "if_state": {
+    "overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP)$"
+   }
+  },
+  {
+   "keys": [
+    "pattern"
+   ],
+   "gap": 0.4
+  },
+  {
+   "state": {
+    "screen": "PATTERN"
+   },
+   "within": 3
+  },
+  {
+   "run": "_stop"
+  },
+  {
+   "say": "OS-PERF-LFO-STEP (QA-PRF-180..189): the step FX Volume LFO 23, Panning LFO 24, Finetune LFO 33 and Position LFO 36. BEFORE the run: the tester's song `LfoStep` (twelve sampler tracks, a wavetable and a granular instrument among them) has the four FX in the first FX column, a note step each bar; a copy `LfoStepOff` is the same song without them. The AFFECTED tracks are set ONCE below (the helper that sets them toggles them: never run Performance windows back to back). By ear: each FX at a slow and a fast value; the Perform VOL LFO row over the FX and its release (QA-PRF-185). The exports are compared on the PC with `cmp` (QA-PRF-187)."
+  },
+  {
+   "keys": [
+    "performance"
+   ],
+   "gap": 0.5
+  },
+  {
+   "state": {
+    "screen": "PERFORM"
+   },
+   "within": 3
+  },
+  {
+   "keys": [
+    "performance"
+   ],
+   "gap": 0.5,
+   "if_state": {
+    "page": "1"
+   }
+  },
+  {
+   "state": {
+    "screen": "PERFORM",
+    "page": "0"
+   },
+   "within": 3
+  },
+  {
+   "keys": [
+    "+shift"
+   ],
+   "gap": 0.3
+  },
+  {
+   "pad": 0,
+   "note": "T1..T12 join the performance layer (AFFECTED), set once"
+  },
+  {
+   "pad": 1
+  },
+  {
+   "pad": 2
+  },
+  {
+   "pad": 3
+  },
+  {
+   "pad": 4
+  },
+  {
+   "pad": 5
+  },
+  {
+   "pad": 6
+  },
+  {
+   "pad": 7
+  },
+  {
+   "pad": 8
+  },
+  {
+   "pad": 9
+  },
+  {
+   "pad": 10
+  },
+  {
+   "pad": 11
+  },
+  {
+   "keys": [
+    "-shift"
+   ],
+   "gap": 0.3
+  },
+  {
+   "cmd": "cpu reset"
+  },
+  {
+   "run": "_play"
+  },
+  {
+   "wait": 5.0,
+   "note": "settle"
+  },
+  {
+   "mix": {
+    "channels": {
+     "MST L": {
+      "min_rms_db": -60
+     }
+    },
+    "within": 6
+   },
+   "note": "the song sounds with the four step FX held"
+  },
+  {
+   "cmd": "cpu",
+   "note": "QA-PRF-188: read `render last` and the underruns, 8 reads 2.5 s apart on the run with the step FX, then the same on `LfoStepOff`; the difference is the cost of the four FX (no more than the same Perform rows, 1.2 pp)"
+  },
+  {
+   "run": "_stop"
+  }
+ ],
+ "finally": [
+  {
+   "keys": [
+    "-f4",
+    "-right",
+    "-left",
+    "-shift"
+   ],
+   "gap": 0.1
+  },
+  {
+   "keys": [
+    "f8"
+   ],
+   "gap": 0.3,
+   "if_state": {
+    "screen": "PERFORM"
+   }
+  },
+  {
+   "keys": [
+    "pattern"
+   ],
+   "gap": 0.4
+  },
+  {
+   "run": "_stop"
+  }
+ ]
+}

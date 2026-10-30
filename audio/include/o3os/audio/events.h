@@ -190,13 +190,18 @@ inline constexpr std::uint8_t kModGroupReverse = 8;
 inline constexpr std::uint8_t kFxReverse = 26;
 inline constexpr std::uint8_t kModGroupLfoFilter = 14;
 // The LFO groups (OS-PERF-LFO, docs/specs/OS-PERFFX.md section 11): seq::FxGroup::LfoVolume / LfoPanning / LfoFinetune / LfoFilter / LfoPosition, 11..15 in the order of the Perform rows VOL, PAN, TUNE, FLT and POS
-// LFO. Only the performance layer's value (ModSet.value, a signed offset on the LFO speed index, -28..28) acts on 11, 12, 13 and 15; the step FX 23, 24, 33 and 36 of these groups have no consumer. The group 14 also
+// LFO. Only the performance layer's value (ModSet.value, a signed offset on the LFO speed index, -28..28) acts on 11, 12, 13 and 15; the step FX 23, 24, 33 and 36 (kFxLfo*, below) act since OS-PERF-LFO-STEP. The group 14 also
 // has the Filter LFO FX 35 (above). audio_model_ids_test holds the groups equal to the sequencer's.
 inline constexpr std::uint8_t kModGroupLfoVolume = 11;
 inline constexpr std::uint8_t kModGroupLfoPanning = 12;
 inline constexpr std::uint8_t kModGroupLfoFinetune = 13;
 inline constexpr std::uint8_t kModGroupLfoPosition = 15;
 inline constexpr std::uint8_t kFxFilterLfo = 35;  // ModSet.a of that group when the sequencer's FX holds it (0 when only the performance layer's slot does)
+// OS-PERF-LFO-STEP: the step FX of the other four LFO groups (ModSet.a, ModSet.b the rate index): Volume LFO (0..23), Panning LFO, Finetune LFO and Position LFO (0..28). They act since this item; audio_model_ids_test holds the numbers.
+inline constexpr std::uint8_t kFxLfoVolume = 23;
+inline constexpr std::uint8_t kFxLfoPanning = 24;
+inline constexpr std::uint8_t kFxLfoFinetune = 33;
+inline constexpr std::uint8_t kFxLfoPosition = 36;
 inline constexpr std::uint8_t kFxFilterFirst = 27;
 inline constexpr std::uint8_t kFxFilterCount = 3;
 

@@ -70,6 +70,10 @@ static_assert(static_cast<unsigned>(o3os::seq::FxGroup::Position) == o3os::audio
 static_assert(static_cast<unsigned>(o3os::seq::FxGroup::Reverse) == o3os::audio::kModGroupReverse && o3os::audio::kModGroupReverse == 8u && o3os::seq::fx::kReverse == o3os::audio::kFxReverse,
               "the voices read the sequencer's Reverse group and FX number, the Perform screen's PLAYBACK and the step FX 26 (OS-PERF-REVERSE)");
 static_assert(o3os::seq::fx::kFilterLfo == o3os::audio::kFxFilterLfo, "the voices read the sequencer's Filter LFO FX number (OS-FU5)");
+static_assert(o3os::seq::fx::kVolumeLfo == o3os::audio::kFxLfoVolume && o3os::audio::kFxLfoVolume == 23 && o3os::seq::fx::kPanningLfo == o3os::audio::kFxLfoPanning && o3os::audio::kFxLfoPanning == 24 &&
+                  o3os::seq::fx::kFinetuneLfo == o3os::audio::kFxLfoFinetune && o3os::audio::kFxLfoFinetune == 33 && o3os::seq::fx::kPositionLfo == o3os::audio::kFxLfoPosition &&
+                  o3os::audio::kFxLfoPosition == 36,
+              "the voices read the sequencer's Volume, Panning, Finetune and Position LFO FX numbers (OS-PERF-LFO-STEP)");
 static_assert(static_cast<unsigned>(o3os::seq::FxGroup::Filter) == o3os::audio::kModGroupFilter, "the voices read the sequencer's Filter group (OS-007l)");
 static_assert(o3os::seq::fx::kLowPass == o3os::audio::kFxFilterFirst && o3os::seq::fx::kHighPass == o3os::audio::kFxFilterFirst + 1 &&
                   o3os::seq::fx::kBandPass == o3os::audio::kFxFilterFirst + 2 && o3os::audio::kFxFilterCount == 3,

@@ -3709,6 +3709,7 @@ These effects read their value in words on the info line.
 | Overdrive | Drives the sound. Value 0 is clean. | `DRIVE 40 %` for value 40  |
 | Bit Depth | Lowers the bit depth. The range is 1 to 16, and 16 is off. | `BITS 8` for value 8  |
 | Panning | Pans the note. Value 100 is hard right. It ends with its step. |  |
+| Volume LFO, Panning LFO, Finetune LFO, Position LFO | Start the track's LFO for the volume (tremolo), the pan (auto-pan), the pitch (vibrato) or the wavetable window or granular position, on a sampler instrument. These four did nothing before; they act now, as Filter LFO does. The value is the LFO's speed in the same list as the instrument's own LFO speed, from the slowest at 0: 0 to 23 for Volume LFO, 0 to 28 for the others. The shape and amount are the instrument's LFO for that target (an instrument with none: triangle, 50 %). Position LFO moves only a wavetable or granular instrument and does nothing on a plain sample. While a Perform LFO row is held on the track its speed wins, and the FX comes back when the row ends or is at 0. Panning LFO and Panning (31) on one track: while the LFO runs it wins, because it sets the pan every block (a Panning step after it is overridden too); when the LFO ends the instrument's pan is back, and Panning acts again at its next step. The LFO stops at the next transport start. Stop does not end it: a pad note played after Stop still gets the LFO until the next Play. |  |
 
 ### Look up a tracker effect
 

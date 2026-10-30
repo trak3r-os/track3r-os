@@ -1161,6 +1161,17 @@ void VoicePool::lfo_set_impl(VoicePool& pool, unsigned track, bool on, unsigned 
   for (unsigned t = all ? 0u : track; t < (all ? kVoiceTracks : track + 1u) && t < kVoiceTracks; ++t) {
     pool.fx_lfo_[t] = on ? static_cast<std::uint8_t>((rate >= kLfoRates ? kLfoRates - 1u : rate) + 1u) : std::uint8_t{0};
     const unsigned i = pool.find(t);
+    if (all) {
+      // OS-PERF-LFO-STEP: FxReset also ends the step FX 23, 24, 33 and 36 (rows 0..3 -> destinations 0, 1, 2, 4); the sounding voice takes the end at once. Before the `continue` below.
+      for (unsigned row = 0; row < 4u; ++row) {
+        if (pool.step_lfo_[row][t] != 0u) {
+          pool.step_lfo_[row][t] = 0;
+          if (i != kNone && pool.v_[i].playing) {
+            pool.perf_sync(pool.v_[i], row == 3u ? 4u : row);
+          }
+        }
+      }
+    }
     if (i == kNone || !pool.v_[i].playing) {
       continue;
     }
@@ -2088,6 +2099,12 @@ void VoicePool::layer_event(unsigned track, const SeqEvent& e) noexcept {
     // The layer's slot is set above, so the voice sounding takes both here (lfo_set_impl ends in perf_dest).
     lfo_set_impl(*this, track, set && e.a == kFxFilterLfo, e.b);
   } else if (slot >= kPerfLfoSlot && slot < kPerfSlots) {
+    // OS-PERF-LFO-STEP: the step FX of the group (23, 24, 33, 36), whoever wins (under the layer a and b still say the FX): its rate index + 1, held to the FX's range; any other ModSet of the group
+    // (a == 0: the layer only, or another FX) and a ModEnd let it go. `row` is the destination without the FLT's (3), which is the group 14's own branch above.
+    static constexpr std::uint8_t kStepFx[4] = {kFxLfoVolume, kFxLfoPanning, kFxLfoFinetune, kFxLfoPosition};
+    const unsigned row = slot - kPerfLfoSlot == 4u ? 3u : slot - kPerfLfoSlot;
+    const unsigned top = row == 0u ? kAmpLfoRates - 1u : kLfoRates - 1u;
+    step_lfo_[row][track] = (set && e.a == kStepFx[row]) ? static_cast<std::uint8_t>((e.b > top ? top : e.b) + 1u) : std::uint8_t{0};
     const unsigned i = find(track);
     if (i != kNone && v_[i].playing) {
       perf_sync(v_[i], slot - kPerfLfoSlot);  // OS-PERF-LFO: the LFO of the destination starts, moves or ends on the sounding voice
@@ -2108,6 +2125,7 @@ void VoicePool::perf_filter_to(unsigned track, unsigned type_plus_one, int offse
 void VoicePool::perf_save(PerfSave& out) const noexcept {
   out.slots = perf_;
   out.rev = perf_rev_;
+  std::memcpy(out.step_lfo, step_lfo_, sizeof(step_lfo_));
   for (unsigned t = 0; t < kVoiceTracks; ++t) {
     out.filter_type[t] = fx_filter_[t].perf_type;
     out.filter_off[t] = fx_filter_[t].perf_off;
@@ -2118,6 +2136,7 @@ void VoicePool::perf_clear() noexcept {
   perf_ = PerfSlots{};
   perf_rev_ = 0;
   step_rev_ = 0;  // (the export's own step FX 26 are told afresh by its sequencer)
+  std::memset(step_lfo_, 0, sizeof(step_lfo_));  // OS-PERF-LFO-STEP: the export has no step LFO but its own (its FxReset ends them too, but not relied on)
   for (unsigned t = 0; t < kVoiceTracks; ++t) {
     perf_filter_to(t, 0u, 0);
   }
@@ -2127,6 +2146,7 @@ void VoicePool::perf_restore(const PerfSave& in) noexcept {
   perf_ = in.slots;
   perf_rev_ = in.rev;
   step_rev_ = 0;  // the export's step FX 26 end with it; the live sequencer tells its own again at its next transport start
+  std::memcpy(step_lfo_, in.step_lfo, sizeof(step_lfo_));  // OS-PERF-LFO-STEP: the live step LFOs are back (no voice sounds: the export's start ended them)
   for (unsigned t = 0; t < kVoiceTracks; ++t) {
     perf_filter_to(t, in.filter_type[t], in.filter_off[t]);
   }
@@ -2367,7 +2387,13 @@ O3OS_AUDIO_INLINE const FilterMod& dest_mod(const SampleDesc& s, unsigned d) noe
 int VoicePool::perf_index(const Voice& v, unsigned d) const noexcept {
   const unsigned t = v.track;
   const unsigned slot = kPerfLfoSlot + d;
-  if (d >= kLfoDests || t >= kVoiceTracks || ((perf_.on[slot] >> t) & 1u) == 0u || perf_.val[t][slot] == 0) {
+  if (d >= kLfoDests || t >= kVoiceTracks) {
+    return -1;
+  }
+  // The layer's offset, 0 when it holds none or holds 0 (OS-PERF-LFO-STEP: then the step FX 23 / 24 / 33 / 36's absolute rate index + 1, `step`, if the track holds it; FLT's is fx_lfo_, not here)
+  const int off = ((perf_.on[slot] >> t) & 1u) != 0u ? perf_.val[t][slot] : 0;
+  const unsigned step = d == 3u ? 0u : step_lfo_[d == 4u ? 3u : d][t];
+  if (off == 0 && step == 0u) {
     return -1;
   }
   const SampleDesc& s = samples_[v.slot];
@@ -2376,7 +2402,7 @@ int VoicePool::perf_index(const Voice& v, unsigned d) const noexcept {
   }
   const FilterMod& m = dest_mod(s, d);
   const int rate0 = kLfoDest[d].rate0;
-  const int i = (m.kind == kFmodLfo ? static_cast<int>(m.rate) + rate0 : static_cast<int>(kPerfLfoBase)) + perf_.val[t][slot];
+  const int i = off == 0 ? static_cast<int>(step) - 1 + rate0 : (m.kind == kFmodLfo ? static_cast<int>(m.rate) + rate0 : static_cast<int>(kPerfLfoBase)) + off;
   return i < rate0 ? rate0 : (i > static_cast<int>(kLfoRates) - 1 ? static_cast<int>(kLfoRates) - 1 : i);
 }
 
