@@ -261,7 +261,7 @@ redraw like for a first edit. Not persisted and not versioned: RAM only.
 | record | header 4 (`u8` op, 0, `u16` payload length) + payload padded to 4 + trailer 4 (`u32` length): the lengths at the ends let undo walk backwards |
 | one `set_step` | 48 (payload 17: id, track, step, new step 7, old step 7) -> **8,192** in the ring |
 | one song edit (`set_order`, `insert_order`, `remove_order`, `append_order`) | 32 -> **12,288** levels |
-| `clear_order` of 255 positions / one instrument / `clear_pattern` / `delete_pattern` | 284 / 1,464 (1,440 before OS-INSTUI S8b) / 14,368 / 14,412 -> 1,384 / 268 / 27 / **27** |
+| `clear_order` of 255 positions / one instrument / `clear_pattern` / `delete_pattern` | 284 / 1,472 (1,464 before OS-STEREO step 2, 1,440 before OS-INSTUI S8b) / 14,368 / 14,412 -> 1,384 / 268 / 27 / **27** |
 
 The ring is bounded by bytes, not levels: a unit that does not fit drops the **oldest units, whole** (`dropped_units()`;
 `depth()` is what is left), so at least 27 levels of even the largest single edit and 12,288 of the smallest (PAR-068 records 10 on
@@ -369,8 +369,8 @@ an IFF-style chunked file. The byte-level specification, limits and a worked exa
   change and bump generation counters (`generation()`, `song_generation()`, `pattern_generation(id)`...): the
   choke point OS-002c will route undo through. All limits are in `model/limits.h`.
 - **Storage**: no heap. One `ModelArena`, a typed object the platform provides (a static on the host; SDRAM on the
-  MK66). `kModelArenaBytes` is **1,933,504 B** worst case (1.84 MiB, 11.5 % of the 16 MiB SDRAM; 128 patterns
-  1,841,152 + 64 instruments 45,824 + unknown pool 16,384 + 2,520 + 13,248 for the parameters' generations and the settings block,
+  MK66). `kModelArenaBytes` is **1,933,760 B** worst case (1.84 MiB, 11.5 % of the 16 MiB SDRAM; 128 patterns
+  1,841,152 + 64 instruments 46,080 (720 B each since OS-STEREO step 2) + unknown pool 16,384 + 2,520 + 13,248 for the parameters' generations and the settings block,
   OS-002d, + 1,144 for the project-level state, OS-004d, + 344 for the session state, OS-PERSIST2, + 2,304 for the nine source-page parameter slots of the 64 instruments, OS-INSTUI S3, + 6,144 for the 24 MOD-page slots, OS-INSTUI S6, + 3,072 for the twelve MIDI / VEL> slots, OS-INSTUI S8b + S9), identical on host and MK66 (`static_assert`).
   Pattern ids go to 255 but only 128 patterns exist at once; a file that needs more is refused ("limit exceeded").
 - **Format** (`o3os::formats::native`, `formats/native.h`): `FORM` + `O3PJ`, then `PHDR`, `TRAK`, `MODR`, `SONG`,

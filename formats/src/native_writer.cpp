@@ -39,7 +39,11 @@ std::size_t song_size(const Project& p) noexcept { return kSongFixed + p.song_le
 // INST 1.1; 1.2 (one byte more) for an instrument that chose its playback engine (OS-004d); 1.3 (the engine byte always, and twelve more) for an instrument one of whose MIDI fields or VEL> is not its default
 // (OS-INSTUI S8b + S9). The version is the smallest one that holds what the instrument has, so a project that never used the newer fields is the file it was.
 // 1.4 (OS-LFOSINE: the 1.3 layout, whole) for an instrument with a Sine LFO.
+// 1.5 (OS-STEREO step 2: the 1.3 layout, whole, and the stereo byte) for a Sample instrument with the stereo flag; it covers a Sine LFO too (1.5 is above the 1.4 gate).
 std::uint16_t inst_version(const Instrument& in) noexcept {
+  if (in.stereo != 0 && in.kind == model::InstrumentKind::Sample) {
+    return kInstVersionStereo;
+  }
   if (model::inst_uses_sine(in)) {
     return kInstVersionLfoSine;
   }
@@ -49,7 +53,7 @@ std::uint16_t inst_version(const Instrument& in) noexcept {
 std::size_t inst_size(const Instrument& in) noexcept {
   const std::uint16_t v = inst_version(in);
   return kInstFixed + text_len(in.name, model::kInstrumentNameMax) + text_len(in.sample_path, model::kSamplePathMax) + in.param_len + kInstRate + (v >= kInstVersionEngine ? kInstEngine : 0) +
-         (v >= kInstVersionMidi ? kInstMidi : 0);
+         (v >= kInstVersionMidi ? kInstMidi : 0) + (v >= kInstVersionStereo ? kInstStereo : 0);
 }
 
 void put_header(Enc& e, std::uint32_t id, std::size_t payload) noexcept {
@@ -370,6 +374,9 @@ bool Writer::build_piece() noexcept {
             e.u8(cc);
           }
           e.u8(in.vel_sens);
+        }
+        if (version >= kInstVersionStereo) {
+          e.u8(in.stereo);
         }
         put_pad(e, payload);
         ++cursor_;

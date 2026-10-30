@@ -251,7 +251,8 @@ TEST_CASE("params screen: PLAY ENGINE is a row of the VOICE page the encoder edi
   NEED(slot < model::kMaxInstruments);
   set_rate(rig, slot, 8287);
   rig.shift_pad(slot);
-  rig.go_to(ip::GroupSource, 9);  // (PLAY ENGINE is the last row of the source page, whatever the mode: O5)
+  rig.go_to(ip::GroupSource, 9);  // (the last row of the source page, whatever the mode: O5; STEREO since OS-STEREO step 2, PLAY ENGINE is the one above it)
+  rig.tap(Button::Up);
   const ParamId id = inst(slot, ip::PlayEngine);
   CHECK(app::kParamsScreen.focus_param(rig.app->model(), rig.app->state()) == id);
   const core::ParamDesc* d = model::param_desc(id);
@@ -281,7 +282,8 @@ TEST_CASE("params screen: a sample too fast for Paula refuses AMIGA with CONVERT
   const unsigned slot = first_sample_slot(rig.project());
   NEED(slot < model::kMaxInstruments);
   rig.shift_pad(slot);
-  rig.go_to(ip::GroupSource, 9);  // (PLAY ENGINE is the last row of the source page, whatever the mode: O5)
+  rig.go_to(ip::GroupSource, 9);  // (the last row of the source page, whatever the mode: O5; STEREO since OS-STEREO step 2, PLAY ENGINE is the one above it)
+  rig.tap(Button::Up);
   const auto engine = [&]() { return rig.project().instrument(slot)->engine; };
   for (const std::uint32_t rate : {0u, 44100u, 31389u}) {  // 0 means the 44,100 Hz default; 31,389 Hz is period 112
     set_rate(rig, slot, rate);

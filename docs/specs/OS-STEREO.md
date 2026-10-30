@@ -73,6 +73,14 @@ Design pass 2026-10-30 (dev 34dc272a, read only). Every slice keeps mono project
 - **(d) The editor operations** of S7.
 - **(e) The `.pti` export:** a "stereo, mid written" count in its report.
 
+### Slice (a) as built (defaults the engineer added, 2026-10-30)
+
+- **The row is virtual, not a table row.** STEREO is `instrument_param::PlayStereo = 0x1F` (like `MidiChannel`): `describe_param` answers `play_stereo_desc()` (MONO / STEREO), the value is the instrument's byte, the edit is `write_play_stereo` (param_actions.cpp). A table row would add a generation slot (`kCount` 95 -> 96, 64 x 4 B = +256 B more in `kModelArenaBytes`, shifting every slot number and the pins of the param tests); the virtual field keeps the arena at 1,933,760 B as rule 3 says.
+- **The stub** is `SampleBank::has_side(slot)` (always false, TODO for slice (b)); STEREO is refused with `STEREO NEEDS A STEREO LOAD`, MONO is always allowed.
+- **The flag is not reconciled at load or save in this slice** (the writer takes a const project): a hand-made 1.5 file with the flag at 1 loads as 1 and saves as 1; MONO on the row clears it. Rule 4's reconcile (flag AND S) belongs to slice (b), where `Slot::side` exists. No build writes a 1 before it.
+- **Review fold (2026-10-30).** A 1.5 chunk of a MIDI or Module instrument with the flag at 1 reads 0 and loads (the reader, C++ and Python; `validate_instrument` still refuses it in memory). `Instrument::reserved[3]` makes the 3 tail-padding bytes explicit and zero (`init_instrument`, `Project::set_instrument`), so the whole-instrument `memcmp` of `Editor::set_instrument`, PASTE and the instrument-file load is defined; `sizeof` stays 720.
+- **Python mirror and fixture:** `o3project.py` knows INST 1.5; `o3pj_tool gen stereo` (small project, flag on instrument 0 plus a Sine LFO) and the `stereo` block of `o3project_roundtrip.py`; the dump line of an instrument ends with `stereo=<n>`.
+
 ### Design rules from the risk review (2026-10-30, folded)
 
 1. INST 1.5 raises `known_minor` (native_reader.cpp:54) AND extends `v1_bounds`' upper bound (:75) by one byte for minor >= 5, or a 1.5 chunk is Malformed (:262, :940). Update `inst_size`, the encoder and `kInstMax`. A 1.4 build reads 1.5 as newer and skips the byte (safe); its next save drops the flag (by design).

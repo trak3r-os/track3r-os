@@ -352,6 +352,12 @@ const core::ParamDesc& midi_channel_desc() noexcept {
   return kDesc;
 }
 
+const core::ParamDesc& play_stereo_desc() noexcept {
+  static constexpr const char* const kStereoChoices[] = {"MONO", "STEREO"};  // Instrument::stereo (INST 1.5)
+  static constexpr ParamDesc kDesc = choice("STEREO", kStereoChoices, 2, 0, 0, instrument_param::GroupSource);
+  return kDesc;
+}
+
 bool instrument_field_app_writable(unsigned field) noexcept {
   namespace ip = instrument_param;
   if (field < ip::kBase) {

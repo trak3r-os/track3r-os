@@ -49,11 +49,11 @@ std::uint8_t rank_of(std::uint32_t id) noexcept {
   }
 }
 
-// The newest minor version of a chunk this reader knows: INST is at 1.3 (the sample rate, the playback engine, the MIDI fields), PERF and SCEN at 1.1 (the Perform FX 20 and 21),
+// The newest minor version of a chunk this reader knows: INST is at 1.5 (the sample rate, the playback engine, the MIDI fields, the Sine LFO, the stereo flag), PERF and SCEN at 1.1 (the Perform FX 20 and 21),
 // APPM at 1.1 (OS-APPUX S3: up to 12 apps), every other chunk at 1.0.
 std::uint32_t known_minor(std::uint32_t id) noexcept {
   switch (id) {
-    case kChunkInst: return kInstVersionLfoSine & 0xFFu;
+    case kChunkInst: return kInstVersionStereo & 0xFFu;
     case kChunkPerf:
     case kChunkScen: return kStateVersionFx & 0xFFu;
     case kChunkAppm: return state_chunks::kAppsVersionV11 & 0xFFu;
@@ -72,7 +72,7 @@ void v1_bounds(std::uint32_t id, std::uint32_t minor, std::size_t& lo, std::size
     case kChunkTrak: lo = kTrakFixed; hi = kTrakMax; break;
     case kChunkModr: lo = kModrFixed; hi = kModrMax; break;
     case kChunkSong: lo = kSongFixed; hi = kSongMax; break;
-    case kChunkInst: lo = kInstFixed; hi = kInstMax + (minor >= 1 ? kInstRate : 0) + (minor >= 2 ? kInstEngine : 0) + (minor >= 3 ? kInstMidi : 0); break;
+    case kChunkInst: lo = kInstFixed; hi = kInstMax + (minor >= 1 ? kInstRate : 0) + (minor >= 2 ? kInstEngine : 0) + (minor >= 3 ? kInstMidi : 0) + (minor >= 5 ? kInstStereo : 0); break;
     case kChunkPatt: lo = kPattHead + kPattTrackFixed; hi = kPattMax; break;
     case kChunkSets: lo = settings_chunks::kFixed; hi = settings_chunks::kSetsMax; break;
     case kChunkLrnb: lo = settings_chunks::kFixed; hi = settings_chunks::kLrnbMax; break;
@@ -742,6 +742,10 @@ bool Reader::parse_inst(std::size_t len) noexcept {
       inst_.midi_cc[i] = cc[i] <= model::kMidiCcMax ? cc[i] : model::kMidiCcConfig;
     }
     inst_.vel_sens = vel_sens <= model::kMaxPercent ? vel_sens : model::kVelSensDefault;
+  }
+  if (chunk_minor_ >= 5) {  // version 1.5 appends the stereo flag after the MIDI bytes (OS-STEREO step 2); a value above 1 reads 0, as the engine does, a flag on a MIDI or Module instrument reads 0 (validate_instrument refuses it, a file is not failed for it), and older chunks are mono
+    const std::uint8_t stereo = c.u8();
+    inst_.stereo = stereo <= model::kInstStereoMax && kind == static_cast<std::uint32_t>(model::InstrumentKind::Sample) ? stereo : std::uint8_t{0};
   }
   for (model::Lfo& l : inst_.sampler.lfo) {  // OS-LFOSINE: the shapes are 0..4 before INST 1.4 and 0..5 from it; a larger one (one this version does not have, or a stray 5 in an older chunk) plays as Triangle, as the engine has always held it
     const std::uint8_t last = chunk_minor_ >= 4 ? model::kLfoShapeSine : std::uint8_t{4};

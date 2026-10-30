@@ -133,6 +133,8 @@ const char* validate_instrument(const Instrument& in, std::uint32_t module_count
   }
   if (field_length(in.name, kInstrumentNameMax) > kInstrumentNameMax) return "instrument name not terminated";
   if (in.engine > kInstEngineMax) return "bad playback engine";
+  if (in.stereo > kInstStereoMax) return "bad stereo flag";
+  if (in.stereo != 0 && in.kind != InstrumentKind::Sample) return "stereo flag on a non-sample instrument";
   if (in.midi_velocity < 1 || in.midi_velocity > 127 || in.midi_program > kMidiProgramMax || in.midi_out > kMidiOutMax || in.midi_pb_range > kMidiPbRangeMax || in.midi_offset > kMidiOffsetMaxMs ||
       in.vel_sens > kMaxPercent) {
     return "bad MIDI field";

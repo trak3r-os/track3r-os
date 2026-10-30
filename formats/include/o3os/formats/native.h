@@ -68,6 +68,11 @@ inline constexpr std::uint16_t kInstVersionMidi = 0x0103;
 // The writer writes 1.4 only for an instrument one of whose six LFOs is Sine (model::inst_uses_sine), else the older minor as before. A reader that knows 1.4 reads a shape of 5 in an older chunk as Triangle (which it played)
 // and a shape above 5 in any chunk as Triangle; an older reader meets a newer minor with nothing appended, reads the chunk whole and plays the shape as Triangle.
 inline constexpr std::uint16_t kInstVersionLfoSine = 0x0104;
+// OS-STEREO step 2 (NEW COMMUNITY OS BEHAVIOUR): INST 1.5 appends one byte after the twelve MIDI bytes, the instrument's stereo flag (u8, 0 mono, 1 stereo: model::Instrument::stereo). The layout before it is 1.3's, whole (the engine byte
+// and the twelve MIDI bytes always present), and the Sine LFO gate stays "minor >= 4" (1.5 is above it). The writer writes 1.5 only for a Sample instrument with the flag set, so every project without a stereo instrument is the file it
+// was (byte for byte). A reader that knows 1.5 reads older chunks as 0 and a value above 1 as 0; a chunk that sets the flag on a Module or MIDI instrument is Malformed (model::validate_instrument). An older reader meets a newer minor, reads
+// the chunk as of 1.4 and loses the byte on its next save (the instrument then plays mono, by design).
+inline constexpr std::uint16_t kInstVersionStereo = 0x0105;
 // OS-PERFFX P1 (decision D5, option A): PERF and SCEN 1.1 add no field and no byte: the version only says that the Perform FX ids 20 (BITDEPTH) and 21 (OVERDRV) are valid. The writer writes 1.1 only when a slot
 // (of a stored scene, for SCEN) holds one of them and 1.0, byte for byte as before, for every other bank (state_chunks::version_of); a reader that knows 1.1 reads 1.0 with 20 and 21 as none. An older reader
 // meets 1.1 as a newer minor of a chunk it knows at 1.0: it reads the chunk whole (the length is the same), reads the two ids as none and loses them on its next save.

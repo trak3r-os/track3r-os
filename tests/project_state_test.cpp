@@ -1007,11 +1007,12 @@ TEST_CASE("project state: INST 1.2 is exact: an engine above the table reads as 
   edit = cs;
   for (RawChunk& c : edit) {
     if (c.id == kChunkInst && c.payload[1] == 2) {
-      c.payload[1] = 5;  // (1.4 is OS-LFOSINE's, with no field of its own)
+      c.payload[1] = 6;  // (1.4 is OS-LFOSINE's, with no field of its own; 1.5 is OS-STEREO's flag, so the next minor is 1.6)
       const std::uint8_t twelve[12] = {127, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 100};
       for (const std::uint8_t b : twelve) {
         c.payload.push_back(b);
       }
+      c.payload.push_back(0);  // the stereo flag of 1.5: mono
       c.payload.push_back(0xEE);
       c.payload.push_back(0xFF);
       break;

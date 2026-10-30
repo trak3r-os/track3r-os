@@ -69,7 +69,7 @@ path's pure parts (`audio_config.h`, `sgtl5000.h`, `resources.h`, `diag_report.h
 | `delay` | `0x70A90000` | 768 | delay lines |
 | `reverb` | `0x70B50000` | 256 | reverb lines |
 | `module_region` | `0x70B90000` | 768 | cold code/data of loaded modules |
-| `project` | `0x70C50000` | 1,920 | the project model arena (the model worst case is 1,933,504 B = 1,888.2 KiB, OS-APPUX S3, E-CFG-03 and E-SONG-07) |
+| `project` | `0x70C50000` | 1,920 | the project model arena (the model worst case is 1,933,760 B = 1,888.4 KiB, OS-APPUX S3, E-CFG-03 and E-SONG-07) |
 | `undo` | `0x70E30000` | 384 | undo journal |
 | `file_job` | `0x70E90000` | 512 | file and job buffers |
 | `lut` | `0x70F10000` | 192 | boot-generated tables |

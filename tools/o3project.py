@@ -61,6 +61,8 @@ LIMITS = [
     ("inst_version_midi", 0x0103),
     # OS-LFOSINE: INST 1.4, the 1.3 layout with no new byte; the version only says that an LFO shape of 5 is Sine (docs/specs/OS-LFOSINE.md)
     ("inst_version_lfo_sine", 0x0104),
+    # OS-STEREO step 2: INST 1.5, the 1.3 layout whole and one byte after it, the instrument's stereo flag (docs/specs/OS-STEREO.md, S1); written only for a sample instrument with the flag set
+    ("inst_version_stereo", 0x0105),
     # OS-PERFFX P1 (decision D5): PERF and SCEN 1.1, written only when a slot holds the Perform FX 20 or 21
     ("state_version_fx", 0x0101),
     # OS-APPUX S3: APPM 1.1, written only when the project holds more than app_param_sets_v10 apps (formats/src/native_state.h kAppsVersionV11)
@@ -95,6 +97,8 @@ STATE_VERSION_FX = L["state_version_fx"]  # OS-PERFFX P1: PERF / SCEN 1.1 (no ne
 APPS_VERSION_V11 = L["apps_version_v11"]  # OS-APPUX S3: APPM 1.1 (the same layout, more than 6 apps); mirrors C++ state_chunks::kAppsVersionV11, compared by the limits table
 PERF_FX_MAX_V10 = 19  # the last Perform FX id of PERF / SCEN 1.0 (formats/src/native_state.h kPerfFxMaxV10); 1.1 goes to L["max_perf_fx"]
 INST_VERSION_LFO_SINE = L["inst_version_lfo_sine"]  # OS-LFOSINE: 1.4 = the 1.3 layout whole; written only for an instrument with an LFO of shape 5 (Sine)
+INST_VERSION_STEREO = L["inst_version_stereo"]  # OS-STEREO step 2: 1.5 = the 1.3 layout whole plus the stereo byte (0 mono, 1 stereo; above 1 reads 0); written only for a sample instrument with the flag set
+INST_STEREO_MAX = 1  # model::kInstStereoMax
 INST_VERSION_MIDI = L["inst_version_midi"]  # OS-INSTUI S8b + S9: 1.3 appends twelve bytes after the engine byte (which is then always present); written only for an instrument one of whose twelve is not its default
 # The twelve bytes of INST 1.3 in file order: velocity, program, out, pb range, offset, CC A..F, VEL>: (largest value, default) of each, and the smallest value of velocity (1).
 INST13 = [(127, 127), (128, 0), (3, 0), (24, 2), (100, 0), (131, 0), (131, 0), (131, 0), (131, 0), (131, 0), (131, 0), (100, 100)]
@@ -213,6 +217,10 @@ def invalid_instrument(i, module_count):
         return "bad instrument kind"
     if i["engine"] > INST_ENGINE_MAX:
         return "bad playback engine"
+    if i.get("stereo", 0) > INST_STEREO_MAX:
+        return "bad stereo flag"
+    if i.get("stereo", 0) and i["kind"] != 1:
+        return "stereo flag on a non-sample instrument"
     if len(i["m13"]) != len(INST13) or i["m13"][0] < 1 or any(not 0 <= x <= hi for x, (hi, _) in zip(i["m13"], INST13)):
         return "bad MIDI field"
     if not safe_relative_path(i["path"]):
@@ -382,6 +390,8 @@ def parse(data):
                 hi += 1  # the playback engine of version 1.2
             if cid == b"INST" and (version & 0xFF) >= 3:
                 hi += len(INST13)  # the MIDI fields and VEL> of version 1.3
+            if cid == b"INST" and (version & 0xFF) >= 5:
+                hi += 1  # the stereo flag of version 1.5 (OS-STEREO step 2)
             if cid == b"USBS" and (version & 0xFF) >= 1:
                 hi += 1  # version 1.1: the channel count of a 4 or 6 output project (OS-USBOUTS)
             if cid == b"APPM" and (version & 0xFF) >= 1:
@@ -452,9 +462,9 @@ def keep_unknown(p, cid, payload, used):
 
 
 def known_minor(cid):
-    """The newest minor version of a chunk this reader knows: INST 1.4, PERF and SCEN 1.1, APPM 1.1, USBS 1.1, the others 1.0."""
+    """The newest minor version of a chunk this reader knows: INST 1.5, PERF and SCEN 1.1, APPM 1.1, USBS 1.1, the others 1.0."""
     if cid == b"INST":
-        return INST_VERSION_LFO_SINE & 0xFF
+        return INST_VERSION_STEREO & 0xFF
     if cid in (b"PERF", b"SCEN"):
         return STATE_VERSION_FX & 0xFF
     return 1 if cid in (b"APPM", b"USBS") else CHUNK_VERSION & 0xFF
@@ -821,6 +831,10 @@ def parse_inst(p, payload):
     if (version & 0xFF) >= 3:  # version 1.3 appends the MIDI fields and VEL>; a value out of its range is the field's default (a later version may add values)
         got = [c.u8() for _ in INST13]
         m13 = [x if (x >= 1 if n == 0 else True) and x <= hi else d for n, (x, (hi, d)) in enumerate(zip(got, INST13))]
+    stereo = 0
+    if (version & 0xFF) >= 5:  # version 1.5 appends the stereo flag after the MIDI bytes (OS-STEREO step 2); a value above 1 reads 0, as the engine does
+        stereo = c.u8()
+        stereo = stereo if stereo <= INST_STEREO_MAX and kind == 1 else 0  # a flag on a MIDI or Module instrument reads 0 (the model refuses it in memory; a file is not failed for it)
     last_shape = 5 if (version & 0xFF) >= 4 else 4  # OS-LFOSINE: the LFO shapes are 0..4 before INST 1.4 and 0..5 from it; a larger one plays as Triangle (2)
     for x in lfo:
         if x[0] > last_shape:
@@ -830,7 +844,7 @@ def parse_inst(p, payload):
         malformed("INST: bad slot index or kind")
     if index in p["instruments"]:
         malformed("INST: duplicate slot")
-    inst = {"kind": kind, "midi": midi, "module": module, "name": name, "path": path, "rate": rate, "engine": engine, "m13": m13, "head": head,
+    inst = {"kind": kind, "midi": midi, "module": module, "name": name, "path": path, "rate": rate, "engine": engine, "m13": m13, "stereo": stereo, "head": head,
             "env": env, "lfo": lfo, "slices": slices, "blob": blob}
     why = invalid_instrument(inst, len(p["modules"]))
     if why:
@@ -922,8 +936,10 @@ def build(p):
     for index in sorted(p["instruments"]):
         i = p["instruments"][index]
         # 1.3 only for an instrument one of whose twelve MIDI bytes is not its default, 1.2 (the engine byte) only for an instrument that chose an engine: every other is the 1.1 chunk it always was
-        # 1.4 (the 1.3 layout whole) for an instrument with a Sine LFO
-        if any(x[0] == 5 for x in i["lfo"]):
+        # 1.4 (the 1.3 layout whole) for an instrument with a Sine LFO; 1.5 (the same and the stereo byte) for a sample instrument with the stereo flag (it covers a Sine LFO too)
+        if i.get("stereo", 0) and i["kind"] == 1:
+            version = INST_VERSION_STEREO
+        elif any(x[0] == 5 for x in i["lfo"]):
             version = INST_VERSION_LFO_SINE
         else:
             version = INST_VERSION_MIDI if i["m13"] != INST13_DEFAULT else (INST_VERSION_ENGINE if i["engine"] else INST_VERSION)
@@ -935,6 +951,8 @@ def build(p):
             body += bytes([i["engine"]])
         if version >= INST_VERSION_MIDI:
             body += bytes(i["m13"])
+        if version >= INST_VERSION_STEREO:
+            body += bytes([i.get("stereo", 0)])
         chunks.append(chunk(b"INST", body))
     if p["settings"] != [d for d, _, _ in PROJECT_SETTINGS]:  # SETS: every setting, only when one is not its default
         chunks.append(chunk(b"SETS", v + struct.pack(">H", len(p["settings"])) + b"".join(
@@ -1015,9 +1033,9 @@ def dump(p):
     for index in sorted(p["instruments"]):
         i = p["instruments"][index]
         h = i["head"]
-        out.append("instrument %d kind=%d midi=%d module=%d name=%s path=%s rate=%d engine=%d blob=%d/%08x m13=%s" % (
+        out.append("instrument %d kind=%d midi=%d module=%d name=%s path=%s rate=%d engine=%d blob=%d/%08x m13=%s stereo=%d" % (
             index, i["kind"], i["midi"], i["module"], i["name"].hex(), i["path"].hex(), i["rate"], i["engine"], len(i["blob"]),
-            zlib.crc32(i["blob"]) & 0xFFFFFFFF, ",".join("%d" % x for x in i["m13"])))
+            zlib.crc32(i["blob"]) & 0xFFFFFFFF, ",".join("%d" % x for x in i["m13"]), i.get("stereo", 0)))
         line = "  sampler %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d" % (
             h[0], h[1], h[2], h[3], signed(h[4]), signed(h[5]), h[6], h[7], h[8], h[9], h[10], h[11], h[12],
             h[13], h[14], h[15])

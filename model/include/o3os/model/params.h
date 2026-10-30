@@ -69,6 +69,10 @@ inline constexpr unsigned kSourceRows = 9;
 // rest of the table plumbing do not see it and INST is unchanged; only the Params screen's MIDI page and app/param_actions.cpp know it. The descriptor is midi_channel_desc(), the value is
 // read from the instrument and an edit writes the whole instrument as one undo record (Editor::set_instrument, as NAME). 0x1E: past the source rows (0x1D stays nothing).
 inline constexpr unsigned MidiChannel = 0x1E;
+// OS-STEREO step 2 (INST 1.5): the source page's STEREO choice (Instrument::stereo, MONO / STEREO), next to PLAY ENGINE. A VIRTUAL field like MidiChannel (no table row, so the generation block and the arena
+// do not grow by a slot per instrument): describe_param answers it (play_stereo_desc), the value is read from the instrument and an edit goes through the stereo action (app/param_actions.cpp), which refuses STEREO
+// while the bank holds no side signal for the slot. Not learnable, not modulatable, not in the app SDK. 0x1F: the last id before the envelopes.
+inline constexpr unsigned PlayStereo = 0x1F;
 constexpr bool is_source_field(unsigned field) noexcept { return field >= kSourceFirst && field < kSourceFirst + kSourceRows; }
 
 inline constexpr unsigned kEnvelopeFirst = 0x20;
@@ -255,6 +259,8 @@ bool find_param(core::ParamId id, ParamField& out) noexcept;
 const core::ParamDesc* param_desc(core::ParamId id) noexcept;
 // OS-INSTUI S8a: the descriptor of the virtual field instrument_param::MidiChannel (CHANNEL 1..16, default 1, not learnable); param_desc(id) of that field stays nullptr.
 const core::ParamDesc& midi_channel_desc() noexcept;
+// OS-STEREO step 2: the descriptor of the virtual field instrument_param::PlayStereo (STEREO: MONO / STEREO, default MONO, not learnable); param_desc(id) of that field stays nullptr.
+const core::ParamDesc& play_stereo_desc() noexcept;
 
 // Generations are kept in a dense array per kind: how many slots one index of the kind has (instrument 49, track 5, master 8,
 // project 3, device 20), and the slot of a parameter in that block (kNoParamSlot if it does not exist).

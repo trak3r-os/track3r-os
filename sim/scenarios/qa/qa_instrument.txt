@@ -244,3 +244,13 @@ press shift
 tap left
 release shift
 snap qa_ins_223
+# QA-INS-224 (OS-STEREO step 2): the source page of a sample instrument ends with the STEREO row after PLAY ENGINE, MONO by default.
+action instrument.select 2
+tap f1
+wait 8000
+tap down 8
+snap qa_ins_224
+# QA-INS-225: STEREO is turned up with nothing to play it with (the simulator's bank has no side signal, and nothing provides one yet): the strip refuses it (STEREO NEEDS A STEREO LOAD, a toast the picture does not hold) and the row stays MONO.
+encoder 1
+assert model inst.2.stereo=0
+snap qa_ins_225

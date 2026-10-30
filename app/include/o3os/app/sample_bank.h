@@ -258,6 +258,12 @@ class SampleBank {
 
   // ---- Reading ----
   Pcm pcm(unsigned slot) const noexcept;
+  // OS-STEREO step 2: whether the slot's audio also has a side signal S (decision S4 of docs/specs/OS-STEREO.md: an instrument plays stereo only with the flag AND S). The STEREO row of the source page asks it.
+  // TODO(OS-STEREO slice (b)): the bank's `Slot::side`; nothing provides S before it, so the answer is always no and the row refuses STEREO.
+  bool has_side(unsigned slot) const noexcept {
+    (void)slot;
+    return false;
+  }
   std::uint32_t version(unsigned slot) const noexcept { return mem_ != nullptr && slot < kSlots ? mem_->slots[slot].version : 0u; }
   // OS-FU2 (save_service.h, A PROJECT'S SAMPLES): the audio of `slot` was just read from the project's own folder (samples/<file>.wav), so that folder holds it as it is now:
   // a save into that folder has nothing to write for the slot until the audio changes (its version moves). card_version() is 0 for a slot with no such audio.

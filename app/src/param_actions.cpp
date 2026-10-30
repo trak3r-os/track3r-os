@@ -185,6 +185,14 @@ bool read_param(const Model& model, core::ParamId id, float& value) noexcept {
     value = static_cast<float>(in->midi_channel);
     return true;
   }
+  if (is_play_stereo_param(id)) {  // OS-STEREO step 2: the source page's STEREO is the instrument's own byte (not a table row)
+    const model::Instrument* in = model.project != nullptr ? model.project->instrument(core::param_index(id)) : nullptr;
+    if (in == nullptr || in->kind != model::InstrumentKind::Sample) {
+      return false;
+    }
+    value = static_cast<float>(in->stereo);
+    return true;
+  }
   if (model.project == nullptr || !model.project->has_param(id)) {
     return false;
   }
@@ -470,11 +478,44 @@ WriteResult write_midi_channel(ActionContext& ctx, core::ParamId id, float value
   return ctx.edit->set_instrument(core::param_index(id), next) == model::Status::Ok ? WriteResult::Changed : WriteResult::Rejected;
 }
 
+// OS-STEREO step 2, the source page's STEREO row: the instrument is written whole with the flag, one undo record. MONO is always allowed; STEREO only while the bank holds a side signal for the slot (decision S4
+// of docs/specs/OS-STEREO.md: the flag is the instrument's wish, S the sample's), else it is refused on the strip. Nothing is sent to the audio side (no audio change before slice (c)).
+constexpr const char* kStereoNeedsLoad = "STEREO NEEDS A STEREO LOAD";
+static_assert(sizeof("STEREO NEEDS A STEREO LOAD") - 1 <= core::kNotifyTextChars, "the STEREO refusal fits the strip");
+
+WriteResult write_play_stereo(ActionContext& ctx, core::ParamId id, float value) noexcept {
+  if (ctx.edit == nullptr) {
+    return WriteResult::NoProject;
+  }
+  const unsigned slot = core::param_index(id);
+  const model::Instrument* in = ctx.edit->project().instrument(slot);
+  if (in == nullptr || in->kind != model::InstrumentKind::Sample) {
+    return WriteResult::NoInstrument;
+  }
+  if (!(value >= 0.0f && value <= static_cast<float>(model::kInstStereoMax))) {
+    return WriteResult::Rejected;  // (NaN, negative or past the two choices)
+  }
+  const std::uint8_t target = static_cast<std::uint8_t>(value + 0.5f);
+  if (target == in->stereo) {
+    return WriteResult::Unchanged;
+  }
+  if (target != 0u && !(ctx.samples != nullptr && ctx.samples->has_side(slot))) {
+    (void)say(ctx, core::Severity::Info, kStereoNeedsLoad);
+    return WriteResult::Unchanged;  // (the refusal has been said)
+  }
+  model::Instrument next = *in;
+  next.stereo = target;
+  return ctx.edit->set_instrument(slot, next) == model::Status::Ok ? WriteResult::Changed : WriteResult::Rejected;
+}
+
 }  // namespace
 
 WriteResult write_param(ActionContext& ctx, core::ParamId id, float value, bool tell) noexcept {
   if (is_midi_channel_param(id)) {
     return write_midi_channel(ctx, id, value);
+  }
+  if (is_play_stereo_param(id)) {
+    return write_play_stereo(ctx, id, value);
   }
   if (is_module_param(id)) {
     return write_module_param(ctx, id, value);

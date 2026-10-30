@@ -87,7 +87,7 @@ static_assert(sizeof(MasterSettings) == 5 && sizeof(TrackSlot) == 26, "records c
 static_assert(UndoJournal::unit_bytes_for(3 + 2 * kStepBytes) == 48, "a step edit is 48 bytes of journal (editor.h)");
 static_assert(UndoJournal::unit_bytes_for(3) == 32, "a song edit is 32 bytes of journal (editor.h)");
 static_assert(UndoJournal::unit_bytes_for(1 + kMaxSongPositions) == 284, "clearing a full song is 284 bytes (editor.h)");
-static_assert(UndoJournal::unit_bytes_for(2 + 2 * sizeof(Instrument)) == 1464, "an instrument edit is 1,464 bytes (editor.h)");
+static_assert(UndoJournal::unit_bytes_for(2 + 2 * sizeof(Instrument)) == 1472, "an instrument edit is 1,472 bytes (editor.h)");
 static_assert(UndoJournal::unit_bytes_for(kDeleteImage) == 14412, "deleting a pattern is 14,412 bytes (editor.h)");
 static_assert(UndoJournal::unit_bytes_for(1 + kStepsImage) == 14368, "clearing a pattern is 14,368 bytes (editor.h)");
 static_assert(kUndoPatternBytes / UndoJournal::unit_bytes_for(kDeleteImage) >= 11, "a whole-pattern delete keeps 11 levels in PATTERN");

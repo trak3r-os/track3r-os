@@ -292,9 +292,16 @@ bool is_midi_channel_param(core::ParamId id) noexcept {
   return core::param_kind(id) == core::ParamKind::Instrument && core::param_field(id) == model::instrument_param::MidiChannel && core::param_index(id) < model::kMaxInstruments;
 }
 
+bool is_play_stereo_param(core::ParamId id) noexcept {
+  return core::param_kind(id) == core::ParamKind::Instrument && core::param_field(id) == model::instrument_param::PlayStereo && core::param_index(id) < model::kMaxInstruments;
+}
+
 const core::ParamDesc* describe_param(const Model& model, core::ParamId id, ParamScratch& scratch) noexcept {
   if (is_midi_channel_param(id)) {
     return &model::midi_channel_desc();
+  }
+  if (is_play_stereo_param(id)) {
+    return &model::play_stereo_desc();
   }
   if (!is_module_param(id)) {
     return model::param_desc(id);

@@ -47,6 +47,8 @@ A project saved by an earlier build can sound at a different level, and the stor
 
 The **PLAY ENGINE** row picks the engine for a sample: **Auto**, **Modern**, **Amiga**, **12-bit** or **8-bit**. **Auto** picks the Amiga engine for a **ONE SHOT** or **LOOP FWD** sample at the Paula rate, and the Modern engine for the rest. Paula is the Amiga's sound chip. Its rate here is 8,287 Hz (PAL) or 8,363 Hz (NTSC). The Amiga engine plays a sample as that chip does: it holds each value until the next one, and uses 8 bits of it. The **12-bit** and **8-bit** engines are the Modern engine with its output cut to 12 or 8 bits, and cap the **BIT DEPTH** row the same way. <!-- QA-INS-006, QA-INS-003 -->
 
+The **STEREO** row under it says whether a sample plays as a stereo pair: **MONO** or **STEREO**. This is new in track3r-os, and for now it only prepares the ground: no sample has a stereo load yet, so turning it to **STEREO** is refused with `STEREO NEEDS A STEREO LOAD`, and the row stays **MONO**. Nothing about the sound changes. <!-- QA-INS-224, QA-INS-225 -->
+
 If you want to know more: a full-scale square wave on the Amiga engine peaks at +2.5 dB above its level. It matches a reference Amiga player on the host. Not yet checked on the unit. <!-- QA-INS-203 -->
 
 ## Try it
@@ -97,7 +99,7 @@ You should see the rows of the new mode. The waveform on the right follows each 
 | GRANULAR | GRAIN POS, GRAIN LENGTH, GRAIN SHAPE, GRAIN LOOP |
 | BEAT SLICE | SLICES, SLICE |
 
-<!-- QA-INS-016, QA-INS-017, QA-INS-018. PLAY ENGINE is the last row of every mode. -->
+<!-- QA-INS-016, QA-INS-017, QA-INS-018. PLAY ENGINE and then STEREO are the last rows of every mode. -->
 
 ### Shape the sound: VOICE, FILTER and SENDS
 

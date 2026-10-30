@@ -50,7 +50,7 @@ namespace o3os::model {
 // nothing was written since (undo.h): the sweep of an encoder is one unit. merge_break() ends the group (a screen change, a pause).
 //
 // Capacity. Records are what the edit changed, not copies of the project; the sizes (journal bytes, header and trailer
-// included): a step edit 48, a song edit 32, clearing a 255-position song 284, an instrument 1,464 (1,440 before OS-INSTUI S8b), a pattern clear or
+// included): a step edit 48, a song edit 32, clearing a 255-position song 284, an instrument 1,472 (1,464 before OS-STEREO step 2, 1,440 before OS-INSTUI S8b), a pattern clear or
 // delete 14,368 and 14,412 (UndoJournal::unit_bytes_for). The rings hold (160 / 96 / 128 KiB): PATTERN 3,413 step edits or 11 whole-pattern
 // deletes, SONG 3,072 song edits or 6 full pattern copies, SOUND 2,457 parameter edits or 89 instrument edits. The largest single step edit is a paste or a pull over 16 tracks (the steps of each track, old and new: about 29 KB), so at least 5 levels of even that are kept in PATTERN.
 //

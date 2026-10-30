@@ -88,6 +88,8 @@ const core::ParamDesc* describe_param(const Model& model, core::ParamId id, Para
 bool is_module_param(core::ParamId id) noexcept;
 // OS-INSTUI S8a: whether `id` is the MIDI page's CHANNEL (the virtual field instrument_param::MidiChannel of an instrument slot; describe_param answers it, the tables do not).
 bool is_midi_channel_param(core::ParamId id) noexcept;
+// OS-STEREO step 2: whether `id` is the source page's STEREO choice (the virtual field instrument_param::PlayStereo of an instrument slot; describe_param answers it, the tables do not).
+bool is_play_stereo_param(core::ParamId id) noexcept;
 
 inline constexpr unsigned kModuleCatalogMax = 16;
 

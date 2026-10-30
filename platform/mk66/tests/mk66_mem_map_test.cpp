@@ -106,7 +106,7 @@ TEST_CASE("mk66 mem_map: in_sram() accepts what is in SRAM and nothing else") {
 }
 
 TEST_CASE("mk66 mem_map: the project region holds the model's worst-case arena (OS-004a)") {
-  CHECK(mem::kModelArenaWorstCaseBytes == 1933504u);  // tests/mem_map_model_test.cpp checks this against o3os::model::kModelArenaBytes
+  CHECK(mem::kModelArenaWorstCaseBytes == 1933760u);  // tests/mem_map_model_test.cpp checks this against o3os::model::kModelArenaBytes
   CHECK(mem::kProjectSize == 1920u * 1024u);
   CHECK(mem::kProjectSize >= mem::kModelArenaWorstCaseBytes);
   CHECK(mem::kProjectSize - mem::kModelArenaWorstCaseBytes < 64u * 1024u);  // little waste: the region is the arena plus a margin

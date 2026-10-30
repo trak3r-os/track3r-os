@@ -81,12 +81,12 @@ void fill_empty(Pattern& p) noexcept {
 }  // namespace
 
 // Declared, not left to the compiler (ADR 0011): the arena is the same size on the 64-bit host and on the
-// MK66. Worst case, everything full: 128 patterns x 14,384 B = 1,841,152 B, 64 instruments x 716 B = 45,824 B,
+// MK66. Worst case, everything full: 128 patterns x 14,384 B = 1,841,152 B, 64 instruments x 720 B = 46,080 B (OS-STEREO step 2: the stereo byte, +4 B each),
 // the 16 KiB unknown-chunk pool, and 15,728 B of header, tracks, song, tables and generation counters (2,520 B) and, since OS-002d,
 // the parameters' generations (3,224 x 4 B), their epoch and the project's settings block (348 B; 388 B since OS-006e made room for 24 fields): 13,248 B (13,288), and, since OS-PERSIST2, the session state: 341 B (+3 of padding), and, since OS-APPUX S3, twelve app parameter sets of 164 B instead of six (+984 B).
 static_assert(sizeof(Pattern) * kMaxPatterns == 1841152, "pattern pool size");
-static_assert(sizeof(Instrument) * kMaxInstruments == 45824, "instrument pool size");
-static_assert(kModelArenaBytes == 1933504, "ModelArena size changed: update docs/formats/o3-project.md, docs/architecture/os-tree.md and the mirror in platform/mk66 mem_map.h");
+static_assert(sizeof(Instrument) * kMaxInstruments == 46080, "instrument pool size");
+static_assert(kModelArenaBytes == 1933760, "ModelArena size changed: update docs/formats/o3-project.md, docs/architecture/os-tree.md and the mirror in platform/mk66 mem_map.h");
 
 void Project::reset(bool keep_instruments) noexcept {
   order_depth_ = 0;  // E-SONG-07: a reset never runs inside a bracket, and at boot the arena is raw SDRAM; the epoch and the op count are never rewound (a stale value would look like "no change")
@@ -633,6 +633,7 @@ Status Project::set_instrument(std::uint32_t index, const Instrument& value) noe
   n = field_length(value.sample_path, kSamplePathMax);
   std::memset(slot.sample_path + n, 0, kSamplePathMax + 1 - n);
   std::memset(slot.params + value.param_len, 0, kModuleParamBytes - value.param_len);
+  std::memset(slot.reserved, 0, sizeof slot.reserved);
   ++instrument_generation_[index];
   touch();
   return Status::Ok;

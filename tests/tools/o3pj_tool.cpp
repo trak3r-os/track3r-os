@@ -132,8 +132,8 @@ void dump(const Project& p) {
     print_hex("name", in->name, len_of(in->name, kInstrumentNameMax));
     std::printf(" ");
     print_hex("path", in->sample_path, len_of(in->sample_path, kSamplePathMax));
-    std::printf(" rate=%u engine=%u blob=%u/%08x m13=%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n", in->sample_rate, in->engine, in->param_len, formats::crc32(in->params, in->param_len), in->midi_velocity,
-                in->midi_program, in->midi_out, in->midi_pb_range, in->midi_offset, in->midi_cc[0], in->midi_cc[1], in->midi_cc[2], in->midi_cc[3], in->midi_cc[4], in->midi_cc[5], in->vel_sens);
+    std::printf(" rate=%u engine=%u blob=%u/%08x m13=%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u stereo=%u\n", in->sample_rate, in->engine, in->param_len, formats::crc32(in->params, in->param_len), in->midi_velocity,
+                in->midi_program, in->midi_out, in->midi_pb_range, in->midi_offset, in->midi_cc[0], in->midi_cc[1], in->midi_cc[2], in->midi_cc[3], in->midi_cc[4], in->midi_cc[5], in->vel_sens, in->stereo);
     const SamplerParams& s = in->sampler;
     std::printf("  sampler %u %u %u %u %d %d %u %u %u %u %u %u %u %u %u %u | %u %u %u %u %u %u %u %u | %u | %08x %08x",
                 s.sample_type, s.play_mode, s.filter_type, s.filter_enable, s.tune, s.fine_tune, s.volume,
@@ -306,6 +306,7 @@ void limits() {
       {"inst_version_engine", formats::native::kInstVersionEngine},
       {"inst_version_midi", formats::native::kInstVersionMidi},
       {"inst_version_lfo_sine", formats::native::kInstVersionLfoSine},
+      {"inst_version_stereo", formats::native::kInstVersionStereo},
       {"state_version_fx", formats::native::kStateVersionFx},
       {"apps_version_v11", formats::state_chunks::kAppsVersionV11},
       {"midi_ports", kMidiPorts},
@@ -738,6 +739,13 @@ int main(int argc, char** argv) {
       in.sampler.lfo[0].shape = 5;
       in.sampler.lfo[1].shape = 2;
       in.sampler.lfo[5].shape = 4;
+      (void)a.project.set_instrument(0, in);
+    } else if (std::strcmp(argv[2], "stereo") == 0) {
+      // OS-STEREO step 2: the small project with the stereo flag on instrument 0 (a Sine LFO beside it, which 1.5 covers too), so INST 1.5; the other instruments stay as they were.
+      test::fill_small(a.project);
+      model::Instrument in = *a.project.instrument(0);
+      in.stereo = 1;
+      in.sampler.lfo[2].shape = 5;
       (void)a.project.set_instrument(0, in);
     } else if (std::strcmp(argv[2], "persist2") == 0) {
       test::fill_persist2(a.project);

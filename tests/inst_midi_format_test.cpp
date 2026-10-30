@@ -15,6 +15,7 @@
 #include <o3os/model/project.h>
 
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -104,7 +105,7 @@ TEST_CASE("inst 1.3: the model: every field has its default in a fresh instrumen
   refused([](Instrument& i) { i.midi_offset = 101; });
   refused([](Instrument& i) { i.midi_cc[3] = 132; });
   refused([](Instrument& i) { i.vel_sens = 101; });
-  CHECK(sizeof(Instrument) == 716);
+  CHECK(sizeof(Instrument) == 720);
 }
 
 TEST_CASE("inst 1.3: the chunk is the bytes of the description: version 1.3, the engine byte, then the twelve") {
@@ -311,16 +312,16 @@ TEST_CASE("inst 1.3: a value out of its range reads as the field's default (a la
   CHECK(rep.error == Error::Malformed);
 }
 
-TEST_CASE("inst 1.3: a newer minor (1.5, past INST 1.4 of OS-LFOSINE) is read as far as 1.3, the rest skipped, and written back as 1.3 without it; an older reader meets the same rule at 1.3") {
+TEST_CASE("inst 1.3: a newer minor (1.6, past INST 1.4 of OS-LFOSINE and INST 1.5 of OS-STEREO) is read as far as 1.5, the rest skipped, and written back as 1.3 without it; an older reader meets the same rule at 1.3") {
   test::fill_small(proj(0));
   NEED(proj(0).set_instrument(kSlot, busy_midi()) == Status::Ok);
   const Bytes file = saved(proj(0));
   std::vector<RawChunk> edit = test::split_chunks(file);
   RawChunk* c = inst_of(edit, kSlot);
   NEED(c != nullptr);
-  c->payload[1] = 0x05;
+  c->payload[1] = 0x06;
   for (unsigned i = 0; i < 300; ++i) {
-    c->payload.push_back(0xAB);  // a field of a later version
+    c->payload.push_back(0xAB);  // the first is a stereo flag above 1 (mono); the rest are fields of a later version
   }
   Report rep;
   NEED(test::load(test::arena(1), build(edit), &rep) == Progress::Done);
@@ -375,4 +376,176 @@ TEST_CASE("inst 1.3: the fixtures that never used the fields are the files they 
     CHECK(file.size() == p.size);
     CHECK(file_crc(file) == p.crc);
   }
+}
+
+// ---- OS-STEREO step 2, INST 1.5: the instrument's stereo flag (docs/formats/o3-project.md; NEW COMMUNITY OS BEHAVIOUR). The pins above also hold the mono projects of this build to the files they were. ----
+
+TEST_CASE("inst 1.5: the model: a fresh instrument is mono, the flag is a Sample instrument's, and validate refuses a value above 1 and the flag on another kind") {
+  for (const InstrumentKind kind : {InstrumentKind::Sample, InstrumentKind::Midi, InstrumentKind::Module}) {
+    Instrument in;
+    init_instrument(in, kind);
+    CHECK(in.stereo == 0);
+  }
+  Instrument s;
+  init_instrument(s, InstrumentKind::Sample);
+  s.stereo = 1;
+  CHECK(validate_instrument(s, 0) == nullptr);
+  s.stereo = 2;
+  CHECK(validate_instrument(s, 0) != nullptr);
+  Instrument m = busy_midi();
+  m.stereo = 1;
+  CHECK(validate_instrument(m, 0) != nullptr);
+  CHECK(proj(0).set_instrument(kSlot, m) != Status::Ok);
+  Instrument mod;
+  init_instrument(mod, InstrumentKind::Module);
+  mod.stereo = 1;
+  CHECK(validate_instrument(mod, 1) != nullptr);
+}
+
+TEST_CASE("inst 1.5: a stereo sample instrument is the 1.5 chunk (the 1.3 layout and the flag), and the project round-trips (save, load, save)") {
+  test::fill_small(proj(0));
+  const Bytes mono = saved(proj(0));
+  Instrument s = *proj(0).instrument(0);
+  s.stereo = 1;
+  NEED(proj(0).set_instrument(0, s) == Status::Ok);
+  const Bytes file = saved(proj(0));
+  std::vector<RawChunk> cs = test::split_chunks(file);
+  RawChunk* c = inst_of(cs, 0);
+  NEED(c != nullptr);
+  CHECK(c->payload[0] == 0x01);
+  CHECK(c->payload[1] == 0x05);
+  CHECK(c->payload.back() == 1);  // the flag is the last byte
+  // before it: the 1.3 block, whole (the engine byte, the twelve at their defaults), as an instrument of 1.3 has it
+  std::vector<RawChunk> ms = test::split_chunks(mono);
+  RawChunk* m = inst_of(ms, 0);
+  NEED(m != nullptr);
+  NEED(c->payload.size() == m->payload.size() + 13u + 1u);  // 1.1 -> the engine byte, the twelve, the flag
+  const std::uint8_t dflt[13] = {0, 127, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 100};
+  for (unsigned i = 0; i < 13; ++i) {
+    CHECK(c->payload[c->payload.size() - 14 + i] == dflt[i]);
+  }
+  // the other instruments are the chunks of the mono file
+  for (std::uint8_t slot = 1; slot < 3; ++slot) {
+    RawChunk* a = inst_of(cs, slot);
+    RawChunk* b = inst_of(ms, slot);
+    if (a != nullptr && b != nullptr) {
+      CHECK(a->payload == b->payload);
+    }
+  }
+  Report rep;
+  NEED(test::load(test::arena(1), file, &rep) == Progress::Done);
+  CHECK_FALSE(rep.newer_minor);
+  CHECK(proj(1).instrument(0)->stereo == 1);
+  CHECK(proj(1).instrument(0)->kind == InstrumentKind::Sample);
+  const Bytes back = saved(proj(1));
+  CHECK(back == file);
+  CHECK(file_crc(back) == file_crc(file));
+  // flag off again: the mono file's bytes, byte for byte
+  s.stereo = 0;
+  NEED(proj(0).set_instrument(0, s) == Status::Ok);
+  CHECK(saved(proj(0)) == mono);
+}
+
+TEST_CASE("inst 1.5: the flag with an engine, VEL> or a Sine LFO is one 1.5 chunk that keeps all of them") {
+  test::fill_small(proj(0));
+  Instrument s = *proj(0).instrument(0);
+  s.stereo = 1;
+  s.engine = kInstEngineAmiga;
+  s.vel_sens = 40;
+  s.sampler.lfo[1].shape = kLfoShapeSine;
+  NEED(proj(0).set_instrument(0, s) == Status::Ok);
+  const Bytes file = saved(proj(0));
+  Report rep;
+  NEED(test::load(test::arena(1), file, &rep) == Progress::Done);
+  const Instrument* q = proj(1).instrument(0);
+  NEED(q != nullptr);
+  CHECK(q->stereo == 1);
+  CHECK(q->engine == kInstEngineAmiga);
+  CHECK(q->vel_sens == 40);
+  CHECK(q->sampler.lfo[1].shape == kLfoShapeSine);  // (the Sine gate is minor >= 4: 1.5 is above it)
+  CHECK(saved(proj(1)) == file);
+}
+
+TEST_CASE("inst 1.5: a 1.4 chunk reads mono, a value above 1 reads mono, and neither is written back as 1.5") {
+  test::fill_small(proj(0));
+  Instrument s = *proj(0).instrument(0);
+  s.stereo = 1;
+  s.sampler.lfo[0].shape = kLfoShapeSine;  // so that the chunk has something that 1.4 says
+  NEED(proj(0).set_instrument(0, s) == Status::Ok);
+  const Bytes file = saved(proj(0));
+  // 1.4: the flag taken off and the chunk labelled 1.4 (what the build before this one wrote for the instrument)
+  std::vector<RawChunk> cs = test::split_chunks(file);
+  RawChunk* c = inst_of(cs, 0);
+  NEED(c != nullptr);
+  c->payload[1] = 0x04;
+  c->payload.pop_back();
+  Report rep;
+  NEED(test::load(test::arena(1), build(cs), &rep) == Progress::Done);
+  CHECK_FALSE(rep.newer_minor);
+  CHECK(proj(1).instrument(0)->stereo == 0);
+  CHECK(proj(1).instrument(0)->sampler.lfo[0].shape == kLfoShapeSine);
+  CHECK(saved(proj(1)) == build(cs));  // written back as 1.4
+  // 1.5 with the flag at 2 (and at 255): reads 0, as an engine above the table does
+  for (const std::uint8_t value : {std::uint8_t{2}, std::uint8_t{255}}) {
+    cs = test::split_chunks(file);
+    c = inst_of(cs, 0);
+    NEED(c != nullptr);
+    c->payload.back() = value;
+    NEED(test::load(test::arena(1), build(cs), &rep) == Progress::Done);
+    CHECK(proj(1).instrument(0)->stereo == 0);
+    for (const RawChunk& r : test::split_chunks(saved(proj(1)))) {
+      if (r.id == kChunkInst && r.payload[2] == 0) {
+        CHECK(r.payload[1] == 0x04);  // (the Sine LFO is still there; the flag is not)
+      }
+    }
+  }
+}
+
+TEST_CASE("inst 1.5: the length is exact, and the flag on a MIDI instrument is read as 0 (the project still loads)") {
+  test::fill_small(proj(0));
+  Instrument s = *proj(0).instrument(0);
+  s.stereo = 1;
+  NEED(proj(0).set_instrument(0, s) == Status::Ok);
+  const Bytes file = saved(proj(0));
+  std::vector<RawChunk> cs = test::split_chunks(file);
+  Report rep;
+  inst_of(cs, 0)->payload.pop_back();  // a byte short
+  CHECK(test::load(test::arena(1), build(cs), &rep) == Progress::Failed);
+  CHECK(rep.error == Error::Malformed);
+  cs = test::split_chunks(file);
+  inst_of(cs, 0)->payload.push_back(0);  // a byte long
+  CHECK(test::load(test::arena(1), build(cs), &rep) == Progress::Failed);
+  CHECK(rep.error == Error::Malformed);
+  // a MIDI instrument of 1.3, relabelled 1.5 with the flag
+  test::fill_small(proj(0));
+  NEED(proj(0).set_instrument(kSlot, busy_midi()) == Status::Ok);
+  cs = test::split_chunks(saved(proj(0)));
+  RawChunk* m = inst_of(cs, kSlot);
+  NEED(m != nullptr);
+  m->payload[1] = 0x05;
+  m->payload.push_back(1);
+  NEED(test::load(test::arena(1), build(cs), &rep) == Progress::Done);  // the flag is a Sample instrument's: on a MIDI instrument it reads 0 (docs/specs/OS-STEREO.md), the file is not refused
+  CHECK(proj(1).instrument(kSlot)->stereo == 0);
+  CHECK(proj(1).instrument(kSlot)->midi_channel == 5);
+  CHECK(std::memcmp(proj(1).instrument(kSlot)->reserved, "\0\0\0", 3) == 0);
+  m->payload.back() = 0;  // the same chunk with the flag at 0 is a valid 1.5 chunk of a MIDI instrument (read, written back as 1.3)
+  NEED(test::load(test::arena(1), build(cs), &rep) == Progress::Done);
+  CHECK(proj(1).instrument(kSlot)->stereo == 0);
+  CHECK(proj(1).instrument(kSlot)->midi_channel == 5);
+}
+
+TEST_CASE("inst 1.5: the maximal project with every sample instrument stereo fits the file limit and round-trips") {
+  test::fill_maximal(proj(0));
+  for (unsigned i = 0; i < kMaxInstruments; ++i) {
+    Instrument in = *proj(0).instrument(i);
+    if (in.kind == InstrumentKind::Sample) {
+      in.stereo = 1;
+      NEED(proj(0).set_instrument(i, in) == Status::Ok);
+    }
+  }
+  const Bytes file = saved(proj(0));
+  CHECK(file.size() < kMaxFileBytes);
+  Report rep;
+  NEED(test::load(test::arena(1), file, &rep) == Progress::Done);
+  CHECK(saved(proj(1)) == file);
 }

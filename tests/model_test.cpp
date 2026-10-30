@@ -38,8 +38,8 @@ Instrument sample_instrument() {
 // The declared layout (ADR 0011): these are the numbers docs/formats/o3-project.md quotes.
 static_assert(sizeof(Step) == 7 && alignof(Step) == 1, "step");
 static_assert(sizeof(Pattern) == 14384, "pattern");
-static_assert(sizeof(Instrument) == 716, "instrument");
-static_assert(kModelArenaBytes == 1933504, "arena");
+static_assert(sizeof(Instrument) == 720, "instrument");
+static_assert(kModelArenaBytes == 1933760, "arena");
 static_assert(alignof(ModelArena) == 8, "arena alignment");
 static_assert(kMaxPatterns * sizeof(Pattern) + kMaxInstruments * sizeof(Instrument) + kUnknownPoolBytes < kModelArenaBytes,
               "the pools are most of the arena");

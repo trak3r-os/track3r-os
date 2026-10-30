@@ -137,6 +137,9 @@ const std::vector<ParamName>& param_names() {
       if (field == ip::MidiChannel) {
         desc = &model::midi_channel_desc();  // (the one virtual field: param_desc has nothing for it)
       }
+      if (field == ip::PlayStereo) {
+        desc = &model::play_stereo_desc();  // (the other virtual field, OS-STEREO step 2: the instrument's own byte)
+      }
       if (desc != nullptr) {
         names.push_back({prefix + caption_of(desc->name), field});
       }
@@ -148,6 +151,7 @@ const std::vector<ParamName>& param_names() {
       add("", f);
     }
     add("", ip::MidiChannel);
+    add("", ip::PlayStereo);
     for (unsigned e = 0; e < ip::kEnvelopes; ++e) {
       for (unsigned f = 0; f < ip::kEnvelopeFields; ++f) {
         add("env" + std::to_string(e) + ".", ip::envelope(e, f));
@@ -315,6 +319,10 @@ bool read_value(const model::Project& project, const ModelPath& path, Value& out
       }
       if (path.field == model::instrument_param::MidiChannel) {
         out = number_value(in->midi_channel, true);
+        return true;
+      }
+      if (path.field == model::instrument_param::PlayStereo) {
+        out = number_value(in->stereo, true);
         return true;
       }
       const core::ParamId id = core::param_id(core::ParamKind::Instrument, path.a - 1u, path.field);

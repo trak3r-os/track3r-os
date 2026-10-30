@@ -10,6 +10,7 @@
 #include <o3os/app/actions.h>
 #include <o3os/app/app.h>
 #include <o3os/app/buttons.h>
+#include <o3os/app/module_ui.h>
 #include <o3os/app/og_samples.h>
 #include <o3os/app/play_mode.h>
 #include <o3os/app/sample_bank.h>
@@ -21,8 +22,12 @@
 #include <o3os/model/params.h>
 #include <o3os/platform/host/fakes.h>
 
+#include "../app/src/param_access.h"  // write_param (private to app/src): the stereo test calls the write path itself
+
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -166,14 +171,14 @@ TEST_CASE("source page: the rows follow the play mode, PLAY MODE first and PLAY 
     std::vector<unsigned> fields;
   };
   const Want wants[] = {
-      {0, {ip::PlayMode, ip::PlayEngine}},
-      {1, {ip::PlayMode, ip::PlayEngine}},
-      {2, {ip::PlayMode, ip::PlayEngine}},
-      {3, {ip::PlayMode, ip::PlayEngine}},
-      {4, {ip::PlayMode, ip::Slices, ip::Slice, ip::PlayEngine}},
-      {5, {ip::PlayMode, ip::Slices, ip::Slice, ip::PlayEngine}},
-      {6, {ip::PlayMode, ip::WtPos, ip::WtSize, ip::PlayEngine}},
-      {7, {ip::PlayMode, ip::GrainPos, ip::GrainLength, ip::GrainShape, ip::GrainLoop, ip::PlayEngine}},
+      {0, {ip::PlayMode, ip::PlayEngine, ip::PlayStereo}},  // (OS-STEREO step 2: STEREO follows PLAY ENGINE)
+      {1, {ip::PlayMode, ip::PlayEngine, ip::PlayStereo}},
+      {2, {ip::PlayMode, ip::PlayEngine, ip::PlayStereo}},
+      {3, {ip::PlayMode, ip::PlayEngine, ip::PlayStereo}},
+      {4, {ip::PlayMode, ip::Slices, ip::Slice, ip::PlayEngine, ip::PlayStereo}},
+      {5, {ip::PlayMode, ip::Slices, ip::Slice, ip::PlayEngine, ip::PlayStereo}},
+      {6, {ip::PlayMode, ip::WtPos, ip::WtSize, ip::PlayEngine, ip::PlayStereo}},
+      {7, {ip::PlayMode, ip::GrainPos, ip::GrainLength, ip::GrainShape, ip::GrainLoop, ip::PlayEngine, ip::PlayStereo}},
   };
   for (const Want& w : wants) {
     rig.set_mode(w.mode);
@@ -372,12 +377,108 @@ TEST_CASE("source page: rows that do not apply are dimmed with the reason, not h
   Rig rig;
   rig.select(kEmpty);  // a sample instrument with no audio
   rig.set_mode(6);
-  CHECK(rig.rows() == 4);  // the rows are all there
+  CHECK(rig.rows() == 5);  // the rows are all there (PLAY MODE, WT POS, WT SIZE, PLAY ENGINE, STEREO)
   rig.select(kSlot);
   rig.set_mode(5);
-  CHECK(rig.rows() == 4);  // SLICE is a row whatever the slices (dimmed while there are none)
+  CHECK(rig.rows() == 5);  // SLICE is a row whatever the slices (dimmed while there are none)
   CHECK(rig.app->frames() >= 1u);
   CHECK(rig.app->failed_frames() == 0u);
+}
+
+// OS-STEREO step 2 (INST 1.5): the STEREO row, a virtual field after PLAY ENGINE. Nothing provides a side signal before slice (b), so STEREO is refused on the strip while the bank has none, and MONO is always
+// allowed (a flag a file carried is the way back).
+TEST_CASE("stereo row: STEREO is refused while the bank holds no side signal, the strip says why, and the instrument stays mono") {
+  Rig rig;
+  rig.clear_notes();
+  NEED(rig.rows() == 3);
+  CHECK(rig.field_at(2) == ip::PlayStereo);
+  CHECK(rig.value(ip::PlayStereo) == 0.0f);  // (the table has no such row: the value is the instrument's byte)
+  CHECK_FALSE(rig.bank.has_side(kSlot));
+  const std::uint32_t before = rig.arena->project.generation();
+  rig.turn(1);  // MONO -> STEREO
+  CHECK(rig.note() == "STEREO NEEDS A STEREO LOAD");
+  CHECK(rig.inst().stereo == 0);
+  CHECK(rig.arena->project.generation() == before);  // nothing was written, nothing to undo
+  rig.clear_notes();
+  rig.turn(-1);  // MONO stays MONO: no refusal, no write
+  CHECK(rig.inst().stereo == 0);
+  CHECK(rig.note().empty());
+}
+
+TEST_CASE("stereo row: the row reads the instrument, and MONO clears a flag a file carried, as one undo unit") {
+  Rig rig;
+  model::Instrument s = rig.inst();
+  s.stereo = 1;  // as a hand-made INST 1.5 file would leave it
+  NEED(rig.arena->project.set_instrument(kSlot, s) == model::Status::Ok);
+  rig.clear_notes();
+  CHECK(rig.field_at(2) == ip::PlayStereo);
+  app::ParamScratch scratch;
+  const core::ParamId id = rig.focus();
+  const core::ParamDesc* d = app::describe_param(rig.app->model(), id, scratch);
+  NEED(d != nullptr);
+  CHECK(std::string(d->name) == "STEREO");
+  CHECK(std::string(d->names[0]) == "MONO");
+  CHECK(std::string(d->names[1]) == "STEREO");
+  rig.turn(-1);  // STEREO -> MONO
+  CHECK(rig.inst().stereo == 0);
+  CHECK(rig.note().empty());
+  (void)rig.invoke("edit.undo");
+  CHECK(rig.inst().stereo == 1);  // one undo unit: back to what the file had
+  (void)rig.invoke("edit.redo");
+  CHECK(rig.inst().stereo == 0);
+}
+
+TEST_CASE("stereo row: a MIDI instrument has no such page, and the write path refuses the field on an instrument that is not a sample") {
+  Rig rig;
+  const core::ParamId id = core::param_id(core::ParamKind::Instrument, 9, ip::PlayStereo);  // the MIDI instrument of the rig
+  app::ParamScratch scratch;
+  CHECK(app::is_play_stereo_param(id));
+  CHECK(app::describe_param(rig.app->model(), id, scratch) != nullptr);  // (the descriptor is the field's, whatever the slot)
+  CHECK(model::param_desc(id) == nullptr);                               // (not a table row: the generation block does not grow)
+  CHECK_FALSE(model::instrument_field_app_writable(ip::PlayStereo));
+  // The write path itself (not only the descriptor): a MIDI slot is NoInstrument whatever the value; on the sample slot NaN, a negative and a value past the two choices are Rejected and nothing is written.
+  auto model = std::make_unique<app::Model>();
+  app::ViewState view;
+  app::ActionContext ctx{*model, view, app::App::kSoftKeyLabels, 1000, true, &rig.app->session()};
+  ctx.edit = rig.editor.get();
+  ctx.samples = &rig.bank;
+  const std::uint32_t before = rig.arena->project.generation();
+  for (const float v : {0.0f, 1.0f}) {
+    CHECK(app::write_param(ctx, id, v) == app::WriteResult::NoInstrument);
+  }
+  CHECK(rig.arena->project.instrument(9)->stereo == 0);
+  const core::ParamId sample_id = core::param_id(core::ParamKind::Instrument, kSlot, ip::PlayStereo);
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  for (const float v : {nan, -1.0f, 2.0f, 255.0f}) {
+    CHECK(app::write_param(ctx, sample_id, v) == app::WriteResult::Rejected);
+  }
+  CHECK(app::write_param(ctx, sample_id, 0.0f) == app::WriteResult::Unchanged);  // already MONO
+  CHECK(rig.inst().stereo == 0);
+  CHECK(rig.arena->project.generation() == before);
+}
+
+// The instrument is 720 B with no padding (Instrument::reserved), so the whole-instrument memcmp of a no-op edit and of PASTE compares defined bytes.
+TEST_CASE("stereo flag: a no-op instrument edit records no undo unit, and a paste of an identical instrument says it already holds it") {
+  Rig rig;
+  static_assert(sizeof(model::Instrument) == offsetof(model::Instrument, reserved) + sizeof(model::Instrument::reserved), "no tail padding");
+  const std::size_t depth = rig.editor->journal().depth();
+  const model::Instrument same = rig.inst();
+  NEED(rig.editor->set_instrument(kSlot, same) == model::Status::Ok);
+  CHECK(rig.editor->journal().depth() == depth);  // nothing changed: no unit
+  model::Instrument fresh = rig.inst();
+  std::memset(fresh.reserved, 0xAA, sizeof fresh.reserved);  // a caller's stray bytes are not stored
+  NEED(rig.editor->set_instrument(kSlot, fresh) == model::Status::Ok);
+  CHECK(rig.editor->journal().depth() == depth);
+  CHECK(rig.inst().reserved[0] == 0);
+  CHECK(rig.inst().reserved[2] == 0);
+  // PASTE: copy slot 5 (SHIFT+F2 on the Instrument screen), paste it in a second slot that holds the same instrument.
+  rig.clear_notes();
+  rig.select(kSlot);
+  (void)rig.invoke("instrument.copy");
+  (void)rig.invoke("instrument.paste");
+  rig.clear_notes();
+  (void)rig.invoke("instrument.paste");
+  CHECK(rig.note().find("ALREADY HOLDS THIS") != std::string::npos);
 }
 
 TEST_CASE("source page: a wavetable with an unset window size plays the window the page shows (fitted to a short sample), not silence") {

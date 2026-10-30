@@ -131,10 +131,19 @@ struct Instrument {
   std::uint8_t midi_offset;
   std::uint8_t midi_cc[kMidiCcSlotsPerInstrument];
   std::uint8_t vel_sens;
+  // OS-STEREO step 2 (INST 1.5, NEW COMMUNITY OS BEHAVIOUR): 1 = the instrument is a stereo sample (kInstStereoMax); a Sample instrument's only, 0 for every other kind. It is the instrument's wish: the sample
+  // plays stereo only while the bank also holds its side signal (decision S4 of docs/specs/OS-STEREO.md), which nothing provides before slice (b). One byte after VEL>: the struct grows to 720 B.
+  std::uint8_t stereo;
+  // The three bytes that would be tail padding, made explicit so a whole-instrument memcmp (Editor::set_instrument, PASTE, the instrument-file load) compares defined bytes. Always 0: init_instrument zeroes them
+  // and Project::set_instrument stores them zero (the canonical form); the file has no field for them.
+  std::uint8_t reserved[3];
 };
 
 // True when every INST 1.3 field has the value init_instrument gives it (the writer then writes the chunk as the older minor).
 bool inst_v13_default(const Instrument& in) noexcept;
+
+// OS-STEREO step 2: the largest value of Instrument::stereo (0 mono, 1 stereo); a file's byte above it reads 0 (as an engine byte above kInstEngineMax reads automatic).
+inline constexpr std::uint8_t kInstStereoMax = 1;
 
 // OS-LFOSINE: true when one of the six LFOs is the Sine shape (the writer then writes INST 1.4, which only says that a shape of 5 is Sine).
 bool inst_uses_sine(const Instrument& in) noexcept;
@@ -144,7 +153,7 @@ bool inst_uses_sine(const Instrument& in) noexcept;
 static_assert(sizeof(Envelope) == 20 && alignof(Envelope) == 4, "Envelope layout");
 static_assert(sizeof(Lfo) == 8 && alignof(Lfo) == 4, "Lfo layout");
 static_assert(sizeof(SamplerParams) == 308 && alignof(SamplerParams) == 4, "SamplerParams layout");
-static_assert(sizeof(Instrument) == 716 && alignof(Instrument) == 4, "Instrument layout");
+static_assert(sizeof(Instrument) == 720 && alignof(Instrument) == 4, "Instrument layout");
 
 // Sets `out` to a fresh instrument of `kind`: all zero except bit_depth 16, volume 100, panning 50 and the
 // sample points spanning the whole sample (loop_end = end = 65535), sample_rate 0 (not recorded), engine 0 (automatic) and the INST 1.3 fields at their defaults (velocity 127, no program, the device's port, a bend

@@ -50,12 +50,14 @@ RawChunk& chunk_of(std::vector<RawChunk>& cs, std::uint32_t id, int nth = 0) {
 
 Bytes build(const std::vector<RawChunk>& cs, const BuildOptions& o = {}) { return test::build_file(cs, o); }
 
-// A hypothetical INST 1.5 (INST 1.4 is OS-LFOSINE's, with no field of its own) made of an INST 1.1 payload: the engine byte (automatic) and the twelve bytes of INST 1.3 at their defaults (OS-INSTUI S8b), then `tail` bytes of a field of a later version.
+// A hypothetical INST 1.6 (INST 1.4 is OS-LFOSINE's, with no field of its own; INST 1.5 is OS-STEREO's stereo byte) made of an INST 1.1 payload: the engine byte (automatic), the twelve bytes of INST 1.3 at their defaults (OS-INSTUI S8b)
+// and the stereo byte of 1.5 (mono), then `tail` bytes of a field of a later version.
 void make_inst_next_minor(RawChunk& c, std::size_t tail, std::uint8_t fill = 0xAB, std::uint8_t engine = 0) {
-  c.payload[1] = 5;
+  c.payload[1] = 6;
   c.payload.push_back(engine);
   const std::uint8_t twelve[12] = {127, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 100};
   c.payload.insert(c.payload.end(), twelve, twelve + 12);
+  c.payload.push_back(0);
   c.payload.insert(c.payload.end(), tail, fill);
 }
 

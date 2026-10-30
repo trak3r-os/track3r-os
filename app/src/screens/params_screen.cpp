@@ -227,6 +227,7 @@ Rows rows_of(const Model& m, const ViewState& view) noexcept {
       r.field[r.n++] = ip::Slice;
     }
     r.field[r.n++] = ip::PlayEngine;
+    r.field[r.n++] = ip::PlayStereo;  // OS-STEREO step 2 (INST 1.5): after PLAY ENGINE, so the source page is at most seven rows (granular: PLAY MODE, four rows, ENGINE, STEREO)
     return r;
   }
   if (group == ip::GroupEnvelope) {
@@ -265,6 +266,11 @@ float value_of(const Model& m, core::ParamId id, const core::ParamDesc& d, bool&
     const model::Instrument* in = m.project != nullptr ? m.project->instrument(core::param_index(id)) : nullptr;
     live = in != nullptr && in->kind == model::InstrumentKind::Midi;
     return live ? static_cast<float>(in->midi_channel) : d.def;
+  }
+  if (is_play_stereo_param(id)) {  // OS-STEREO step 2: the virtual STEREO field reads the instrument
+    const model::Instrument* in = m.project != nullptr ? m.project->instrument(core::param_index(id)) : nullptr;
+    live = in != nullptr && in->kind == model::InstrumentKind::Sample;
+    return live ? static_cast<float>(in->stereo) : d.def;
   }
   if (m.project != nullptr && m.project->has_param(id)) {
     live = true;

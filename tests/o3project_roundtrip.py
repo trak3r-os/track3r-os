@@ -97,7 +97,7 @@ def main():
     if cpp_limits != py_limits:
         sys.exit("FAILED: the limits tables differ\nC++:\n%s\nPython:\n%s" % (cpp_limits.decode(), py_limits.decode()))
 
-    for kind in ("empty", "small", "maximal", "settings", "state", "midi13", "persist2", "lfosine", "og", "og17", "law"):
+    for kind in ("empty", "small", "maximal", "settings", "state", "midi13", "persist2", "lfosine", "stereo", "og", "og17", "law"):
         a, b, c = (os.path.join(work, "%s.%s.o3p" % (kind, tag)) for tag in ("cpp", "py", "cpp2"))
         run([tool, "gen", kind, a])
         if kind in PRE_LAW:  # OS-BUG-PASTE24: a project whose law is 0 writes no LAW chunk: the file is the one the build before it wrote (size and CRC-32 taken from that build's o3pj_tool)
@@ -330,7 +330,7 @@ def main():
 
     def appended(cid):
         def edit(p):
-            minor = b"\x05" if cid == b"INST" else b"\x01"  # INST is at 1.4 (1.3 is the sample rate, the engine, the MIDI fields; 1.4 is OS-LFOSINE's, no field): its next minor is 1.5 (the tail of 0xAB bytes reads as out-of-range fields: the defaults)
+            minor = b"\x06" if cid == b"INST" else b"\x01"  # INST is at 1.5 (1.3 is the sample rate, the engine, the MIDI fields; 1.4 is OS-LFOSINE's, no field; 1.5 is OS-STEREO's stereo byte): its next minor is 1.6 (the tail of 0xAB bytes reads as out-of-range fields: the defaults)
             return b"\x01" + minor + p[2:] + b"\xab" * 20000
         return [(c, edit(p) if c == cid else p) for c, p in chunks]
 
@@ -591,7 +591,7 @@ def main():
     for at, value, want in ((0, 0, "127"), (0, 200, "127"), (1, 129, "0"), (2, 4, "0"), (3, 25, "2"), (4, 101, "0"), (5, 132, "0"), (10, 255, "0"), (11, 101, "100")):
         _, dump_d = alike13("INST 1.3 byte %d = %d" % (at, value), damage(at, value))
         line = [l for l in dump_d.splitlines() if l.startswith("instrument 20 ")][0]
-        fields = line.split("m13=")[1].split(",")
+        fields = line.split("m13=")[1].split(" ")[0].split(",")
         if fields[at] != want:
             sys.exit("FAILED: INST 1.3 byte %d = %d did not read as %s (%r)" % (at, value, want, fields))
     # the length is exact: a byte long or short is malformed on both sides
@@ -603,10 +603,10 @@ def main():
         pyr = run(py + ["check", path], expect_ok=False)
         if error_kind(cpp.stderr) != "malformed" or error_kind(pyr.stderr) != "malformed":
             sys.exit("FAILED: INST 1.3 %s: C++ says %r, Python says %r" % (name, error_kind(cpp.stderr), error_kind(pyr.stderr)))
-    # a newer minor (1.5; 1.4 is OS-LFOSINE's, no field) with a tail: read as far as 1.3, the tail lost, the twelve kept
-    newer, dump_new = alike13("INST 1.5", lambda c, p: b"\x01\x05" + p[2:] + b"\xcd" * 700 if c == b"INST" and p[:2] == b"\x01\x03" else p)
-    if newer != m13 or "m13=100,6,3,12,40,75,129,130,131,1,128,33" not in dump_new:
-        sys.exit("FAILED: INST 1.5 was not read as far as 1.3 and written back as the 1.3 chunk without its tail")
+    # a newer minor (1.6; 1.4 is OS-LFOSINE's, no field; 1.5 is OS-STEREO's byte) with a tail: read as far as 1.5 (the first tail byte, 0xCD, is a stereo flag above 1: mono), the tail lost, the twelve kept
+    newer, dump_new = alike13("INST 1.6", lambda c, p: b"\x01\x06" + p[2:] + b"\xcd" * 700 if c == b"INST" and p[:2] == b"\x01\x03" else p)
+    if newer != m13 or "m13=100,6,3,12,40,75,129,130,131,1,128,33" not in dump_new or "stereo=0" not in dump_new:
+        sys.exit("FAILED: INST 1.6 was not read as far as 1.5 and written back as the 1.3 chunk without its tail")
     # OS-LFOSINE: the LFO shape bytes out of range, on both readers alike. The six LFOs sit 36 bytes before the 96 of the slices and the 19 of the tail (blob length 2, rate 4, engine 1, the twelve
     # of 1.3; a sample instrument has no blob). A 1.3 chunk with a shape of 5 or more, and a 1.4 chunk with one of 6 or more, reads as Triangle (2); a 1.4 chunk keeps 5.
     def shapes_of(p):
@@ -632,6 +632,52 @@ def main():
         if not got or any(g != want for g in got):
             sys.exit("FAILED: %s: read as %r, wanted %r on every sample instrument" % (name, got, want))
     print("midi13: INST 1.3 is written for a non-default MIDI field or VEL> only, older files read as the defaults, damaged values read as defaults, a newer minor is read alike on both sides")
+
+    # OS-STEREO step 2, INST 1.5 (NEW COMMUNITY OS BEHAVIOUR): the `stereo` fixture is the small project with the stereo flag on instrument 0 (and a Sine LFO beside it, which 1.5 covers). Only that instrument is
+    # written as 1.5, with the flag as the last byte; every other chunk is the small fixture's, byte for byte (the existing fixtures' sizes and CRC-32 are pinned above, so a mono project is the file it was).
+    st_chunks = split_chunks(read(os.path.join(work, "stereo.cpp.o3p")))
+    sm_chunks = split_chunks(read(os.path.join(work, "small.cpp.o3p")))
+    st_inst = [p for c, p in st_chunks if c == b"INST"]
+    sm_inst = [p for c, p in sm_chunks if c == b"INST"]
+    if [(c, p) for c, p in st_chunks if c != b"INST"] != [(c, p) for c, p in sm_chunks if c != b"INST"] or st_inst[1:] != sm_inst[1:] or len(st_inst) != len(sm_inst):
+        sys.exit("FAILED: the stereo fixture differs from the small fixture in more than instrument 0")
+    if st_inst[0][:2] != b"\x01\x05" or st_inst[0][-1:] != b"\x01" or [p[:2] for p in st_inst].count(b"\x01\x05") != 1:
+        sys.exit("FAILED: the stereo fixture's instrument 0 is not the one INST 1.5 chunk, ending with the flag: %r" % st_inst[0][-4:])
+    dump_st = run([tool, "dump", os.path.join(work, "stereo.cpp.o3p")]).stdout.decode().splitlines()
+    if sum(1 for l in dump_st if l.endswith("stereo=1")) != 1 or sum(1 for l in dump_st if l.startswith("instrument ") and l.endswith("stereo=0")) != len(st_inst) - 1:
+        sys.exit("FAILED: the stereo fixture's dump does not show stereo=1 on instrument 0 only")
+
+    def alike_st(name, edit):
+        a, b, c2 = (os.path.join(work, "stereo.%s.o3p" % tag) for tag in ("edit", "py", "cpp2"))
+        write(a, join_chunks([(c, edit(p) if c == b"INST" and p[2] == 0 else p) for c, p in st_chunks]))
+        run(py + ["rewrite", a, b])
+        run([tool, "resave", a, c2])
+        if read(b) != read(c2):
+            sys.exit("FAILED: %s: Python and C++ rewrote it differently (first difference at byte %d)" % (name, first_difference(read(b), read(c2))))
+        cpp_dump = run([tool, "dump", a]).stdout.decode().splitlines()
+        if cpp_dump != run(py + ["dump", a]).stdout.decode().splitlines():
+            sys.exit("FAILED: %s: the dumps differ" % name)
+        return read(c2), cpp_dump
+
+    # the written file is read back and written again byte for byte (C++ -> C++ and through Python: the loop above did the Python part); a 1.5 chunk with the flag at 1 keeps it
+    again, dump_again = alike_st("INST 1.5 as written", lambda p: p)
+    if again != read(os.path.join(work, "stereo.cpp.o3p")) or "stereo=1" not in " ".join(dump_again):
+        sys.exit("FAILED: the stereo fixture is not read back and written again as it was")
+    # a 1.4 file (the byte taken off, labelled 1.4: the Sine LFO is still there) reads 0 and is written back as 1.4
+    old14, dump14 = alike_st("INST 1.4", lambda p: b"\x01\x04" + p[2:-1])
+    if any(l.endswith("stereo=1") for l in dump14) or [p[:2] for c, p in split_chunks(old14) if c == b"INST"].count(b"\x01\x05") != 0 or [p[:2] for c, p in split_chunks(old14) if c == b"INST"][0] != b"\x01\x04":
+        sys.exit("FAILED: an INST 1.4 file did not read as mono and write back as 1.4")
+    # a value above 1 reads 0 (as the engine does) and is written back without the flag
+    two, dump2v = alike_st("INST 1.5 stereo = 2", lambda p: p[:-1] + b"\x02")
+    if any(l.endswith("stereo=2") or l.endswith("stereo=1") for l in dump2v) or [p[:2] for c, p in split_chunks(two) if c == b"INST"].count(b"\x01\x05") != 0:
+        sys.exit("FAILED: an INST 1.5 stereo flag of 2 did not read as mono")
+    # the length is exact in 1.5 (a byte long or short is Malformed); a flag on a MIDI instrument reads 0 on both sides, the file loads (the midi13 fixture's MIDI instrument, its 1.3 chunk relabelled 1.5 with the flag)
+    refused_alike("INST 1.5 a byte long", [(c, p + b"\0" if c == b"INST" and p[:2] == b"\x01\x05" else p) for c, p in st_chunks])
+    refused_alike("INST 1.5 a byte short", [(c, p[:-1] if c == b"INST" and p[:2] == b"\x01\x05" else p) for c, p in st_chunks])
+    midi_st, dump_mst = alike13("INST 1.5 stereo on a MIDI instrument", lambda c, p: b"\x01\x05" + p[2:] + b"\x01" if c == b"INST" and p[:2] == b"\x01\x03" and p[3] == 2 else p)
+    if any(l.endswith("stereo=1") for l in dump_mst.splitlines()) or [p[:2] for c, p in split_chunks(midi_st) if c == b"INST"].count(b"\x01\x05") != 0:
+        sys.exit("FAILED: an INST 1.5 stereo flag on a MIDI instrument did not read as mono (and write back without it)")
+    print("stereo: INST 1.5 is written for a stereo sample instrument only (the rest of the file is the small fixture's), a 1.4 file and a value above 1 read as mono, the length is exact, a flag on a MIDI instrument reads as mono, both sides alike")
 
     # OS-PERSIST2: the session state, NOTE, MUTE, SCEN and SNFX. Tolerant: a value out of its range is its default, alike on both sides (the dumps show what was taken); the shape of a chunk is
     # the only error. An older build keeps the four as unknown chunks and writes them back byte for byte (emulated below, and checked against the real previous reader by hand).
