@@ -253,6 +253,9 @@ ModuleImport::Probe ModuleImport::decide(const char* name, const std::uint8_t* h
   } else {
     const mod::Kind k = mod::sniff_kind(head, n);
     seen = k == mod::Kind::Mod ? Probe::Mod : (k == mod::Kind::S3m ? Probe::S3m : Probe::NotModule);
+    if (seen == Probe::Mod && size < mod::tagged_mod_min_bytes(head, n)) {
+      seen = Probe::NotModule;  // OS-BUG-IMPTRUNC: no room for one pattern: the same refusal as a cut file, before the NEW question
+    }
   }
   const char* base = name;
   for (const char* p = name; *p != '\0'; ++p) {

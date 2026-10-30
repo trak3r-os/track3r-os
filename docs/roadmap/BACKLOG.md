@@ -21,6 +21,8 @@ Merged and covered by host or simulator tests; the check on the real unit is the
 
 | ID | What | Check left on the unit |
 |---|---|---|
+| OS-BUG-ST15LOOP | A 15-sample Soundtracker file's loop start is read in bytes, as real files store it | Import two real 15-sample files with loops and check the loop points in the sample editor |
+| OS-BUG-IMPTRUNC | A tagged MOD with no room for one pattern is refused before the NEW question | A 1,084-byte `M.K.` file is refused with no question |
 | OS-SONG-STAGE | Song STAGE page: the playing slot and the next one in large type, a bar countdown to the next slot, a progress bar (live use, low vision) | N | S | Merged 2026-10-30; checks on the unit pending: legibility at a distance, the bar countdown against the audio. New Community OS behaviour; defaults to confirm by the maintainer (`docs/specs/OS-SONG-VIEW.md`). After the unit check the maintainer drops STAGE from the Song cycle (OS-SONG-VIEW2); its countdown moves to TIMELINE. |
 | OS-SONG-TIMELINE | Song TIMELINE: slots as blocks scaled to bars, a colour per pattern, per-track note density, an energy curve over the song | N | M | Merged 2026-10-30; checks on the unit pending: how the colours, the density thumbnails and the energy curve read. The display list is bounded by construction. New Community OS behaviour; defaults to confirm by the maintainer (`docs/specs/OS-SONG-VIEW.md`). |
 | OS-PERF-LFO-STEP | The step-effect LFO columns 23, 24, 33 and 36 start the matching LFO on a sampler track, as FX 35 does | Passed on the unit (`v1.0.1-lfostep.1`): sound by capture for 23, 24 and 33; FX 24 wins over FX 31 in both orders; step rows cost no more than the layer rows; FX 36 on plain samples +0.14 pp; underrun 0; the export carries the LFO and two exports are byte-identical. Left: FX 36 on wavetable and granular, by ear; QA-PRF-186 and 189; "the next Play ends it"; "layer at 0". The step-against-layer CPU gate held only for VOL (the other layer rows measured were default slots); re-check in OS-PERF-CPU3 step 0. |
@@ -81,8 +83,6 @@ Merged and covered by host or simulator tests; the check on the real unit is the
 | ID | What | Parity | Cost | Note |
 |---|---|---|---|---|
 | OS-PERF-HPBP | The HIPASS and BANDPASS Perform rows cost about 18k cycles a block in the voices | N | S | Slice 1b merged (HIPASS row -16 % on the unit, BANDPASS unchanged). Slice 1c (align the loop heads) measured on the unit 2026-10-30 and dropped: no BANDPASS gain, HIPASS and LOWPASS worse. Slice 2 (a two-voice loop, bench first) waits in the queue. |
-| OS-BUG-ST15LOOP | A 15-sample Soundtracker file's loop start is read in words; real files store it in bytes | N | S | Found on the unit 2026-10-30 in two of three real files. Fix: read the start in bytes for 15-sample files, with a host test. |
-| OS-BUG-IMPTRUNC | A tagged MOD with no room for one pattern asks the NEW question, then fails TRUNCATED and leaves an empty project | N | S | Found on the unit 2026-10-30. Fix: refuse before the question. |
 | OS-SONG-VIEW2 | STAGE leaves the Song cycle (its countdown moves to TIMELINE); a simpler TIMELINE; a per-pattern note map (one tick per note) replaces the density thumbnails | N | S+M | Slices 1-2 merged (STAGE left the cycle, a simpler TIMELINE); slice 3, the note map, next. Approved by the maintainer 2026-10-30. No format change. Spec `docs/specs/OS-SONG-VIEW2.md`. |
 
 ## APPROVED (in order)

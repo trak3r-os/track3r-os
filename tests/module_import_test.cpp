@@ -33,6 +33,19 @@ using Bytes = std::vector<std::uint8_t>;
 
 namespace {
 
+// A MOD that plays two patterns, cut inside the second: it holds room for one pattern (OS-BUG-IMPTRUNC), so only the reader finds it short.
+Bytes mod_cut_in_second_pattern() {
+  test::modimp::ModSpec m;
+  m.name = "cut two";
+  m.samples[0].name = "kick";
+  m.samples[0].data.assign(64, 0x10);
+  m.orders = {0, 1};
+  m.patterns = {{{{0, 0}, test::modimp::note(12, 1)}}, {{{0, 0}, test::modimp::note(12, 1)}}};
+  Bytes b = test::modimp::build(m);
+  b.resize(1084 + 1024 + 500);
+  return b;
+}
+
 Bytes mod_bytes() {
   test::modimp::ModSpec m;
   m.name = "kc test";
@@ -340,7 +353,7 @@ TEST_CASE("module import: the steps' size changes nothing") {
 TEST_CASE("module import: a file cut short fails with its reason and the strip says so") {
   const Bytes whole = mod_bytes();
   Rig r;
-  Bytes cut(whole.begin(), whole.begin() + 1500);  // inside the first pattern
+  const Bytes cut = mod_cut_in_second_pattern();  // inside the second pattern (a cut inside the first is refused before the question: OS-BUG-IMPTRUNC)
   r.card.add_file("MOD/cut.mod", cut);
   CHECK(r.run("MOD/cut.mod") == ModuleImport::State::Failed);
   CHECK_FALSE(r.import->summary().ok);
@@ -459,8 +472,7 @@ TEST_CASE("module import: begin() writes nothing to the document; the importer's
 
   // A bad file the header cannot tell from a module is found by the reader, after the reset: the document is empty (and the platform empties the voices' table and the bank).
   Rig t;
-  Bytes cut = mod_bytes();
-  cut.resize(1100);  // the signature is there, the patterns are not
+  const Bytes cut = mod_cut_in_second_pattern();  // the signature and the first pattern are there, the second is cut
   t.card.add_file("MOD/cut.mod", cut);
   NEED(t.arena->project.create_pattern(1, 32) == model::Status::Ok);
   NEED(t.arena->project.append_order(1) == model::Status::Ok);
@@ -520,6 +532,35 @@ TEST_CASE("module import: a file that is no module is refused by probe() whateve
   NEED(r.arena->project.create_pattern(1, 32) == model::Status::Ok);
   const std::uint32_t generation = r.arena->project.generation();
   CHECK(r.import->begin(r.card, "X/kick.mod", *r.arena, ImportEngine::Auto) == ModuleImport::Start::NotModule);
+  CHECK_FALSE(r.import->summary().valid);
+  CHECK(r.arena->project.generation() == generation);
+}
+
+TEST_CASE("module import: a tagged MOD with no room for one pattern is refused before the question, as a cut file is (OS-BUG-IMPTRUNC)") {
+  // a header and a tag and nothing else: 1,084 bytes pass the tag check, the question would be asked and the import would fail TRUNCATED
+  const auto tagged = [](const char* tag, std::size_t size) {
+    Bytes b(size, 0);
+    std::memcpy(b.data() + 1080, tag, 4);
+    return b;
+  };
+  Rig r;
+  r.card.add_file("X/bare.mod", tagged("M.K.", 1084));
+  r.card.add_file("X/bare", tagged("M.K.", 1084));
+  r.card.add_file("X/short.mod", tagged("M.K.", 1084 + 1023));
+  r.card.add_file("X/one.mod", tagged("M.K.", 1084 + 1024));
+  r.card.add_file("X/eight_short.mod", tagged("8CHN", 1084 + 2047));  // a pattern of 8 channels is 2,048 bytes
+  r.card.add_file("X/eight.mod", tagged("8CHN", 1084 + 2048));
+  for (const char* p : {"X/bare.mod", "X/bare", "X/short.mod", "X/eight_short.mod"}) {
+    INFO(p);
+    CHECK(ModuleImport::probe(r.card, p) == ModuleImport::Probe::NotModule);
+  }
+  for (const char* p : {"X/one.mod", "X/eight.mod"}) {
+    INFO(p);
+    CHECK(ModuleImport::probe(r.card, p) == ModuleImport::Probe::Mod);
+  }
+  NEED(r.arena->project.create_pattern(1, 32) == model::Status::Ok);
+  const std::uint32_t generation = r.arena->project.generation();
+  CHECK(r.import->begin(r.card, "X/bare.mod", *r.arena, ImportEngine::Auto) == ModuleImport::Start::NotModule);
   CHECK_FALSE(r.import->summary().valid);
   CHECK(r.arena->project.generation() == generation);
 }

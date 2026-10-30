@@ -978,6 +978,44 @@ TEST_CASE("modimp reader: a 15-sample Soundtracker file reads as a 4-channel mod
   CHECK(k.info().sample_count == 31);
 }
 
+TEST_CASE("modimp reader: a 15-sample file's loop start is in bytes (OS-BUG-ST15LOOP), a 31-sample file's in words") {
+  // sample 0 is 32 bytes (16 words); its loop start is the word at 26 of its header, the loop length (words) the one at 28
+  const auto loop_of = [](Bytes b, unsigned start, unsigned len_words, SampleInfo& s) {
+    b[20 + 26] = static_cast<std::uint8_t>(start >> 8);
+    b[20 + 27] = static_cast<std::uint8_t>(start);
+    b[20 + 28] = static_cast<std::uint8_t>(len_words >> 8);
+    b[20 + 29] = static_cast<std::uint8_t>(len_words);
+    const Opened o(b);
+    return o.ok() && module().sample(0, s).ok();
+  };
+  const Bytes st = soundtracker15(test::modimp::build(soundtracker_spec()));
+  SampleInfo s;
+  // a loop that fits only when the start is read in bytes (20 + 12 <= 32; in words it would end at 52)
+  NEED(loop_of(st, 20, 6, s));
+  CHECK(s.has_loop);
+  CHECK(s.loop_start == 20);
+  CHECK(s.loop_len == 12);
+  CHECK((s.notes & kNoteLoopClamped) == 0);
+  // a loop that fits both ways (4 + 16 <= 32, 8 + 16 <= 32): bytes win
+  NEED(loop_of(st, 4, 8, s));
+  CHECK(s.has_loop);
+  CHECK(s.loop_start == 4);
+  CHECK(s.loop_len == 16);
+  CHECK((s.notes & kNoteLoopClamped) == 0);
+  // (a loop that fits only in words cannot exist: a start that fits in words, 2 * start + length <= size, fits in bytes too)
+  // a loop that fits neither way is clamped to the end, as in any module
+  NEED(loop_of(st, 24, 6, s));
+  CHECK(s.has_loop);
+  CHECK(s.loop_start == 24);
+  CHECK(s.loop_len == 8);
+  CHECK((s.notes & kNoteLoopClamped) != 0);
+  // the same words in a 31-sample file stay words: the start 4 is byte 8
+  const Bytes mk = test::modimp::build(soundtracker_spec());
+  NEED(loop_of(mk, 4, 8, s));
+  CHECK(s.loop_start == 8);
+  CHECK(s.loop_len == 16);
+}
+
 TEST_CASE("modimp reader: Soundtracker edges: length 0, an order of 64, a volume of 65, a name that is not text, a short pattern area, a short last sample, a short earlier one") {
   const Bytes st = soundtracker15(test::modimp::build(soundtracker_spec()));
   auto refused = [](const Bytes& b) {

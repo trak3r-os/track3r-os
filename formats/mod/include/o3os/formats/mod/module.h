@@ -171,6 +171,10 @@ class Module {
 // Kind::None when they say neither, and for a head too short to tell.
 Kind sniff_kind(const std::uint8_t* head, std::size_t n) noexcept;
 
+// OS-BUG-IMPTRUNC: the least a MOD with the tag at 1,080 can be: the header plus one pattern of its channel count (1,084 + 1,024 for 4 channels); 0 when the first `n` bytes carry no tag this reader takes.
+// A file shorter than this cannot be read (TRUNCATED), so an importer refuses it before it asks anything. (A 15-sample file's check, below, already counts its patterns.)
+std::uint32_t tagged_mod_min_bytes(const std::uint8_t* head, std::size_t n) noexcept;
+
 // OS-IMPORT-ANY I6: does the structure of a file say it is a 15-sample Soundtracker module? Such a file has no signature, so this never decides a listing or a sniff (sniff_kind says None): a caller asks it
 // when the name says MOD or says nothing. `head` holds the first `n` bytes (the 600-byte header at least) and `file_size` is the file's. True when: the song length is 1..128; every order the song plays is below 64;
 // every sample volume is at most 64; the title and the sample names are printable ASCII or NUL; and the file holds the header, the patterns (the highest order of the table + 1, or of the played ones when the whole

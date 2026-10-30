@@ -5,8 +5,8 @@
 # After a merge conflict here: take either side, then re-run --ack-path <file> (or --ack-all) on the merged tree.
 cheat_sheet.md#global-keys QA-GLB-130=4460aa4d421d QA-GLB-157=75a7529ba1e2 docs/manual/panel.md=2cac9a7ca46c docs/manual/pattern.md=71e6fcfab5c7
 cheat_sheet.md#pattern-editing docs/manual/panel.md=2cac9a7ca46c docs/manual/pattern.md=71e6fcfab5c7
-cheat_sheet.md#screens docs/manual/file.md=d4a79ce2baeb docs/manual/instrument.md=3a16f162a3a4 docs/manual/mixer.md=b2a20e87d2c6 docs/manual/panel.md=2cac9a7ca46c docs/manual/pattern.md=71e6fcfab5c7 docs/manual/perform_dj.md=ae245996a57e docs/manual/record.md=82e097c98ae3 docs/manual/sample_edit.md=820713defef5 docs/manual/sample_load.md=b336f79100db
-cheat_sheet.md#shift-combinations docs/manual/file.md=d4a79ce2baeb docs/manual/instrument.md=3a16f162a3a4 docs/manual/mixer.md=b2a20e87d2c6 docs/manual/panel.md=2cac9a7ca46c docs/manual/pattern.md=71e6fcfab5c7 docs/manual/sample_load.md=b336f79100db
+cheat_sheet.md#screens docs/manual/file.md=29f19d7490de docs/manual/instrument.md=3a16f162a3a4 docs/manual/mixer.md=b2a20e87d2c6 docs/manual/panel.md=2cac9a7ca46c docs/manual/pattern.md=71e6fcfab5c7 docs/manual/perform_dj.md=ae245996a57e docs/manual/record.md=82e097c98ae3 docs/manual/sample_edit.md=820713defef5 docs/manual/sample_load.md=b336f79100db
+cheat_sheet.md#shift-combinations docs/manual/file.md=29f19d7490de docs/manual/instrument.md=3a16f162a3a4 docs/manual/mixer.md=b2a20e87d2c6 docs/manual/panel.md=2cac9a7ca46c docs/manual/pattern.md=71e6fcfab5c7 docs/manual/sample_load.md=b336f79100db
 computer_tools.md#measure-the-audio-o3audiopy platform/mk66/tools/o3audio.py=05a7d8707dc0
 computer_tools.md#send-a-firmware-file-to-the-card platform/mk66/tools/o3console.py=7f3d4a798b3c platform/mk66/update/include/o3os/platform/mk66/update/path_guard.h=350f302bc4ef
 computer_tools.md#take-a-screen-from-a-saved-text-o3shotpy platform/mk66/tools/o3shot.py=da6c8eed3e9e
@@ -29,9 +29,9 @@ config.md#update-from-the-unit QA-CFG-040=bfbbd395b055 QA-CFG-041=5ee8abd5b930 Q
 export.md#export-a-block-of-the-pattern QA-PAT-185=1e533b9125d0 QA-PAT-186=6309f92e6063 QA-PAT-319=f10157f9f2e1 app/src/export_actions.cpp=83b2d467d661
 export.md#how-it-works QA-FIL-021=bded8ff8ae5a QA-FIL-022=23238454123f QA-FIL-025=b10ed629d7ac QA-FIL-057=a36adbc959d4 app/src/app_export.cpp=62fcd07967b6
 export.md#try-it QA-FIL-020=7449611ee991 QA-FIL-021=bded8ff8ae5a app/src/app_export.cpp=62fcd07967b6
-file.md#convert-other-module-formats-with-openmpt QA-FIL-128=128283f00dc4 app/src/module_import.cpp=04ec712b1872
+file.md#convert-other-module-formats-with-openmpt QA-FIL-128=128283f00dc4 app/src/module_import.cpp=d61712fee8ab
 file.md#good-to-know QA-FIL-030=72e011f5c584 QA-FIL-035=3ace6c369566 QA-FIL-036=556bc8fd6eeb QA-FIL-043=19c9c44059b3 QA-FIL-081=989cc19dfeb8 QA-FIL-091=2472bcd8a3f4 QA-FIL-118=8d7fba6070a6 QA-FIL-119=c97ec5c1ac81 QA-GLB-008=e1997748c982 QA-GLB-009=e83dad1913e3 QA-GLB-011=bdcad6efc100 hal/include/o3os/hal/save_guard.h=ec4b9d75e113
-file.md#import-a-module-file QA-FIL-003=b09b0a76faab QA-FIL-125=0acf04cba3d6 QA-FIL-126=8fbfc858c86c QA-FIL-127=b3ec947b4c22 QA-FIL-128=128283f00dc4 QA-FIL-129=54a5d5e9e10a app/src/file_actions.cpp=aea5ae2cbe20
+file.md#import-a-module-file QA-FIL-003=b09b0a76faab QA-FIL-125=0acf04cba3d6 QA-FIL-126=8fbfc858c86c QA-FIL-127=407507968cb3 QA-FIL-128=128283f00dc4 QA-FIL-129=7e09ca7fa226 app/src/file_actions.cpp=aea5ae2cbe20
 file.md#keys-on-this-screen QA-FIL-002=45b99b044ab2 QA-FIL-003=389cb99746f3 QA-FIL-012=64657b5f8224 QA-FIL-013=dc79a9a435fc QA-FIL-020=7449611ee991 QA-FIL-032=3e010b0b5c5d QA-FIL-035=3ace6c369566 QA-FIL-037=60fb31c0f122 QA-FIL-041=dcee3c22764d QA-FIL-060=0121ca4b35dc QA-FIL-061=8da057c53954 QA-FIL-070=644d85919dac QA-FIL-071=7d7181429e74 QA-FIL-072=435f14970540 app/src/file_actions.cpp=aea5ae2cbe20
 file.md#open-a-project QA-FIL-012=64657b5f8224 QA-FIL-035=3ace6c369566 QA-FIL-095=0390046862ad QA-FIL-096=5925269eca28 QA-FIL-110=b10dba1e8170 QA-FIL-111=797eed02abbe app/src/file_actions.cpp=aea5ae2cbe20
 file.md#save-a-project-save-a-copy-or-name-it QA-FIL-034=8254759c5cab QA-FIL-040=c53c1288c014 QA-FIL-060=0121ca4b35dc QA-FIL-061=8da057c53954 QA-FIL-072=435f14970540 QA-FIL-091=2472bcd8a3f4 QA-FIL-098=40b7dc514fb3 QA-FIL-104=3123935c5795 app/src/save_actions.cpp=3475a10ccf5f

@@ -100,6 +100,15 @@ Kind sniff_kind(const std::uint8_t* head, std::size_t n) noexcept {
   return Kind::None;
 }
 
+std::uint32_t tagged_mod_min_bytes(const std::uint8_t* head, std::size_t n) noexcept {
+  Variant v;
+  std::uint8_t channels;
+  if (n < caps::kModHeaderBytes || !mod_tag(head + 1080, v, channels)) {
+    return 0;
+  }
+  return caps::kModHeaderBytes + caps::kRows * 4u * channels;  // the header and one pattern (64 rows of 4 bytes a channel)
+}
+
 bool is_soundtracker15(const std::uint8_t* head, std::size_t n, std::uint32_t file_size) noexcept {
   if (n < kSt15HeaderBytes || file_size < kSt15HeaderBytes || !printable_or_nul(head, 20)) {
     return false;
@@ -579,7 +588,9 @@ Status Module::sample(std::uint32_t slot, SampleInfo& out) const noexcept {
     out.is_signed = true;
     const std::uint32_t rep_len = 2u * be16(h + 28);
     if (be16(h + 28) > 1) {
-      const std::uint32_t start = 2u * be16(h + 26);
+      // a 15-sample file stores the loop start in bytes (real files: the loop only fits the sample so); ProTracker's header counts words.
+      // (No per-sample fallback to words: a start that fits in words, 2 * start + length <= size, fits in bytes too.)
+      const std::uint32_t start = info_.variant == Variant::St15 ? be16(h + 26) : 2u * be16(h + 26);
       std::uint32_t end = start + rep_len;  // < 2^19: no overflow
       if (end > frames) {
         end = frames;
