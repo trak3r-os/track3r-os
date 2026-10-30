@@ -1,4 +1,4 @@
-<!-- manual-sync: 571f81aa -->
+<!-- manual-sync: 3ba49bb7 -->
 # Song
 <!-- sync: src=app/src/screens/song_screen.cpp,app/src/song_actions.cpp,app/include/o3os/app/song_map.h spec=docs/specs/SONG-UX.md,docs/specs/OS-SONGSHARE.md qa=QA-SNG-020,QA-SNG-034,QA-SNG-036,QA-SNG-040,QA-SNG-050 -->
 
@@ -8,7 +8,7 @@ Song is an editor, not only a list. Adding a slot with `F3` (**ADD SLOT**) works
 
 ## What it is for
 
-Use Song to arrange patterns in time. Press `Song`. The order list holds the slots, and each slot holds one pattern number. The song plays the slots from the top. Press `Song` again for the **ARRANGEMENT** page, and again for the **TIMELINE** page, which draws the song as blocks along the page. Three pages in all; the header says which one you are on (**ORDER 1/3**, **ARRANGEMENT 2/3**, **TIMELINE 3/3**).
+Use Song to arrange patterns in time. Press `Song`. The order list holds the slots, and each slot holds one pattern number. The song plays the slots from the top. Press `Song` again for the **ARRANGEMENT** page, and again for the **TIMELINE** page, which draws the song as blocks along the page. Three pages in all; the header says which one you are on (**ORDER 1/3**, **ARRANGEMENT 2/3**, **TIMELINE 3/3**). The next press after **TIMELINE 3/3** goes back to **ORDER 1/3**. <!-- QA-SNG-087 -->
 
 ## How it works
 <!-- sync: src=app/src/song_actions.cpp,app/src/screens/song_screen.cpp spec=docs/specs/SONG-UX.md,docs/specs/OS-SONGSHARE.md qa=QA-SNG-034,QA-SNG-036,QA-SNG-037,QA-SNG-040,QA-SNG-043,QA-SNG-050 -->
@@ -154,7 +154,7 @@ Not yet checked on the unit: how the colours and the thumbnails read on the pane
 
 Start on any other screen.
 
-1. Hold `Song`. After 0.4 s the Song screen comes up. <!-- QA-SNG-060 -->
+1. Hold `Song`. After 0.4 s the Song screen comes up. It opens on the page you left it on, for example **TIMELINE 3/3**. <!-- QA-SNG-060, QA-SNG-087 -->
 2. Let go. You return to the screen you came from, as you left it. <!-- QA-SNG-060 -->
 
 Not yet checked on the unit.
@@ -217,3 +217,5 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 - [Pattern](pattern.md): the notes of each pattern. A slot holds one.
 - [Pattern tools](pattern_tools.md): the same block tools on a single pattern.
 - [Perform](perform.md): play the pattern live, without writing it.
+
+<!-- Rows not written: QA-SNG-067 to QA-SNG-072 (retired 2026-10-30 with the STAGE page, OS-SONG-VIEW2); QA-SNG-079 (host only: no key sequence reaches an empty TIMELINE). -->
