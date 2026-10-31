@@ -200,6 +200,18 @@ std::uint32_t scan_peak(const std::int16_t* src, std::uint32_t frames, std::uint
   return peak;
 }
 
+std::uint32_t scan_peak_ms(const std::int16_t* mid, const std::int16_t* side, std::uint32_t frames, std::uint32_t from, std::uint32_t n) noexcept {
+  const std::uint32_t end = from + n > frames || from + n < from ? frames : from + n;
+  std::uint32_t peak = 0;
+  for (std::uint32_t i = from; i < end; ++i) {
+    const std::int32_t m = mid[i];
+    const std::int32_t s = side[i];
+    const std::uint32_t v = static_cast<std::uint32_t>((m < 0 ? -m : m) + (s < 0 ? -s : s));
+    peak = v > peak ? v : peak;
+  }
+  return peak;
+}
+
 void scan_dc(const std::int16_t* src, std::uint32_t frames, std::uint32_t from, std::uint32_t n, DcScan& scan) noexcept {
   const std::uint32_t end = from + n > frames || from + n < from ? frames : from + n;
   std::int64_t sum = 0;

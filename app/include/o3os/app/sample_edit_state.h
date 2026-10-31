@@ -57,6 +57,7 @@ struct SampleEditState {
   EditOp ready_op = EditOp::Amplify;
   std::uint16_t ready_period = 0;
   std::uint8_t ready_slot = 0;
+  bool ready_stereo = false;  // OS-STEREO (d): the staged buffer is M then S (S at staged + even(staged_frames)): sample.commit swaps both in
   std::uint32_t ready_a = 0;  // the range it was made over
   std::uint32_t ready_b = 0;
   std::int16_t* staged = nullptr;

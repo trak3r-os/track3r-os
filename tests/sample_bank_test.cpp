@@ -1411,6 +1411,167 @@ TEST_CASE("sample bank: a paste shares M and S; undo and redo of a load or an ed
   CHECK(side_is_intact(rig.bank, 1, 500));
 }
 
+// ---- OS-STEREO step 2, slice (d): the edit pool for a stereo sample (rule 11: 2 x per step, both blocks swap together) ---------------------------------------
+
+namespace {
+// A stereo result in `buf`: M = k, S = -k (every frame), the layout of commit_load.
+void fill_stereo(std::int16_t* buf, std::uint32_t frames, std::int16_t k) {
+  const std::uint32_t even = (frames + 1u) & ~1u;
+  for (std::uint32_t i = 0; i < frames; ++i) {
+    buf[i] = k;
+    buf[even + i] = static_cast<std::int16_t>(-k);
+  }
+}
+bool holds_stereo(const SampleBank& bank, unsigned slot, std::uint32_t frames, std::int16_t k) {
+  const SampleBank::Pcm p = bank.pcm(slot);
+  if (p.frames != frames || p.side == nullptr || p.side != p.data + ((frames + 1u) & ~1u)) {
+    return false;
+  }
+  for (std::uint32_t i = 0; i < frames; ++i) {
+    if (p.data[i] != k || p.side[i] != static_cast<std::int16_t>(-k)) {
+      return false;
+    }
+  }
+  return true;
+}
+}  // namespace
+
+TEST_CASE("sample bank: a stereo edit is one buffer of 2 x even(frames) and commits M and S together; undo and redo carry both (S7, rule 11)") {
+  Rig rig;
+  make_stereo(rig, 1, 501);  // odd: S sits at 502
+  CHECK(rig.bank.edit_stereo(1));
+  const std::int16_t* const first_m = rig.bank.pcm(1).data;
+  app::PointsRec rec;
+  std::int16_t* buf = rig.bank.edit_begin(1, 501, true);
+  NEED(buf != nullptr);
+  fill_stereo(buf, 501, 7);
+  // An S that is not behind M inside the buffer is not committed, and nothing changes (both blocks swap or neither).
+  CHECK_FALSE(rig.bank.edit_commit(1, buf, 501, rec, rec, buf + 501));
+  CHECK_FALSE(rig.bank.edit_commit(1, buf, 501, rec, rec, buf + 600));
+  CHECK(rig.bank.pcm(1).data == first_m);
+  CHECK(side_is_intact(rig.bank, 1, 501));
+  CHECK(rig.bank.undo_depth(1) == 0u);
+  const std::uint32_t v0 = rig.bank.version(1);
+  CHECK(rig.bank.edit_commit(1, buf, 501, rec, rec, buf + 502));
+  CHECK(holds_stereo(rig.bank, 1, 501, 7));
+  CHECK(rig.bank.version(1) == v0 + 1u);  // one change of version, one rebind request: the descriptor is made from the slot's M and S together
+  CHECK(rig.bank.edit_stereo(1));
+  CHECK(rig.bank.edit_undo(1, rec));
+  CHECK(rig.bank.pcm(1).data == first_m);
+  CHECK(side_is_intact(rig.bank, 1, 501));
+  CHECK(rig.bank.edit_redo(1, rec));
+  CHECK(holds_stereo(rig.bank, 1, 501, 7));
+  // A shorter stereo result (a crop) in a buffer made for the longer one; its undo brings the longer one back with its S.
+  std::int16_t* b2 = rig.bank.edit_begin(1, 300, true);
+  NEED(b2 != nullptr);
+  fill_stereo(b2, 300, 9);
+  CHECK(rig.bank.edit_commit(1, b2, 300, rec, rec, b2 + 300));
+  CHECK(holds_stereo(rig.bank, 1, 300, 9));
+  CHECK(rig.bank.edit_undo(1, rec));
+  CHECK(holds_stereo(rig.bank, 1, 501, 7));
+  // A mono result of the stereo sample (a sample whose STEREO row says MONO is edited as mono) drops S; its undo brings it back.
+  std::int16_t* b3 = rig.bank.edit_begin(1, 501);
+  NEED(b3 != nullptr);
+  for (std::uint32_t i = 0; i < 501; ++i) {
+    b3[i] = 5;
+  }
+  CHECK(rig.bank.edit_commit(1, b3, 501, rec, rec));
+  CHECK_FALSE(rig.bank.has_side(1));
+  CHECK_FALSE(rig.bank.edit_stereo(1));
+  CHECK(rig.bank.edit_undo(1, rec));
+  CHECK(holds_stereo(rig.bank, 1, 501, 7));
+  // edit_stereo asks for both the S and the flag: a sample set to MONO is edited as mono.
+  model::Instrument in = *rig.arena->project.instrument(1);
+  in.stereo = 0;
+  CHECK(rig.arena->project.set_instrument(1, in) == model::Status::Ok);
+  CHECK(rig.bank.has_side(1));
+  CHECK_FALSE(rig.bank.edit_stereo(1));
+}
+
+TEST_CASE("sample bank: stereo edits through the whole pool and history: the buffers never overlap, every undo step holds its own M and S (S7, rule 11)") {
+  Rig rig(4100);  // the sample (800) and the four buffers of the pool (4 x 800) just fit
+  make_stereo(rig, 1, 400);
+  app::PointsRec rec;
+  for (std::int16_t k = 1; k <= 7; ++k) {  // more edits than buffers: the oldest steps give theirs back
+    std::int16_t* b = rig.bank.edit_begin(1, 400, true);
+    NEED(b != nullptr);
+    fill_stereo(b, 400, k);
+    CHECK(rig.bank.edit_commit(1, b, 400, rec, rec, b + 400));
+    CHECK(holds_stereo(rig.bank, 1, 400, k));
+  }
+  CHECK(rig.bank.undo_depth(1) == SampleBank::kHistory);
+  for (std::int16_t k = 6; k >= 4; --k) {
+    CHECK(rig.bank.edit_undo(1, rec));
+    CHECK(holds_stereo(rig.bank, 1, 400, k));
+  }
+  for (std::int16_t k = 5; k <= 7; ++k) {
+    CHECK(rig.bank.edit_redo(1, rec));
+    CHECK(holds_stereo(rig.bank, 1, 400, k));
+  }
+  CHECK(rig.bank.free_samples() < 400u);  // the pool took the arena and no more
+}
+
+TEST_CASE("sample bank: with no room for the second block the stereo edit is refused, nothing has changed, and a mono result still fits (S7, rule 11)") {
+  Rig rig(3200);
+  make_stereo(rig, 1, 1000);  // 2000 used, 1200 free
+  const SampleBank::Pcm before = rig.bank.pcm(1);
+  const std::uint32_t free0 = rig.bank.free_samples();
+  CHECK(rig.bank.edit_begin(1, 1000, true) == nullptr);  // needs 2000
+  CHECK(rig.bank.free_samples() == free0);
+  CHECK(rig.bank.undo_depth(1) == 0u);
+  CHECK(rig.bank.pcm(1).data == before.data);
+  CHECK(rig.bank.pcm(1).side == before.side);
+  CHECK(side_is_intact(rig.bank, 1, 1000));
+  std::int16_t* mono = rig.bank.edit_begin(1, 1000);  // the same sample as mono: 1000 fits
+  CHECK(mono != nullptr);
+  // A buffer made for a mono result is too small for a stereo one. Where it is the last block of the arena it grows in place by what it lacks (the review fold: 1200 needed, 200 free after it) ...
+  CHECK(rig.bank.edit_begin(1, 500, true) == mono);  // 1000 needed: it fits as it is (not committed, so it is free again)
+  std::int16_t* const st = rig.bank.edit_begin(1, 600, true);
+  CHECK(st == mono);
+  CHECK(rig.bank.free_samples() == 0u);
+  // ... and when it cannot (nothing left behind it) the edit is refused.
+  CHECK(rig.bank.edit_begin(1, 700, true) == nullptr);  // 1400 needed
+  CHECK(side_is_intact(rig.bank, 1, 1000));
+}
+
+TEST_CASE("sample bank: a refused edit leaves the history, the redo and the history's slot as they were; a spare that would free nothing big enough is not worth a step (OS-STEREO (d) review fold)") {
+  Rig rig(4600);
+  make_stereo(rig, 1, 400);  // 800 used
+  rig.make(2, 100);          // 100 more
+  app::PointsRec rec;
+  for (std::int16_t k = 1; k <= 2; ++k) {
+    std::int16_t* b = rig.bank.edit_begin(1, 400, true);
+    NEED(b != nullptr);
+    fill_stereo(b, 400, k);
+    NEED(rig.bank.edit_commit(1, b, 400, rec, rec, b + 400));
+  }
+  CHECK(rig.bank.undo_depth(1) == 2u);
+  CHECK(rig.bank.edit_undo(1, rec));  // one undo, one redo
+  CHECK(rig.bank.undo_depth(1) == 1u);
+  CHECK(rig.bank.redo_depth(1) == 1u);
+  const std::uint32_t free0 = rig.bank.free_samples();
+  const SampleBank::Pcm before = rig.bank.pcm(1);
+  // Far longer than any spare or the free arena can take: the refusal changes nothing.
+  CHECK(rig.bank.edit_begin(1, 3000, true) == nullptr);
+  CHECK(rig.bank.undo_depth(1) == 1u);
+  CHECK(rig.bank.redo_depth(1) == 1u);
+  CHECK(rig.bank.free_samples() == free0);
+  CHECK(rig.bank.pcm(1).data == before.data);
+  CHECK(rig.bank.pcm(1).side == before.side);
+  // Asked for the other slot, the refusal does not move the history to it either.
+  CHECK(rig.bank.edit_begin(2, 4000) == nullptr);
+  CHECK(rig.bank.undo_depth(1) == 1u);
+  CHECK(rig.bank.redo_depth(1) == 1u);
+  CHECK(rig.bank.undo_depth(2) == 0u);
+  // And the history still works: redo, then undo twice.
+  CHECK(rig.bank.edit_redo(1, rec));
+  CHECK(holds_stereo(rig.bank, 1, 400, 2));
+  CHECK(rig.bank.edit_undo(1, rec));
+  CHECK(holds_stereo(rig.bank, 1, 400, 1));
+  CHECK(rig.bank.edit_undo(1, rec));
+  CHECK(side_is_intact(rig.bank, 1, 400));
+}
+
 TEST_CASE("sample bank: reconcile_stereo clears the flag of an instrument whose slot has no S, and keeps one that has it") {
   Rig rig;
   make_stereo(rig, 1, 200);  // flag set, S there

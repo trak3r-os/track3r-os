@@ -138,7 +138,7 @@ Start on Sample load. Put the cursor on a stereo file. Its name shows **ST** at 
 
 You should see the strip say what the file will load: **STEREO FILE LOADS: LEFT**, **STEREO FILE LOADS: RIGHT**, **STEREO FILE LOADS: STEREO (MID + SIDE)** or **STEREO FILE LOADS: MIX (L+R)/2**. **CH MIX** loads the mix of both channels, (left + right) / 2. **CH LEFT** and **CH RIGHT** load one channel alone, with no mixing.
 
-**STEREO** (new in the Community OS) loads the same mix as **CH MIX** and also keeps the difference between the channels, the side signal, next to it in sample memory. It takes twice the memory of a mono load and the instrument's **STEREO** row switches to **STEREO**. A project that is saved with such an instrument writes the sample as before, `samples/<name>.wav` (the mix, which any tool and any older version reads), plus `samples/<name>_s.wav` for the side signal. If the second file is missing or does not match when the project is opened, the instrument opens as a mono sample and the log says how many. If another instrument already has the name the second file would take, **STEREO** is refused (**STEREO REFUSED: SIDE FILE NAME TAKEN**), and a save of such a project writes that instrument as mono and says **STEREO SAVED MONO**. The voices do not play the side signal yet: a stereo instrument still sounds as the mix until stereo playback arrives. <!-- QA-FIL-132 --> <!-- QA-FIL-133 --> <!-- QA-FIL-134 --> <!-- QA-FIL-136 -->
+**STEREO** (new in the Community OS) loads the same mix as **CH MIX** and also keeps the difference between the channels, the side signal, next to it in sample memory. It takes twice the memory of a mono load and the instrument's **STEREO** row switches to **STEREO**. A project that is saved with such an instrument writes the sample as before, `samples/<name>.wav` (the mix, which any tool and any older version reads), plus `samples/<name>_s.wav` for the side signal. If the second file is missing or does not match when the project is opened, the instrument opens as a mono sample and the log says how many. If another instrument already has the name the second file would take, **STEREO** is refused (**STEREO REFUSED: SIDE FILE NAME TAKEN**), and a save of such a project writes that instrument as mono and says **STEREO SAVED MONO**. The instrument then plays in stereo (see the **STEREO** row in [Instrument](instrument.md): up to four voices at once, forward play modes, no filter or shaper on the note). <!-- QA-FIL-132 --> <!-- QA-FIL-133 --> <!-- QA-FIL-134 --> <!-- QA-FIL-136 -->
 
 The choice is not saved with the project. It lasts until the unit is switched off.
 
@@ -147,7 +147,7 @@ The choice is not saved with the project. It lasts until the unit is switched of
 ### Play a stereo file in stereo
 <!-- sync: src=app/include/o3os/app/sample_load_view.h qa=QA-FIL-120,QA-FIL-121,QA-FIL-122,QA-FIL-123,QA-FIL-124 -->
 
-An instrument holds one channel, so a stereo file cannot play in stereo from one instrument. You can get the stereo image with two instruments and two tracks. Stereo instruments are planned, not built yet.
+With **CH MIX**, **CH LEFT** or **CH RIGHT** an instrument holds one channel, so it cannot play in stereo. You can get the stereo image with two instruments and two tracks, as below. With **STEREO** one instrument plays both channels (see above); the two-instrument way still works for the modes that do not play in stereo.
 
 Start on Sample load. Put the cursor on a stereo file.
 

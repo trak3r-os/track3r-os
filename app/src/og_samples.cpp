@@ -139,7 +139,7 @@ unsigned live_loop_moves(const model::Instrument& before, const model::Instrumen
 
 
 audio::SampleDesc make_sample_desc(const model::Instrument& in, const std::int16_t* pcm, std::uint32_t frames, bool* approximated, std::int16_t* slice_table,
-                                   audio::LevelLaw law) noexcept {
+                                   audio::LevelLaw law, const std::int16_t* side) noexcept {
   audio::SampleDesc d;  // length 0: silent
   if (approximated != nullptr) {
     *approximated = false;
@@ -303,6 +303,10 @@ audio::SampleDesc make_sample_desc(const model::Instrument& in, const std::int16
     put_mod(kSlotGranPos, d.pos_mod);
   } else if (d.wt_size != 0u && d.wt_windows > 1u) {
     put_mod(kSlotWtPos, d.pos_mod);
+  }
+  // OS-STEREO (c): S is at `side` (the bank's block holds M then S, so side = pcm + even(frames)): the instrument's flag AND S present, for a mode that plays forward (the voices drop it for the rest, set_sample).
+  if (side != nullptr && in.stereo != 0u && side > pcm && !d.granular && d.wt_size == 0u && d.loop_mode == 0u && d.length != 0u) {
+    d.st_off = static_cast<std::uint32_t>(side - pcm);
   }
   return d;
 }
@@ -520,7 +524,9 @@ void OgSampleLoader::bind(std::uint8_t slot, std::uint32_t frames, std::uint32_t
   }
   bool approximated = false;
   audio::SampleDesc desc =
-      in != nullptr ? make_sample_desc(*in, arena_ + used_, frames, &approximated, table_samples != 0u ? arena_ + used_ + block : nullptr, law_) : audio::SampleDesc{};
+      in != nullptr ? make_sample_desc(*in, arena_ + used_, frames, &approximated, table_samples != 0u ? arena_ + used_ + block : nullptr, law_,
+                                           side ? arena_ + used_ + pcm_samples : nullptr)
+         : audio::SampleDesc{};
   if (desc.length == 0u) {
     settle(slot, SampleProblem::Unusable);
     return;

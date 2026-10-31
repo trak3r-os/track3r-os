@@ -89,13 +89,14 @@ void ExportDrops::add(const ExportDrops& o) noexcept {
   sum(no_sample_memory, o.no_sample_memory);
   sum(levels_converted, o.levels_converted);
   sum(levels_clamped, o.levels_clamped);
+  sum(stereo_mid, o.stereo_mid);
   defaulted_groups |= o.defaulted_groups;
 }
 
 bool ExportDrops::any_lost() const noexcept {
   return (tracks_beyond_12 | engine_fx | core_fx | volume_dropped | track_settings | track_names_cut | project_settings |
           module_instruments | midi_instruments | sample_slots_beyond_48 | unknown_chunks | instrument_names_cut |
-          pattern_names | settings_ignored | midi_settings | lfo_sine | rate_ignored | amiga_engine | bit_engine | pcm_too_long | instruments_not_written | levels_clamped) != 0;
+          pattern_names | settings_ignored | midi_settings | lfo_sine | rate_ignored | amiga_engine | bit_engine | pcm_too_long | instruments_not_written | levels_clamped | stereo_mid) != 0;
 }
 
 bool inspect_settings(const std::uint8_t* payload, std::uint32_t length, std::uint16_t& groups,

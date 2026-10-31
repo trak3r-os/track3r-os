@@ -1806,3 +1806,48 @@ TEST_CASE("guard: instruments/ holds .pti files that are never replaced, never r
   CHECK(longest.size() + 1 <= sv::kPathCap);
   CHECK(sv::classify(longest.c_str()) == Place::Target);
 }
+
+// OS-STEREO (e): a stereo instrument's .pti is its mid M, the very bytes of a mono sample's; the format is the OG's as ever and the strip says that S is not in it.
+TEST_CASE("save: a stereo instrument's .pti holds M as a mono sample's does, and the strip says MID WRITTEN (OS-STEREO (e))") {
+  for (unsigned rate : {44100u, 22050u}) {
+    INFO("rate " << rate);
+    Bytes mono_file;
+    {
+      Rig rig;
+      rig.set_rate(kA, rate);
+      rig.select(kA);
+      rig.clear_notes();
+      rig.shift_tap(Button::F5);
+      CHECK(rig.note() != "STEREO: MID WRITTEN, SIDE NOT KEPT");
+      rig.jobs(2000);
+      const std::vector<std::string> files = pti_files(rig.card);
+      NEED(files.size() == 1);
+      mono_file = *rig.card.get(files[0].c_str());
+    }
+    Rig rig;
+    rig.set_rate(kA, rate);
+    {  // the same M, now with a side block behind it: a stereo instrument
+      const std::uint32_t even = (kFramesA + 1u) & ~1u;
+      std::uint32_t cap = 0;
+      std::int16_t* p = rig.bank.reserve(cap);
+      NEED(p != nullptr);
+      std::memcpy(p, rig.pcm(kA).data, kFramesA * sizeof(std::int16_t));
+      for (std::uint32_t i = 0; i < kFramesA; ++i) {
+        p[even + i] = static_cast<std::int16_t>(-static_cast<int>(i % 7) - 1);
+      }
+      model::Instrument in = *rig.arena->project.instrument(kA);
+      in.stereo = 1;
+      NEED(rig.arena->project.set_instrument(kA, in) == model::Status::Ok);
+      NEED(rig.bank.commit_load(kA, p, kFramesA, p + even));
+      NEED(rig.bank.edit_stereo(kA));
+    }
+    rig.select(kA);
+    rig.clear_notes();
+    rig.shift_tap(Button::F5);
+    CHECK(rig.note() == (rate == 44100u ? "STEREO: MID WRITTEN, SIDE NOT KEPT" : "RESAMPLED 22050 -> 44100 HZ, MID ONLY"));
+    rig.jobs(2000);
+    const std::vector<std::string> files = pti_files(rig.card);
+    NEED(files.size() == 1);
+    CHECK(*rig.card.get(files[0].c_str()) == mono_file);  // byte for byte
+  }
+}

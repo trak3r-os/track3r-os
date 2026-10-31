@@ -47,7 +47,9 @@ A project saved by an earlier build can sound at a different level, and the stor
 
 The **PLAY ENGINE** row picks the engine for a sample: **Auto**, **Modern**, **Amiga**, **12-bit** or **8-bit**. **Auto** picks the Amiga engine for a **ONE SHOT** or **LOOP FWD** sample at the Paula rate, and the Modern engine for the rest. Paula is the Amiga's sound chip. Its rate here is 8,287 Hz (PAL) or 8,363 Hz (NTSC). The Amiga engine plays a sample as that chip does: it holds each value until the next one, and uses 8 bits of it. The **12-bit** and **8-bit** engines are the Modern engine with its output cut to 12 or 8 bits, and cap the **BIT DEPTH** row the same way. <!-- QA-INS-006, QA-INS-003 -->
 
-The **STEREO** row under it says whether a sample plays as a stereo pair: **MONO** or **STEREO**. This is new in track3r-os, and for now it only prepares the ground: no sample has a stereo load yet, so turning it to **STEREO** is refused with `STEREO NEEDS A STEREO LOAD`, and the row stays **MONO**. Nothing about the sound changes. <!-- QA-INS-224, QA-INS-225 -->
+The **STEREO** row under it says whether a sample plays as a stereo pair: **MONO** or **STEREO**. This is new in track3r-os. **STEREO** can only be chosen for a sample that was loaded with **STEREO** on Sample load (see [Sample load](sample_load.md)): on any other sample the row says `STEREO NEEDS A STEREO LOAD` and stays **MONO**. A **STEREO** instrument plays its two channels: the left output gets the mix plus the side signal, the right output the mix minus it, through the track's level and pan like any other sound. <!-- QA-INS-224, QA-INS-225, QA-INS-260 --> A stereo note uses a little more of the unit's time than a mono one (about 0.8 percentage points of the audio budget each, not yet measured on the unit), so at most four voices play in stereo at once: the next one plays as the mix on both sides. <!-- QA-INS-262 -->
+
+A note plays in stereo when its play mode plays forward (**ONE SHOT**, **LOOP FWD**, **SLICE**, **BEAT SLICE**) on the Modern engine, with no filter, **OVERDRIVE**, **BIT DEPTH** or tremolo on it. Otherwise it plays the mix: a backward or ping-pong loop, a wavetable, a granular instrument, the Amiga engine, a note played in reverse, or any of those effects. If one of the effects comes on while a stereo note sounds, the side signal fades out over one audio block (about 1.5 ms) and stays off for that note; the next note is stereo again. A track with its fader closed or muted drops the side signal too, for the rest of that note. The track's own outputs stay mono: the send effects, the CUE and REC buses, the meters and the USB track stems carry the mix; the master, the headphones and the USB main pair carry the stereo image. <!-- QA-INS-261, QA-INS-263, QA-INS-264, QA-INS-265, QA-INS-266 --> Turning the row over while a note sounds takes effect at the next stop. <!-- QA-INS-267 --> Not yet checked on the unit.
 
 If you want to know more: a full-scale square wave on the Amiga engine peaks at +2.5 dB above its level. It matches a reference Amiga player on the host. Not yet checked on the unit. <!-- QA-INS-203 -->
 
@@ -190,10 +192,11 @@ You should see `INS 05 RENAMED - F8 UNDO` in the strip. <!-- QA-INS-051 -->
 You should see `INS 05 INIT - F8 UNDO`. Every row goes back to its default. The name, sample and start and end points stay. <!-- QA-INS-032, QA-INS-041 -->
 
 ### Save and load an instrument file
-<!-- sync: src=hal/include/o3os/hal/storage_write.h,app/src/save_service.cpp qa=QA-INS-052,QA-INS-053,QA-INS-056,QA-INS-057,QA-INS-055 -->
+<!-- sync: src=hal/include/o3os/hal/storage_write.h,app/src/save_service.cpp qa=QA-INS-052,QA-INS-053,QA-INS-056,QA-INS-057,QA-INS-055,QA-FIL-137 -->
 
 1. On a sample instrument, press `Shift` + `F5` (**SAVE**). The strip runs `SAVE <name>` up to 100 %, then **DONE**. <!-- QA-INS-052 -->
 2. The file is `instruments/<NAME>.pti`. A second save never replaces the first; it becomes, for example, `KICK 2.pti`. <!-- QA-INS-053 -->
+   A **STEREO** instrument is saved as its mid, the mix of its two sides, in an ordinary mono `.pti` (the format has no place for the side signal), and the strip says **STEREO: MID WRITTEN, SIDE NOT KEPT**. A project export to the OG folder counts such instruments as **STEREO** among the things it leaves out. <!-- QA-FIL-137 -->
 3. To load a file, press `F5` (**LOAD**) on an empty slot. Sample load shows the `.pti` files. <!-- QA-INS-056 -->
 4. Move the cursor to a file and press `F1` (**LOAD**). The Instrument screen comes back on the slot, with the instrument and its sound. <!-- QA-INS-057 -->
 

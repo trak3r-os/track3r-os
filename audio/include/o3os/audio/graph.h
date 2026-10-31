@@ -316,6 +316,15 @@ class Graph {
     }
   }
 
+  // OS-STEREO (c): the side signal S (L = M + S, R = M - S) of the track's stereo voice, kBlock samples, 4-byte aligned, that the caller owns until the next render, next to feed()'s M (null: the track is
+  // mono). S follows the strip's fader ramp and takes the strip's pan law into MAIN only (the track's own outputs, its sends, the CUE and REC taps and the USB stems read M); a muted or closed strip, a strip
+  // with an insert in the path or one that is not a feed source takes none. Render context (Engine::play_block).
+  void feed_side(unsigned track, const std::int16_t* block) noexcept {
+    if (track < kTracks) {
+      side_[track].store(block, std::memory_order_relaxed);  // (g) relaxed: the writer (Engine::play_block) and the reader (run_tracks) are one render context in order, nothing is published to another; acquire cost a dmb a track
+    }
+  }
+
   // The taps and who may ask for them. A tap costs nothing while nobody consumes it: the UI turns the scope and the spectrum on while a screen shows
   // them, and chooses which meters are measured (a bit per channel of meter_ch::; all on by default, so `diag mix` and a mixer screen need nothing).
   const MeterBank& meters() const noexcept { return meters_; }
@@ -437,6 +446,9 @@ class Graph {
     kernel::StripLane lane;
     bool centre;
   };
+
+  // OS-STEREO (c): the side signal of `track`'s stereo voice into MAIN's two sides (flash: one call per stereo track and block, hot.h); `lane` is the track's strip lane of this block (level and pan ramps).
+  O3OS_AUDIO_COLD void side_pass(unsigned track, const std::int16_t* side, const kernel::StripLane& lane) noexcept;
 
   // Render-context helpers (placed with render(), in SRAM_L).
   O3OS_AUDIO_HOT void drain() noexcept;
@@ -602,6 +614,8 @@ class Graph {
   MasterScratch scratch_stage_;  // OS-DJ C1: the `headroom` slot's processor (init_defaults installs it, bypassed); the ScratchMode ParamChange engages it, and it bypasses itself when its release has ended
   MasterKillEq kill_eq_;  // OS-DJ A3: the `eq` slot's processor (init_defaults installs it, bypassed); the KillEq ParamChange engages it, and it bypasses itself once no kill is on and the gains are back at 1
   MasterDjFilter dj_filter_;  // OS-DJ A2: the `bass` slot's processor (init_defaults installs it, bypassed); the DjFilter ParamChange engages it, and it bypasses itself once it has run down to 0
+  // OS-STEREO (c): the side signal S of a stereo voice per track (feed_side), at the end like the members above. Written by the Engine (render context) once a block, read by run_tracks; null: the track is mono.
+  std::atomic<const std::int16_t*> side_[kTracks] = {};
 };
 
 }  // namespace o3os::audio

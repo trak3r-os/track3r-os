@@ -919,6 +919,12 @@ void Graph::run_tracks(bool silence) noexcept {
       const Ramp rr = s.dest_r[0].closed() ? Ramp{0, 0} : s.dest_r[0].next_block();
       pend[np] = Pending{t, block, kernel::StripLane{block, lv, rl, rr}, centre};
       ++np;
+      // OS-STEREO (c): the track's S (voices.h STEREO VOICES) through the same level ramp and pan law into MAIN's two sides, after the mono pass (the sums commute). A strip that got here is live, unmuted and open
+      // (the closed-fader case continued above). An insert in the path processed M only, so S is not used. The call is in flash (one per stereo track); a mono track pays the one load.
+      const std::int16_t* const side = side_[t].load(std::memory_order_relaxed);  // (g: see feed_side)
+      if (__builtin_expect(side != nullptr, 0)) {
+        side_pass(t, side, pend[np - 1u].lane);
+      }
       if (np == 2u) {
         flush_main(pend, 2);
         np = 0;
@@ -940,6 +946,17 @@ void Graph::run_tracks(bool silence) noexcept {
     }
   }
   quiet_ = quiet;
+}
+
+// OS-STEREO (c): the side signal of a stereo voice on `track` through the strip's level ramp and pan gains (the lane the mono pass is given) into MAIN's two sides: L += S, R -= S. A strip whose source is not
+// the voices' feed, or with an insert in the path (it processed M only), takes none. In flash, one call per stereo track and block.
+void Graph::side_pass(unsigned track, const std::int16_t* side, const kernel::StripLane& lane) noexcept {
+  const Strip& s = strips_[track];
+  if (s.source != SourceKind::Feed || (s.insert[0].fn != nullptr && !s.insert[0].bypass) || (s.insert[1].fn != nullptr && !s.insert[1].bypass)) {
+    return;
+  }
+  kernel::gain_pan_st(side, lane.level, lane.left, lane.right, acc_main_[0], acc_main_[1], kBlk);
+  b_main_.dirty = true;
 }
 
 // The strip pass for the tracks waiting: both at once if they are of one kind (two centred, or two panned), else one by one.

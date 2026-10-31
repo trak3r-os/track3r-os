@@ -16,6 +16,18 @@ O3OS_AUDIO_INLINE std::int16_t sat16(std::int32_t v) noexcept { return static_ca
 
 O3OS_AUDIO_INLINE std::int32_t abs32(std::int32_t v) noexcept { return v < 0 ? -v : v; }
 
+// OS-STEREO (f): floor((s * amp + 2^23) / 2^24) for a 16-bit s and 0 <= amp < 2^28 (the voice's amplitude: at most kMaxGain * 256), the sample loop's product, in one SMMULR instead of the 64-bit SMLAL, the
+// shift and the OR. (s * 32) x (amp * 8) = s * amp * 256, and SMMULR adds 2^31 and keeps the high word: floor((256 s amp + 2^31) / 2^32), the same number. amp8 = amp * 8 is made by the caller.
+O3OS_AUDIO_INLINE std::int32_t mul_q24(std::int32_t s, std::int32_t amp8) noexcept {
+#if defined(__ARM_FEATURE_DSP)
+  std::int32_t r;
+  __asm__("smmulr %0, %1, %2" : "=r"(r) : "r"(s * 32), "r"(amp8));
+  return r;
+#else
+  return static_cast<std::int32_t>((static_cast<std::int64_t>(s * 32) * amp8 + 0x80000000LL) >> 32);
+#endif
+}
+
 // The cutoff ADSR's milliseconds in samples at the engine's rate (44.1176 a ms at the default rate).
 constexpr float kSamplesPerMs = static_cast<float>(hal::audio::sample_rate_mhz()) * 1.0e-6f;
 static_assert(VoicePool::kBlock % kFilterCtl == 0u, "the filter modulation's grid divides the block");
@@ -149,6 +161,9 @@ SampleDesc VoicePool::sanitized(const SampleDesc& desc) noexcept {
     d.wt_size = 0;
     d.gr_shape = d.gr_shape > 2u ? 0u : d.gr_shape;
   }
+  if (d.granular || d.wt_size != 0u || d.loop_mode != 0u || d.engine != kEngineModern) {
+    d.st_off = 0;  // OS-STEREO (c): S is for the modes that play forward on the Modern engine
+  }
   d.pan = d.pan > 100u ? 100u : d.pan;
   d.delay_send = d.delay_send > 100u ? 100u : d.delay_send;
   d.reverb_send = d.reverb_send > 100u ? 100u : d.reverb_send;
@@ -234,8 +249,8 @@ void VoicePool::take_stage() noexcept {
 
 // OS-CPU10 slice 2 (A5): the unchecked samples of the forward loop, the body of the checked loop's with its tests taken out (see run). Separate and not inlined so that the allocator has only these
 // values to place (data, output pointer and its end, the 64-bit position and increment, amp, and the ramp's step and cap): a loop inside run() spilled three of them to the stack.
-template <bool Ramp>
-O3OS_AUDIO_INLINE void VoicePool::fast_body(Voice& v, std::int16_t* out, std::uint32_t k, std::int32_t top) noexcept {
+template <bool Ramp, bool St>
+O3OS_AUDIO_INLINE void VoicePool::fast_body(Voice& v, std::int16_t* out, std::uint32_t k, std::int32_t top, [[maybe_unused]] std::int16_t* sout, [[maybe_unused]] const std::int16_t* sdata) noexcept {
   const std::int16_t* const data = v.data;
   // The position as two words, the carry made by hand: the compiler then has no linear 64-bit recurrence to close (it made the exit's position as phase + k x inc from copies of the start, and
   // those copies cost the registers the loop needs).
@@ -247,11 +262,26 @@ O3OS_AUDIO_INLINE void VoicePool::fast_body(Voice& v, std::int16_t* out, std::ui
   std::int32_t amp = v.amp;
   std::int16_t* const stop = out + k;
   for (; out != stop; ++out) {
-    const std::int32_t s0 = data[idx];
-    const std::int32_t s1 = data[idx + 1u];
     const std::int32_t frac = static_cast<std::int32_t>(lo >> 17);
-    const std::int32_t s = s0 + (((s1 - s0) * frac) >> 15);
-    *out = static_cast<std::int16_t>(simd::NativeOps::ssat16(static_cast<std::int32_t>((static_cast<std::int64_t>(s) * amp + 0x800000) >> 24)));
+    if constexpr (St) {  // OS-STEREO (c): S at the same position, through the same amplitude (the loop of audio/bench_stereo.h with the two outputs M and S)
+      // (f): the product of both is mul_q24 (one SMMULR: the caller holds 0 <= amp < 2^28, run's guard), the same number as the 64-bit form of the plain loop below. The samples are read through
+      // one pointer each (the index scaled once a sample), which leaves the allocator a register for the position's step.
+      const std::int32_t amp8 = amp * 8;
+      const std::int16_t* const mp = data + idx;
+      const std::int32_t s0 = mp[0];
+      const std::int32_t s = s0 + (((mp[1] - s0) * frac) >> 15);
+      *out = static_cast<std::int16_t>(simd::NativeOps::ssat16(mul_q24(s, amp8)));
+      const std::int16_t* const sp = sdata + idx;
+      const std::int32_t t0 = sp[0];
+      const std::int32_t ss = t0 + (((sp[1] - t0) * frac) >> 15);
+      *sout = static_cast<std::int16_t>(simd::NativeOps::ssat16(mul_q24(ss, amp8)));
+      ++sout;
+    } else {
+      const std::int32_t s0 = data[idx];
+      const std::int32_t s1 = data[idx + 1u];
+      const std::int32_t s = s0 + (((s1 - s0) * frac) >> 15);
+      *out = static_cast<std::int16_t>(simd::NativeOps::ssat16(static_cast<std::int32_t>((static_cast<std::int64_t>(s) * amp + 0x800000) >> 24)));
+    }
 #if defined(__arm__)
     __asm__("adds %0, %0, %2\n\tadc %1, %1, %3" : "+r"(lo), "+r"(idx) : "r"(inc_lo), "r"(inc_hi) : "cc");  // the 64-bit add as the compiler makes it, in place
 #else
@@ -270,8 +300,9 @@ O3OS_AUDIO_INLINE void VoicePool::fast_body(Voice& v, std::int16_t* out, std::ui
 void VoicePool::fast_steady(Voice& v, std::int16_t* out, std::uint32_t k, std::int32_t top) noexcept { fast_body<false>(v, out, k, top); }
 void VoicePool::fast_ramp(Voice& v, std::int16_t* out, std::uint32_t k, std::int32_t top) noexcept { fast_body<true>(v, out, k, top); }
 
-template <bool Ramp, bool Dir>
-O3OS_AUDIO_INLINE std::uint32_t VoicePool::run(Voice& v, std::int16_t* out, std::uint32_t n) noexcept {
+template <bool Ramp, bool Dir, bool St>
+O3OS_AUDIO_INLINE std::uint32_t VoicePool::run(Voice& v, std::int16_t* out, std::uint32_t n, [[maybe_unused]] StSide* sd, [[maybe_unused]] std::int16_t* sout, [[maybe_unused]] bool st_ramp) noexcept {
+  static_assert(!(St && Dir), "a stereo voice plays forward (one shot or forward loop)");
   const std::int16_t* const data = v.data;
   const std::uint64_t inc = v.inc;
   const std::uint32_t end = v.end;
@@ -331,7 +362,13 @@ O3OS_AUDIO_INLINE std::uint32_t VoicePool::run(Voice& v, std::int16_t* out, std:
     // steps qualify (one division a call). The arithmetic of the body is the checked loop's, step for step, so the output is the same bit for bit; the checked loop below takes over
     // for the rest (the last samples of a one shot, a loop wrap).
     const std::uint32_t idx0 = static_cast<std::uint32_t>(phase >> 32);
-    if (idx0 + 2u <= end) {
+    // (f): a stereo voice's fast loop makes its products with mul_q24, which needs 0 <= amp < 2^28; a voice's amp is always inside (the clamp holds it to top < 2^28), and the test sends any other value to
+    // the checked loop, which has no such limit (a stereo voice only: the plain loops are untouched).
+    bool fast_ok = idx0 + 2u <= end;
+    if constexpr (St) {
+      fast_ok = fast_ok && static_cast<std::uint32_t>(amp) < (1u << 28);
+    }
+    if (fast_ok) {
       const std::uint64_t ip64 = (inc >> 32) + 1u;
       const std::uint32_t ip = ip64 > 0xFFFFFFFFull ? 0xFFFFFFFFu : static_cast<std::uint32_t>(ip64);
       std::uint32_t k = 1u + (end - 2u - idx0) / ip;
@@ -339,7 +376,13 @@ O3OS_AUDIO_INLINE std::uint32_t VoicePool::run(Voice& v, std::int16_t* out, std:
       if (k != 0u) {
         v.phase = phase;  // the voice's own fields carry the position and the amplitude through the call
         v.amp = amp;
-        if (Ramp) {
+        if constexpr (St) {
+          if (st_ramp) {  // OS-STEREO (c): the same k samples, M and S (the kernel of the loop, the second output)
+            fast_st<true>(v, out, sout, sd->data, k, top);
+          } else {
+            fast_st<false>(v, out, sout, sd->data, k, top);
+          }
+        } else if (Ramp) {
           fast_ramp(v, out, k, top);
         } else {
           fast_steady(v, out, k, top);
@@ -377,6 +420,12 @@ O3OS_AUDIO_INLINE std::uint32_t VoicePool::run(Voice& v, std::int16_t* out, std:
     // the mixer. A Q16 amp the voice used to hold is this one with 8 zero bits, and the result is the same bit for bit (floor((256 X + 2^23) / 2^24) =
     // floor((X + 2^15) / 2^16)); the extra bits are the envelope's.
     out[i] = sat16(static_cast<std::int32_t>((static_cast<std::int64_t>(s) * amp + 0x800000) >> 24));
+    if constexpr (St) {  // OS-STEREO (c): S at the same index and neighbour (across the loop point too), the same fraction and amplitude
+      const std::int32_t t0 = sd->data[idx];
+      const std::int32_t t1 = sd->data[next];
+      const std::int32_t ss = t0 + (((t1 - t0) * frac) >> 15);
+      sout[i] = sat16(static_cast<std::int32_t>((static_cast<std::int64_t>(ss) * amp + 0x800000) >> 24));
+    }
     if constexpr (Dir) {
       std::int64_t q = static_cast<std::int64_t>(phase);
       if (!bwd) {
@@ -410,7 +459,7 @@ O3OS_AUDIO_INLINE std::uint32_t VoicePool::run(Voice& v, std::int16_t* out, std:
     } else {
       phase += inc;
     }
-    if (Ramp) {
+    if (St ? st_ramp : Ramp) {  // (a stereo voice: one checked loop for both, the flag at run time; it runs in flash)
       amp += step;
       amp = amp < 0 ? 0 : (amp > top ? top : amp);
     }
@@ -422,6 +471,9 @@ O3OS_AUDIO_INLINE std::uint32_t VoicePool::run(Voice& v, std::int16_t* out, std:
   }
   if (i != 0u) {
     v.last = out[i - 1u];
+    if constexpr (St) {
+      sd->last = sout[i - 1u];
+    }
   }
   return i;
 }
@@ -429,6 +481,203 @@ O3OS_AUDIO_INLINE std::uint32_t VoicePool::run(Voice& v, std::int16_t* out, std:
 std::uint32_t VoicePool::run_steady(Voice& v, std::int16_t* out, std::uint32_t n) noexcept { return run<false, false>(v, out, n); }
 std::uint32_t VoicePool::run_ramp(Voice& v, std::int16_t* out, std::uint32_t n) noexcept { return run<true, false>(v, out, n); }
 std::uint32_t VoicePool::run_dir(Voice& v, std::int16_t* out, std::uint32_t n) noexcept { return run<true, true>(v, out, n); }
+
+// ---- Stereo voices (voices.h STEREO VOICES; docs/specs/OS-STEREO.md, step 2, slice (c)). In flash: the calls are per segment of a voice that holds a side block, or per note.
+
+namespace {
+// (f) The stereo loop of a steady amplitude (the common block), as a function of its own that takes the position in and returns it: no Voice reference is live in the loop, which leaves the allocator the
+// register that the position's step otherwise spilled (one reload a sample; 31 instructions a sample instead of 40 with `fast_body<false, true>`'s). M's arithmetic is the plain loop's, bit for bit (mul_q24),
+// and S is the same on the side data; `amp8` is amp * 8 (run's guard: 0 <= amp < 2^28).
+[[gnu::noinline]] std::uint64_t st_steady_loop(const std::int16_t* data, const std::int16_t* sdata, std::int16_t* out, std::int16_t* sout, std::uint32_t k, std::uint64_t phase, std::uint64_t inc, std::int32_t amp8) noexcept {
+  const std::uint32_t inc_lo = static_cast<std::uint32_t>(inc);
+  const std::uint32_t inc_hi = static_cast<std::uint32_t>(inc >> 32);
+  std::uint32_t lo = static_cast<std::uint32_t>(phase);
+  std::uint32_t idx = static_cast<std::uint32_t>(phase >> 32);
+  std::int16_t* const stop = out + k;
+  for (; out != stop; ++out, ++sout) {
+    const std::int32_t frac = static_cast<std::int32_t>(lo >> 17);
+    const std::int16_t* const mp = data + idx;
+    const std::int32_t s0 = mp[0];
+    const std::int32_t s = s0 + (((mp[1] - s0) * frac) >> 15);
+    *out = static_cast<std::int16_t>(simd::NativeOps::ssat16(mul_q24(s, amp8)));
+    const std::int16_t* const sp = sdata + idx;
+    const std::int32_t t0 = sp[0];
+    const std::int32_t ss = t0 + (((sp[1] - t0) * frac) >> 15);
+    *sout = static_cast<std::int16_t>(simd::NativeOps::ssat16(mul_q24(ss, amp8)));
+#if defined(__arm__)
+    __asm__("adds %0, %0, %2\n\tadc %1, %1, %3" : "+r"(lo), "+r"(idx) : "r"(inc_lo), "r"(inc_hi) : "cc");  // the 64-bit add as the compiler makes it, in place
+#else
+    lo += inc_lo;
+    idx += inc_hi + (lo < inc_lo ? 1u : 0u);
+#endif
+  }
+  return (static_cast<std::uint64_t>(idx) << 32) | lo;
+}
+}  // namespace
+
+template <bool Ramp>
+void VoicePool::fast_st(Voice& v, std::int16_t* out, std::int16_t* sout, const std::int16_t* sdata, std::uint32_t k, std::int32_t top) noexcept {
+  if constexpr (Ramp) {
+    fast_body<true, true>(v, out, k, top, sout, sdata);
+  } else {
+    v.phase = st_steady_loop(v.data, sdata, out, sout, k, v.phase, v.inc, v.amp * 8);  // (the amplitude does not move)
+  }
+}
+
+namespace {
+// The step of a residual that fades over kDeclickSamples (VoicePool::carry's rule: at least one unit a sample).
+O3OS_AUDIO_INLINE std::int32_t st_step(std::int32_t r) noexcept {
+  return r == 0 ? 0 : (abs32(r) + static_cast<std::int32_t>(kDeclickSamples) - 1) / static_cast<std::int32_t>(kDeclickSamples);
+}
+}  // namespace
+
+std::int16_t* VoicePool::st_block(const Voice& v) noexcept {
+  const unsigned k = (v.st & kStIdx) - 1u;
+  std::int16_t* const block = sblocks_[k];
+  if ((st_touched_ & (1u << k)) == 0u) {
+    st_touched_ = static_cast<std::uint8_t>(st_touched_ | (1u << k));
+    // (f): 32 bytes an iteration (four STRD; the block is alignas(8)) where it was one word: about 60 cycles, not 170
+    const std::uint64_t zero = 0;
+    for (std::uint32_t i = 0; i < kBlock; i += 16u) {
+      std::memcpy(block + i, &zero, sizeof zero);
+      std::memcpy(block + i + 4u, &zero, sizeof zero);
+      std::memcpy(block + i + 8u, &zero, sizeof zero);
+      std::memcpy(block + i + 12u, &zero, sizeof zero);
+    }
+  }
+  return block;
+}
+
+// add_residual's rule on S: its tail walks to zero by res_dec a sample.
+void VoicePool::st_residual(StSide& d, std::int16_t* sout, std::uint32_t n) noexcept {
+  std::int32_t r = d.res;
+  if (r == 0) {
+    return;
+  }
+  const std::int32_t step = d.res_dec;
+  for (std::uint32_t i = 0; i < n; ++i) {
+    sout[i] = sat16(sout[i] + r);
+    r = r > 0 ? (r > step ? r - step : 0) : (r < -step ? r + step : 0);
+  }
+  d.res = r;
+}
+
+// A segment of a voice that holds a side block and plays: the stereo loop while the note makes S, else the plain loop with S's tail (an effect of S5 turned on mid-note: S's last value fades over a block, kDeclickSamples,
+// and the note goes on as M alone for good). M is what run_steady / run_ramp make, bit for bit; S is the same loop on the side data (the two share the position and the amplitude).
+std::uint32_t VoicePool::run_st(Voice& v, std::int16_t* out, std::uint32_t pos, std::uint32_t n, bool ramp) noexcept {
+  const unsigned k = (v.st & kStIdx) - 1u;
+  StSide& d = st_[k];
+  std::int16_t* const sout = st_block(v) + pos;
+  std::uint32_t made;
+  if ((v.st & kStOn) != 0u && (v.filt || (v.drive | v.crush) != 0u || (v.mmask & kMmTrem) != 0u)) {
+    v.st = static_cast<std::uint8_t>(v.st & ~kStOn);  // a dropped S stays dropped for the note (rule 9)
+    d.res += d.last;
+    d.last = 0;
+    d.res_dec = st_step(d.res);
+  }
+  if ((v.st & kStOn) != 0u) {
+    made = run<true, false, true>(v, out + pos, n, &d, sout, ramp);  // (one instantiation: Ramp stands for "either", the flag is `ramp`)
+  } else {
+    made = ramp ? run_ramp(v, out + pos, n) : run_steady(v, out + pos, n);
+  }
+  st_residual(d, sout, made);  // (a block whose fade is over is given back by end_block_st, after this block's S has been fed)
+  return made;
+}
+
+// The voice has stopped (a NoteCut, the end of a one shot or of the release, a take over of the descriptor) and holds a block: what S last was becomes its residual, which fades over kDeclickSamples as M's does, and
+// is added to the block over n samples from `pos`; the block is given back when it has run out.
+void VoicePool::st_tail(Voice& v, std::uint32_t pos, std::uint32_t n) noexcept {
+  const unsigned k = (v.st & kStIdx) - 1u;
+  StSide& d = st_[k];
+  if ((v.st & kStOn) != 0u) {
+    v.st = static_cast<std::uint8_t>(v.st & ~kStOn);
+    d.res += d.last;
+    d.last = 0;
+    d.res_dec = st_step(d.res);
+  }
+  st_residual(d, st_block(v) + pos, n);
+}
+
+void VoicePool::st_drop(Voice& v) noexcept {
+  const unsigned bit = 1u << ((v.st & kStIdx) - 1u);
+  st_used_ = static_cast<std::uint8_t>(st_used_ & ~bit);
+  st_touched_ = static_cast<std::uint8_t>(st_touched_ & ~bit);  // (end_block skips end_block_st while nothing is held: a block written in this block and dropped before it ends must be zeroed at its next first use)
+  v.st = 0;
+}
+
+void VoicePool::st_retrigger(Voice& v) noexcept {
+  StSide& d = st_[(v.st & kStIdx) - 1u];
+  d.res += d.last;  // (zero unless the note makes S)
+  d.last = 0;
+  d.res_dec = st_step(d.res);
+}
+
+// A note's decision, at the end of mods_start (everything it reads is settled): S for the note when the descriptor has it (the instrument's flag and the bank's S, a forward mode), the engine is Modern, the
+// note plays forward (Voice::mode 0: no reversed or granular note), none of the effects of S5 is in the path (the filter, the overdrive, the bit depth, the tremolo), the track is audible, and a side block is free
+// (the cap, kStMax). The residual of the block's old note: a retrigger carries S's last into it, as note_on does M's; a voice taken from another track (or a steal) starts clean, as M's does.
+void VoicePool::st_start(Voice& v, const SampleDesc& s, bool retrigger) noexcept {
+  if (v.st != 0u) {
+    StSide& d = st_[(v.st & kStIdx) - 1u];
+    if (!retrigger) {
+      d.res = 0;
+    } else {
+      d.res += d.last;  // the old note's S (zero when it makes none; a note that stopped in this block, before a render could take its tail, is carried here as M's was by its stop)
+    }
+    d.last = 0;
+    d.res_dec = st_step(d.res);
+  }
+  const bool want = s.st_off != 0u && s.engine == kEngineModern && v.mode == 0u && !v.filt && (v.drive | v.crush) == 0u && (v.mmask & kMmTrem) == 0u && ((gate_ >> v.track) & 1u) == 0u;
+  if (want && v.st == 0u && st_used_ != (1u << kStMax) - 1u) {
+    unsigned k = 0;
+    while (((st_used_ >> k) & 1u) != 0u) {
+      ++k;
+    }
+    st_used_ = static_cast<std::uint8_t>(st_used_ | (1u << k));
+    st_[k] = StSide{nullptr, 0, 0, 0};
+    v.st = static_cast<std::uint8_t>(k + 1u);
+  }
+  if (v.st == 0u) {
+    return;
+  }
+  StSide& d = st_[(v.st & kStIdx) - 1u];
+  if (want) {
+    d.data = v.data + s.st_off;
+    v.st = static_cast<std::uint8_t>(v.st | kStOn);
+  } else {
+    v.st = static_cast<std::uint8_t>(v.st & ~kStOn);
+    if (d.res == 0) {
+      st_drop(v);  // nothing of the old note's S is left to fade
+    }
+  }
+}
+
+// The block's end: which tracks have S now (the voices that fed their track with a block that S was written in), the blocks whose tail has run out given back. Called while a block is held or the last block fed S.
+void VoicePool::end_block_st(std::uint32_t fed) noexcept {
+  std::uint16_t mask = 0;
+  for (unsigned i = 0; i < kMaxVoices; ++i) {
+    Voice& v = v_[i];
+    if (v.st == 0u) {
+      if ((fed & (1u << i)) != 0u && v.track < kVoiceTracks) {
+        mask = static_cast<std::uint16_t>(mask & ~(1u << v.track));  // (this voice has the track: a voice with S that came before it no longer does)
+      }
+      continue;
+    }
+    const unsigned k = (v.st & kStIdx) - 1u;
+    if ((fed & (1u << i)) != 0u && v.track < kVoiceTracks) {
+      if (((st_touched_ >> k) & 1u) != 0u) {
+        mask = static_cast<std::uint16_t>(mask | (1u << v.track));
+        side_idx_[v.track] = static_cast<std::uint8_t>(k);
+      } else {
+        mask = static_cast<std::uint16_t>(mask & ~(1u << v.track));
+      }
+    }
+    if ((v.st & kStOn) == 0u && st_[k].res == 0) {
+      st_drop(v);  // the fade is over (it was fed above): the block is free for the next block's notes
+    }
+  }
+  side_mask_ = mask;
+  st_touched_ = 0;
+}
 
 // ---- The grain (voices.h GRANULAR). In flash: see the declarations.
 
@@ -769,13 +1018,16 @@ std::uint32_t VoicePool::advance(Voice& v, std::uint32_t n, bool ramp) noexcept 
 }
 
 // One voice's span, in segments of constant envelope (see the declaration). Adv: the segments are the same, the sample loop is advance() and there is no block (`out` is not read, the voice holds no residual).
-template <bool Adv>
+template <bool Adv, bool St>
 O3OS_AUDIO_INLINE void VoicePool::render_seg(Voice& v, [[maybe_unused]] std::int16_t* out, std::uint32_t begin, std::uint32_t end) noexcept {
   std::uint32_t pos = begin;
   while (pos < end) {
     if (!v.playing) {
       if constexpr (!Adv) {
         add_residual(v, out + pos, end - pos);
+        if constexpr (St) {
+          st_tail(v, pos, end - pos);  // OS-STEREO (c): S's own tail
+        }
       }
       return;
     }
@@ -801,6 +1053,11 @@ O3OS_AUDIO_INLINE void VoicePool::render_seg(Voice& v, [[maybe_unused]] std::int
     } else if (v.mode != 0u) {  // a backward or ping-pong loop: the one loop that steps its amplitude whether it moves or not
       v.amp_step = ramp ? v.amp_step : 0;
       made = v.mode == kModeGranular ? run_gran(v, out + pos, n) : run_dir(v, out + pos, n);
+      if constexpr (St) {
+        st_tail(v, pos, made);  // OS-STEREO (c): the old note's S still fades under a note that makes none
+      }
+    } else if constexpr (St) {
+      made = run_st(v, out, pos, n, ramp);  // OS-STEREO (c): the voice holds a side block: the stereo loop (or the plain one with S's tail)
     } else {
       made = ramp ? run_ramp(v, out + pos, n) : run_steady(v, out + pos, n);
     }
@@ -828,6 +1085,8 @@ O3OS_AUDIO_INLINE void VoicePool::render_seg(Voice& v, [[maybe_unused]] std::int
 }
 
 void VoicePool::render_voice(Voice& v, std::int16_t* out, std::uint32_t begin, std::uint32_t end) noexcept { render_seg<false>(v, out, begin, end); }
+// OS-STEREO (c): the same segments for a voice that holds a side block, the whole of it in flash (render() makes the one test a voice and span): the plain voice's code is untouched.
+void VoicePool::render_voice_st(Voice& v, std::int16_t* out, std::uint32_t begin, std::uint32_t end) noexcept { render_seg<false, true>(v, out, begin, end); }
 
 // The stages that only make a voice sound, after its samples and its residual are in its block: the tremolo, before the filter, the filter over the whole span
 // (the voice's samples, its residual and the silence after a one shot), the overdrive and the bit depth (OS-IFX1, in flash). Inlined into render and into odd_span: one text, two callers.
@@ -850,7 +1109,7 @@ void VoicePool::render(std::uint32_t begin, std::uint32_t end) noexcept {
   const std::uint32_t gate_now = gate_;  // render context: set_gate is called between blocks
   for (unsigned i = 0; i < kMaxVoices; ++i) {
     Voice& v = v_[i];
-    if (v.playing || v.resid != 0) {
+    if (v.live() || v.resid != 0) {  // (OS-STEREO (c): a voice that holds a side block is visited until its S has faded; (g): playing and st in one halfword load, so the idle voices cost what they did)
       // OS-ODD11 (voices.h GATE): a playing voice on an inaudible strip keeps its note and skips what only makes it sound. (a residual tail is added as always; the block is not fed).
       // OS-ODD11 UTAIL: a block with nothing gated and no voice owing a re-entry (every unmuted block) costs one compare against a register and one byte load a voice a span; the rest is odd_span, in flash.
       // OS-ODD11 slice 2: a gated voice of the plain kind is advanced in closed form, with no block (gated_span, flash); the others go on below as in slice 1.
@@ -863,7 +1122,12 @@ void VoicePool::render(std::uint32_t begin, std::uint32_t end) noexcept {
       if (v.mmask != 0u && v.playing && (first || v.mneed)) {
         mod_block(v, samples_[v.slot], begin);  // OS-MOD: the pan and the finetune, once a block (flash)
       }
-      render_voice(v, block, begin, end);
+      // (g): the plain voice's call is the first branch (at -Os the source order is the layout: the other order put two taken branches and a second copy of the arguments on every plain voice's path)
+      if (__builtin_expect(v.st == 0u, 1)) {
+        render_voice(v, block, begin, end);
+      } else {
+        render_voice_st(v, block, begin, end);  // OS-STEREO (c), flash
+      }
       if (__builtin_expect(gate || v.dk != 0u, 0)) {
         odd_span(v, i, block, begin, end, gate);
         continue;
@@ -1267,7 +1531,10 @@ void VoicePool::end_block() noexcept {
     if ((fed & (1u << i)) != 0u && v_[i].track < kVoiceTracks) {
       feed_[v_[i].track] = blocks_[i];
     }
-    in_use += (v_[i].playing || v_[i].resid != 0) ? 1u : 0u;
+    in_use += (v_[i].live() || v_[i].resid != 0) ? 1u : 0u;
+  }
+  if (__builtin_expect((st_used_ | side_mask_) != 0u, 0)) {
+    end_block_st(fed);  // OS-STEREO (c): the blocks to the tracks, the finished tails released (flash; nothing while no voice is stereo)
   }
   pub_in_use_.store(in_use, std::memory_order_relaxed);
   if (in_use > pub_peak_.load(std::memory_order_relaxed)) {
@@ -1286,7 +1553,7 @@ void VoicePool::end_block() noexcept {
 
 unsigned VoicePool::find(unsigned track) const noexcept {
   for (unsigned i = 0; i < kMaxVoices; ++i) {
-    if ((v_[i].playing || v_[i].resid != 0) && v_[i].track == track) {
+    if ((v_[i].playing || v_[i].resid != 0 || v_[i].st != 0u) && v_[i].track == track) {
       return i;
     }
   }
@@ -1303,7 +1570,7 @@ unsigned VoicePool::allocate() noexcept {
       if (oldest == kNone || static_cast<std::int32_t>(v.age - v_[oldest].age) < 0) {
         oldest = i;
       }
-    } else if (v.resid != 0) {
+    } else if (v.resid != 0 || v.st != 0u) {
       fading = fading == kNone ? i : fading;
     } else {
       return i;
@@ -1740,6 +2007,7 @@ void VoicePool::mods_start(Voice& v, const SampleDesc& s, bool retrigger, unsign
       (void)perf_dest(v, d, false);  // OS-PERF-LFO: the layer's LFOs over the instrument's modulators (a fresh phase: the note's)
     }
   }
+  st_start(v, s, retrigger);  // OS-STEREO (c): S for the note, after everything it depends on is settled (the mode, the filter, the shaper, the tremolo); before the tail below (v.playing and v.last are the old note's)
   // OS-PERF-CPU3: the tail of note_on, here so that note_on (SRAM_L) loses its instructions: last and unconditional (nothing above reads or writes these fields; the early returns of note_on come before the call).
   if (v.env != nullptr) {
     v.releasing = false;
@@ -1911,6 +2179,9 @@ bool VoicePool::tracker_retrigger(unsigned track) noexcept {
   }
   Voice& v = v_[i];
   carry(v, v.last);  // what the voice was putting out fades under the restart (note_on's retrigger rule)
+  if (v.st != 0u) {
+    st_retrigger(v);  // OS-STEREO (c): and S's own
+  }
   if (v.mode == kModeReverse) {
     v.phase = static_cast<std::uint64_t>(v.end - 1u) << 32;  // OS-PERF-REVERSE: a backward note restarts from the window's last frame
     v.bwd = true;
@@ -2226,6 +2497,9 @@ O3OS_AUDIO_INLINE void VoicePool::gate_mark(Voice& v, unsigned i, std::uint32_t 
 // block is not zeroed or written, mod_block runs as it would (the pan, the finetune and the slide move the voice's increment, once a block), the envelope segments are render_voice's with advance() for the
 // sample loop, and the gate's bookkeeping is odd_span's. True: done. False: another kind, nothing touched (render goes on as in slice 1). Flash: one call a gated voice and span.
 bool VoicePool::gated_span(Voice& v, std::uint32_t begin, std::uint32_t end) noexcept {
+  if (v.st != 0u) {
+    st_drop(v);  // OS-STEREO (c), rule 9: a gated voice drops S (the strip is inaudible), and a dropped S stays dropped for the note
+  }
   const SampleDesc& s = samples_[v.slot];
   if (v.mode != 0u || v.resid != 0 || s.wt_size != 0u) {
     return false;

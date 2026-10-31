@@ -58,6 +58,8 @@ if(O3OS_PLATFORM STREQUAL "qemu")
   o3os_target_suite(audio_offline DEPENDS audio usb SOURCES audio_offline_test.cpp TIMEOUT 120)
   # OS-ODD11: the voice gate (a voice on an inaudible strip skips its post stages; the quiet mask, the re-entry ramp, the export untouched).
   o3os_target_suite(audio_gate DEPENDS audio usb SOURCES audio_gate_test.cpp TIMEOUT 120)
+  # OS-STEREO (c): the stereo voice and the mix: M against the mono voice bit for bit, S against the mono render of the S wave (stops, retriggers, steals, envelope), the cap of four, the effect that drops S, the side kernel and the graph's L / R.
+  o3os_target_suite(audio_stereo DEPENDS audio usb SOURCES audio_stereo_test.cpp TIMEOUT 180)
   # OS-PERFFX P0: the Perform layer in the voices and the strips: the performance filter against the instrument's, the layer's values across FxReset and Stopped, and an export that puts it away and gives it back (through the Engine).
   o3os_target_suite(audio_perform DEPENDS audio usb SOURCES audio_perform_test.cpp TIMEOUT 120)
   # OS-PERF-LFO (P4): the Perform rows VOL, PAN, TUNE, FLT and POS LFO against the instrument's own LFO at the offset index, the clamps, the layer's life across FxReset / Stopped / the export, the group 14's old rules.

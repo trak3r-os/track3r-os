@@ -12,6 +12,7 @@
 #include <o3os/app/app.h>
 #include <o3os/app/key_prompt.h>
 #include <o3os/app/sample_bank.h>
+#include <o3os/app/sample_dsp.h>
 #include <o3os/app/state_line.h>
 #include <o3os/app/screens/sample_load_screen.h>
 #include <o3os/audio/voices.h>
@@ -1798,4 +1799,183 @@ TEST_CASE("sample load: the summary of a multi-load is the last word on the stri
   rig.invoke("sample.load", 0);
   CHECK(rig.until("PEAKS D.WAV DONE", 800));
   CHECK(rig.bank.pcm(3).frames == 1300u);
+}
+
+// ---- OS-STEREO step 2, slice (d): the Sample edit screen on a stereo sample (decision S7) ----------------------------------------------------------------------------
+
+namespace {
+
+constexpr std::uint32_t kStFrames = 3001;  // odd: S sits at pcm + 3002
+
+// A stereo WAV loaded with STEREO into slot 0 (instrument 1), the Sample edit screen open on it.
+void load_stereo_and_open_edit(Rig& rig) {
+  write_file(rig.dir.root / "st.wav", stereo_wav_bytes(kStFrames));
+  rig.go(ScreenId::SampleLoad);
+  rig.settle();
+  rig.invoke("instrument.select", 1);
+  rig.select("st.wav");
+  const_cast<app::ViewState&>(rig.app->state()).wav.channel = app::kChannelStereo;
+  rig.invoke("sample.load", 0);
+  NEED(rig.until("PEAKS ST.WAV DONE"));
+  rig.expire();
+  NEED(rig.bank.has_side(0));
+  NEED(rig.bank.edit_stereo(0));
+  rig.go(ScreenId::SampleEdit);
+}
+
+struct Blocks {
+  std::vector<std::int16_t> m, s;
+  const std::int16_t* base = nullptr;
+};
+Blocks blocks_of(const app::SampleBank& bank, unsigned slot) {
+  const app::SampleBank::Pcm p = bank.pcm(slot);
+  Blocks b;
+  b.base = p.data;
+  b.m.assign(p.data, p.data + p.frames);
+  if (p.side != nullptr) {
+    b.s.assign(p.side, p.side + p.frames);
+  }
+  return b;
+}
+
+// Runs the effect `op` over [a, b) through the screen's own action and waits for the sample to change or the strip to refuse; true when an undo step was added.
+bool run_edit(Rig& rig, app::EditOp op, std::uint32_t a, std::uint32_t b) {
+  app::SampleEditState& st = const_cast<app::ViewState&>(rig.app->state()).sedit;
+  st.a = a;
+  st.b = b;
+  const unsigned depth = rig.bank.undo_depth(0);
+  rig.invoke("sedit.run", static_cast<core::ActionArg>(op));
+  for (unsigned i = 0; i < 3000 && rig.bank.undo_depth(0) == depth && rig.message() != "NO ROOM FOR THE EDIT"; ++i) {
+    rig.pass();
+  }
+  for (unsigned i = 0; i < 3000 && st.running; ++i) {
+    rig.pass();
+  }
+  return rig.bank.undo_depth(0) == depth + 1u;
+}
+
+}  // namespace
+
+TEST_CASE("sample edit, stereo: every operation of S7 acts on M and S as specified, the result is one stereo block, undo and redo bring both back (OS-STEREO (d))") {
+  Rig rig;
+  load_stereo_and_open_edit(rig);
+  const Blocks orig = blocks_of(rig.bank, 0);
+  NEED(orig.m.size() == kStFrames);
+  const std::uint32_t n = kStFrames;
+  const std::uint32_t a = 600;
+  const std::uint32_t b = 2400;
+  const std::uint16_t amp = rig.app->state().sedit.amp;
+  const std::int16_t* fx = rig.app->state().sedit.fx;
+  const unsigned rate = rig.arena->project.instrument(0)->sample_rate;
+  for (const app::EditOp op : {app::EditOp::Crop, app::EditOp::Reverse, app::EditOp::FadeIn, app::EditOp::FadeOut, app::EditOp::Amplify, app::EditOp::Normalise, app::EditOp::DcRemove,
+                               app::EditOp::Filter}) {
+    CAPTURE(static_cast<int>(op));
+    app::EditSpec spec = app::make_spec(op, n, a, b, amp);
+    if (op == app::EditOp::Filter) {
+      spec = app::make_filter_spec(n, a, b, rate, static_cast<app::FilterType>(fx[app::kFxType]), static_cast<unsigned>(fx[app::kFxCutoff]), static_cast<unsigned>(fx[app::kFxQ]));
+    }
+    app::EditSpec spec_s = spec;  // DC remove's offset and Normalise's gain are the job's to find: here from the references
+    if (op == app::EditOp::Normalise) {
+      spec.gain_q16 = spec_s.gain_q16 = app::normalise_gain_q16(app::scan_peak_ms(orig.m.data(), orig.s.data(), n, a, b - a));
+    } else if (op == app::EditOp::DcRemove) {
+      app::DcScan sm;
+      app::DcScan ss;
+      app::scan_dc(orig.m.data(), n, a, b - a, sm);
+      app::scan_dc(orig.s.data(), n, a, b - a, ss);
+      spec.dc = app::dc_offset(sm, b - a);
+      spec_s.dc = app::dc_offset(ss, b - a);
+    }
+    const std::uint32_t total = app::edit_result_frames(spec, n);
+    std::vector<std::int16_t> em(total);
+    std::vector<std::int16_t> es(total);
+    app::EditRun run_m;
+    app::EditRun run_s;
+    app::edit_chunk(spec, orig.m.data(), n, em.data(), 0, total, &run_m);
+    app::edit_chunk(spec_s, orig.s.data(), n, es.data(), 0, total, &run_s);
+    NEED(run_edit(rig, op, a, b));
+    const app::SampleBank::Pcm p = rig.bank.pcm(0);
+    NEED(p.frames == total);
+    NEED(p.side != nullptr);
+    CHECK(p.side == p.data + ((total + 1u) & ~1u));  // one block: S right behind M
+    CHECK(std::memcmp(p.data, em.data(), total * 2u) == 0);
+    CHECK(std::memcmp(p.side, es.data(), total * 2u) == 0);
+    CHECK(rig.arena->project.instrument(0)->stereo == 1u);  // still a stereo instrument
+    CHECK(rig.bank.edit_stereo(0));
+    // Undo: both blocks of the version before, the very ones; redo: both of the edit.
+    rig.invoke("sedit.undo");
+    CHECK(rig.bank.pcm(0).data == orig.base);
+    const Blocks undone = blocks_of(rig.bank, 0);
+    CHECK(undone.m == orig.m);
+    CHECK(undone.s == orig.s);
+    CHECK(rig.bank.pcm(0).side == orig.base + ((n + 1u) & ~1u));
+    rig.invoke("sedit.redo");
+    CHECK(rig.bank.pcm(0).frames == total);
+    CHECK(std::memcmp(rig.bank.pcm(0).data, em.data(), total * 2u) == 0);
+    CHECK(std::memcmp(rig.bank.pcm(0).side, es.data(), total * 2u) == 0);
+    rig.invoke("sedit.undo");
+    CHECK(rig.bank.pcm(0).data == orig.base);
+    rig.expire();
+  }
+}
+
+TEST_CASE("sample edit, stereo: Compressor and the Amiga conversion are refused with the strip message, nothing starts; a sample set to MONO is edited as mono (OS-STEREO (d))") {
+  Rig rig;
+  load_stereo_and_open_edit(rig);
+  const Blocks orig = blocks_of(rig.bank, 0);
+  const app::SampleEditState& st = rig.app->state().sedit;
+  rig.invoke("sedit.run", static_cast<core::ActionArg>(app::EditOp::Compressor));
+  CHECK(rig.message() == "STEREO: MAKE MONO FIRST");
+  rig.passes(5);
+  CHECK_FALSE(st.running);
+  CHECK(rig.bank.undo_depth(0) == 0u);
+  rig.expire();
+  rig.invoke("sedit.amiga", 0);
+  CHECK(rig.message() == "STEREO: MAKE MONO FIRST");
+  rig.expire();
+  rig.invoke("sedit.amiga", 1);
+  CHECK(rig.message() == "STEREO: MAKE MONO FIRST");
+  rig.passes(5);
+  CHECK_FALSE(st.running);
+  CHECK(rig.bank.undo_depth(0) == 0u);
+  CHECK(rig.bank.pcm(0).data == orig.base);
+  CHECK(rig.bank.has_side(0));
+  rig.expire();
+  // The STEREO row on MONO: the sample is a mono one for the editor. The compressor runs, its result has no S, and its undo brings S back.
+  model::Instrument in = *rig.arena->project.instrument(0);
+  in.stereo = 0;
+  NEED(rig.arena->project.set_instrument(0, in) == model::Status::Ok);
+  CHECK_FALSE(rig.bank.edit_stereo(0));
+  NEED(run_edit(rig, app::EditOp::Compressor, 0, 0));
+  CHECK_FALSE(rig.bank.has_side(0));
+  CHECK(rig.bank.pcm(0).frames == kStFrames);
+  rig.invoke("sedit.undo");
+  CHECK(rig.bank.pcm(0).data == orig.base);
+  CHECK(rig.bank.has_side(0));
+  CHECK(blocks_of(rig.bank, 0).s == orig.s);
+}
+
+TEST_CASE("sample edit, stereo: with room for M but not for the second block the edit is refused cleanly and nothing is half applied (OS-STEREO (d), rule 11)") {
+  Rig rig(2u * (kStFrames + 1u) + 4000u);  // the stereo sample (6,004) and 4,000 samples of pool: one mono result fits, a stereo one (6,004) does not
+  load_stereo_and_open_edit(rig);
+  const Blocks orig = blocks_of(rig.bank, 0);
+  const std::uint32_t free0 = rig.bank.free_samples();
+  const app::SampleEditState& st = rig.app->state().sedit;
+  CHECK_FALSE(run_edit(rig, app::EditOp::Reverse, 0, 0));
+  CHECK(rig.message() == "NO ROOM FOR THE EDIT");
+  CHECK_FALSE(st.running);
+  CHECK(rig.bank.undo_depth(0) == 0u);
+  CHECK(rig.bank.pcm(0).data == orig.base);
+  CHECK(rig.bank.pcm(0).side == orig.base + ((kStFrames + 1u) & ~1u));
+  CHECK(rig.bank.free_samples() == free0);
+  CHECK(blocks_of(rig.bank, 0).m == orig.m);
+  CHECK(blocks_of(rig.bank, 0).s == orig.s);
+  rig.expire();
+  // Set to MONO the same edit needs one block and goes through; the stereo sample is back with its undo.
+  model::Instrument in = *rig.arena->project.instrument(0);
+  in.stereo = 0;
+  NEED(rig.arena->project.set_instrument(0, in) == model::Status::Ok);
+  CHECK(run_edit(rig, app::EditOp::Reverse, 0, 0));
+  CHECK_FALSE(rig.bank.has_side(0));
+  rig.invoke("sedit.undo");
+  CHECK(blocks_of(rig.bank, 0).s == orig.s);
 }

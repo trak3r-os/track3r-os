@@ -515,3 +515,30 @@ TEST_CASE("source page: a wavetable with an unset window size plays the window t
   pcm.resize(20);  // under 32 frames: no window, silent (the action refuses the mode there)
   CHECK(app::make_sample_desc(in, pcm.data(), 20, nullptr).length == 0u);
 }
+
+// OS-STEREO (c): the descriptor carries the side signal only for the instrument's flag AND a side block, in a mode that plays forward.
+TEST_CASE("source page: the descriptor has st_off only for a stereo instrument in a forward mode with a side block") {
+  std::vector<std::int16_t> pcm(2u * 1000u, 100);  // M then S (1000 frames, even)
+  const std::int16_t* const side = pcm.data() + 1000;
+  const audio::LevelLaw law = audio::LevelLaw::Og12;
+  model::Instrument in;
+  model::init_instrument(in, model::InstrumentKind::Sample);
+  in.stereo = 1;
+  for (const unsigned mode : {0u, 1u, 4u, 5u}) {  // one shot, forward loop, slice, beat slice
+    in.sampler.play_mode = static_cast<std::uint8_t>(mode);
+    const audio::SampleDesc d = app::make_sample_desc(in, pcm.data(), 1000, nullptr, nullptr, law, side);
+    INFO("mode " << mode);
+    CHECK(d.length != 0u);
+    CHECK(d.st_off == 1000u);
+  }
+  in.sampler.play_mode = 0;
+  CHECK(app::make_sample_desc(in, pcm.data(), 1000, nullptr, nullptr, law, nullptr).st_off == 0u);  // no side block
+  in.stereo = 0;
+  CHECK(app::make_sample_desc(in, pcm.data(), 1000, nullptr, nullptr, law, side).st_off == 0u);    // the flag is off
+  in.stereo = 1;
+  in.sampler.play_mode = 6;  // wavetable
+  in.sampler.wavetable_window_size = 256;
+  CHECK(app::make_sample_desc(in, pcm.data(), 1000, nullptr, nullptr, law, side).st_off == 0u);
+  in.sampler.play_mode = 7;  // granular
+  CHECK(app::make_sample_desc(in, pcm.data(), 1000, nullptr, nullptr, law, side).st_off == 0u);
+}

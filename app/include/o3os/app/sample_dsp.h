@@ -77,6 +77,9 @@ std::uint32_t edit_result_frames(const EditSpec& spec, std::uint32_t frames) noe
 
 // The largest |sample| of frames [from, from + n) (clamped to the source): 0 for silence.
 std::uint32_t scan_peak(const std::int16_t* src, std::uint32_t frames, std::uint32_t from, std::uint32_t n) noexcept;
+// OS-STEREO (d): the largest |M| + |S| of frames [from, from + n) of a stereo sample (M at `mid`, S at `side`, S = L - M, so L = M + S and R = M - S: |M| + |S| is the larger of |L| and |R|, to
+// within the 1 LSB of the stored R). Normalise's peak for a stereo sample: one factor for both blocks keeps the balance.
+std::uint32_t scan_peak_ms(const std::int16_t* mid, const std::int16_t* side, std::uint32_t frames, std::uint32_t from, std::uint32_t n) noexcept;
 // DC removal's scan of a range: the sum (int64: frames of 16 bits, a 16 M-frame range needs 2^39, 2^47 holds 2^32 of them) and the extremes.
 struct DcScan {
   std::int64_t sum = 0;

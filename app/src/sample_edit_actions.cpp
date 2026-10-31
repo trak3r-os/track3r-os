@@ -17,6 +17,7 @@ namespace {
 constexpr int kLaneColumns = 768;
 constexpr int kCoarse = 16;
 constexpr int kMaxClicks = 1 << 16;
+constexpr const char* kMakeMono = "STEREO: MAKE MONO FIRST";  // OS-STEREO S7: Compressor and the Amiga conversion refuse a stereo sample (the STEREO row of the source page set to MONO)
 
 bool say(ActionContext& ctx, core::Severity severity, const char* text) noexcept {
   return ctx.view.notify.post(severity, text, "edit", ViewState::kMessageMs);
@@ -156,6 +157,9 @@ bool sedit_run(ActionContext& ctx, core::ActionArg arg) noexcept {
   if (pcm.frames == 0u || in == nullptr || in->kind != model::InstrumentKind::Sample) {
     return say(ctx, core::Severity::Info, "NO SAMPLE IN THIS INSTRUMENT");
   }
+  if (static_cast<EditOp>(arg) == EditOp::Compressor && ctx.model.samples->edit_stereo(slot)) {  // OS-STEREO S7: one signal only
+    return say(ctx, core::Severity::Info, kMakeMono);
+  }
   const SampleEditState& st = ctx.view.sedit;
   if (static_cast<EditOp>(arg) == EditOp::Crop && !(st.b > st.a && st.b - st.a < pcm.frames)) {
     return say(ctx, core::Severity::Info, st.b > st.a ? "THE SELECTION IS ALL OF IT" : "SELECT WHAT TO KEEP FIRST");
@@ -176,6 +180,9 @@ bool sedit_amiga(ActionContext& ctx, core::ActionArg arg) noexcept {
   const model::Instrument* in = ctx.model.project != nullptr ? ctx.model.project->instrument(slot) : nullptr;
   if (pcm.frames == 0u || in == nullptr || in->kind != model::InstrumentKind::Sample) {
     return say(ctx, core::Severity::Info, "NO SAMPLE IN THIS INSTRUMENT");
+  }
+  if (ctx.model.samples->edit_stereo(slot)) {  // OS-STEREO S7: the conversion makes one signal
+    return say(ctx, core::Severity::Info, kMakeMono);
   }
   const unsigned period = arg == 0 ? kAmigaPeriod8 : kAmigaPeriod16;
   if (in->sampler.sample_type == 1u || in->sampler.play_mode == 6u) {
@@ -246,7 +253,8 @@ bool sample_commit(ActionContext& ctx, core::ActionArg) noexcept {
     after.tune = static_cast<std::int8_t>(tune);
     after.rate = amiga_rate_hz(st.ready_period);
   }
-  if (!ctx.samples->edit_commit(slot, st.staged, st.staged_frames, before, after)) {
+  std::int16_t* const side = st.ready_stereo && st.staged != nullptr ? st.staged + ((st.staged_frames + 1u) & ~1u) : nullptr;  // OS-STEREO (d): S behind M in the same buffer
+  if (!ctx.samples->edit_commit(slot, st.staged, st.staged_frames, before, after, side)) {
     return say(ctx, core::Severity::Warn, "THE EDIT COULD NOT BE KEPT");
   }
   model::Instrument edited = *in;

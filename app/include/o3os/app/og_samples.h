@@ -119,8 +119,10 @@ constexpr std::uint8_t unity_level(audio::LevelLaw law) noexcept { return law ==
 // less than one window, or no PCM): the slot then stays silent. `approximated` (when not null) is set for a beat slice whose table was not given. `slice_table` (when not null) is where slice_table_samples(in) samples are written, 2-byte aligned
 // and at an even index of the arena (4-byte aligned) when it is the arena; a beat slice instrument is bound to it. `law` turns the instrument's volume into
 // SampleDesc::gain (main loop: calls level_gain_q16).
+// OS-STEREO (c): `side` (when not null) is the sample's S (at pcm + even(frames) in its arena block): the descriptor gets st_off = side - pcm when the instrument's stereo flag is set and its play mode plays forward
+// (one shot, forward loop, slice, beat slice); the voices read it at a note's start (VoicePool::st_start).
 audio::SampleDesc make_sample_desc(const model::Instrument& in, const std::int16_t* pcm, std::uint32_t frames, bool* approximated, std::int16_t* slice_table = nullptr,
-                                   audio::LevelLaw law = audio::LevelLaw::Og12) noexcept;
+                                   audio::LevelLaw law = audio::LevelLaw::Og12, const std::int16_t* side = nullptr) noexcept;
 
 // Does make_sample_desc read instrument parameter `field` (model::instrument_param): the voice, filter and envelope fields it turns into the descriptor's gain, pan, tune, filter
 // and modulators (OS-LIVEP; OS-MOD: the amp, pan, cutoff and finetune slots; OS-GRAN: the wavetable and granular position slots). An edit of one must reach the engine's descriptor of the slot

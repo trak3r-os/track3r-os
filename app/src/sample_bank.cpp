@@ -404,18 +404,18 @@ bool SampleBank::take_commit(unsigned slot, std::uint32_t offset, std::uint32_t 
 
 // ---- The edit history --------------------------------------------------------------------------------------------------------------------
 
-bool SampleBank::alive(const std::int16_t* p) const noexcept {
+bool SampleBank::alive(const std::int16_t* p, bool history) const noexcept {
   for (const SampleBankMem::Slot& s : mem_->slots) {
     if (s.pcm == p || s.bound == p) {
       return true;
     }
   }
-  for (unsigned i = 0; i < undo_n_; ++i) {
+  for (unsigned i = 0; history && i < undo_n_; ++i) {
     if (mem_->undo[i].pcm == p) {
       return true;
     }
   }
-  for (unsigned i = 0; i < redo_n_; ++i) {
+  for (unsigned i = 0; history && i < redo_n_; ++i) {
     if (mem_->redo[i].pcm == p) {
       return true;
     }
@@ -442,23 +442,38 @@ void SampleBank::set_audio(unsigned slot, std::int16_t* pcm, std::uint32_t frame
   request_rebind(slot);
 }
 
-std::int16_t* SampleBank::edit_begin(unsigned slot, std::uint32_t frames) noexcept {
-  if (mem_ == nullptr || slot >= kSlots || frames == 0u || mem_->slots[slot].pcm == nullptr) {
+namespace {
+// The samples a pool buffer needs for a result of `frames`: a stereo result is M then S, each even(frames) long (OS-STEREO (d), the layout of commit_load).
+std::uint32_t pool_need(std::uint32_t frames, bool stereo) noexcept { return stereo ? 2u * ((frames + 1u) & ~1u) : frames; }
+}  // namespace
+
+std::int16_t* SampleBank::edit_begin(unsigned slot, std::uint32_t frames, bool stereo) noexcept {
+  if (mem_ == nullptr || slot >= kSlots || frames == 0u || mem_->slots[slot].pcm == nullptr || frames > 0x7FFFFFFFu / 2u) {
     return nullptr;
   }
+  const std::uint32_t need = pool_need(frames, stereo);
+  const unsigned keep_slot = hist_slot_;  // a refusal leaves the history as it was (the slot switch below is undone)
+  const unsigned keep_undo = undo_n_;
+  const unsigned keep_redo = redo_n_;
   if (hist_slot_ != slot) {  // another slot: its history starts over (the audio of both stays as it is)
     hist_slot_ = slot;
     undo_n_ = 0;
     redo_n_ = 0;
   }
+  // A spare that is the last block of the arena grows in place by what it lacks (a spare made for a mono result may be asked for a stereo one: the arena has no free, this is the one block it can lengthen).
+  auto grows = [&](unsigned i) noexcept {
+    const std::uint32_t want = (need + 1u) & ~1u;
+    return mem_->spare_cap[i] < want && mem_->spare[i] + mem_->spare_cap[i] == arena_ + used_ && arena_ != nullptr && want - mem_->spare_cap[i] <= free_samples() && !wav_file_.is_open();
+  };
   for (;;) {
     for (unsigned i = 0; i < spare_n_; ++i) {
-      if (mem_->spare_cap[i] >= frames && !alive(mem_->spare[i])) {
+      if (mem_->spare_cap[i] >= need && !alive(mem_->spare[i])) {
         return mem_->spare[i];
       }
     }
     if (spare_n_ < kSpares) {
-      const std::uint32_t cap = frames > mem_->slots[slot].frames ? frames : mem_->slots[slot].frames;  // every later edit is no longer than the sample is now
+      const std::uint32_t now = pool_need(mem_->slots[slot].frames, stereo);
+      const std::uint32_t cap = need > now ? need : now;  // every later edit is no longer than the sample is now (a stereo one takes 2 x: both blocks are one buffer; a mono result of a stereo sample takes 1 x)
       std::int16_t* p = alloc(cap);
       if (p != nullptr) {
         mem_->spare[spare_n_] = p;
@@ -467,28 +482,49 @@ std::int16_t* SampleBank::edit_begin(unsigned slot, std::uint32_t frames) noexce
         return p;
       }
     }
-    if (undo_n_ != 0u) {
+    for (unsigned i = 0; i < spare_n_; ++i) {
+      if (grows(i) && !alive(mem_->spare[i])) {
+        std::int16_t* const p = alloc(((need + 1u) & ~1u) - mem_->spare_cap[i]);  // the block right behind this spare (grows() checked it)
+        if (p != nullptr) {
+          mem_->spare_cap[i] = (need + 1u) & ~1u;
+          return mem_->spare[i];
+        }
+      }
+    }
+    // Nothing fits. Dropping history helps only when it frees a spare that is, or can grow, big enough: else the refusal must leave the history as it was.
+    bool helps = false;
+    for (unsigned i = 0; i < spare_n_ && !helps; ++i) {
+      helps = (mem_->spare_cap[i] >= need || grows(i)) && !alive(mem_->spare[i], false);
+    }
+    if (helps && undo_n_ != 0u) {
       drop_oldest_undo();  // its buffer, if it was one of ours, is free now
-    } else if (redo_n_ != 0u) {
+    } else if (helps && redo_n_ != 0u) {
       redo_n_ = 0;  // the edit would clear them anyway
     } else {
+      hist_slot_ = keep_slot;
+      undo_n_ = keep_undo;
+      redo_n_ = keep_redo;
       return nullptr;
     }
   }
 }
 
-bool SampleBank::edit_commit(unsigned slot, std::int16_t* buf, std::uint32_t frames, const PointsRec& before, const PointsRec& after) noexcept {
+bool SampleBank::edit_commit(unsigned slot, std::int16_t* buf, std::uint32_t frames, const PointsRec& before, const PointsRec& after, std::int16_t* side) noexcept {
   bool ours = false;
-  for (unsigned i = 0; i < spare_n_; ++i) {
-    ours = ours || (mem_->spare[i] == buf && mem_->spare_cap[i] >= frames);
+  if (frames > 0x7FFFFFFFu / 2u) {
+    return false;
   }
-  if (slot != hist_slot_ || !ours || frames == 0u || alive(buf)) {
+  for (unsigned i = 0; i < spare_n_; ++i) {
+    ours = ours || (mem_->spare[i] == buf && mem_->spare_cap[i] >= pool_need(frames, side != nullptr));
+  }
+  // A stereo result is one block: S lies right behind M inside the same buffer (else it is not S, and nothing is committed: both blocks swap or neither).
+  if (slot != hist_slot_ || !ours || frames == 0u || alive(buf) || (side != nullptr && side != buf + ((frames + 1u) & ~1u))) {
     return false;
   }
   SampleBankMem::Step step;
   step.pcm = mem_->slots[slot].pcm;
   step.frames = mem_->slots[slot].frames;
-  step.side = mem_->slots[slot].side;  // the edit's result is mono (S goes with the version it belongs to, and comes back with its undo; slice (d) edits both blocks)
+  step.side = mem_->slots[slot].side;  // the version being left keeps its S (it comes back with its undo); a mono result (side nullptr) has none
   step.before = before;
   step.after = after;
   redo_n_ = 0;
@@ -496,7 +532,7 @@ bool SampleBank::edit_commit(unsigned slot, std::int16_t* buf, std::uint32_t fra
     drop_oldest_undo();
   }
   mem_->undo[undo_n_++] = step;
-  set_audio(slot, buf, frames, nullptr);
+  set_audio(slot, buf, frames, side);  // M and S in one call: one rebind, one descriptor (no frame with M new and S old)
   return true;
 }
 
@@ -647,7 +683,7 @@ void SampleBank::rebind_now(unsigned slot) noexcept {
       table = s.table;
     }
     bool approximated = false;
-    d = make_sample_desc(*in, s.pcm, s.frames, &approximated, table, law_);
+    d = make_sample_desc(*in, s.pcm, s.frames, &approximated, table, law_, s.side);
     d.engine = engine_for(slot, *in);
   }
   voices_->set_sample(slot, d);
@@ -749,7 +785,7 @@ bool SampleBank::stage_step(std::uint64_t now_ms, bool params_idle) noexcept {
       table = s.table != nullptr ? reinterpret_cast<std::int16_t*>(mem_->stage.table) : nullptr;  // built in the cell: the render copies it over the slot's own table with the descriptor
     }
     bool approximated = false;
-    d = make_sample_desc(*in, s.pcm, s.frames, &approximated, table, law_);
+    d = make_sample_desc(*in, s.pcm, s.frames, &approximated, table, law_, s.side);
     d.engine = engine_for(slot, *in);
     if (d.slices != nullptr) {
       dst = reinterpret_cast<std::uint16_t*>(s.table);

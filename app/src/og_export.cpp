@@ -113,6 +113,7 @@ OgInstrumentPlan og_instrument_plan(const model::Project& project, const SampleB
       break;
   }
   r.result = OgInstrumentPlan::Result::Write;
+  c.stereo_mid += bank->edit_stereo(slot) ? 1u : 0u;  // OS-STEREO (e): the file holds M (r.pcm), as for a mono sample; S is counted, not written
   r.plan = check.plan;
   r.fine = check.fine;
   c.resampled += !check.plan.identity ? 1u : 0u;
@@ -133,6 +134,7 @@ unsigned og_loss_items(const formats::og::ExportDrops& d, OgLossItem (&items)[kO
       {d.no_sample_memory, "NO SAMPLE MEM", "INSTRUMENTS NOT WRITTEN: SAMPLE MEMORY NOT READY"},
       {d.bit_engine, "12/8 BIT", "12 / 8 BIT ENGINE INSTRUMENTS (NOT WRITTEN)"},
       {d.amiga_engine, "AMIGA", "AMIGA ENGINE INSTRUMENTS (ENGINE NOT KEPT)"},
+      {d.stereo_mid, "STEREO", "STEREO INSTRUMENTS (MID WRITTEN, SIDE NOT KEPT)"},
       {d.pcm_too_long, "TOO LONG", "INSTRUMENTS TOO LONG FOR A FILE (NOT WRITTEN)"},
       {d.levels_clamped, "CLAMPED", "LEVELS CLAMPED (LOUDER THAN PLAYED)"},
       {d.module_instruments, "MODULES", "MODULE INSTRUMENTS"},

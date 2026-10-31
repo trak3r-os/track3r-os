@@ -10,8 +10,10 @@
 #include <o3os/app/sample_edit_job.h>
 #include <o3os/app/wave_math.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -698,4 +700,195 @@ TEST_CASE("sample dsp: no warm-up unless a Filter or Compressor range starts at 
   CHECK(at.warm_from == 500u);
   set_loop_warmup(at, n, 500, 90000, kRate);  // a loop end past the sample is held to it
   CHECK(at.warm_from + at.warm_n == n);
+}
+
+// ---- OS-STEREO step 2, slice (d): the job over both blocks of a stereo sample (decision S7) ------------------------------------------------------------
+
+namespace {
+
+// A stereo fixture: M and S as the loader makes them (S = L - M), from a left and a right that differ in level and in DC; both blocks inside int16 with room to spare.
+struct StereoFixture {
+  std::uint32_t n;
+  std::vector<std::int16_t> m, s, l, r;
+  explicit StereoFixture(std::uint32_t frames, int amp_l = 9000, int amp_r = 4000) : n(frames), m(frames), s(frames), l(frames), r(frames) {
+    for (std::uint32_t i = 0; i < frames; ++i) {
+      l[i] = static_cast<std::int16_t>(std::lround(amp_l * std::sin(0.05 * i + 0.3)) + 700);
+      r[i] = static_cast<std::int16_t>(std::lround(amp_r * std::sin(0.031 * i + 1.1)) - 300);
+      m[i] = static_cast<std::int16_t>((l[i] + r[i]) / 2);
+      s[i] = static_cast<std::int16_t>(l[i] - m[i]);
+    }
+  }
+};
+
+struct StereoOut {
+  std::vector<std::int16_t> m, s;
+  unsigned steps = 0;
+  bool unchanged = false;
+  bool held = false;
+  bool began = false;
+  EditSpec spec;
+};
+
+StereoOut run_stereo_job(const EditSpec& in, const StereoFixture& f, std::uint32_t budget_us) {
+  StereoOut o;
+  const std::uint32_t total = edit_result_frames(in, f.n);
+  o.m.assign(total, 0x5A5A);
+  o.s.assign(total, 0x5A5A);
+  SampleEditJob job;
+  o.began = job.begin(in, f.m.data(), f.n, o.m.data(), "ST", f.s.data(), o.s.data());
+  if (!o.began) {
+    return o;
+  }
+  unsigned last = 0;
+  while (job.step(budget_us) == o3os::core::JobStatus::Running && o.steps < 1000000u) {
+    CHECK(job.progress() >= last);  // never goes back, also when the pass over S starts
+    last = job.progress();
+    ++o.steps;
+  }
+  CHECK(job.progress() == o3os::core::kJobProgressMax);
+  o.unchanged = job.unchanged();
+  o.held = job.held();
+  o.spec = job.spec();
+  return o;
+}
+
+}  // namespace
+
+TEST_CASE("sample edit job, stereo: Crop, Reverse, the fades and Amplify do the same to M and to S, in steps of any size; L and R follow (S7)") {
+  const StereoFixture f(6001);  // odd: S sits at even(frames) in the sample bank, the job sees two plain blocks
+  for (const EditOp op : {EditOp::Crop, EditOp::Reverse, EditOp::FadeIn, EditOp::FadeOut, EditOp::Amplify}) {
+    const EditSpec spec = make_spec(op, f.n, 1500, 4500, 160);
+    for (const std::uint32_t budget : {1u, 37u, 100000u}) {
+      const StereoOut o = run_stereo_job(spec, f, budget);
+      NEED(o.began);
+      CHECK(o.m == run(spec, f.m));
+      CHECK(o.s == run(spec, f.s));
+      CHECK_FALSE(o.unchanged);
+    }
+    // L = M + S and R = M - S of the result against the edit of the file's own channels: exact for the copies, within a few LSB (the roundings of two blocks) for the scalings
+    const StereoOut o = run_stereo_job(spec, f, 100000);
+    const std::vector<std::int16_t> el = run(spec, f.l);
+    const std::vector<std::int16_t> er = run(spec, f.r);
+    int worst = 0;
+    for (std::size_t i = 0; i < o.m.size(); ++i) {
+      const int dl = std::abs(o.m[i] + o.s[i] - el[i]);
+      const int dr = std::abs(o.m[i] - o.s[i] - er[i]);
+      worst = std::max(worst, std::max(dl, dr));
+    }
+    const bool exact = op == EditOp::Crop || op == EditOp::Reverse;
+    CHECK(worst <= (exact ? 1 : 3));  // (R is stored 1 LSB off when L + R is odd)
+  }
+  // The sources are never written.
+  const StereoFixture g(6001);
+  CHECK(f.m == g.m);
+  CHECK(f.s == g.s);
+}
+
+TEST_CASE("sample edit job, stereo: Normalise takes one factor from the larger of |L| and |R| and applies it to both blocks, the balance is kept (S7)") {
+  const StereoFixture f(5000, 12000, 3000);
+  const EditSpec spec = make_spec(EditOp::Normalise, f.n, 0, f.n, 100);
+  std::uint32_t peak_lr = 0;
+  for (std::uint32_t i = 0; i < f.n; ++i) {
+    peak_lr = std::max<std::uint32_t>(peak_lr, static_cast<std::uint32_t>(std::max(std::abs(f.m[i] + f.s[i]), std::abs(f.m[i] - f.s[i]))));
+  }
+  CHECK(scan_peak_ms(f.m.data(), f.s.data(), f.n, 0, f.n) == peak_lr);
+  CHECK(peak_lr > scan_peak(f.m.data(), f.n, 0, f.n));  // the peak is not M's: M alone would have been normalised too loud
+  const StereoOut o = run_stereo_job(spec, f, 777);
+  NEED(o.began);
+  const std::uint32_t gain = normalise_gain_q16(peak_lr);
+  CHECK(o.spec.gain_q16 == gain);
+  EditSpec used = spec;
+  used.gain_q16 = gain;
+  CHECK(o.m == run(used, f.m));
+  CHECK(o.s == run(used, f.s));
+  // The loudest of L and R reaches full scale (to the roundings of the two blocks) and nothing is above it.
+  int peak_out = 0;
+  for (std::size_t i = 0; i < o.m.size(); ++i) {
+    peak_out = std::max(peak_out, std::max(std::abs(o.m[i] + o.s[i]), std::abs(o.m[i] - o.s[i])));
+  }
+  CHECK(peak_out >= 32765);
+  CHECK(peak_out <= 32768);
+  // A stereo sample that is at full scale in L or R has nothing to do, even when M alone is quiet.
+  StereoFixture hot(2000, 3000, 1000);
+  hot.m[10] = 16000;
+  hot.s[10] = 16767;  // L = 32767, R = -767
+  const StereoOut h = run_stereo_job(make_spec(EditOp::Normalise, 2000, 0, 2000, 100), hot, 100000);
+  NEED(h.began);
+  CHECK(h.unchanged);
+}
+
+TEST_CASE("sample edit job, stereo: DC remove and Filter run per block, the offset and the state of each block its own (S7)") {
+  const StereoFixture f(8000);
+  // DC remove: M and S each lose their own mean; L and R lose theirs.
+  const EditSpec dc = make_spec(EditOp::DcRemove, f.n, 0, f.n, 100);
+  DcScan sm;
+  DcScan ss;
+  scan_dc(f.m.data(), f.n, 0, f.n, sm);
+  scan_dc(f.s.data(), f.n, 0, f.n, ss);
+  const std::int32_t dm = dc_offset(sm, f.n);
+  const std::int32_t ds = dc_offset(ss, f.n);
+  CHECK(dm != 0);
+  CHECK(ds != 0);
+  CHECK(dm != ds);
+  const StereoOut o = run_stereo_job(dc, f, 500);
+  NEED(o.began);
+  CHECK_FALSE(o.unchanged);
+  EditSpec em = dc;
+  em.dc = dm;
+  EditSpec es = dc;
+  es.dc = ds;
+  CHECK(o.m == run(em, f.m));
+  CHECK(o.s == run(es, f.s));
+  double mean_l = 0;
+  double mean_r = 0;
+  for (std::size_t i = 0; i < o.m.size(); ++i) {
+    mean_l += o.m[i] + o.s[i];
+    mean_r += o.m[i] - o.s[i];
+  }
+  CHECK(std::abs(mean_l / static_cast<double>(o.m.size())) < 2.0);
+  CHECK(std::abs(mean_r / static_cast<double>(o.m.size())) < 2.0);
+  // No offset in either block: unchanged. An offset in S alone is not "nothing to do".
+  StereoFixture none(1000);
+  for (std::uint32_t i = 0; i < 1000; ++i) {
+    none.m[i] = static_cast<std::int16_t>(i % 2 == 0 ? 500 : -500);
+    none.s[i] = 0;
+  }
+  CHECK(run_stereo_job(make_spec(EditOp::DcRemove, 1000, 0, 1000, 100), none, 100000).unchanged);
+  for (std::uint32_t i = 0; i < 1000; ++i) {
+    none.s[i] = static_cast<std::int16_t>(i % 2 == 0 ? 300 : -100);  // mean +100
+  }
+  CHECK_FALSE(run_stereo_job(make_spec(EditOp::DcRemove, 1000, 0, 1000, 100), none, 100000).unchanged);
+  // Filter: each block through a filter that starts from rest (S is not a continuation of M).
+  const EditSpec fl = make_filter_spec(f.n, 1000, 7000, kRate, FilterType::LowPass, 700, 9);
+  for (const std::uint32_t budget : {3u, 400u}) {
+    const StereoOut x = run_stereo_job(fl, f, budget);
+    NEED(x.began);
+    CHECK(x.m == run(fl, f.m));
+    CHECK(x.s == run(fl, f.s));
+  }
+  // The same with the loop warm-up of OS-A9-SEAM (the range starts at the loop start): the state is warmed per block as well.
+  EditSpec wl = make_filter_spec(f.n, 0, f.n, kRate, FilterType::HighPass, 900, 7);
+  set_loop_warmup(wl, f.n, 0, f.n, kRate);
+  CHECK(wl.warm_n > 0u);
+  const StereoOut w = run_stereo_job(wl, f, 50);
+  NEED(w.began);
+  CHECK(w.m == run_job(wl, f.m, 50));
+  CHECK(w.s == run_job(wl, f.s, 50));
+}
+
+TEST_CASE("sample edit job, stereo: Compressor and Amiga are refused, and so is half a pair of blocks (S7)") {
+  const StereoFixture f(4000);
+  CHECK_FALSE(run_stereo_job(make_comp_spec(f.n, 0, f.n, kRate, -20, 60, 5, 80, 0, true, false), f, 100).began);
+  CHECK_FALSE(run_stereo_job(make_amiga_spec(f.n, 428, false, false, 44100), f, 100).began);
+  std::vector<std::int16_t> out(f.n);
+  std::vector<std::int16_t> side(f.n);
+  SampleEditJob job;
+  const EditSpec amp = make_spec(EditOp::Amplify, f.n, 0, f.n, 150);
+  CHECK_FALSE(job.begin(amp, f.m.data(), f.n, out.data(), "X", f.s.data(), nullptr));
+  CHECK_FALSE(job.begin(amp, f.m.data(), f.n, out.data(), "X", nullptr, side.data()));
+  CHECK(job.begin(amp, f.m.data(), f.n, out.data(), "X", f.s.data(), side.data()));
+  CHECK(job.stereo());
+  // A mono begin after a stereo job is mono again (the bank reuses its one job).
+  CHECK(job.begin(amp, f.m.data(), f.n, out.data(), "X"));
+  CHECK_FALSE(job.stereo());
 }

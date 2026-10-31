@@ -1843,6 +1843,59 @@ TEST_CASE("og export C2c: with no sample memory every sample instrument is skipp
   CHECK(rig.saves->og_state() == OgState::Done);
 }
 
+// OS-STEREO (e): a stereo instrument is written as its mid M, a mono .pti; the OG format has no place for S, so it is counted (and told in the loss line), and nothing else of the export changes.
+TEST_CASE("og export, OS-STEREO (e): a stereo instrument writes the very files of the mono one and is counted as MID WRITTEN") {
+  const Fixture f = make_fixture(1);
+  const std::vector<std::int16_t> m = saw(500, 7);
+  struct Out {
+    std::map<std::string, Bytes> files;
+    og_ns::ExportDrops drops;
+  };
+  const auto run = [&](bool stereo) -> Out {
+    import_fixture(f, export_arena());
+    Audio au(export_arena());
+    au.add(0, "Same", m, 44100);
+    au.add(1, "Other", saw(300, 3), 44100);
+    if (stereo) {  // slot 0 again, with a side block behind the same M, and the instrument's STEREO row on
+      const std::uint32_t frames = static_cast<std::uint32_t>(m.size());
+      const std::uint32_t even = (frames + 1u) & ~1u;
+      std::uint32_t cap = 0;
+      std::int16_t* p = au.bank.reserve(cap);
+      CHECK(p != nullptr);
+      std::copy(m.begin(), m.end(), p);
+      for (std::uint32_t i = 0; i < frames; ++i) {
+        p[even + i] = static_cast<std::int16_t>(-static_cast<int>(i % 7) - 1);
+      }
+      model::Instrument in = *export_arena().project.instrument(0);
+      in.stereo = 1;
+      CHECK(export_arena().project.set_instrument(0, in) == model::Status::Ok);
+      CHECK(au.bank.commit_load(0, p, frames, p + even));
+      au.bank.rebind_now(0);
+      CHECK(au.bank.edit_stereo(0));
+    }
+    Rig rig;
+    CHECK(rig.start(export_arena().project, "Projects/Song", &au.bank) == Start::Started);
+    Out out;
+    out.drops = rig.saves->og_drops();
+    CHECK(rig.run());
+    CHECK(rig.saves->og_state() == OgState::Done);
+    out.files = rig.card.files;
+    return out;
+  };
+  const Out mono = run(false);
+  const Out st = run(true);
+  CHECK(mono.drops.stereo_mid == 0u);
+  CHECK(st.drops.stereo_mid == 1u);
+  CHECK(st.files == mono.files);  // every file, byte for byte: the .pti of the stereo instrument is its mid
+  CHECK_FALSE(mono.drops.any_lost());
+  CHECK(st.drops.any_lost());
+  char line[48];
+  CHECK_FALSE(app::og_loss_line(mono.drops, line, sizeof line));
+  CHECK(app::og_loss_line(st.drops, line, sizeof line));
+  CHECK(std::string(line) == "1 STEREO");
+  CHECK(app::og_loss_signature(st.drops) != app::og_loss_signature(mono.drops));
+}
+
 TEST_CASE("og export C2c: the loss line names every C2b counter, fits the strip, cuts with .. and changes its signature with any counter") {
   og_ns::ExportDrops d;
   char line[48];

@@ -271,6 +271,11 @@ class SampleBank {
   Pcm pcm(unsigned slot) const noexcept;
   // OS-STEREO step 2: whether the slot's audio also has a side signal S (decision S4 of docs/specs/OS-STEREO.md: an instrument plays stereo only with the flag AND S). The STEREO row of the source page asks it.
   bool has_side(unsigned slot) const noexcept { return mem_ != nullptr && slot < kSlots && mem_->slots[slot].pcm != nullptr && mem_->slots[slot].side != nullptr; }
+  // OS-STEREO (d), S7: the editor treats the slot's sample as stereo when it has S AND the instrument's STEREO row says STEREO; an instrument set to MONO is edited as mono (the result drops S, its undo brings it back).
+  bool edit_stereo(unsigned slot) const noexcept {
+    const model::Instrument* in = has_side(slot) && project_ != nullptr ? project_->project.instrument(slot) : nullptr;
+    return in != nullptr && in->stereo != 0u;
+  }
   // Rule 4 of the risk review, the load half: every sample instrument of the document whose stereo flag is set and whose slot has no S gets the flag cleared (the document's own write, no undo unit: a load has
   // just made the document). Returns how many were cleared. The OgSampleLoader calls it when a project's samples are in.
   unsigned reconcile_stereo() noexcept;
@@ -387,10 +392,13 @@ class SampleBank {
   static constexpr unsigned kHistory = SampleBankMem::kHistory;
   static constexpr unsigned kSpares = kHistory + 1;
   // A buffer of `frames` for an edit's result, or nullptr when the arena has no room for one more copy and every buffer is in use.
-  std::int16_t* edit_begin(unsigned slot, std::uint32_t frames) noexcept;
+  // OS-STEREO (d): `stereo` asks for a buffer of 2 x even(frames) (S3's layout: M at buf[i], S at buf[even(frames) + i], the one block commit_load takes): the edit writes both, and edit_commit
+  // swaps them in together. A pool buffer made for a mono sample is too small for a stereo result and stays unused for it; with no room the answer is nullptr and nothing has changed.
+  std::int16_t* edit_begin(unsigned slot, std::uint32_t frames, bool stereo = false) noexcept;
   // The edit written into `buf` (from edit_begin) is `frames` long and is the slot's audio now; `before` and `after` are the instrument's points and slices around it
   // (what undo and redo put back). The handover is requested. False (nothing changed) when `buf` is not a free buffer of the session.
-  bool edit_commit(unsigned slot, std::int16_t* buf, std::uint32_t frames, const PointsRec& before, const PointsRec& after) noexcept;
+  // `side` (stereo): S of the result, which must be buf + even(frames); the slot's M and S change in one call (one rebind, one descriptor). nullptr: a mono result, which drops the slot's S (its undo brings it back).
+  bool edit_commit(unsigned slot, std::int16_t* buf, std::uint32_t frames, const PointsRec& before, const PointsRec& after, std::int16_t* side = nullptr) noexcept;
   // One step back / forward: the slot's audio is the other version and `restore` the points to give the instrument. False when there is none.
   bool edit_undo(unsigned slot, PointsRec& restore) noexcept;
   bool edit_redo(unsigned slot, PointsRec& restore) noexcept;
@@ -502,7 +510,7 @@ class SampleBank {
   bool quiet_ = false;              // the engine was quiet at the last poll ...
   std::uint64_t quiet_since_ = 0;   // ... since this uptime
   std::uint32_t rebinds_ = 0;
-  bool alive(const std::int16_t* p) const noexcept;
+  bool alive(const std::int16_t* p, bool history = true) const noexcept;  // history false: the undo and redo steps do not count (what stays when they are dropped)
   void drop_oldest_undo() noexcept;
   void set_audio(unsigned slot, std::int16_t* pcm, std::uint32_t frames, std::int16_t* side = nullptr) noexcept;
   bool reclaim(unsigned slot) noexcept;  // RECLAIM: true when the stale block's room was won back (and the slot rebound), the mark done with

@@ -118,6 +118,12 @@ void kernel_table() {
       best_ns(kReps, kInner, [&] { fresh(); kernel::gain_pan2(StripLane{x1, steady, unity, GainRamp{30000, 30000}}, StripLane{x2, steady, GainRamp{20000, 20000}, unity}, acc, acc2, kB); g_sink += acc[3]; }));
   row("2 x level + centre (steady)", best_ns(kReps, kInner, [&] { fresh(); kernel::gain_mac2_ref(StripLane{x1, steady, unity, unity}, StripLane{x2, steady, unity, unity}, acc3, kB); g_sink += acc3[3]; }),
       best_ns(kReps, kInner, [&] { fresh(); kernel::gain_mac2(StripLane{x1, steady, unity, unity}, StripLane{x2, steady, unity, unity}, acc3, kB); g_sink += acc3[3]; }));
+  // OS-STEREO (f): the side signal's pass (L += S, R -= S; the block is only read, so no fresh copy): the steady loop and the ramped one
+  alignas(8) std::int32_t side_rows[2][kB] = {};  // MAIN's two accumulators are one array of two rows (the steady loop's condition)
+  row("side pass (steady)", best_ns(kReps, kInner, [&] { kernel::gain_pan_st_ref(x1, steady, unity, GainRamp{30000, 30000}, side_rows[0], side_rows[1], kB); g_sink += side_rows[0][3]; }),
+      best_ns(kReps, kInner, [&] { kernel::gain_pan_st(x1, steady, unity, GainRamp{30000, 30000}, side_rows[0], side_rows[1], kB); g_sink += side_rows[0][3]; }));
+  row("side pass (ramping)", best_ns(kReps, kInner, [&] { kernel::gain_pan_st_ref(x1, down, up, GainRamp{65536, 0}, side_rows[0], side_rows[1], kB); g_sink += side_rows[0][3]; }),
+      best_ns(kReps, kInner, [&] { kernel::gain_pan_st(x1, down, up, GainRamp{65536, 0}, side_rows[0], side_rows[1], kB); g_sink += side_rows[0][3]; }));
   {
     // the cost of the copy alone, to subtract by eye from the strip rows
     const double copy = best_ns(kReps, kInner, [&] { fresh(); g_sink += x1[3]; });

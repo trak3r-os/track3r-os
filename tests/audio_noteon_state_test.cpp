@@ -41,6 +41,11 @@ struct NoteOnStateTest {  // (friend of VoicePool: no code)
       std::memcpy(&c, &p.v_[i], sizeof c);
       c.data = c.data == nullptr ? nullptr : reinterpret_cast<const std::int16_t*>(static_cast<std::uintptr_t>(c.data - base) + 1u);
       c.env = c.env == nullptr ? nullptr : reinterpret_cast<const AmpEnvelope*>(std::uintptr_t{1});
+      // OS-STEREO (g) put `st` next to `playing` and `releasing` in the last padding byte: swap the two bytes back so that the image hashed is the layout the expected values were captured from
+      unsigned char* const raw = reinterpret_cast<unsigned char*>(&c);
+      const unsigned char moved = raw[offsetof(VoicePool::Voice, st)];
+      raw[offsetof(VoicePool::Voice, st)] = raw[offsetof(VoicePool::Voice, releasing)];
+      raw[offsetof(VoicePool::Voice, releasing)] = moved;
       h = mix(h, &c, sizeof c);
     }
     h = mix(h, &p.gated_, sizeof p.gated_);

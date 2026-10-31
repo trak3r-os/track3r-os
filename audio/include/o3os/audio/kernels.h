@@ -122,6 +122,17 @@ O3OS_AUDIO_HOT void sat_clear_main(std::int16_t* dst_l, std::int16_t* dst_r, std
 void acc_to_float_main_ref(float* dst_l, float* dst_r, std::int32_t* acc_l, std::int32_t* acc_r, std::int32_t* acc_c, std::uint32_t n) noexcept;
 O3OS_AUDIO_HOT void acc_to_float_main(float* dst_l, float* dst_r, std::int32_t* acc_l, std::int32_t* acc_r, std::int32_t* acc_c, std::uint32_t n) noexcept;
 
+// ---- the side signal of a stereo track (OS-STEREO (c)) -----------------------------------------------------------------------
+// One track's S through its strip into MAIN: y[i] = gain(s[i], level) (the post-fader S, rounded to Q15 as gain_ref rounds the track's M, so S follows the strip's level ramp), then
+//     acc_l[i] += Q19 product of y[i] with `left`        (L = M + S)
+//     acc_r[i] -= Q19 product of y[i] with `right`       (R = M - S; the balance law's two gains: the louder side stays at unity)
+// `s` is only read. A closed side is a ramp {0, 0}. With S = 0 nothing is added: a stereo voice with no side signal is the mono render bit for bit. The right side's product is that of the NEGATED gain
+// (floor(-y g / 2^16)). gain_pan_st_ref is the specification (scalar), gain_pan_st the paired loop on the DSP instructions, bit for bit; the production one is in flash (O3OS_AUDIO_COLD: one call per track that
+// has S in the block, hot.h), tests/audio_stereo_test.cpp holds the two to each other. OS-STEREO (f): the steady block (the three gains constant) takes a loop of its own, LDRD / STRD on the accumulators, when
+// acc_r is acc_l + kBlock and acc_l is 8-byte aligned (MAIN's two accumulators are one array of two rows); any other call takes the ramped loop (the same numbers, slower).
+void gain_pan_st_ref(const std::int16_t* s, GainRamp level, GainRamp left, GainRamp right, std::int32_t* acc_l, std::int32_t* acc_r, std::uint32_t n) noexcept;
+O3OS_AUDIO_COLD void gain_pan_st(const std::int16_t* s, GainRamp level, GainRamp left, GainRamp right, std::int32_t* acc_l, std::int32_t* acc_r, std::uint32_t n) noexcept;
+
 // ---- mono sum ---------------------------------------------------------------------------------------------------------------
 // dst[i] = (l[i] + r[i] + 1) >> 1: the mono mix of a stereo pair (a send of the input, the spectrum tap, OUT MODE, a mono take), rounded half up.
 void mono_mix_ref(std::int16_t* dst, const std::int16_t* l, const std::int16_t* r, std::uint32_t n) noexcept;

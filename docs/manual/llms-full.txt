@@ -719,6 +719,8 @@ To set a level or a pan on the MIXER page, press `Left` or `Right` to pick the c
 
 Think of a mixing desk. Each track has a fader and a pan, and a set of switches for the buses it feeds. A bus is a shared sum. The buses are **MAIN** (the speakers), **CUE** (a second output for monitoring), **SND A** and **SND B** (the send effects), **REC** (what the recorder hears) and **USB** (the stems to the computer). New in track3r-os.
 
+A track is mono, one sound that the pan places between left and right, with one exception: a note of a **STEREO** instrument (see [Instrument](instrument.md)) brings a second signal, its side, which goes to **MAIN** only, through the same fader and pan, so that the speakers and the headphones hear the two channels of the file. The other buses, the sends and the track's USB stem carry the mix of the two. New in track3r-os.
+
 On **ROUTING**, a row is a source and a column is a bus. Put the cursor on a cell and turn the encoder up to route, down to remove the route. Example: route a kick to CUE as well as MAIN, and you hear it on the cue output too.
 
 Below the tracks are three more rows. **LINE IN** is the audio input. Its row has no USB cell. **RET A DELAY** and **RET B REVERB** are the returns of the two send effects, and each can go to MAIN, CUE or both. The last row, **OUT MODE**, is not a grid: turn the encoder up for **MAIN L / CUE R** (the speakers on the left, the cue on the right), down for **STEREO**. The header shows the mode as **OUT**. Delete puts back **STEREO**.
@@ -1421,7 +1423,7 @@ Start on Sample load. Put the cursor on a stereo file. Its name shows **ST** at 
 
 You should see the strip say what the file will load: **STEREO FILE LOADS: LEFT**, **STEREO FILE LOADS: RIGHT**, **STEREO FILE LOADS: STEREO (MID + SIDE)** or **STEREO FILE LOADS: MIX (L+R)/2**. **CH MIX** loads the mix of both channels, (left + right) / 2. **CH LEFT** and **CH RIGHT** load one channel alone, with no mixing.
 
-**STEREO** (new in the Community OS) loads the same mix as **CH MIX** and also keeps the difference between the channels, the side signal, next to it in sample memory. It takes twice the memory of a mono load and the instrument's **STEREO** row switches to **STEREO**. A project that is saved with such an instrument writes the sample as before, `samples/<name>.wav` (the mix, which any tool and any older version reads), plus `samples/<name>_s.wav` for the side signal. If the second file is missing or does not match when the project is opened, the instrument opens as a mono sample and the log says how many. If another instrument already has the name the second file would take, **STEREO** is refused (**STEREO REFUSED: SIDE FILE NAME TAKEN**), and a save of such a project writes that instrument as mono and says **STEREO SAVED MONO**. The voices do not play the side signal yet: a stereo instrument still sounds as the mix until stereo playback arrives.
+**STEREO** (new in the Community OS) loads the same mix as **CH MIX** and also keeps the difference between the channels, the side signal, next to it in sample memory. It takes twice the memory of a mono load and the instrument's **STEREO** row switches to **STEREO**. A project that is saved with such an instrument writes the sample as before, `samples/<name>.wav` (the mix, which any tool and any older version reads), plus `samples/<name>_s.wav` for the side signal. If the second file is missing or does not match when the project is opened, the instrument opens as a mono sample and the log says how many. If another instrument already has the name the second file would take, **STEREO** is refused (**STEREO REFUSED: SIDE FILE NAME TAKEN**), and a save of such a project writes that instrument as mono and says **STEREO SAVED MONO**. The instrument then plays in stereo (see the **STEREO** row in [Instrument](instrument.md): up to four voices at once, forward play modes, no filter or shaper on the note).
 
 The choice is not saved with the project. It lasts until the unit is switched off.
 
@@ -1429,7 +1431,7 @@ The choice is not saved with the project. It lasts until the unit is switched of
 
 ### Play a stereo file in stereo
 
-An instrument holds one channel, so a stereo file cannot play in stereo from one instrument. You can get the stereo image with two instruments and two tracks. Stereo instruments are planned, not built yet.
+With **CH MIX**, **CH LEFT** or **CH RIGHT** an instrument holds one channel, so it cannot play in stereo. You can get the stereo image with two instruments and two tracks, as below. With **STEREO** one instrument plays both channels (see above); the two-instrument way still works for the modes that do not play in stereo.
 
 Start on Sample load. Put the cursor on a stereo file.
 
@@ -1576,6 +1578,12 @@ The filter starts from silence at the first frame of the selection, so a selecti
 2. `Shift` + `F3` (**Q8**) switches the 8-bit option on and off for the next conversion. The line under the sample and the strip say **8-BIT ON** or **OFF**.
 
 The sample still plays at its original pitch.  Not yet checked on the unit.
+
+### Edit a stereo sample
+
+New in track3r-os. A sample loaded with **STEREO** on Sample load (its instrument's **STEREO** row reads **STEREO**) keeps its left and right sides, and the edit page works on both.  **CROP**, **REVERSE**, the fades and **AMP** do the same to both sides. **NORM** finds the loudest point of the left or the right side and scales both by the same amount, so the balance between them stays. **DC REM** and the **FILTER** treat each side on its own. All of it is one undo step, and `F8` brings back both sides.
+
+The **COMPRESSOR** and the Amiga conversion work on one signal only. On a stereo sample they refuse and the strip says **STEREO: MAKE MONO FIRST**: set the **STEREO** row of the instrument to **MONO**, then run them (the result is a mono sample, and `F8` brings the stereo one back).  A stereo edit needs room for both sides. When the sample memory has none, the strip says **NO ROOM FOR THE EDIT** and nothing changes; with the row on **MONO** the same edit needs half the room.  Not yet checked on the unit.
 
 ## Keys on this screen
 
@@ -3975,7 +3983,9 @@ A project saved by an earlier build can sound at a different level, and the stor
 
 The **PLAY ENGINE** row picks the engine for a sample: **Auto**, **Modern**, **Amiga**, **12-bit** or **8-bit**. **Auto** picks the Amiga engine for a **ONE SHOT** or **LOOP FWD** sample at the Paula rate, and the Modern engine for the rest. Paula is the Amiga's sound chip. Its rate here is 8,287 Hz (PAL) or 8,363 Hz (NTSC). The Amiga engine plays a sample as that chip does: it holds each value until the next one, and uses 8 bits of it. The **12-bit** and **8-bit** engines are the Modern engine with its output cut to 12 or 8 bits, and cap the **BIT DEPTH** row the same way.
 
-The **STEREO** row under it says whether a sample plays as a stereo pair: **MONO** or **STEREO**. This is new in track3r-os, and for now it only prepares the ground: no sample has a stereo load yet, so turning it to **STEREO** is refused with `STEREO NEEDS A STEREO LOAD`, and the row stays **MONO**. Nothing about the sound changes.
+The **STEREO** row under it says whether a sample plays as a stereo pair: **MONO** or **STEREO**. This is new in track3r-os. **STEREO** can only be chosen for a sample that was loaded with **STEREO** on Sample load (see [Sample load](sample_load.md)): on any other sample the row says `STEREO NEEDS A STEREO LOAD` and stays **MONO**. A **STEREO** instrument plays its two channels: the left output gets the mix plus the side signal, the right output the mix minus it, through the track's level and pan like any other sound.  A stereo note uses a little more of the unit's time than a mono one (about 0.8 percentage points of the audio budget each, not yet measured on the unit), so at most four voices play in stereo at once: the next one plays as the mix on both sides.
+
+A note plays in stereo when its play mode plays forward (**ONE SHOT**, **LOOP FWD**, **SLICE**, **BEAT SLICE**) on the Modern engine, with no filter, **OVERDRIVE**, **BIT DEPTH** or tremolo on it. Otherwise it plays the mix: a backward or ping-pong loop, a wavetable, a granular instrument, the Amiga engine, a note played in reverse, or any of those effects. If one of the effects comes on while a stereo note sounds, the side signal fades out over one audio block (about 1.5 ms) and stays off for that note; the next note is stereo again. A track with its fader closed or muted drops the side signal too, for the rest of that note. The track's own outputs stay mono: the send effects, the CUE and REC buses, the meters and the USB track stems carry the mix; the master, the headphones and the USB main pair carry the stereo image.  Turning the row over while a note sounds takes effect at the next stop.  Not yet checked on the unit.
 
 If you want to know more: a full-scale square wave on the Amiga engine peaks at +2.5 dB above its level. It matches a reference Amiga player on the host. Not yet checked on the unit.
 
@@ -4115,6 +4125,7 @@ You should see `INS 05 INIT - F8 UNDO`. Every row goes back to its default. The 
 
 1. On a sample instrument, press `Shift` + `F5` (**SAVE**). The strip runs `SAVE <name>` up to 100 %, then **DONE**.
 2. The file is `instruments/<NAME>.pti`. A second save never replaces the first; it becomes, for example, `KICK 2.pti`.
+   A **STEREO** instrument is saved as its mid, the mix of its two sides, in an ordinary mono `.pti` (the format has no place for the side signal), and the strip says **STEREO: MID WRITTEN, SIDE NOT KEPT**. A project export to the OG folder counts such instruments as **STEREO** among the things it leaves out.
 3. To load a file, press `F5` (**LOAD**) on an empty slot. Sample load shows the `.pti` files.
 4. Move the cursor to a file and press `F1` (**LOAD**). The Instrument screen comes back on the slot, with the instrument and its sound.
 

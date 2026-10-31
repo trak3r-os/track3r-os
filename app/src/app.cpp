@@ -2663,14 +2663,22 @@ void App::poll_sedit() noexcept {
   } else {
     spec = make_spec(st.op, pcm.frames, st.a, st.b, st.amp);
   }
-  std::int16_t* dst = samples_->edit_begin(slot, edit_result_frames(spec, pcm.frames));
-  if (dst == nullptr) {
-    say(core::Severity::Warn, "NO ROOM FOR THE EDIT");
+  // OS-STEREO (d), S7: a stereo sample is edited as two blocks into one pool buffer of 2 x (the two effects that act on one signal are refused at the key; a state that changed since is caught here)
+  const bool stereo = samples_->edit_stereo(slot) && pcm.side != nullptr;
+  if (stereo && (st.op == EditOp::Amiga || st.op == EditOp::Compressor)) {
+    say(core::Severity::Info, "STEREO: MAKE MONO FIRST");
     return;
   }
+  const std::uint32_t result = edit_result_frames(spec, pcm.frames);
+  std::int16_t* dst = samples_->edit_begin(slot, result, stereo);
+  if (dst == nullptr) {
+    say(core::Severity::Warn, "NO ROOM FOR THE EDIT");  // (nothing was started: the sample, both blocks, is as it was)
+    return;
+  }
+  std::int16_t* const dst_side = stereo ? dst + ((result + 1u) & ~1u) : nullptr;
   static constexpr const char* kNames[] = {"CROP", "NORMALISE", "REVERSE", "FADE IN", "FADE OUT", "AMPLIFY", "AMIGA 8287", "DC REMOVE", "FILTER", "COMPRESSOR"};
   const char* const label = st.op == EditOp::Amiga && st.period == kAmigaPeriod16 ? "AMIGA 16574" : kNames[static_cast<unsigned>(st.op)];
-  if (!samples_->edit_job().begin(spec, pcm.data, pcm.frames, dst, label)) {
+  if (!samples_->edit_job().begin(spec, pcm.data, pcm.frames, dst, label, stereo ? pcm.side : nullptr, dst_side)) {
     return;
   }
   const int job = session_.jobs.start(samples_->edit_job());
@@ -2704,6 +2712,7 @@ bool App::finish_edit(core::SlotState state) noexcept {
   st.staged_frames = samples_->edit_job().result_frames();
   st.ready_op = edit_op_;
   st.ready_slot = static_cast<std::uint8_t>(edit_target_);
+  st.ready_stereo = samples_->edit_job().stereo();
   st.ready_a = samples_->edit_job().spec().a;
   st.ready_b = samples_->edit_job().spec().b;
   st.ready_period = samples_->edit_job().spec().period;

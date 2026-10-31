@@ -21,6 +21,8 @@ To set a level or a pan on the MIXER page, press `Left` or `Right` to pick the c
 
 Think of a mixing desk. Each track has a fader and a pan, and a set of switches for the buses it feeds. A bus is a shared sum. The buses are **MAIN** (the speakers), **CUE** (a second output for monitoring), **SND A** and **SND B** (the send effects), **REC** (what the recorder hears) and **USB** (the stems to the computer). New in track3r-os. <!-- QA-MIX-029 -->
 
+A track is mono, one sound that the pan places between left and right, with one exception: a note of a **STEREO** instrument (see [Instrument](instrument.md)) brings a second signal, its side, which goes to **MAIN** only, through the same fader and pan, so that the speakers and the headphones hear the two channels of the file. The other buses, the sends and the track's USB stem carry the mix of the two. New in track3r-os. <!-- QA-INS-266 -->
+
 On **ROUTING**, a row is a source and a column is a bus. Put the cursor on a cell and turn the encoder up to route, down to remove the route. Example: route a kick to CUE as well as MAIN, and you hear it on the cue output too.
 
 Below the tracks are three more rows. **LINE IN** is the audio input. Its row has no USB cell. **RET A DELAY** and **RET B REVERB** are the returns of the two send effects, and each can go to MAIN, CUE or both. The last row, **OUT MODE**, is not a grid: turn the encoder up for **MAIN L / CUE R** (the speakers on the left, the cue on the right), down for **STEREO**. The header shows the mode as **OUT**. Delete puts back **STEREO**. <!-- QA-MIX-029 -->

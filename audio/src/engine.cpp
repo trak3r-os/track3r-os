@@ -73,6 +73,22 @@ void Engine::apply_pan_mods() noexcept {
   }
 }
 
+// OS-STEREO (c): S of the stereo voices to the graph, for the tracks of `mask` (the voices' side_mask) whose M is the voices' (not a module's or an Amiga voice's: S is dropped there, rule 9), and a null for every
+// track that had one in the last block and has none now. The tracks have no voice's S while the export or the gate says otherwise: the voices decide (they drop S when gated).
+void Engine::feed_sides(std::uint16_t mask) noexcept {
+  std::uint16_t fed = 0;
+  // (f): only the tracks that have S now or had it in the last block (side_fed_): every other track's side pointer is null already (feed_side's only writer is this loop), so the sixteen tracks'
+  // two module lookups and stores a block (about 0.4k cycles from flash) are the one or two that matter.
+  for (std::uint32_t todo = static_cast<std::uint32_t>(mask | side_fed_); todo != 0u; todo &= todo - 1u) {
+    const unsigned t = static_cast<unsigned>(__builtin_ctz(todo));
+    const bool other = (modules_ != nullptr && modules_->feed(t) != nullptr) || (amiga_ != nullptr && amiga_->feed(t) != nullptr);
+    const std::int16_t* const s = (!other && t < kVoiceTracks && ((mask >> t) & 1u) != 0u) ? voices_->feed_side(t) : nullptr;
+    graph_.feed_side(t, s);
+    fed = static_cast<std::uint16_t>(fed | (s != nullptr ? (1u << t) : 0u));
+  }
+  side_fed_ = fed;
+}
+
 // OS-BUG-MODDRIVE: the module instruments' Overdrive and Bit depth, the sampler's curve (VoicePool::shape_pcm) over the instance's block in place, after its own render and filter (the sampler shapes after its
 // filter too) and before the feed. Only the tracks of `mask` that a module sounds on this block (ModuleVoices::feed_mut, as feed() selects). The instrument's value of a module track is neutral (no row for it;
 // OVERDRIVE 0, BIT DEPTH 16), so the step FX 38 / 39 and the layer decide. One call a block, in flash; the values at the block's end apply to the whole block (an event can act up to one block early).
@@ -425,6 +441,9 @@ void Engine::play_block() noexcept {
     for (unsigned t = 0; t < kTracks; ++t) {
       graph_.feed(t, voices_->feed(t));
     }
+  }
+  if (__builtin_expect((voices_->side_mask() | side_fed_) != 0u, 0)) {
+    feed_sides(voices_->side_mask());  // OS-STEREO (c), flash: only while a voice made S in this block or the last
   }
   seq_cycles_ = t1 - t0;
   voice_cycles_ = cycles_() - t1;

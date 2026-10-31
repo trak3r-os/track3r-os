@@ -50,7 +50,7 @@ TEST_CASE("diag mem: the SDRAM table, the SRAM budgets and the sums, from the re
   CHECK(std::strncmp(rest, sram, std::strlen(sram)) == 0);
   CHECK(std::strstr(text, "  budget audio_io_rings 2 KiB\n") != nullptr);
   CHECK(std::strstr(text, "  budget crash_block_fault_stack 640 B\n") != nullptr);
-  CHECK(std::strstr(text, "  budget sum 154368 B\n") != nullptr);  // OS-PERFFX P5: voice_state +64 B; OS-PERF-SMP: sequencer +64 B
+  CHECK(std::strstr(text, "  budget sum 155200 B\n") != nullptr);  // OS-PERFFX P5: voice_state +64 B; OS-PERF-SMP: sequencer +64 B; OS-STEREO (c): voice_state +832 B
 }
 
 TEST_CASE("diag mem: a table that does not sum to the part is flagged") {

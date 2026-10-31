@@ -84,6 +84,13 @@ The filter starts from silence at the first frame of the selection, so a selecti
 
 The sample still plays at its original pitch. <!-- QA-SLD-009 --> Not yet checked on the unit.
 
+### Edit a stereo sample
+<!-- sync: src=app/src/sample_edit_actions.cpp,app/src/app.cpp qa=QA-SED-024,QA-SED-025,QA-SED-026 -->
+
+New in track3r-os. A sample loaded with **STEREO** on Sample load (its instrument's **STEREO** row reads **STEREO**) keeps its left and right sides, and the edit page works on both. <!-- QA-SED-024 --> **CROP**, **REVERSE**, the fades and **AMP** do the same to both sides. **NORM** finds the loudest point of the left or the right side and scales both by the same amount, so the balance between them stays. **DC REM** and the **FILTER** treat each side on its own. All of it is one undo step, and `F8` brings back both sides.
+
+The **COMPRESSOR** and the Amiga conversion work on one signal only. On a stereo sample they refuse and the strip says **STEREO: MAKE MONO FIRST**: set the **STEREO** row of the instrument to **MONO**, then run them (the result is a mono sample, and `F8` brings the stereo one back). <!-- QA-SED-025 --> A stereo edit needs room for both sides. When the sample memory has none, the strip says **NO ROOM FOR THE EDIT** and nothing changes; with the row on **MONO** the same edit needs half the room. <!-- QA-SED-026 --> Not yet checked on the unit.
+
 ## Keys on this screen
 
 <!-- sync: src=app/src/save_actions.cpp,app/src/save_service.cpp qa=QA-SED-002,QA-SED-004,QA-SED-001,QA-SED-003 -->

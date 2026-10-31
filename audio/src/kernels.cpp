@@ -49,6 +49,14 @@ void gain_mac2_ref(const StripLane& a, const StripLane& b, std::int32_t* acc, st
   gain_mac_ref(b, acc, n);
 }
 
+void gain_pan_st_ref(const std::int16_t* s, GainRamp level, GainRamp left, GainRamp right, std::int32_t* acc_l, std::int32_t* acc_r, std::uint32_t n) noexcept {
+  for (std::uint32_t i = 0; i < n; ++i) {
+    const std::int16_t y = detail::gain_sample(s[i], ramp_gain20(level.start, level.end, i));
+    acc_l[i] = detail::add_wrap(acc_l[i], detail::prod_q19(y, ramp_gain20(left.start, left.end, i)));
+    acc_r[i] = detail::add_wrap(acc_r[i], detail::prod_q19(y, -ramp_gain20(right.start, right.end, i)));
+  }
+}
+
 void sat_clear_ref(std::int16_t* dst, std::int32_t* acc, std::uint32_t n) noexcept {
   for (std::uint32_t i = 0; i < n; ++i) {
     dst[i] = detail::q19_to_q15(acc[i]);
@@ -146,6 +154,84 @@ void gain_pan2(const StripLane& a, const StripLane& b, std::int32_t* acc_l, std:
 void gain_mac2(const StripLane& a, const StripLane& b, std::int32_t* acc, std::uint32_t n) noexcept {
   const StripLane lanes[2] = {centre_lane(a), centre_lane(b)};
   detail::strip_simd<simd::NativeOps, 2, false>(lanes, acc, nullptr, n);
+}
+// OS-STEREO (c), (f): the side signal's strip pass, the paired loop of gain_pan's (level, then the two pan products), the right one subtracted (the gain is negated after the ramp: Gen holds the ramp unsigned), in flash.
+// Slice (f): this loop is the ramped block's (its Gen<false> costs six shifts and six adds a pair and the registers that spilled it: 44 instructions a pair); the steady block (all three gains constant, the
+// common one) has the loop below (21 instructions a pair).
+O3OS_AUDIO_INLINE void gain_pan_st_pairs(const std::int16_t* s, GainRamp level, GainRamp left, GainRamp right, std::int32_t* acc_l, std::int32_t* acc_r, std::uint32_t n, std::uint32_t& i) noexcept {
+  detail::Gen<false> gv;
+  detail::Gen<false> gl;
+  detail::Gen<false> gr;
+  gv.init(level);
+  gl.init(left);
+  gr.init(right);
+  for (; i + 2u <= n; i += 2u) {
+    const std::int32_t v0 = gv.next();  // (in order: the ramp is a sequence)
+    const std::int32_t v1 = gv.next();
+    const std::uint32_t y = detail::level_pair<simd::NativeOps>(v0, v1, detail::load_pair(s + i));
+    acc_l[i] = simd::NativeOps::smlawb(gl.next(), y, acc_l[i]);
+    acc_l[i + 1u] = simd::NativeOps::smlawt(gl.next(), y, acc_l[i + 1u]);
+    acc_r[i] = simd::NativeOps::smlawb(-gr.next(), y, acc_r[i]);
+    acc_r[i + 1u] = simd::NativeOps::smlawt(-gr.next(), y, acc_r[i + 1u]);
+  }
+}
+// The steady loop reads and writes each accumulator pair as one doubleword (LDRD / STRD: three cycles for two words where two LDR and two STR cost four each with the products between them); the pair
+// is at an even index of an array of 8-byte alignment (the caller's test: LDRD / STRD need a word, and the pair is two adjacent words, so a doubleword access is exactly what two word accesses are).
+O3OS_AUDIO_INLINE void load2(const std::int32_t* p, std::int32_t& a, std::int32_t& b) noexcept {
+#if defined(__arm__)
+  __asm__("ldrd %0, %1, [%2]" : "=&r"(a), "=&r"(b) : "r"(p), "m"(*reinterpret_cast<const std::int32_t(*)[2]>(p)));
+#else
+  a = p[0];
+  b = p[1];
+#endif
+}
+O3OS_AUDIO_INLINE void store2(std::int32_t* p, std::int32_t a, std::int32_t b) noexcept {
+#if defined(__arm__)
+  __asm__("strd %1, %2, [%3]" : "=m"(*reinterpret_cast<std::int32_t(*)[2]>(p)) : "r"(a), "r"(b), "r"(p));
+#else
+  p[0] = a;
+  p[1] = b;
+#endif
+}
+// A function of its own with few values: inlined into gain_pan_st (which also holds the ramped loop and the tails) the allocator spilled the pointers and reloaded them every pair. The right accumulator is
+// the left one's kBlock words on (MAIN's two accumulators are one array of two rows: the caller's test), so one pointer walks both and the right pair is an immediate offset of the same LDRD / STRD.
+[[gnu::noinline]] void gain_pan_st_steady(std::int32_t* pl, const std::int16_t* sp, std::uint32_t pairs, std::int32_t gv, std::int32_t gl, std::int32_t gr) noexcept {
+  constexpr std::uint32_t kRow = hal::audio::kBlock;
+  for (std::uint32_t k = 0; k < pairs; ++k) {
+    const std::uint32_t y = detail::level_pair<simd::NativeOps>(gv, gv, detail::load_pair(sp));
+    std::int32_t l0;
+    std::int32_t l1;
+    std::int32_t r0;
+    std::int32_t r1;
+    load2(pl, l0, l1);
+    load2(pl + kRow, r0, r1);
+    l0 = simd::NativeOps::smlawb(gl, y, l0);
+    l1 = simd::NativeOps::smlawt(gl, y, l1);
+    r0 = simd::NativeOps::smlawb(gr, y, r0);
+    r1 = simd::NativeOps::smlawt(gr, y, r1);
+    store2(pl, l0, l1);
+    store2(pl + kRow, r0, r1);
+    sp += 2;
+    pl += 2;
+  }
+}
+void gain_pan_st(const std::int16_t* s, GainRamp level, GainRamp left, GainRamp right, std::int32_t* acc_l, std::int32_t* acc_r, std::uint32_t n) noexcept {
+  std::uint32_t i = 0;
+  const bool rows = (reinterpret_cast<std::uintptr_t>(acc_l) & 7u) == 0u && acc_r == acc_l + hal::audio::kBlock && n <= hal::audio::kBlock;
+  if (detail::aligned4(s)) {
+    if (rows && detail::steady(level) && detail::steady(left) && detail::steady(right)) {
+      const std::uint32_t pairs = n / 2u;
+      gain_pan_st_steady(acc_l, s, pairs, 16 * level.start, 16 * left.start, -(16 * right.start));
+      i = 2u * pairs;
+    } else {
+      gain_pan_st_pairs(s, level, left, right, acc_l, acc_r, n, i);
+    }
+  }
+  for (; i < n; ++i) {
+    const std::int16_t y = detail::gain_sample(s[i], ramp_gain20(level.start, level.end, i));
+    acc_l[i] = detail::add_wrap(acc_l[i], detail::prod_q19(y, ramp_gain20(left.start, left.end, i)));
+    acc_r[i] = detail::add_wrap(acc_r[i], detail::prod_q19(y, -ramp_gain20(right.start, right.end, i)));
+  }
 }
 void sat_clear(std::int16_t* dst, std::int32_t* acc, std::uint32_t n) noexcept { detail::sat_clear_simd<simd::NativeOps>(dst, acc, n); }
 void sat_clear_main(std::int16_t* dst_l, std::int16_t* dst_r, std::int32_t* acc_l, std::int32_t* acc_r, std::int32_t* acc_c, std::uint32_t n) noexcept {

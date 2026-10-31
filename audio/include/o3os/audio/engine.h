@@ -166,6 +166,9 @@ class Engine {
   // OS-BUG-MODDRIVE: Overdrive / Bit depth (step FX 38 / 39, Perform OVERDRV / BITDEPTH) on the module instruments' blocks, in place, between the modules' end_block() and the feed. `mask`: VoicePool::shape_mask()
   // (non-zero, the caller's test). In flash, once a block while any track holds either FX, plus one shape_pcm per shaped module track (hot.h exceptions).
   O3OS_AUDIO_COLD void shape_modules(std::uint16_t mask) noexcept;
+  // OS-STEREO (c): S of the stereo voices to the graph (Graph::feed_side), after the tracks' M feeds: a track whose M is a module's or an Amiga voice's gets none. In flash; play_block() calls it only while the voices made
+  // S in this block or the last one did (VoicePool::side_mask()), so a mono project pays one test a block.
+  O3OS_AUDIO_COLD void feed_sides(std::uint16_t mask) noexcept;
   // OS-CPU10: flash (1,468 B of SRAM_L back). play_block() makes the empty-queue test inline and calls this only when the main loop has queued a live event (a pad press).
   O3OS_AUDIO_COLD void play_live() noexcept;
   O3OS_AUDIO_COLD bool live_amiga_on(unsigned track, unsigned note, unsigned slot, unsigned velocity) noexcept;
@@ -199,6 +202,7 @@ class Engine {
   std::uint32_t seq_cycles_ = 0;      // render only: this block's cycles in the event source, and in the voices (added to the report)
   std::uint32_t voice_cycles_ = 0;
   std::uint16_t gate_off_ = 0;         // OS-ODD11: the tracks the gate may not act on (set_voice_gate_mask); zero, so the Engine stays in .bss
+  std::uint16_t side_fed_ = 0;         // OS-STEREO (c), render only: the tracks (bit t) that Graph::feed_side was given S for in the last block
   std::atomic<bool> tone_target_{false};
   std::atomic<std::uint32_t> left_only_blocks_{kToneLeftOnlyBlocks};
   std::atomic<std::uint32_t> stall_cycles_{0};

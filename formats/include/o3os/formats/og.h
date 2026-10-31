@@ -271,6 +271,7 @@ struct ExportDrops {
   std::uint32_t no_sample_memory = 0;      // the sample memory was not up when the plan was made (no bank): every sample instrument counted in instruments_not_written for this reason, not for having no audio
   std::uint32_t levels_converted = 0;      // levels rewritten from the 1.1.14 law to the 1.2+ law so that the gain stays
   std::uint32_t levels_clamped = 0;        // 1.1.14 levels under -24 dB, written as level 1 (the quietest the 1.2+ law has): louder than the instrument plays
+  std::uint32_t stereo_mid = 0;            // OS-STEREO (e): stereo instruments written as their mid M (a mono .pti, the same bytes as a mono sample's): the side S is not in the file
   // project: DropGroup bits of every group written as a default because the project carries no value for it (the
   // session state always; a settings group the OGPM chunk does not hold). Not a loss: the model has nothing there.
   std::uint32_t defaulted_groups = 0;

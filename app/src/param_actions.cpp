@@ -505,7 +505,13 @@ WriteResult write_play_stereo(ActionContext& ctx, core::ParamId id, float value)
   }
   model::Instrument next = *in;
   next.stereo = target;
-  return ctx.edit->set_instrument(slot, next) == model::Status::Ok ? WriteResult::Changed : WriteResult::Rejected;
+  if (ctx.edit->set_instrument(slot, next) != model::Status::Ok) {
+    return WriteResult::Rejected;
+  }
+  if (ctx.samples != nullptr) {
+    ctx.samples->request_rebind(slot);  // OS-STEREO (c): the descriptor's S follows the flag (the bank applies it when stopped and idle, as for every descriptor field)
+  }
+  return WriteResult::Changed;
 }
 
 }  // namespace

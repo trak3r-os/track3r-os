@@ -232,12 +232,17 @@ bool instrument_save(ActionContext& ctx, core::ActionArg) noexcept {
   const SaveService::Start start = ctx.saves->save_instrument(ctx.session->jobs, *ctx.model.project, *ctx.model.samples, slot);
   const bool reported = save_report(ctx, start);
   const std::uint32_t from = ctx.saves->pti_resampled_hz();  // (0 on every refusal: save_instrument clears it first)
+  const bool mid = start == SaveService::Start::Started && ctx.model.samples->edit_stereo(slot);  // OS-STEREO (e): a stereo instrument's file holds its mid M (a mono .pti); S is not in it
   if (start == SaveService::Start::Started && from != 0u) {  // OS-FILES-C C1b: the file is at 44,100 Hz, the instrument was not
     core::FixedString<core::kNotifyTextChars> text;
     text.assign("RESAMPLED ");
     append_uint(text, from);
     text.append(" -> 44100 HZ");
+    text.append(mid ? ", MID ONLY" : "");
     return say(ctx, core::Severity::Info, text.c_str());
+  }
+  if (mid) {
+    return say(ctx, core::Severity::Info, "STEREO: MID WRITTEN, SIDE NOT KEPT");
   }
   return reported;
 }
