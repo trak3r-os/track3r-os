@@ -9,7 +9,8 @@ defect, holes, address range, the head, SP, reset and vector cases, the SRAM_L w
 checkers on every file and requires the SAME verdict: check_image.py with --expect-sp 0x20030000 --ramfunc-l 0x1FFF0000:0xC000 (how the build runs it)
 against the device validator. For an accepted file the image length and the CRC-32 of the file must agree as well. With --hex the real built image
 and a family of mutations of it join the corpus. One documented difference is checked as such: records out of ascending order, which check_image.py
-accepts and the device refuses (it keeps O(1) state; objcopy never writes them). Exit 0 all agree, 1 a disagreement, 2 a usage or tool error.
+accepts and the device refuses (it keeps O(1) state; objcopy never writes them). check_image.py's `sector_end` (the image ends on a 4 KiB flash
+sector boundary, OS-BUG-COSMBOOT) is a build-time rule that the device validator does not apply: the reference verdict here leaves it out. Exit 0 all agree, 1 a disagreement, 2 a usage or tool error.
 """
 import argparse
 import importlib.util
@@ -210,7 +211,7 @@ def reference_verdict(ci, text):
     except ci.ImageError:
         return False, 0
     results = ci.check_image(memory, expect_sp=0x20030000, ramfunc_l=(0x1FFF0000, 0xC000))
-    ok = all(r[1] for r in results)
+    ok = all(r[1] for r in results if r[0] != "sector_end")   # a build-time rule only: the device validator does not apply it
     return ok, max(memory) + 1
 
 

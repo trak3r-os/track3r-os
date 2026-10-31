@@ -613,9 +613,9 @@ def selftest_image(bad_config=False):
     segments = module.good_segments()
     if bad_config:
         segments[module.CONFIG_ADDRESS] = bytes.fromhex("ffffffffffffffffffffffffdcf9ffff")
-    # a longer image so that the upload needs several acknowledgements
+    # a longer image so that the upload needs several acknowledgements; it ends on a flash sector boundary (check_image `sector_end`)
     code = segments[module.CONFIG_ADDRESS + module.CONFIG_SIZE]
-    segments[module.CONFIG_ADDRESS + module.CONFIG_SIZE] = (code * 20)[:6000]
+    segments[module.CONFIG_ADDRESS + module.CONFIG_SIZE] = (code * 20)[:2 * module.FLASH_SECTOR - module.CONFIG_ADDRESS - module.CONFIG_SIZE]
     return module.make_hex(segments).encode("ascii")
 
 

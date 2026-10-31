@@ -23,6 +23,9 @@ inline constexpr std::uint32_t kMiB = 1024u * 1024u;
 // ---- Chip ----------------------------------------------------------------------------------------------------------
 inline constexpr std::uint32_t kFlashBase = 0x00000000u;
 inline constexpr std::uint32_t kFlashSize = 1u * kMiB;
+// Erase unit of the program flash. The SD bootloader leaves a final sector that the image fills only in part neither erased nor
+// programmed (OS-BUG-COSMBOOT, docs/hw/tracker-hardware-notes.md section 3), so the linker pads the image to a multiple of it.
+inline constexpr std::uint32_t kFlashSectorSize = 4096u;
 // Flash configuration field (FSEC, FOPT, ...): sixteen bytes the chip reads at reset to decide its own protection.
 // A wrong value can permanently lock the MCU. See flash_config.h; the linker places it here and asserts so.
 inline constexpr std::uint32_t kFlashConfigOffset = 0x400u;
@@ -241,6 +244,7 @@ static_assert(kSramLBase + kSramLSize == kSramUBase, "SRAM_L and SRAM_U are one 
 static_assert(kStackTop == 0x20030000u, "_estack: initial SP at the end of SRAM_U");
 static_assert(kSramLSize + kSramUSize == 256u * kKiB, "MK66FX1M0 has 256 KiB of SRAM");
 static_assert(kFlashSize == 1024u * kKiB, "MK66FX1M0 has 1 MiB of program flash");
+static_assert(kFlashSectorSize == 4096u && kFlashSize % kFlashSectorSize == 0u, "MK66FX1M0 program flash: 4 KiB sectors");
 static_assert(kRamfuncLSize + kModuleSlabSize == kSramLSize, "SRAM_L is hot code plus the module slab");
 static_assert(kModuleSlabBase + kModuleSlabSize == kSramLBase + kSramLSize, "the module slab is the top of SRAM_L");
 static_assert(kVectorTableBytes <= kFlashConfigOffset, "the vector table must end below the flash configuration field");

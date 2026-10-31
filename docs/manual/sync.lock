@@ -8,11 +8,11 @@ cheat_sheet.md#pattern-editing docs/manual/panel.md=2cac9a7ca46c docs/manual/pat
 cheat_sheet.md#screens docs/manual/file.md=29f19d7490de docs/manual/instrument.md=3a16f162a3a4 docs/manual/mixer.md=b2a20e87d2c6 docs/manual/panel.md=2cac9a7ca46c docs/manual/pattern.md=71e6fcfab5c7 docs/manual/perform_dj.md=ae245996a57e docs/manual/record.md=82e097c98ae3 docs/manual/sample_edit.md=820713defef5 docs/manual/sample_load.md=c0bcf9acd1ec
 cheat_sheet.md#shift-combinations docs/manual/file.md=29f19d7490de docs/manual/instrument.md=3a16f162a3a4 docs/manual/mixer.md=b2a20e87d2c6 docs/manual/panel.md=2cac9a7ca46c docs/manual/pattern.md=71e6fcfab5c7 docs/manual/sample_load.md=c0bcf9acd1ec
 computer_tools.md#measure-the-audio-o3audiopy platform/mk66/tools/o3audio.py=05a7d8707dc0
-computer_tools.md#send-a-firmware-file-to-the-card platform/mk66/tools/o3console.py=7f3d4a798b3c platform/mk66/update/include/o3os/platform/mk66/update/path_guard.h=350f302bc4ef
+computer_tools.md#send-a-firmware-file-to-the-card platform/mk66/tools/o3console.py=2c10a826eb04 platform/mk66/update/include/o3os/platform/mk66/update/path_guard.h=350f302bc4ef
 computer_tools.md#take-a-screen-from-a-saved-text-o3shotpy platform/mk66/tools/o3shot.py=da6c8eed3e9e
-computer_tools.md#take-a-screenshot platform/mk66/tools/o3console.py=7f3d4a798b3c platform/mk66/usb/src/shot_stream.cpp=0f6bf6be6ce5
+computer_tools.md#take-a-screenshot platform/mk66/tools/o3console.py=2c10a826eb04 platform/mk66/usb/src/shot_stream.cpp=0f6bf6be6ce5
 computer_tools.md#the-commands-you-can-use platform/mk66/usb/include/o3os/platform/mk66/usb/command_table.h=7eb30ec31c5b platform/mk66/usb/src/console.cpp=014e351d0973
-computer_tools.md#the-diag-console-o3consolepy platform/mk66/tools/o3console.py=7f3d4a798b3c
+computer_tools.md#the-diag-console-o3consolepy platform/mk66/tools/o3console.py=2c10a826eb04
 config.md#change-the-display-the-pad-lights-and-the-notation QA-CFG-213=585a3bf9e5d3 QA-CFG-214=0d3325b52de6 QA-CFG-215=a40c81e1891e QA-CFG-216=b77ab277801e app/include/o3os/app/brightness.h=56a9a72b94a2 app/src/bindings.cpp=65f1da57fe7f app/src/screens/pattern_screen.cpp=c385ac34228f model/src/params.cpp=8ee6653817a1
 config.md#change-usb-return QA-CFG-005=e82c7b0cdbeb QA-CFG-006=7902b06de2f9 QA-CFG-007=00b6f17c134c QA-CFG-012=8c99d4ddf99e QA-CFG-013=c650ac312c2b app/src/screens/config_screen.cpp=61fb0ed5120d
 config.md#choose-when-a-picked-pattern-starts QA-CFG-229=76619d55269c QA-PAT-318=23a07a87be04 app/src/chooser_actions.cpp=e0a5028ba74f model/include/o3os/model/params.h=97d5b7943f89
@@ -43,9 +43,9 @@ getting_started.md#start-the-unit-for-the-first-time platform/mk66/src/app_main.
 getting_started.md#what-goes-on-the-card tools/release/make_starter.py=5776c99f2fb0
 glossary.md#glossary app/include/o3os/app/limiter_rows.h=db03d7f45e49 app/include/o3os/app/pad_lights.h=0a6a6ede704b app/src/bindings.cpp=65f1da57fe7f app/src/screens/config_screen.cpp=61fb0ed5120d audio/include/o3os/audio/graph.h=55c5ccb34779 audio/include/o3os/audio/master_limiter.h=c5a5f63e53a0 docs/manual/sample_edit.md=820713defef5
 input_test.md#input-test QA-INP-001=0b49b5ec19a7 QA-INP-002=ba3a1164831b QA-INP-003=54af89aea908 QA-INP-004=59fc29f59110 QA-INP-005=dd437bb6e566 QA-INP-006=3436fa203dee QA-INP-007=32ff2b08ee8a QA-INP-008=318bf78ba52f app/include/o3os/app/screens/input_test_screen.h=971aaab8d1f6
-install.md#1-from-the-official-firmware docs/hw/tracker-hardware-notes.md=880c1ec55fe9 platform/mk66/README.md=4288b20767db
-install.md#2-updating-track3r-os-to-a-newer-track3r-os docs/specs/OS-006-usb.md=2aa9dddd58f3 platform/mk66/tools/o3console.py=7f3d4a798b3c
-install.md#before-you-start docs/hw/tracker-hardware-notes.md=880c1ec55fe9 platform/mk66/update/include/o3os/platform/mk66/update/path_guard.h=350f302bc4ef
+install.md#1-from-the-official-firmware docs/hw/tracker-hardware-notes.md=46e3a61714bb platform/mk66/README.md=d3af33e126df
+install.md#2-updating-track3r-os-to-a-newer-track3r-os docs/specs/OS-006-usb.md=2aa9dddd58f3 platform/mk66/tools/o3console.py=2c10a826eb04
+install.md#before-you-start docs/hw/tracker-hardware-notes.md=46e3a61714bb platform/mk66/update/include/o3os/platform/mk66/update/path_guard.h=350f302bc4ef
 install.md#what-a-release-contains tools/release/make_starter.py=5776c99f2fb0 tools/release/starter_manifest.json=46aff5797521
 instrument.md#how-it-works QA-INS-021=302472a2c1a3 QA-INS-032=0e5eed0344da QA-INS-085=6884037584c9 app/src/param_access.h=1376cf00e4c8 app/src/screens/params_screen.cpp=eeb9ed4d2ac5
 instrument.md#instrument QA-INS-060=315b5a08f937 QA-INS-072=18535beeda08 QA-INS-077=2289b4fd62ba app/src/param_access.h=1376cf00e4c8 app/src/sample_bank.cpp=d3748439cef0 app/src/save_service.cpp=bae421f84c88 audio/include/o3os/audio/paula.h=318bcb8de6da audio/include/o3os/audio/smoothing.h=7d57df5d37e7 hal/include/o3os/hal/storage_write.h=d6b8d157b68b model/src/params.cpp=8ee6653817a1

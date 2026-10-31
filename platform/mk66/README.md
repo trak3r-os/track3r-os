@@ -169,6 +169,13 @@ add up to the span of the image, `objcopy` runs with `--gap-fill 0xFF` as a back
 (`contiguous`). Because that address is explicit, `ld`'s `FLASH:` line in the memory-usage table leaves out the `.data` load
 image; the flash use is the `image: ... N bytes` line of the check output (and `__image_end`).
 
+**The image ends on a flash sector boundary** (OS-BUG-COSMBOOT). The SD bootloader leaves a final 4 KiB sector that the image fills only in part neither
+erased nor programmed, so it keeps the bytes of the previously installed image (the unit crashed at boot because `.data`'s load image, in the 124-byte last
+sector of `v1.0.1-cosm.1`, still held the bytes of an older image; `docs/hw/tracker-hardware-notes.md` section 3). The linker pads the image with zero bytes (not the erased value `0xFF`: a bootloader that skipped 0xFF content would still see a short tail)
+(`.flashpad`, a PT_LOAD of its own placed right behind `.data`'s load image, at least one byte, up to the next 4 KiB boundary), so the last sector is always
+full; the pad is real programmed bytes in the HEX, `__image_end` is the end of it, a linker ASSERT checks the alignment, and `check_image.py` refuses an
+image that does not end on a boundary (`sector_end`). The pad costs up to 4 KiB of flash (the `image: ... N bytes` line includes it). `.bss` has no segment of its own (`:NONE`, like the other NOBITS sections): its old load address, right behind `.data`'s load image, is where the pad begins, and `ld` refuses that overlap.
+
 **Objects that must not be initialised** (the crash block, `O3OS_NOINIT`, `O3OS_SDRAM_NOINIT` in `sections.h`) go in input
 sections named `.bss.noinit...`: GCC makes them NOBITS and refuses a non-zero initialiser in them at compile time
 ("only zero initializers are allowed in section"), so a value can never be silently dropped from a NOLOAD output section. The

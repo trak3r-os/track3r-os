@@ -14,6 +14,9 @@
   head_present   addresses 0..0x40F are all populated (vector table, startup, flash configuration field)
   contiguous     the image is one run from address 0 to its last byte: no hole anywhere (whether the SD bootloader
                  tolerates one is unknown)
+  sector_end     the image ends on a 4 KiB flash sector boundary (last address + 1 is a multiple of 4096): the SD bootloader leaves
+                 a final sector that the image fills only in part neither erased nor programmed, so it keeps the bytes of the
+                 previous image there (OS-BUG-COSMBOOT, docs/hw/tracker-hardware-notes.md section 3). The linker pads with zeros
   initial_sp     the word at 0 is 8-byte aligned and inside internal SRAM (0x1FFF0000..0x20030000), and, with --expect-sp,
                  exactly that
   reset_vector   the word at 4 is a Thumb address (bit 0 set) that points at populated flash, past the flash configuration
@@ -39,6 +42,7 @@ import tempfile
 from pathlib import Path
 
 FLASH_LAST = 0x000FFFFF
+FLASH_SECTOR = 4096    # mem_map.h kFlashSectorSize
 SRAM_FIRST = 0x1FFF0000
 SRAM_END = 0x20030000  # one past the last byte; also the legal initial SP of an image that uses all of SRAM
 CONFIG_ADDRESS = 0x400
@@ -151,6 +155,15 @@ def check_image(memory, expect_sp=None, vector_count=DEFAULT_VECTOR_COUNT, requi
         add("contiguous", False, "%d byte(s) missing between 0x0 and 0x%08X, the first at 0x%08X" % (missing_bytes, high, first_hole))
     else:
         add("contiguous", True, "one run, 0x0..0x%08X" % high)
+
+    # The image must end on a flash sector boundary (OS-BUG-COSMBOOT).
+    tail = (high + 1) % FLASH_SECTOR
+    if tail == 0:
+        add("sector_end", True, "image end 0x%08X is a multiple of %d" % (high + 1, FLASH_SECTOR))
+    else:
+        add("sector_end", False, "image end 0x%08X is not a multiple of %d: the last sector holds only %d byte(s), and the SD bootloader "
+            "leaves a short final sector neither erased nor programmed (OS-BUG-COSMBOOT); pad the image to the sector end"
+            % (high + 1, FLASH_SECTOR, tail))
 
     def in_image(address):
         return address in memory
@@ -311,7 +324,8 @@ def good_segments():
         vectors += w(0 if index in RESERVED_VECTORS else 0x00000511)
     vectors += b"\xFF" * (CONFIG_ADDRESS - len(vectors))
     config = bytes.fromhex(REQUIRED_CONFIG_HEX)
-    code = bytes(range(256)) * 2
+    # The code runs to the end of the first 4 KiB flash sector (the image must end on a sector boundary: `sector_end`).
+    code = (bytes(range(256)) * 16)[:FLASH_SECTOR - CONFIG_ADDRESS - CONFIG_SIZE]
     return {0: bytes(vectors), CONFIG_ADDRESS: config, CONFIG_ADDRESS + CONFIG_SIZE: code}
 
 
@@ -410,9 +424,23 @@ def self_test():
     segments[code_end + 4] = b"\xAA" * 8   # leaves code_end..code_end+3 empty: a hole
     expect_fail("hole between the code and a later record", verdicts(segments), "contiguous")
     segments = good_segments()
-    segments[code_end] = b"\xFF" * 4 + b"\xAA" * 8   # the same gap, filled
+    segments[code_end] = b"\xFF" * 4 + b"\xAA" * (FLASH_SECTOR - 4)   # the same gap, filled, the image ending on the next sector boundary
     expect_ok("a filled gap is no hole", verdicts(segments))
     expect_fail("an image that does not start at 0", verdicts({a + 4: b for a, b in good_segments().items()}), "contiguous")
+
+    # Sector end (OS-BUG-COSMBOOT): the good image ends on a boundary; a short last sector, even by one byte, fails, and so does
+    # one byte more than a boundary; a second full sector passes.
+    expect_ok("image ends on a sector boundary", verdicts())
+    for label, extra in (("one byte into a new sector", 1), ("124 bytes into a new sector (the cosm.1 tail)", 124), ("one byte short of a boundary", FLASH_SECTOR - 1)):
+        segments = good_segments()
+        segments[code_end] = b"\xFF" * extra
+        expect_fail("short tail: %s" % label, verdicts(segments), "sector_end")
+    segments = good_segments()
+    segments[code_end] = b"\xFF" * FLASH_SECTOR
+    expect_ok("two full sectors", verdicts(segments))
+    segments = good_segments()
+    segments[CONFIG_ADDRESS + CONFIG_SIZE] = segments[CONFIG_ADDRESS + CONFIG_SIZE][:-1]
+    expect_fail("short tail: the last byte of the image removed", verdicts(segments), "sector_end")
 
     # Head and initial SP.
     segments = good_segments()

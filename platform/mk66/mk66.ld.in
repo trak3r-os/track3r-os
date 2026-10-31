@@ -7,7 +7,8 @@
  *
  * Regions:
  *   FLASH         program flash, 1 MiB at 0. Vector table at 0, flash configuration field at 0x400, code and constants,
- *                 then the load images of .ramfunc_l and .data, each starting where the one before ends. The image is one
+ *                 then the load images of .ramfunc_l and .data, each starting where the one before ends, then zero padding to a
+ *                 4 KiB flash sector boundary (.flashpad, OS-BUG-COSMBOOT: the SD bootloader leaves a short last sector unwritten). The image is one
  *                 contiguous run from 0 to its end with no hole (whether the SD bootloader tolerates one is unknown; asserted at the end of this script; the HEX
  *                 check and the objcopy gap fill back it up).
  *   SRAM_L        the first 48 KiB of SRAM_L (code bus): hot code (`.ramfunc_l`) and the audio taps' data (`.tapmem_l`, NOLOAD).
@@ -40,6 +41,7 @@ PHDRS
   text    PT_LOAD FLAGS(5);
   ramfunc PT_LOAD FLAGS(5);
   data    PT_LOAD FLAGS(6);
+  flashpad PT_LOAD FLAGS(4);
 }
 
 SECTIONS
@@ -134,7 +136,7 @@ SECTIONS
 
   /* The audio DMA rings (OS-005a): each aligned to its own size, because the eDMA wraps an address with a modulo (hal/audio.h,
      audio_config.h). Placed here, before .data, so that their alignment padding is NOLOAD and cannot open a gap between .data and
-     .bss, which share one load segment. NOT cleared by the reset sequence: audio start() zeroes them (silence) before the DMA runs.
+     .bss, which stay adjacent in SRAM_U. NOT cleared by the reset sequence: audio start() zeroes them (silence) before the DMA runs.
      Input sections named `.bss.dma_rings` are NOBITS, like the noinit ones, so a non-zero initialiser is a compile error. */
   .dma_rings (NOLOAD) : ALIGN(@kDmaRingAlign@)
   {
@@ -155,14 +157,16 @@ SECTIONS
   } > SRAM_U :data
   __data_load = LOADADDR(.data);
 
-  /* .bss has no load image; a load address right behind .data's keeps it in the same segment. */
-  .bss : AT(LOADADDR(.data) + SIZEOF(.data)) ALIGN(8)
+  /* .bss has no load image and no segment of its own (:NONE, as the other NOBITS sections): Reset_Handler clears it between
+     __bss_start and __bss_end. It used to share .data's segment through a load address right behind .data's load image;
+     that address is now where .flashpad begins, and ld refuses the overlap ("section .bss can't be allocated in segment"). */
+  .bss : ALIGN(8)
   {
     __bss_start = .;
     *(.bss .bss.* COMMON .gnu.linkonce.b.*)
     . = ALIGN(8);
     __bss_end = .;
-  } > SRAM_U :data
+  } > SRAM_U :NONE
 
   /* The main stack: the top of SRAM_U, growing down. Nothing may be linked into it. */
   __stack_top = ORIGIN(SRAM_U) + LENGTH(SRAM_U);
@@ -207,12 +211,26 @@ SECTIONS
   .debug_names 0 : { *(.debug_names) }
   /DISCARD/ : { *(.comment) }
 
-  /* Where the image ends in flash: the end of the last load image. */
-  __image_end = LOADADDR(.data) + SIZEOF(.data);
+  /* The image's last load image is the one of .data. Pad it with zeros to the next flash sector boundary, at least one byte
+     (OS-BUG-COSMBOOT): the SD bootloader leaves a final sector that the image fills only in part neither erased nor programmed
+     (it kept the bytes of the previous image there, among them .data's initial values), so the last sector must be full. The
+     pad is zeros, not the erased value 0xFF (a bootloader that skipped 0xFF content would still see a short tail), and real programmed bytes in the HEX (one contiguous run). Its VMA is its LMA, in flash; nothing else is placed there. */
+  __data_load_end = LOADADDR(.data) + SIZEOF(.data);
+  .flashpad __data_load_end : AT(__data_load_end)
+  {
+    BYTE(0x00)
+    . = ALIGN(@kFlashSectorSize@);
+  } > FLASH :flashpad =0x00
+
+  /* Where the image ends in flash: the end of the padding, a multiple of the flash sector size. */
+  __image_end = LOADADDR(.flashpad) + SIZEOF(.flashpad);
 
   /* No hole in the flash image: the sizes of everything loaded into flash add up to the span from the start of flash to the
      end of the last load image. (Sections never overlap, so equal sums mean every byte is covered.) */
   ASSERT(SIZEOF(.text) + SIZEOF(.ARM.extab) + SIZEOF(.ARM.exidx) + SIZEOF(.preinit_array) + SIZEOF(.init_array) +
-         SIZEOF(.fini_array) + SIZEOF(.ramfunc_l) + SIZEOF(.data) == __image_end - ORIGIN(FLASH),
+         SIZEOF(.fini_array) + SIZEOF(.ramfunc_l) + SIZEOF(.data) + SIZEOF(.flashpad) == __image_end - ORIGIN(FLASH),
          "the flash image has a hole (an alignment gap between two load images): the HEX must be one contiguous run")
+  ASSERT(__image_end % @kFlashSectorSize@ == 0 && __image_end - __data_load_end >= 1,
+         "the flash image must end on a flash sector boundary with at least one pad byte (OS-BUG-COSMBOOT: the SD bootloader leaves a short final sector unwritten)")
+  ASSERT(__image_end <= ORIGIN(FLASH) + LENGTH(FLASH), "the padded flash image does not fit in flash")
 }
