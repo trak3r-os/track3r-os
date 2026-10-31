@@ -13,12 +13,14 @@
 
 #include <cstring>
 
+#include "../platform/mk66/tests/mk66_shot_region.h"
+
 using namespace o3os;
 using namespace o3os::ui::plot;
 
 TEST_CASE("plot ram_g: the map is word aligned, inside RAM_G and disjoint, in address order, and the numbers are the documented ones") {
   CHECK(ram_g_regions_ok(kRamGRegions, kRamGRegionCount));
-  CHECK(kRamGRegionCount == 8);
+  CHECK(kRamGRegionCount == 9);
   CHECK(kRamGRegions[0].addr == 0);
   std::uint32_t end = 0;
   for (unsigned i = 0; i < kRamGRegionCount; ++i) {
@@ -51,15 +53,29 @@ TEST_CASE("plot ram_g: the map is word aligned, inside RAM_G and disjoint, in ad
   CHECK(std::strcmp(kRamGRegions[6].name, "boot_logo") == 0);
   CHECK(kRamGRegions[6].addr == kRamGBootLogo);
   CHECK(kRamGRegions[6].bytes == kRamGBootLogoBytes);
-  CHECK(kRamGSpare == 0x71000);
-  CHECK(kRamGSpareBytes == 585728);
-  CHECK(std::strcmp(kRamGRegions[7].name, "spare") == 0);
-  CHECK(kRamGRegions[7].addr == kRamGSpare);
+  // the note map (OS-SONG-VIEW2 V4): 255 pictures of 384 bytes (128 x 24 at L1) right after the logo, rounded up to 4 KB pages, then the spare region
+  CHECK(kNoteMapBytes == 384);
+  CHECK(kNoteMapStride == 16);
+  CHECK(kRamGNoteMap == kRamGBootLogoEnd);
+  CHECK(kRamGNoteMap == 0x71000);
+  CHECK(kNoteMapPictures * kNoteMapBytes == 97920);
+  CHECK(kRamGNoteMapBytes == 98304);
+  CHECK(std::strcmp(kRamGRegions[7].name, "note_map") == 0);
+  CHECK(kRamGRegions[7].addr == kRamGNoteMap);
+  CHECK(kRamGRegions[7].bytes == kRamGNoteMapBytes);
+  CHECK(kRamGSpare == 0x89000);
+  CHECK(kRamGSpare == kRamGNoteMapEnd);
+  CHECK(kRamGSpareBytes == 487424);
+  CHECK(std::strcmp(kRamGRegions[8].name, "spare") == 0);
+  CHECK(kRamGRegions[8].addr == kRamGSpare);
   // OS-HIL: the screenshot's bands live in the spare region, less the DMA self-test's last 64 bytes
   CHECK(kRamGShot == kRamGSpare);
-  CHECK(kRamGShotBytes == 585664);
+  CHECK(kRamGShotBytes == 487360);
+  CHECK(kRamGShot == platform::mk66::test::kShotRegion);  // the shot tests' region (platform/mk66/tests/mk66_shot_region.h: they may not include ui)
+  CHECK(kRamGShotBytes == platform::mk66::test::kShotRegionBytes);
+  CHECK(kRamGShotBytes >= 240u * 800u * 2u);  // the screenshot's two bands of 240 rows at RGB565 still fit
   CHECK(kRamGShot + kRamGShotBytes + kRamGSelfTestBytes == hal::kRamGBytes);
-  CHECK(kRamGShot >= kRamGBootLogoEnd);
+  CHECK(kRamGShot >= kRamGNoteMapEnd);
   CHECK(kHandleBootLogo == 11);
   CHECK(kHandleBootLogo > kHandleWaveLane1);
   CHECK(kHandleBootLogo <= 14);

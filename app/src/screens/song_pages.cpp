@@ -5,6 +5,8 @@
 #include <o3os/app/song_timeline.h>
 #include <o3os/app/text_format.h>
 #include <o3os/core/fixed_string.h>
+#include <o3os/eve/dl.h>
+#include <o3os/ui/plot/ram_g_map.h>
 #include <o3os/ui/components.h>
 #include <o3os/ui/theme.h>
 
@@ -14,6 +16,7 @@ using ui::Color;
 using ui::Face;
 using ui::Rect;
 using ui::Renderer;
+namespace dl = eve::dl;
 
 namespace {
 
@@ -106,7 +109,7 @@ void draw_song_timeline(Renderer& r, const Frame& f, const Model& model, const V
     }
   }
 
-  // The thumbnails: a lane a track, in each slot one bar as high as the pattern's note density in that track (densities are cached by the pattern's generation: a frame reads a table).
+  // The note map: a lane a track under the blocks, a tick where a step holds a note (the pictures are rendered once per pattern generation: a frame compares one number a slot). Then the energy curve.
   if (model.project != nullptr && tracks > 0u) {
     const int top = under + 4 + g;
     const int floor_y = f.pane.y + f.pane.h - g;                 // the bottom of the page: the energy curve stands on it
@@ -114,23 +117,50 @@ void draw_song_timeline(Renderer& r, const Frame& f, const Model& model, const V
     const int bottom = floor_y - curve_h - (micro_h + 2) - g;    // the lanes end above the curve's caption
     int lane = (bottom - top) / static_cast<int>(tracks);
     lane = lane > m.row_pitch ? m.row_pitch : lane;
-    if (lane >= 3) {
+    if (lane >= 4) {
+      // The note map (V4): each slot's picture (song_notemap.h) is a bitmap over its block, scaled so that a step is the same width in every block (16 a bar) and a track's lane is `lane` pixels (a little
+      // less: E is whole in 8.8, see notemap_row_top); one raw section for the page (the handle, the layout, E and the colour once), then BITMAP_SOURCE, SIZE, TRANSFORM_A and VERTEX2F a slot (4 words). A pattern
+      // that does not exist, or whose picture the display has not taken yet (at most SongNoteMap::kMaxPerFrame uploads a frame, none after a Busy), has none: it draws as an empty map, never a stale picture.
+      // At most 12 tracks and 128 steps are drawn: tracks past 12 are not in the map.
+      const std::int32_t e = notemap_scale_y(lane);
+      const int map_h = notemap_row_top(2u * tracks, e);
+      bool open = false;
       for (unsigned i = 0; i < w.count; ++i) {
-        const Rect blk = block_of(i);
-        const std::uint64_t dens = view.density.get(*model.project, src.pattern(w.first + static_cast<int>(i)));  // (0 for a pattern that does not exist)
-        for (unsigned tr = 0; tr < tracks; ++tr) {
-          const unsigned d = SongDensity::nibble(dens, tr);
-          if (d != 0u) {
-            const int h = 1 + static_cast<int>(d) * (lane - 2) / static_cast<int>(SongDensity::kMax);
-            r.panel(Rect{blk.x, top + static_cast<int>(tr) * lane + (lane - 1 - h), blk.w, h}, Color::TextDim);  // dimmed (V3): the lanes are the background of the blocks' numbers and colours
-          }
+        const int slot = w.first + static_cast<int>(i);
+        const unsigned id = src.pattern(slot);
+        if (!src.exists(slot) || !view.notemap.ensure(r.display(), *model.project, id)) {
+          continue;
         }
+        if (!open) {
+          open = true;
+          r.begin_raw();
+          r.raw(dl::bitmap_handle(ui::plot::kHandleNoteMap));
+          r.raw(dl::bitmap_layout(eve::BitmapFormat::L1, SongNoteMap::kStride, SongNoteMap::kRows));
+          r.raw(dl::bitmap_transform_e(e));
+          r.raw(r.color_word(Color::Text));
+          r.raw(dl::begin(eve::Primitive::Bitmaps));
+          r.raw(dl::cell(0));
+        }
+        const Rect blk = block_of(i);
+        const int span = timeline_x(w, w.start[i + 1], width) - timeline_x(w, w.start[i], width);
+        const std::int32_t a = notemap_scale_x(timeline_bars(static_cast<unsigned>(src.steps(slot))), span);
+        const int map_w = notemap_fit_width(a, blk.w < 511 ? blk.w : 511);  // never a pixel that samples past column 127
+        r.raw(dl::bitmap_source(SongNoteMap::addr(id)));
+        r.raw(dl::bitmap_size(eve::Filter::Nearest, eve::Wrap::Border, eve::Wrap::Border, static_cast<std::uint32_t>(map_w), static_cast<std::uint32_t>(map_h)));
+        r.raw(dl::bitmap_transform_a(a));
+        r.raw(dl::vertex2f(blk.x * 16, top * 16));
       }
-      if (lane >= micro_h) {  // the track numbers in the margin
-        for (unsigned tr = 0; tr < tracks; ++tr) {
+      if (open) {
+        r.raw(dl::end());
+        r.end_raw();
+      }
+      for (unsigned tr = 0; tr < tracks; ++tr) {  // the track numbers in the margin, centred on the track's lane
+        const int lane_top = top + notemap_row_top(2u * tr, e);
+        const int lane_h = notemap_row_top(2u * tr + 2u, e) - notemap_row_top(2u * tr, e);
+        if (lane_h >= micro_h) {
           text.clear();
           append_dec(text, tr + 1u, 2);
-          r.text(2, top + static_cast<int>(tr) * lane + (lane - micro_h) / 2, text.c_str(), Color::TextDim, Face::Micro);
+          r.text(2, lane_top + (lane_h - micro_h) / 2, text.c_str(), Color::TextDim, Face::Micro);
         }
       }
     }

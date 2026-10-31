@@ -14,6 +14,8 @@
 
 #include <o3os/platform/mk66/display/ft812_regs.h>
 
+#include "mk66_shot_region.h"
+
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
@@ -31,8 +33,8 @@ namespace host = o3os::platform::host;
 
 namespace {
 
-constexpr std::uint32_t kRegionAddr = 0x71000u;
-constexpr std::uint32_t kRegionBytes = 585664u;  // the map's spare region less the DMA self-test's 64 bytes
+constexpr std::uint32_t kRegionAddr = o3os::platform::mk66::test::kShotRegion;
+constexpr std::uint32_t kRegionBytes = o3os::platform::mk66::test::kShotRegionBytes;  // kRamGShotBytes (checked against the map by plot_ram_g_test): the spare region less the DMA self-test's 64 bytes
 
 // The picture the chip "shows": a byte that depends on its place in the image, so a misplaced or doubled piece is seen.
 std::uint8_t pixel_byte(std::uint32_t image_offset) { return static_cast<std::uint8_t>((image_offset * 7u + (image_offset >> 8)) & 0xFFu); }

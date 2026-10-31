@@ -621,7 +621,7 @@ Start on Song.
 1. Press `Song` until the header says **TIMELINE 3/3**. The blocks run from four slots before the cursor.
    A slot is as wide as it has bars (a bar is 16 steps). The page is always at least 16 bars wide, so a short song stays small and does not stretch.
 2. Look at the blocks. Each one carries its pattern's number, and under the number a short strip in the pattern's colour: there are four colours, so patterns 1 and 5 share one. The strip tells you when a pattern comes back; the number tells you which it is. A very narrow block (one bar in a long view) may be too small for a three-digit number. A slot whose pattern does not exist yet has a dim number and no strip.
-3. Look under the blocks. Each track has a lane, and each slot has a dim bar in it. A tall bar means the track plays many notes in that pattern. No bar means no notes. The bars follow your edits in Pattern.
+3. Look under the blocks. This is the note map: each track has a lane, and each slot shows a small tick for every step that holds a note, sixteen steps to a bar. You see the rhythm of each track, not only how busy it is. A step with only a volume, an effect or a note-off has no tick. A track that is shorter than the pattern stops where it stops. Patterns of different lengths use the same step width, so the ticks of a short and a long pattern line up with the bars. The ticks follow your edits in Pattern: edit one pattern and only its map changes. A slot whose pattern does not exist yet has no map.
 4. Press `Up`, `Down`, `Left` or `Right`. The cursor moves one slot and the white frame follows it. The info line says, for example, **timeline slot 02 bar 5 pattern 02 4 bars**.
 5. Press `Play`. A green bar under a block and a white line mark the slot and the step that play.
    The info line now counts down: **timeline NEXT IN 2 BARS cursor slot 02**. It counts the bars left in the pattern that plays, and the last bar says **1 BAR**.
@@ -631,7 +631,7 @@ Start on Song.
 The page draws the tracks Pattern can show, at most 12, and at most 40 slots and 48 bars: with 12 tracks it shows 34 slots. The cursor's slot is always in view.
 The page does not edit anything: the keys work as on the other pages.
 
-Not yet checked on the unit: how the colours and the thumbnails read on the panel, and the countdown against the sound.
+Not yet checked on the unit: how the colours and the note map read on the panel, and the countdown against the sound.
 
 ### Look at Song and come back
 

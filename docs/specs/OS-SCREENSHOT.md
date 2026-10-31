@@ -12,7 +12,7 @@ Shift + Power saves what the screen shows as `Screenshots/SHOT_nnnn.bmp` on the 
 
 - **The console `shot`** (`platform/mk66/README.md:1038, 1060-1066`; `usb/shot_stream.h`).
   - The FT812 coprocessor runs `CMD_SNAPSHOT2` in RGB565 into the spare RAM_G region, in two bands of 240 rows.
-  - The region is `ram_g_map.h` `kRamGShot`: from 0x71000, 572 KiB, less the DMA self-test's last 64 bytes. No bitmap, font or wave slot is touched.
+  - The region is `ram_g_map.h` `kRamGShot`: from 0x89000, 476 KiB (after the 96 KiB note map of OS-SONG-VIEW2 V4, which took 0x71000..0x89000 of what was 0x71000, 572 KiB), less the DMA self-test's last 64 bytes. No bitmap, font or wave slot is touched.
   - The main loop reads each band back over SPI, only when `Ft812Display::bus_idle()`, and a few lines a pass. Audio, the display and the console never stall.
   - A key press or 3 s without progress ends it.
 - **The Power key** (OS-POWER, `docs/specs/OS-POWER.md` D5, `core::PowerHold`).

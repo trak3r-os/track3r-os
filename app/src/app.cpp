@@ -2874,7 +2874,7 @@ void App::render() noexcept {
   } else {
     ++failed_frames_;  // aborted by the builder: the same content would overflow again, so no retry loop
   }
-  dirty_ = false;
+  dirty_ = state_.notemap.pending();  // note-map pictures still to upload (song_notemap.h): another frame fills in the rest
 }
 
 }  // namespace o3os::app

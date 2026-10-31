@@ -9,6 +9,8 @@
 #include <o3os/platform/mk66/usb/shot_stream.h>
 #include <o3os/usb/diag_shell.h>
 
+#include "mk66_shot_region.h"
+
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -31,8 +33,8 @@ namespace sh = o3os::usb::diag;
 
 namespace {
 
-constexpr std::uint32_t kRegion = 0x71000u;
-constexpr std::uint32_t kRegionBytes = 585664u;  // the map's spare region less the DMA self-test's 64 bytes (platform/mk66/src/app_main.cpp shot_region)
+constexpr std::uint32_t kRegion = o3os::platform::mk66::test::kShotRegion;
+constexpr std::uint32_t kRegionBytes = o3os::platform::mk66::test::kShotRegionBytes;  // kRamGShotBytes (checked against the map by plot_ram_g_test): the spare region less the DMA self-test's 64 bytes (platform/mk66/src/app_main.cpp shot_region)
 
 // The picture the "chip" has: a byte is a function of its offset in the image, so any misplaced line shows.
 std::uint8_t image_byte(std::uint32_t offset) { return static_cast<std::uint8_t>((offset * 131u + (offset >> 8) * 7u + 3u) & 0xFFu); }
@@ -331,7 +333,7 @@ TEST_CASE("shot: the default w is the chip's: 800 for RGB565, 1600 for ARGB8 (OS
   CHECK(console::default_width_param(console::ShotFormat::Rgb565) == console::ShotParams{}.width_param);
 }
 
-TEST_CASE("shot: ARGB8 with its default w is six bands of 80 rows") {
+TEST_CASE("shot: ARGB8 with its default w is seven bands of 69 rows") {
   console::ShotStream s;
   FakePort p;
   p.row_bytes = 3200;
@@ -343,18 +345,20 @@ TEST_CASE("shot: ARGB8 with its default w is six bands of 80 rows") {
   run(s, t, p);
   MUST(t.others.size() == 2u);
   CHECK(t.others.front() == "SHOT BEGIN fmt=8888 w=800 h=480 bytes=1536000 line=96");
-  MUST(p.captures.size() == 6u);
-  for (unsigned b = 0; b < 6; ++b) {
+  // The region holds kRamGShotBytes / 6400 rows of what the chip may write (1600 pixels of 4 bytes): 76, so 7 bands of 69 rows (the last one 66).
+  static_assert(kRegionBytes / 6400u == 76u, "the region holds 76 rows at the default w; the bands below follow");
+  MUST(p.captures.size() == 7u);
+  for (unsigned b = 0; b < 7; ++b) {
     CHECK(p.captures[b].format == ft::kFmtArgb8);
-    CHECK(p.captures[b].y == 80u * b);
-    CHECK(p.captures[b].rows == 80u);
+    CHECK(p.captures[b].y == 69u * b);
+    CHECK(p.captures[b].rows == (b < 6u ? 69u : 66u));
     CHECK(p.captures[b].w == 1600u);  // what the chip is given: the picture's row is still 800 pixels
     CHECK(p.captures[b].addr == kRegion);
   }
-  // 80 rows * 3200 = 256000 bytes a band: 2666 lines of 96 and one of 64; the offsets run on across the bands
+  // 69 rows * 3200 = 220800 bytes a band, 2300 lines of 96 (the last band 66 rows, 2200 lines): no short line; the offsets run on across the bands
   CHECK(t.bad_lines == 0u);
   CHECK(t.expect_offset == 1536000u);
-  CHECK(t.short_lines == 6u);
+  CHECK(t.short_lines == 0u);
   CHECK(t.others.back().find("moved=0") != std::string::npos);
 }
 
@@ -557,12 +561,13 @@ TEST_CASE("shot: the bands are sized by what the chip may write, so a large w ne
     console::ShotFormat format;
     std::uint32_t w, row_bytes, stride, rows, bands;
   };
-  // region 602,048 bytes: stride = max(800 px, w px) * bytes per pixel; rows = ceil(480 / ceil(480 / (region / stride)))
+  // region 487,360 bytes (kRamGShotBytes): stride = max(800 px, w px) * bytes per pixel; rows = ceil(480 / ceil(480 / (region / stride)))
+  static_assert(kRegionBytes == 487360u, "the cases below follow the region's size");
   const Case cases[] = {
       {console::ShotFormat::Rgb565, 800, 1600, 1600, 240, 2},  {console::ShotFormat::Rgb565, 400, 1600, 1600, 240, 2},  // a narrower w writes no more than a full row
-      {console::ShotFormat::Rgb565, 1600, 1600, 3200, 160, 3},  {console::ShotFormat::Rgb565, 4095, 1600, 8190, 69, 7},
-      {console::ShotFormat::Argb8, 800, 3200, 3200, 160, 3},   {console::ShotFormat::Argb8, 1600, 3200, 6400, 80, 6},
-      {console::ShotFormat::Argb8, 4095, 3200, 16380, 35, 14},
+      {console::ShotFormat::Rgb565, 1600, 1600, 3200, 120, 4},  {console::ShotFormat::Rgb565, 4095, 1600, 8190, 54, 9},
+      {console::ShotFormat::Argb8, 800, 3200, 3200, 120, 4},   {console::ShotFormat::Argb8, 1600, 3200, 6400, 69, 7},
+      {console::ShotFormat::Argb8, 4095, 3200, 16380, 29, 17},
   };
   for (const Case& c : cases) {
     INFO("format " << (c.format == console::ShotFormat::Argb8 ? "8888" : "565") << " w " << c.w);

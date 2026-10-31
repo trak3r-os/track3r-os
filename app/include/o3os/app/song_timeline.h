@@ -13,9 +13,11 @@ namespace o3os::app {
 inline constexpr unsigned kTimelineBefore = 4;      // slots shown before the cursor's (D6)
 inline constexpr unsigned kTimelineMaxSlots = 40;   // at most this many slots in view (D7)
 inline constexpr unsigned kTimelineMaxBars = 48;    // and at most this many bars
-// The display-list bound is structural: a slot costs its tracks' thumbnail rectangles (2 words each) plus a fixed overhead (its block, the colour change, the number, the energy column: measured
+// The display-list bound was structural: a slot cost its tracks' thumbnail rectangles (2 words each) plus a fixed overhead (its block, the colour change, the number, the energy column: measured
 // 11.4 words at worst, counted as kTimelineSlotOverhead rectangles = 12 words), so slots x (tracks + kTimelineSlotOverhead) is held to kTimelineSlotBudget whatever the track count, and the page
-// is at most about 400 (the rest of the page) + 2 x tracks + 2 x kTimelineSlotBudget = 1673 words of the 1792; measured worst 1500 after OS-SONG-VIEW2 V3/V5 (the blocks' passes go by colour; it was 1650; song/timeline_worst sweeps every track count, 1 to 16; song_timeline_test checks the arithmetic).
+// was at most about 400 (the rest of the page) + 2 x tracks + 2 x kTimelineSlotBudget = 1673 words of the 1792 (measured worst 1500 after OS-SONG-VIEW2 V3/V5; song_timeline_test checks the arithmetic). Since
+// OS-SONG-VIEW2 V4 the tracks are one bitmap a slot (4 words, one raw section for the page) and song/timeline_worst (every track count, 1 to 16) measures 891 words (817 translated): the cap is kept as it was (it
+// keeps the window, and so the picture, as the maintainer saw it) and is room to spend later, not a need.
 inline constexpr unsigned kTimelineSlotOverhead = 6;   // rectangle-equivalents a slot costs besides its tracks' rectangles
 inline constexpr unsigned kTimelineSlotBudget = 620;   // slots x (tracks + kTimelineSlotOverhead) at most this: 16 tracks show 28 slots, 12 show 34, 9 or fewer 40
 inline constexpr unsigned kTimelineMinBars = 16;    // the page is at least this many bars wide: a short song does not stretch its few blocks over the whole width

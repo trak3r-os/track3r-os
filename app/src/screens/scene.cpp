@@ -9,6 +9,7 @@
 namespace o3os::app {
 
 void render_scene(const Model& model, const ViewState& view, ui::Renderer& r) noexcept {
+  view.notemap.begin_frame();  // the Song TIMELINE page's note-map uploads are counted a frame (song_notemap.h)
   const ScreenEntry* entry = find_screen(screen_registry(), view.screen);
   const Screen& screen = entry != nullptr && entry->screen != nullptr ? *entry->screen : kPatternScreen;
   // The base screen first, told what the overlay will cover so it can leave that out; then the overlay over it.

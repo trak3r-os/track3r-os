@@ -11,7 +11,7 @@
 
 namespace o3os::app {
 
-// OS-SONG-TIMELINE: the visible slots as blocks as wide as they have bars, a colour and the number of the pattern on each, a lane of note-density thumbnails a track, the playing slot and playhead, the cursor.
+// OS-SONG-TIMELINE: the visible slots as blocks as wide as they have bars, a colour and the number of the pattern on each, a note map (a lane of ticks a track, song_notemap.h), the energy row, the playing slot and playhead, the cursor.
 void draw_song_timeline(ui::Renderer& r, const Frame& f, const Model& model, const ViewState& view, ui::Rect covered) noexcept;
 
 }  // namespace o3os::app

@@ -8,7 +8,7 @@
 # dir_index / dir_scan (OS-010a) are the folder browser's core (a sorted listing, and the job that fills it from a hal::storage::Storage); file_view,
 # file_actions and screens/file_screen.cpp are the File screen on it.
 o3os_library(app
-  SOURCES src/app.cpp src/pattern_data.cpp src/pattern_view.cpp src/song_data.cpp src/song_view.cpp src/song_actions.cpp src/song_map.cpp src/song_stage.cpp src/song_timeline.cpp src/screens/song_pages.cpp src/song_edit.cpp src/song_map_actions.cpp src/song_tools_view.cpp src/screens/song_tools_overlay.cpp
+  SOURCES src/app.cpp src/pattern_data.cpp src/pattern_view.cpp src/song_data.cpp src/song_view.cpp src/song_actions.cpp src/song_map.cpp src/song_notemap.cpp src/song_stage.cpp src/song_timeline.cpp src/screens/song_pages.cpp src/song_edit.cpp src/song_map_actions.cpp src/song_tools_view.cpp src/screens/song_tools_overlay.cpp
           src/actions.cpp src/nav_actions.cpp src/screen_actions.cpp src/pattern_actions.cpp src/pad_audition_actions.cpp src/ui_actions.cpp
           src/edit_actions.cpp src/job_actions.cpp src/param_actions.cpp src/import_job.cpp src/peak_job.cpp src/og_folder.cpp src/native_load.cpp src/og_samples.cpp src/module_import.cpp src/module_binder.cpp src/module_ui.cpp
           src/dir_index.cpp src/dir_scan.cpp src/file_view.cpp src/file_actions.cpp src/file_ops_actions.cpp src/recent_list.cpp

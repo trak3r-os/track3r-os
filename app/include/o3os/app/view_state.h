@@ -19,6 +19,7 @@
 #include <o3os/app/sample_load_view.h>
 #include <o3os/app/screens/ids.h>
 #include <o3os/app/sample_edit_state.h>
+#include <o3os/app/song_notemap.h>
 #include <o3os/app/song_tools_view.h>
 #include <o3os/app/song_view.h>
 #include <o3os/app/text_entry.h>
@@ -159,7 +160,8 @@ struct ViewState {
   PatternView pattern;  // the Pattern screen's cursor and window
   PatternEdit edit;     // the pattern being edited, the edit step, the pad board, the selection (OS-009)
   SongView song;        // the Song screen's cursor and window
-  SongDensity density;  // the TIMELINE page's thumbnails (song_map.h): a cache kept here, not in SongView, which SongScreen::render copies each frame
+  SongDensity density;  // the TIMELINE page's energy row (song_map.h): a cache kept here, not in SongView, which SongScreen::render copies each frame
+  SongNoteMap notemap;  // the TIMELINE page's note maps (song_notemap.h): which pattern generations are in RAM_G, 1 KB; kept here for the same reason as `density`
   FileView file;        // the File screen's cursor and window over the folder listing (OS-010a)
   FileImport import;    // the File screen's IMPORT page (OS-FILES): the page, its folder, the report flag, the engine choice
   ExportView xport;     // the File screen's EXPORT page and the progress of a running WAV export (OS-WAVEXP)

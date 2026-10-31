@@ -38,7 +38,7 @@ class SongTrackMap {
   mutable std::uint32_t computed_ = 0;
 };
 
-// The note density of each track of a pattern, for the thumbnails of the Song screen's TIMELINE page (OS-SONG-TIMELINE, docs/specs/OS-SONG-VIEW.md): 4 bits a track (0 nothing .. 15 full), packed in
+// The note density of each track of a pattern, for the energy row of the Song screen's TIMELINE page (OS-SONG-TIMELINE, docs/specs/OS-SONG-VIEW.md; the thumbnails it drew once are the note map since OS-SONG-VIEW2 V4): 4 bits a track (0 nothing .. 15 full), packed in
 // 64 bits (track t at bits 4t..4t+3). Computed from the pattern on the main loop at most once per change of it, keyed by the pattern's generation like the track map: drawing a frame reads a table.
 // Main loop only, nothing allocated, none of it saved.
 class SongDensity {

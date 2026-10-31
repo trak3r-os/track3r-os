@@ -43,7 +43,7 @@ getting_started.md#start-the-unit-for-the-first-time platform/mk66/src/app_main.
 getting_started.md#what-goes-on-the-card tools/release/make_starter.py=5776c99f2fb0
 glossary.md#glossary app/include/o3os/app/limiter_rows.h=db03d7f45e49 app/include/o3os/app/pad_lights.h=0a6a6ede704b app/src/bindings.cpp=65f1da57fe7f app/src/screens/config_screen.cpp=61fb0ed5120d audio/include/o3os/audio/graph.h=55c5ccb34779 audio/include/o3os/audio/master_limiter.h=c5a5f63e53a0 docs/manual/sample_edit.md=820713defef5
 input_test.md#input-test QA-INP-001=0b49b5ec19a7 QA-INP-002=ba3a1164831b QA-INP-003=54af89aea908 QA-INP-004=59fc29f59110 QA-INP-005=dd437bb6e566 QA-INP-006=3436fa203dee QA-INP-007=32ff2b08ee8a QA-INP-008=318bf78ba52f app/include/o3os/app/screens/input_test_screen.h=971aaab8d1f6
-install.md#1-from-the-official-firmware docs/hw/tracker-hardware-notes.md=880c1ec55fe9 platform/mk66/README.md=2ac0b62f530b
+install.md#1-from-the-official-firmware docs/hw/tracker-hardware-notes.md=880c1ec55fe9 platform/mk66/README.md=4288b20767db
 install.md#2-updating-track3r-os-to-a-newer-track3r-os docs/specs/OS-006-usb.md=2aa9dddd58f3 platform/mk66/tools/o3console.py=7f3d4a798b3c
 install.md#before-you-start docs/hw/tracker-hardware-notes.md=880c1ec55fe9 platform/mk66/update/include/o3os/platform/mk66/update/path_guard.h=350f302bc4ef
 install.md#what-a-release-contains tools/release/make_starter.py=5776c99f2fb0 tools/release/starter_manifest.json=46aff5797521
@@ -136,7 +136,7 @@ sample_load.md#play-a-stereo-file-in-stereo QA-FIL-120=43f0da02f38a QA-FIL-121=a
 sample_load.md#sample-load app/include/o3os/app/sample_load_view.h=5968dbd75118 app/src/bindings.cpp=65f1da57fe7f app/src/sample_actions.cpp=258af12516e0 app/src/screens/sample_load_screen.cpp=0cd5e51f7fda
 song.md#good-to-know QA-SNG-010=13f0cd10ca85 QA-SNG-013=4a6665d0a244 QA-SNG-061=05e2b8fadabb app/src/song_actions.cpp=de2351abac40
 song.md#how-it-works QA-SNG-034=791acbbee9b6 QA-SNG-036=713f5c40e1fb QA-SNG-037=1d06afccfa21 QA-SNG-040=e65da4caaef5 QA-SNG-043=464a96ff2ff9 QA-SNG-050=2f6f3cc1bdf9 app/src/screens/song_screen.cpp=86ff2e60fc4c app/src/song_actions.cpp=de2351abac40 docs/specs/OS-SONGSHARE.md=2e4dbdfbf336 docs/specs/SONG-UX.md=36c1c8f19945
-song.md#song QA-SNG-020=9d616fb6002a QA-SNG-034=791acbbee9b6 QA-SNG-036=713f5c40e1fb QA-SNG-040=e65da4caaef5 QA-SNG-050=2f6f3cc1bdf9 app/include/o3os/app/song_map.h=302639cfc868 app/src/screens/song_screen.cpp=86ff2e60fc4c app/src/song_actions.cpp=de2351abac40 docs/specs/OS-SONGSHARE.md=2e4dbdfbf336 docs/specs/SONG-UX.md=36c1c8f19945
+song.md#song QA-SNG-020=9d616fb6002a QA-SNG-034=791acbbee9b6 QA-SNG-036=713f5c40e1fb QA-SNG-040=e65da4caaef5 QA-SNG-050=2f6f3cc1bdf9 app/include/o3os/app/song_map.h=615c4df0f490 app/src/screens/song_screen.cpp=86ff2e60fc4c app/src/song_actions.cpp=de2351abac40 docs/specs/OS-SONGSHARE.md=2e4dbdfbf336 docs/specs/SONG-UX.md=36c1c8f19945
 song.md#try-it QA-SNG-003=296f76370766 QA-SNG-034=791acbbee9b6 QA-SNG-050=2f6f3cc1bdf9 QA-SNG-051=50878674683d app/src/screens/song_screen.cpp=86ff2e60fc4c app/src/song_actions.cpp=de2351abac40
 usb_disk.md#get-the-card-back-from-the-computer QA-CFG-203=01aa42f5fe87 QA-CFG-204=b3b0024527ae QA-CFG-208=f037b173483a QA-CFG-209=77e550b73f82 docs/specs/OS-USBDISK.md=215b84ba76e3
 usb_disk.md#how-it-works QA-CFG-200=34391ab05399 QA-CFG-201=cf9bf027d960 QA-CFG-202=2c3228877fb1 QA-GLB-015=e7a23c55e9cb docs/specs/OS-USBDISK.md=215b84ba76e3

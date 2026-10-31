@@ -1,0 +1,35 @@
+# OS-SONG-VIEW2 V4 (docs/specs/OS-SONG-VIEW2.md; new Community OS behaviour): the note map of the Song screen's TIMELINE page, QA-SNG-088 and 090, docs/qa/catalogue/song.md. Goldens are keyed qa_song_notemap/<snap>.
+# QA-SNG-088: the note map. Under each block one lane a track (the demo's twelve), a tick where a step holds a note, sixteen steps to a bar: the demo's four-bar pattern and its
+# three copies (Shift + Insert) show the same ticks; the last two lanes (the external line tracks) hold volume and FX only and have none.
+document
+tap song
+press shift
+tap insert
+tap insert
+tap insert
+release shift
+tap up 3
+tap song
+tap song
+assert state screen=SONG page=2
+snap qa_sng_088
+
+# QA-SNG-090: an edit of a pattern redraws only that pattern's map: the first bar's four kicks of pattern 1 are deleted (each Delete moves the cursor on one step) in Pattern (STEP) and the copies keep theirs.
+tap pattern
+tap rec
+assert model pat.1.0.0.note=25
+tap delete
+tap down 3
+tap delete
+tap down 3
+tap delete
+tap down 3
+tap delete
+assert model pat.1.0.0.note=0
+assert model pat.1.0.4.note=0
+assert model pat.1.0.8.note=0
+assert model pat.1.0.12.note=0
+assert model pat.2.0.0.note=25
+tap song
+assert state screen=SONG page=2
+snap qa_sng_090
