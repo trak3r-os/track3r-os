@@ -8,7 +8,6 @@
 # only falls back to the plain arrow, a key with a sibling of the same action, the placeholder soft key); the ID is that of A2's decision list (tests/qanet/allow_rules.txt, baseline_keys.txt) when it lists the same
 # action, else `new`: the walk reaches states A2's table does not (a recorder with nothing recorded, a text entry with no room, a Pattern with no selection ...), and whether the silence is design is the maintainer's call
 # (docs/qa/qanet-findings.md). An R3 line is the walk's own: an input judged against rule 3's table after a selection the walk made (the table may be wrong for these two as well as the code: not yet classified).
-R1 | FILE | tap f1 | 4@170 | File F1 (OPEN, or IMPORT on the import page): the document changes with no unit and the history may be cleared, and the load fails (the residuals of the verify of OS-QAFIX-4, docs/qa/qanet-findings.md) | new
 # C4 (`--audio-probe`): audio_probe lines, keyed (edit, <pad:fresh|pad:settled>:<what>). pad:fresh = the pad straight after the edit; add, auto and even still differ from the step by about 3 ms of onset and a little shape after the OS-BUG-SLICEPITCH fix (the older pitch lines left with it); after a load the slot is empty for a few ms: a dropped note; pad:settled = a difference that stays. All `new`.
 # The two lines `audio_probe | auto | pad:fresh:silent` and `audio_probe | load | pad:fresh:onset` left the baseline because the walk's random stream changed (B4b: Shift + arrows and the 100 ms before a key): they no longer occur in seeds 1..200 of this stream. They were NOT fixed; a stream that reaches the state again can bring them back as new findings. `audio_probe | add | pad:fresh:onset` (31@150) left the same way at the 44,100 Hz clock (OS-RATE): the walk's stream is unchanged, so the clock moved the probe's onset measure of that state; it is not fixed. It came back as a new finding (19@150, the first seed of the key) when the walk's stream moved again with dev c21328bf (OS-BUG-R3SEL), and is a line again.
 audio_probe | add | pad:fresh:onset | 19@150 | onset -3.3 ms | new (still there after the OS-BUG-SLICEPITCH fix)
@@ -30,12 +29,13 @@ audio_probe | undo | pad:fresh:shape | 28@150 | shape 0.75 | new
 audio_probe | undo | pad:settled:shape | 28@150 | shape 0.75 | new
 R2 | CONFIG | firmware.open 0 | 11@81 | bound key changes nothing and says nothing (firmware.open) [27x in the run] | OS-FWCONFIG
 R2 | CONFIG | param.apply 0 | 100@18 | bound key changes nothing and says nothing (param.apply) [5x in the run] | OS-BUG-APPLYSILENT: seed 100 step 18 replayed 2026-10-23: CONFIG page 2 (SD, F3 then F7), no parameter row, F7 unlabelled: by design, OS-QAFIX-7
+R2 | CONFIG | shift+param.coarse -1 | 18@272 | bound key changes nothing and says nothing (param.coarse -1) [1x in the run] | new
 R2 | FILE | file.engine 0 | 162@103 | bound key changes nothing and says nothing (file.engine) [2x in the run] | new
 R2 | FILE | file.new 0 | 88@279 | bound key changes nothing and says nothing (file.new) [1x in the run] | new
 R2 | FILE | file.page 0 | 100@237 | bound key changes nothing and says nothing (file.page) [4x in the run] | new
 R2 | FILE | file.report 0 | 1@220 | bound key changes nothing and says nothing (file.report) [184x in the run] | OS-FILES-B
-R2 | FILE | file.rescan 0 | 6@228 | bound key changes nothing and says nothing (file.rescan) [11x in the run] | new
-R2 | FILE | shift+cursor.jump_end 0 | 4@160 | bound key changes nothing and says nothing (cursor.jump_end) [21x in the run] | new
+R2 | FILE | file.rescan 0 | 11@51 | bound key changes nothing and says nothing (file.rescan) [11x in the run] | new
+R2 | FILE | shift+cursor.jump_end 0 | 15@293 | bound key changes nothing and says nothing (cursor.jump_end) [21x in the run] | new
 R2 | FILE | shift+cursor.page -1 | 2@199 | bound key changes nothing and says nothing (cursor.page) [46x in the run] | new
 R2 | FILE | shift+cursor.page 1 | 9@117 | bound key changes nothing and says nothing (cursor.page) [10x in the run] | new
 R2 | FILE | shift+file.purge 0 | 3@148 | bound key changes nothing and says nothing (file.purge) [28x in the run] | new
@@ -53,6 +53,7 @@ R2 | MIXER | shift+mixer.solo_none 0 | 162@111 | bound key changes nothing and s
 R2 | MIXER | text.auto 0 | 69@296 | bound key changes nothing and says nothing (text.auto) [2x in the run] | new
 R2 | MIXER | text.key 0 | 69@295 | bound key changes nothing and says nothing (text.key) [1x in the run] | new
 # The line `R2 | PATTERN | pattern.invert 0` left the baseline after OS-AUDIT-56 (column blocks: Shift + Left/Right grow a column block, which changed the walk and what Invert acts on); it no longer occurs in the LONG run (shard 2, seeds 10..18).
+# The line `R1 | FILE | tap f1` (the residuals of the verify of OS-QAFIX-4) left the baseline on 2026-10-31: the walk's random stream moved with the dev merges after OS-AUDIT-56 (OS-SID, OS-IMPORT-ANY, the Config APPLY? arm, OS-STEREO slice (b), OS-SONG-VIEW2 slice 3), and it no longer occurs in the LONG run (shards 1 and 2); in the same move `file.rescan` and `shift+cursor.jump_end` took new repros and `shift+param.coarse -1` on Config came in.
 R2 | PATTERN | pattern.preview 0 | 1@47 | bound key changes nothing and says nothing (pattern.preview) [59x in the run] | new
 R2 | PATTERN | shift+cursor.page -1 | 33@8 | bound key changes nothing and says nothing (cursor.page) [5x in the run] | new
 R2 | PATTERN | shift+cursor.page 1 | 104@204 | bound key changes nothing and says nothing (cursor.page) [1x in the run] | new
