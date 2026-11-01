@@ -44,3 +44,7 @@ Slice 1 and 1b: the digests and SVF tests above unchanged, the qemu digests, `cp
 ## Done when
 
 Slice 1 merged with the disassembly and unit `cpuopt` figures before and after; slice 2 measured and decided; cpu-budget.md updated (and the stale 128-sample lines fixed); slice 3 recorded for the maintainer.
+
+## Slice 2 result (2026-11-01)
+
+Measured on the unit (`v1.0.1-hpbp2.1-bench`, dc21f23e on `feat/OS-PERF-HPBP-2`, not merged): `svf_run2<High>` saves 9.6 % against two single runs (5,062 to 4,574 cycles over 64 samples, median of three; bit-identical, `cpuopt_eq_svf2` OK). Below the 15 % gate of the Plan, so slice 2 is not wired into `render` and its bench row is not merged (orchestrator, by the gate; the maintainer can reopen it). Details in `docs/architecture/cpu-budget.md`, OS-PERF-HPBP section. The item closes with slice 1b; slice 3 stays not pursued; the BANDPASS in-voice gap stays an open research question.
