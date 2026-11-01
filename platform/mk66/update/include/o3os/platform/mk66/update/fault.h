@@ -50,6 +50,8 @@ enum class Fault : std::uint8_t {
   Expired,       // the check is older than kArmLifetimeMs
   // the update name limit (path_guard.h, OS-BUG-FWNAMELEN)
   NameLong,      // a valid image name over kUpdateNameMax characters: never armed (the SD bootloader flashes another file for it)
+  // the image's end (hex_validator.h, OS-GATE-BOOTCRASH), appended after NameLong so that no value moves
+  NotPadded,     // the image's end (last address + 1) is not a multiple of 4096: the SD bootloader leaves a short final sector as it was, so the tail would be stale bytes
   Count
 };
 
@@ -91,6 +93,7 @@ inline constexpr const char* fault_name(Fault f) noexcept {
     case Fault::NotArmed: return "not checked, or the card changed since";
     case Fault::Expired: return "check expired, check again";
     case Fault::NameLong: return "name over 30 characters";
+    case Fault::NotPadded: return "image not padded: may not boot";
     case Fault::Count: break;
   }
   return "?";

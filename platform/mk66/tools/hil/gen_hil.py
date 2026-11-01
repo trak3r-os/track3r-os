@@ -80,6 +80,9 @@ def SAY(text):
     return {"say": text}
 
 
+# The Song screen has 3 pages (ORDER, ARRANGEMENT, TIMELINE) and the Song key turns them round: from page 1 two presses reach page 0, from page 2 one. Expects the Song screen up.
+SONG_PAGE0 = [K("song", gap=0.4, if_state={"page": "1"}, note="(page 0 first: Song again cycles ORDER / ARRANGEMENT / TIMELINE)"), K("song", gap=0.4, if_state={"page": "2"})]
+
 KEYROW = ["0,458,800,22"]
 
 
@@ -182,12 +185,13 @@ nav += [
     SAY("PATTERN"),
     ST({"screen": "PATTERN", "overlay": "NONE"}, within=3),
     SHOT("pattern", compare=CMP("screens", "pattern_start"), soft=True, note="(soft: the key-cap row against the simulator's golden; needs --sim or --golden-dir)"),
-    # SONG, two pages
+    # SONG, three pages (OS-SONG-VIEW2: ORDER, ARRANGEMENT, TIMELINE)
     K("song", gap=0.5), ST({"screen": "SONG"}, within=3),
-    K("song", gap=0.4, if_state={"page": "1"}, note="(page 0 first: Song again cycles ORDER / ARRANGEMENT)"), ST({"screen": "SONG", "page": "0"}, within=2),
+    *SONG_PAGE0, ST({"screen": "SONG", "page": "0"}, within=2),
     SHOT("song_order", compare=CMP("screens", "song_start"), soft=True),
     K("song", gap=0.4), ST({"screen": "SONG", "page": "1"}, within=2),
     SHOT("song_arrangement", compare=CMP("screens", "song_page2"), soft=True),
+    K("song", gap=0.4), ST({"screen": "SONG", "page": "2"}, within=2, note="the Timeline page"),
     K("song", gap=0.4), ST({"screen": "SONG", "page": "0"}, within=2),
     # INSTRUMENT (Params): F1 the SOURCE page, F2..F5 the four pages (the engine picker is the F4 of a free slot, OS-INSTUI S5: below)
     K("params", gap=0.5), ST({"screen": "INSTRUMENT"}, within=3),
@@ -617,7 +621,7 @@ add("slices_pads", "OS-SLICEFIX: for each of the 16 instruments of t-v16 select 
 # ======================================================================================================================================
 song = start_on_pattern() + [
     K("song", gap=0.5), ST({"screen": "SONG"}, within=3),
-    K("song", gap=0.4, if_state={"page": "1"}), ST({"page": "0"}, within=2),
+    *SONG_PAGE0, ST({"page": "0"}, within=2),
     K("+shift", "f1", "-shift", gap=0.3, note="Shift + F1: the cursor to the first slot"),
     K("+shift", "f8", "-shift", gap=0.3, note="(redo on an empty journal: the last message becomes NOTHING TO REDO)"),
     ST({"msg": NOTHING_REDO}, within=2, soft=True),

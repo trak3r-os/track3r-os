@@ -422,6 +422,26 @@ TEST_CASE("firmware: a failed check returns to the list with the fault and the o
   CHECK(rig.overlay() == OverlayId::None);
 }
 
+TEST_CASE("firmware: an image not padded to a 4 KiB sector is refused by the check with its own line, inside the dialog's width, and nothing is installed (OS-GATE-BOOTCRASH)") {
+  Rig rig;
+  FakeFirmwareSink::Script bad;
+  bad.verdict = State::Failed;
+  bad.fault = "image not padded: may not boot";  // platform/mk66/update/fault.h fault_name(Fault::NotPadded)
+  bad.offset = 927932;                            // 0xE28BC, the v1.0.0 image end (the stream's byte count, not an address): the screen must not print it
+  bad.offset_known = false;                       // what the real sink says for Fault::NotPadded
+  rig.sink.script("TRACKER_1.PTF", bad);
+  rig.tap(Button::F8);
+  rig.tap(Button::F1);
+  rig.tap(Button::F1);
+  rig.passes(FakeFirmwareSink::kDefaultSlices);
+  CHECK(rig.fw().phase == Phase::List);
+  CHECK(rig.fw().bad);
+  CHECK(std::string(rig.fw().msg.c_str()) == "NOT A VALID IMAGE: IMAGE NOT PADDED: MAY NOT BOOT");
+  CHECK(rig.fw().msg.size() <= FirmwareView::kMsgChars);
+  CHECK(rig.sink.installs == 0u);
+  CHECK(rig.sink.count("install") == 0u);
+}
+
 TEST_CASE("firmware: question 2 is answered by F1 alone; INSTALL reaches the port exactly once and the hand-over shows DO NOT POWER OFF with no key acting") {
   Rig rig;
   rig.to_question_two();

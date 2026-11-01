@@ -83,7 +83,7 @@ TEST_CASE("fw put: a good upload is acknowledged, validated, read back and renam
   const PutRun run = do_put(r, kName, file, file_crc(file));
   NEED(run.ready);
   const std::string t = r.text();
-  CHECK(t.find("ok " + std::string(kName) + " " + std::to_string(file.size()) + " " + hex8s(file_crc(file)) + " image " + std::to_string(0x410 + 9000)) != std::string::npos);
+  CHECK(t.find("ok " + std::string(kName) + " " + std::to_string(file.size()) + " " + hex8s(file_crc(file)) + " image " + std::to_string(good_image(9000).size())) != std::string::npos);  // 0x410 + 9000, padded to 12288
   CHECK(r.said("first-ptf "));
   CHECK(r.said("o3> "));  // the prompt is back
   CHECK(r.store.has(kName));
@@ -272,6 +272,15 @@ TEST_CASE("fw put: every kind of failure after the bytes arrive leaves nothing o
     CHECK(!r.store.has_call("commit"));
     CHECK(!r.store.has_call("open_read"));
   }
+  {  // OS-GATE-BOOTCRASH: an image that does not end on a 4 KiB boundary (the SD bootloader would leave stale bytes in its last sector) is refused at the end
+    const std::string unpadded = to_hex(good_image(3000, false));
+    Rig r;
+    NEED(do_put(r, kName, unpadded, file_crc(unpadded)).ready);
+    CHECK(r.said(("ERR image not padded: may not boot at " + std::to_string(unpadded.size())).c_str()));
+    CHECK(!r.store.has(kName));
+    CHECK(!r.store.has(up::kTempName));
+    CHECK(!r.store.has_call("commit"));
+  }
   {  // a write that fails half way
     Rig r;
     r.store.fail_append_after = 2;
@@ -449,6 +458,33 @@ TEST_CASE("fw arm: a name over 30 characters is refused with a reason and nothin
   CHECK(!r.store.has(up::kFwInfoName));
   r.clear();
   r.command("fw arm " + at30 + " " + hex8s(a.crc));  // the longest proven name arms as before
+  CHECK(token_of(r).size() == 8u);
+  CHECK(r.svc.armed());
+}
+
+// OS-GATE-BOOTCRASH: a file already on the card (copied there by a computer, or stored by an older build) that does not end on a 4 KiB boundary is never armed:
+// 1 byte short is refused with its own reason, the boundary exactly arms, and a refused arm hands nothing over.
+TEST_CASE("fw arm: an image not padded to a 4 KiB sector is refused with a reason, nothing is armed or handed over") {
+  const std::size_t sector = 4096;
+  const std::string short_by_one = to_hex(good_image(sector - 0x410 - 1, false));
+  const std::string exact = to_hex(good_image(sector - 0x410, false));
+  const std::string v100_like = to_hex(good_image(3000, false));
+  Rig r;
+  r.store.put_file("short1.ptf", std::vector<std::uint8_t>(short_by_one.begin(), short_by_one.end()));
+  r.store.put_file("exact.ptf", std::vector<std::uint8_t>(exact.begin(), exact.end()));
+  r.store.put_file("v100.ptf", std::vector<std::uint8_t>(v100_like.begin(), v100_like.end()));
+  for (const char* name : {"short1.ptf", "v100.ptf"}) {
+    r.clear();
+    r.command(std::string("fw arm ") + name + " " + hex8s(file_crc(name[0] == 's' ? short_by_one : v100_like)));
+    CHECK_MESSAGE(r.said("ERR image not padded: may not boot"), name);
+    CHECK(!r.svc.armed());
+    CHECK(token_of(r).empty());
+    CHECK(!r.store.has(up::kFwInfoName));
+    CHECK(!r.host.called("quiesce"));
+    CHECK(!r.host.pin_low);
+  }
+  r.clear();
+  r.command("fw arm exact.ptf " + hex8s(file_crc(exact)));
   CHECK(token_of(r).size() == 8u);
   CHECK(r.svc.armed());
 }

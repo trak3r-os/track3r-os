@@ -35,6 +35,7 @@ class FakeFirmwareSink final : public hal::firmware::FirmwareSink {
     std::uint32_t image = 0x3F2A0u;     // Checked
     std::uint32_t crc = 0x5EA1B0C4u;    // Checked
     std::uint32_t offset = 0;           // Failed: the byte of the fault
+    bool offset_known = true;           // Failed: false for a fault of the whole image (the real sink says so for not padded)
     const char* fault = "bad vector table";  // Failed: a static text
     State install_end = State::Idle;    // after install(): Failed or DidNotStart after `install_slices` polls; Idle: Running for good
     unsigned install_slices = kDefaultSlices;
@@ -193,6 +194,7 @@ class FakeFirmwareSink final : public hal::firmware::FirmwareSink {
       checked_ = true;
     } else {
       status_.offset = script_.offset;
+      status_.offset_known = script_.offset_known;
       status_.fault = script_.fault;
     }
   }

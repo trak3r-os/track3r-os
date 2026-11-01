@@ -6,6 +6,7 @@
 // an extended linear address record at each 64 KiB), and a few helpers to break either.
 #include <o3os/platform/mk66/update/hex_validator.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -23,9 +24,15 @@ inline void put_word(std::vector<std::uint8_t>& image, std::size_t at, std::uint
 }
 
 // A valid image of `code_bytes` bytes of code after the flash configuration field: SP 0x20030000, reset 0x501, every other vector 0x511, the reserved
-// ones 0, the field the required 16 bytes. Length 0x410 + code_bytes.
-inline std::vector<std::uint8_t> good_image(std::size_t code_bytes = 512) {
-  std::vector<std::uint8_t> image(0x410 + code_bytes, 0xFF);
+// ones 0, the field the required 16 bytes. Length 0x410 + code_bytes, padded with zeros to the next 4 KiB boundary like the linker's .flashpad
+// (the validator refuses any other end: Fault::NotPadded); `pad` false leaves the exact length for the tests of that rule.
+inline std::vector<std::uint8_t> good_image(std::size_t code_bytes = 512, bool pad = true) {
+  std::size_t length = 0x410 + code_bytes;
+  if (pad) {
+    length = (length + up::kFlashSector - 1u) / up::kFlashSector * up::kFlashSector;
+  }
+  std::vector<std::uint8_t> image(length, 0);
+  std::fill(image.begin(), image.begin() + 0x410 + static_cast<std::ptrdiff_t>(code_bytes), std::uint8_t{0xFF});
   put_word(image, 0, 0x20030000u);
   put_word(image, 4, 0x00000501u);
   for (unsigned i = 2; i < up::kVectorEntries; ++i) {

@@ -10,7 +10,7 @@ checkers on every file and requires the SAME verdict: check_image.py with --expe
 against the device validator. For an accepted file the image length and the CRC-32 of the file must agree as well. With --hex the real built image
 and a family of mutations of it join the corpus. One documented difference is checked as such: records out of ascending order, which check_image.py
 accepts and the device refuses (it keeps O(1) state; objcopy never writes them). check_image.py's `sector_end` (the image ends on a 4 KiB flash
-sector boundary, OS-BUG-COSMBOOT) is a build-time rule that the device validator does not apply: the reference verdict here leaves it out. Exit 0 all agree, 1 a disagreement, 2 a usage or tool error.
+sector boundary, OS-BUG-COSMBOOT) is applied by the device validator too since OS-GATE-BOOTCRASH (Fault::NotPadded), so the reference verdict includes it. Exit 0 all agree, 1 a disagreement, 2 a usage or tool error.
 """
 import argparse
 import importlib.util
@@ -91,8 +91,12 @@ def build_corpus(ci, real_text):
     segments[code_end + 4] = b"\xAA" * 8
     add("hole after the code", ci.make_hex(segments))
     segments = dict(good)
-    segments[code_end] = b"\xFF" * 4 + b"\xAA" * 8
+    segments[code_end] = b"\xFF" * 4 + b"\xAA" * (ci.FLASH_SECTOR - 4)   # a second sector, so the image still ends on a boundary
     add("a filled gap", ci.make_hex(segments))
+    for extra, label in ((1, "one byte into a second sector"), (ci.FLASH_SECTOR - 1, "one byte short of the second boundary"), (ci.FLASH_SECTOR, "two full sectors")):
+        segments = dict(good)
+        segments[code_end] = b"\xFF" * extra
+        add("sector end: " + label, ci.make_hex(segments))
     add("image not starting at 0", ci.make_hex({a + 4: b for a, b in good.items()}))
 
     # Head, SP, reset, vectors.
@@ -211,7 +215,7 @@ def reference_verdict(ci, text):
     except ci.ImageError:
         return False, 0
     results = ci.check_image(memory, expect_sp=0x20030000, ramfunc_l=(0x1FFF0000, 0xC000))
-    ok = all(r[1] for r in results if r[0] != "sector_end")   # a build-time rule only: the device validator does not apply it
+    ok = all(r[1] for r in results)   # every verdict, `sector_end` included (the device refuses an unpadded image: Fault::NotPadded)
     return ok, max(memory) + 1
 
 

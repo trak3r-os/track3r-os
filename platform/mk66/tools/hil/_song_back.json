@@ -2,7 +2,8 @@
  "steps": [
   {"keys": ["song"], "gap": 0.6, "if_state": {"screen": "~^PATTERN$"}, "note": "back on the Song screen after _play_song, which leaves on the Pattern screen (nothing is pressed when a step already is on Song: the key would turn the page)"},
   {"state": {"screen": "SONG"}, "within": 3},
-  {"keys": ["song"], "gap": 0.4, "if_state": {"page": "1"}, "note": "(_play_song's own first Song press turned the page when it began on Song: the Order page again)"},
+  {"keys": ["song"], "gap": 0.4, "if_state": {"page": "1"}, "note": "(_play_song's own first Song press turned the page when it began on Song: the Order page again; the Song screen has 3 pages, so from page 1 the Timeline page comes first and a second press, below, reaches page 0)"},
+  {"keys": ["song"], "gap": 0.4, "if_state": {"page": "2"}},
   {"state": {"page": "0"}, "within": 2}
  ]
 }

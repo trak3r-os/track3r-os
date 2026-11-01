@@ -13,6 +13,8 @@
 //   * STRICTER THAN check_image.py in one respect, because O(1) state cannot remember every address: data bytes must arrive at ascending, consecutive
 //     addresses starting at 0 (every record starts where the last one ended). That is what `objcopy -O ihex` writes; a HEX that check_image accepts
 //     with its records in another order is refused here (`HexOrder`). It also makes "no byte given twice" and "no hole" one check;
+//   * the image ends on a 4 KiB boundary (length a multiple of 4096): the check_image.py `sector_end` rule (OS-GATE-BOOTCRASH). The SD bootloader
+//     leaves a short final sector as it was, so an unpadded image would boot with stale bytes in its tail (OS-BUG-COSMBOOT). Tested last (`NotPadded`);
 //   * every address is <= 0x000FFFFF (1 MiB of flash), and the image reaches at least 0x410;
 //   * initial SP exactly 0x20030000; reset vector a Thumb address inside the image and past the flash configuration (>= 0x410);
 //   * the 116 vector entries (16 system, 100 device): the reserved slots 7-10 and 13 are 0, every other entry is a Thumb address inside the image past
@@ -41,6 +43,7 @@ inline constexpr std::uint32_t kRequiredSp = 0x20030000u;
 inline constexpr std::uint32_t kRamfuncBase = 0x1FFF0000u;  // the SRAM_L code window (pinned to mem_map.h by hex_validator.cpp's static_asserts)
 inline constexpr std::uint32_t kRamfuncSize = 0xC800u;  // 50 KiB since the module slab went to 14 KiB (OS-PERF3; 49 at 15 KiB); hot code sits in the first 27 KiB, so the validator accepts the images of the older sizes too
 inline constexpr std::uint32_t kMaxImageBytes = kFlashLastAddress + 1u;
+inline constexpr std::uint32_t kFlashSector = 4096u;  // the SD bootloader leaves a short final sector neither erased nor programmed (OS-BUG-COSMBOOT): the image must end on a boundary
 inline constexpr std::uint8_t kRequiredConfig[kConfigBytes] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xDE, 0xF9, 0xFF, 0xFF};
 
 class HexValidator {

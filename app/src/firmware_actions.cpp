@@ -324,7 +324,7 @@ bool firmware_poll(ViewState& view, FirmwareSink& sink, core::Tick now) noexcept
         to_failure(v, "UPDATE FAILED: ", s.fault, nullptr);
       } else {
         sink.cancel();
-        to_failure(v, "NOT A VALID IMAGE: ", s.fault, &s.offset);
+        to_failure(v, "NOT A VALID IMAGE: ", s.fault, s.offset_known ? &s.offset : nullptr);
       }
       return true;
     case State::DidNotStart:

@@ -14,7 +14,8 @@
   {"cmd": "cpu reset", "note": "(the cpu counters are since boot or since this reset: a scenario that checks underruns / over-budget starts from zero)"},
   {"keys": ["song"], "gap": 0.5},
   {"state": {"screen": "SONG"}, "within": 3},
-  {"keys": ["song"], "gap": 0.4, "if_state": {"page": "1"}},
+  {"keys": ["song"], "gap": 0.4, "if_state": {"page": "1"}, "note": "(the Song screen has 3 pages since OS-SONG-VIEW2: ORDER, ARRANGEMENT, TIMELINE; Song turns them round, so from page 1 two presses reach page 0, from page 2 one)"},
+  {"keys": ["song"], "gap": 0.4, "if_state": {"page": "2"}},
   {"state": {"page": "0", "pads": "TRACKS"}, "within": 2, "note": "the Order page, the pads in TRACKS (the mode at boot)"},
   {"leds": {"online": true, "within": 3, "snap": "song_tracks"}},
 
@@ -203,7 +204,7 @@
   {"shot": "qa_sng_050", "non_blank": true, "soft": true, "note": "QA-SNG-050: the mark on both slots, the second ink on slot 1's pattern number, the count on the info line"},
   {"keys": ["song"], "gap": 0.4, "note": "the Arrangement page"},
   {"shot": "qa_sng_052", "non_blank": true, "soft": true, "note": "QA-SNG-052: the Arrangement page keeps the second ink and the count on its info line"},
-  {"keys": ["song"], "gap": 0.4, "note": "back to the Order page"},
+  {"keys": ["song"], "gap": 0.4, "repeat": 2, "note": "back to the Order page (the Timeline page comes first: 3 pages)"},
   {"keys": ["f8"], "gap": 0.3, "note": "ADD SLOT taken back"},
   {"shot": "qa_sng_051", "non_blank": true, "soft": true, "note": "QA-SNG-051: with the slot gone no mark is left on a pattern the project holds in one slot (the t-v16 project's other slots may share patterns of their own)"},
   {"say": "OS-SONGSHARE S2, rows QA-SNG-053..055: CUT on Shift + Delete. On PAT the slot goes into the slot clipboard and out of the list in one undo unit; in the map the cells go into the song clip and are cleared by Delete's rules. Needs the t-v16 project open (a song of several slots) and the transport stopped; the steps take their edits back with F8. New Community OS behaviour"},

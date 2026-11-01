@@ -76,6 +76,7 @@ struct CheckStatus {
   std::uint32_t image = 0;      // Checked: the image's length
   std::uint32_t crc = 0;        // Checked: the CRC-32 of the whole file, as `fw arm` prints it
   std::uint32_t offset = 0;     // Failed: the byte of the file where the fault was found
+  bool offset_known = true;     // Failed: `offset` is a place in the file; false for a fault of the whole image (not padded), where the stream's byte count means nothing to the user
   const char* fault = nullptr;  // Failed: a short static text ("flash configuration field is not the required one"); nullptr otherwise
 };
 

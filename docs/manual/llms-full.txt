@@ -70,7 +70,7 @@ An image of track3r-os has the `diag` console on its USB serial port and can wri
    python3 -I platform/mk66/tools/o3console.py --put track3r-os-v0.5.1.ptf --name track3r-os-v0.5.1.ptf
    ```
 
-   The unit validates the stream while it writes, reads the file back from the card and checks it again, and answers `ok <name> <bytes> <crc> image <length>`. It never leaves a half-written `.ptf`.
+   The unit validates the stream while it writes, reads the file back from the card and checks it again, and answers `ok <name> <bytes> <crc> image <length>`. It never leaves a half-written `.ptf`. An image must end on a 4 KiB boundary (the build pads it): the SD bootloader leaves a short last sector as it was, so an image that does not (v1.0.0 is one) may crash at boot, and the tool, the unit's `fw` command and the Update screen (**IMAGE NOT PADDED: MAY NOT BOOT**) refuse it. For such an older image use the reset button or the official update menu.
 4. Update. This restarts the unit into the bootloader, so the tool asks for `--yes-update`. `<crc>` is the CRC-32 from the release notes (the `ok` line of the put prints the same value):
 
    ```sh

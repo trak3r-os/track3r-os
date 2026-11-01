@@ -23,6 +23,7 @@ constexpr bool config_matches_header() noexcept {
   return kRequiredConfig[12] == c.fsec && kRequiredConfig[13] == c.fopt && kRequiredConfig[14] == c.feprot && kRequiredConfig[15] == c.fdprot;
 }
 static_assert(config_matches_header(), "the validator's flash configuration bytes are flash_config.h's");
+static_assert(kFlashSector == mem::kFlashSectorSize, "the padding rule is the flash sector of mem_map.h");
 static_assert((kRequiredConfig[12] & 0x03u) == 0x02u, "FSEC & 3 == 2 (unsecured)");
 static_assert(kConfigAddress + kConfigBytes == 0x410u && kHeadBytes == 0x410u, "the head holds the whole flash configuration field");
 static_assert(kRamfuncBase == mem::kSramLBase && kRamfuncSize == mem::kRamfuncLSize, "the SRAM_L code window is mem_map.h's");
@@ -285,6 +286,10 @@ bool HexValidator::finish() noexcept {
       fail(Fault::BadVector);
       return false;
     }
+  }
+  if (next_ % kFlashSector != 0u) {  // last the check_image.py `sector_end` rule, after every check that says what is wrong with the image itself
+    fail(Fault::NotPadded);
+    return false;
   }
   return true;
 }

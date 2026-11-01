@@ -73,8 +73,9 @@ TEST_CASE("hex validator: a good image is accepted, with its length and the CRC 
   no_end.pop_back();  // the EOF record's LF
   CHECK(accepts(no_end));
   CHECK(accepts(hex_of(good_image(65'000))));
-  CHECK(validate(hex_of(good_image(65'000))).length == 0x410u + 65'000u);
-  CHECK(validate(hex_of(good_image(0))).fault == Fault::BadReset);  // no code for the reset vector to point at
+  CHECK(validate(hex_of(good_image(65'000))).length == good_image(65'000).size());  // 0x410 + 65'000, padded to the next 4 KiB boundary
+  CHECK(good_image(65'000).size() == 69632u);
+  CHECK(validate(hex_of(good_image(0, false))).fault == Fault::BadReset);  // no code for the reset vector to point at (the unpadded end is checked after it)
 }
 
 TEST_CASE("hex validator: the verdict does not depend on how the stream is cut") {
@@ -209,6 +210,50 @@ TEST_CASE("hex validator: addresses must be the next one, and inside 1 MiB") {
   CHECK(validate(to_hex(std::vector<std::uint8_t>(head.begin(), head.begin() + 0x100))).fault == Fault::HexShort);
 }
 
+TEST_CASE("hex validator: the image must end on a 4 KiB boundary (OS-GATE-BOOTCRASH: the SD bootloader leaves a short final sector as it was)") {
+  constexpr std::size_t kSector = 4096;
+  // The boundary exactly is accepted, for one sector and for several, and the length is reported as it is.
+  for (const std::size_t end : {kSector, 2 * kSector, 5 * kSector}) {
+    CAPTURE(end);
+    const Verdict v = validate(hex_of(good_image(end - 0x410, false)));
+    CHECK(v.ok);
+    CHECK(v.fault == Fault::Ok);
+    CHECK(v.length == end);
+  }
+  // One byte short of a boundary, one byte past it, and a few more offsets are refused, with the fault at the end of the stream.
+  for (const std::size_t end : {kSector - 1, kSector + 1, 2 * kSector - 1, 2 * kSector + 1, kSector - 0x100, kSector / 2 + 0x410}) {
+    CAPTURE(end);
+    const std::string text = hex_of(good_image(end - 0x410, false));
+    const Verdict v = validate(text);
+    CHECK_FALSE(v.ok);
+    CHECK(v.fault == Fault::NotPadded);
+    CHECK(v.offset == text.size());
+    CHECK(v.length == 0u);
+  }
+  // The refusal does not depend on how the stream is cut up, and a fed validator stays refused after the verdict.
+  const std::string text = hex_of(good_image(kSector - 0x410 - 1, false));
+  for (const std::size_t chunk : {std::size_t{1}, std::size_t{7}, std::size_t{16}, std::size_t{45}, std::size_t{1000}}) {
+    CAPTURE(chunk);
+    CHECK(validate(text, chunk).fault == Fault::NotPadded);
+  }
+  up::HexValidator v;
+  (void)v.feed(reinterpret_cast<const std::uint8_t*>(text.data()), text.size());
+  CHECK_FALSE(v.finish());
+  CHECK_FALSE(v.finish());
+  CHECK(v.fault() == Fault::NotPadded);
+  // good_image pads by default, and the padding is zeros like .flashpad.
+  const std::vector<std::uint8_t> padded = good_image(100);
+  CHECK(padded.size() == kSector);
+  CHECK(padded.back() == 0);
+  CHECK(accepts(hex_of(padded)));
+  // Another defect of the image is reported first: the sector rule is the last verdict.
+  std::vector<std::uint8_t> bad_sp = good_image(100, false);
+  put_word(bad_sp, 0, 0x20020000u);
+  CHECK(validate(hex_of(bad_sp)).fault == Fault::BadSp);
+  // Its console and screen text names the rule.
+  CHECK(std::strcmp(up::fault_name(Fault::NotPadded), "image not padded: may not boot") == 0);
+}
+
 TEST_CASE("hex validator: the flash configuration field must be exactly ffffffffffffffffffffffffdef9ffff") {
   const std::vector<std::uint8_t> good = good_image();
   NEED(accepts(hex_of(good)));
@@ -257,7 +302,7 @@ TEST_CASE("hex validator: initial SP, reset vector and the vector table") {
   }
   CHECK(accepts(hex_of(with_word(4, 0x00000411u))));  // the first byte past the field
   for (const unsigned index : {2u, 3u, 15u, 16u, 60u, 115u}) {
-    for (const std::uint32_t value : {0x00000510u, 0u, 0x00300001u, 0x00000041u, 0x00000401u, 0xFFFFFFFFu, 0x00000711u}) {
+    for (const std::uint32_t value : {0x00000510u, 0u, 0x00300001u, 0x00000041u, 0x00000401u, 0xFFFFFFFFu, 0x00001001u}) {
       const Verdict v = validate(hex_of(with_word(index * 4u, value)));
       CHECK_MESSAGE(!v.ok, "vector " << index << " = " << value);
       CHECK(v.fault == Fault::BadVector);
@@ -273,7 +318,7 @@ TEST_CASE("hex validator: initial SP, reset vector and the vector table") {
   for (const unsigned index : {16u + 15u, 16u + 64u, 115u}) {
     CHECK(accepts(hex_of(with_word(index * 4u, 0x1FFF0101u))));
     CHECK(accepts(hex_of(with_word(index * 4u, 0x1FFF0000u + 0x411u))));
-    for (const std::uint32_t value : {0x1FFF0100u, 0x1FFFC001u, 0x1FFFC000u | 1u, 0x20000101u, 0x1FFF8001u, 0x1FFEFFFFu, 0x1FFF0000u + 0x410u + 512u + 1u}) {
+    for (const std::uint32_t value : {0x1FFF0100u, 0x1FFFC001u, 0x1FFFC000u | 1u, 0x20000101u, 0x1FFF8001u, 0x1FFEFFFFu, 0x1FFF0000u + 0x1000u + 1u}) {  // the last: one past the padded image's 4096 bytes
       CHECK_MESSAGE(!accepts(hex_of(with_word(index * 4u, value))), "vector " << index << " = " << value);
     }
   }
