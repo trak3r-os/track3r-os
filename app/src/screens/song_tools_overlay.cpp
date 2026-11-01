@@ -88,14 +88,30 @@ void SongToolsOverlay::render(const Model& model, const ViewState& view, ui::Ren
     r.text(value_x, ui::caps_y(t, Face::Data, y, pitch), value.c_str(), ink, Face::Data);
   }
 
-  if (v.tool == SongTool::ExportWav) {  // no value row: the line says what F1 does
-    r.text(x, ui::caps_y(t, Face::Label, d.body.y + pitch, pitch), "A WAV FILE OF THE SLOTS, WITH ITS TAIL", Color::ChromeDim, Face::Label);
+  // The line under the rows says what F1 does (EXPORT WAV has no value row; FORM's third row is the last).
+  const char* about = nullptr;
+  switch (v.tool) {
+    case SongTool::ExportWav: about = "A WAV FILE OF THE SLOTS, WITH ITS TAIL"; break;
+    case SongTool::Form: about = "A SONG SHAPE BY SUBTRACTION"; break;
+    case SongTool::Bridge: about = "A RUN OF SLOTS FROM A TO B"; break;
+    case SongTool::Transpose:
+    case SongTool::Instrument:
+    case SongTool::Clear: break;
+  }
+  if (about != nullptr) {
+    r.text(x, ui::caps_y(t, Face::Label, d.body.y + static_cast<int>(song_tools_rows(v)) * pitch, pitch), about, Color::ChromeDim, Face::Label);
   }
 
-  // Where it acts, and the keys.
+  // Where it acts (FORM: what it will make), and the keys.
   const int sy = d.body.y + (static_cast<int>(kSongToolsRows) + 1) * pitch;
   core::FixedString<48> scope;
-  scope_text(v, scope);
+  if (v.tool == SongTool::Form) {
+    song_form_footer(v.plan, scope);
+  } else if (v.tool == SongTool::Bridge) {
+    song_bridge_footer(v.plan, scope);
+  } else {
+    scope_text(v, scope);
+  }
   r.text(x, ui::caps_y(t, Face::Label, sy, pitch), scope.c_str(), Color::ChromeDim, Face::Label);
   const int foot = sy + pitch;
   (void)draw_prompt_hints(r, x, foot, pitch, prompt_in_force(model, view), 3);  // F1 APPLY, F8 BACK: the dialog line and the key row are one table (OS-KEYROWDLG)

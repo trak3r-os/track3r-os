@@ -111,6 +111,10 @@ void song_unique_apply(model::Editor& editor, int s0, int s1, const SongIdSet* o
 // yet copies as an empty pattern of the default length. Status::Ok, or what the model said (Full: the pattern pool). DUP PAT (Shift + Insert) and UNIQUE use it.
 model::Status song_copy_pattern(model::Editor& editor, unsigned from, unsigned to) noexcept;
 
+// FORM's copy (OS-SONG-BUILD D11): the pattern `from` (which must exist) as the new pattern `to`, with its name and every track's length; the tracks of `cleared_tracks` (bit t = track t) stay empty and the others hold
+// the source's steps up to the track's length (the ones past it never sound and are not copied), written as the span from the first to the last step that holds something. Status::Ok, or what the model said.
+model::Status song_copy_pattern_masked(model::Editor& editor, unsigned from, unsigned to, std::uint16_t cleared_tracks) noexcept;
+
 // The bytes one journal record of `payload` bytes takes, and the fixed part of a unit (header and trailer): the arithmetic of undo.h, for the planners.
 constexpr std::size_t song_record_bytes(std::size_t payload) noexcept { return 8u + ((payload + 3u) & ~std::size_t{3}); }
 inline constexpr std::size_t kSongUnitOverhead = 16u + 4u;

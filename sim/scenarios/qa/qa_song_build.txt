@@ -1,0 +1,80 @@
+# OS-SONG-FORM (docs/specs/OS-SONG-BUILD.md; new Community OS behaviour): FORM, the fifth OP of F6 TOOLS on the Song ORDER page. One `snap qa_sng_NNN` per row with a visible result; the goldens are keyed qa_song_build/qa_sng_NNN.
+# The demo's song is one slot holding pattern 1, so each build takes that one pattern as A (B and C are A) and puts the form's slots after it.
+
+# QA-SNG-097: F6 opens the dialog, the OP row turned to FORM: the FORM row (LOOP>SONG), the DRUMS row (TRACKS 1-4), the help line and the plan in the footer.
+document
+tap song
+tap f6
+encoder +4
+assert state screen=SONG
+snap qa_sng_097
+
+# QA-SNG-098: LOOP>SONG on the one pattern: 8 new slots after it (the drums-only intro, the A without the kick, ...), the cursor on the first new slot, the strip says what was made.
+tap f1
+assert model order.len=9
+snap qa_sng_098
+
+# QA-SNG-105: one undo (F8) takes the slots and the copies back together.
+tap f8
+assert model order.len=1
+snap qa_sng_105
+
+# QA-SNG-099: POP: 9 slots.
+tap f6
+tap down
+encoder +1
+tap f1
+assert model order.len=10
+snap qa_sng_099
+tap f8
+assert model order.len=1
+
+# QA-SNG-100: TECHNO: 10 slots.
+tap f6
+tap down
+encoder +1
+tap f1
+assert model order.len=11
+snap qa_sng_100
+tap f8
+assert model order.len=1
+
+# QA-SNG-101: DRUMS 1 (the kick alone is the drums, everything else is music): the row reads TRACK 1.
+tap f6
+tap down
+tap down
+encoder -3
+snap qa_sng_101
+tap f8
+
+# OS-SONG-BRIDGE (same spec; new Community OS behaviour): BRIDGE, the sixth OP: SLOTS new slots between A (the rectangle's first slot) and the slot after it. Shift + Insert makes a second slot that holds a COPY of pattern 1, so A and B
+# are two patterns (the demo's single pattern has equal steps in both: the picture shows the slots, the steps' spread is the host test's).
+# QA-SNG-107: F6, the OP row turned from FORM (where the scenario above left it: the dialog keeps its OP) to BRIDGE: the SLOTS row (4), the help line and the plan in the footer (PATTERN 01 TO 02  4 SLOTS  4 NEW PATTERNS).
+document
+tap song
+press shift
+tap insert
+release shift
+assert model order.len=2
+tap up
+tap f6
+encoder +1
+assert state screen=SONG
+snap qa_sng_107
+
+# QA-SNG-108: F1: 4 new slots between A and B (6 in all), the cursor on the first of them, the strip says BRIDGE: 4 SLOTS, 4 NEW PATTERNS.
+tap f1
+assert model order.len=6
+snap qa_sng_108
+
+# QA-SNG-114: one undo (F8) takes the slots and the patterns back together.
+tap f8
+assert model order.len=2
+snap qa_sng_114
+
+# QA-SNG-112: the cursor on the last slot has no next slot: NO NEXT SLOT on the strip, nothing written.
+tap down 4
+tap f6
+tap f1
+assert model order.len=2
+snap qa_sng_112

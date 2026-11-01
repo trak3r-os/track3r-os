@@ -613,9 +613,9 @@ TEST_CASE("song map: TOOLS, EXPORT WAV is the fourth OP with the OP row alone; n
   CHECK(rig.state().tools.whole);
   rig.tap(Button::Down);  // there is no second row: the cursor stays on OP
   CHECK(rig.state().tools.row == 0);
-  rig.turn(1);            // OP wraps to TRANSPOSE ...
+  rig.turn(3);            // OP goes on to FORM and BRIDGE (OS-SONG-BUILD) and wraps to TRANSPOSE ...
   CHECK(rig.state().tools.tool == app::SongTool::Transpose);
-  rig.turn(-1);           // ... and back to EXPORT WAV
+  rig.turn(-3);           // ... and back to EXPORT WAV
   CHECK(rig.state().tools.tool == app::SongTool::ExportWav);
   rig.tap(Button::F1);    // no card write layer in this rig: nothing is exported, nothing is written, the dialog is closed
   CHECK(rig.state().overlay == app::OverlayId::None);

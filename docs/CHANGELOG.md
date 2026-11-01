@@ -4,6 +4,11 @@ User-visible changes of the Community OS, newest first, one entry per change, in
 
 ## Unreleased
 
+### New
+
+- **Song: BRIDGE puts transition slots between two patterns.** In the Song screen's TOOLS dialog (`F6`) the OP row has one more value, BRIDGE: put the cursor on a slot (or select two), set SLOTS from 1 to 16 and press `F1`. The new slots go between the slot and the next one, each a new pattern in which more and more steps are the next pattern's, so the music moves from one to the other step by step; the same two patterns always give the same bridge. Nothing is written when the song, the pattern pool or the undo memory cannot take it, and one undo takes it all back.
+- **Song: FORM builds a song shape from 1 to 3 patterns.** In the Song screen's TOOLS dialog (`F6`) the OP row has a new value, FORM: choose LOOP>SONG, POP or TECHNO and how many tracks are drums, and `F1` adds the form's 8, 9 or 10 slots after your selection. The first slot is the pattern with some tracks cleared (the music in LOOP>SONG, the drums in POP, all but the kick in TECHNO), a break the pattern without the kick, and so on; the changed versions are new patterns, your own are not touched. The footer shows the plan; when the song, the pattern pool or the undo memory cannot take it, the strip says so and nothing is written. One undo takes it all back.
+
 ### Fixed
 
 - **Update file names over 30 characters are refused.** With a longer `.ptf` name the card update could install the first `.ptf` of the `Firmware` folder instead, with no error. The Update screen now shows `NAME TOO LONG: 30 MAX` for such a file and asks nothing; rename the file to 30 characters or fewer (`.ptf` included). `o3console.py` refuses the same names.

@@ -24,7 +24,7 @@ namespace o3os::sim {
 extern const ScreenState kSongStates[14];
 // The overlays: Learn, the Navigator and a notification over the Pattern screen, a notification over the Song screen.
 // Each has a typical state and a `_worst` sweep over the dearest content under it. Since OS-009 P1a.1 also the three choosers of the Pattern screen; since OS-SONGMAP the Song screen's TOOLS dialog.
-extern const ScreenState kOverlayStates[14];
+extern const ScreenState kOverlayStates[16];
 
 // The generated parameter page (Instrument PARAMS, OS-002d): the four pages typical, the cutoff envelope, Learn over the filter page, no project,
 // and `worst`, the sweep of every page, row, content, controller tag and overlay (screens_params.cpp).

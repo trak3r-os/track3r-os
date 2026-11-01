@@ -7,6 +7,7 @@
 #include <o3os/app/key_prompt.h>
 #include <o3os/app/screens/song_screen.h>
 #include <o3os/app/session.h>
+#include <o3os/app/song_build.h>
 #include <o3os/app/song_clip.h>
 #include <o3os/app/song_edit.h>
 #include <o3os/app/song_source.h>
@@ -439,6 +440,32 @@ unsigned first_instrument(const ActionContext& ctx, const SongRect& rect) noexce
   return 1;
 }
 
+// A build of new slots and patterns (FORM, BRIDGE; song_build.h) from its plan, as the caller's one undo unit: the refusals first (the planner's, then the unit against the ceiling), nothing written when one fires; then
+// `apply` writes the copies and the slots, the cursor goes to the first new slot with the selection collapsed, and the strip says what was made. `name` is the label of the result (`FORM POP`, `BRIDGE`).
+bool run_build(ActionContext& ctx, const SongBuildPlan& plan, SongBuildKind kind, const char* name, bool (*apply)(model::Editor&, const SongBuildPlan&) noexcept) noexcept {
+  core::FixedString<core::kNotifyTextChars> text;
+  if (plan.info.refusal != SongBuildRefusal::None) {
+    song_build_text(kind, plan.info, text);
+    return say(ctx, core::Severity::Warn, text.c_str());
+  }
+  if (plan.bytes > undo_limit(ctx)) {
+    return say(ctx, core::Severity::Warn, "TOO BIG TO UNDO: SELECT LESS");
+  }
+  if (!apply(*ctx.edit, plan)) {
+    // (the planner checked the pool and the list: a refusal here is a bug; what was written stays as this action's one unit, F8 takes it back, as run_edit's unreachable failure)
+    return say(ctx, core::Severity::Warn, "NO FREE PATTERN");
+  }
+  SongView& sv = ctx.view.song;
+  sv.leave_edit();
+  (void)sv.set(static_cast<int>(plan.at), static_cast<int>(ctx.edit->project().song_length()));
+  text.assign(name);
+  text.append(": ");
+  append_count(text, plan.info.slots, " SLOT", " SLOTS");
+  text.append(", ");
+  append_count(text, plan.info.copies, " NEW PATTERN", " NEW PATTERNS");
+  return say(ctx, core::Severity::Info, text.c_str());
+}
+
 }  // namespace
 
 // F6: the dialog over the rectangle (no selection: the cursor's cell; on PAT the cursor slot's tracks, all of them). Its rows are session state (the Fill dialog's rule).
@@ -460,6 +487,7 @@ bool song_tools_open(ActionContext& ctx, core::ActionArg) noexcept {
   t.whole = !v.song.in_map() || !(v.song.selecting() || v.song.track_selecting());  // (EXPORT WAV: the cursor's cell alone is no choice of tracks)
   t.patterns = static_cast<std::uint8_t>(song_distinct(*ctx.model.project, rect));  // (the patterns that exist: the tools skip the others, D10, so the footer counts what the result will)
   t.instrument = static_cast<std::uint8_t>(first_instrument(ctx, rect));
+  song_tools_refresh(t, *ctx.model.project);
   t.row = 0;
   v.overlay = OverlayId::SongTools;
   return true;
@@ -480,7 +508,11 @@ bool songtools_delta(ActionContext& ctx, core::ActionArg arg) noexcept {
     return false;
   }
   SongToolsView& t = ctx.view.tools;
-  return song_tools_step(t, static_cast<SongToolsRow>(t.row < song_tools_rows(t) ? t.row : 0u), clamp_int(arg, -1000, 1000));
+  const bool changed = song_tools_step(t, static_cast<SongToolsRow>(t.row < song_tools_rows(t) ? t.row : 0u), clamp_int(arg, -1000, 1000));
+  if (changed && ctx.model.project != nullptr) {
+    song_tools_refresh(t, *ctx.model.project);  // (the footer is the plan)
+  }
+  return changed;
 }
 
 // Shift + encoder: each detent is the row's coarse step (AMOUNT 12 semitones, TO 8 instruments; the OP and WHAT rows have a coarse step of 1).
@@ -490,7 +522,11 @@ bool songtools_coarse(ActionContext& ctx, core::ActionArg arg) noexcept {
   }
   SongToolsView& t = ctx.view.tools;
   const SongToolsRow row = static_cast<SongToolsRow>(t.row < song_tools_rows(t) ? t.row : 0u);
-  return song_tools_step(t, row, clamp_int(arg, -1000, 1000) * static_cast<int>(song_tools_desc(t, row).coarse));
+  const bool changed = song_tools_step(t, row, clamp_int(arg, -1000, 1000) * static_cast<int>(song_tools_desc(t, row).coarse));
+  if (changed && ctx.model.project != nullptr) {
+    song_tools_refresh(t, *ctx.model.project);
+  }
+  return changed;
 }
 
 // F1 APPLY. The dialog closes first (the notice of the result is the strip's, which waits behind a modal overlay), then the tool runs over the rectangle it was opened on, with the question of 1.6 first when it must.
@@ -530,6 +566,19 @@ bool songtools_apply(ActionContext& ctx, core::ActionArg) noexcept {
         }
       }
       return export_slots(ctx, static_cast<unsigned>(t.rect.s0), static_cast<unsigned>(t.rect.s1), mask);
+    }
+    case SongTool::Form: {  // OS-SONG-BUILD: the slots of the form after the rectangle, with the copies they need (song_build.h)
+      SongBuildPlan plan;
+      song_form_plan(ctx.edit->project(), t.rect, t.form, t.drums, plan);
+      core::FixedString<core::kNotifyTextChars> name;
+      name.assign("FORM ");
+      name.append(song_form_name(t.form));
+      return run_build(ctx, plan, SongBuildKind::Form, name.c_str(), song_form_apply);
+    }
+    case SongTool::Bridge: {  // OS-SONG-BRIDGE: N new slots between A (the rectangle's first slot) and the slot after it
+      SongBuildPlan plan;
+      song_bridge_plan(ctx.edit->project(), t.rect, t.bridge_slots, plan);
+      return run_build(ctx, plan, SongBuildKind::Bridge, "BRIDGE", song_bridge_apply);
     }
   }
   return run_edit(ctx, edit);

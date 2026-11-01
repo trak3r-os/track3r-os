@@ -509,8 +509,24 @@ void draw_song_notify_worst(ui::Renderer& r, unsigned variant) {
 // scope line) and both pages.
 void song_tools_state(ViewState& v, unsigned tool, unsigned row, bool extreme) {
   v.overlay = OverlayId::SongTools;
-  v.tools.tool = static_cast<app::SongTool>(tool % 4);
-  v.tools.row = static_cast<std::uint8_t>(row % 2);
+  v.tools.tool = static_cast<app::SongTool>(tool % 6);
+  v.tools.row = static_cast<std::uint8_t>(row % app::song_tools_rows(v.tools));
+  v.tools.form = extreme ? app::SongForm::LoopSong : app::SongForm::Pop;  // (LOOP>SONG is the longest name)
+  v.tools.drums = extreme ? 8 : 4;
+  // FORM's footer is the plan (what the planner says for the demo's patterns is another test's): the typical one is the spec's example, the extreme one the longest line, three 3-digit ids.
+  v.tools.plan = app::SongBuildInfo{};
+  v.tools.plan.slots = extreme ? 10 : 8;
+  v.tools.plan.copies = extreme ? 4 : 3;
+  v.tools.plan.source_count = 3;
+  v.tools.plan.sources[0] = extreme ? 255 : 2;
+  v.tools.plan.sources[1] = extreme ? 254 : 5;
+  v.tools.plan.sources[2] = extreme ? 253 : 7;
+  if (v.tools.tool == app::SongTool::Bridge) {  // OS-SONG-BRIDGE: `PATTERN 02 TO 05  4 SLOTS  4 NEW PATTERNS`; the extreme one is the longest line (16 slots, two 3-digit ids)
+    v.tools.bridge_slots = extreme ? 16 : 4;
+    v.tools.plan.slots = v.tools.bridge_slots;
+    v.tools.plan.copies = v.tools.bridge_slots;
+    v.tools.plan.source_count = 2;
+  }
   v.tools.amount = extreme ? -24 : 7;
   v.tools.instrument = extreme ? 64 : 5;
   v.tools.what = extreme ? app::SongWhat::Volume : app::SongWhat::All;
@@ -526,14 +542,30 @@ void draw_song_tools(ui::Renderer& r, unsigned) {
   scene(r, d.model, v);
 }
 
-constexpr unsigned kSongToolsVariants = 4 * 2 * 2 * 2;
+// OS-SONG-BUILD: the dialog on FORM, its three rows and the plan in the footer.
+void draw_song_tools_form(ui::Renderer& r, unsigned) {
+  SongDoc& d = song_doc(false);
+  ViewState v = song_doc_map_view(kPageOrder, 5, 12, 4, 3);
+  song_tools_state(v, static_cast<unsigned>(app::SongTool::Form), 1, false);
+  scene(r, d.model, v);
+}
+
+// OS-SONG-BRIDGE: the dialog on BRIDGE, its SLOTS row and the plan in the footer.
+void draw_song_tools_bridge(ui::Renderer& r, unsigned) {
+  SongDoc& d = song_doc(false);
+  ViewState v = song_doc_map_view(kPageOrder, 5, 12, 4, 3);
+  song_tools_state(v, static_cast<unsigned>(app::SongTool::Bridge), 1, false);
+  scene(r, d.model, v);
+}
+
+constexpr unsigned kSongToolsVariants = 6 * 3 * 2 * 2;
 
 void draw_song_tools_worst(ui::Renderer& r, unsigned variant) {
   SongDoc& d = song_doc(true);
-  const unsigned tool = variant % 4;
-  variant /= 4;
-  const unsigned row = variant % 2;
-  variant /= 2;
+  const unsigned tool = variant % 6;
+  variant /= 6;
+  const unsigned row = variant % 3;
+  variant /= 3;
   const bool extreme = variant % 2 != 0;
   variant /= 2;
   ViewState v = song_doc_map_view(variant % 2, 25, 16, 16, 15);
@@ -678,7 +710,7 @@ const ScreenState kSongStates[14] = {
 
 // The `_worst` sweeps (and the arrangement page, which the song scenario shows) are measured but not rendered to the
 // gallery: the typical states are what is looked at.
-const ScreenState kOverlayStates[14] = {
+const ScreenState kOverlayStates[16] = {
     {"pattern_learn", true, 1, kBudgetWords, draw_learn},
     {"pattern_learn_worst", true, kWindows, kBudgetWords, draw_learn_worst, false},
     {"pattern_navigator", true, 1, kBudgetWords, draw_navigator},
@@ -694,6 +726,8 @@ const ScreenState kOverlayStates[14] = {
     {"pattern_jump", true, 1, kBudgetWords, draw_pattern_jump},
     // OS-SONGMAP: the Song screen's TOOLS dialog.
     {"song_tools", true, 1, kBudgetWords, draw_song_tools},
+    {"song_tools_form", true, 1, kBudgetWords, draw_song_tools_form},
+    {"song_tools_bridge", true, 1, kBudgetWords, draw_song_tools_bridge},
     {"song_tools_worst", true, kSongToolsVariants, kBudgetWords, draw_song_tools_worst, false},
 };
 

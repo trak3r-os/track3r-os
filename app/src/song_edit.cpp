@@ -2,6 +2,8 @@
 // The edits of the Song map (OS-SONGMAP, docs/specs/SONG-UX.md section 1; song_edit.h): the planner and the executor over one walk, copy of the cells, UNIQUE. New Community OS behaviour, no format change.
 #include <o3os/app/song_edit.h>
 
+#include "song_edit_internal.h"
+
 #include <o3os/app/song_clip.h>
 #include <o3os/model/editor.h>
 #include <o3os/model/limits.h>
@@ -214,6 +216,29 @@ std::size_t copy_pattern_body(const model::Project& p, unsigned from) noexcept {
   return body;
 }
 
+// The span of track `t` that a masked copy writes: from the first step that holds something to the last, inside the track's length; none (count 0) for a cleared track or one with nothing in it.
+void masked_span(const model::Pattern& src, unsigned t, std::uint16_t cleared, unsigned& first, unsigned& count) noexcept {
+  first = 0;
+  count = 0;
+  if (((cleared >> t) & 1u) != 0u) {
+    return;
+  }
+  int lo = -1;
+  int hi = -1;
+  for (unsigned k = 0; k < src.track_length[t] && k < model::kMaxPatternLength; ++k) {
+    if (!model::is_empty(src.steps[t][k])) {
+      lo = lo < 0 ? static_cast<int>(k) : lo;
+      hi = static_cast<int>(k);
+    }
+  }
+  if (lo >= 0) {
+    first = static_cast<unsigned>(lo);
+    count = static_cast<unsigned>(hi - lo + 1);
+  }
+}
+
+}  // namespace
+
 // The first pattern number that no pattern has and no slot names (a slot that names a pattern that does not exist yet would start to play the copy), that is not in `taken`; 0 when there is none.
 unsigned free_number(const model::Project& p, const SongIdSet& named, const SongIdSet& taken) noexcept {
   for (unsigned id = 1; id <= model::kMaxPatternId; ++id) {
@@ -223,6 +248,8 @@ unsigned free_number(const model::Project& p, const SongIdSet& named, const Song
   }
   return 0;
 }
+
+namespace {
 
 // The shared patterns of the slots s0..s1 in slot order, each with the number its copy takes: `sink.copy(from, to, slots)` once per pattern, `slots` being the slots of the range that hold it.
 template <class Sink>
@@ -369,6 +396,58 @@ model::Status song_copy_pattern(model::Editor& e, unsigned from, unsigned to) no
     }
     if (any) {
       (void)e.set_steps(to, t, 0, src->steps[t], model::kMaxPatternLength);
+    }
+  }
+  (void)e.set_pattern_name(to, src->name, std::strlen(src->name));
+  return model::Status::Ok;
+}
+
+std::size_t copy_pattern_body_masked(const model::Project& p, unsigned from, std::uint16_t cleared_tracks) noexcept {
+  const model::Pattern* src = p.pattern(from);
+  std::size_t body = song_record_bytes(2);  // create_pattern
+  if (src == nullptr) {
+    return body;
+  }
+  const std::uint32_t whole = p.pattern_length(from);
+  const std::uint32_t made = whole != 0u ? whole : p.default_pattern_length();
+  for (unsigned t = 0; t < model::kMaxTracks; ++t) {
+    if (src->track_length[t] != made) {
+      body += song_record_bytes(4);  // set_track_length: [id, track, new, old]
+    }
+    unsigned first = 0;
+    unsigned count = 0;
+    masked_span(*src, t, cleared_tracks, first, count);
+    if (count != 0u) {
+      body += song_record_bytes(4u + 2u * count * sizeof(Step));  // set_steps of the span: [id, track, first, count], the new steps, the old
+    }
+  }
+  const std::size_t name = std::strlen(src->name);
+  if (name != 0u) {
+    body += song_record_bytes(3u + name);  // set_pattern_name: [id, len], the text, [old len], no old text
+  }
+  return body;
+}
+
+model::Status song_copy_pattern_masked(model::Editor& e, unsigned from, unsigned to, std::uint16_t cleared_tracks) noexcept {
+  const model::Pattern* src = e.project().pattern(from);
+  if (src == nullptr) {
+    return model::Status::NotFound;
+  }
+  const std::uint32_t whole = e.project().pattern_length(from);
+  const model::Status st = e.create_pattern(to, whole != 0u ? whole : e.project().default_pattern_length());
+  if (st != model::Status::Ok) {
+    return st;
+  }
+  src = e.project().pattern(from);  // (taken again after the creation, as song_copy_pattern does)
+  for (unsigned t = 0; t < model::kMaxTracks; ++t) {
+    if (src->track_length[t] != e.project().pattern(to)->track_length[t]) {
+      (void)e.set_track_length(to, t, src->track_length[t]);
+    }
+    unsigned first = 0;
+    unsigned count = 0;
+    masked_span(*src, t, cleared_tracks, first, count);
+    if (count != 0u) {
+      (void)e.set_steps(to, t, first, &src->steps[t][first], count);
     }
   }
   (void)e.set_pattern_name(to, src->name, std::strlen(src->name));
