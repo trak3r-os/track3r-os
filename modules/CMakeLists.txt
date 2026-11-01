@@ -183,6 +183,16 @@ o3m_add_module(fm SOURCES fm/fm.cpp OPT -O2 VERSION 1.0.0)
 o3m_manifest(fm fm/module.json)
 o3m_add_test(fm fm/tests/fm_test.cpp)
 
+# OS-INSFX S8: the first sample effect, a biquad filter with mix for a track insert (modules/effects/biquad). Not built in: a .tmod for /modules/effects/ on the card, so the image does not grow.
+# The descriptor header is generated into the build tree; the module's own host test compares it with a double-precision reference.
+o3m_manifest(biquad effects/biquad/module.json GENERATE)
+o3m_add_module(biquad SOURCES effects/biquad/biquad.cpp OPT -O2 VERSION 1.0.0 GEN)
+o3m_add_test(biquad effects/biquad/tests/biquad_test.cpp)
+if(TARGET o3m_biquad_test)
+  target_include_directories(o3m_biquad_test PRIVATE ${O3M_GEN_DIR})  # biquad_gen.h: the parameter ids and ranges
+  add_dependencies(o3m_biquad_test o3m_biquad_gen)
+endif()
+
 # OS-012d: the built-in modules. The packed .tmod files of the TB-303, chip, FM and SID go into a generated table (tools/o3m_embed.py: the bytes as const arrays, flash on the MK66) that
 # the images link (o3m_builtin) and hand to module::ModuleSet::set_builtins; module/builtin.h says how they meet the card's copies. The notices the code in them requires
 # (builtin/NOTICES.txt and Open303's licence text) are in the same file as a string. Without the cross compiler there are no .tmod files: the table is empty and the tests that need it say so.

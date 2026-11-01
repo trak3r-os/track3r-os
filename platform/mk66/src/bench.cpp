@@ -801,6 +801,24 @@ void run_insert(const Out& out, std::uint32_t blocks) noexcept {
       blocks, [&] { refill(); audio::InsertHostBench::ramp(in, true); }, [&] { audio::InsertHostBench::run(in, io, kBlock); }, nop);
   const Stat run = measure(
       blocks, [&] { refill(); audio::InsertHostBench::ramp(in, false); }, [&] { audio::InsertHostBench::run(in, io, kBlock); }, [&] { peak.add_q15(io, kBlock); });
+  // OS-INSFX S8: the module while its first modulation target moves every block (the modulation matrix, a MIDI controller, an LFO): set_param() between two points of 25 % and 75 % of the range, then render(),
+  // so a module that smooths and re-derives its coefficients pays that every block. This is the worst case of its cost; `insert_effect` above is the settled one. Read the mean and the max of this row.
+  std::uint32_t moving = mod->param_count;
+  for (std::uint32_t i = 0; i < mod->param_count && mod->params != nullptr; ++i) {
+    if ((mod->params[i].flags & O3M_PARAM_MOD) != 0u) {
+      moving = i;
+      break;
+    }
+  }
+  Stat sweep;
+  const bool swept = moving < mod->param_count && mod->set_param != nullptr;
+  if (swept) {
+    const o3m_param& pr = mod->params[moving];
+    const float lo = pr.min + 0.25f * (pr.max - pr.min), hi = pr.min + 0.75f * (pr.max - pr.min);
+    bool up = false;
+    sweep = measure(
+        blocks, [&] { audio::kernel::q15_to_float(fl, src, kBlock); up = !up; }, [&] { mod->set_param(state, moving, up ? hi : lo); (void)mod->render(state, fl, fl, kBlock); }, nop);
+  }
   mod->shutdown(state);
   const std::uint32_t adapter = run.min() > effect.min() ? run.min() - effect.min() : 0u;
   const std::uint32_t tenths = audio::gov::tenths_of_block(adapter);
@@ -808,6 +826,12 @@ void run_insert(const Out& out, std::uint32_t blocks) noexcept {
   audio::diag::Text lt(label, sizeof label);
   lt.str(mod->name != nullptr ? mod->name : "?").str(", adapter ").dec(adapter).str(" cycles (").dec(tenths / 10u).chr('.').dec(tenths % 10u).str("%)");
   out.stat("insert_effect", effect, "render() alone");
+  if (swept) {
+    char note[48];
+    audio::diag::Text nt(note, sizeof note);
+    nt.str("set_param ").dec(moving).str(" every block + render()");
+    out.stat("insert_effect_mod", sweep, note);
+  }
   out.stat("insert_ramp", ramp, "transition block");
   out.stat_checked("insert", run, label, peak, "a silent effect, or a dead adapter");
 }

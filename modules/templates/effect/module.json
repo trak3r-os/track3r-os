@@ -2,7 +2,7 @@
   "name": "Example Effect",
   "id": "example_effect",
   "kind": "effect",
-  "description": "A one-pole low-pass with a dry/wet mix and a bypass, and a view of its response: the smallest effect that uses every part of the SDK. (This OS version loads effects but does not run them yet: the engine's graph has no effect slot.)",
+  "description": "A one-pole low-pass with a dry/wet mix and a bypass, and a view of its response: the smallest effect that uses every part of the SDK. (An effect runs as a track insert: OS-INSFX.)",
   "state_bytes": 48,
   "params": [
     {"name": "Cutoff", "min": 20, "max": 20000, "default": 2000, "curve": "log", "unit": "hz", "mod": true},

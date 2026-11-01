@@ -1,0 +1,19 @@
+{
+  "name": "Biquad Filter",
+  "id": "biquad",
+  "kind": "effect",
+  "abi": "1.2",
+  "description": "A resonant biquad filter with a dry/wet mix for a track insert: low-pass, high-pass, band-pass or notch (the RBJ cookbook shapes), cutoff and resonance smoothed at control rate, and a view of its response. One mono instance.",
+  "state_bytes": 128,
+  "params": [
+    {"name": "Mode", "min": 0, "max": 3, "default": 0, "type": "int"},
+    {"name": "Cutoff", "min": 20, "max": 20000, "default": 1000, "curve": "log", "unit": "hz", "mod": true},
+    {"name": "Resonance", "min": 0, "max": 100, "default": 10, "unit": "percent", "mod": true},
+    {"name": "Mix", "min": 0, "max": 100, "default": 100, "unit": "percent", "mod": true}
+  ],
+  "views": [
+    {"name": "Response", "min_size": [120, 80], "preferred_size": [380, 140]}
+  ],
+  "voices": 1,
+  "memory": {"hot_bytes": 1136, "sdram_bytes": 0}
+}

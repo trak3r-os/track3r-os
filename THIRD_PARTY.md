@@ -85,6 +85,10 @@ is copied, and the layout is the interface's documented one. The biquad response
 identity of z-transform magnitude in `sin^2(w/2)`; the RBJ audio-EQ-cookbook coefficients that the tests and the gallery build for
 their own filters are not part of the library.
 
+## RBJ Audio EQ Cookbook, as formulas (OS-INSFX S8)
+
+The Biquad Filter effect module (`modules/effects/biquad/`) uses the low-pass, high-pass, band-pass (constant 0 dB peak) and notch coefficient formulas of the Audio EQ Cookbook (Robert Bristow-Johnson, a published note of formulas; no licence is stated for the note and it is widely re-implemented). Only the formulas are used, written in the module's own half-angle form (`1 - cos w = 2 sin^2(w/2)`) with its own smoothing, mix folding and tail rule. No code of the note or of any library is copied or vendored, and the module's test checks it against a double-precision biquad written from the same formulas.
+
 ## Riedel EmbeddedVideoEngine (OS-007c)
 
 What it is and how it is used: Rudolph Riedel's FT800-FT813 C library for the FT81x / BT81x display controllers
