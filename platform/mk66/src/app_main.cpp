@@ -740,6 +740,9 @@ app::SampleBank g_bank;
 // and written about a hundred times a sample, and an SDRAM access costs the core 28 cycles against 10 for SRAM, `diag bench mem`). A state that does not fit the 4 KiB falls
 // back to the SDRAM arena, slower and correct (kMaxModuleInstances is 8: eight TB-303s at 400 B each, their manifest's state_bytes, take 3,200 B and fit; the fallback is for modules with bigger states). The scratch blocks the modules render into are in the SRAM_L slab (attach_scratch), as before.
 audio::ModuleVoices g_module_voices;
+// OS-INSFX S1: the effect inserts (audio/insert_host.h). The object (about 0.8 KB, the render reads and writes its instance records every block) is in SRAM_U; the instances' parameter copies
+// (kInstances x 128 B) are in the module system's record in SDRAM (ModuleSystem::insert_blobs). Main loop: bind, unbind, bypass, service every pass; render: begin_block and the insert calls.
+audio::InsertHost g_insert_host;
 audio::gov::Snapshot module_governor_snapshot() noexcept { return g_module_voices.governor().snapshot(); }
 constexpr std::uint32_t kModuleStateBytes = 4096;
 alignas(64) std::uint8_t g_module_state[kModuleStateBytes];  // (.bss: zeroed at start, and the binder zeroes each block it takes)
@@ -749,6 +752,7 @@ struct ModuleSystem {
   module::ModuleSet set;
   module::ModuleLoader loader;
   audio::ModuleVoices& voices;
+  audio::InsertHost::Blobs insert_blobs;  // OS-INSFX S1: the parameter copies of the inserts (InsertHost::attach)
   app::ModuleBinder binder;
   app::ModuleUi ui;          // OS-012b: the Instrument page's module controls and views, the engine picker, MODULES and the apps' pages (the view host's record is in it)
   std::uint16_t crashed_id;  // the module the previous run died in (module::fault_id), 0 none
@@ -868,6 +872,7 @@ void make_sound(model::Project& project) noexcept {
   engine.attach_voices(&voices);
   engine.attach_live(g_live);  // the main loop is the queue's one producer (g_live_preview), the render its one consumer
   engine.attach_modules(&modsys().voices);
+  (void)engine.attach_inserts(&g_insert_host, &modsys().insert_blobs);  // OS-INSFX S1: false only without the modules, attached just above
   engine.attach_amiga(&audio_amiga());  // OS-005h: the instruments whose engine is Amiga
   engine.attach_events(g_midi->event_source(g_events, audio::kMaxEventsPerBlock));
   // OS-SENDFX: the send effects go into the graph's two slots, un-bypassed (the sends reach them through the ParamChange ring: the track's sends, the routing bits, the master DELAY and REVERB
@@ -1457,7 +1462,8 @@ void advance_load(std::uint64_t now) noexcept {
     const bool quiet = !audio_running() || (waited >= kSettleMinMs && audio_voices().voices_in_use() == 0);  // the render context writes the voices: a benign read
     // OS-012a: the module instruments were withdrawn when the load began; the render has to be clear of them (two block starts) before they are shut down and their memory reused
     ModuleSystem& m = modsys();
-    if ((quiet && (!audio_running() || m.voices.quiescent())) || waited >= kSettleMaxMs) {
+    if ((quiet && (!audio_running() || (m.voices.quiescent() && g_insert_host.settled()))) || waited >= kSettleMaxMs) {
+      g_insert_host.release_all();  // OS-INSFX S1: before the module memory is reset (the inserts' modules and states are in it)
       m.voices.release_all();  // shutdown() of each, main loop (after kSettleMaxMs the render has long passed its block starts; an audio that is not running calls nothing)
       m.set.clear();           // the modules and their memory: the new project's are loaded in the Modules phase (the quarantine stays)
       m.ui.reset();            // the apps' state and the catalogs pointed into them: OS-012b
@@ -1890,6 +1896,7 @@ void begin_replace() noexcept {
   modsys().manual = false;
   modsys().ui.diag_clear();      // OS-BUGS4: the console's binds go with the instances
   modsys().voices.retire_all();  // the module instruments leave the render now; Settle waits for it to be clear of them
+  g_insert_host.retire_all();    // OS-INSFX S1: so do the effect inserts (a console-bound insert is not in the project: it is lost at a load, as a console-bound instrument is)
   g_settle_start_ms = system_clock().uptime_ms();
   g_load_phase = LoadPhase::Settle;
 #else
@@ -2312,6 +2319,160 @@ const char* module_bind(unsigned slot, const char* stem) noexcept {
   return "this image has no sound";
 #endif
 }
+
+// ---- `diag ins` (OS-INSFX S1): effect modules as per-track inserts, from the console. Main loop only. New Community OS behaviour; nothing is saved, a project load drops them (begin_replace).
+const char* insert_bind(unsigned track, unsigned slot, const char* stem) noexcept {
+#if !O3OS_AUDIO_TEST
+  ModuleSystem& m = modsys();
+  if (g_load_phase != LoadPhase::Idle || m.manual) {
+    return "busy: a load is running";
+  }
+  if (track >= audio::kTracks || slot > 1u) {
+    return "no such track or slot";
+  }
+  const int idx = m.set.find(stem);
+  if (idx < 0) {
+    return "not loaded (`mod load <name>` first)";
+  }
+  const module::LoadedModule& lm = *m.set.at(static_cast<unsigned>(idx));
+  if (lm.entry == nullptr || lm.header.kind != O3M_KIND_EFFECT) {
+    return "not an effect module this build can run";
+  }
+  const unsigned where = track * 2u + slot;
+  const std::uint16_t fault = module::fault_id(stem);
+  audio::InsertHost::Bind r = g_insert_host.bind(where, *lm.entry, fault, nullptr, nullptr, 0, false);  // a free record that held this module keeps its state block
+  const module::ModuleSet::StateMark mark = m.set.state_mark();
+  bool took = false;
+  if (r == audio::InsertHost::Bind::NeedState) {
+    std::uint8_t* mem = nullptr;
+    std::uint32_t addr = 0;
+    if (!m.set.take_state(lm.entry->state_bytes, mem, addr)) {
+      return "no module memory left";
+    }
+    took = true;
+    std::memset(mem, 0, lm.entry->state_bytes);
+    r = g_insert_host.bind(where, *lm.entry, fault, mem, nullptr, 0, false);
+  }
+  if (r == audio::InsertHost::Bind::Ok) {
+    return nullptr;
+  }
+  if (took) {
+    m.set.state_rollback(mark);
+  }
+  switch (r) {
+    case audio::InsertHost::Bind::WhereTaken: return "an insert is bound there already";
+    case audio::InsertHost::Bind::NoInstance: return "four inserts at most";
+    case audio::InsertHost::Bind::NoCpu: return "NO CPU: the governor has no room for it (see `mod gov`)";
+    case audio::InsertHost::Bind::InitFailed: return "init() refused";
+    case audio::InsertHost::Bind::Ok:
+    case audio::InsertHost::Bind::NoGraph:
+    case audio::InsertHost::Bind::BadWhere:
+    case audio::InsertHost::Bind::BadModule:
+    case audio::InsertHost::Bind::NeedState:
+    case audio::InsertHost::Bind::BadState: break;
+  }
+  return "bind refused";
+#else
+  (void)track;
+  (void)slot;
+  (void)stem;
+  return "this image has no sound";
+#endif
+}
+
+const char* insert_unbind(unsigned track, unsigned slot) noexcept {
+#if !O3OS_AUDIO_TEST
+  return track < audio::kTracks && slot <= 1u && g_insert_host.unbind(track * 2u + slot) ? nullptr : "no insert bound there";
+#else
+  (void)track;
+  (void)slot;
+  return "this image has no sound";
+#endif
+}
+
+const char* insert_bypass(unsigned track, unsigned slot, bool on) noexcept {
+#if !O3OS_AUDIO_TEST
+  if (track >= audio::kTracks || slot > 1u) {
+    return "no such track or slot";
+  }
+  switch (g_insert_host.set_bypass(track * 2u + slot, on, false)) {
+    case audio::InsertHost::Toggle::Done: return nullptr;
+    case audio::InsertHost::Toggle::NoCpu: return "NO CPU: the governor has no room for it (see `mod gov`)";
+    case audio::InsertHost::Toggle::NotBound: break;
+  }
+  return "no insert bound there";
+#else
+  (void)track;
+  (void)slot;
+  (void)on;
+  return "this image has no sound";
+#endif
+}
+
+#if !O3OS_AUDIO_TEST
+// "N cycles (P.T%)": the two lines of `ins` share it.
+[[gnu::noinline]] static audio::diag::Text& insert_cycles(audio::diag::Text& t, std::uint32_t cycles) noexcept {
+  const std::uint32_t tenths = audio::gov::tenths_of_block(cycles);
+  return t.dec(cycles).str(" cycles (").dec(tenths / 10u).chr('.').dec(tenths % 10u).str("%)");
+}
+#endif
+
+// Line 0 is the totals (blocks the boundary ran, the latest block's insert cycles, the counters); lines 1.. are the bound inserts (cycles, state, OVER BUDGET).
+std::size_t insert_line(unsigned i, char* out, std::size_t cap) noexcept {
+#if !O3OS_AUDIO_TEST
+  audio::diag::Text t(out, cap);
+  if (i == 0u) {
+    const audio::InsertHost::Stats& s = g_insert_host.stats();
+    insert_cycles(t.str("ins: ").dec(g_insert_host.blocks()).str(" blocks, inserts "), g_insert_host.total_cycles()).str(", params ")
+        .dec(s.params).str(" stale ").dec(s.stale).str(" clipped ").dec(s.saturated).str(", forced ").dec(s.forced_instance).chr('/').dec(s.forced_aggregate).str(", activated ")
+        .dec(s.activations).str(" retired ").dec(s.retired).str(", ring full ").dec(s.ring_full).str(", export unsettled ").dec(s.export_unsettled);
+    return t.size();
+  }
+  unsigned n = 0;
+  for (unsigned k = 0; k < audio::InsertHost::kInstances; ++k) {
+    audio::InsertHost::Info in;
+    if (!g_insert_host.info(k, in) || in.where >= audio::InsertHost::kWhere) {
+      continue;
+    }
+    if (++n != i) {
+      continue;
+    }
+    static const char* const kPhase[] = {"off", "in", "on", "out (to bypass)", "bypassed", "out (leaving)"};
+    t.str("ins: track ").dec(in.where / 2u + 1u).str(" slot ").dec(in.where % 2u + 1u).str(": ").str(in.mod != nullptr ? in.mod->name : "?").chr(' ')
+        .str(kPhase[static_cast<unsigned>(in.phase) % 6u]);
+    if (in.leaving) {
+      t.str(", leaving");
+    }
+    if (in.forced) {
+      t.str(", OVER BUDGET (forced to dry)");
+    } else if (in.user_bypass) {
+      t.str(", bypass");
+    }
+    insert_cycles(t.str(", "), in.cost).str(", state ").str(state_region(in.state));
+    return t.size();
+  }
+  return 0;
+#else
+  (void)i;
+  (void)out;
+  (void)cap;
+  return 0;
+#endif
+}
+
+#if O3OS_BENCH
+// `diag bench insert`: the first loaded effect module this build can run (kind 2; `mod load example_effect`), or null. Bench images only.
+const o3m_module* insert_bench_module() noexcept {
+  const module::ModuleSet& set = modsys().set;
+  for (unsigned i = 0; i < set.count(); ++i) {
+    const module::LoadedModule* lm = set.at(i);
+    if (lm != nullptr && lm->entry != nullptr && lm->header.kind == O3M_KIND_EFFECT) {
+      return lm->entry;
+    }
+  }
+  return nullptr;
+}
+#endif
 
 bool module_audition(unsigned slot, unsigned note, unsigned velocity, bool on) noexcept {
 #if !O3OS_AUDIO_TEST
@@ -2947,6 +3108,7 @@ std::uint8_t pass() noexcept {
   }
   poll_midi_cc(g_load_phase != LoadPhase::Idle);
   step_manual_module();
+  g_insert_host.service();  // OS-INSFX S1: the commands a full ring held back, the leaving inserts' shutdown once the render is clear of them
   if (g_probe_ms != 0u && now >= g_probe_ms) {
     g_probe_ms = 0;
     log_play_probe();

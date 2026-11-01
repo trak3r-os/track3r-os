@@ -311,7 +311,11 @@ audio::OfflineRenderer::Step OfflineRender::next(std::int16_t* out) noexcept {
       if (!w_.engine->offline_ready(live)) {
         return Step::Wait;  // the live render has not seen the request yet: its next block start
       }
-      w_.engine->offline_enter(source_);
+      if (!w_.engine->offline_enter(source_)) {
+        failure_ = "THE INSERTS DID NOT SETTLE";  // OS-INSFX: `ins` counts it (export unsettled); close() gives the engine back
+        state_ = State::Failed;
+        return Step::Failed;
+      }
       note_stopped();
       start_pass();
       return Step::Wait;

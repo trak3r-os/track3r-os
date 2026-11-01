@@ -37,6 +37,7 @@
 #include <o3os/audio/event_source.h>
 #include <o3os/audio/graph.h>
 #include <o3os/audio/hot.h>
+#include <o3os/audio/insert_host.h>
 #include <o3os/audio/live_notes.h>
 #include <o3os/audio/module_voices.h>
 #include <o3os/audio/test_signal.h>
@@ -85,6 +86,10 @@ class Engine {
   // Attaching them also switches on the spare strip (kAuditionTrack, graph.h) that `diag mod note` plays on (OS-MODSILENT).
   void attach_modules(ModuleVoices* modules) noexcept;
   ModuleVoices* modules() noexcept { return modules_; }
+  // OS-INSFX S1: the effect inserts (audio/insert_host.h). `blobs` is the host's parameter copy memory (InsertHost::Blobs). Needs attach_modules() first (the service table, the hooks and the governor are the modules'): false without.
+  // Main loop, before the audio starts. The render calls InsertHost::begin_block at the end of every block (block_end, the existing flash call of block_done) and at the start of each block of an export.
+  bool attach_inserts(InsertHost* inserts, InsertHost::Blobs* blobs) noexcept;
+  InsertHost* inserts() noexcept { return inserts_; }
   // OS-005h: the instruments whose playback engine is Amiga (audio/amiga_voices.h). Optional (null: none; SampleDesc::engine is then ignored and the note plays Modern): the
   // events of those instruments and the Tick events go to it, and its block is the track's feed. Main loop, before the audio starts or with the render idle.
   void attach_amiga(AmigaVoices* amiga) noexcept { amiga_ = amiga; }
@@ -133,7 +138,8 @@ class Engine {
   // `want_` is written by the main loop and read by the render, `parked_` the other way round; everything 3 to 5 touch is the main loop's while `want_` is set. The cost on the live path is one atomic load, in flash (the trampoline), none in the hot render.
   void offline_request() noexcept;
   bool offline_ready(bool live_running) const noexcept;
-  void offline_enter(const EventSource& source) noexcept;
+  // False: nothing was entered (no request, or OS-INSFX: the inserts did not settle, InsertHost::prepare_export); the caller ends the export, whose close() calls offline_leave().
+  bool offline_enter(const EventSource& source) noexcept;
   void offline_leave() noexcept;
   bool offline_wanted() const noexcept { return want_.load(std::memory_order_relaxed); }
   bool offline_entered() const noexcept { return offline_entered_; }
@@ -158,6 +164,10 @@ class Engine {
   O3OS_AUDIO_HOT void play_block() noexcept;
   O3OS_AUDIO_HOT void dispatch(const SeqEvent& e) noexcept;
   O3OS_AUDIO_COLD void module_fx(const SeqEvent& e) noexcept;  // OS-MODPITCH: the Slide and Glide FX (and the reset) for the module instruments, in flash: dispatch() keeps one call a site
+  // OS-INSFX S1: the block's end for the modules and the inserts, in flash (it replaces the direct block_done call of render_block: one flash call a block, as before). param_route is the graph's param hook:
+  // ParamKind::Insert goes to the insert host, every other kind to the event source's hook.
+  O3OS_AUDIO_COLD void block_end(const std::uint32_t (&stage_cycles)[hal::audio::kStageCount]) noexcept;
+  O3OS_AUDIO_COLD static bool param_route(void* self, const ParamChange& change) noexcept;
   O3OS_AUDIO_COLD void tracker_event(const SeqEvent& e) noexcept;  // OS-COREFX: the tracker FX processor's events (TrackerFx::takes), in flash: dispatch() keeps one call
   // The export's ParamChange hook (main loop, while the engine is the export's): the export's sequencer takes the change, and so does the live one, which is parked and would otherwise never see a
   // change that was on the ring when the export began (the render has no other way to hand it over). True when either took it.
@@ -182,6 +192,7 @@ class Engine {
   VoicePool* voices_ = nullptr;
   LiveBox* live_ = nullptr;           // OS-005g: set before start
   ModuleVoices* modules_ = nullptr;  // OS-012a
+  InsertHost* inserts_ = nullptr;    // OS-INSFX S1
   AmigaVoices* amiga_ = nullptr;     // OS-005h
   TrackerFx tfx_;                    // OS-COREFX: the tracker FX of the sampler voices (audio/tracker_fx.h), run on the TrkFx and Tick events from dispatch()
   std::atomic<bool> want_{false};    // OS-WAVEXP: the export has asked for the engine (main loop writes, the render reads); see OFFLINE RENDERING

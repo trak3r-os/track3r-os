@@ -949,14 +949,39 @@ void Graph::run_tracks(bool silence) noexcept {
 }
 
 // OS-STEREO (c): the side signal of a stereo voice on `track` through the strip's level ramp and pan gains (the lane the mono pass is given) into MAIN's two sides: L += S, R -= S. A strip whose source is not
-// the voices' feed, or with an insert in the path (it processed M only), takes none. In flash, one call per stereo track and block.
+// the voices' feed takes none; one with an insert in the path (it processed M only) takes S as much as the insert leaves of the dry signal: OS-INSFX S1, 255 - wet of each insert in the path, from the wet
+// share it had at the start and has at the end of the block (set_insert_wet), so S comes back and goes away over one block, no step; a steady insert (wet 255) takes none, as before.
+// In flash, one call per stereo track and block.
 void Graph::side_pass(unsigned track, const std::int16_t* side, const kernel::StripLane& lane) noexcept {
   const Strip& s = strips_[track];
-  if (s.source != SourceKind::Feed || (s.insert[0].fn != nullptr && !s.insert[0].bypass) || (s.insert[1].fn != nullptr && !s.insert[1].bypass)) {
+  if (s.source != SourceKind::Feed) {
     return;
   }
-  kernel::gain_pan_st(side, lane.level, lane.left, lane.right, acc_main_[0], acc_main_[1], kBlk);
+  std::uint32_t g0 = 255u;
+  std::uint32_t g1 = 255u;
+  for (unsigned k = 0; k < 2u; ++k) {
+    if (s.insert[k].fn != nullptr && !s.insert[k].bypass) {
+      g0 = g0 * (255u - s.insert[k].wet0) / 255u;
+      g1 = g1 * (255u - s.insert[k].wet1) / 255u;
+    }
+  }
+  if (g0 == 0u && g1 == 0u) {
+    return;
+  }
+  kernel::GainRamp level = lane.level;
+  if (g0 != 255u || g1 != 255u) {
+    level.start = static_cast<std::int32_t>(static_cast<std::int64_t>(level.start) * g0 / 255);
+    level.end = static_cast<std::int32_t>(static_cast<std::int64_t>(level.end) * g1 / 255);
+  }
+  kernel::gain_pan_st(side, level, lane.left, lane.right, acc_main_[0], acc_main_[1], kBlk);
   b_main_.dirty = true;
+}
+
+void Graph::set_insert_wet(unsigned track, unsigned slot, unsigned wet0, unsigned wet1) noexcept {
+  if (track < kTracks && slot < 2u) {
+    strips_[track].insert[slot].wet0 = static_cast<std::uint8_t>(wet0 > 255u ? 255u : wet0);
+    strips_[track].insert[slot].wet1 = static_cast<std::uint8_t>(wet1 > 255u ? 255u : wet1);
+  }
 }
 
 // The strip pass for the tracks waiting: both at once if they are of one kind (two centred, or two panned), else one by one.

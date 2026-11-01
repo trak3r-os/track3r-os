@@ -130,7 +130,38 @@ bool Engine::instrument_hook(void* self, const ParamChange& change) noexcept {
 
 void Engine::attach_events(const EventSource& source) noexcept {
   source_ = source;
-  graph_.set_param_hook(source.param, source.self);
+  graph_.set_param_hook(&Engine::param_route, this);
+}
+
+bool Engine::attach_inserts(InsertHost* inserts, InsertHost::Blobs* blobs) noexcept {
+  if (inserts != nullptr && modules_ == nullptr) {
+    return false;
+  }
+  inserts_ = inserts;
+  if (inserts != nullptr) {
+    inserts->attach(graph_, *modules_, blobs);
+    inserts->set_cycles(cycles_);
+  }
+  return true;
+}
+
+// OS-INSFX S1: the graph's param hook. An insert parameter goes to the host; every other kind to the event source's hook (what attach_events used to install directly).
+bool Engine::param_route(void* self, const ParamChange& change) noexcept {
+  Engine& e = *static_cast<Engine*>(self);
+  if (core::param_kind(change.id) == core::ParamKind::Insert) {
+    return e.inserts_ != nullptr && e.inserts_->apply_param(change);
+  }
+  return e.source_.param != nullptr && e.source_.param(e.source_.self, change);
+}
+
+// The end of a block, once, in flash: the governor takes the block's stage cycles (the block's total is its recent worst render and its base), then the inserts' boundary (the transitions of the block that ran, the nets, the commands).
+void Engine::block_end(const std::uint32_t (&stage_cycles)[hal::audio::kStageCount]) noexcept {
+  if (modules_ != nullptr) {
+    modules_->block_done(stage_cycles);  // OS-GOV: the block's stages (wall time, a USB interrupt inside them counts; not the RX copy's 1 % and the commit) are the governor's recent worst render
+  }
+  if (inserts_ != nullptr) {
+    inserts_->begin_block();
+  }
 }
 
 // What a note event does to the voices; the events of the other kinds (modulation, MIDI, the UI's) are not this slice's.
@@ -497,9 +528,7 @@ void Engine::render_block(const hal::audio::BlockIo& io) noexcept {
   if (voices_ != nullptr) {
     io.report->stage_cycles[hal::audio::kStageDrain] += seq_cycles_;
     io.report->stage_cycles[hal::audio::kStageRender] += voice_cycles_;
-    if (modules_ != nullptr) {
-      modules_->block_done(io.report->stage_cycles);  // OS-GOV: the block's stages (wall time, a USB interrupt inside them counts; not the RX copy's 1 % and the commit) are the governor's recent worst render
-    }
+    block_end(io.report->stage_cycles);  // OS-GOV: the modules' governor takes the block's stage cycles; OS-INSFX: the inserts' boundary
   }
 }
 
@@ -544,14 +573,20 @@ void Engine::offline_quiet() noexcept {
 
 bool Engine::offline_param(void* self, const ParamChange& change) noexcept {
   Engine& e = *static_cast<Engine*>(self);
+  if (core::param_kind(change.id) == core::ParamKind::Insert) {  // OS-INSFX S1: the inserts are the live ones in an export
+    return e.inserts_ != nullptr && e.inserts_->apply_param(change);
+  }
   const bool exported = e.source_.param != nullptr && e.source_.param(e.source_.self, change);
   const bool live = e.live_source_.param != nullptr && e.live_source_.param(e.live_source_.self, change);
   return exported || live;
 }
 
-void Engine::offline_enter(const EventSource& source) noexcept {
+bool Engine::offline_enter(const EventSource& source) noexcept {
   if (offline_entered_ || !want_.load(std::memory_order_relaxed)) {
-    return;
+    return offline_entered_;
+  }
+  if (inserts_ != nullptr && !inserts_->prepare_export()) {  // OS-INSFX S1: queued commands applied, every running effect reset (two exports give the same bits), the nets off. First: a refusal leaves nothing swapped (offline_leave() gives the engine back)
+    return false;
   }
   offline_entered_ = true;
   live_source_ = source_;
@@ -586,6 +621,7 @@ void Engine::offline_enter(const EventSource& source) noexcept {
   graph_.perf_clear();
   offline_quiet();
   stop_live_notes();
+  return true;
 }
 
 // OS-EXPNOTE: the live notes that are held (a pad, a MIDI key, a note-on that never got its note-off) end here, at the export's start, instead of refusing it: the voices were cut by
@@ -635,7 +671,7 @@ void Engine::offline_leave() noexcept {
     graph_.perf_restore(perf_strips_);
     graph_.clear_quiet();  // OS-ODD11: the first live block renders whole
     source_ = live_source_;
-    graph_.set_param_hook(source_.param, source_.self);
+    graph_.set_param_hook(&Engine::param_route, this);
     clock_ = live_clock_;
     fx_tempo_ = 0;  // the live source's tempo is told to the send effects again
     graph_.set_input_feed(feed_was_);
@@ -648,6 +684,9 @@ void Engine::offline_leave() noexcept {
     graph_.loop().park(false);  // (halted: it resumes on the first bar of the live transport)
     if (modules_ != nullptr) {
       modules_->set_governed(governed_was_);
+    }
+    if (inserts_ != nullptr) {
+      inserts_->export_end();
     }
     if (source_.resume != nullptr) {
       source_.resume(source_.self);  // the live source (restored above) forgets what it kept from before: the MIDI link's rings and clock loop. Still parked.
@@ -665,6 +704,9 @@ void Engine::render_offline(const hal::audio::BlockIo& io) noexcept {
   LiveBox* const live = live_;
   live_ = nullptr;
   graph_.clear_quiet();  // OS-ODD11: no voice is gated in an export (the strips' state is the live render's until the export's first drain)
+  if (inserts_ != nullptr) {
+    inserts_->begin_block();  // OS-INSFX S1: the boundary the live render has at the end of a block, here at the start of one
+  }
   if (voices_ != nullptr) {
     play_block();
   }

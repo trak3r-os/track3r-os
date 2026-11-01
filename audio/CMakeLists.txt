@@ -25,6 +25,7 @@ o3os_library(audio
     src/voices.cpp
     src/module_voices.cpp
     src/module_governor.cpp
+    src/insert_host.cpp
     src/paula.cpp
     src/amiga_voices.cpp
     src/med_tick.cpp

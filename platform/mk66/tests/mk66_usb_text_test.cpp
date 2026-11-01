@@ -246,9 +246,9 @@ TEST_CASE("mk66 diag text: log, input, version") {
 TEST_CASE("mk66 diag commands: the table is the documented set, every command an action, nothing maintainer-gated") {
   const char* const expected[] = {"help", "version", "stage", "cpu", "mem",  "crash", "usb", "log", "input", "mix",
                                   "mon",  "peek",    "poke",  "audio", "rot", "sd",    "ls",  "load", "inst", "mod", "reset", "fw", "radio", "voices",
-                                  "key",  "pad",     "enc",   "state", "shot", "leds", "bench", "cache", "ogexp", "power", "disk", "guard"};
+                                  "key",  "pad",     "enc",   "state", "shot", "leds", "bench", "cache", "ogexp", "power", "disk", "guard", "ins"};
   constexpr std::size_t kCount = static_cast<std::size_t>(console::Cmd::Count);
-  CHECK(kCount == 36u);  // (OS-USBDISK U2a: disk; OS-MAINGUARD: guard)
+  CHECK(kCount == 37u);  // (OS-USBDISK U2a: disk; OS-MAINGUARD: guard; OS-INSFX S1: ins)
   for (std::size_t i = 0; i < kCount; ++i) {
     const console::CommandInfo& c = console::kCommandInfo[i];
     INFO(c.name);

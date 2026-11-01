@@ -10,6 +10,8 @@
 #include <o3os/platform/mk66/i2c_config.h>
 #include <o3os/platform/mk66/idle_hook.h>
 
+#include <o3module.h>
+
 #include <cstdint>
 
 namespace o3os::hal {
@@ -270,6 +272,15 @@ inline const char* mod_start_name(ModStart s) noexcept {
 ModStart start_module_load(const char* stem) noexcept;
 std::size_t module_line(unsigned i, char* out, std::size_t cap) noexcept;
 const char* module_bind(unsigned slot, const char* stem) noexcept;
+// OS-INSFX S1 (`diag ins`): an effect module (kind 2, loaded by `mod load`) as an insert of `track` (0..15), `slot` 0 (A) or 1 (B). Each returns null or the reason it could not. Nothing is saved: a project
+// load drops the inserts. insert_line(i): line 0 the totals, lines 1.. the bound inserts (phase, forced, cost); 0 when there is none. Main loop only.
+const char* insert_bind(unsigned track, unsigned slot, const char* stem) noexcept;
+const char* insert_unbind(unsigned track, unsigned slot) noexcept;
+const char* insert_bypass(unsigned track, unsigned slot, bool on) noexcept;
+std::size_t insert_line(unsigned i, char* out, std::size_t cap) noexcept;
+#if O3OS_BENCH
+const o3m_module* insert_bench_module() noexcept;  // `diag bench insert`: the first loaded effect module, or null
+#endif
 // OS-012d: the licence notices of the built-in modules (NUL terminated text, in flash), for `diag mod notice`.
 const char* module_notices() noexcept;
 // OS-PERF3 (`diag cache check`): how many bytes of the sample arena hold loaded PCM (the demo kit or a project's samples), from the start of the arena.

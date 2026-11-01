@@ -1,0 +1,32 @@
+{
+ "name": "qa_inserts",
+ "title": "OS-INSFX S1, Inserts from the console: an effect module (kind 2) bound to a track insert with `diag ins`, heard, measured (`ins`, `cpu`), bypassed, reset and unbound while the transport plays. Console only: the insert is NOT saved and a project load drops it (S3 adds the project record). Needs an effect module file on the card: modules/effects/example_effect.tmod (the SDK template, built by the tester). Writes nothing to the card. Leaves no insert bound",
+ "steps": [
+  {"say": "OS-INSFX S1, rows QA-GLB-161..165 of docs/qa/catalogue/global.md (a unit step is named by the row id its note begins with). Open the project the run is about (the Dense8 song of OS-DENSE, or any project with a sounding track 1) before the run, and put modules/effects/example_effect.tmod on the card. The insert is console-bound: it is lost on save and on reload until the project record lands (slice S3); `ins` says nothing about saving"},
+  {"keys": ["-shift"], "gap": 0.2, "note": "(Shift released, in case a former run left it down)"},
+  {"cmd": "ins", "expect": ["ins: \\d+ blocks, inserts \\d+ cycles"], "show": true, "note": "QA-GLB-161: the totals line with no insert bound: no insert line follows"},
+  {"cmd": "mod load example_effect", "expect": "mod: example_effect: (started|already loaded)"},
+  {"cmd": "mod", "expect": "mod: example_effect (v\\d+\\.\\d+\\.\\d+|unversioned) ABI", "within": 10, "poll": 1.0, "note": "the effect module is loaded (the kind is not shown: `ins bind` refuses an instrument)"},
+  {"cmd": "ins bind 1 1 example_effect", "expect": "ins: bind ok", "note": "QA-GLB-162: an effect module bound to track 1, slot 1 (the activation is applied at the next block boundary)"},
+  {"cmd": "ins bind 1 1 example_effect", "expect": "ins: bind an insert is bound there already", "note": "QA-GLB-162: the same place twice is refused"},
+  {"run": "_play"},
+  {"wait": 3.0},
+  {"cmd": "ins", "expect": ["ins: track 1 slot 1: .+ (in|on),", "state SRAM"], "show": true, "note": "QA-GLB-163: the insert is running (phase on); its measured cycles and share of the block are on the line"},
+  {"cmd": "cpu", "show": true, "note": "QA-GLB-163: the load with the insert on; the insert's cycles are inside the render figure (the governor's base)"},
+  {"cmd": "ins", "expect": ["ins: \\d+ blocks, inserts \\d+ cycles", "forced 0/0"], "show": true, "note": "QA-GLB-163: the totals line again: nothing was forced to dry"},
+  {"cmd": "ins bypass 1 1 on", "expect": "ins: bypass ok", "note": "QA-GLB-164: bypass is a one-block ramp to the dry signal, no click"},
+  {"wait": 1.0},
+  {"cmd": "ins", "expect": "ins: track 1 slot 1: .+ bypassed, bypass", "show": true, "note": "QA-GLB-164"},
+  {"cmd": "ins bypass 1 1 off", "expect": "ins: bypass ok", "note": "QA-GLB-164: off is a reset of the effect (shutdown, init, its parameters) through the swap protocol: the module's tail starts again from silence"},
+  {"wait": 1.0},
+  {"cmd": "ins", "expect": "ins: track 1 slot 1: .+ (in|on),", "show": true, "note": "QA-GLB-164"},
+  {"cmd": "ins unbind 1 1", "expect": "ins: unbind ok", "note": "QA-GLB-165: unbind is a one-block ramp to dry, then the module is shut down once the render is clear of it"},
+  {"wait": 1.0},
+  {"cmd": "ins unbind 1 1", "expect": "ins: unbind no insert bound there", "note": "QA-GLB-165"},
+  {"run": "_stop"},
+  {"wait": 1.0},
+  {"cmd": "ins", "expect": ["ins: \\d+ blocks, inserts \\d+ cycles"], "show": true, "note": "QA-GLB-165: the counters: retired 1 or more, params and stale in the totals line"},
+  {"cmd": "cpu", "show": true, "note": "QA-GLB-165: underruns 0 over the run (read it against the first read)"},
+  {"cmd": "bench insert 64", "if_reply_not": "not in this image", "expect": ["BENCH insert_effect \\d+ 64 avg \\d+ max \\d+", "BENCH insert_ramp \\d+ 64 avg \\d+ max \\d+", "BENCH insert \\d+ 64 avg \\d+ max \\d+ \\(.*, adapter \\d+ cycles \\(\\d+\\.\\d%\\) peak \\d+\\)", "BENCH done"], "timeout": 20, "show": true, "note": "QA-GLB-166: bench image, transport stopped, example_effect still loaded: the adapter's cost is the number after `adapter` (insert minus insert_effect)"}
+ ]
+}

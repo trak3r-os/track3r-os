@@ -102,6 +102,7 @@ class ModuleVoices {
   // `mem` (at least kScratchBytes, 16-byte aligned) is the scratch and the instances' blocks. False when it is too small or not aligned.
   bool attach_scratch(void* mem, std::uint32_t bytes) noexcept;
   void set_hooks(const Hooks& hooks) noexcept;
+  const Hooks& hooks() const noexcept { return hooks_; }  // OS-INSFX: the effect inserts run their module code under the same platform stamps
   void set_sample_rate(float hz) noexcept { host_.sample_rate = hz; }
   // The cycle counter the governor measures with (the engine's: Engine::attach_modules). Before the audio starts. Null: no measure, no governor.
   void set_cycles(gov::Clock clock) noexcept {

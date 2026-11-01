@@ -40,8 +40,9 @@ enum class ParamKind : std::uint8_t {
   Master = 3,      // the master section's levels and switches
   Project = 4,     // settings that belong to the project (sends mode, limiter mode, ...): in the project file
   Device = 5,      // settings that belong to the device (brightness, MIDI clock source, ...): in the settings file
+  Insert = 6,      // OS-INSFX: a parameter of an effect module bound as an insert; index = track * 2 + slot (0..31), field = the module's parameter. ParamChange::ramp_samples carries the binding's generation (low 16 bits)
 };
-inline constexpr unsigned kParamKindCount = 6;
+inline constexpr unsigned kParamKindCount = 7;
 
 enum class ParamId : std::uint32_t { None = 0 };
 

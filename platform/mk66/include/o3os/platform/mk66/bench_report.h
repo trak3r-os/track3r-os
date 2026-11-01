@@ -19,7 +19,7 @@
 
 namespace o3os::platform::mk66::bench {
 
-enum class Kernel : std::uint8_t { Voice, VoiceFilter, VoiceDrive, VoiceCrush, VoiceBoth, VoiceRev, VoicePan, VoiceSt, Tb303, Tb303x128, Delay, Reverb, ReverbFull, Limiter, LimiterQuiet, Strips, Stages, Mem, Worst, Kernels, Cpuopt, Looper, Disk, Burst, DjMaster, Count };
+enum class Kernel : std::uint8_t { Voice, VoiceFilter, VoiceDrive, VoiceCrush, VoiceBoth, VoiceRev, VoicePan, VoiceSt, Tb303, Tb303x128, Delay, Reverb, ReverbFull, Limiter, LimiterQuiet, Strips, Stages, Mem, Worst, Kernels, Cpuopt, Looper, Disk, Burst, DjMaster, Insert, Count };
 
 struct KernelInfo {
   const char* name;  // lower case, digits and '_'; the argument of `bench`
@@ -52,6 +52,7 @@ inline constexpr KernelInfo kKernelInfo[] = {
     {"disk", "OS-USBDISK U1d: card reads, scratch-file writes, USB window (reset|clean)"},
     {"burst", "OS-ODD11 UTAIL: 12 filtered voices: note_ons, first block, steady, 4 spans"},
     {"dj", "OS-DJ: kill EQ held (LOW MID HIGH all), DJ filter, filter + kill, a block each"},
+    {"insert", "OS-INSFX: effect insert, adapter and effect alone (mod load example_effect)"},
 };
 static_assert(sizeof(kKernelInfo) / sizeof(kKernelInfo[0]) == static_cast<std::size_t>(Kernel::Count), "one row per Kernel");
 

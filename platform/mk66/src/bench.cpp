@@ -22,6 +22,7 @@
 
 #include <o3os/audio/bench_stereo.h>
 #include <o3os/audio/graph.h>
+#include <o3os/audio/insert_host.h>
 #include <o3os/audio/kernels.h>
 #include <o3os/audio/loop_mix.h>
 #include <o3os/audio/loop_overdub.h>
@@ -49,6 +50,30 @@
 
 #include <cstring>
 #include <new>
+
+namespace o3os::audio {
+// OS-INSFX S1 (`diag bench insert`): the friend of InsertHost that makes one private record on a private host (never bound, never in the graph's slots: only the graph's scratch planes are used,
+// with the render held off) so that the Graph's own InsertFn, InsertHost::run, is timed as the render calls it.
+struct InsertHostBench {
+  static InsertHost::Inst& prepare(InsertHost& h, Graph& g, ModuleVoices& mv, const o3m_module& mod, void* state, gov::Clock clock) noexcept {
+    h.attach(g, mv, nullptr);
+    h.set_cycles(clock);
+    InsertHost::Inst& in = h.in_[0];
+    in.mod = &mod;
+    in.state = state;
+    in.phase = InsertHost::Phase::On;
+    in.mix = 1.0f;
+    in.target = 1.0f;
+    in.idle = false;
+    return in;
+  }
+  static void ramp(InsertHost::Inst& in, bool on) noexcept {  // a transition block (bind: 0 to 1) or a steady one
+    in.mix = on ? 0.0f : 1.0f;
+    in.target = 1.0f;
+  }
+  static void run(InsertHost::Inst& in, std::int16_t* io, std::uint32_t n) noexcept { InsertHost::run(&in, io, n); }
+};
+}  // namespace o3os::audio
 
 namespace o3os::platform::mk66::bench {
 namespace {
@@ -726,6 +751,65 @@ void run_tb303(const Out& out, std::uint32_t blocks, std::uint32_t frames) noexc
   audio::diag::Text lt(label, sizeof label);
   lt.str(info.mod->name).str(", ").dec(frames).str(" frames, ").dec(st.min() / frames).str(" cycles/frame");
   out.stat_checked(name, st, label, peak);
+}
+
+// OS-INSFX S1: the effect insert (audio/insert_host.h). The first loaded effect module (`mod load example_effect`) on a PRIVATE record and a private, freshly init()ed state (SRAM_U, the stack), on
+// noise at half scale, with the render held off; the engine's own InsertHost::run is what is timed, through the same indirect cycle clock and platform enter / leave hooks the render uses.
+//   insert_effect  the module's render() alone on a float block (the figure the module's author gets)
+//   insert_ramp    run() in a transition block (a bind or a bypass change: the dry copy and the one-block ramp on top)
+//   insert         run() in a steady block; its note gives the ADAPTER: insert minus insert_effect, in cycles and in tenths of a percent of the 261,225-cycle block
+void run_insert(const Out& out, std::uint32_t blocks) noexcept {
+  audio::ModuleVoices* mv = appimg::module_voices();
+  if (mv == nullptr) {
+    out.na("insert", "this image has no sound");
+    return;
+  }
+  const o3m_module* const mod = appimg::insert_bench_module();
+  if (mod == nullptr) {
+    out.na("insert", "no effect module is loaded (mod load example_effect)");
+    return;
+  }
+  alignas(16) unsigned char state[512];
+  if (mod->state_bytes > sizeof state || mod->render == nullptr || mod->init == nullptr || mod->shutdown == nullptr) {
+    out.na("insert", "the effect has no state, or it is too big to copy");
+    return;
+  }
+  if (!stack_room(static_cast<std::uint32_t>(sizeof(audio::InsertHost)))) {
+    out.na("insert", "not enough stack for the private host");
+    return;
+  }
+  std::memset(state, 0, sizeof state);
+  if (mod->init(state, &mv->host()) != 0) {
+    out.na("insert", "init() refused");
+    return;
+  }
+  audio::InsertHost host;
+  auto& in = audio::InsertHostBench::prepare(host, audio_engine().graph(), *mv, *mod, state, []() noexcept { return dwt(); });
+  alignas(8) std::int16_t src[kBlock];
+  alignas(8) std::int16_t io[kBlock];
+  alignas(8) float fl[kBlock];
+  Noise n;
+  for (std::uint32_t i = 0; i < kBlock; ++i) {
+    src[i] = static_cast<std::int16_t>(n.next() / 2);
+  }
+  const auto nop = [] {};
+  const auto refill = [&] { std::memcpy(io, src, sizeof io); };
+  Peak peak;
+  const Stat effect = measure(
+      blocks, [&] { audio::kernel::q15_to_float(fl, src, kBlock); }, [&] { (void)mod->render(state, fl, fl, kBlock); }, nop);
+  const Stat ramp = measure(
+      blocks, [&] { refill(); audio::InsertHostBench::ramp(in, true); }, [&] { audio::InsertHostBench::run(in, io, kBlock); }, nop);
+  const Stat run = measure(
+      blocks, [&] { refill(); audio::InsertHostBench::ramp(in, false); }, [&] { audio::InsertHostBench::run(in, io, kBlock); }, [&] { peak.add_q15(io, kBlock); });
+  mod->shutdown(state);
+  const std::uint32_t adapter = run.min() > effect.min() ? run.min() - effect.min() : 0u;
+  const std::uint32_t tenths = audio::gov::tenths_of_block(adapter);
+  char label[64];
+  audio::diag::Text lt(label, sizeof label);
+  lt.str(mod->name != nullptr ? mod->name : "?").str(", adapter ").dec(adapter).str(" cycles (").dec(tenths / 10u).chr('.').dec(tenths % 10u).str("%)");
+  out.stat("insert_effect", effect, "render() alone");
+  out.stat("insert_ramp", ramp, "transition block");
+  out.stat_checked("insert", run, label, peak, "a silent effect, or a dead adapter");
 }
 
 // ---- in situ: the render's own stage figures -------------------------------------------------------------------------------------------
@@ -1642,6 +1726,7 @@ void run(Kernel kernel, std::uint32_t blocks, Variant variant, Emit emit, void* 
     case Kernel::Disk: diskbench::run(out, blocks); break;
     case Kernel::Burst: run_burst(out, blocks); break;
     case Kernel::DjMaster: run_dj(out, blocks); break;
+    case Kernel::Insert: run_insert(out, blocks); break;
     case Kernel::Count: break;
   }
 }

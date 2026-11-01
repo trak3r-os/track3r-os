@@ -827,6 +827,38 @@ bool parse_value(const char* s, float& out) {
   return *s == '\0';
 }
 
+// OS-INSFX S1: effect modules as per-track inserts (audio/insert_host.h). `ins` / `ins list`: the totals and the bound inserts; `ins bind <track 1..16> <slot 1..2> <module>` (the module
+// loaded by `mod load` first), `ins unbind <track> <slot>`, `ins bypass <track> <slot> on|off` (off is a reset of the effect). Nothing is saved; a project load drops the inserts.
+void cmd_ins(shell::Shell& sh, const shell::Args& a) {
+  std::uint32_t track = 0;
+  std::uint32_t slot = 0;
+  const char* sub = a.argc >= 2 ? a.argv[1] : "list";
+  const char* why = nullptr;
+  if (std::strcmp(sub, "list") == 0 && a.argc <= 2) {
+    char line[160];
+    for (unsigned i = 0; i < 6u; ++i) {  // the totals and the four inserts (and one to spare)
+      const std::size_t len = appimg::insert_line(i, line, sizeof line);
+      if (len == 0u) {
+        break;
+      }
+      sh.out().text(line, len).nl();
+    }
+    return;
+  }
+  const bool two = a.argc >= 4 && parse_dec(a.argv[2], 16u, track) && track != 0u && parse_dec(a.argv[3], 2u, slot) && slot != 0u;
+  if (std::strcmp(sub, "bind") == 0 && a.argc == 5 && two) {
+    why = appimg::insert_bind(track - 1u, slot - 1u, a.argv[4]);
+  } else if (std::strcmp(sub, "unbind") == 0 && a.argc == 4 && two) {
+    why = appimg::insert_unbind(track - 1u, slot - 1u);
+  } else if (std::strcmp(sub, "bypass") == 0 && a.argc == 5 && two && (std::strcmp(a.argv[4], "on") == 0 || std::strcmp(a.argv[4], "off") == 0)) {
+    why = appimg::insert_bypass(track - 1u, slot - 1u, std::strcmp(a.argv[4], "on") == 0);
+  } else {
+    sh.out().text("usage: ins [list] | bind <1..16> <1..2> <module> | unbind <1..16> <1..2> | bypass <1..16> <1..2> on|off\n");
+    return;
+  }
+  sh.out().text("ins: ").text(sub).text(" ").text(why == nullptr ? "ok" : why).nl();
+}
+
 void cmd_mod(shell::Shell& sh, const shell::Args& a) {
   constexpr unsigned kMaxLines = 24;
   if (a.argc == 1) {
@@ -1410,6 +1442,7 @@ constexpr shell::Command kCommands[] = {
     bind(Cmd::Shot, &cmd_shot),   bind(Cmd::Leds, &cmd_leds),       bind(Cmd::Bench, &cmd_bench), bind(Cmd::Cache, &cmd_cache),
     bind(Cmd::Power, &cmd_power),   bind(Cmd::Disk, &cmd_disk),
     bind(Cmd::Guard, &cmd_guard),
+    bind(Cmd::Ins, &cmd_ins),
 };
 static_assert(sizeof(kCommands) / sizeof(kCommands[0]) == static_cast<std::size_t>(Cmd::Count), "every command has a handler");
 

@@ -63,6 +63,8 @@ constexpr std::uint32_t tenths_of_block(std::uint32_t cycles) noexcept { return 
 // ---- the knobs ------------------------------------------------------------------------------------------------------------------------
 inline constexpr std::uint32_t kThresholdPercent = 90;     // admission: a new voice that would take the predicted block above this is dropped
 inline constexpr std::uint32_t kColdVoicePercent = 20;     // the assumed cost of a voice of an instance that was never measured (the TB-303 is 16.4 %)
+inline constexpr std::uint32_t kColdInsertPercent = 10;   // OS-INSFX: the assumed cost of an effect insert that was never measured (an unmeasured effect is not trusted to be cheap)
+inline constexpr unsigned kMaxInserts = 4;                 // OS-INSFX D3: effect instances active at once (a master insert will count 2); the cap is retuned from the unit's figures (S8)
 inline constexpr std::uint32_t kBudgetPercent = 50;        // the time one instance may take in a block before it counts as over (the TB-303 before OS-PERF3 was 50 %, now 16 %)
 inline constexpr unsigned kMuteBlocks = 4;                 // N: consecutive blocks over the budget that mute an instance (5.8 ms)
 inline constexpr std::uint32_t kMuteCooldownBlocks = 1024; // blocks (1.5 s) after a mute before a note may clear it
@@ -78,6 +80,7 @@ inline constexpr std::uint32_t kMaxBudgetPercent = 100;
 
 inline constexpr std::uint32_t kThresholdCycles = cycles_of_percent(kThresholdPercent);
 inline constexpr std::uint32_t kColdCycles = cycles_of_percent(kColdVoicePercent);
+inline constexpr std::uint32_t kColdInsertCycles = cycles_of_percent(kColdInsertPercent);
 inline constexpr std::uint32_t kBudgetCycles = cycles_of_percent(kBudgetPercent);
 static_assert(kThresholdPercent >= kMinThresholdPercent && kThresholdPercent <= kMaxThresholdPercent && kBudgetPercent >= kMinBudgetPercent && kBudgetPercent <= kMaxBudgetPercent, "the defaults are in range");
 static_assert(kColdVoicePercent < kThresholdPercent, "the knobs are fractions of the block, in order");
@@ -182,6 +185,8 @@ class Governor {
   void set_budget_percent(std::uint32_t percent) noexcept { budget_.store(cycles_of_percent(clamp(percent, kMinBudgetPercent, kMaxBudgetPercent)), std::memory_order_relaxed); }
   std::uint32_t threshold() const noexcept { return threshold_.load(std::memory_order_relaxed); }
   std::uint32_t budget() const noexcept { return budget_.load(std::memory_order_relaxed); }
+  // OS-INSFX: the recent worst of what the render takes besides the module voices (it holds the effect inserts' cycles: InsertHost does not call account()), any context.
+  std::uint32_t base() const noexcept { return base_pub_.load(std::memory_order_relaxed); }
   Snapshot snapshot() const noexcept;
 
   // ---- render context ------------------------------------------------------------------------------------------------------------
