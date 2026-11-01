@@ -39,7 +39,7 @@ Instrument sample_instrument() {
 static_assert(sizeof(Step) == 7 && alignof(Step) == 1, "step");
 static_assert(sizeof(Pattern) == 14384, "pattern");
 static_assert(sizeof(Instrument) == 720, "instrument");
-static_assert(kModelArenaBytes == 1933760, "arena");
+static_assert(kModelArenaBytes == 1934312, "arena");
 static_assert(alignof(ModelArena) == 8, "arena alignment");
 static_assert(kMaxPatterns * sizeof(Pattern) + kMaxInstruments * sizeof(Instrument) + kUnknownPoolBytes < kModelArenaBytes,
               "the pools are most of the arena");

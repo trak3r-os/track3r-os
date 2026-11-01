@@ -25,6 +25,8 @@ void fill_state(model::Project& p);
 void fill_midi13(model::Project& p);
 // fill_small plus the session state of OS-PERSIST2: one of every part, none of the default values (NOTE, MUTE, SCEN with two scenes stored and LATCH off, SNFX).
 void fill_persist2(model::Project& p);
+// fill_persist2 plus three inserts (OS-INSFX S3a: INSX 1.0): track 0 INS A (no parameters), track 3 INS B (32 parameters, bypassed), the master (three parameters).
+void fill_inserts(model::Project& p);
 // Every limit reached: 128 patterns (ids 1..127 and 255) of 16 x 128 non-empty steps, a song of 255
 // positions, 64 instruments of all three kinds with maximal texts and blobs, 16 modules, the unknown-chunk
 // pool exactly full, maximal names.

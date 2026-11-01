@@ -45,6 +45,7 @@ inline constexpr std::uint32_t kChunkMute = fourcc('M', 'U', 'T', 'E');  // each
 inline constexpr std::uint32_t kChunkScen = fourcc('S', 'C', 'E', 'N');  // the Perform scenes and LATCH (OS-PERSIST2)
 inline constexpr std::uint32_t kChunkSnfx = fourcc('S', 'N', 'F', 'X');  // the send effects' controls (OS-PERSIST2)
 inline constexpr std::uint32_t kChunkLaw = fourcc('L', 'A', 'W', ' ');   // the instrument volume law, written only when it is the 1.1.14 table (OS-BUG-PASTE24)
+inline constexpr std::uint32_t kChunkInsx = fourcc('I', 'N', 'S', 'X');  // the inserts, written only when the project has one (OS-INSFX S3a)
 inline constexpr std::uint32_t kChunkCrc = fourcc('C', 'R', 'C', ' ');   // CRC-32 of everything before it
 
 // Chunk version, the first two payload bytes of every chunk: major in the high byte, minor in the low byte.

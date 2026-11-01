@@ -2,12 +2,12 @@
 // Command-line helper for the C++ <-> Python round trip of the native project format (ctest project_python,
 // driven by tests/o3project_roundtrip.py). Not part of the OS.
 //
-//   o3pj_tool gen empty|small|maximal|settings|state|midi13|persist2|og|og17|law OUT   write a fixture project (empty = the default project; state = the project-level
+//   o3pj_tool gen empty|small|maximal|settings|state|midi13|persist2|og|og17|law|insx OUT  write a fixture project (empty = the default project; state = the project-level
 //                                       state of OS-004d: MIDI, USBS, MIXR, PERF, APPM and instruments with a playback engine; persist2 = the session
 //                                       state of OS-PERSIST2: NOTE, MUTE, SCEN, SNFX; og = what the OG
 //                                       readers make of a synthetic OG project, with its OGPM and OGPN chunks; og17 = the same
 //                                       from a project v17, whose OGPM chunk is 1.1: it carries the byte at 0x80C; law = the og fixture with the volume
-//                                       law 1, so with the LAW chunk of OS-BUG-PASTE24)
+//                                       law 1, so with the LAW chunk of OS-BUG-PASTE24; insx = the persist2 fixture with three inserts, so with the INSX chunk of OS-INSFX S3a)
 //   o3pj_tool gen kit OUT               (OS-E2E-13) the instrument kit of the "pro session" journey: five instruments and no pattern work, and the four WAV files they name in a
 //                                       `samples/` folder beside OUT (integer arithmetic only, so the same bytes on every machine). Not a round-trip fixture
 //   o3pj_tool gen heavy OUT             (OS-FINALQA FQA-7) the heavy song of docs/architecture/cpu-budget.md section 4 for the unit's CPU run: 10 sustained sampler voices (6 modern, 4 Paula; looped, filtered, modulated, with sends and
@@ -244,6 +244,14 @@ void dump(const Project& p) {
   }
   if (p.volume_law() != 0u) {  // OS-BUG-PASTE24: the LAW chunk
     std::printf("law=%u\n", p.volume_law());
+  }
+  for (std::uint32_t i = 0; i < p.inserts().count; ++i) {  // OS-INSFX S3a: the INSX chunk, the same lines as o3project.py's dump
+    const InsertRecord& r = p.inserts().rec[i];
+    std::printf("insert %u where=%u slot=%u module=%u flags=%u values=", i, r.where, r.slot, r.module, r.flags);
+    for (std::uint32_t k = 0; k < r.n; ++k) {
+      std::printf("%s%08x", k == 0 ? "" : ",", bits(r.param[k]));
+    }
+    std::printf("\n");
   }
   for (std::uint32_t i = 0; i < p.unknown_count(); ++i) {
     const UnknownChunk& u = *p.unknown(i);
@@ -749,6 +757,8 @@ int main(int argc, char** argv) {
       (void)a.project.set_instrument(0, in);
     } else if (std::strcmp(argv[2], "persist2") == 0) {
       test::fill_persist2(a.project);
+    } else if (std::strcmp(argv[2], "insx") == 0) {
+      test::fill_inserts(a.project);  // OS-INSFX S3a: the persist2 fixture and three inserts, so with the INSX chunk
     } else if (std::strcmp(argv[2], "kit") == 0) {
       fill_kit(a.project);
     } else if (std::strcmp(argv[2], "heavy") == 0) {
@@ -773,7 +783,7 @@ int main(int argc, char** argv) {
         return fail("gen: the synthetic OG project did not import");
       }
     } else {
-      return fail("gen: empty, small, maximal, settings, state, midi13, persist2, lfosine, kit, heavy, dense10, dense8, moddrive1|4|8[off], lfostep23|24|33|36|off, og, og17 or law");
+      return fail("gen: empty, small, maximal, settings, state, midi13, persist2, lfosine, kit, heavy, dense10, dense8, moddrive1|4|8[off], lfostep23|24|33|36|off, og, og17, law or insx");
     }
     std::vector<std::uint8_t> out;
     if (test::save(a.project, out) != formats::native::Progress::Done) {
@@ -815,5 +825,5 @@ int main(int argc, char** argv) {
     }
     return write_file(argv[3], out) ? 0 : fail("resave: cannot write the output");
   }
-  return fail("usage: o3pj_tool gen empty|small|maximal|settings|state|midi13|persist2|kit|heavy|dense10|dense8|og|og17|law OUT | resave IN OUT | dump IN | limits");
+  return fail("usage: o3pj_tool gen empty|small|maximal|settings|state|midi13|persist2|kit|heavy|dense10|dense8|og|og17|law|insx OUT | resave IN OUT | dump IN | limits");
 }

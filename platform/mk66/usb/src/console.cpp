@@ -828,7 +828,8 @@ bool parse_value(const char* s, float& out) {
 }
 
 // OS-INSFX S1: effect modules as per-track inserts (audio/insert_host.h). `ins` / `ins list`: the totals and the bound inserts; `ins bind <track 1..16> <slot 1..2> <module>` (the module
-// loaded by `mod load` first), `ins unbind <track> <slot>`, `ins bypass <track> <slot> on|off` (off is a reset of the effect). Nothing is saved; a project load drops the inserts.
+// loaded by `mod load` first), `ins unbind <track> <slot>`, `ins bypass <track> <slot> on|off` (off is a reset of the effect). S3b: each one is written to the project (INSX), so a save keeps it and a
+// load binds the saved ones (not undoable).
 void cmd_ins(shell::Shell& sh, const shell::Args& a) {
   std::uint32_t track = 0;
   std::uint32_t slot = 0;

@@ -184,6 +184,10 @@ class Editor {
   Status set_scenes_state(const ScenesState& value) noexcept;
   Status set_send_fx_state(const SendFxState& value) noexcept;
   Status set_app_params(const char* name, std::size_t len, std::uint32_t abi_major, std::uint32_t abi_minor, const float* values, std::uint32_t count) noexcept;
+  // OS-INSFX S3b: the insert records (Project::set_insert, clear_insert: same checks and Status), written the same way. NOT undoable (D9: an insert is the engine's state, not an edit): no record,
+  // and an in-sync history stays in sync when the project's generation moves.
+  Status set_insert(const InsertRecord& value) noexcept;
+  Status clear_insert(std::uint32_t where, std::uint32_t slot) noexcept;
 
   // Parameters (OS-002d): one value, or one slot of the project's Learn store; same checks and Status as the Project's.
   Status set_param(core::ParamId id, float value) noexcept;

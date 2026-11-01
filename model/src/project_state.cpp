@@ -175,6 +175,44 @@ const char* validate_send_fx_state(const SendFxState& s) noexcept {
   return nullptr;
 }
 
+const char* validate_insert_record(const InsertRecord& r, std::uint32_t module_count) noexcept {
+  const bool master = r.where == kInsertWhereMaster;
+  if (r.where > kInsertWhereMaster) return "INSX: where out of range";
+  if (r.slot >= (master ? 1u : kInsertSlotsPerTrack)) return "INSX: slot out of range";
+  if (r.module >= module_count) return "INSX: module index past MODR";
+  if ((r.flags & ~kInsertFlagBypass) != 0 || r.reserved[0] != 0 || r.reserved[1] != 0 || r.reserved[2] != 0) return "INSX: reserved bits set";
+  if (r.n > kInsertParamsMax) return "INSX: too many parameters";
+  for (std::uint32_t i = 0; i < kInsertParamsMax; ++i) {
+    if (i >= r.n) {
+      std::uint32_t bits;
+      std::memcpy(&bits, &r.param[i], sizeof bits);
+      if (bits != 0) return "INSX: a value past n";
+    } else if (!is_finite_float(r.param[i])) {
+      return "INSX: non-finite parameter";
+    }
+  }
+  return nullptr;
+}
+
+const char* validate_insert_state(const InsertState& s, std::uint32_t module_count) noexcept {
+  if (s.count > kMaxInserts || s.reserved[0] != 0 || s.reserved[1] != 0 || s.reserved[2] != 0) return "INSX: bad count";
+  for (std::uint32_t i = 0; i < kMaxInserts; ++i) {
+    if (i < s.count) {
+      if (const char* why = validate_insert_record(s.rec[i], module_count)) return why;
+      if (i > 0) {
+        const InsertRecord& a = s.rec[i - 1];
+        const InsertRecord& b = s.rec[i];
+        if (!(a.where < b.where || (a.where == b.where && a.slot < b.slot))) return "INSX: records not ascending";
+      }
+    } else {
+      InsertRecord zero;
+      std::memset(&zero, 0, sizeof zero);
+      if (!(s.rec[i] == zero)) return "INSX: a record past count";
+    }
+  }
+  return nullptr;
+}
+
 unsigned sanitise_note_state(NoteState& s) noexcept {
   unsigned reset = 0;
   const auto fix = [&reset](std::uint8_t& v, std::uint8_t max, std::uint8_t def) {

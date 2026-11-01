@@ -97,7 +97,7 @@ def main():
     if cpp_limits != py_limits:
         sys.exit("FAILED: the limits tables differ\nC++:\n%s\nPython:\n%s" % (cpp_limits.decode(), py_limits.decode()))
 
-    for kind in ("empty", "small", "maximal", "settings", "state", "midi13", "persist2", "lfosine", "stereo", "og", "og17", "law"):
+    for kind in ("empty", "small", "maximal", "settings", "state", "midi13", "persist2", "lfosine", "stereo", "og", "og17", "law", "insx"):
         a, b, c = (os.path.join(work, "%s.%s.o3p" % (kind, tag)) for tag in ("cpp", "py", "cpp2"))
         run([tool, "gen", kind, a])
         if kind in PRE_LAW:  # OS-BUG-PASTE24: a project whose law is 0 writes no LAW chunk: the file is the one the build before it wrote (size and CRC-32 taken from that build's o3pj_tool)
@@ -882,12 +882,108 @@ def main():
     prev.RANKS.pop(b"LAW ")
     prev.LENGTH_RANGE.pop(b"LAW ")
     prev.LAW_PARTS = ()
+    prev.RANKS.pop(b"INSX")  # (the build before LAW has no INSX either: none of these files holds one)
+    prev.LENGTH_RANGE.pop(b"INSX")
+    prev.INSX_PARTS = ()
     prev.RANKS[b"CRC "] = 18
     for what, data in (("the law fixture", law_file), ("persist2 with LAW", join_chunks(pc[:s0 + 4] + p2_law + pc[s0 + 4:]))):
         older_law = prev.parse(data)
         if [c for c, _ in older_law["unknown"]][0] != b"LAW " or prev.build(older_law) != data:
             sys.exit("FAILED: %s: a reader that does not know LAW does not keep it and write it back byte for byte" % what)
     print("law: the LAW chunk is read alike on both sides (law 0 or 1, damaged forms, newer minors, order), the files of law 0 are the bytes of the build before, a previous reader keeps it byte for byte")
+    # OS-INSFX S3a: the INSX chunk. The `insx` fixture is the persist2 fixture with three inserts (track 0 INS A without parameters, track 3 INS B with 32 parameters and the bypass flag, the master with three):
+    # the same chunks and, after SNFX and before the unknown chunks, INSX 1.0. Both sides read it alike (the dumps above are identical), a project that never had an insert is the file it was (the PRE_LAW
+    # pins above), and the file without the chunk is the persist2 fixture.
+    ix_file = read(os.path.join(work, "insx.cpp.o3p"))
+    ix = split_chunks(ix_file)
+    ix_kinds = [c for c, _ in ix]
+    ix_at = ix_kinds.index(b"INSX")
+    if ix_kinds[ix_at - 1] != b"SNFX" or ix_kinds[ix_at + 1:] != [b"XTRA", b"EMPT"] or ix_kinds.count(b"INSX") != 1:
+        sys.exit("FAILED: INSX is not right after SNFX, before the unknown chunks (%r)" % ix_kinds)
+    if [(c, q) for c, q in ix if c != b"INSX"] != split_chunks(read(os.path.join(work, "persist2.cpp.o3p"))):
+        sys.exit("FAILED: the insx fixture is not the persist2 fixture plus the INSX chunk")
+
+    def irec(where, slot, module, flags, vals):
+        return bytes([where, slot, module, flags, len(vals)]) + b"".join(struct.pack(">f", x) for x in vals)
+
+    def ipay(count, records, version=0x0100):
+        return struct.pack(">HB", version, count) + b"".join(records)
+
+    blob = [0.5 * k - 3.25 for k in range(32)]
+    want_insx = ipay(3, [irec(0, 0, 0, 0, []), irec(3, 1, 1, 1, blob), irec(16, 0, 1, 0, [1.0, -0.0, 123456.789])])
+    # (123456.789 as an f32 is rounded: the C++ fixture stores the float literal, Python packs the double to the same f32)
+    if ix[ix_at][1] != want_insx or len(want_insx) != 158:
+        sys.exit("FAILED: the INSX chunk of the insx fixture is not the 158 bytes the description gives")
+    dump_ix = run([tool, "dump", os.path.join(work, "insx.cpp.o3p")]).stdout.decode().splitlines()
+    for line in ("insert 0 where=0 slot=0 module=0 flags=0 values=", "insert 1 where=3 slot=1 module=1 flags=1 values=" + ",".join("%08x" % struct.unpack(">I", struct.pack(">f", x))[0] for x in blob),
+                 "insert 2 where=16 slot=0 module=1 flags=0 values=3f800000,80000000,47f12065"):
+        if line not in dump_ix:
+            sys.exit("FAILED: the insx fixture's dump has no %r line" % line)
+
+    def ix_with(payload):
+        return [(c, payload if c == b"INSX" else q) for c, q in ix]
+
+    # A file that never had an insert reads as none on both sides, whatever else it holds, and is written back as it was.
+    no_ix = [(c, q) for c, q in ix if c != b"INSX"]
+    for l in rewrite_alike("no INSX", no_ix, expect=join_chunks(no_ix)):
+        if l.startswith("insert "):
+            sys.exit("FAILED: a file with no INSX chunk reads as having inserts")
+    if join_chunks(no_ix) != read(os.path.join(work, "persist2.cpp.o3p")):
+        sys.exit("FAILED: the insx fixture without its INSX chunk is not the persist2 fixture")
+    # Tolerance: a record the reader cannot use is skipped, on both sides alike (the C++ test counts them), the rest is written back as 1.0 sorted.
+    nan, inf = float("nan"), float("inf")
+    keep = irec(2, 0, 0, 0, [1.0, -2.5, 0.125])
+    skip = {"module past MODR": irec(4, 0, 2, 0, [1.0]), "module 255": irec(4, 0, 255, 0, [1.0]), "where 17": irec(17, 0, 0, 0, [1.0]), "where 255": irec(255, 0, 0, 0, [1.0]),
+            "track slot 2": irec(4, 2, 0, 0, [1.0]), "master slot 1": irec(16, 1, 0, 0, [1.0]), "NaN": irec(4, 0, 0, 0, [1.0, nan]), "+inf": irec(4, 0, 0, 0, [inf]),
+            "-inf": irec(4, 0, 0, 0, [-inf]), "duplicate": irec(2, 0, 1, 0, [9.0]), "n 33": irec(4, 0, 0, 0, [0.25] * 33)}
+    for name, bad in skip.items():
+        out = rewrite_alike("INSX skips " + name, ix_with(ipay(2, [keep, bad])), expect=join_chunks(ix_with(ipay(1, [keep]))))
+        if sum(1 for l in out if l.startswith("insert ")) != 1:
+            sys.exit("FAILED: INSX %s: not skipped" % name)
+    rewrite_alike("INSX flag bits other than bypass", ix_with(ipay(1, [irec(4, 0, 0, 3, [1.0])])), expect=join_chunks(ix_with(ipay(1, [irec(4, 0, 0, 1, [1.0])]))))
+    rewrite_alike("INSX after a skipped record", ix_with(ipay(3, [irec(1, 0, 9, 0, [0.25] * 33), irec(1, 1, 0, 0, [1.0]), irec(3, 0, 0, 0, [])])),
+                  expect=join_chunks(ix_with(ipay(2, [irec(1, 1, 0, 0, [1.0]), irec(3, 0, 0, 0, [])]))))
+    rewrite_alike("INSX out of order", ix_with(ipay(3, [irec(16, 0, 0, 0, []), irec(0, 1, 1, 0, []), irec(0, 0, 0, 0, [])])),
+                  expect=join_chunks(ix_with(ipay(3, [irec(0, 0, 0, 0, []), irec(0, 1, 1, 0, []), irec(16, 0, 0, 0, [])]))))
+    rewrite_alike("INSX every record skipped", ix_with(ipay(2, [irec(17, 0, 0, 0, []), irec(0, 0, 7, 0, [])])), expect=join_chunks(no_ix))
+    rewrite_alike("INSX count 0", ix_with(ipay(0, [])), expect=join_chunks(no_ix))
+    # The maximal chunk (OS-INSFX S3b fold): four records of 32 parameters, exactly 535 bytes, written back unchanged.
+    maxi = ipay(4, [irec(w, s, s, s, [0.125 * k - i for k in range(32)]) for i, (w, s) in enumerate(((0, 0), (5, 1), (10, 0), (15, 1)))])
+    if len(maxi) != 535:
+        sys.exit("FAILED: the maximal INSX chunk is not 535 bytes")
+    rewrite_alike("INSX maximal", ix_with(maxi), expect=join_chunks(ix_with(maxi)))
+    # Shape errors are Malformed on both sides.
+    for name, payload in {"count 5": ipay(5, [irec(i, 0, 0, 0, []) for i in range(5)]), "count 255": ipay(255, []), "count above its records": ipay(2, [keep]),
+                          "a byte too long": ipay(1, [keep]) + b"\0", "a parameter cut short": ipay(1, [keep])[:-2], "a record header cut short": ipay(1, [b"\0\0\0"]),
+                          "n 33 without its bytes": ipay(1, [bytes([0, 0, 0, 0, 33, 0, 0, 0, 0])]), "version 0": ipay(0, [], 0), "shorter than its header": b"\x01\x00",
+                          "over 535 bytes": ipay(4, []) + b"\0" * 533}.items():
+        refused_alike("INSX " + name, ix_with(payload))
+    refused_alike("INSX 2.0", ix_with(ipay(0, [], 0x0200)), "newer major version")
+    # A newer minor with appended bytes: read as 1.0 knows it, written back as 1.0 without them; shorter than 1.0 or a count above the cap is still Malformed.
+    rewrite_alike("INSX 1.1 with appended bytes", ix_with(want_insx[:1] + b"\x01" + want_insx[2:] + b"\xab" * 5), expect=ix_file)
+    rewrite_alike("INSX 1.7 count 0 with appended bytes", ix_with(ipay(0, [], 0x0107) + b"\x55" * 100), expect=join_chunks(no_ix))
+    refused_alike("INSX 1.1 shorter than 1.0", ix_with(b"\x01\x01"))
+    refused_alike("INSX 1.1 count 5", ix_with(ipay(5, [], 0x0101)))
+    # Order: after SNFX and LAW, before the unknown chunks; before NOTE, before LAW, or twice is refused, behind the unknown chunks it is legal (a build older than this one writes the unknown chunks last).
+    refused_alike("INSX twice", ix[:ix_at + 1] + [ix[ix_at]] + ix[ix_at + 1:])
+    refused_alike("INSX before NOTE", ix[:s0] + [ix[ix_at]] + ix[s0:ix_at] + ix[ix_at + 1:])
+    refused_alike("INSX before LAW", ix[:ix_at + 1] + [(b"LAW ", b"\x01\x00\x01")] + ix[ix_at + 1:])
+    rewrite_alike("LAW before INSX", ix[:ix_at] + [(b"LAW ", b"\x01\x00\x01")] + ix[ix_at:], expect=join_chunks(ix[:ix_at] + [(b"LAW ", b"\x01\x00\x01")] + ix[ix_at:]))
+    rewrite_alike("INSX after the unknown chunks", ix[:ix_at] + ix[ix_at + 1:] + [ix[ix_at]], expect=ix_file)
+    # The build before this slice (emulated: INSX is unknown to it, the CRC chunk is rank 19): the file loads, the project plays without the inserts, INSX is kept as an unknown chunk (in the order it was read)
+    # and written back byte for byte, whether it sat before the unknown chunks or behind them.
+    spec_insx = importlib.util.spec_from_file_location("o3project_before_insx", ref)
+    prev = importlib.util.module_from_spec(spec_insx)
+    spec_insx.loader.exec_module(prev)
+    prev.RANKS.pop(b"INSX")
+    prev.LENGTH_RANGE.pop(b"INSX")
+    prev.INSX_PARTS = ()
+    prev.RANKS[b"CRC "] = 19
+    for what, data in (("the insx fixture", ix_file), ("INSX behind the unknown chunks", join_chunks(ix[:ix_at] + ix[ix_at + 1:] + [ix[ix_at]]))):
+        older = prev.parse(data)
+        if b"INSX" not in [c for c, _ in older["unknown"]] or older["inserts"] != [] or prev.build(older) != data:
+            sys.exit("FAILED: %s: a reader that does not know INSX does not keep it and write it back byte for byte" % what)
+    print("insx: the INSX chunk is read alike on both sides (tolerance, shape errors, newer minors, order), a file without it is the one that never had an insert, a previous reader keeps it byte for byte")
     print("versions: %d newer-major cases refused, %d newer-minor cases read, INST 1.0 read as rate 0, alike" % (len(refused) + 1, len(accepted) + 3))
     print("OK")
 

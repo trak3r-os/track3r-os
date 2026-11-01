@@ -186,6 +186,32 @@ struct SendFxState {
   std::uint16_t value[kSendFxCount];
 };
 
+// ---- Inserts (OS-INSFX S3a): the effect modules on the strips, the INSX chunk (docs/formats/o3-project.md, "The INSX chunk"; docs/specs/OS-INSFX.md section 7). At most kMaxInserts records
+// (audio::gov::kMaxInserts), each one (where, slot): a track 0..15 with slot 0 or 1 (INS A / INS B), or the master (where 16) with slot 0. `module` indexes the project's MODR table (the name and
+// the ABI are there), `param` is the module's parameter blob (n finite floats; the rest 0). Unlike the other parts there is no "present" bit (every bit of Project::state_present() is a part):
+// the part is present when `count` is not 0, so the chunk is written only for a project that has an insert, and a project without one is the file it was.
+inline constexpr std::uint32_t kMaxInserts = 4;
+inline constexpr std::uint8_t kInsertWhereMaster = 16;       // `where` of the master strip; its slot is 0
+inline constexpr std::uint32_t kInsertSlotsPerTrack = 2;     // INS A, INS B
+inline constexpr std::uint32_t kInsertParamsMax = 32;        // O3M_PARAMS_MAX
+inline constexpr std::uint8_t kInsertFlagBypass = 1;         // `flags` bit 0; the other bits are 0
+
+struct InsertRecord {
+  std::uint8_t where;     // 0..15 a track, 16 the master
+  std::uint8_t slot;      // 0 or 1 for a track, 0 for the master
+  std::uint8_t module;    // index into the project's module table (MODR), below Project::module_count()
+  std::uint8_t flags;     // kInsertFlag* bits
+  std::uint8_t n;         // parameters in use, 0..kInsertParamsMax
+  std::uint8_t reserved[3];  // 0
+  float param[kInsertParamsMax];  // finite; past `n` they are 0
+};
+
+struct InsertState {
+  std::uint8_t count;        // records in use, 0..kMaxInserts
+  std::uint8_t reserved[3];  // 0
+  InsertRecord rec[kMaxInserts];  // ascending (where, slot), no duplicate; past `count` all zero
+};
+
 static_assert(std::is_trivially_copyable<MidiState>::value && std::is_trivially_copyable<UsbState>::value && std::is_trivially_copyable<MixState>::value &&
                   std::is_trivially_copyable<PerfState>::value && std::is_trivially_copyable<AppParams>::value,
               "the project's state is plain bytes");
@@ -196,6 +222,8 @@ static_assert(std::is_trivially_copyable<NoteState>::value && std::is_trivially_
               "the session state is plain bytes");
 static_assert(sizeof(NoteState) == 5 && sizeof(MuteState) == 16 && sizeof(SceneState) == 98 && sizeof(ScenesState) == 296 && sizeof(SendFxState) == 24,
               "the session state structs have no padding (they are compared with memcmp)");
+static_assert(std::is_trivially_copyable<InsertState>::value && sizeof(InsertRecord) == 136 && sizeof(InsertState) == 548,
+              "the insert state has no padding (OS-INSFX S3a: 4 x 136 + 4 bytes in the model arena)");
 
 // What the project holds before it has been told anything (the values a reset puts in; MIDI and USB are "absent" then, see above).
 void init_midi_state(MidiState& out) noexcept;
@@ -217,6 +245,10 @@ const char* validate_note_state(const NoteState& s) noexcept;
 const char* validate_mute_state(const MuteState& s) noexcept;
 const char* validate_scenes_state(const ScenesState& s) noexcept;  // a scene that is not stored must hold zeros
 const char* validate_send_fx_state(const SendFxState& s) noexcept;
+// One insert: where, slot, flags and n in range, every parameter finite and the ones past n zero, reserved zero. `module_count` is the project's MODR size: the module index must be below it.
+const char* validate_insert_record(const InsertRecord& r, std::uint32_t module_count) noexcept;
+// The whole part: count in range, every record valid, strictly ascending (where, slot), the rest zero.
+const char* validate_insert_state(const InsertState& s, std::uint32_t module_count) noexcept;
 
 // What a tolerant reader makes of a value it read (OS-PERSIST2): every field outside its range becomes its default, a scene that is not stored becomes zeros; the result passes validate_*().
 // Returns how many fields were reset (the reader counts them: Report::settings_skipped).
@@ -233,6 +265,7 @@ inline bool operator==(const NoteState& a, const NoteState& b) noexcept { return
 inline bool operator==(const MuteState& a, const MuteState& b) noexcept { return std::memcmp(&a, &b, sizeof a) == 0; }
 inline bool operator==(const ScenesState& a, const ScenesState& b) noexcept { return std::memcmp(&a, &b, sizeof a) == 0; }
 inline bool operator==(const SendFxState& a, const SendFxState& b) noexcept { return std::memcmp(&a, &b, sizeof a) == 0; }
+inline bool operator==(const InsertRecord& a, const InsertRecord& b) noexcept { return std::memcmp(&a, &b, sizeof a) == 0; }
 inline bool operator!=(const NoteState& a, const NoteState& b) noexcept { return !(a == b); }
 inline bool operator!=(const MuteState& a, const MuteState& b) noexcept { return !(a == b); }
 inline bool operator!=(const ScenesState& a, const ScenesState& b) noexcept { return !(a == b); }

@@ -22,7 +22,7 @@ constexpr std::uint8_t kRankInst = 6;
 constexpr std::uint8_t kRankSets = 7;  // OS-002d: after INST, before the unknown chunks and the CRC
 constexpr std::uint8_t kRankLrnb = 8;
 constexpr std::uint8_t kRankMidi = 9;  // OS-004d: the project-level state, after LRNB in this order (state_chunks::Part), before the unknown chunks and the CRC
-constexpr std::uint8_t kRankCrc = 19;  // after the ten state parts (OS-004d: MIDI..APPM, OS-PERSIST2: NOTE, MUTE, SCEN, SNFX, OS-BUG-PASTE24: LAW)
+constexpr std::uint8_t kRankCrc = 20;  // after the eleven state parts (OS-004d: MIDI..APPM, OS-PERSIST2: NOTE, MUTE, SCEN, SNFX, OS-BUG-PASTE24: LAW, OS-INSFX S3a: INSX)
 
 std::uint8_t rank_of(std::uint32_t id) noexcept {
   switch (id) {
@@ -44,6 +44,7 @@ std::uint8_t rank_of(std::uint32_t id) noexcept {
     case kChunkScen: return kRankMidi + 7;
     case kChunkSnfx: return kRankMidi + 8;
     case kChunkLaw: return kRankMidi + 9;
+    case kChunkInsx: return kRankMidi + 10;
     case kChunkCrc: return kRankCrc;
     default: return 0;
   }
@@ -86,6 +87,7 @@ void v1_bounds(std::uint32_t id, std::uint32_t minor, std::size_t& lo, std::size
     case kChunkScen: lo = hi = state_chunks::kSceneBytes; break;
     case kChunkSnfx: lo = state_chunks::kSendFxFixed; hi = state_chunks::kSendFxMax; break;
     case kChunkLaw: lo = hi = state_chunks::kLawBytes; break;
+    case kChunkInsx: lo = state_chunks::kInsxFixed; hi = state_chunks::kInsxMax; break;
     default: lo = kCrcPayload; hi = kCrcPayload; break;  // CRC
   }
 }
@@ -455,6 +457,7 @@ void Reader::on_payload() noexcept {
     case kChunkScen: ok = parse_state(have, 7); break;
     case kChunkSnfx: ok = parse_state(have, 8); break;
     case kChunkLaw: ok = parse_state(have, 9); break;
+    case kChunkInsx: ok = parse_state(have, 10); break;
     case kChunkCrc: ok = parse_crc(have); break;
     default: fail(Error::Internal, "payload state for an unknown chunk"); return;
   }

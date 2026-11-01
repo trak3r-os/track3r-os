@@ -889,6 +889,8 @@ Status Editor::set_active_tracks_state(std::uint32_t count) noexcept { O3OS_EDIT
 Status Editor::set_app_params(const char* name, std::size_t len, std::uint32_t abi_major, std::uint32_t abi_minor, const float* values, std::uint32_t count) noexcept {
   O3OS_EDITOR_STATE_SETTER(project_.set_app_params(name, len, abi_major, abi_minor, values, count))
 }
+Status Editor::set_insert(const InsertRecord& value) noexcept { O3OS_EDITOR_STATE_SETTER(project_.set_insert(value)) }
+Status Editor::clear_insert(std::uint32_t where, std::uint32_t slot) noexcept { O3OS_EDITOR_STATE_SETTER(project_.clear_insert(where, slot)) }
 #undef O3OS_EDITOR_STATE_SETTER
 
 Status Editor::set_instrument_name(std::uint32_t index, const char* text, std::size_t len) noexcept {

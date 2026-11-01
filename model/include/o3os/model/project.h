@@ -199,6 +199,10 @@ class Project {
   const MuteState& mute() const noexcept { return mute_; }
   const ScenesState& scenes() const noexcept { return scenes_; }
   const SendFxState& send_fx() const noexcept { return send_fx_; }
+  // OS-INSFX S3a: the inserts, the INSX chunk. Present (written to a file) when inserts().count is not 0; a reset and a file without the chunk leave none.
+  const InsertState& inserts() const noexcept { return inserts_; }
+  // The record (where, slot), nullptr when there is none.
+  const InsertRecord* find_insert(std::uint32_t where, std::uint32_t slot) const noexcept;
   // The apps whose parameters the project remembers, oldest stored first; the entry of a module name, nullptr when there is none.
   std::uint32_t app_params_count() const noexcept { return app_params_count_; }
   const AppParams* app_params(std::uint32_t index) const noexcept { return index < app_params_count_ ? &app_params_[index] : nullptr; }
@@ -309,6 +313,13 @@ class Project {
   Status set_mute(const MuteState& value) noexcept;
   Status set_scenes(const ScenesState& value) noexcept;
   Status set_send_fx(const SendFxState& value) noexcept;
+  // OS-INSFX S3a: puts one insert (validate_insert_record against module_count(): BadValue and nothing changed for a record it refuses). Replaces the record of the same (where, slot) or adds
+  // one in (where, slot) order (Full when kMaxInserts are taken); a record equal to the stored one changes nothing. NOT undoable (D9). MODR is never pruned: the module stays in the table.
+  Status set_insert(const InsertRecord& value) noexcept;
+  // Removes the record (where, slot): BadIndex for a (where, slot) no record can have, NotFound when there is none (nothing changes). The module stays in MODR.
+  Status clear_insert(std::uint32_t where, std::uint32_t slot) noexcept;
+  // Removes every insert (a project without the chunk has none); reset() does it too.
+  void clear_inserts() noexcept;
   // The parameters of an app: `count` values (1..kMaxAppParams, finite) for the module `name` built with ABI abi_major.abi_minor. Replaces the entry of that name and moves it to the
   // end; a new name when all kMaxAppParamSets are taken, or when the entries would no longer fit kAppParamsBytesMax, drops the oldest. BadValue for an unsafe name, a bad count or a non-finite value.
   Status set_app_params(const char* name, std::size_t len, std::uint32_t abi_major, std::uint32_t abi_minor, const float* values, std::uint32_t count) noexcept;
@@ -376,6 +387,7 @@ class Project {
   MuteState mute_;
   ScenesState scenes_;
   SendFxState send_fx_;
+  InsertState inserts_;  // OS-INSFX S3a
   AppParams app_params_[kMaxAppParamSets];
   std::uint32_t unknown_count_;
   std::uint32_t unknown_used_;    // bytes reserved in the pool

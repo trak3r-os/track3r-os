@@ -114,7 +114,7 @@ SAMPLER_BYTES = SAMPLER_HEAD.size + 6 * ENVELOPE.size + 6 * LFO.size + SLICES.si
 assert SAMPLER_BYTES == 296
 
 RANKS = {b"PHDR": 1, b"TRAK": 2, b"MODR": 3, b"SONG": 4, b"PATT": 5, b"INST": 6, b"SETS": 7, b"LRNB": 8,
-         b"MIDI": 9, b"USBS": 10, b"MIXR": 11, b"PERF": 12, b"APPM": 13, b"NOTE": 14, b"MUTE": 15, b"SCEN": 16, b"SNFX": 17, b"LAW ": 18, b"CRC ": 19}
+         b"MIDI": 9, b"USBS": 10, b"MIXR": 11, b"PERF": 12, b"APPM": 13, b"NOTE": 14, b"MUTE": 15, b"SCEN": 16, b"SNFX": 17, b"LAW ": 18, b"INSX": 19, b"CRC ": 20}
 
 # The project-level state of OS-004d (docs/formats/o3-project.md section 3, model/project_state.h): the chunks MIDI, USBS, MIXR, PERF, APPM.
 USB_PROFILE_CHANNELS = [2, 8, 10, 11, 0, 4, 6]  # usb::Profile P2, P8, P10, P11, (P4S: not stored), P4, P6 (usb::profile_channels)
@@ -127,6 +127,12 @@ STATE_PARTS = (b"MIDI", b"USBS", b"MIXR", b"PERF", b"APPM")
 # The session state of OS-PERSIST2 (docs/formats/o3-project.md section 3, "The session state"): NOTE, MUTE, SCEN, SNFX, read tolerantly (a value out of its range is its default).
 SESSION_PARTS = (b"NOTE", b"MUTE", b"SCEN", b"SNFX")
 LAW_PARTS = (b"LAW ",)  # a name so that a test can emulate the build before it
+INSX_PARTS = (b"INSX",)  # OS-INSFX S3a: same, for the build before the INSX chunk
+# OS-INSFX S3a: the INSX chunk (docs/formats/o3-project.md, "The INSX chunk"): the inserts, written only when the project has one: u16 version, u8 count (0..4), then per record u8 where (0..15 a track, 16 the master),
+# u8 slot (0 or 1, 0 for the master), u8 module (index into MODR), u8 flags (bit 0 bypassed), u8 n (0..32), f32 param[n]. Records are read tolerantly (a skipped record is not an error), the shape is the only error.
+INSERT_MAX = 4  # model::kMaxInserts
+INSERT_WHERE_MASTER = 16
+INSERT_PARAMS_MAX = 32  # O3M_PARAMS_MAX
 # OS-BUG-PASTE24: the LAW chunk (docs/formats/o3-project.md, "The LAW chunk"): the instrument volume law, 0 the 1.2+ law (no chunk) or 1 the 1.1.14 table; a value above 1 is Malformed in every minor.
 NOTE_FIELDS = [(11, 0), (11, 0), (9, 3), (1, 0), (32, 1)]  # root, scale, octave, lock, jump: (largest value, default)
 MUTE_MODE_MAX = 2
@@ -170,6 +176,7 @@ def new_project():
         "scenes": None,
         "send": None,
         "law": 0,           # OS-BUG-PASTE24: the instrument volume law; the LAW chunk is written only when it is 1
+        "inserts": [],      # OS-INSFX S3a: (where, slot, module, flags, [value bits]) ascending (where, slot); the INSX chunk is written only when there is one
         "apps": [],         # (module name, abi major, abi minor, [value bits]) oldest first
         "unknown": [],      # (fourcc bytes, payload)
         "unknown_dropped": 0,
@@ -328,6 +335,7 @@ LENGTH_RANGE = {
     b"SCEN": (295, 295),
     b"SNFX": (3, 3 + 2 * 32),
     b"LAW ": (3, 3),
+    b"INSX": (3, 3 + INSERT_MAX * (5 + 4 * INSERT_PARAMS_MAX)),
     b"CRC ": (6, 6),
 }
 
@@ -429,6 +437,8 @@ def parse(data):
             parse_session(p, cid, payload, check_version(be16(payload, 0), cid))
         elif cid in LAW_PARTS:
             law = parse_law(payload, check_version(be16(payload, 0), cid))  # applied when the CRC has matched, like the C++ reader does at Done
+        elif cid in INSX_PARTS:
+            parse_insx(p, payload, check_version(be16(payload, 0), cid))
         elif cid == b"CRC ":
             c = Cursor(payload)
             check_version(c.u16())
@@ -753,6 +763,31 @@ def parse_law(payload, newer):
     return law
 
 
+def parse_insx(p, payload, newer):
+    """INSX (OS-INSFX S3a): count above the cap or a length that does not fit the records is Malformed; a record whose module is past MODR, whose where or slot is out of range, whose n is above 32, with a
+    non-finite parameter, or whose (where, slot) an earlier record has, is skipped; flag bits other than bit 0 are cleared (formats/src/native_state.cpp)."""
+    c = Cursor(payload)
+    c.u16()
+    count = c.u8()
+    if c.bad or count > INSERT_MAX:
+        malformed("INSX: bad record count" if not c.bad else "chunk fields do not fit (short chunk, text too long or containing NUL)")
+    out = []
+    for _ in range(count):
+        where, slot, module, flags, n = c.u8(), c.u8(), c.u8(), c.u8(), c.u8()
+        if c.bad:
+            malformed("chunk fields do not fit (short chunk, text too long or containing NUL)")
+        bits = [c.u32() for _ in range(n)]
+        if c.bad:
+            malformed("chunk fields do not fit (short chunk, text too long or containing NUL)")
+        flags &= 1
+        ok = (n <= INSERT_PARAMS_MAX and where <= INSERT_WHERE_MASTER and slot < (1 if where == INSERT_WHERE_MASTER else 2) and module < len(p["modules"])
+              and all(((b >> 23) & 0xFF) != 0xFF for b in bits) and all((x[0], x[1]) != (where, slot) for x in out))
+        if ok:
+            out.append((where, slot, module, flags, bits))
+    finish_fields(c, newer)
+    p["inserts"] = sorted(out, key=lambda x: (x[0], x[1]))
+
+
 def parse_session(p, cid, payload, newer):
     """NOTE, MUTE, SCEN, SNFX (OS-PERSIST2): the shape of the chunk is the only error; a value out of its range is its default (model/project_state.cpp's sanitise_*)."""
     c = Cursor(payload)
@@ -964,6 +999,9 @@ def build(p):
     chunks.extend(build_session(p, v))
     if p["law"]:  # LAW: the last known chunk, only for the 1.1.14 table
         chunks.append(chunk(b"LAW ", v + b"\x01"))
+    if p["inserts"]:  # INSX: after LAW, only for a project that has an insert
+        chunks.append(chunk(b"INSX", v + bytes([len(p["inserts"])]) + b"".join(
+            bytes([where, slot, module, flags, len(bits)]) + b"".join(struct.pack(">I", x) for x in bits) for where, slot, module, flags, bits in p["inserts"])))
     for cid, payload in p["unknown"]:
         chunks.append(chunk(cid, payload))
     body = b"".join(chunks)
@@ -1083,6 +1121,8 @@ def dump(p):
         out.append("sendfx values=%s" % ",".join("%d" % x for x in p["send"]))
     if p["law"]:
         out.append("law=%d" % p["law"])
+    for n, (where, slot, module, flags, bits) in enumerate(p["inserts"]):
+        out.append("insert %d where=%d slot=%d module=%d flags=%d values=%s" % (n, where, slot, module, flags, ",".join("%08x" % x for x in bits)))
     for n, (cid, payload) in enumerate(p["unknown"]):
         out.append("unknown %d id=%s len=%d crc=%08x" % (n, cid.decode("ascii"), len(payload),
                                                         zlib.crc32(payload) & 0xFFFFFFFF))

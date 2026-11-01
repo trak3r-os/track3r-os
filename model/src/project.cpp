@@ -86,7 +86,7 @@ void fill_empty(Pattern& p) noexcept {
 // the parameters' generations (3,224 x 4 B), their epoch and the project's settings block (348 B; 388 B since OS-006e made room for 24 fields): 13,248 B (13,288), and, since OS-PERSIST2, the session state: 341 B (+3 of padding), and, since OS-APPUX S3, twelve app parameter sets of 164 B instead of six (+984 B).
 static_assert(sizeof(Pattern) * kMaxPatterns == 1841152, "pattern pool size");
 static_assert(sizeof(Instrument) * kMaxInstruments == 46080, "instrument pool size");
-static_assert(kModelArenaBytes == 1933760, "ModelArena size changed: update docs/formats/o3-project.md, docs/architecture/os-tree.md and the mirror in platform/mk66 mem_map.h");
+static_assert(kModelArenaBytes == 1934312, "ModelArena size changed: update docs/formats/o3-project.md, docs/architecture/os-tree.md and the mirror in platform/mk66 mem_map.h");
 
 void Project::reset(bool keep_instruments) noexcept {
   order_depth_ = 0;  // E-SONG-07: a reset never runs inside a bracket, and at boot the arena is raw SDRAM; the epoch and the op count are never rewound (a stale value would look like "no change")
@@ -128,6 +128,7 @@ void Project::reset(bool keep_instruments) noexcept {
   init_mute_state(mute_);
   init_scenes_state(scenes_);
   init_send_fx_state(send_fx_);
+  std::memset(&inserts_, 0, sizeof inserts_);  // OS-INSFX S3a: no insert, also on a KEEP INSTRUMENTS reset (the inserts are the document's; the module table they name may stay)
   std::memset(app_params_, 0, sizeof app_params_);
   unknown_count_ = 0;
   unknown_used_ = 0;
@@ -753,6 +754,55 @@ Status Project::set_send_fx(const SendFxState& value) noexcept {
   return Status::Ok;
 }
 
+const InsertRecord* Project::find_insert(std::uint32_t where, std::uint32_t slot) const noexcept {
+  for (std::uint32_t i = 0; i < inserts_.count; ++i) {
+    if (inserts_.rec[i].where == where && inserts_.rec[i].slot == slot) return &inserts_.rec[i];
+  }
+  return nullptr;
+}
+
+Status Project::set_insert(const InsertRecord& value) noexcept {
+  if (validate_insert_record(value, module_count_) != nullptr) {
+    return Status::BadValue;
+  }
+  std::uint32_t at = 0;  // the first record that is not before the new one
+  while (at < inserts_.count && (inserts_.rec[at].where < value.where || (inserts_.rec[at].where == value.where && inserts_.rec[at].slot < value.slot))) {
+    ++at;
+  }
+  const bool same = at < inserts_.count && inserts_.rec[at].where == value.where && inserts_.rec[at].slot == value.slot;
+  if (same) {
+    if (inserts_.rec[at] == value) return Status::Ok;
+    inserts_.rec[at] = value;
+  } else {
+    if (inserts_.count >= kMaxInserts) return Status::Full;
+    for (std::uint32_t i = inserts_.count; i > at; --i) inserts_.rec[i] = inserts_.rec[i - 1];
+    inserts_.rec[at] = value;
+    ++inserts_.count;
+  }
+  touch();
+  return Status::Ok;
+}
+
+Status Project::clear_insert(std::uint32_t where, std::uint32_t slot) noexcept {
+  if (where > kInsertWhereMaster || slot >= (where == kInsertWhereMaster ? 1u : kInsertSlotsPerTrack)) {
+    return Status::BadIndex;
+  }
+  std::uint32_t at = 0;
+  while (at < inserts_.count && !(inserts_.rec[at].where == where && inserts_.rec[at].slot == slot)) ++at;
+  if (at >= inserts_.count) return Status::NotFound;
+  for (std::uint32_t i = at; i + 1 < inserts_.count; ++i) inserts_.rec[i] = inserts_.rec[i + 1];
+  std::memset(&inserts_.rec[inserts_.count - 1], 0, sizeof(InsertRecord));
+  --inserts_.count;
+  touch();
+  return Status::Ok;
+}
+
+void Project::clear_inserts() noexcept {
+  if (inserts_.count == 0) return;
+  std::memset(&inserts_, 0, sizeof inserts_);
+  touch();
+}
+
 const AppParams* Project::find_app_params(const char* name, std::size_t len) const noexcept {
   for (std::uint32_t i = 0; i < app_params_count_; ++i) {
     if (std::strlen(app_params_[i].name) == len && std::memcmp(app_params_[i].name, name, len) == 0) {
@@ -861,6 +911,9 @@ Status Project::clear_modules() noexcept {
     if (i.kind == InstrumentKind::Module) {
       return Status::BadValue;
     }
+  }
+  if (inserts_.count != 0) {
+    return Status::BadValue;  // an insert names its module by the index in this table
   }
   std::memset(modules_, 0, sizeof modules_);
   module_count_ = 0;
@@ -1159,6 +1212,7 @@ bool Project::check_invariants() const noexcept {
   if (app_params_count_ > kMaxAppParamSets || app_params_bytes() > kAppParamsBytesMax) return false;  // (every bit of state_present_ is a part now)
   if (validate_midi_state(midi_) != nullptr || validate_usb_state(usb_) != nullptr || validate_mix_state(mix_) != nullptr || validate_perf_state(perf_) != nullptr) return false;
   if (validate_note_state(note_) != nullptr || validate_mute_state(mute_) != nullptr || validate_scenes_state(scenes_) != nullptr || validate_send_fx_state(send_fx_) != nullptr) return false;
+  if (validate_insert_state(inserts_, module_count_) != nullptr) return false;  // OS-INSFX S3a
   for (std::uint32_t i = 0; i < app_params_count_; ++i) {
     if (validate_app_params(app_params_[i]) != nullptr) return false;
     for (std::uint32_t j = 0; j < i; ++j) {

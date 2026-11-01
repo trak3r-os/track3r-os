@@ -1273,6 +1273,14 @@ void finish_load() noexcept {
 #if !O3OS_AUDIO_TEST
 void begin_modules() noexcept;  // (below: begin_samples starts it for a new project)
 
+// OS-INSFX S3b: a load that ends before the module binder (the samples were refused) leaves the project's inserts unbound: said once, with how many. (The records stay in the project.)
+void log_inserts_unbound() noexcept {
+  const unsigned n = g_arena != nullptr ? g_arena->project.inserts().count : 0u;
+  if (n != 0u) {
+    console::log_dec("boot: inserts NOT bound (the load ended before the module binder), saved", n);
+  }
+}
+
 // The voices' sample table emptied (the previous document's PCM, or the demo kit's: nothing is playing, the transport has been stopped since the load began, the Settle is over).
 void clear_sample_table() noexcept {
   audio::VoicePool& voices = audio_voices();
@@ -1301,6 +1309,7 @@ void begin_samples() noexcept {
     } else {
       console::log("boot: module samples NOT loaded");
       module->close();  // (the file is released here: samples_done() will not run)
+      log_inserts_unbound();
       finish_load();
     }
     return;
@@ -1321,6 +1330,7 @@ void begin_samples() noexcept {
     g_load_phase = LoadPhase::Samples;
   } else {
     console::log("boot: samples NOT loaded (the folder is not a path)");
+    log_inserts_unbound();
     finish_load();
   }
 }
@@ -1340,7 +1350,7 @@ void begin_modules() noexcept {
       console::log(line);
     }
   }
-  if (m.binder.begin(storage::device::storage(), project, m.set, m.loader, m.voices, &sync_code)) {
+  if (m.binder.begin(storage::device::storage(), project, m.set, m.loader, m.voices, &sync_code, &g_insert_host)) {  // OS-INSFX S3b: the project's inserts after its instruments
     g_load_phase = LoadPhase::Modules;
   } else {
     finish_load();
@@ -1349,9 +1359,9 @@ void begin_modules() noexcept {
 
 void finish_modules() noexcept {
   const app::ModuleReport& r = modsys().binder.report();
-  char line[112];
+  char line[168];  // (the inserts' tail of the summary: S3b)
   (void)app::describe_modules(r, line, sizeof line);
-  if (r.instruments != 0u || r.problem_count != 0u) {
+  if (r.instruments != 0u || r.inserts != 0u || r.problem_count != 0u) {
     console::log(line);
   }
   for (unsigned i = 0; i < r.problem_count; ++i) {
@@ -1896,7 +1906,7 @@ void begin_replace() noexcept {
   modsys().manual = false;
   modsys().ui.diag_clear();      // OS-BUGS4: the console's binds go with the instances
   modsys().voices.retire_all();  // the module instruments leave the render now; Settle waits for it to be clear of them
-  g_insert_host.retire_all();    // OS-INSFX S1: so do the effect inserts (a console-bound insert is not in the project: it is lost at a load, as a console-bound instrument is)
+  g_insert_host.retire_all();    // OS-INSFX S1: so do the effect inserts, every one: the new project's are bound by the module binder (S3b), so a project without INSX has none (nothing leaks from the old one)
   g_settle_start_ms = system_clock().uptime_ms();
   g_load_phase = LoadPhase::Settle;
 #else
@@ -2320,7 +2330,48 @@ const char* module_bind(unsigned slot, const char* stem) noexcept {
 #endif
 }
 
-// ---- `diag ins` (OS-INSFX S1): effect modules as per-track inserts, from the console. Main loop only. New Community OS behaviour; nothing is saved, a project load drops them (begin_replace).
+// ---- `diag ins` (OS-INSFX S1): effect modules as per-track inserts, from the console. Main loop only. New Community OS behaviour. S3b: a bind, an unbind and a bypass are written to the project (the INSX
+// chunk) through the Editor: not an undo step (D9), but the project is changed and a save keeps them; a project load binds the new project's inserts (the module binder) and drops these.
+#if !O3OS_AUDIO_TEST
+// The project's record for the insert just bound: its module in MODR (added when the project had not named it), the module's default parameters, bypass off. Null on success, else why not.
+const char* insert_record_bind(unsigned track, unsigned slot, const char* stem, const module::LoadedModule& lm) noexcept {
+  if (g_editor == nullptr || g_arena == nullptr) {
+    return "no document";
+  }
+  const model::Project& project = g_arena->project;
+  // Room first, so a refused bind changes nothing (not even the module table): a record of this (where, slot) is replaced, a new one needs a free place of the four; the module is in the table or needs a place.
+  if (project.find_insert(track, slot) == nullptr && project.inserts().count >= model::kMaxInserts) {
+    return "NO ROOM: the project holds four inserts";
+  }
+  bool named = false;
+  for (std::uint32_t i = 0; i < project.module_count() && !named; ++i) {
+    named = std::strcmp(project.module(i)->name, stem) == 0;
+  }
+  if (!named && project.module_count() >= model::kMaxModules) {
+    return "NO ROOM: the project's module table is full";
+  }
+  const model::Status added = g_editor->add_module(stem, std::strlen(stem), lm.header.abi_major, lm.header.abi_minor);
+  if (added != model::Status::Ok && added != model::Status::Exists) {
+    return "bind refused";
+  }
+  model::InsertRecord rec;
+  std::memset(&rec, 0, sizeof rec);
+  for (std::uint32_t i = 0; i < project.module_count(); ++i) {
+    if (std::strcmp(project.module(i)->name, stem) == 0) {
+      rec.module = static_cast<std::uint8_t>(i);
+    }
+  }
+  rec.where = static_cast<std::uint8_t>(track);
+  rec.slot = static_cast<std::uint8_t>(slot);
+  rec.n = static_cast<std::uint8_t>(lm.entry->param_count < model::kInsertParamsMax ? lm.entry->param_count : model::kInsertParamsMax);
+  for (unsigned i = 0; i < rec.n; ++i) {
+    rec.param[i] = lm.entry->params[i].def;
+  }
+  const model::Status st = g_editor->set_insert(rec);
+  return st == model::Status::Ok ? nullptr : (st == model::Status::Full ? "NO ROOM: the project holds four inserts" : "bind refused");
+}
+#endif
+
 const char* insert_bind(unsigned track, unsigned slot, const char* stem) noexcept {
 #if !O3OS_AUDIO_TEST
   ModuleSystem& m = modsys();
@@ -2354,13 +2405,25 @@ const char* insert_bind(unsigned track, unsigned slot, const char* stem) noexcep
     r = g_insert_host.bind(where, *lm.entry, fault, mem, nullptr, 0, false);
   }
   if (r == audio::InsertHost::Bind::Ok) {
-    return nullptr;
+    const char* why = insert_record_bind(track, slot, stem, lm);
+    if (why != nullptr) {
+      (void)g_insert_host.unbind(where);  // the project cannot hold it: it does not play either (a project that does not say it is not what is heard)
+    }
+    return why;
   }
   if (took) {
     m.set.state_rollback(mark);
   }
   switch (r) {
-    case audio::InsertHost::Bind::WhereTaken: return "an insert is bound there already";
+    case audio::InsertHost::Bind::WhereTaken: {
+      for (unsigned k = 0; k < audio::InsertHost::kInstances; ++k) {
+        audio::InsertHost::Info in;
+        if (g_insert_host.info(k, in) && in.where == where && in.leaving) {
+          return "the insert there is still leaving: retry in a moment";
+        }
+      }
+      return "an insert is bound there already";
+    }
     case audio::InsertHost::Bind::NoInstance: return "four inserts at most";
     case audio::InsertHost::Bind::NoCpu: return "NO CPU: the governor has no room for it (see `mod gov`)";
     case audio::InsertHost::Bind::InitFailed: return "init() refused";
@@ -2382,7 +2445,16 @@ const char* insert_bind(unsigned track, unsigned slot, const char* stem) noexcep
 
 const char* insert_unbind(unsigned track, unsigned slot) noexcept {
 #if !O3OS_AUDIO_TEST
-  return track < audio::kTracks && slot <= 1u && g_insert_host.unbind(track * 2u + slot) ? nullptr : "no insert bound there";
+  if (g_load_phase != LoadPhase::Idle) {
+    return "busy: a load is running";
+  }
+  if (track >= audio::kTracks || slot > 1u || g_editor == nullptr || g_arena == nullptr) {
+    return "no insert bound there";
+  }
+  const bool was_bound = g_insert_host.unbind(track * 2u + slot);
+  // The project's record goes too: also one the load left unbound (its module was missing), which `ins unbind` then removes from the project.
+  const bool recorded = g_editor->clear_insert(track, slot) == model::Status::Ok;
+  return was_bound || recorded ? nullptr : "no insert bound there";
 #else
   (void)track;
   (void)slot;
@@ -2395,8 +2467,19 @@ const char* insert_bypass(unsigned track, unsigned slot, bool on) noexcept {
   if (track >= audio::kTracks || slot > 1u) {
     return "no such track or slot";
   }
+  if (g_load_phase != LoadPhase::Idle) {
+    return "busy: a load is running";
+  }
   switch (g_insert_host.set_bypass(track * 2u + slot, on, false)) {
-    case audio::InsertHost::Toggle::Done: return nullptr;
+    case audio::InsertHost::Toggle::Done: {
+      const model::InsertRecord* cur = g_arena != nullptr ? g_arena->project.find_insert(track, slot) : nullptr;
+      if (cur != nullptr && g_editor != nullptr) {  // S3b: the flag is the project's
+        model::InsertRecord next = *cur;
+        next.flags = on ? static_cast<std::uint8_t>(next.flags | model::kInsertFlagBypass) : static_cast<std::uint8_t>(next.flags & ~model::kInsertFlagBypass);
+        (void)g_editor->set_insert(next);
+      }
+      return nullptr;
+    }
     case audio::InsertHost::Toggle::NoCpu: return "NO CPU: the governor has no room for it (see `mod gov`)";
     case audio::InsertHost::Toggle::NotBound: break;
   }

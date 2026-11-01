@@ -341,6 +341,34 @@ void fill_persist2(Project& p) {
   ok(p.set_send_fx(f));
 }
 
+void fill_inserts(Project& p) {
+  fill_persist2(p);
+  // Three inserts, one of every shape: a track's INS B with the module's whole blob and its bypass flag, a track's INS A without parameters, the master with three. The modules are the
+  // two fill_small has (MODR 0 and 1): the format does not know what an effect is, only an index.
+  InsertRecord r;
+  std::memset(&r, 0, sizeof r);
+  r.where = 3;
+  r.slot = 1;
+  r.module = 1;
+  r.flags = kInsertFlagBypass;
+  r.n = kInsertParamsMax;
+  for (std::uint32_t k = 0; k < kInsertParamsMax; ++k) r.param[k] = 0.5f * static_cast<float>(k) - 3.25f;
+  ok(p.set_insert(r));
+  std::memset(&r, 0, sizeof r);
+  r.where = 0;
+  r.slot = 0;
+  r.module = 0;
+  ok(p.set_insert(r));
+  std::memset(&r, 0, sizeof r);
+  r.where = kInsertWhereMaster;
+  r.module = 1;
+  r.n = 3;
+  r.param[0] = 1.0f;
+  r.param[1] = -0.0f;
+  r.param[2] = 123456.789f;
+  ok(p.set_insert(r));
+}
+
 void fill_maximal(Project& p) {
   Rng r(20261011);
   p.reset();

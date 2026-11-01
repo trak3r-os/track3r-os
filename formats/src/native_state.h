@@ -24,6 +24,14 @@
 //
 // decode() only validates it: the Reader keeps the byte and applies it with Project::set_volume_law at Done.
 //
+// OS-INSFX S3a adds the eleventh, the inserts (docs/formats/o3-project.md, "The INSX chunk"), written only when the project has one (Project::inserts().count), after LAW:
+//
+//   INSX  u16 version, u8 count (0..4), then per record u8 where (0..15 a track, 16 the master), u8 slot (0 or 1; 0 for the master), u8 module (index into MODR),
+//         u8 flags (bit 0 bypassed), u8 n (0..32), f32 param[n]                                                                                            (3 .. 535 bytes)
+//
+// Records are read tolerantly (the LRNB rule): one whose module is past MODR, whose where or slot is out of range, whose n is above 32, with a non-finite parameter or whose (where, slot)
+// an earlier record has is skipped; flag bits other than bit 0 are cleared; each is counted in `reset`. A count above the cap, or a length that does not fit the records, is Malformed.
+//
 // PERF reads an FX id above the table as none and a row above 3 as off (a later version may extend the table; INST's engine does the same); every other value out of range is an error.
 // The table of version 1.0 ends at id 19; PERF and SCEN 1.1 (OS-PERFFX P1, native.h kStateVersionFx) add 20 and 21 and are written only when a slot holds one of them: in a 1.0 chunk those two read as none.
 // Each is written only when the project has the part (Project::state_present(); APPM when an app is remembered) and read with the strict rules of every known chunk: a value outside
@@ -37,8 +45,8 @@
 
 namespace o3os::formats::state_chunks {
 
-enum class Part : std::uint8_t { Midi, Usb, Mix, Perf, Apps, Note, Mute, Scene, SendFx, Law };
-inline constexpr unsigned kParts = 10;  // the file order of the chunks
+enum class Part : std::uint8_t { Midi, Usb, Mix, Perf, Apps, Note, Mute, Scene, SendFx, Law, Insx };
+inline constexpr unsigned kParts = 11;  // the file order of the chunks
 
 inline constexpr std::uint16_t kVersion = 0x0100;
 inline constexpr std::uint8_t kPerfFxMaxV10 = 19;  // the last Perform FX id of PERF / SCEN 1.0 (seq::PerfFx::PatternLength); 1.1 goes to model::kPerfFxMax
@@ -66,9 +74,13 @@ inline constexpr std::size_t kSceneBytes = 4 + model::kSceneCount * kSceneRecord
 inline constexpr std::size_t kSendFxFixed = 3;
 inline constexpr std::size_t kSendFxMax = kSendFxFixed + 2 * model::kSendFxCountMax;              // 67
 inline constexpr std::size_t kLawBytes = 3;                                                       // u16 version, u8 law
+inline constexpr std::size_t kInsxFixed = 3;                                                      // u16 version, u8 count
+inline constexpr std::size_t kInsxRecordFixed = 5;                                                // where, slot, module, flags, n
+inline constexpr std::size_t kInsxMax = kInsxFixed + model::kMaxInserts * (kInsxRecordFixed + 4 * model::kInsertParamsMax);  // 535
 
 static_assert(kMidiBytes == 20 && kMixBytes == 25 && kPerfBytes == 99 && kAppsMax10 == 981 && kAppsMax == 1015, "the chunk sizes of docs/formats/o3-project.md");
 static_assert(kLawBytes == 3, "the chunk size of docs/formats/o3-project.md (OS-BUG-PASTE24)");
+static_assert(kInsxMax == 535, "the chunk size of docs/formats/o3-project.md (OS-INSFX S3a)");
 static_assert(kNoteBytes == 7 && kMuteMax == 19 && kSceneBytes == 295 && kSendFxMax == 67, "the chunk sizes of docs/formats/o3-project.md (OS-PERSIST2)");
 static_assert(native::codec::kChunkHeader + kAppsMax + 1 <= native::kScratchBytes, "every state chunk is one writer piece and is read whole");
 static_assert(kAppsMax10 <= kAppsMax && model::kMaxAppParamSets > model::kAppParamSetsV10, "APPM 1.1 is the longer one");
@@ -83,7 +95,8 @@ constexpr std::uint32_t chunk_id(Part p) noexcept {
          : p == Part::Mute ? native::kChunkMute
          : p == Part::Scene ? native::kChunkScen
          : p == Part::SendFx ? native::kChunkSnfx
-                             : native::kChunkLaw;
+         : p == Part::Law ? native::kChunkLaw
+                          : native::kChunkInsx;
 }
 
 // Whether the writer writes the part, and its payload size (0 when it is not written).

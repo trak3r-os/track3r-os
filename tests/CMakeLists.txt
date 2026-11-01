@@ -264,7 +264,7 @@ set(o3os_unit_fuzz */native_fuzz_test.cpp)
 set(o3os_unit_usb */usb_*_test.cpp)
 set(o3os_unit_model */undo_test.cpp */undo_area_test.cpp */model_test.cpp */param*_test.cpp */settings_format_test.cpp)
 set(o3os_unit_formats */native_format_test.cpp */og_*_test.cpp */med_*_test.cpp */modimp_*_test.cpp */wav*_test.cpp */iff_sample_test.cpp */format_registry_test.cpp
-                      */import_job_test.cpp */project_state_test.cpp */persist2_format_test.cpp */law_format_test.cpp */appm_format_test.cpp */lfosine_format_test.cpp)
+                      */import_job_test.cpp */project_state_test.cpp */persist2_format_test.cpp */law_format_test.cpp */insx_format_test.cpp */appm_format_test.cpp */lfosine_format_test.cpp)
 set(o3os_unit_plot */plot_*_test.cpp */raster*_test.cpp)
 set(o3os_unit_audio */audio_*_test.cpp */tb303_*_test.cpp */paula_oracle_test.cpp */amiga_*_test.cpp)
 set(o3os_unit_seq */seq_*_test.cpp */midi_*_test.cpp */metro_*_test.cpp */play_*_test.cpp)

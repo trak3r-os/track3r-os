@@ -23,6 +23,7 @@ NOT_SIMULATED = {
     "log": "console log lines",
     "log_dec": "console log lines",
     "log_muted_tracks": "console log lines",
+    "log_inserts_unbound": "console log line (the simulator has no module binder: no inserts are bound on a load)",
     "describe_native_load": "the load summary goes to the console and `diag sd`",
     "describe_load": "the load summary goes to the console and `diag sd`",
     "module_strip_text": "the module import's summary text goes to the console and `diag sd` (the strip's own words come from the app, which reads the sink: SimProject::import_summary)",

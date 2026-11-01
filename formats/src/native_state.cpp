@@ -32,6 +32,7 @@ bool present(const model::Project& p, Part part) noexcept {
     case Part::Scene: return (p.state_present() & model::Project::kStateScenes) != 0;
     case Part::SendFx: return (p.state_present() & model::Project::kStateSendFx) != 0;
     case Part::Law: return p.volume_law() != 0u;
+    case Part::Insx: return p.inserts().count != 0;
   }
   return false;
 }
@@ -58,6 +59,11 @@ std::size_t payload_size(const model::Project& p, Part part) noexcept {
     case Part::Scene: return kSceneBytes;
     case Part::SendFx: return kSendFxFixed + 2u * model::kSendFxCount;
     case Part::Law: return kLawBytes;
+    case Part::Insx: {
+      std::size_t n = kInsxFixed;
+      for (std::uint32_t i = 0; i < p.inserts().count; ++i) n += kInsxRecordFixed + 4u * p.inserts().rec[i].n;
+      return n;
+    }
   }
   return 0;
 }
@@ -203,6 +209,20 @@ void encode(Enc& e, const model::Project& p, Part part) noexcept {
     case Part::Law:
       e.u8(1);  // written only for the 1.1.14 table
       return;
+    case Part::Insx: {
+      const model::InsertState& s = p.inserts();
+      e.u8(s.count);
+      for (std::uint32_t i = 0; i < s.count; ++i) {  // ascending (where, slot): the model keeps them so
+        const model::InsertRecord& r = s.rec[i];
+        e.u8(r.where);
+        e.u8(r.slot);
+        e.u8(r.module);
+        e.u8(r.flags);
+        e.u8(r.n);
+        for (std::uint32_t k = 0; k < r.n; ++k) e.f32(r.param[k]);
+      }
+      return;
+    }
   }
 }
 
@@ -384,6 +404,38 @@ const char* decode(Cursor& c, bool newer_minor, model::Project& p, Part part, st
       const std::uint8_t law = c.u8();
       if (!shape_ok(c, newer_minor)) return kShort;
       return law > 1 ? "LAW: unknown law" : nullptr;  // not a default: a law this version does not know would play up to 24 dB wrong; the Reader applies it at Done
+    }
+    case Part::Insx: {
+      const std::uint32_t count = c.u8();
+      if (c.bad() || count > model::kMaxInserts) return c.bad() ? kShort : "INSX: more records than the cap";
+      for (std::uint32_t i = 0; i < count; ++i) {
+        model::InsertRecord r;
+        std::memset(&r, 0, sizeof r);
+        r.where = c.u8();
+        r.slot = c.u8();
+        r.module = c.u8();
+        std::uint8_t flags = c.u8();
+        const std::uint32_t n = c.u8();
+        if (c.bad()) return kShort;
+        bool ok = n <= model::kInsertParamsMax;
+        if (ok) {
+          for (std::uint32_t k = 0; k < n; ++k) r.param[k] = c.f32();
+        } else if (c.take(4u * n) == nullptr) {  // more than the module ABI has: the record is skipped, its bytes are still its own
+          return kShort;
+        }
+        if (c.bad()) return kShort;
+        const bool later_flags = (flags & ~model::kInsertFlagBypass) != 0;  // a flag of a later version: cleared, and counted (once, with the skip below if the record is skipped too)
+        flags = static_cast<std::uint8_t>(flags & model::kInsertFlagBypass);
+        r.flags = flags;
+        r.n = static_cast<std::uint8_t>(n);
+        // A record this version cannot use is skipped and counted (the LRNB rule: the project still opens): n above 32, a module past MODR, where or slot out of range, a non-finite
+        // parameter, a (where, slot) an earlier record has.
+        ok = ok && model::validate_insert_record(r, p.module_count()) == nullptr && p.find_insert(r.where, r.slot) == nullptr;
+        if (!ok || p.set_insert(r) != model::Status::Ok || later_flags) {
+          ++reset;
+        }
+      }
+      return shape_ok(c, newer_minor) ? nullptr : kShort;
     }
   }
   return "internal";
