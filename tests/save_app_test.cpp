@@ -1364,6 +1364,102 @@ TEST_CASE("remount: a save that did not complete (card full) leaves the beliefs 
   CHECK(rig.card.violations == 0);
 }
 
+TEST_CASE("remount: a slot the save skipped (a path the guard refuses) keeps its belief to be checked: it does not become current when the path is back (OS-BUG-REMOUNT-L1)") {
+  Rig rig;
+  put_sample(rig, 0, 600, 100);
+  put_sample(rig, 2, 900, -2000);
+  save_as(rig, "Mine");
+  card_out_and_back(rig);
+  rig.card.put("Projects/Mine/samples/instr01.wav", std::string("edited on a computer"));
+  model::Project& project = test::arena(1).project;
+  model::Instrument in = *project.instrument(0);
+  char good[sizeof in.sample_path];
+  std::memcpy(good, in.sample_path, sizeof good);
+  std::strncpy(in.sample_path, "elsewhere/instr01.wav", sizeof in.sample_path - 1);  // not under samples/: this save does not look at slot 0
+  NEED(project.set_instrument(0, in) == model::Status::Ok);
+  rig.expire();
+  rig.go(ScreenId::File);
+  rig.tap(Button::F4);
+  rig.settle();
+  CHECK(rig.card.same("Projects/Mine/samples/instr03.wav", wav_of(rig, 2)));  // (the save ran and ended)
+  CHECK(rig.card.violations == 0);
+  std::memcpy(in.sample_path, good, sizeof good);  // the path is back, the audio is the version the folder was believed to hold
+  NEED(project.set_instrument(0, in) == model::Status::Ok);
+  rig.card.log.clear();
+  rig.expire();
+  rig.tap(Button::F4);
+  rig.settle();
+  CHECK(rig.card.same("Projects/Mine/samples/instr01.wav", wav_of(rig, 0)));  // the belief was never checked against the edited file: it is now, and the file is written again
+  CHECK(rig.card.violations == 0);
+}
+
+TEST_CASE("remount: a slot skipped while the bank believes the folder holds its audio leaves the beliefs to be checked until the path is back (OS-BUG-REMOUNT-L1)") {
+  Rig rig;
+  put_sample(rig, 0, 600, 100);
+  rig.card.put("Projects/Mine/samples/instr01.wav", wav_of(rig, 0));
+  hal::storage::FileStamp st;
+  CHECK(rig.card.stat("Projects/Mine/samples/instr01.wav", st) == hal::storage::Status::Ok);
+  rig.bank.mark_on_card(0, st.size, st.stamp);
+  rig.project.last_folder = "Projects/Mine";
+  rig.go(ScreenId::File);
+  card_out_and_back(rig);
+  rig.card.put("Projects/Mine/samples/instr01.wav", std::string("edited on a computer"));
+  model::Project& project = test::arena(1).project;
+  model::Instrument in = *project.instrument(0);
+  char good[sizeof in.sample_path];
+  std::memcpy(good, in.sample_path, sizeof good);
+  std::strncpy(in.sample_path, "elsewhere/instr01.wav", sizeof in.sample_path - 1);
+  NEED(project.set_instrument(0, in) == model::Status::Ok);
+  rig.tap(Button::F4);
+  rig.settle();
+  CHECK(rig.card.has("Projects/Mine/project.o3pj"));  // the save ended without looking at slot 0
+  std::memcpy(in.sample_path, good, sizeof good);
+  NEED(project.set_instrument(0, in) == model::Status::Ok);
+  rig.card.log.clear();
+  rig.expire();
+  rig.tap(Button::F4);
+  rig.settle();
+  CHECK(rig.card.same("Projects/Mine/samples/instr01.wav", wav_of(rig, 0)));  // checked now: the file is not what the bank read, so it is written
+  CHECK(rig.card.violations == 0);
+}
+
+TEST_CASE("remount: a slot switched to another kind keeps its beliefs to be checked: switched back after a save, a WAV erased on a computer is written again (OS-BUG-REMOUNT-L1)") {
+  for (int from_bank = 0; from_bank < 2; ++from_bank) {  // the belief is the bank's (read from the folder) or an earlier save's
+    Rig rig;
+    put_sample(rig, 0, 600, 100);
+    model::Project& project = test::arena(1).project;
+    const model::Instrument sample = *project.instrument(0);
+    if (from_bank != 0) {
+      rig.card.put("Projects/Mine/samples/instr01.wav", wav_of(rig, 0));
+      hal::storage::FileStamp st;
+      CHECK(rig.card.stat("Projects/Mine/samples/instr01.wav", st) == hal::storage::Status::Ok);
+      rig.bank.mark_on_card(0, st.size, st.stamp);
+      rig.project.last_folder = "Projects/Mine";
+      rig.go(ScreenId::File);
+    } else {
+      save_as(rig, "Mine");
+    }
+    card_out_and_back(rig);
+    rig.card.files.erase("projects/mine/samples/instr01.wav");  // erased on a computer
+    model::Instrument other = sample;
+    other.kind = model::InstrumentKind::Midi;
+    other.midi_channel = 1;
+    NEED(project.set_instrument(0, other) == model::Status::Ok);  // (the bank keeps the audio and its belief)
+    rig.expire();
+    rig.go(ScreenId::File);
+    rig.tap(Button::F4);
+    rig.settle();
+    CHECK(rig.card.has("Projects/Mine/project.o3pj"));
+    CHECK_FALSE(rig.card.has("Projects/Mine/samples/instr01.wav"));
+    NEED(project.set_instrument(0, sample) == model::Status::Ok);  // a sample again, the same audio
+    rig.expire();
+    rig.tap(Button::F4);
+    rig.settle();
+    CHECK(rig.card.same("Projects/Mine/samples/instr01.wav", wav_of(rig, 0)));  // the project must not refer to a WAV that is not there
+    CHECK(rig.card.violations == 0);
+  }
+}
+
 TEST_CASE("save samples: audio that was read from the project's own folder is not written back until it changes; one that was not (a .pti's) is") {
   Rig rig;
   put_sample(rig, 0, 600, 100);  // read from Projects/Mine/samples (the loader marks it)

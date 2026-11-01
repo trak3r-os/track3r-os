@@ -300,17 +300,29 @@ class StampedStorage final : public hs::Storage {
   hs::Status exists(const char* path, bool* is_dir) noexcept override { return in_.exists(path, is_dir); }
   hs::Status stat(const char* path, hs::FileStamp& out) noexcept override {
     const hs::Status s = in_.stat(path, out);
-    out.stamp = s == hs::Status::Ok ? kStamp : 0u;
+    out.stamp = s == hs::Status::Ok ? kStamp + edits : 0u;
     return s;
   }
-  hs::Status open(const char* path, hs::FileHandle& out) noexcept override { return in_.open(path, out); }
-  hs::Status read(hs::FileHandle f, void* dst, std::size_t max, std::size_t& got) noexcept override { return in_.read(f, dst, max, got); }
+  hs::Status open(const char* path, hs::FileHandle& out) noexcept override {
+    const std::size_t n = std::strlen(path);
+    wav_open = n >= 4u && std::strcmp(path + n - 4u, ".wav") == 0;
+    return in_.open(path, out);
+  }
+  hs::Status read(hs::FileHandle f, void* dst, std::size_t max, std::size_t& got) noexcept override {
+    if (edit_on_read && wav_open) {
+      edits = 1u;  // (OS-BUG-REMOUNT-L2) a computer edits the file as the first read goes by: the stamp moves from here on
+    }
+    return in_.read(f, dst, max, got);
+  }
   hs::Status seek(hs::FileHandle f, std::uint32_t offset) noexcept override { return in_.seek(f, offset); }
   hs::Status size(hs::FileHandle f, std::uint32_t& out) const noexcept override { return in_.size(f, out); }
   void close(hs::FileHandle& f) noexcept override { in_.close(f); }
   hs::Status opendir(const char* path, hs::DirHandle& out) noexcept override { return in_.opendir(path, out); }
   hs::Status readdir(hs::DirHandle d, hs::DirEntry& out) noexcept override { return in_.readdir(d, out); }
   void closedir(hs::DirHandle& d) noexcept override { in_.closedir(d); }
+  bool edit_on_read = false;
+  bool wav_open = false;  // the file opened last is a .wav (a .pti's read edits nothing)
+  std::uint32_t edits = 0;
 
  private:
   DirStorage& in_;
@@ -349,6 +361,37 @@ TEST_CASE("og samples: a WAV read from the project's folder is marked on the ban
   CHECK(bank.card_version(2) == 0u);  // the .pti's audio is not in a WAV
   CHECK(bank.card_size(2) == 0u);
   CHECK(bank.card_stamp(2) == 0u);
+}
+
+TEST_CASE("og samples: the stamp marked on the bank is the file's as it was before the read: a file edited during the read does not match it (OS-BUG-REMOUNT-L2)") {
+  TempDir tmp;
+  write_project(tmp.path);
+  DirStorage dir(tmp.path.string());
+  NEED(dir.mount() == hs::Status::Ok);
+  StampedStorage card(dir);
+  std::vector<std::int16_t> arena(200000, std::int16_t{-1});
+  VoicePool& p = pool();
+  OgSampleLoader& sl = sample_loader();
+  OgFolderLoader& pl = loader();
+  o3os::model::ModelArena& model = o3os::test::og::arena(0);
+  auto mem = std::make_unique<o3os::app::SampleBankMem>();
+  o3os::app::SampleBank bank;
+  bank.init(p, model, *mem, arena.data(), static_cast<std::uint32_t>(arena.size()));
+  model.project.reset();
+  NEED(pl.begin(card, "Workspace", model));
+  NEED(run_loader(pl, 4096) == OgFolderLoader::State::Done);
+  const o3os::audio::LevelLaw law = o3os::app::instrument_law(pl.report().version);
+  bank.set_law(law);
+  card.edit_on_read = true;  // from the first byte read on, the file looks different
+  NEED(sl.begin(card, pl.folder(), model.project, pl.pti_slots(), p, arena.data(), static_cast<std::uint32_t>(arena.size()), law, &bank));
+  for (unsigned n = 0; n < 100000u && sl.state() == OgSampleLoader::State::Running; ++n) {
+    (void)sl.step(4096);
+  }
+  NEED(sl.state() == OgSampleLoader::State::Done);
+  NEED(card.edits == 1u);
+  CHECK(bank.card_version(0) == bank.version(0));
+  CHECK(bank.card_stamp(0) == StampedStorage::kStamp);  // the file as it was when the read began
+  CHECK(bank.card_stamp(0) != StampedStorage::kStamp + card.edits);  // not the file as it is now: a remount finds it changed and the next save writes the slot
 }
 
 // ---- OS-007h: the play modes that are not "a window at the note's pitch" ----------------------------------------------------------------------------

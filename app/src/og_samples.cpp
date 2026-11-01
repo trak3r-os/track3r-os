@@ -663,6 +663,12 @@ void OgSampleLoader::wav_next() noexcept {
   if (!open_file(path, nullptr, slot)) {
     return;
   }
+  // (OS-BUG-REMOUNT-L2) The file's size and stamp are taken after the open and before the first byte is read: a file a computer changes during the read then differs from this stamp (the next save after a
+  // remount finds it out and writes the slot), where a stamp taken after the read would call the changed file the one the audio came from.
+  m_stamp_ = hal::storage::FileStamp{};
+  if (bank_ != nullptr && storage_->stat(path_, m_stamp_) != Status::Ok) {
+    m_stamp_ = hal::storage::FileStamp{};  // unknown: a remount cannot confirm it, the next save writes the slot
+  }
   source_.attach(*storage_, file_);
   source_.clear_error();
   importer_.begin(source_, arena_ + used_, arena_samples_ - used_);
@@ -699,10 +705,6 @@ void OgSampleLoader::wav_read(std::size_t room) noexcept {
   }
   m_frames_ = info.frames;
   m_rate_ = info.sample_rate;
-  m_stamp_ = hal::storage::FileStamp{};
-  if (bank_ != nullptr && storage_->stat(path_, m_stamp_) != Status::Ok) {
-    m_stamp_ = hal::storage::FileStamp{};  // unknown: a remount cannot confirm it, the next save writes the slot
-  }
   if (native_ && bank_ != nullptr && in != nullptr && in->stereo != 0u) {  // OS-STEREO (b): a stereo instrument's side file follows its mid; bound together or not at all
     stage_ = Stage::SideNext;
     return;

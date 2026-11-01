@@ -521,9 +521,11 @@ class SaveService {
     std::uint64_t todo = 0;
     std::uint64_t ok = ~std::uint64_t{0};
     std::uint64_t refused = 0;
+    std::uint64_t unchecked = 0;  // (OS-BUG-REMOUNT-L1) the slots this save skipped (no audio, or a path it does not write) while the bank believes the folder holds their audio: the belief was not checked, so the save does not make the beliefs current
   };
   SidePlan side_;  // the running plan's (side_.todo: the side files still to be written, after every mid), or the last project save's
-  std::uint64_t samples_to_write(const model::Project& project, const SampleBank& bank, const char* name, bool read_from_folder, SidePlan& side) const noexcept;
+  // (Not const: after a remount a slot that is skipped forgets what the earlier saves wrote for it, see the definition.)
+  std::uint64_t samples_to_write(const model::Project& project, const SampleBank& bank, const char* name, bool read_from_folder, SidePlan& side) noexcept;
   // A flagged slot saved without its side file: counted for the strip (take_stereo_mono), the first one named (the instrument's name, upper case).
   void note_mono(const model::Project& project, unsigned slot) noexcept;
   Start advance_plan(core::JobRunner& jobs) noexcept;
@@ -671,6 +673,7 @@ class SaveService {
   hal::storage::FileStamp known_file_[64] = {};  // OS-BUG-REMOUNT: what Projects/<known_dir_>/samples/<file> looked like when that save finished (size 0 and stamp 0: unknown)
   std::uint32_t remount_epoch_ = 0;  // card_remounted() calls so far; save_epoch_: the value when the running save checked its samples (an event in between leaves the beliefs to be checked again)
   std::uint32_t save_epoch_ = 0;
+  bool save_checked_ = false;  // the running save has checked its samples (save_epoch_ is meaningful only then; reset at the start of every project save)
   bool revalidate_ = false;                       // the card was out and back: a belief about a file stands only while the file still looks as it did (cleared by the next project save that completes)
   char smp_path_[hal::storage::save::kPathCap] = {};            // the file of the sample job in progress
   std::uint32_t known_card_ = 0;  // the writer's card_id() that known_ was written on: another card forgets it (OS-FU5)

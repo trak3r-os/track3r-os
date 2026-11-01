@@ -516,7 +516,7 @@ SaveService::Start SaveService::save_project(core::JobRunner& jobs, const model:
   if (writer_->gate() != WriteStatus::Ok) {
     return Start::NotWritable;
   }
-  save_epoch_ = ~remount_epoch_;  // (OS-BUG-REMOUNT) this save has checked no sample yet (never equal to remount_epoch_): a value left by an earlier save that failed must not make the beliefs current at this one's end
+  save_checked_ = false;  // (OS-BUG-REMOUNT) this save has checked no sample yet: a value left by an earlier save that failed must not make the beliefs current at this one's end
   side_ = SidePlan{};             // OS-STEREO (b): what this save owes the side files (samples_to_write fills it when there is a bank)
   mono_count_ = 0;
   mono_name_[0] = '\0';
@@ -553,6 +553,7 @@ SaveService::Start SaveService::save_project(core::JobRunner& jobs, const model:
     char loaded_name[guard::kNameMax + 1] = {};
     const bool from_folder = !as_new && project_name_of(loaded, loaded_name) && same_ci(loaded_name, name);
     forget_other_card();
+    save_checked_ = true;
     save_epoch_ = remount_epoch_;  // the samples are checked below, against the card as it is now
     const std::uint64_t todo = samples_to_write(project, *bank, name, from_folder, side_);
     for (unsigned slot = 0; slot < model::kMaxInstruments; ++slot) {
@@ -601,7 +602,7 @@ SaveService::Start SaveService::save_project(core::JobRunner& jobs, const model:
 
 // The slots whose audio Projects/<name>/samples does not hold yet: every sample instrument that has audio in the bank and a path the guard takes, except one that an earlier save
 // wrote into that folder at this version of the audio, or (`read_from_folder`: the project came from this very folder) one the loader read from it and that has not changed since.
-std::uint64_t SaveService::samples_to_write(const model::Project& project, const SampleBank& bank, const char* name, bool read_from_folder, SidePlan& side) const noexcept {
+std::uint64_t SaveService::samples_to_write(const model::Project& project, const SampleBank& bank, const char* name, bool read_from_folder, SidePlan& side) noexcept {
   std::uint64_t todo = 0;
   side = SidePlan{};
   const bool known_here = same_ci(known_dir_, name);
@@ -610,12 +611,21 @@ std::uint64_t SaveService::samples_to_write(const model::Project& project, const
     if (in != nullptr && in->stereo != 0u) {
       side.ok &= ~(std::uint64_t{1} << slot);  // (rule 4: a flagged slot keeps its flag only where its side file is held or written, set below)
     }
-    if (in == nullptr || in->kind != model::InstrumentKind::Sample) {
-      continue;
-    }
     const SampleBank::Pcm pcm = bank.pcm(slot);
     char file[guard::kNameMax + 8];
-    if (pcm.data == nullptr || pcm.frames == 0u || !sample_file_of(in->sample_path, file)) {
+    if (in == nullptr || in->kind != model::InstrumentKind::Sample || pcm.data == nullptr || pcm.frames == 0u || !sample_file_of(in->sample_path, file)) {
+      if (revalidate_) {
+        // (OS-BUG-REMOUNT-L1) This slot is not looked at (no audio, a path this save does not write, or an instrument that is not a sample now: the bank keeps the audio and its belief across a change of kind, and the
+        // slot may be a sample again), so a belief about its file is not checked by this save, and the save's end must not make it current (the audio, the kind or the path may come back with the same version).
+        // What this service recorded is forgotten (the slot is written the next time it is a sample to write); the bank's own belief stays, so the beliefs stay to be checked (`unchecked`), but only a belief that
+        // still names this audio (card_version == version): a stale one never confirms anything, and must not keep the check pending for ever.
+        known_[slot] = 0;
+        known_side_[slot] = 0;
+        known_file_[slot] = hal::storage::FileStamp{};
+        if (pcm.data != nullptr && bank.card_version(slot) != 0u && bank.card_version(slot) == bank.version(slot)) {
+          side.unchecked |= std::uint64_t{1} << slot;
+        }
+      }
       continue;
     }
     const std::uint32_t version = bank.version(slot);
@@ -1813,8 +1823,8 @@ void SaveService::reconcile() noexcept {
   }
   if (kind_ == Kind::Project && job_.done()) {
     recent_touch(pending_name_);
-    if (save_epoch_ == remount_epoch_) {
-      revalidate_ = false;  // every sample of this save was checked, skipped or written, and the card did not come back since: the beliefs are current
+    if (save_checked_ && save_epoch_ == remount_epoch_ && side_.unchecked == 0u) {
+      revalidate_ = false;  // every sample of this save was checked or written (a slot it did not look at holds no belief of the bank's, and what the service recorded for it was forgotten), and the card did not come back since: the beliefs are current
     }
     clean_generation_ = pending_generation_;  // the file on the card is the project as it was when the save started (and the writer failed the save if it moved)
     clean_valid_ = true;
