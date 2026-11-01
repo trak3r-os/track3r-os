@@ -156,7 +156,7 @@ TEST_CASE("fw client: a check reads the file in slices, reports progress, the im
   CHECK(b.svc.ui_slice().state == State::Checked);
 }
 
-TEST_CASE("fw client: an image not padded to a 4 KiB sector fails the check (NotPadded), the boundary exactly passes, and nothing is armed or handed over (OS-GATE-BOOTCRASH)") {
+TEST_CASE("fw client: an image not padded to a 4 KiB sector is offered the pad (NeedsPad, only when nothing else is wrong), the boundary exactly passes, and nothing is armed or handed over (OS-GATE-BOOTCRASH, OS-UPDPAD)") {
   const std::size_t sector = 4096;
   Bare b;
   const std::string short_by_one = to_hex(good_image(sector - 0x410 - 1, false));
@@ -165,19 +165,19 @@ TEST_CASE("fw client: an image not padded to a 4 KiB sector fails the check (Not
   b.store.put_file("exact.ptf", std::vector<std::uint8_t>(exact.begin(), exact.end()));
   NEED(b.svc.ui_check_begin("short1.ptf") == Fault::Ok);
   const up::UiStatus s = b.drive();
-  CHECK(s.state == State::Failed);
-  CHECK(s.fault == Fault::NotPadded);
-  CHECK(s.offset == short_by_one.size());
+  CHECK(s.state == State::NeedsPad);
+  CHECK(s.image == sector - 1);
   CHECK(!s.installing);
   CHECK(b.svc.ui_install() == Fault::NotArmed);  // no good check: the install refuses before the bootloader is asked
   CHECK(b.host.calls.empty());
   CHECK(!b.host.pin_low);
   CHECK(!b.store.has(up::kFwInfoName));
+  CHECK(b.store.count_calls("begin") == 0u);  // the offer writes nothing
   NEED(b.svc.ui_check_begin("exact.ptf") == Fault::Ok);
   const up::UiStatus ok = b.drive();
   CHECK(ok.state == State::Checked);
   CHECK(ok.image == sector);
-  {  // through the port: the screen is told the offset is not a place in the file (the stream's byte count is no image address)
+  {  // through the port: the screen is told the file needs a pad (NeedsPad), with the length of the image
     Bare p;
     p.store.put_file("short1.ptf", std::vector<std::uint8_t>(short_by_one.begin(), short_by_one.end()));
     up::FwServiceSink sink(p.svc);
@@ -187,8 +187,8 @@ TEST_CASE("fw client: an image not padded to a 4 KiB sector fails the check (Not
     do {
       ps = sink.poll_check();
     } while (ps.state == fwp::CheckStatus::State::Running && ++n < 100u);
-    CHECK(ps.state == fwp::CheckStatus::State::Failed);
-    CHECK(!ps.offset_known);
+    CHECK(ps.state == fwp::CheckStatus::State::NeedsPad);
+    CHECK(ps.image == sector - 1);
   }
 }
 
@@ -366,6 +366,26 @@ TEST_CASE("fw client: the console and the screen never run at once") {
     CHECK(r.svc.ui_install() == Fault::NotArmed);
     CHECK(!r.host.called("quiesce"));
     CHECK(!r.host.pin_low);
+  }
+  {  // a pad offer (NeedsPad) is killed by any console command: nothing is written, the screen's answer is refused, and the status says the offer is gone (OS-UPDPAD)
+    Rig q;
+    const std::string raw = to_hex(good_image(3000, false));
+    q.store.put_file("old.ptf", std::vector<std::uint8_t>(raw.begin(), raw.end()));
+    NEED(q.svc.ui_check_begin("old.ptf") == Fault::Ok);
+    up::UiStatus s;
+    for (unsigned i = 0; i < 1000u && (s = q.svc.ui_slice()).state == State::Running; ++i) {
+    }
+    NEED(s.state == State::NeedsPad);
+    CHECK(q.svc.blocks_injection());
+    q.clear();
+    q.command("fw");
+    CHECK(q.svc.ui_slice().state == State::Failed);  // dropped by that command
+    CHECK(q.svc.ui_pad() == Fault::NotArmed);
+    CHECK(q.store.count_calls("begin ") == 0u);
+    CHECK(q.store.count_calls("append ") == 0u);
+    CHECK(!q.svc.blocks_injection());
+    CHECK(!q.svc.armed());
+    CHECK(!q.store.has(up::kFwInfoName));
   }
   {  // the stale end of a failed console operation (phase Done, its stream still to end) does not take over a client check
     Rig q;
@@ -789,6 +809,7 @@ TEST_CASE("fw client: every fault maps to its port refusal (the whole table), an
       {Fault::Expired, fwp::Refusal::Expired},
       {Fault::NameLong, fwp::Refusal::NameTooLong},
       {Fault::NotPadded, fwp::Refusal::Io},  // found by the check (state Failed, the fault text on the screen), like the other image faults
+      {Fault::CopyExists, fwp::Refusal::Io},  // found by the pad job (state Failed, the fault text on the screen)
   };
   static_assert(sizeof kTable / sizeof kTable[0] == static_cast<unsigned>(Fault::Count), "one row per Fault");
   for (unsigned i = 0; i < static_cast<unsigned>(Fault::Count); ++i) {
@@ -1004,4 +1025,418 @@ TEST_CASE("fw client: the HIL injection is refused exactly while the update path
     r.svc.poll(r.shell);
     CHECK(!r.svc.blocks_injection());
   }
+}
+
+// ---- the pad (OS-UPDPAD) ---------------------------------------------------------------------------------------------------------------------------
+
+namespace {
+
+constexpr const char* kRaw = "old-1.0.1.ptf";       // an image of the older firmware: valid, not padded
+constexpr const char* kCopy = "pad-old-1.0.1.ptf";  // the copy's name (pad_name_of)
+constexpr std::size_t kRawCode = 3000;              // 0x410 + 3000 = 4056 bytes: 40 bytes of padding
+
+// The service with the padded kName and the unpadded kRaw on the card; the offer already made when `offered`.
+struct PadBare : Bare {
+  std::vector<std::uint8_t> raw_image = good_image(kRawCode, false);
+  std::string raw = to_hex(raw_image);
+  explicit PadBare(bool offered = true) {
+    store.put_file(kRaw, std::vector<std::uint8_t>(raw.begin(), raw.end()));
+    if (offered) {
+      NEED(svc.ui_check_begin(kRaw) == Fault::Ok);
+      NEED(drive().state == State::NeedsPad);
+    }
+  }
+  bool no_copy_left() const {
+    for (const auto& kv : store.files) {
+      if (kv.first.compare(0, 4, "pad-") == 0 || kv.first == up::kTempName) {
+        return false;
+      }
+    }
+    return true;
+  }
+  unsigned copies() const {
+    unsigned n = 0;
+    for (const auto& kv : store.files) {
+      n += kv.first.compare(0, 4, "pad-") == 0 ? 1u : 0u;
+    }
+    return n;
+  }
+  void nothing_armed() {
+    CHECK(!store.has(up::kFwInfoName));
+    CHECK(host.calls.empty());
+    CHECK(!host.pin_low);
+    CHECK(svc.phase() == up::FwPhase::Idle);
+    CHECK(svc.ui_install() == Fault::NotArmed);
+  }
+};
+
+}  // namespace
+
+TEST_CASE("fw client pad: the offer is made, the answer writes the copy, the copy is checked, and only then does an install hand over the copy; the original never changes") {
+  PadBare b;
+  const std::string expected = expected_padded_hex(b.raw_image);
+  b.store.calls.clear();
+  CHECK(b.svc.ui_install() == Fault::NotArmed);  // the unpadded original cannot be installed
+  CHECK(b.store.calls.empty());
+  NEED(b.svc.ui_pad() == Fault::Ok);
+  CHECK(b.svc.phase() == up::FwPhase::Padding);
+  CHECK(up::fw_phase_holds_card(b.svc.phase()));
+  CHECK(b.store.calls.empty());  // the card is first touched by the job's first slice, not by the key
+  const up::UiStatus s = b.drive();
+  NEED(s.state == State::Checked);
+  NEED(s.copy != nullptr);
+  CHECK(std::string(s.copy) == kCopy);
+  CHECK(s.image == 4096u);
+  CHECK(s.crc == file_crc(expected));
+  CHECK(b.store.text_of(kCopy) == expected);
+  CHECK(b.store.text_of(kRaw) == b.raw);  // the original is as it was
+  CHECK(b.no_copy_left() == false);       // (the copy is there ...)
+  CHECK(b.copies() == 1u);
+  CHECK(!b.store.has(up::kTempName));     // ... the temporary file is not
+  CHECK(b.store.count_calls("remove ") == 0u);  // nothing is ever removed to make room for a copy
+  CHECK(b.host.calls.empty());            // nothing is handed over before the install
+  CHECK(accepts(expected));
+  // The install is of the copy: re-validated, then _fwinfo names the copy.
+  b.store.calls.clear();
+  NEED(b.svc.ui_install() == Fault::Ok);
+  const up::UiStatus h = b.drive(nullptr, true);
+  CHECK(h.installing);
+  CHECK(b.host.pin_low);
+  CHECK(b.store.text_of(up::kFwInfoName) == kCopy);
+  CHECK(b.store.count_calls(std::string("open_read ") + kRaw) == 0u);
+}
+
+TEST_CASE("fw client pad: the copy goes through the same name rules as any image, and a second pad of the same file is refused: the first copy is never removed or replaced") {
+  PadBare b;
+  NEED(b.svc.ui_pad() == Fault::Ok);
+  NEED(b.drive().state == State::Checked);
+  const std::string first = b.store.text_of(kCopy);
+  // Dropped, asked again: the copy's name is taken (CopyExists), nothing is written or removed, the copy is as it was.
+  b.svc.ui_cancel();
+  NEED(b.svc.ui_check_begin(kRaw) == Fault::Ok);
+  NEED(b.drive().state == State::NeedsPad);
+  b.store.calls.clear();
+  NEED(b.svc.ui_pad() == Fault::Ok);
+  const up::UiStatus s = b.drive();
+  CHECK(s.state == State::Failed);
+  CHECK(s.fault == Fault::CopyExists);
+  CHECK(std::strlen(up::fault_name(Fault::CopyExists)) + 16u <= 48u);  // "PADDING FAILED: " + the text fits the strip
+  CHECK(b.copies() == 1u);
+  CHECK(b.store.text_of(kCopy) == first);
+  CHECK(b.store.count_calls("remove ") == 0u);
+  CHECK(b.store.count_calls("append ") == 0u);
+  CHECK(!b.store.has(up::kTempName));
+  b.nothing_armed();
+  // A file of the user's own with that name is just as safe.
+  b.store.put_file(kCopy, std::vector<std::uint8_t>(10, 'z'));
+  NEED(b.svc.ui_check_begin(kRaw) == Fault::Ok);
+  NEED(b.drive().state == State::NeedsPad);
+  NEED(b.svc.ui_pad() == Fault::Ok);
+  CHECK(b.drive().fault == Fault::CopyExists);
+  CHECK(b.store.text_of(kCopy) == "zzzzzzzzzz");
+  CHECK(b.store.count_calls("remove ") == 0u);
+  // The longest original: its stem is cut so that the name stays within the 30 characters, and is a valid image name.
+  const std::string longest = std::string(48, 'a') + ".ptf";
+  b.store.put_file(longest.c_str(), std::vector<std::uint8_t>(b.raw.begin(), b.raw.end()));
+  b.svc.ui_cancel();
+  CHECK(b.svc.ui_check_begin(longest.c_str()) == Fault::NameLong);  // (the check already refuses a name the install path cannot take)
+  const std::string at30 = std::string(26, 'b') + ".ptf";           // 30 characters
+  b.store.put_file(at30.c_str(), std::vector<std::uint8_t>(b.raw.begin(), b.raw.end()));
+  NEED(b.svc.ui_check_begin(at30.c_str()) == Fault::Ok);
+  NEED(b.drive().state == State::NeedsPad);
+  NEED(b.svc.ui_pad() == Fault::Ok);
+  const up::UiStatus t = b.drive();
+  NEED(t.state == State::Checked);
+  NEED(t.copy != nullptr);
+  CHECK(std::strlen(t.copy) <= 30u);
+  CHECK(std::string(t.copy) == "pad-" + std::string(22, 'b') + ".ptf");
+  CHECK(up::update_name_ok(t.copy));
+  CHECK(b.store.text_of(at30) == b.raw);
+}
+
+TEST_CASE("fw client pad: only NotPadded gets the offer, every other defect refuses as it did, flash configuration included, and nothing is written") {
+  struct Case {
+    const char* what;
+    std::string text;
+    Fault fault;  // Fault::Ok: only that it is not NotPadded
+  };
+  std::vector<Case> cases;
+  {
+    std::vector<std::uint8_t> im = good_image(kRawCode, false);
+    for (unsigned position = 0; position < up::kConfigBytes; ++position) {
+      im[0x400 + position] = static_cast<std::uint8_t>(im[0x400 + position] ^ 0x01u);
+      cases.push_back({"config byte", to_hex(im), Fault::BadConfig});
+      im[0x400 + position] = up::kRequiredConfig[position];
+    }
+    std::vector<std::uint8_t> sp = good_image(kRawCode, false);
+    put_word(sp, 0, 0x20020000u);
+    cases.push_back({"SP", to_hex(sp), Fault::BadSp});
+    std::vector<std::uint8_t> reset = good_image(kRawCode, false);
+    put_word(reset, 4, 0u);
+    cases.push_back({"reset", to_hex(reset), Fault::BadReset});
+    std::vector<std::uint8_t> vec = good_image(kRawCode, false);
+    put_word(vec, 8u * 4u, 0x00000510u);
+    cases.push_back({"vector", to_hex(vec), Fault::BadVector});
+    std::string sum = to_hex(good_image(kRawCode, false));
+    sum[sum.find('\n') - 1u] = sum[sum.find('\n') - 1u] == '0' ? '1' : '0';  // the first record's checksum
+    cases.push_back({"checksum", sum, Fault::HexChecksum});
+    cases.push_back({"no EOF", to_hex(good_image(kRawCode, false), "\n", 16, false), Fault::HexNoEof});
+    std::string after = to_hex(good_image(kRawCode, false)) + record(0, 0, {1, 2}) + "\n";
+    cases.push_back({"data after EOF", after, Fault::HexAfterEof});
+  }
+  for (const Case& c : cases) {
+    CAPTURE(c.what);
+    PadBare b(false);
+    b.store.put_file("bad.ptf", std::vector<std::uint8_t>(c.text.begin(), c.text.end()));
+    NEED(b.svc.ui_check_begin("bad.ptf") == Fault::Ok);
+    const up::UiStatus s = b.drive();
+    CHECK(s.state == State::Failed);
+    CHECK(s.fault != Fault::NotPadded);
+    CHECK(s.fault == c.fault);
+    CHECK(b.svc.ui_pad() == Fault::NotArmed);
+    CHECK(b.store.count_calls("begin ") == 0u);
+    CHECK(b.no_copy_left());
+    b.nothing_armed();
+  }
+}
+
+TEST_CASE("fw client pad: a cancel, a lapse, a computer on the card or no offer at all arm nothing and write nothing") {
+  {  // no check at all
+    PadBare b(false);
+    CHECK(b.svc.ui_pad() == Fault::NotArmed);
+    b.nothing_armed();
+  }
+  {  // the screen's cancel
+    PadBare b;
+    b.svc.ui_cancel();
+    CHECK(b.svc.ui_pad() == Fault::NotArmed);
+    CHECK(b.svc.ui_slice().state == State::Idle);
+    CHECK(b.store.count_calls("begin ") == 0u);
+    b.nothing_armed();
+  }
+  {  // 30 s without an answer: the status says so, and the answer is used up
+    PadBare b;
+    b.host.now += up::kArmLifetimeMs - 1u;
+    CHECK(b.svc.ui_slice().state == State::NeedsPad);
+    b.host.now += 1u;
+    const up::UiStatus s = b.svc.ui_slice();
+    CHECK(s.state == State::Failed);
+    CHECK(s.fault == Fault::Expired);
+    CHECK(b.svc.ui_pad() == Fault::NotArmed);
+    CHECK(b.store.count_calls("begin ") == 0u);
+    b.nothing_armed();
+  }
+  {  // the answer comes late without a status pass in between
+    PadBare b;
+    b.host.now += up::kArmLifetimeMs;
+    CHECK(b.svc.ui_pad() == Fault::Expired);
+    CHECK(b.svc.ui_pad() == Fault::NotArmed);
+    CHECK(b.store.count_calls("begin ") == 0u);
+    b.nothing_armed();
+  }
+  {  // the card was handed to a computer since the check
+    PadBare b;
+    ++b.host.sessions;
+    CHECK(b.svc.ui_pad() == Fault::NotArmed);
+    b.nothing_armed();
+  }
+  {  // the card is on a computer right now
+    PadBare b;
+    b.host.on_host = true;
+    CHECK(b.svc.ui_pad() == Fault::OnHost);
+    b.host.on_host = false;
+    CHECK(b.svc.ui_pad() == Fault::NotArmed);  // used up
+    b.nothing_armed();
+  }
+  {  // the offer blocks the HIL injection, like a passed check, and a new check ends it
+    PadBare b;
+    CHECK(b.svc.blocks_injection());
+    b.svc.ui_cancel();
+    CHECK(!b.svc.blocks_injection());
+  }
+  {  // the offer is used up by its answer: asking again while the job runs is Busy, and the job goes on
+    PadBare b;
+    NEED(b.svc.ui_pad() == Fault::Ok);
+    CHECK(b.svc.ui_pad() == Fault::Busy);
+    CHECK(b.svc.ui_check_begin(kRaw) == Fault::Busy);
+    CHECK(b.drive().state == State::Checked);
+  }
+}
+
+TEST_CASE("fw client pad: a dropped pad job leaves no copy, no temporary file and the original as it was") {
+  PadBare b;
+  NEED(b.svc.ui_pad() == Fault::Ok);
+  for (unsigned i = 0; i < 3; ++i) {
+    NEED(b.svc.ui_slice().state == State::Running);
+  }
+  CHECK(b.store.uploading());
+  b.svc.ui_cancel();
+  CHECK(!b.store.uploading());
+  CHECK(b.no_copy_left());
+  CHECK(b.store.text_of(kRaw) == b.raw);
+  CHECK(b.svc.ui_slice().state == State::Idle);
+  b.nothing_armed();
+  // ... and the same from inside the read-back and the arming check of the copy.
+  PadBare c;
+  NEED(c.svc.ui_pad() == Fault::Ok);
+  unsigned n = 0;
+  while (c.svc.phase() != up::FwPhase::Arming && n++ < 4000u) {
+    (void)c.svc.ui_slice();
+  }
+  NEED(c.svc.phase() == up::FwPhase::Arming);
+  c.svc.ui_cancel();
+  CHECK(c.store.text_of(kRaw) == c.raw);
+  CHECK(!c.store.has(up::kTempName));
+  CHECK(c.svc.phase() == up::FwPhase::Idle);
+  CHECK(c.svc.ui_install() == Fault::NotArmed);
+  CHECK(c.host.calls.empty());
+}
+
+TEST_CASE("fw client pad: every way the copy can fail ends in Failed with the reason, arms nothing and leaves no .ptf of the copy") {
+  const auto fails = [](const char* what, auto&& prepare, Fault fault) {
+    CAPTURE(what);
+    PadBare b;
+    prepare(b);
+    NEED(b.svc.ui_pad() == Fault::Ok);
+    const up::UiStatus s = b.drive();
+    CHECK(s.state == State::Failed);
+    if (fault != Fault::Ok) {
+      CHECK(s.fault == fault);
+    }
+    CHECK(s.fault != Fault::Ok);
+    CHECK(b.no_copy_left());
+    CHECK(b.store.text_of(kRaw) == b.raw);
+    CHECK(!b.store.uploading());
+    b.nothing_armed();
+    // The path is free again (the card back, as it was): a new check of the original gets the offer again.
+    b.host.busy = false;
+    b.store.set_state(true, Fault::Ok);
+    b.store.set_serial("1234-ABCD");
+    NEED(b.svc.ui_check_begin(kRaw) == Fault::Ok);
+    CHECK(b.drive().state == State::NeedsPad);
+  };
+  fails("card full", [](PadBare& b) { b.store.space_left = 4000u; }, Fault::NoSpace);
+  fails("write protected", [](PadBare& b) { b.store.set_state(false, Fault::WriteProtected); }, Fault::WriteProtected);
+  fails("no card", [](PadBare& b) { b.store.set_state(false, Fault::NoCard); }, Fault::NoCard);
+  fails("card swapped", [](PadBare& b) { b.store.set_serial("FFFF-0000"); }, Fault::NotArmed);
+  fails("busy card", [](PadBare& b) { b.host.busy = true; }, Fault::CardBusy);
+  fails("begin refused", [](PadBare& b) { b.store.begin_fault = Fault::Io; }, Fault::Io);
+  fails("first write fails", [](PadBare& b) { b.store.fail_append_after = 0u; }, Fault::Io);
+  fails("a later write fails", [](PadBare& b) { b.store.fail_append_after = 2u; }, Fault::Io);
+  fails("the last write fails", [](PadBare& b) { b.store.fail_append_after = 3u; }, Fault::Io);
+  fails("close fails", [](PadBare& b) { b.store.fail_close = true; }, Fault::Ok);
+  fails("commit fails", [](PadBare& b) { b.store.commit_fault = Fault::Io; }, Fault::Io);
+  fails("the copy reads back different", [](PadBare& b) { b.store.corrupt_readback = true; }, Fault::Ok);
+  fails("the copy reads back short", [](PadBare& b) { b.store.short_readback = true; }, Fault::Ok);
+  fails("the copy fails its arming check", [](PadBare& b) { b.store.corrupt_file = kCopy; }, Fault::Ok);
+  fails("the original changed since the check", [](PadBare& b) { b.store.reported_size_delta = 1u; }, Fault::Readback);
+  {  // a card that cannot be written: the older copy of the name is not touched, nothing is written
+    PadBare b;
+    b.store.put_file(kCopy, std::vector<std::uint8_t>(10, 'z'));
+    b.store.set_state(false, Fault::WriteProtected);
+    NEED(b.svc.ui_pad() == Fault::Ok);
+    const up::UiStatus s = b.drive();
+    CHECK(s.state == State::Failed);
+    CHECK(b.store.text_of(kCopy) == "zzzzzzzzzz");
+    CHECK(b.store.count_calls("append ") == 0u);
+    b.nothing_armed();
+  }
+  {  // the copy fails its arming check and the store refuses to remove it (LastPtf, Io): the failure is still reported, nothing is armed, and the log says the copy stays
+    PadBare b;
+    b.store.corrupt_file = kCopy;
+    b.store.remove_fault = Fault::LastPtf;
+    NEED(b.svc.ui_pad() == Fault::Ok);
+    const up::UiStatus s = b.drive();
+    CHECK(s.state == State::Failed);
+    CHECK(b.store.has_call(std::string("remove ") + kCopy));
+    CHECK(b.store.has(kCopy));  // (the refused removal left it)
+    bool logged = false;
+    for (const std::string& l : b.host.logs) {
+      logged = logged || l.find("not removed") != std::string::npos;
+    }
+    CHECK(logged);
+    CHECK(!b.store.has(up::kTempName));
+    b.nothing_armed();
+    // A removal that works (or a copy that is already gone) says nothing of the kind.
+    PadBare c;
+    c.store.corrupt_file = kCopy;
+    NEED(c.svc.ui_pad() == Fault::Ok);
+    CHECK(c.drive().state == State::Failed);
+    CHECK(!c.store.has(kCopy));
+    for (const std::string& l : c.host.logs) {
+      CHECK(l.find("not removed") == std::string::npos);
+    }
+  }
+  {  // the original changes under the job with its size kept (one hex digit's case: still a valid image, same length): the copy is refused by the CRC of what was read
+    PadBare b;
+    std::string changed = b.raw;
+    std::size_t at = 200;  // a data record (the first records hold the vectors)
+    while (at < changed.size() && !(changed[at] >= 'A' && changed[at] <= 'F')) {
+      ++at;
+    }
+    NEED(at < changed.size());
+    changed[at] = static_cast<char>(changed[at] - 'A' + 'a');
+    b.store.put_file(kRaw, std::vector<std::uint8_t>(changed.begin(), changed.end()));
+    NEED(changed.size() == b.raw.size());
+    NEED(b.svc.ui_pad() == Fault::Ok);
+    const up::UiStatus s = b.drive();
+    CHECK(s.state == State::Failed);
+    CHECK(s.fault == Fault::Crc);
+    CHECK(b.no_copy_left());
+    CHECK(!b.store.has_call("commit"));
+    CHECK(b.store.text_of(kRaw) == changed);
+    b.nothing_armed();
+  }
+  {  // the original's name is the copy's name (a periodic "pad-pad-..." name 30 characters long): refused, the original is never replaced
+    const std::string same = "pad-pad-pad-pad-pad-pad-pa.ptf";
+    NEED(same.size() == 30u);
+    PadBare b(false);
+    b.store.put_file(same, std::vector<std::uint8_t>(b.raw.begin(), b.raw.end()));
+    NEED(b.svc.ui_check_begin(same.c_str()) == Fault::Ok);
+    NEED(b.drive().state == State::NeedsPad);
+    NEED(b.svc.ui_pad() == Fault::Ok);
+    const up::UiStatus s = b.drive();
+    CHECK(s.state == State::Failed);
+    CHECK(s.fault == Fault::CopyExists);
+    CHECK(b.store.text_of(same) == b.raw);
+    CHECK(b.store.count_calls("append ") == 0u);  // (begin_upload said Exists: nothing was created)
+    CHECK(!b.store.has(up::kTempName));
+    CHECK(b.store.count_calls("remove ") == 0u);
+  }
+}
+
+TEST_CASE("fw client pad: the port's adapter offers, pads and installs through the same service") {
+  PadBare b(false);
+  up::FwServiceSink sink(b.svc);
+  CHECK(sink.pad() == fwp::Refusal::NotChecked);  // no offer yet
+  NEED(sink.begin_check(kRaw) == fwp::Refusal::None);
+  fwp::CheckStatus s;
+  unsigned n = 0;
+  do {
+    s = sink.poll_check();
+  } while (s.state == fwp::CheckStatus::State::Running && ++n < 100u);
+  NEED(s.state == fwp::CheckStatus::State::NeedsPad);
+  CHECK(s.copy == nullptr);
+  CHECK(sink.install() == fwp::Refusal::NotChecked);
+  NEED(sink.pad() == fwp::Refusal::None);
+  CHECK(sink.pad() == fwp::Refusal::Busy);
+  n = 0;
+  do {
+    s = sink.poll_check();
+  } while (s.state == fwp::CheckStatus::State::Running && ++n < 1000u);
+  NEED(s.state == fwp::CheckStatus::State::Checked);
+  NEED(s.copy != nullptr);
+  CHECK(std::string(s.copy) == kCopy);
+  CHECK(s.image == 4096u);
+  CHECK(s.crc == file_crc(expected_padded_hex(b.raw_image)));
+  CHECK(sink.install() == fwp::Refusal::None);
+  // A plain image has no copy to name.
+  PadBare p(false);
+  up::FwServiceSink plain(p.svc);
+  NEED(plain.begin_check(kName) == fwp::Refusal::None);
+  do {
+    s = plain.poll_check();
+  } while (s.state == fwp::CheckStatus::State::Running);
+  CHECK(s.state == fwp::CheckStatus::State::Checked);
+  CHECK(s.copy == nullptr);
 }

@@ -99,7 +99,7 @@ constexpr KeyOption kHelpOptions[] = {{kF8, "CLOSE", "CLOSE"}};
 constexpr KeyOption kExportOptions[] = {{kF8, "CANCEL", ""}};
 // The firmware update dialog (OS-FWCONFIG): F1 UPDATE on the list, YES to question 1, INSTALL to question 2 (the answers are drawn inverted); F8 BACK on the list, CANCEL before INSTALL. No key acts once INSTALL
 // was taken ("DO NOT POWER OFF"): the row is blank. Any other control takes a question back (firmware_question_taken_back).
-constexpr KeyOption kFirmwareOptions[] = {{kF1, "UPDATE", "UPDATE"}, {kF1, "YES", "YES"}, {kF1, "INSTALL", "INSTALL"}, {kF8, "BACK", "BACK"}, {kF8, "CANCEL", "CANCEL"}};
+constexpr KeyOption kFirmwareOptions[] = {{kF1, "UPDATE", "UPDATE"}, {kF1, "YES", "YES"}, {kF1, "INSTALL", "INSTALL"}, {kF1, "PAD", "PAD"}, {kF8, "BACK", "BACK"}, {kF8, "CANCEL", "CANCEL"}};  // PAD (OS-UPDPAD): the question of an image that is only not padded
 
 // The boot disk (D1): a key or pad restarts the unit, whichever it is, so all eight keys say so (one option stands for the eight: KeyPrompt::every_key); after the first press while a computer may still be writing
 // every key asks again (inverted); while the restart waits for the command in flight no key acts any more, and the row is blank (an owned row with no option).
@@ -228,10 +228,12 @@ PromptState owner_state(const Model& model, const ViewState& view) noexcept {
     case OverlayId::ExportProgress: return owned(kExportPrompt, all_of(kExportPrompt));
     case OverlayId::FirmwareUpdate:
       switch (view.firmware.phase) {
-        case FirmwareView::Phase::List: return owned(kFirmwarePrompt, static_cast<std::uint16_t>((view.firmware.n != 0u ? 1u << 0 : 0u) | (1u << 3)));  // UPDATE (with a file to choose), BACK
-        case FirmwareView::Phase::AskUpdate: return owned(kFirmwarePrompt, (1u << 1) | (1u << 4), 1u << 1);                                           // YES (inverted), CANCEL
-        case FirmwareView::Phase::Checking: return owned(kFirmwarePrompt, 1u << 4);                                                                    // CANCEL
-        case FirmwareView::Phase::AskInstall: return owned(kFirmwarePrompt, (1u << 2) | (1u << 4), 1u << 2);                                          // INSTALL (inverted), CANCEL
+        case FirmwareView::Phase::List: return owned(kFirmwarePrompt, static_cast<std::uint16_t>((view.firmware.n != 0u ? 1u << 0 : 0u) | (1u << 4)));  // UPDATE (with a file to choose), BACK
+        case FirmwareView::Phase::AskUpdate: return owned(kFirmwarePrompt, (1u << 1) | (1u << 5), 1u << 1);                                           // YES (inverted), CANCEL
+        case FirmwareView::Phase::Checking:
+        case FirmwareView::Phase::Padding: return owned(kFirmwarePrompt, 1u << 5);                                                                     // CANCEL
+        case FirmwareView::Phase::AskPad: return owned(kFirmwarePrompt, (1u << 3) | (1u << 5), 1u << 3);                                               // PAD (inverted), CANCEL
+        case FirmwareView::Phase::AskInstall: return owned(kFirmwarePrompt, (1u << 2) | (1u << 5), 1u << 2);                                          // INSTALL (inverted), CANCEL
         case FirmwareView::Phase::Installing:
         case FirmwareView::Phase::Closed: break;
       }

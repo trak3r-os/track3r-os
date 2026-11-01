@@ -195,3 +195,62 @@ TEST_CASE("fake firmware sink: a check that lapses says Failed and cannot be ins
   CHECK(sink.install() == Refusal::NotChecked);
   CHECK(fake.installs == 0u);
 }
+
+TEST_CASE("fake firmware sink: a NeedsPad verdict is answered by pad(), which ends in the copy or in Failed; install() is refused until then (OS-UPDPAD)") {
+  FakeFirmwareSink fake;
+  hal::firmware::FirmwareSink& sink = fake;
+  fake.add("old.ptf", 900);
+  FakeFirmwareSink::Script s;
+  s.verdict = State::NeedsPad;
+  s.image = 4056u;
+  s.copy = "pad-old.ptf";
+  fake.script("old.ptf", s);
+  CHECK(sink.pad() == Refusal::NotChecked);  // no check yet
+  CHECK(sink.begin_check("old.ptf") == Refusal::None);
+  CHECK(sink.pad() == Refusal::Busy);        // the check runs
+  const CheckStatus offer = run_until_done(sink);
+  CHECK(offer.state == State::NeedsPad);
+  CHECK(offer.image == 4056u);
+  CHECK(offer.copy == nullptr);
+  CHECK(sink.install() == Refusal::NotChecked);
+  CHECK(fake.installs == 0u);
+  CHECK(sink.pad() == Refusal::None);
+  CHECK(fake.pads == 1u);
+  CHECK(sink.pad() == Refusal::Busy);
+  const CheckStatus done = run_until_done(sink);
+  NEED(done.state == State::Checked);
+  NEED(done.copy != nullptr);
+  CHECK(std::strcmp(done.copy, "pad-old.ptf") == 0);
+  CHECK(sink.pad() == Refusal::NotChecked);  // used up
+  CHECK(sink.install() == Refusal::None);
+  CHECK(fake.installs == 1u);
+  // A pad that fails, a cancel of an offer, and a lapse of one.
+  FakeFirmwareSink f2;
+  hal::firmware::FirmwareSink& k2 = f2;
+  f2.add("old.ptf", 900);
+  s.pad_end = State::Failed;
+  s.pad_fault = "no space";
+  f2.script("old.ptf", s);
+  CHECK(k2.begin_check("old.ptf") == Refusal::None);
+  CHECK(run_until_done(k2).state == State::NeedsPad);
+  CHECK(k2.pad() == Refusal::None);
+  const CheckStatus bad = run_until_done(k2);
+  CHECK(bad.state == State::Failed);
+  CHECK(bad.copy == nullptr);
+  CHECK(k2.install() == Refusal::NotChecked);
+  CHECK(k2.begin_check("old.ptf") == Refusal::None);
+  CHECK(run_until_done(k2).state == State::NeedsPad);
+  k2.cancel();
+  CHECK(k2.pad() == Refusal::NotChecked);
+  CHECK(k2.begin_check("old.ptf") == Refusal::None);
+  CHECK(run_until_done(k2).state == State::NeedsPad);
+  f2.lapse();
+  CHECK(k2.poll_check().state == State::Failed);
+  CHECK(k2.pad() == Refusal::NotChecked);
+  CHECK(f2.pads == 1u);
+  f2.pad_refusal = Refusal::OnComputer;
+  CHECK(k2.begin_check("old.ptf") == Refusal::None);
+  CHECK(run_until_done(k2).state == State::NeedsPad);
+  CHECK(k2.pad() == Refusal::OnComputer);
+  CHECK(f2.pads == 1u);
+}

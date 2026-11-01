@@ -3,7 +3,7 @@
 # tests and the QEMU suite run it: the path guard, the streaming Intel HEX validator, the transfer and arm state machines, the `fw` command and the
 # FatFs-backed FirmwareStore, and since OS-FWCONFIG the adapter of the App's firmware port (fw_sink.cpp) (tests/mk66_update_*_test.cpp). Only src/fw_host_mk66.cpp (the PTA1 hand-over, the mute, the entropy) is the image's: the
 # block of platform/mk66/CMakeLists.txt adds it to the executable.
-target_sources(platform_mk66_pure PRIVATE src/path_guard.cpp src/hex_validator.cpp src/fat_firmware_store.cpp src/fw_service.cpp src/fw_sink.cpp)
+target_sources(platform_mk66_pure PRIVATE src/path_guard.cpp src/hex_validator.cpp src/hex_pad.cpp src/fat_firmware_store.cpp src/fw_service.cpp src/fw_sink.cpp)
 target_include_directories(platform_mk66_pure PUBLIC include)
 
 # Every public header compiles on its own (the same check o3os_library() gives the layers).

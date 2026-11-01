@@ -489,6 +489,179 @@ TEST_CASE("fw arm: an image not padded to a 4 KiB sector is refused with a reaso
   CHECK(r.svc.armed());
 }
 
+// OS-UPDPAD: the explicit `pad` word is the console's yes. The same rule as the screen: only a file whose one defect is the missing padding gets a copy; the original is never changed.
+TEST_CASE("fw arm pad: an unpadded image gets a padded copy that is checked and armed, the original is untouched, and a plain fw arm still refuses") {
+  const std::vector<std::uint8_t> raw_image = good_image(3000, false);
+  const std::string raw = to_hex(raw_image);
+  const std::string expected = expected_padded_hex(raw_image);
+  Rig r;
+  r.store.put_file("v100.ptf", std::vector<std::uint8_t>(raw.begin(), raw.end()));
+  r.command("fw arm v100.ptf " + hex8s(file_crc(raw)));  // by default it refuses
+  CHECK(r.said("ERR image not padded: may not boot"));
+  CHECK(!r.svc.armed());
+  CHECK(r.store.count_calls("begin ") == 0u);
+  r.clear();
+  r.command("fw arm v100.ptf " + hex8s(file_crc(raw)) + " pad");
+  CHECK(r.said(("padded pad-v100.ptf " + std::to_string(expected.size()) + " " + hex8s(file_crc(expected)) + " image 4096").c_str()));
+  const std::string token = token_of(r);
+  NEED(token.size() == 8u);
+  CHECK(r.svc.armed());
+  CHECK(r.store.text_of("pad-v100.ptf") == expected);
+  CHECK(r.store.text_of("v100.ptf") == raw);
+  CHECK(!r.store.has(up::kTempName));
+  CHECK(!r.store.has(up::kFwInfoName));  // arming changes nothing
+  CHECK(!r.host.called("quiesce"));
+  // The token is of the copy: the update names it.
+  r.clear();
+  r.send("fw update " + token + "\r");
+  for (unsigned i = 0; i < 200; ++i) {
+    r.step();
+  }
+  CHECK(r.store.text_of(up::kFwInfoName) == "pad-v100.ptf");
+  CHECK(r.host.pin_low);
+  CHECK(r.said("update: handing over to the bootloader (pad-v100.ptf)"));
+}
+
+TEST_CASE("fw arm pad: the pad word changes nothing for a good image, and every other defect, a wrong CRC or a bad name still refuses with nothing written") {
+  const std::string padded = good_text(3000);
+  {  // already padded: armed as it is, no copy
+    Rig r;
+    r.store.put_file("good.ptf", std::vector<std::uint8_t>(padded.begin(), padded.end()));
+    r.command("fw arm good.ptf " + hex8s(file_crc(padded)) + " pad");
+    CHECK(token_of(r).size() == 8u);
+    CHECK(!r.said("padded "));
+    CHECK(r.store.count_calls("begin ") == 0u);
+    CHECK(r.svc.armed());
+    CHECK(r.store.files.size() == 2u);  // (the rig's own official image and this one: no copy)
+  }
+  std::vector<std::uint8_t> config = good_image(3000, false);
+  config[0x40C] = 0xDC;  // a flash configuration field that could lock the MCU, in an unpadded image too
+  const std::string locked = to_hex(config);
+  std::vector<std::uint8_t> sp = good_image(3000, false);
+  put_word(sp, 0, 0x20020000u);
+  const std::string bad_sp = to_hex(sp);
+  const std::string raw = to_hex(good_image(3000, false));
+  const std::string no_eof = to_hex(good_image(3000, false), "\n", 16, false);
+  struct Row {
+    const char* name;
+    const std::string* text;
+    std::uint32_t crc_xor;
+    const char* err;
+  };
+  const Row rows[] = {
+      {"locked.ptf", &locked, 0u, "ERR flash configuration field is not the required one"},
+      {"badsp.ptf", &bad_sp, 0u, nullptr},
+      {"noeof.ptf", &no_eof, 0u, "ERR no EOF record"},
+      {"crc.ptf", &raw, 1u, "ERR crc mismatch"},
+  };
+  for (const Row& row : rows) {
+    CAPTURE(row.name);
+    Rig r;
+    r.store.put_file(row.name, std::vector<std::uint8_t>(row.text->begin(), row.text->end()));
+    r.command(std::string("fw arm ") + row.name + " " + hex8s(file_crc(*row.text) ^ row.crc_xor) + " pad");
+    CHECK(r.said("ERR "));
+    if (row.err != nullptr) {
+      CHECK(r.said(row.err));
+    }
+    CHECK(!r.said("ERR image not padded"));
+    CHECK(!r.said("padded "));
+    CHECK(!r.svc.armed());
+    CHECK(r.store.count_calls("begin ") == 0u);
+    CHECK(r.store.files.size() == 2u);  // (the rig's own official image and the file: nothing added)
+    CHECK(!r.host.called("quiesce"));
+  }
+  {  // not the word `pad`, and a name that is not an image: the usage line, which now says what pad does
+    Rig r;
+    r.store.put_file("v100.ptf", std::vector<std::uint8_t>(raw.begin(), raw.end()));
+    r.command("fw arm v100.ptf " + hex8s(file_crc(raw)) + " padd");
+    CHECK(r.said("usage: fw"));
+    CHECK(r.store.count_calls("begin ") == 0u);
+    CHECK(!r.svc.armed());
+    r.clear();
+    r.command("fw arm a..b.ptf " + hex8s(file_crc(raw)) + " pad");
+    CHECK(r.said("usage: fw arm"));
+    CHECK(r.said("[pad]"));
+    r.clear();
+    r.command("fw arm");
+    CHECK(r.said("[pad]"));
+  }
+}
+
+TEST_CASE("fw arm pad: a card that cannot take the copy says why, arms nothing and leaves no .ptf of the copy, and a copy that fails its check is removed") {
+  const std::vector<std::uint8_t> raw_image = good_image(3000, false);
+  const std::string raw = to_hex(raw_image);
+  const std::string arm = "fw arm v100.ptf " + hex8s(file_crc(raw)) + " pad";
+  const auto no_copy = [](const Rig& r) {
+    for (const auto& kv : r.store.files) {
+      CHECK(kv.first.compare(0, 4, "pad-") != 0);
+    }
+    CHECK(!r.store.has(up::kTempName));
+    CHECK(!r.store.uploading());
+    CHECK(!r.svc.armed());
+    CHECK(!r.store.has(up::kFwInfoName));
+    CHECK(!r.host.called("quiesce"));
+  };
+  {  // card full
+    Rig r;
+    r.store.put_file("v100.ptf", std::vector<std::uint8_t>(raw.begin(), raw.end()));
+    r.store.space_left = 3000u;
+    r.command(arm);
+    CHECK(r.said((std::string("ERR ") + up::fault_name(Fault::NoSpace)).c_str()));
+    no_copy(r);
+  }
+  {  // write protected
+    Rig r;
+    r.store.put_file("v100.ptf", std::vector<std::uint8_t>(raw.begin(), raw.end()));
+    r.store.set_state(false, Fault::WriteProtected);
+    r.command(arm);
+    CHECK(r.said("ERR "));
+    CHECK(r.store.count_calls("begin ") == 0u);
+    no_copy(r);
+  }
+  {  // a write that fails half way
+    Rig r;
+    r.store.put_file("v100.ptf", std::vector<std::uint8_t>(raw.begin(), raw.end()));
+    r.store.fail_append_after = 2u;
+    r.command(arm);
+    CHECK(r.said("ERR "));
+    no_copy(r);
+    CHECK(r.store.text_of("v100.ptf") == raw);
+  }
+  {  // the copy reads back different: never renamed
+    Rig r;
+    r.store.put_file("v100.ptf", std::vector<std::uint8_t>(raw.begin(), raw.end()));
+    r.store.corrupt_readback = true;
+    r.command(arm);
+    CHECK(r.said("ERR "));
+    CHECK(!r.store.has_call("commit"));
+    no_copy(r);
+  }
+  {  // the copy was renamed and then fails the arming check: it is removed again
+    Rig r;
+    r.store.put_file("v100.ptf", std::vector<std::uint8_t>(raw.begin(), raw.end()));
+    r.store.corrupt_file = "pad-v100.ptf";
+    r.command(arm);
+    CHECK(r.said("ERR "));
+    CHECK(r.store.has_call("commit"));
+    no_copy(r);
+    CHECK(r.store.text_of("v100.ptf") == raw);
+  }
+  {  // an older copy (or any file) of the copy's name is never replaced: the console says so, nothing is written or removed, nothing is armed
+    Rig r;
+    r.store.put_file("v100.ptf", std::vector<std::uint8_t>(raw.begin(), raw.end()));
+    r.store.put_file("pad-v100.ptf", std::vector<std::uint8_t>(5, 'q'));
+    r.command(arm);
+    CHECK(r.said((std::string("ERR ") + up::fault_name(Fault::CopyExists)).c_str()));
+    CHECK(token_of(r).empty());
+    CHECK(!r.svc.armed());
+    CHECK(r.store.text_of("pad-v100.ptf") == "qqqqq");
+    CHECK(r.store.text_of("v100.ptf") == raw);
+    CHECK(r.store.count_calls("remove ") == 0u);
+    CHECK(r.store.count_calls("append ") == 0u);
+    CHECK(!r.store.has(up::kTempName));
+  }
+}
+
 TEST_CASE("fw arm: the file is re-read and fully re-validated, and the token is single use") {
   Armed a;
   Rig r;

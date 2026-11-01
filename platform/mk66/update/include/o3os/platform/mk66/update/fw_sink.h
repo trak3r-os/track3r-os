@@ -29,6 +29,7 @@ class FwServiceSink final : public hal::firmware::FirmwareSink {
   hal::firmware::CheckStatus poll_check() noexcept override;
   void cancel() noexcept override { svc_.ui_cancel(); }
   hal::firmware::Refusal install() noexcept override { return refusal_of(svc_.ui_install()); }
+  hal::firmware::Refusal pad() noexcept override { return refusal_of(svc_.ui_pad()); }
 
  private:
   FwService& svc_;

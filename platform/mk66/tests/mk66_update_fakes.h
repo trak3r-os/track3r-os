@@ -45,9 +45,11 @@ class FakeStore final : public up::FirmwareStore {
   unsigned fail_append_after = 0xFFFFFFFFu;  // the Nth append (0: the next) fails with Io
   bool fail_close = false;
   up::Fault commit_fault = up::Fault::Ok;
+  up::Fault remove_fault = up::Fault::Ok;  // remove() of an existing file is refused with this (nothing is removed)
   up::Fault fwinfo_fault = up::Fault::Ok;
   bool corrupt_readback = false;   // one byte of the temporary file reads back different
   std::size_t corrupt_at = 100;
+  std::string corrupt_file;        // an image of this name reads back with one byte (at corrupt_at) different (a copy that fails its arming check)
   bool short_readback = false;     // the temporary file reads back one byte shorter
   unsigned appends_this_pass = 0;
   unsigned max_appends_per_pass = 0;
@@ -170,6 +172,9 @@ class FakeStore final : public up::FirmwareStore {
         read_copy_.pop_back();
       }
     }
+    if (!corrupt_file.empty() && corrupt_file == name && corrupt_at < read_copy_.size()) {
+      read_copy_[corrupt_at] = static_cast<std::uint8_t>(read_copy_[corrupt_at] ^ 0x01u);
+    }
     read_at_ = 0;
     reading_ = true;
     size = static_cast<std::uint32_t>(read_copy_.size()) + reported_size_delta;
@@ -195,6 +200,9 @@ class FakeStore final : public up::FirmwareStore {
     }
     if (!has(name)) {
       return up::Fault::NotFound;
+    }
+    if (remove_fault != up::Fault::Ok) {
+      return remove_fault;
     }
     if (up::is_ptf_name(name)) {
       unsigned n = 0;

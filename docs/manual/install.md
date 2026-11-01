@@ -66,7 +66,7 @@ An image of track3r-os has the `diag` console on its USB serial port and can wri
    python3 -I platform/mk66/tools/o3console.py --put track3r-os-v0.5.1.ptf --name track3r-os-v0.5.1.ptf
    ```
 
-   The unit validates the stream while it writes, reads the file back from the card and checks it again, and answers `ok <name> <bytes> <crc> image <length>`. It never leaves a half-written `.ptf`. An image must end on a 4 KiB boundary (the build pads it): the SD bootloader leaves a short last sector as it was, so an image that does not (v1.0.0 is one) may crash at boot, and the tool, the unit's `fw` command and the Update screen (**IMAGE NOT PADDED: MAY NOT BOOT**) refuse it. For such an older image use the reset button or the official update menu. <!-- QA-CFG-268 -->
+   The unit validates the stream while it writes, reads the file back from the card and checks it again, and answers `ok <name> <bytes> <crc> image <length>`. It never leaves a half-written `.ptf`. An image must end on a 4 KiB boundary (the build pads it): the SD bootloader leaves a short last sector as it was, so an image that does not (v1.0.0 is one) may crash at boot, and the tool, the unit's `fw` command and `fw put` refuse it (**IMAGE NOT PADDED: MAY NOT BOOT**). The Update screen on the unit does not refuse such an image: it says it is not padded and asks whether track3r-os may pad a copy (**PAD**); after you confirm, it writes `pad-<name>.ptf` next to the file (zeros up to the next 4 KiB boundary, the file you chose stays as it is), checks the copy, and asks again before it installs the copy. If that name is already taken, nothing is written and the copy that is there is kept: pick it from the list. Any other fault still refuses. From a computer, `o3console.py --put FILE --pad` makes the same copy, and `--update NAME --crc <crc> --yes-update --pad` asks the unit to pad (`fw arm NAME <crc> pad`); the reset button and the official update menu work as before. New Community OS behaviour; not yet checked on the unit. <!-- QA-CFG-268 --> <!-- QA-CFG-269 --> <!-- QA-CFG-271 -->
 4. Update. This restarts the unit into the bootloader, so the tool asks for `--yes-update`. `<crc>` is the CRC-32 from the release notes (the `ok` line of the put prints the same value):
 
    ```sh
@@ -86,7 +86,7 @@ A unit that already runs a track3r-os with the update dialog can also install a 
 
 The bootloader is separate from the application, so a broken or unwanted application does not remove the recovery path. The way back that has been proven on the unit is the hidden reset button with a single good `.ptf` in `Firmware/`.
 
-**Going back from v1.1.0 to v1.0.1 or v1.0.0** through the on-device Update screen is refused: those files are not padded to a 4 KiB sector (IMAGE NOT PADDED: MAY NOT BOOT). Use the reset button as below, with the older file alone in `Firmware/`. <!-- QA-CFG-268 -->
+**Going back from v1.1.0 to v1.0.1 or v1.0.0** works through the on-device Update screen too. Those files are not padded to a 4 KiB sector, so the screen offers to pad a copy first (**PAD**), then installs the copy (see [Update](config.md)). The reset button as below, with the older file alone in `Firmware/`, works as well. <!-- QA-CFG-269 -->
 
 1. Put the card on your computer. Move **every** `.ptf` out of `Firmware/` (the track3r-os files and any other).
 2. Copy the official `PolyendTracker_<version>.ptf` you kept (or downloaded from Polyend) into `Firmware/`, so that it is the only `.ptf` there.

@@ -442,6 +442,207 @@ TEST_CASE("firmware: an image not padded to a 4 KiB sector is refused by the che
   CHECK(rig.sink.count("install") == 0u);
 }
 
+// OS-UPDPAD (new Community OS behaviour): a check whose only finding is the missing padding asks a question of its own, before anything is written; PAD starts the job, the copy is
+// checked, and question 2 (INSTALL) is about the copy. The original is never installed.
+namespace {
+
+FakeFirmwareSink::Script needs_pad() {
+  FakeFirmwareSink::Script s;
+  s.verdict = State::NeedsPad;
+  s.image = 4056u;
+  return s;
+}
+
+}  // namespace
+
+TEST_CASE("firmware pad: the offer is asked before anything is written, PAD runs the job, and INSTALL is then of the padded copy") {
+  Rig rig;
+  rig.sink.script("TRACKER_1.PTF", needs_pad());
+  rig.to_question_two();
+  NEED(rig.fw().phase == Phase::AskPad);
+  CHECK(rig.fw().asking());
+  CHECK(rig.keys() == "F1:PAD,F8:CANCEL");  // (the same order as the other questions: the answer, then CANCEL)
+  CHECK(rig.fw().image == 4056u);
+  CHECK(rig.sink.pads == 0u);
+  CHECK(rig.sink.installs == 0u);
+  const test::RowRead row = test::read_owner_row(rig.app->model(), rig.app->state());
+  CHECK(row.label[0] == "PAD");
+  CHECK(row.label[7] == "CANCEL");
+  CHECK(row.hot == 0x01u);  // the answer is inverted, as a question's
+  rig.passes(5);
+  CHECK(rig.fw().phase == Phase::AskPad);  // it waits (30 s)
+  rig.tap(Button::F1);
+  CHECK(rig.fw().phase == Phase::Padding);
+  CHECK(rig.sink.pads == 1u);
+  CHECK(rig.sink.installs == 0u);
+  CHECK(rig.keys() == "F8:CANCEL");
+  const test::RowRead going = test::read_owner_row(rig.app->model(), rig.app->state());
+  CHECK(going.label[0].empty());
+  CHECK(going.label[7] == "CANCEL");
+  rig.pass();
+  CHECK(rig.fw().phase == Phase::Padding);
+  CHECK(rig.fw().done > 0u);
+  rig.passes(FakeFirmwareSink::kDefaultSlices);
+  NEED(rig.fw().phase == Phase::AskInstall);
+  CHECK(std::string(rig.fw().copy) == "pad-copy.ptf");
+  CHECK(rig.keys() == "F1:INSTALL,F8:CANCEL");
+  CHECK(rig.sink.installs == 0u);  // the copy was made and checked; installing it is the next, separate answer
+  CHECK(rig.app->frames() >= 1u);
+  rig.tap(Button::F1);
+  CHECK(rig.fw().phase == Phase::Installing);
+  CHECK(rig.sink.installs == 1u);
+  CHECK(rig.sink.pads == 1u);
+}
+
+TEST_CASE("firmware pad: any other answer takes the offer back: no pad job, no install, the port is cancelled") {
+  const auto fresh = [](Rig& rig) {
+    rig.sink.script("TRACKER_1.PTF", needs_pad());
+    rig.to_question_two();
+    NEED(rig.fw().phase == Phase::AskPad);
+    rig.sink.calls.clear();
+  };
+  const auto back_in_list = [](Rig& rig, const char* what) {
+    CHECK_MESSAGE(rig.fw().phase == Phase::List, what);
+    CHECK_MESSAGE(rig.overlay() == OverlayId::FirmwareUpdate, what);
+    CHECK_MESSAGE(rig.sink.pads == 0u, what);
+    CHECK_MESSAGE(rig.sink.count("pad") == 0u, what);
+    CHECK_MESSAGE(rig.sink.installs == 0u, what);
+    CHECK_MESSAGE(rig.sink.count("install") == 0u, what);
+    CHECK_MESSAGE(rig.sink.count("cancel") >= 1u, what);
+  };
+  {
+    Rig rig;
+    fresh(rig);
+    rig.tap(Button::F3);
+    back_in_list(rig, "another key");
+  }
+  {
+    Rig rig;
+    fresh(rig);
+    rig.turn(1);
+    back_in_list(rig, "the encoder");
+  }
+  {
+    Rig rig;
+    fresh(rig);
+    rig.pad(0);
+    back_in_list(rig, "a pad");
+  }
+  {
+    Rig rig;
+    fresh(rig);
+    rig.tap(Button::F8);
+    back_in_list(rig, "F8");
+    CHECK(rig.fw().msg.empty());
+  }
+  {  // Shift + F1 is not PAD
+    Rig rig;
+    fresh(rig);
+    rig.press(Button::Shift);
+    rig.pass(1);
+    rig.tap(Button::F1);
+    back_in_list(rig, "Shift + F1");
+    rig.release(Button::Shift);
+    rig.pass(1);
+  }
+  {
+    Rig rig;
+    fresh(rig);
+    rig.passes(10, 2900);
+    CHECK(rig.fw().phase == Phase::AskPad);
+    rig.passes(2, 1000);
+    back_in_list(rig, "the 30 s");
+    CHECK(std::string(rig.fw().msg.c_str()) == "THE CHECK EXPIRED: CHECK AGAIN");
+    rig.tap(Button::F1);  // a late F1 asks question 1 again, it does not pad
+    CHECK(rig.fw().phase == Phase::AskUpdate);
+    CHECK(rig.sink.pads == 0u);
+  }
+  {
+    Rig rig;
+    fresh(rig);
+    rig.sink.lapse("card changed");
+    rig.pass();
+    back_in_list(rig, "the card going to a computer");
+    CHECK(std::string(rig.fw().msg.c_str()) == "CHECK AGAIN");
+  }
+  {  // the port refuses PAD: the dialog says why, nothing was started
+    Rig rig;
+    fresh(rig);
+    rig.sink.pad_refusal = Refusal::OnComputer;
+    rig.tap(Button::F1);
+    CHECK(rig.fw().phase == Phase::List);
+    CHECK(rig.fw().bad);
+    CHECK(rig.sink.pads == 0u);
+    CHECK(rig.sink.installs == 0u);
+    CHECK(rig.sink.count("cancel") >= 1u);
+  }
+  {  // BACK of the dialog (F8 in the list) and a card that goes away: cancel() on the way out of AskPad
+    Rig rig;
+    fresh(rig);
+    rig.tap(Button::F8);
+    rig.tap(Button::F8);
+    CHECK(rig.fw().phase == Phase::Closed);
+    CHECK(rig.sink.pads == 0u);
+    CHECK(rig.sink.count("cancel") >= 1u);
+  }
+}
+
+TEST_CASE("firmware pad: F8 CANCEL drops the job; a copy that fails says so on the list and arms nothing; a plain Checked has no copy line") {
+  {
+    Rig rig;
+    rig.sink.script("TRACKER_1.PTF", needs_pad());
+    rig.to_question_two();
+    NEED(rig.fw().phase == Phase::AskPad);
+    rig.tap(Button::F1);
+    NEED(rig.fw().phase == Phase::Padding);
+    rig.sink.calls.clear();
+    rig.tap(Button::F8);
+    CHECK(rig.fw().phase == Phase::List);
+    CHECK(rig.sink.count("cancel") == 1u);
+    CHECK(rig.sink.installs == 0u);
+    CHECK(rig.fw().msg.empty());
+    rig.passes(20);
+    CHECK(rig.fw().phase == Phase::List);  // the dropped job does not come back as a question
+  }
+  {
+    Rig rig;
+    FakeFirmwareSink::Script s = needs_pad();
+    s.pad_end = State::Failed;
+    s.pad_fault = "no space";
+    rig.sink.script("TRACKER_1.PTF", s);
+    rig.to_question_two();
+    NEED(rig.fw().phase == Phase::AskPad);
+    rig.tap(Button::F1);
+    rig.passes(FakeFirmwareSink::kDefaultSlices);
+    CHECK(rig.fw().phase == Phase::List);
+    CHECK(rig.fw().bad);
+    CHECK(std::string(rig.fw().msg.c_str()) == "PADDING FAILED: NO SPACE");
+    CHECK(rig.fw().msg.size() <= FirmwareView::kMsgChars);
+    CHECK(rig.sink.installs == 0u);
+    CHECK(rig.fw().copy[0] == '\0');
+    rig.tap(Button::F1);  // the next try starts with question 1 again
+    CHECK(rig.fw().phase == Phase::AskUpdate);
+  }
+  {  // a good plain check never names a copy, and a copy named earlier does not stay for another file
+    Rig rig;
+    rig.sink.script("TRACKER_1.PTF", needs_pad());
+    rig.to_question_two();
+    rig.tap(Button::F1);
+    rig.passes(FakeFirmwareSink::kDefaultSlices);
+    NEED(rig.fw().phase == Phase::AskInstall);
+    NEED(rig.fw().copy[0] != '\0');
+    rig.tap(Button::F8);
+    NEED(rig.fw().phase == Phase::List);
+    CHECK(rig.fw().copy[0] == '\0');
+    rig.turn(1);  // TRACKER_2 has no script: a plain Checked
+    rig.tap(Button::F1);
+    rig.tap(Button::F1);
+    rig.passes(FakeFirmwareSink::kDefaultSlices + 1);
+    NEED(rig.fw().phase == Phase::AskInstall);
+    CHECK(rig.fw().copy[0] == '\0');
+  }
+}
+
 TEST_CASE("firmware: question 2 is answered by F1 alone; INSTALL reaches the port exactly once and the hand-over shows DO NOT POWER OFF with no key acting") {
   Rig rig;
   rig.to_question_two();

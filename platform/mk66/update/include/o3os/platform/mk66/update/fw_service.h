@@ -8,7 +8,8 @@
 //                                   the first .ptf (the reset button's target), the upload state, the last result
 //   fw put <name> <bytes> <crc32>   receive a HEX file of exactly <bytes> bytes into Firmware/<name> (see below)
 //   fw rm <name>                    remove a temporary file or a dev-namespace image (path_guard.h removable_name), never the last .ptf
-//   fw arm <name> <crc32>           re-read and fully re-validate Firmware/<name>, check its CRC-32, print `armed <token>`
+//   fw arm <name> <crc32> [pad]     re-read and fully re-validate Firmware/<name>, check its CRC-32, print `armed <token>`; with `pad`, an image whose ONLY fault is NotPadded is
+//                                   padded into a copy first (below)
 //   fw update <token>               hand over to the bootloader (below)
 //
 // `fw put`. One `ERR <reason>` line and nothing else on a bad name, an existing target, no Firmware/ folder, size 0 or over 4 MiB, an
@@ -30,6 +31,12 @@
 // output drain (at most 40 ms), then drives the bootloader request pin low (FwHost::bootloader_request). If the chip is still running 5 s later the pin is
 // released, _fwinfo is deleted and `ERR bootloader did not take over` is printed (USB keeps being serviced meanwhile: the wait is a stream of the shell).
 //
+// The pad (OS-UPDPAD, docs/specs/OS-UPDPAD.md). An image whose only fault is NotPadded (every earlier check passed, the flash configuration field included) is not refused when the caller
+// asked for a pad: `fw arm <name> <crc> pad`, or, for the screen, the check ends in UiStatus::State::NeedsPad and ui_pad() is the answer to its question. The job (phase Padding) is
+// sliced like a check: it refuses (CopyExists) when the copy's name is taken, reserves the room (Firmware/_o3up.tmp), copies the original up to its EOF record (CRC-ing what it reads:
+// the original must still be the file the check saw), writes the padding records (hex_pad.h), copies the tail, then the upload's read-back validates the copy from the start (sector_end included), it is renamed to `pad-<stem>.ptf` and the normal arming check
+// reads it once more. What is armed is the copy; the original is only read. A failure or a cancel before the rename arms nothing and leaves no .ptf.
+//
 // The client API (OS-FWCONFIG), for a screen that has no shell: ui_check_begin(name) is `fw arm` without a CRC to compare and without a token, ui_install() is `fw update`
 // for the file that check passed, and ui_slice() runs the slices of either (2 KiB of the file a call, the buffer and the validator the console uses). There is ONE implementation of
 // the check (verify_slice), of the hand-over (begin_handover) and of the wait for the bootloader (handover_check): they take the shell as a pointer and print only when they have
@@ -48,6 +55,7 @@
 #include <o3os/platform/mk66/update/crc32.h>
 #include <o3os/platform/mk66/update/fault.h>
 #include <o3os/platform/mk66/update/firmware_store.h>
+#include <o3os/platform/mk66/update/hex_pad.h>
 #include <o3os/platform/mk66/update/hex_validator.h>
 #include <o3os/usb/diag_shell.h>
 
@@ -83,7 +91,7 @@ class FwHost {
   FwHost& operator=(const FwHost&) = delete;
 };
 
-enum class FwPhase : std::uint8_t { Idle, Receiving, Discarding, Finalizing, Verifying, Arming, Rechecking, Handover, Done };
+enum class FwPhase : std::uint8_t { Idle, Receiving, Discarding, Finalizing, Verifying, Arming, Rechecking, Handover, Done, Padding };
 
 // The update path holds the card from `fw put` to the end of `fw update`'s hand-over (OS-007o); Idle and Done do not. One of the claims of the card (storage/card_claims.h).
 constexpr bool fw_phase_holds_card(FwPhase p) noexcept { return p != FwPhase::Idle && p != FwPhase::Done; }
@@ -100,14 +108,15 @@ struct FwLast {
 
 // What a client operation is doing (ui_slice()).
 struct UiStatus {
-  enum class State : std::uint8_t { Idle, Running, Checked, Failed, DidNotStart };
+  enum class State : std::uint8_t { Idle, Running, Checked, Failed, DidNotStart, NeedsPad };  // NeedsPad: only NotPadded is wrong with the file; ui_pad() may follow
   State state = State::Idle;
   bool installing = false;      // the job is ui_install()'s
   Fault fault = Fault::Ok;      // Failed
   std::uint32_t offset = 0;     // Failed: the byte of the file where the fault was found
   std::uint32_t done = 0;       // Running: bytes of the file read
   std::uint32_t total = 0;      // Running: the file's size
-  std::uint32_t image = 0;      // Checked: the image's length
+  const char* copy = nullptr;   // Checked after a pad: the copy's name (the service's own buffer: valid until the next operation)
+  std::uint32_t image = 0;      // Checked, NeedsPad: the image's length
   std::uint32_t crc = 0;        // Checked: the CRC-32 of the whole file
 };
 
@@ -138,6 +147,10 @@ class FwService {
   // Starts the install of the file the last check passed: Busy (a re-check, the hand-over or a console job runs: nothing is touched), NotArmed, Expired, OnHost, CardBusy, the write
   // path's reason, Readback (the file changed). A refusal other than Busy uses the check up (one use). Ok: ui_slice() runs the re-check and the wait.
   Fault ui_install() noexcept;
+  // Starts the pad job for the file the last check found NotPadded-only (state NeedsPad): Busy, NotArmed (no offer: none made, cancelled, lapsed, the card went to a computer), Expired, OnHost.
+  // The offer is used up, whatever the answer. Ok: ui_slice() runs the job (its first slice touches the card: CardBusy, NoSpace, WriteProtected ... arrive as Failed) and ends in Checked (the
+  // copy is checked, ui_install() installs it) or Failed.
+  Fault ui_pad() noexcept;
   // Drops a check in progress, or a result waiting for ui_install(). An install that has reached the hand-over cannot be dropped. The screen calls it on EVERY way out (a check
   // that is left running holds the card; a passed one that is left waiting keeps the HIL injection refused until it lapses).
   void ui_cancel() noexcept;
@@ -147,7 +160,7 @@ class FwService {
   bool armed() const noexcept { return armed_; }
   // The HIL console injects no key while this is true: a console token is armed, a passed client check waits for its INSTALL question (only a pressed key answers it), or any
   // put / arm / check / hand-over is running (the token is bound to what the unit shows, and a stray key must not be what cancels or confirms anything).
-  bool blocks_injection() const noexcept { return armed_ || ui_armed_ || phase_ != FwPhase::Idle; }
+  bool blocks_injection() const noexcept { return armed_ || ui_armed_ || pad_offer_ || phase_ != FwPhase::Idle; }
 
  private:
   static std::size_t raw_thunk(usb::diag::Shell& sh, const std::uint8_t* bytes, std::size_t n, void* self) noexcept;
@@ -167,6 +180,12 @@ class FwService {
   bool begin_handover(usb::diag::Shell* sh) noexcept;
   Fault begin_check(const char* name) noexcept;
   Fault begin_recheck() noexcept;
+  Fault begin_readback() noexcept;
+  // The pad job (OS-UPDPAD): the offer at the end of a check, one slice of the copy, and the step from the copy's read-back to its arming. `sh` null: a client operation.
+  bool offer_pad(usb::diag::Shell* sh) noexcept;
+  Fault pad_begin() noexcept;
+  bool pad_slice(usb::diag::Shell* sh) noexcept;
+  bool pad_to_arm(usb::diag::Shell* sh) noexcept;
   void ui_end(UiStatus::State state, Fault f, std::uint32_t offset) noexcept;
   void ui_expire() noexcept;
   void finish_ok(usb::diag::Shell& sh) noexcept;
@@ -192,6 +211,21 @@ class FwService {
   std::uint32_t crc_seen_ = 0;
   std::uint32_t read_total_ = 0;
   std::uint32_t read_size_ = 0;
+
+  // the pad job. pad_ is true from the start of the job until its copy is armed or it fails (the phases Padding, then Verifying and Arming on the copy); pad_cmd_ is `fw arm ... pad`;
+  // pad_offer_ is a client check that ended NotPadded-only and waits for ui_pad() (armed_name_, armed_size_, armed_at_, armed_serial_ and armed_sessions_ describe the original then).
+  // Main loop only. last_colon_ is the offset in the file of the last ':' a check read: the EOF record, where the padding goes.
+  enum class PadStage : std::uint8_t { Begin, Head, Zeros, Tail };
+  bool pad_ = false;
+  bool pad_cmd_ = false;
+  bool pad_offer_ = false;
+  PadStage pad_stage_ = PadStage::Begin;
+  HexPadWriter pad_text_;
+  Crc32 pad_crc_;      // of the copy as written
+  Crc32 pad_src_crc_;  // of the original as the job reads it: must equal armed_crc_, the check's CRC of it
+  std::uint32_t last_colon_ = 0;
+  std::uint32_t pad_image_ = 0;    // the original's image length
+  std::uint32_t pad_written_ = 0;  // bytes appended to the copy
 
   // arm
   bool armed_ = false;

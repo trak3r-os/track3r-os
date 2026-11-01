@@ -10,6 +10,7 @@
 #include "mk66_update_support.h"
 
 #include <o3os/platform/mk66/update/crc32.h>
+#include <o3os/platform/mk66/update/hex_pad.h>
 
 #include <cstdint>
 #include <cstring>
@@ -341,4 +342,75 @@ TEST_CASE("hex validator: nothing the stream can contain is undefined (every byt
   CHECK(validate(record(0, 0, data) + "\n").fault == Fault::HexNoEof);
   std::vector<std::uint8_t> huge(300, 1);
   (void)validate(record(0, 0, huge) + "\n");
+}
+
+// ---- the padder (OS-UPDPAD) --------------------------------------------------------------------------------------------------------
+namespace {
+
+std::string pad_text_of(std::uint32_t length) {
+  up::HexPadWriter w;
+  w.begin(length);
+  std::string text;
+  std::uint8_t line[up::kPadLineMax + 8];
+  for (std::size_t n = w.next(line); n != 0u; n = w.next(line)) {
+    CHECK(n <= up::kPadLineMax);
+    text.append(reinterpret_cast<const char*>(line), n);
+  }
+  return text;
+}
+
+}  // namespace
+
+TEST_CASE("hex pad: the exact HEX text for 20 bytes (one full record and one short), and the boundary cases") {
+  // 4076 bytes of image: 20 zero bytes to 4096. The extended linear address record for 0x0000, a record of 16 at 0x0FEC, a record of 4 at 0x0FFC (checksums by hand: 6 -> FA, 0x10B -> F5, 0x10F -> F1).
+  CHECK(pad_text_of(4076) == ":020000040000FA\n"
+                             ":100FEC0000000000000000000000000000000000F5\n"
+                             ":040FFC0000000000F1\n");
+  // The upper 16 bits of the image's end are the base record's payload: 0x10FFF is one byte short of 0x11000.
+  CHECK(pad_text_of(0x10FFF) == ":020000040001F9\n:010FFF0000F1\n");
+  // Exactly on a boundary: nothing at all. One byte short of one: one byte. One past: 4095 bytes.
+  CHECK(up::HexPadWriter::pad_bytes(4096) == 0u);
+  CHECK(up::HexPadWriter::text_bytes(4096) == 0u);
+  CHECK(pad_text_of(4096).empty());
+  CHECK(pad_text_of(2 * 4096).empty());
+  CHECK(up::HexPadWriter::pad_bytes(4095) == 1u);
+  CHECK(up::HexPadWriter::pad_bytes(4097) == 4095u);
+  CHECK(pad_text_of(4095) == ":020000040000FA\n:010FFF0000F1\n");
+  const std::string most = pad_text_of(4097);  // 4095 bytes: 255 records of 16 and one of 15
+  CHECK(most.size() == up::HexPadWriter::text_bytes(4097));
+  CHECK(most.compare(0, 16, ":020000040000FA\n") == 0);
+  CHECK(most.compare(16, 9, ":10100100") == 0);  // the first data record: 16 bytes at 0x1001
+  // A writer that is finished stays finished, and begin() starts over.
+  up::HexPadWriter w;
+  w.begin(4076);
+  std::uint8_t line[up::kPadLineMax];
+  while (w.next(line) != 0u) {
+  }
+  CHECK(w.next(line) == 0u);
+  w.begin(4095);
+  CHECK(w.next(line) == 16u);
+}
+
+TEST_CASE("hex pad: text_bytes is the length of the text, for every length near a boundary and a 64 KiB line, and the padded file validates") {
+  for (std::uint32_t length = 1; length <= 3 * 4096u; length += (length < 40u || length > 3 * 4096u - 40u || (length > 4096u - 40u && length < 4096u + 40u)) ? 1u : 37u) {
+    CAPTURE(length);
+    CHECK(pad_text_of(length).size() == up::HexPadWriter::text_bytes(length));
+  }
+  for (const std::uint32_t length : {0xFFFFu, 0x10000u - 4096u + 1u, 0x10001u, 0x10FFFu, 0xFF001u, 0xFFFFFu}) {
+    CAPTURE(length);
+    CHECK(pad_text_of(length).size() == up::HexPadWriter::text_bytes(length));
+    CHECK(up::HexPadWriter::pad_bytes(length) == ((length + 4095u) & ~4095u) - length);
+  }
+  // The padded file validates, ends on the boundary and has the length of the padded image, across a 64 KiB line too; it is the original's records, the writer's lines, the EOF record.
+  for (const std::size_t length : {std::size_t{4095}, std::size_t{4097}, std::size_t{4096 + 0x100}, std::size_t{0x10000 + 100}, std::size_t{0x20000 - 1}, std::size_t{0x10000 - 1}}) {
+    CAPTURE(length);
+    const std::vector<std::uint8_t> raw = good_image(length - 0x410, false);
+    CHECK(validate(to_hex(raw)).fault == Fault::NotPadded);
+    const std::string text = expected_padded_hex(raw);
+    const Verdict v = validate(text);
+    CHECK(v.ok);
+    CHECK(v.length == (length + 4095u) / 4096u * 4096u);
+    CHECK(to_hex(raw, "\n", 16, false) + pad_text_of(static_cast<std::uint32_t>(length)) + record(1, 0, {}) + "\n" == text);
+    CHECK(validate(text, 1).ok);
+  }
 }

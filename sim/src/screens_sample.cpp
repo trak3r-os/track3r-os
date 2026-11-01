@@ -521,10 +521,19 @@ void draw_config_fw_paged(ui::Renderer& r, unsigned) {
   s.show_firmware_paged();
   app::render_scene(s.model, s.view, r);
 }
+// OS-UPDPAD: the question of an image that only lacks its padding, the copy being written (the bar), and question 2 about the copy (its name on the second line).
+void draw_config_fw_pad(ui::Renderer& r, unsigned) { draw_config_fw(r, app::FirmwareView::Phase::AskPad, 0); }
+void draw_config_fw_padding(ui::Renderer& r, unsigned) { draw_config_fw(r, app::FirmwareView::Phase::Padding, 3, 400); }
+void draw_config_fw_padded(ui::Renderer& r, unsigned) {
+  ConfigScene& s = config_scene();
+  s.show_firmware(app::FirmwareView::Phase::AskInstall, 0);
+  std::strncpy(s.view.firmware.copy, "pad-TRACKER_1.ptf", sizeof s.view.firmware.copy - 1);
+  app::render_scene(s.model, s.view, r);
+}
 
 }  // namespace
 
-const ScreenState kConfigStates[17] = {
+const ScreenState kConfigStates[20] = {
     {"midi", true, 1, kBudgetWords, draw_config_midi},
     {"display", true, 1, kBudgetWords, draw_config_display},
     {"sd", true, 1, kBudgetWords, draw_config_sd},
@@ -542,6 +551,9 @@ const ScreenState kConfigStates[17] = {
     {"fw_installing", true, 1, kBudgetWords, draw_config_fw_installing},
     {"fw_failed", true, 1, kBudgetWords, draw_config_fw_failed},
     {"fw_paged", true, 1, kBudgetWords, draw_config_fw_paged},
+    {"fw_pad", true, 1, kBudgetWords, draw_config_fw_pad},
+    {"fw_padding", true, 1, kBudgetWords, draw_config_fw_padding},
+    {"fw_padded", true, 1, kBudgetWords, draw_config_fw_padded},
 };
 
 namespace {

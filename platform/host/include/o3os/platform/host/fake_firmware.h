@@ -31,7 +31,7 @@ class FakeFirmwareSink final : public hal::firmware::FirmwareSink {
 
   struct Script {
     unsigned slices = kDefaultSlices;   // Running polls before the verdict
-    State verdict = State::Checked;     // Checked or Failed
+    State verdict = State::Checked;     // Checked, Failed, or NeedsPad (a valid image that is not padded: `image` is its length; pad() may follow)
     std::uint32_t image = 0x3F2A0u;     // Checked
     std::uint32_t crc = 0x5EA1B0C4u;    // Checked
     std::uint32_t offset = 0;           // Failed: the byte of the fault
@@ -40,6 +40,10 @@ class FakeFirmwareSink final : public hal::firmware::FirmwareSink {
     State install_end = State::Idle;    // after install(): Failed or DidNotStart after `install_slices` polls; Idle: Running for good
     unsigned install_slices = kDefaultSlices;
     const char* install_fault = "i/o error";
+    State pad_end = State::Checked;     // after pad(): Checked (the copy `copy` was made and checked) or Failed, after `pad_slices` polls
+    unsigned pad_slices = kDefaultSlices;
+    const char* pad_fault = "no space";
+    const char* copy = "pad-copy.ptf";
   };
 
   // ---- the fixture
@@ -47,12 +51,13 @@ class FakeFirmwareSink final : public hal::firmware::FirmwareSink {
   Refusal list_refusal = Refusal::None;
   Refusal check_refusal = Refusal::None;
   Refusal install_refusal = Refusal::None;
+  Refusal pad_refusal = Refusal::None;
   void add(const std::string& name, std::uint32_t size) { files_.push_back(Item{name, size}); }
   void clear_files() { files_.clear(); }
   void script(const std::string& name, const Script& s) { scripts_.push_back(Named{name, s}); }
   // The check that waits for install() has lapsed (the 30 s, or the card went to a computer): the next poll_check() says Failed.
   void lapse(const char* fault = "check expired, check again") {
-    if (status_.state == State::Checked) {
+    if (status_.state == State::Checked || status_.state == State::NeedsPad) {
       status_ = hal::firmware::CheckStatus{};
       status_.state = State::Failed;
       status_.fault = fault;
@@ -63,6 +68,7 @@ class FakeFirmwareSink final : public hal::firmware::FirmwareSink {
   // ---- what was asked
   std::vector<std::string> calls;       // "list_begin", "begin_check NAME", "cancel", "install", ...
   unsigned installs = 0;                // install() calls that were taken
+  unsigned pads = 0;                    // pad() calls that were taken
   std::string last_name;                // the file of the last begin_check
   unsigned count(const std::string& call) const {
     unsigned n = 0;
@@ -122,6 +128,7 @@ class FakeFirmwareSink final : public hal::firmware::FirmwareSink {
     total_ = found->size;
     polls_ = 0;
     installing_ = false;
+    padding_ = false;
     checked_ = false;
     status_ = hal::firmware::CheckStatus{};
     status_.state = State::Running;
@@ -132,13 +139,24 @@ class FakeFirmwareSink final : public hal::firmware::FirmwareSink {
   hal::firmware::CheckStatus poll_check() noexcept override {
     if (status_.state == State::Running) {
       ++polls_;
-      if (!installing_ && polls_ >= script_.slices) {
+      if (padding_ && polls_ >= script_.pad_slices) {
+        status_ = hal::firmware::CheckStatus{};
+        status_.state = script_.pad_end;
+        if (script_.pad_end == State::Checked) {
+          status_.image = script_.image + 1u;  // (any length: the copy is another file)
+          status_.crc = script_.crc ^ 1u;
+          status_.copy = script_.copy;
+          checked_ = true;
+        } else {
+          status_.fault = script_.pad_fault;
+        }
+      } else if (!installing_ && !padding_ && polls_ >= script_.slices) {
         finish_check();
       } else if (installing_ && script_.install_end != State::Idle && polls_ >= script_.install_slices) {
         status_.state = script_.install_end;
         status_.fault = script_.install_end == State::Failed ? script_.install_fault : nullptr;
       } else {
-        const unsigned of = installing_ ? script_.install_slices : script_.slices;
+        const unsigned of = installing_ ? script_.install_slices : (padding_ ? script_.pad_slices : script_.slices);
         status_.done = static_cast<std::uint32_t>((static_cast<std::uint64_t>(total_) * (polls_ < of ? polls_ : of)) / (of == 0 ? 1 : of));
       }
     }
@@ -150,7 +168,30 @@ class FakeFirmwareSink final : public hal::firmware::FirmwareSink {
     if (!(installing_ && status_.state == State::Running)) {  // an install that has asked the bootloader cannot be taken back
       status_ = hal::firmware::CheckStatus{};
       checked_ = false;
+      offered_ = false;
+      padding_ = false;
     }
+  }
+
+  Refusal pad() noexcept override {
+    calls.push_back("pad");
+    if (status_.state == State::Running) {  // a check, a pad or an install runs: Busy, and the status stays the job's
+      return Refusal::Busy;
+    }
+    if (pad_refusal != Refusal::None) {
+      return pad_refusal;
+    }
+    if (!offered_ || status_.state != State::NeedsPad) {
+      return Refusal::NotChecked;
+    }
+    ++pads;
+    padding_ = true;
+    offered_ = false;
+    polls_ = 0;
+    status_ = hal::firmware::CheckStatus{};
+    status_.state = State::Running;
+    status_.total = total_;
+    return Refusal::None;
   }
 
   Refusal install() noexcept override {
@@ -188,10 +229,14 @@ class FakeFirmwareSink final : public hal::firmware::FirmwareSink {
   void finish_check() {
     status_ = hal::firmware::CheckStatus{};
     status_.state = script_.verdict;
-    if (script_.verdict == State::Checked) {
+    if (script_.verdict == State::Checked || script_.verdict == State::NeedsPad) {
       status_.image = script_.image;
-      status_.crc = script_.crc;
-      checked_ = true;
+      if (script_.verdict == State::Checked) {
+        status_.crc = script_.crc;
+        checked_ = true;
+      } else {
+        offered_ = true;
+      }
     } else {
       status_.offset = script_.offset;
       status_.offset_known = script_.offset_known;
@@ -207,6 +252,8 @@ class FakeFirmwareSink final : public hal::firmware::FirmwareSink {
   std::uint32_t total_ = 0;
   unsigned polls_ = 0;
   bool installing_ = false;
+  bool padding_ = false;
+  bool offered_ = false;
   bool checked_ = false;
 };
 

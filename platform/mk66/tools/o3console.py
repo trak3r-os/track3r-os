@@ -22,8 +22,8 @@ for again, up to --shot-retries times. Exit status: 0 written, 2 no prompt or th
 
 Firmware update over USB (OS-006c; the device side is `fw` in platform/mk66/README.md, "Firmware update over USB"):
 
-    o3console.py --put FILE.ptf [--name o3os-0.7.ptf] [--expect-volume ABCD-1234]
-    o3console.py --update o3os-0.7.ptf --crc 1A2B3C4D --yes-update [--expect-volume ABCD-1234] [--expect-version TEXT]
+    o3console.py --put FILE.ptf [--pad] [--name o3os-0.7.ptf] [--expect-volume ABCD-1234]
+    o3console.py --update o3os-0.7.ptf --crc 1A2B3C4D --yes-update [--pad] [--expect-volume ABCD-1234] [--expect-version TEXT]
 
 `--put` first runs `check_image.py check` (this directory) on the file and refuses to send one that fails it, then sends `fw put <name> <bytes> <crc32>`
 and the file in windows of 4096 bytes past the last acknowledgement the unit printed, and prints the unit's reply (`ok <name> <bytes> <crc> image <length>`,
@@ -31,6 +31,11 @@ or `ERR <reason> at <offset>`). `--update` runs `fw arm` and `fw update <token>`
 and come back (up to --reboot-timeout seconds), runs `version` and prints it; `--expect-version` makes a version that does not contain the text a failure.
 The name (the file's own, `--name`, or `--update`'s) is at most 30 characters with `.ptf` (OS-BUG-FWNAMELEN: with a longer one the SD bootloader may flash the first .ptf of Firmware/
 instead; both commands refuse it with exit status 1 before the port is opened).
+Padding (OS-UPDPAD): the SD bootloader leaves a short final 4 KiB flash sector unwritten, so the unit and `check_image.py` refuse an image whose end is not on a 4096-byte boundary
+(a build of the older firmware, or a foreign one). `--put FILE --pad` pads on the host: if the file fails the check, the tool writes a padded copy (the same zeros, as Intel HEX data records
+before the EOF record, that the unit's own pad writes), runs the whole check on the copy, and sends it as `pad-<first 22 characters of the name>.ptf` (or `--name`) when the copy passes: a
+file that has any other fault (the flash configuration bytes included) is refused as before. A file that already passes is sent as it is. `--update NAME --crc C --yes-update --pad` sends
+`fw arm NAME C pad`: the unit pads a copy of NAME on its card when only the padding is missing (the CRC is the original's), arms the copy and hands it over; the original stays on the card.
 It needs `--yes-update` because it restarts the unit. `--expect-volume` is an optional check: it refuses both when the card's volume serial (`fw` reports it) is a different one.
 Since OS-FWANY (maintainer decision 2026-10-13) and OS-ANYCARD (2026-10-17) the unit needs no marker file on the card and the tool needs no volume: any writable FAT card with a
 Firmware/ folder takes `fw put`, whatever card is in the unit. The first install of an image that has `fw` goes the old way, by card.
@@ -138,6 +143,7 @@ WINDOW = 4096  # bytes the host may have outstanding past the last `+N` acknowle
 # OS-BUG-FWNAMELEN: the longest file name an update may be armed for, ".ptf" included (hal/firmware.h kUpdateNameMax). OBSERVED on the unit 2026-10-31: with a 33-character name the SD bootloader
 # flashed the FIRST .ptf of Firmware/ with no error; 21, 29 and 30 installed. The unit stores names up to 52, but this tool never puts or arms one over 30.
 UPDATE_NAME_MAX = 30
+FLASH_SECTOR = 4096  # the unit's flash sector: an image ends on a multiple of it (OS-GATE-BOOTCRASH)
 NAME_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z._-]{0,%d}\.ptf$" % (UPDATE_NAME_MAX - 4 - 1), re.IGNORECASE | re.ASCII)
 EXPECT_SP = "0x20030000"
 RAMFUNC_L = "0x1FFF0000:0xC000"
@@ -158,6 +164,87 @@ def name_problem(name):
     if not valid_image_name(name):
         return "%r is not a name the unit accepts (<1..26 of 0-9A-Za-z._-, first alphanumeric>.ptf, no '..', at most %d characters in all): give --name" % (name, UPDATE_NAME_MAX)
     return None
+
+
+PAD_STEM_MAX = 22  # hex_pad / fw_service.cpp kPadStemCut: "pad-" + 22 + ".ptf" = 30 characters
+
+
+def pad_name(name):
+    """The copy's name, as the unit makes it: "pad-" + the stem cut to 22 characters (no trailing dot) + ".ptf"."""
+    stem = name[:-4] if name.lower().endswith(".ptf") else name
+    stem = stem[:PAD_STEM_MAX]
+    while len(stem) > 1 and stem.endswith("."):
+        stem = stem[:-1]
+    return "pad-" + stem + ".ptf"
+
+
+def hex_checksum(body):
+    return (-sum(body)) & 0xFF
+
+
+def hex_line(count, offset, rtype, data=b""):
+    body = bytes([count, offset >> 8 & 0xFF, offset & 0xFF, rtype]) + bytes(data)
+    return (":" + (body + bytes([hex_checksum(body)])).hex().upper() + "\n").encode("ascii")
+
+
+def pad_hex(data):
+    """The padded copy of an Intel HEX file whose image ends off a 4096-byte boundary (platform/mk66/update/src/hex_pad.cpp, byte for byte): the text up to its EOF record, one extended
+    linear address record for the image's end, zero data records of 16 bytes (the last shorter) to the next boundary with LF line ends, then the file's own EOF record. None when the file
+    is not HEX this function understands (a record that is no record, no EOF at the end, data from an address that is not 0) or needs no pad."""
+    text = data.decode("ascii", "replace")
+    base = 0
+    end = 0
+    lines = text.splitlines()
+    for number, line in enumerate(lines):
+        if not re.fullmatch(r":[0-9A-Fa-f]{10,}", line) or len(line) % 2 == 0:
+            return None
+        raw = bytes.fromhex(line[1:])
+        count, offset, rtype = raw[0], raw[1] << 8 | raw[2], raw[3]
+        if len(raw) != count + 5 or sum(raw) & 0xFF:
+            return None
+        if rtype == 0:
+            end = max(end, base + offset + count)
+        elif rtype == 4 and count == 2:
+            base = (raw[4] << 8 | raw[5]) << 16
+        elif rtype == 1:
+            if number != len(lines) - 1:
+                return None
+        elif rtype != 5:
+            return None
+    if not lines or not re.fullmatch(r":00000001FF", lines[-1]) or end == 0 or end % FLASH_SECTOR == 0:
+        return None
+    eof = data.rfind(b":")
+    pad = (-end) % FLASH_SECTOR
+    out = bytearray(data[:eof])
+    out += hex_line(2, 0, 4, bytes([end >> 24 & 0xFF, end >> 16 & 0xFF]))
+    at = end
+    while at < end + pad:
+        n = min(16, end + pad - at)
+        out += hex_line(n, at & 0xFFFF, 0, bytes(n))
+        at += n
+    return bytes(out) + data[eof:]
+
+
+def padded_for_put(path, data, name, explicit, out):
+    """--put --pad: (data, name, note) to send, or None when nothing may be sent (the reason is printed). A file that passes the check goes as it is; one that fails it gets the padded copy
+    checked in full, and goes only if that passes."""
+    import io
+
+    if local_check(path, io.StringIO()):
+        return data, name, "the file passes the check: sent as it is, nothing to pad"
+    padded = pad_hex(data)
+    if padded is None:
+        local_check(path, out)
+        print("o3console: --pad: %s is not a HEX file that only lacks its padding" % path, file=out)
+        return None
+    with tempfile.TemporaryDirectory() as tmp:
+        copy = os.path.join(tmp, pad_name(os.path.basename(path)))
+        with open(copy, "wb") as f:
+            f.write(padded)
+        if not local_check(copy, out):
+            print("o3console: --pad: the file has a fault besides the missing padding: not sent", file=out)
+            return None
+    return padded, name if explicit else pad_name(name), "padded copy: %d bytes (the file has %d)" % (len(padded), len(data))
 
 
 def local_check(path, out):
@@ -309,7 +396,7 @@ def update_unit(fd, port, name, crc, args, out, find=None, opener=None, reboot_t
     status = check_volume(fd, args.expect_volume, timeout, out)
     if status:
         return status
-    reply, ok = exchange(fd, "fw arm %s %08X" % (name, crc), max(timeout, 30.0))
+    reply, ok = exchange(fd, "fw arm %s %08X%s" % (name, crc, " pad" if getattr(args, "pad", False) else ""), max(timeout, 30.0))
     match = re.search(r"armed ([0-9A-F]{8})", reply)
     if not ok or not match:
         print(reply, file=out)
@@ -508,8 +595,12 @@ class FakeUnit(threading.Thread):
             self.say("ready\n")
             self.prompt_pending = False
             return "raw"
-        elif args[0] == "arm" and len(args) == 3:
+        elif args[0] == "arm" and (len(args) == 3 or (len(args) == 4 and args[3] == "pad")):
             self.arm_name = args[1]
+            self.arm_args = list(args)
+            if len(args) == 4:
+                self.arm_name = pad_name(args[1])
+                self.say("padded %s 0 00000000 image 0\n" % self.arm_name)
             self.say("armed 1A2B3C4D\n")
         elif args[0] == "update" and len(args) == 2 and args[1] == "1A2B3C4D":
             self.say("update: handing over to the bootloader (%s)\n" % self.arm_name)
@@ -825,6 +916,86 @@ def self_test_fw(problems):
                 sys.stderr.seek(0)
         finally:
             sys.stderr = saved_err
+        # OS-UPDPAD: the host-side pad. The name, the HEX text byte for byte (the unit's own pad writes the same: hex_pad.cpp, its host test has the same literal), the whole check of the copy
+        for stem, want in (("o3os-1.0.1.ptf", "pad-o3os-1.0.1.ptf"), ("A" * 26 + ".ptf", "pad-" + "A" * 22 + ".ptf"), ("a" * 21 + "..ptf", "pad-" + "a" * 21 + ".ptf")):
+            if pad_name(stem) != want or not valid_image_name(pad_name(stem)) or len(pad_name(stem)) > UPDATE_NAME_MAX:
+                problems.append("pad_name(%r) = %r, wanted %r" % (stem, pad_name(stem), want))
+        spec = importlib.util.spec_from_file_location("check_image_pad", os.path.join(os.path.dirname(os.path.abspath(__file__)), "check_image.py"))
+        ci = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ci)
+        raw = ci.make_hex({0: bytes(range(256)) * 15 + bytes(236)}).encode("ascii")  # 4076 bytes: 20 bytes to the boundary
+        want = (raw[:raw.rfind(b":")] + b":020000040000FA\n:100FEC00" + b"00" * 16 + b"F5\n:040FFC0000000000F1\n" + b":00000001FF\n")
+        if pad_hex(raw) != want:
+            problems.append("pad_hex of 4076 bytes: %r" % (pad_hex(raw) or b"")[-120:])
+        for exact in (4096, 8192):
+            if pad_hex(ci.make_hex({0: bytes(exact)}).encode("ascii")) is not None:
+                problems.append("pad_hex padded an image of %d bytes" % exact)
+        over = ci.make_hex({0: bytes(0x10FFF)}).encode("ascii")  # past a 64 KiB line: the base record of the pad is 0001
+        if not (pad_hex(over) or b"").endswith(b":020000040001F9\n:010FFF0000F1\n:00000001FF\n"):
+            problems.append("pad_hex of 0x10FFF bytes: %r" % (pad_hex(over) or b"")[-80:])
+        for broken in (raw[:-12], raw.replace(b":100FEC", b":100FED") if b":100FEC" in raw else raw + b"x", b"", b"hello\n"):
+            if pad_hex(broken) is not None:
+                problems.append("pad_hex accepted %r" % broken[-30:])
+        # an unpadded good image: --pad makes the copy, the whole check passes it; one with a bad flash configuration, or already good, is not touched
+        segments = ci.good_segments()
+        code = segments[ci.CONFIG_ADDRESS + ci.CONFIG_SIZE]
+        segments[ci.CONFIG_ADDRESS + ci.CONFIG_SIZE] = (code * 20)[:2 * ci.FLASH_SECTOR - ci.CONFIG_ADDRESS - ci.CONFIG_SIZE - 40]
+        unpadded_file = os.path.join(tmp, "o3os-1.0.1.ptf")
+        unpadded = ci.make_hex(segments).encode("ascii")
+        with open(unpadded_file, "wb") as f:
+            f.write(unpadded)
+        shown = io.StringIO()
+        if local_check(unpadded_file, shown) or "sector" not in shown.getvalue():
+            problems.append("check_image accepted an unpadded image or did not name the sector: %s" % shown.getvalue())
+        shown = io.StringIO()
+        chosen = padded_for_put(unpadded_file, unpadded, "o3os-1.0.1.ptf", False, shown)
+        if chosen is None or chosen[1] != "pad-o3os-1.0.1.ptf" or len(chosen[0]) <= len(unpadded) or not chosen[0].startswith(unpadded[:unpadded.rfind(b":")]):
+            problems.append("--pad of an unpadded image: %r %s" % (chosen and chosen[1:], shown.getvalue()))
+        else:
+            if chosen[0].count(b"\n") <= unpadded.count(b"\n") or not chosen[0].endswith(b":00000001FF\n"):
+                problems.append("--pad: the copy has no padding records or no EOF")
+        explicit = padded_for_put(unpadded_file, unpadded, "mine.ptf", True, io.StringIO())
+        if explicit is None or explicit[1] != "mine.ptf":
+            problems.append("--pad with --name changed the name")
+        if padded_for_put(good, data, name, False, io.StringIO())[:2] != (data, name):
+            problems.append("--pad changed a file that already passes")
+        shown = io.StringIO()
+        locked = bytearray(unpadded)
+        locked_segments = ci.good_segments()
+        locked_segments[ci.CONFIG_ADDRESS] = bytes.fromhex("ffffffffffffffffffffffffdcf9ffff")
+        locked_segments[ci.CONFIG_ADDRESS + ci.CONFIG_SIZE] = segments[ci.CONFIG_ADDRESS + ci.CONFIG_SIZE]
+        bad_unpadded = os.path.join(tmp, "o3os-1.0.2.ptf")
+        locked_hex = ci.make_hex(locked_segments).encode("ascii")
+        with open(bad_unpadded, "wb") as f:
+            f.write(locked_hex)
+        if padded_for_put(bad_unpadded, locked_hex, "o3os-1.0.2.ptf", False, shown) is not None or "besides the missing padding" not in shown.getvalue():
+            problems.append("--pad of an image with a bad flash configuration was not refused: %s" % shown.getvalue())
+        # the unit's side: --update --pad sends the word, without it the arm line is as before
+        master, slave, path9 = pty_pair()
+        unit9 = FakeUnit(master, stay=True)
+        unit9.start()
+        fd9 = open_port(path9)
+        wake(fd9, 2.0)
+        out9 = io.StringIO()
+        status9 = update_unit(fd9, path9, name, 0x12345678, Namespace(pad=True), out9, find=lambda: [], reboot_timeout=1.0, timeout=2.0)
+        if status9 != 7 or "fw arm %s 12345678 pad" % name not in unit9.seen or "padded %s" % pad_name(name) not in out9.getvalue():
+            problems.append("update --pad: status %d, the unit saw %r: %s" % (status9, unit9.seen, out9.getvalue()))
+        unit9.stop = True
+        # --pad goes with --put or --update; its put of a bad image reaches no port
+        saved_err, sys.stderr = sys.stderr, io.StringIO()
+        try:
+            if firmware_main(_ap.Namespace(**dict(base, put=None, update=None, pad=True)), "/nonexistent/o3-selftest") != 1 or "--pad goes with" not in sys.stderr.getvalue():
+                problems.append("--pad alone was not a usage error: %s" % sys.stderr.getvalue())
+            sys.stderr.truncate(0)
+            sys.stderr.seek(0)
+            rc = firmware_main(_ap.Namespace(**dict(base, put=bad_unpadded, pad=True)), "/nonexistent/o3-selftest")
+            if rc != 4:
+                problems.append("--put --pad of an image with another fault returned %d" % rc)
+            rc = firmware_main(_ap.Namespace(**dict(base, put=unpadded_file, pad=True)), "/nonexistent/o3-selftest")
+            if rc != 1 or "cannot open" not in sys.stderr.getvalue():
+                problems.append("--put --pad of an unpadded image did not go as far as the port (%d: %s)" % (rc, sys.stderr.getvalue()))
+        finally:
+            sys.stderr = saved_err
         for descriptor in (fd, fd2, fd3, fd4):
             os.close(descriptor)
 
@@ -962,6 +1133,10 @@ def firmware_main(args, port):
     if args.put and args.update:
         print("o3console: --put and --update are two runs", file=sys.stderr)
         return 1
+    pad = getattr(args, "pad", False)
+    if pad and not (args.put or args.update):
+        print("o3console: --pad goes with --put or --update", file=sys.stderr)
+        return 1
     if args.put:
         name = args.name or os.path.basename(args.put)
         problem = name_problem(name)
@@ -977,7 +1152,17 @@ def firmware_main(args, port):
         if not data or len(data) > 4 * 1024 * 1024:
             print("o3console: %s is empty or over 4 MiB" % args.put, file=sys.stderr)
             return 1
-        if not local_check(args.put, sys.stdout):
+        if pad:
+            chosen = padded_for_put(args.put, data, name, bool(args.name), sys.stdout)
+            if chosen is None:
+                return 4
+            data, name, note = chosen
+            problem = name_problem(name)
+            if problem:
+                print("o3console: " + problem, file=sys.stderr)
+                return 1
+            print("o3console: %s, stored as %s" % (note, name), file=sys.stdout)
+        elif not local_check(args.put, sys.stdout):
             return 4
     else:
         name = args.update
@@ -1027,6 +1212,7 @@ def main(argv=None):
     parser.add_argument("--put", metavar="FILE.ptf", help="send a firmware image to Firmware/ on the unit's card (checked with check_image.py first; any writable FAT card in the unit takes it)")
     parser.add_argument("--name", help="the file name on the card for --put (default: the file's name)")
     parser.add_argument("--update", metavar="NAME", help="arm and start the hand-over to the bootloader for Firmware/NAME (needs --crc and --yes-update)")
+    parser.add_argument("--pad", action="store_true", help="OS-UPDPAD: with --put, pad an image that only lacks its 4 KiB padding on the host and send the copy (pad-<name>.ptf); with --update, the unit pads a copy (`fw arm NAME CRC pad`)")
     parser.add_argument("--crc", help="CRC-32 of NAME's file in hex, as the put printed it (for --update)")
     parser.add_argument("--yes-update", action="store_true", help="confirm that --update restarts the unit into the bootloader")
     parser.add_argument("--expect-volume", metavar="XXXX-XXXX", help="optional: refuse --put / --update unless the card's volume serial is this (any SD card may be written, OS-ANYCARD)")

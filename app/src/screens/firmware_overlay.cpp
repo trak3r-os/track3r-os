@@ -165,10 +165,22 @@ void FirmwareOverlay::render(const Model& model, const ViewState& view, ui::Rend
       *put_hex2(put_hex2(put_hex2(put_hex2(crc, v.crc >> 24), v.crc >> 16), v.crc >> 8), v.crc) = '\0';
       line.append(crc);
       data_line(0, line.c_str());
-      label_line(1, v.chosen(), Color::ChromeText);
+      label_line(1, v.copy[0] != '\0' ? v.copy : v.chosen(), Color::ChromeText);  // (after a pad: the padded copy, the file that is installed)
       label_line(kLine, "Good for 30 s. Any other key cancels.");
       break;
     }
+    case Phase::AskPad:
+      data_line(0, "NOT PADDED. TRACK3R-OS WILL PAD A COPY OF IT?");
+      label_line(1, "The copy is checked, then you confirm INSTALL. The file stays as it is.");
+      label_line(kLine, "Good for 30 s. Any other key cancels.");
+      break;
+    case Phase::Padding:
+      line.assign("PADDING ");
+      line.append(v.chosen());
+      data_line(0, line.c_str());
+      bar(kLine);
+      label_line(kLine + 1, "Writing and checking the copy. Do not take the card out.");
+      break;
     case Phase::Installing: {
       const char* warn = "UPDATING: DO NOT POWER OFF";
       const int box_h = pitch - 2 * m.gap;

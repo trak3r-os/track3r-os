@@ -54,6 +54,7 @@ void to_list(FirmwareView& v, const char* text) noexcept {
   v.bad = text[0] != '\0';
   v.msg.assign(text);
   v.done = v.total = 0;
+  v.copy[0] = '\0';
 }
 
 // A step of the walk (a question, the check, the hand-over): nothing is left on the line or the bar.
@@ -199,23 +200,26 @@ bool firmware_go(ActionContext& ctx, core::ActionArg) noexcept {
       step(v, FirmwareView::Phase::Checking);
       return true;
     }
-    case FirmwareView::Phase::AskInstall: {
+    case FirmwareView::Phase::AskInstall:
+    case FirmwareView::Phase::AskPad: {
+      const bool pad = v.phase == FirmwareView::Phase::AskPad;
       if (const char* stop = blocked(ctx)) {  // (the dialog is modal, but a recording or an edit can still come from outside, and 30 s is long: the rules of the opening hold at INSTALL too)
         sink->cancel();
         to_list(v, stop);
         return true;
       }
-      const Refusal why = sink->install();
+      const Refusal why = pad ? sink->pad() : sink->install();  // (PAD: only the job is started; its slices write the copy in the App's passes, not here)
       if (why != Refusal::None) {
         sink->cancel();  // (nothing was touched; the good check, if it is still there, is let go)
         to_list(v, refusal_text(why));
         return true;
       }
-      step(v, FirmwareView::Phase::Installing);  // (the hand-over stops the transport and mutes the outputs itself: FwHost::quiesce)
+      step(v, pad ? FirmwareView::Phase::Padding : FirmwareView::Phase::Installing);  // (the hand-over stops the transport and mutes the outputs itself: FwHost::quiesce)
       return true;
     }
     case FirmwareView::Phase::Closed:
     case FirmwareView::Phase::Checking:
+    case FirmwareView::Phase::Padding:
     case FirmwareView::Phase::Installing: break;
   }
   return false;
@@ -232,6 +236,8 @@ bool firmware_back(ActionContext& ctx, core::ActionArg) noexcept {
       to_list(v, "");
       return true;
     case FirmwareView::Phase::Checking:
+    case FirmwareView::Phase::Padding:
+    case FirmwareView::Phase::AskPad:
     case FirmwareView::Phase::AskInstall:
       if (ctx.firmware != nullptr) {
         ctx.firmware->cancel();
@@ -264,7 +270,7 @@ bool firmware_question_taken_back(const ViewState& view, const core::InputEvent&
 }
 
 void firmware_question_drop(ViewState& view, FirmwareSink* sink) noexcept {
-  if (view.firmware.phase == FirmwareView::Phase::AskInstall && sink != nullptr) {
+  if ((view.firmware.phase == FirmwareView::Phase::AskInstall || view.firmware.phase == FirmwareView::Phase::AskPad) && sink != nullptr) {
     sink->cancel();
   }
   to_list(view.firmware, "");
@@ -289,20 +295,22 @@ bool firmware_poll(ViewState& view, FirmwareSink& sink, core::Tick now) noexcept
     load_want(v, sink);
     return true;
   }
-  if (v.phase != FirmwareView::Phase::Checking && v.phase != FirmwareView::Phase::AskInstall && v.phase != FirmwareView::Phase::Installing) {
+  using Phase = FirmwareView::Phase;
+  if (v.phase != Phase::Checking && v.phase != Phase::AskInstall && v.phase != Phase::Installing && v.phase != Phase::AskPad && v.phase != Phase::Padding) {
     return false;
   }
   const CheckStatus s = sink.poll_check();
   using State = CheckStatus::State;
-  if (v.phase == FirmwareView::Phase::AskInstall) {
-    if (s.state == State::Checked && core::tick_elapsed(now, v.asked_at) < core::ticks_from_ms(hal::firmware::kCheckLifetimeMs)) {
+  if (v.phase == Phase::AskInstall || v.phase == Phase::AskPad) {
+    if (s.state == (v.phase == Phase::AskPad ? State::NeedsPad : State::Checked) && core::tick_elapsed(now, v.asked_at) < core::ticks_from_ms(hal::firmware::kCheckLifetimeMs)) {
       return false;
     }
     sink.cancel();  // the 30 s are over, or the service let the check go (it lapsed, a console command took the card, the card went to a computer): the good check is no longer good
-    to_list(v, s.state == State::Checked ? kCheckExpired : kCheckAgain);
+    to_list(v, s.state == State::Checked || s.state == State::NeedsPad ? kCheckExpired : kCheckAgain);
     return true;
   }
-  const bool installing = v.phase == FirmwareView::Phase::Installing;
+  const bool installing = v.phase == Phase::Installing;
+  const bool padding = v.phase == Phase::Padding;
   switch (s.state) {
     case State::Running: {
       const bool changed = s.done != v.done || s.total != v.total;
@@ -315,16 +323,32 @@ bool firmware_poll(ViewState& view, FirmwareSink& sink, core::Tick now) noexcept
         v.image = s.image;
         v.crc = s.crc;
         v.asked_at = now;
-        v.phase = FirmwareView::Phase::AskInstall;
+        v.copy[0] = '\0';
+        if (padding && s.copy != nullptr) {  // the question is about the padded copy, which has its own name
+          std::size_t i = 0;
+          for (; i + 1 < sizeof v.copy && s.copy[i] != '\0'; ++i) {
+            v.copy[i] = s.copy[i];
+          }
+          v.copy[i] = '\0';
+        }
+        v.phase = Phase::AskInstall;
         return true;
       }
       break;  // (never in an install: it does not report Checked again)
+    case State::NeedsPad:
+      if (!installing && !padding) {  // (a check that found only the missing padding: the question comes before anything is written)
+        v.image = s.image;
+        v.asked_at = now;
+        v.phase = Phase::AskPad;
+        return true;
+      }
+      break;
     case State::Failed:
       if (installing) {
         to_failure(v, "UPDATE FAILED: ", s.fault, nullptr);
       } else {
         sink.cancel();
-        to_failure(v, "NOT A VALID IMAGE: ", s.fault, s.offset_known ? &s.offset : nullptr);
+        to_failure(v, padding ? "PADDING FAILED: " : "NOT A VALID IMAGE: ", s.fault, s.offset_known && !padding ? &s.offset : nullptr);
       }
       return true;
     case State::DidNotStart:

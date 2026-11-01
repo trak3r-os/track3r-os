@@ -57,7 +57,9 @@ fwp::CheckStatus FwServiceSink::poll_check() noexcept {
     case UiStatus::State::Checked: s.state = fwp::CheckStatus::State::Checked; break;
     case UiStatus::State::Failed: s.state = fwp::CheckStatus::State::Failed; break;
     case UiStatus::State::DidNotStart: s.state = fwp::CheckStatus::State::DidNotStart; break;
+    case UiStatus::State::NeedsPad: s.state = fwp::CheckStatus::State::NeedsPad; break;
   }
+  s.copy = u.copy;
   s.installing = u.installing;
   s.done = u.done;
   s.total = u.total;

@@ -21,6 +21,9 @@
 //                                             Checked again. On success the chip resets and nothing more is seen; on failure poll_check() says Failed, or DidNotStart when
 //                                             the bootloader did not take over within 5 s. A refusal is the return value and nothing was touched. Busy (a check or an install is running)
 //                                             changes nothing, status included: a second install() cannot hide the job's "do not power off"
+//   pad()                                     only after NeedsPad (OS-UPDPAD: the file is a valid image whose only defect is that it is not padded to a 4 KiB sector): writes a padded COPY of
+//                                             it on the card, validates the copy and checks it like begin_check() does. It starts the job and returns None; poll_check() then reports Running
+//                                             and ends in Checked (`copy` is the copy's name: install() installs that file) or Failed (why; nothing is armed). The original is never changed
 //   cancel()                                  drops a check, or a result waiting for install(); an install that has asked the bootloader cannot be cancelled. REQUIRED on every
 //                                             way out of the screen (a running check holds the card; a waiting result keeps the HIL key injection refused until it lapses)
 // Nothing is written to the card before install().
@@ -66,6 +69,7 @@ struct CheckStatus {
     Idle,          // nothing started, or cancelled
     Running,       // a check, or (installing) the re-check and the wait for the bootloader; `done` of `total` bytes
     Checked,       // the file is a valid image: `image` bytes, CRC-32 `crc`; install() may follow
+    NeedsPad,      // the file is a valid image except that its end is not on a 4 KiB boundary: `image` bytes; pad() may follow (good for kCheckLifetimeMs, like Checked); install() is refused
     Failed,        // `fault` says why, `offset` where in the file (a check), or an install that stopped before the bootloader was asked
     DidNotStart    // install(): the pin was driven and the bootloader did not take over in 5 s; the pin is released and _fwinfo deleted
   };
@@ -77,6 +81,7 @@ struct CheckStatus {
   std::uint32_t crc = 0;        // Checked: the CRC-32 of the whole file, as `fw arm` prints it
   std::uint32_t offset = 0;     // Failed: the byte of the file where the fault was found
   bool offset_known = true;     // Failed: `offset` is a place in the file; false for a fault of the whole image (not padded), where the stream's byte count means nothing to the user
+  const char* copy = nullptr;   // Checked after pad(): the padded copy's name (valid until the next call: copy it), the file install() will install; nullptr otherwise
   const char* fault = nullptr;  // Failed: a short static text ("flash configuration field is not the required one"); nullptr otherwise
 };
 
@@ -95,6 +100,7 @@ class FirmwareSink {
   virtual CheckStatus poll_check() noexcept = 0;
   virtual void cancel() noexcept = 0;
   virtual Refusal install() noexcept = 0;
+  virtual Refusal pad() noexcept = 0;  // only after NeedsPad: Busy, NotChecked (no offer: cancelled, lapsed or the card changed), Expired, OnComputer; the card is first touched by the job's first slice
 
  protected:
   FirmwareSink() = default;

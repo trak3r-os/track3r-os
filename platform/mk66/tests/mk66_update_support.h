@@ -83,6 +83,23 @@ inline std::string to_hex(const std::vector<std::uint8_t>& image, const char* eo
   return text;
 }
 
+// The file the update path's pad (OS-UPDPAD) must write for the unpadded image `image`: the records of to_hex(image) up to the EOF record, one extended linear address record for the
+// image's end, zero records of 16 bytes (the last one shorter) to the next 4 KiB boundary with LF line ends, then the EOF record. Built from record(), not from HexPadWriter, so the writer
+// is tested against it. A length on a boundary gets no padding records.
+inline std::string expected_padded_hex(const std::vector<std::uint8_t>& image, const char* eol = "\n") {
+  std::string text = to_hex(image, eol, 16, false);
+  const std::size_t length = image.size();
+  const std::size_t end = (length + up::kFlashSector - 1u) / up::kFlashSector * up::kFlashSector;
+  if (end != length) {
+    text += record(4, 0, {static_cast<std::uint8_t>(length >> 24), static_cast<std::uint8_t>(length >> 16)}) + "\n";
+    for (std::size_t at = length; at < end; at += 16) {
+      const std::size_t n = end - at < 16 ? end - at : 16;
+      text += record(0, static_cast<unsigned>(at & 0xFFFF), std::vector<std::uint8_t>(n, 0)) + "\n";
+    }
+  }
+  return text + record(1, 0, {}) + eol;
+}
+
 struct Verdict {
   bool ok;
   up::Fault fault;
