@@ -180,6 +180,8 @@ class Graph {
   // The wet share (0..255) the insert has at the start and at the end of the coming block: the stereo S of a voice on the track follows 255 - wet through side_pass (one block ramp, no step when an insert
   // comes in, goes out or is bypassed). Flash.
   void set_insert_wet(unsigned track, unsigned slot, unsigned wet0, unsigned wet1) noexcept;
+  // OS-INSFX S2: the slot's effect may ring on (InsertHost::run, when that state changes). Flash. A bypass clears it.
+  void set_insert_tail(unsigned track, unsigned slot, bool on) noexcept;
   // OS-INSFX S1: the two 64-float blocks of the master chain's planes, free while the strips run (the master chain fills them after the buses): an insert's float block and dry copy. Render context, in run_tracks.
   float* insert_scratch(unsigned plane) noexcept { return fl_[plane & 1u]; }
   // 0: SNDA (the delay), 1: SNDB (the reverb). `param` (OS-SENDFX) takes the slot's ParamChanges (Master kind, fields sendfx::kFieldBase[which] + n); without one they are refused.
@@ -392,7 +394,11 @@ class Graph {
     // block in force. The insert's own dry/wet ramp is the host's (run()); these two only tell side_pass how fast the stereo S of a voice leaves (wet 0 to 255: S 255 to 0) and comes back.
     std::uint8_t wet0 = 255;
     std::uint8_t wet1 = 255;
+    // OS-INSFX S2 (render context, set_insert_tail, written by InsertHost::run): the effect may still ring (its last render() returned 1, and its output was not 2 s of exact zero on a silent source nor 10 s of silent input),
+    // so a strip whose source is silent stays live for it (run_tracks: a zeroed block through the inserts, sends and fader). Cleared with the slot and by a bypass. The last padding byte of the Insert.
+    std::uint8_t tail = 0;
   };
+  static_assert(sizeof(void*) != 4 || sizeof(Insert) == 12, "the tail byte fills the Insert's padding");
   struct StageSlot {
     MasterFn fn = nullptr;
     void* state = nullptr;

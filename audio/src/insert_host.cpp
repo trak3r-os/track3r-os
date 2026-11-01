@@ -28,6 +28,18 @@ bool block_silent(const std::int16_t* io, std::uint32_t n) noexcept {  // a word
   return any == 0u;
 }
 
+// The render's other work (the aggregate net's input): the fast mean follows a sustained rise in tens of blocks (1/32 a block), the slow one is the base's rate of fall (1/256); the net judges the slow mean
+// unless the fast one is more than the deadband above it (a spike moves the fast mean by a few percent at most). Both are plain running averages for their first blocks (the divisor is the block count until it
+// reaches 32 or 256), so a first cold block is forgotten as fast as the data comes in.
+constexpr std::uint32_t kOthersFastBlocks = 32;
+constexpr std::uint32_t kOthersSlowBlocks = std::uint32_t{1} << gov::kWorstDecayShift;
+constexpr unsigned kOthersDeadbandPercent = 5;
+
+constexpr std::uint32_t running_mean(std::uint32_t mean, std::uint32_t sample, std::uint32_t n, std::uint32_t cap) noexcept {
+  const std::uint32_t d = n < cap ? n : cap;
+  return sample >= mean ? mean + (sample - mean) / d : mean - (mean - sample) / d;
+}
+
 }  // namespace
 
 InsertHost::InsertHost() noexcept {
@@ -59,18 +71,20 @@ bool InsertHost::live(const Inst& in) const noexcept {
   return in.ml == Ml::Bound && in.act_pushed && in.pub_gen.load(std::memory_order_acquire) == in.gen;
 }
 
-bool InsertHost::admit(std::uint32_t cost) const noexcept {
+// The aggregate net's rule, asked in advance: the render's other work (`others_pub_`, the module voices' included) plus the inserts that run (their estimates) plus this one must stay under the threshold and under
+// the instance budget, so a bind or an un-bypass is admitted exactly when the net would not force it. `cost` 0 is an unmeasured candidate: a first bind (`first_bind`) counts it as 0 (the nets judge it once it
+// runs: spec 6), an un-bypass assumes the cold figure.
+bool InsertHost::admit(std::uint32_t cost, bool first_bind) const noexcept {
   const gov::Governor& g = voices_->governor();
-  std::uint32_t sounding = 0;  // the module voices that sound (their figure, or the cold assumption): the governor's `base` holds the inserts but not these
-  for (unsigned k = 0; k < kMaxModuleInstances; ++k) {
-    ModuleVoices::Info mi;
-    if (voices_->info(k, mi) && mi.active) {
-      sounding += mi.cost != 0u ? mi.cost : gov::kColdCycles;
+  std::uint32_t all = cost != 0u ? cost : (first_bind ? 0u : gov::kColdInsertCycles);
+  for (unsigned i = 0; i < kInstances; ++i) {
+    const Inst& in = in_[i];
+    if (in.ml == Ml::Bound && !in.byp_want && in.forced.load(std::memory_order_relaxed) == 0u) {  // it runs, or it will once the render takes it
+      const std::uint32_t est = in.est.load(std::memory_order_relaxed);
+      all += est != 0u ? est : gov::kColdInsertCycles;
     }
   }
-  const std::uint32_t base = g.base();
-  const std::uint32_t gone = gone_.load(std::memory_order_relaxed);  // inserts that stopped running but that the base still holds
-  return gov::decide((base > gone ? base - gone : 0u) + sounding, cost != 0u ? cost : gov::kColdInsertCycles, false, g.threshold()) == gov::Verdict::Admit;
+  return all <= g.budget() && gov::decide(others_pub_.load(std::memory_order_relaxed), all, false, g.threshold()) == gov::Verdict::Admit;
 }
 
 [[gnu::noinline]] std::uint16_t InsertHost::enter(const Inst& in) noexcept {
@@ -205,7 +219,7 @@ InsertHost::Bind InsertHost::bind(unsigned where, const o3m_module& mod, std::ui
     }
   }
   const bool reuse = state == nullptr;
-  if (!force && !admit(reuse ? pick->est.load(std::memory_order_relaxed) : 0u)) {
+  if (!force && !admit(reuse ? pick->est.load(std::memory_order_relaxed) : 0u, true)) {
     return Bind::NoCpu;
   }
   if (!reuse) {
@@ -252,7 +266,7 @@ InsertHost::Toggle InsertHost::set_bypass(unsigned where, bool on, bool force) n
   if (!in.byp_want && in.forced.load(std::memory_order_relaxed) == 0u) {
     return Toggle::Done;  // not bypassed
   }
-  if (!force && !admit(in.est.load(std::memory_order_relaxed))) {
+  if (!force && !admit(in.est.load(std::memory_order_relaxed), false)) {
     return Toggle::NoCpu;
   }
   in.ml = Ml::Leaving;  // a reset: the state is the module's fresh one, through the swap protocol
@@ -388,6 +402,7 @@ void InsertHost::release_all() noexcept {
     Inst& in = in_[i];
     if (graph_ != nullptr && in.phase != Phase::Off) {  // only a forced release gets here with the render holding it (settled() is the rule): the slot must not outlive the module
       graph_->clear_insert(in.track, in.slot);
+      clear_tail(in);
       rwh_[in.track * 2u + in.slot] = kNone;
       in.phase = Phase::Off;
       in.pub_phase.store(0, std::memory_order_relaxed);
@@ -446,6 +461,7 @@ bool InsertHost::prepare_export() noexcept {
         restart_ok = false;
       }
       in.idle = false;
+      clear_tail(in);  // an export starts with no tail (the render is parked: the Graph's byte is written from here)
       in.prev = 0;
       in.over = 0;
       in.acc = 0;
@@ -458,7 +474,6 @@ bool InsertHost::prepare_export() noexcept {
     return false;
   }
   agg_over_ = 0;
-  gone_.store(0, std::memory_order_relaxed);
   nets_ = false;
   return true;
 }
@@ -466,7 +481,7 @@ bool InsertHost::prepare_export() noexcept {
 void InsertHost::export_end() noexcept {
   nets_ = true;
   agg_over_ = 0;
-  gone_.store(0, std::memory_order_relaxed);  // account() does not decay it while the nets are off: a figure left from the export would outlive it
+  // (the means of the render's other work are kept: they are not followed while the nets are off, and a reseed from one cold block could force an insert that was on)
   for (unsigned i = 0; i < kInstances; ++i) {
     in_[i].prev = 0;
     in_[i].over = 0;
@@ -486,6 +501,7 @@ bool InsertHost::info(unsigned i, Info& out) const noexcept {
   out.user_bypass = in.byp_want;
   out.forced = in.forced.load(std::memory_order_relaxed) != 0u;
   out.leaving = in.ml == Ml::Leaving;
+  out.tail = in.tail.load(std::memory_order_relaxed);
   out.gen = in.gen;
   out.cost = in.est.load(std::memory_order_relaxed);
   return true;
@@ -499,13 +515,17 @@ std::uint32_t InsertHost::cost(unsigned where) const noexcept {
 
 // The wet share goes from where it is to dry or to wet over the coming block; the Graph is told for the stereo side.
 void InsertHost::leave_ramp(Inst& in, Phase to) noexcept {
-  if ((in.phase == Phase::In || in.phase == Phase::On) && in.prev != 0u) {  // it stops running: what it took is in the base for a while yet, and the nets and admit() must not count it
-    gone_.store(gone_.load(std::memory_order_relaxed) + in.est.load(std::memory_order_relaxed), std::memory_order_relaxed);
-  }
   graph_->set_insert_wet(in.track, in.slot, wet_of(in.mix), 0u);
   in.target = 0.0f;
   in.phase = to;
   in.pub_phase.store(static_cast<std::uint8_t>(to), std::memory_order_relaxed);
+}
+
+void InsertHost::clear_tail(Inst& in) noexcept {
+  in.tail.store(false, std::memory_order_relaxed);
+  in.zero = 0;
+  in.age = 0;
+  graph_->set_insert_tail(in.track, in.slot, false);
 }
 
 void InsertHost::force_bypass(Inst& in) noexcept {
@@ -541,15 +561,11 @@ void InsertHost::apply(const Command& c) noexcept {
       in.prev = 0;
       in.over = 0;
       in.est_at = blocks_.load(std::memory_order_relaxed);
-      {  // it runs again: the base takes its cycles back, so they are no longer "gone" (the estimate is kept across a bypass off or a re-bind)
-        const std::uint32_t est = in.est.load(std::memory_order_relaxed);
-        const std::uint32_t gone = gone_.load(std::memory_order_relaxed);
-        gone_.store(gone > est ? gone - est : 0u, std::memory_order_relaxed);
-      }
-      in.phase = Phase::In;
+      in.phase = Phase::In;  // (the estimate is kept across a bypass off or a re-bind)
       graph_->install_insert(c.track, c.slot, &InsertHost::run, &in);
       graph_->set_insert_bypass(c.track, c.slot, false);
       graph_->set_insert_wet(c.track, c.slot, 0u, 255u);
+      clear_tail(in);
       in.pub_gen.store(c.gen, std::memory_order_release);
       in.pub_phase.store(static_cast<std::uint8_t>(Phase::In), std::memory_order_relaxed);
       ++stats_.activations;
@@ -602,10 +618,7 @@ void InsertHost::account() noexcept {
   const gov::Governor& g = voices_->governor();
   const std::uint32_t now = blocks_.load(std::memory_order_relaxed);
   const std::uint32_t budget = g.budget();
-  const std::uint32_t gone = gone_.load(std::memory_order_relaxed);
-  gone_.store(gone - (gone >> gov::kWorstDecayShift), std::memory_order_relaxed);  // the base's own rate of fall: base - gone stays what the others take
   std::uint32_t total = 0;
-  std::uint32_t est_sum = 0;
   bool any = false;
   Inst* worst = nullptr;
   std::uint32_t worst_cost = 0;
@@ -641,23 +654,36 @@ void InsertHost::account() noexcept {
         continue;
       }
     }
-    est_sum += est;
     if ((in.phase == Phase::In || in.phase == Phase::On) && (est != 0u ? est : sample) >= worst_cost) {
       worst = &in;
       worst_cost = est != 0u ? est : sample;
     }
   }
+  // The rest of the render, this block (what the governor saw less the inserts' own cycles, measured here), as two moving means (the file's constants): a first block seeds them, at most the threshold, and the
+  // next blocks average in at once (a cold block at boot must not hold an insert that was on over the threshold for long). The base is a moving MAX, which on a busy project that plays without underruns (mean 86 %, peaks past 100 %) sits over the threshold, so an allowance taken from it
+  // was 0 and any insert was forced (OS-INSFX S2 unit regression); a single slow mean followed a light render that turned heavy only after 110 blocks.
+  const std::uint32_t threshold = g.threshold();
+  const std::uint32_t others_now = g.last_total() > total ? g.last_total() - total : 0u;  // all the render's work but the inserts: the module voices count
+  if (others_n_ == 0u) {
+    others_slow_ = others_fast_ = others_now < threshold ? others_now : threshold;
+    others_n_ = 1;
+  } else {
+    if (others_n_ < kOthersSlowBlocks) {
+      ++others_n_;
+    }
+    others_slow_ = running_mean(others_slow_, others_now, others_n_, kOthersSlowBlocks);
+    others_fast_ = running_mean(others_fast_, others_now, others_n_, kOthersFastBlocks);
+  }
+  const std::uint32_t deadband = gov::cycles_of_percent(kOthersDeadbandPercent);
+  const std::uint32_t others = others_fast_ > others_slow_ + deadband ? others_fast_ - deadband : others_slow_;
+  others_pub_.store(others, std::memory_order_relaxed);
   if (!any) {
     agg_over_ = 0;
     return;
   }
   total_pub_.store(total, std::memory_order_relaxed);
-  // The aggregate net: the inserts together against what the threshold leaves once the rest of the render (the base, which holds them, less those that just stopped) is taken off, and never above the
-  // instance budget (so all the inserts together take at most the budget: spec 6).
-  const std::uint32_t base = g.base();
-  const std::uint32_t held = est_sum + gone_.load(std::memory_order_relaxed);  // the running inserts, and the ones the base has not yet forgotten
-  const std::uint32_t others = base > held ? base - held : 0u;
-  const std::uint32_t threshold = g.threshold();
+  // The aggregate net: the inserts together against what the threshold leaves once the rest of the render (`others`, without the inserts) is taken off, and never above the instance budget (so all the inserts
+  // together take at most the budget: spec 6). An insert is forced only when the inserts push the render over the threshold for N blocks.
   const std::uint32_t room = threshold > others ? threshold - others : 0u;
   const std::uint32_t agg = room < budget ? room : budget;
   if (total <= agg) {
@@ -691,12 +717,14 @@ void InsertHost::begin_block() noexcept {
       case Phase::OutBypass:
         graph_->set_insert_bypass(in.track, in.slot, true);
         graph_->set_insert_wet(in.track, in.slot, 255u, 255u);
+        clear_tail(in);
         in.mix = 0.0f;
         in.phase = Phase::Bypassed;
         in.pub_phase.store(static_cast<std::uint8_t>(Phase::Bypassed), std::memory_order_relaxed);
         break;
       case Phase::OutLeave:
         graph_->clear_insert(in.track, in.slot);
+        clear_tail(in);
         rwh_[in.track * 2u + in.slot] = kNone;
         in.phase = Phase::Off;
         in.mix = 0.0f;
@@ -729,7 +757,8 @@ void InsertHost::run(void* state, std::int16_t* io, std::uint32_t n) noexcept {
     return;
   }
   const std::uint32_t t0 = h.cycles_();
-  if (in.idle && block_silent(io, n)) {  // the effect said silent and idle and has nothing to add to silence
+  const bool silent_in = block_silent(io, n);  // (a live source ends the scan at its first word)
+  if (in.idle && silent_in) {  // the effect said silent and idle and has nothing to add to silence
     in.mix = in.target;
     in.acc += h.cycles_() - t0;
     return;
@@ -761,6 +790,22 @@ void InsertHost::run(void* state, std::int16_t* io, std::uint32_t n) noexcept {
     in.mix = in.target;
   }
   h.stats_.saturated += to_q15(io, fl, n);
+  // S2, the tail: the effect rings on while it returns 1, unless its output has been exactly zero for kTailZeroBlocks blocks (2 s) with the source silent, or its input for 10 s (a module stuck at 1). A tail that ends also marks the
+  // effect idle, so a silent input skips it (as after a 0) until the input is not silent again.
+  bool tail = false;
+  if (r != 0u) {
+    in.age = silent_in ? static_cast<std::uint16_t>(in.age < kTailMaxBlocks ? in.age + 1u : kTailMaxBlocks) : 0u;
+    in.zero = (silent_in && block_silent(io, n)) ? static_cast<std::uint16_t>(in.zero < kTailZeroBlocks ? in.zero + 1u : kTailZeroBlocks) : 0u;  // (a live source resets it: a pre-delay's zeros while playing do not count)
+    tail = in.zero < kTailZeroBlocks && in.age < kTailMaxBlocks;
+    in.idle = !tail && silent_in;
+  } else {
+    in.age = 0;
+    in.zero = 0;
+  }
+  if (tail != in.tail.load(std::memory_order_relaxed)) {
+    in.tail.store(tail, std::memory_order_relaxed);
+    h.graph_->set_insert_tail(in.track, in.slot, tail);
+  }
   in.acc += h.cycles_() - t0;
 }
 

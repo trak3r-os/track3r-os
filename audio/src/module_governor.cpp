@@ -91,6 +91,7 @@ void Governor::observe_block(std::uint32_t total) noexcept {
   worst_pub_.store(worst_, std::memory_order_relaxed);
   const std::uint32_t others = total > module_cycles_ ? total - module_cycles_ : 0u;  // what the render took besides the module voices
   module_cycles_ = 0;
+  last_total_ = total;
   base_ = track_max(base_, others, kWorstDecayShift);
   base_pub_.store(base_, std::memory_order_relaxed);
 }

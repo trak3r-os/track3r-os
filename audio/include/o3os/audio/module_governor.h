@@ -187,6 +187,9 @@ class Governor {
   std::uint32_t budget() const noexcept { return budget_.load(std::memory_order_relaxed); }
   // OS-INSFX: the recent worst of what the render takes besides the module voices (it holds the effect inserts' cycles: InsertHost does not call account()), any context.
   std::uint32_t base() const noexcept { return base_pub_.load(std::memory_order_relaxed); }
+  // Render context only (OS-INSFX: InsertHost's aggregate net, in the boundary after observe_block): the last block's cycles as a whole, the module voices' and the inserts' share included (the net's
+  // "others" is this less the inserts' own cycles: every render work but the inserts).
+  std::uint32_t last_total() const noexcept { return last_total_; }
   Snapshot snapshot() const noexcept;
 
   // ---- render context ------------------------------------------------------------------------------------------------------------
@@ -220,6 +223,7 @@ class Governor {
   // render only
   std::uint32_t worst_ = 0;
   std::uint32_t base_ = 0;
+  std::uint32_t last_total_ = 0;
   std::uint32_t pending_ = 0;
   std::uint32_t module_cycles_ = 0;  // this block: what the instances took (summed by account(), used and cleared by observe_block())
   // main loop writes, render reads

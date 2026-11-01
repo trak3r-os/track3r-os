@@ -40,6 +40,7 @@
 #include <o3os/audio/hot.h>
 #include <o3os/audio/module_governor.h>
 #include <o3os/audio/module_voices.h>
+#include <o3os/core/audio_clock.h>
 #include <o3os/core/param.h>
 #include <o3os/core/ring.h>
 #include <o3os/hal/audio.h>
@@ -59,6 +60,9 @@ class InsertHost {
   static constexpr std::uint32_t kMaxCommandsPerBlock = 32;
   static constexpr unsigned kExportPasses = 16;  // boundaries prepare_export may take to settle the inserts (four instances need about 6 at most)
   static constexpr std::uint8_t kNone = 0xFF;
+  // OS-INSFX S2: a tail ends after this many blocks of exact zero Q15 output while the source is silent (2 s: a delay's gap between echoes), or after 10 s of silent input (blocks of the engine's rate).
+  static constexpr std::uint16_t kTailZeroBlocks = static_cast<std::uint16_t>(2.0f * core::kRefRateHz / static_cast<float>(kBlock));
+  static constexpr std::uint16_t kTailMaxBlocks = static_cast<std::uint16_t>(10.0f * core::kRefRateHz / static_cast<float>(kBlock));
   static_assert(kWhere <= 32u, "the parameter id's index byte holds track * 2 + slot");
   static_assert(kBlock == 64u, "the adapter's scratch is the graph's two 64-float planes");
   static_assert(kParams <= 32u, "set_mask and dirty hold one bit per parameter");
@@ -98,7 +102,8 @@ class InsertHost {
   enum class Bind : std::uint8_t { Ok, NoGraph, BadWhere, WhereTaken, BadModule, NoInstance, NeedState, BadState, InitFailed, NoCpu };
   // Binds an insert of effect module `mod` at `where`. `state` is mod.state_bytes of zeroed, 16-byte aligned memory, or null to reuse the state of a free record that held the same module (NeedState: none,
   // take room and call again). `params` / `param_len`: the stored blob (little-endian float32 per parameter, a short blob sets the first ones, non-finite values skipped). `force`: no admission
-  // (a project load). Admission: the graph's base (which holds the inserts running now) + the voices that sound + this module's figure (its last measure, or kColdInsertCycles) must fit the threshold.
+  // (a project load). Admission (admit()): the render's other work (module voices included) + the inserts running now + this module's figure (its last measure; 0 while unmeasured: the nets judge it once it
+  // runs) must fit the threshold and the instance budget.
   // The Activate is pushed now or by service(); the insert is heard from the block after.
   Bind bind(unsigned where, const o3m_module& mod, std::uint16_t fault_id, void* state, const std::uint8_t* params, std::uint32_t param_len, bool force) noexcept;
   // Unbinds: ramps the effect out and, once the render is clear of it, shuts it down (service()). False: nothing is bound there.
@@ -132,6 +137,7 @@ class InsertHost {
     bool user_bypass;      // the main loop asked for bypass
     bool forced;           // a net forced it to dry (OVER BUDGET)
     bool leaving;
+    bool tail;             // S2: the effect may still ring: the strip stays live for it with a silent source
     std::uint16_t gen;
     std::uint32_t cost;    // the measured cycles of one block, 0 never measured
   };
@@ -193,7 +199,12 @@ class InsertHost {
     std::uint16_t rgen = 0;         // the generation the render holds
     std::uint8_t track = 0;
     std::uint8_t slot = 0;
-    bool idle = false;              // the module's last render() returned 0
+    bool idle = false;              // the module's last render() returned 0 (or its tail ended: S2)
+    // S2, the effect's tail (render only): `tail` mirrors Graph's Insert::tail so run() calls the Graph only on a change; `zero` counts the blocks in a row whose Q15 output was exactly 0 with the input silent (a
+    // live source resets it: a pre-delay's zeros while playing never count) and `age` the blocks in a row whose input was exactly 0, both saturating at the limit; a tail needs render() == 1, zero < kTailZeroBlocks and age < kTailMaxBlocks.
+    std::atomic<bool> tail{false};  // (relaxed: the render writes on a change, the console reads it)
+    std::uint16_t zero = 0;
+    std::uint16_t age = 0;
     float mix = 0.0f;               // the wet share now, and where this block takes it
     float target = 0.0f;
     std::uint32_t acc = 0;          // this block: cycles in run()
@@ -214,7 +225,7 @@ class InsertHost {
   bool push(const Command& c) noexcept;
   bool retired_ok(const Inst& in) const noexcept;
   void start_binding(Inst& in, unsigned where, const std::uint8_t* params, std::uint32_t param_len) noexcept;
-  bool admit(std::uint32_t cost) const noexcept;
+  bool admit(std::uint32_t cost, bool first_bind) const noexcept;
   bool init_module(Inst& in) noexcept;
   void shutdown_module(Inst& in) noexcept;
   void apply_blob(Inst& in) noexcept;
@@ -228,6 +239,7 @@ class InsertHost {
   O3OS_AUDIO_COLD void account() noexcept;
   O3OS_AUDIO_COLD void force_bypass(Inst& in) noexcept;
   void leave_ramp(Inst& in, Phase to) noexcept;
+  void clear_tail(Inst& in) noexcept;  // S2: no tail (the slot's byte in the Graph too), counters at 0
   std::uint16_t enter(const Inst& in) noexcept;  // out of line: about 14 call sites (OS-INSFX flash cut)
   void leave(std::uint16_t previous) noexcept;
   bool restart_module(Inst& in) noexcept;  // shutdown, init, the stored values again: false when init() refused
@@ -242,9 +254,14 @@ class InsertHost {
   core::SpscRing<Command, kCommandRing> ring_;
   std::atomic<std::uint32_t> blocks_{0};    // block boundaries the render has passed
   std::uint32_t agg_over_ = 0;              // render: consecutive blocks the total was over the aggregate budget
-  // Cycles of the inserts that stopped running (forced, bypassed, unbound) which the governor's base still holds: base falls by 1/256 a block only, so the nets and admit() take this off it; it falls at the
-  // same rate. Single writer: the render (words, relaxed); admit() reads it on the main loop.
-  std::atomic<std::uint32_t> gone_{0};
+  // All the render's cycles but the inserts', the module voices' included (what the aggregate net and admit() judge), as two moving means of `Governor::last_total()` less the inserts' measured cycles: a slow one (1/256 a
+  // block, the base's rate of fall) and a fast one (1/32), seeded by the first block (at most the threshold; `others_n_` counts the blocks, 0: none yet, saturating at 256) and kept across an export. `others_pub_` is
+  // max(slow, fast less a deadband): a sustained rise is followed in tens of blocks, a spike or two never moves it (a mean that rises faster than it falls climbs on spikes). Single writer: the render (words, relaxed);
+  // admit() reads `others_pub_` on the main loop.
+  std::uint32_t others_slow_ = 0;
+  std::uint32_t others_fast_ = 0;
+  std::uint32_t others_n_ = 0;
+  std::atomic<std::uint32_t> others_pub_{0};
   std::atomic<std::uint32_t> total_pub_{0};
   bool nets_ = true;                        // render reads, the export switches it with the render parked
   Stats stats_;

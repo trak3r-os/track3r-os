@@ -475,3 +475,7 @@ Bytes of the guard (remote mk66, against the slice 3 figures): FLASH +1,416 B (9
 ## OS-SONG-TIMELINE (2026-10-30; `docs/specs/OS-SONG-VIEW.md`): the density scan on the main loop
 
 `SongDensity::refresh`'s first frame on the TIMELINE page scans up to 40 patterns (about 82k steps, about 3 ms [est]) on the main loop, never in the audio path; later frames read the cache (a scan per pattern generation).
+
+## OS-INSFX S2 fold: the insert nets' mean of the other work (2026-11-01; `docs/specs/OS-INSFX.md` section 6)
+
+`InsertHost::account` keeps two moving means of the render's other work (slow 1/256, fast 1/32 a block, plus a block count) and `others_pub_` (what the aggregate net and `admit()` judge); all of it is in flash (`O3OS_AUDIO_COLD`), two integer divisions a block, no SRAM_L. Bytes from `tools/remote_ci.sh mk66` (release image), against 932549b4 (before the net changed): 68df8566 FLASH `.text` +16 B (949,188 -> 949,204), SRAM_U +8 B (137,280 -> 137,288); this fold `.text` +48 B (949,236), SRAM_U +16 B (137,296; the `gone_` figure left, four words came in), SRAM_L +0 B (49,848), `.ramfunc_l` 27,572 B unchanged, SDRAM_STATIC unchanged. **SRAM_U margin** (the linker's rule: `__stack_limit - __bss_end >= kSramUMinFree`, 192 KiB - 24 KiB stack - 32 KiB floor = 139,264 B for the sections): 1,984 B at 932549b4, 1,976 B at 68df8566, **1,968 B** after this fold (it was 24 B at the slice 3 figures of OS-CPU10; later items gave it back). Unit still to check: Dense8 with a 1.3 % insert bound stays on.

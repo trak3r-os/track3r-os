@@ -2443,6 +2443,9 @@ std::size_t insert_line(unsigned i, char* out, std::size_t cap) noexcept {
     if (in.leaving) {
       t.str(", leaving");
     }
+    if (in.tail) {
+      t.str(", tail");
+    }
     if (in.forced) {
       t.str(", OVER BUDGET (forced to dry)");
     } else if (in.user_bypass) {

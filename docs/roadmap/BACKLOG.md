@@ -12,7 +12,7 @@ What is not finished. One row per package. Finished work (DONE) is not listed he
 
 | ID | What | Parity | Cost | Note |
 |---|---|---|---|---|
-| OS-INSFX | Effect `.tmod` modules in the reserved per-track insert slots and one master insert | N | ? | Level C: audio path, a published ABI, the project stores the inserts (version bump and round trip). Each module measured on the unit, with a cap on active inserts. S1 merged 2026-11-01: the insert host, console only (`diag ins`, `diag bench insert`); an insert is lost on save until S3. Unit: one insert on the dense reference song costs 1.2 % of the block, 0 underruns. Left: the bypass/unbind click by ear. Next: S2. |
+| OS-INSFX | Effect `.tmod` modules in the reserved per-track insert slots and one master insert | N | ? | Level C: audio path, a published ABI, the project stores the inserts (version bump and round trip). Each module measured on the unit, with a cap on active inserts. S1 merged 2026-11-01: the insert host, console only (`diag ins`, `diag bench insert`); an insert is lost on save until S3. Unit: one insert on the dense reference song costs 1.2 % of the block, 0 underruns. Left: the bypass/unbind click by ear. S2 (effect tails) and a CPU-net fix merged 2026-11-01: the net now judges a mean of the render load instead of its peak (it forced every insert to dry on a heavy song); on the unit one insert stays on with 0 underruns and the tail ends after the stop. Left: an audible tail (needs a feedback effect module). Next: S3. |
 
 ## UNIT PENDING
 

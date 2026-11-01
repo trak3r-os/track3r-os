@@ -140,6 +140,9 @@ void Graph::install_insert(unsigned track, unsigned slot, InsertFn fn, void* sta
 void Graph::set_insert_bypass(unsigned track, unsigned slot, bool bypass) noexcept {
   if (track < kTracks && slot < 2u) {
     strips_[track].insert[slot].bypass = bypass;
+    if (bypass) {
+      strips_[track].insert[slot].tail = 0;  // a bypassed slot has no tail (OS-INSFX S2)
+    }
   }
 }
 void Graph::install_send_fx(unsigned which, SendFxFn fn, void* state, SendFxParamFn param) noexcept {
@@ -871,13 +874,16 @@ void Graph::run_tracks(bool silence) noexcept {
         break;
     }
     if (!make) {
-      settle(s);
-      continue;
+      if (__builtin_expect((s.insert[0].tail | s.insert[1].tail) == 0u, 1)) {
+        settle(s);
+        continue;
+      }
+      fed = zero_;  // OS-INSFX S2: an effect that may still ring keeps the strip live: the source block is silence, through the inserts, sends and fader (the byte is clear unless the slot is bound and not bypassed)
     }
     s.live = true;
     std::int16_t* const block = scratch_[np];  // the free one: nothing is pending in it
     const std::uint32_t t_a = cycles_();
-    if (s.source == SourceKind::Feed) {
+    if (fed != nullptr) {  // (a feed, or the tail's silence; a tone source leaves it null)
       copy_block(block, fed);
     } else {
       // The D2 voice-to-track conversion point: a float block, converted once to the track's Q15 block.
@@ -975,6 +981,13 @@ void Graph::side_pass(unsigned track, const std::int16_t* side, const kernel::St
   }
   kernel::gain_pan_st(side, level, lane.left, lane.right, acc_main_[0], acc_main_[1], kBlk);
   b_main_.dirty = true;
+}
+
+void Graph::set_insert_tail(unsigned track, unsigned slot, bool on) noexcept {
+  if (track < kTracks && slot < 2u) {
+    Insert& ins = strips_[track].insert[slot];
+    ins.tail = (on && ins.fn != nullptr) ? 1u : 0u;  // (flash: a slot with no module never keeps a strip live: a render that writes the byte after a forced release cleared the slot is ignored)
+  }
 }
 
 void Graph::set_insert_wet(unsigned track, unsigned slot, unsigned wet0, unsigned wet1) noexcept {
