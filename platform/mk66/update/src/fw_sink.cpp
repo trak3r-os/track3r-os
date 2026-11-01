@@ -20,6 +20,7 @@ fwp::Refusal refusal_of(Fault f) noexcept {
     case Fault::NoDir: return fwp::Refusal::NoFolder;
     case Fault::NotFound: return fwp::Refusal::NotFound;
     case Fault::BadName: return fwp::Refusal::BadName;
+    case Fault::NameLong: return fwp::Refusal::NameTooLong;
     case Fault::NotArmed:
     case Fault::Readback: return fwp::Refusal::NotChecked;  // (a Readback is the file that changed since the check: install() asked for a check that no longer holds)
     case Fault::Expired: return fwp::Refusal::Expired;

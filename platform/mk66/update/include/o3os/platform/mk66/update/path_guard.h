@@ -14,6 +14,8 @@
 // writer never deletes a name that could be an official image. FAT is case-insensitive, so a name that differs from an existing one only in case
 // is the same file (the store's existence checks go through FatFs); the guard's prefix test for removal is case-insensitive for the same reason.
 
+#include <o3os/hal/firmware.h>
+
 #include <cstddef>
 
 namespace o3os::platform::mk66::update {
@@ -28,11 +30,17 @@ inline constexpr std::size_t kSuffixLen = sizeof(kImageSuffix) - 1;  // 4
 inline constexpr std::size_t kStemMax = 48;
 inline constexpr std::size_t kImageNameMax = kStemMax + kSuffixLen;  // 52
 inline constexpr std::size_t kPathMax = sizeof(kFirmwareDir) + 1 + kImageNameMax;  // "Firmware/" + the longest name + NUL
+// OS-BUG-FWNAMELEN: the longest name, ".ptf" included, that an update may be armed for (one constant, hal/firmware.h: 30, OBSERVED on the unit; the dialog uses it too). A valid image name may be longer
+// (it is stored, listed and read); `update_name_ok` is what write_fwinfo, `fw arm` and the screen's check ask before anything is armed.
+inline constexpr std::size_t kUpdateNameMax = hal::firmware::kUpdateNameMax;
+static_assert(kUpdateNameMax < kImageNameMax, "the update limit is inside the stored names");
 
 enum class WriteKind : unsigned char { None, Temp, FwInfo, Image };
 
 // A bare image name a finished upload may get: <stem>.ptf (see the top of this file).
 bool valid_image_name(const char* name) noexcept;
+// A valid image name that an update may be armed for: at most kUpdateNameMax characters in all (a longer one makes the SD bootloader flash the first .ptf of Firmware/, OS-BUG-FWNAMELEN).
+bool update_name_ok(const char* name) noexcept;
 // A bare name `remove` may delete: the temporary file, or a valid image name that does not look official (see the top of this file).
 bool removable_name(const char* name) noexcept;
 // A bare name the store may read: a valid image name or the temporary file.

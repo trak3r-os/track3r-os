@@ -309,6 +309,9 @@ Fault FatFirmwareStore::write_fwinfo(const char* name) noexcept {
   if (!valid_image_name(name)) {
     return Fault::BadName;
   }
+  if (!update_name_ok(name)) {
+    return Fault::NameLong;  // the last guard before the hand-over: the bootloader would flash another file for this name (OS-BUG-FWNAMELEN)
+  }
   Fault f = writable();
   if (f != Fault::Ok) {
     return f;

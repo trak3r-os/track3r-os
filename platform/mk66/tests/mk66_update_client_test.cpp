@@ -216,6 +216,36 @@ TEST_CASE("fw client: a check that fails says why and at which byte, and a dropp
   }
 }
 
+// OS-BUG-FWNAMELEN: a stored image whose name is over 30 characters is listed but never checked, armed or handed over (the SD bootloader flashes another file for it).
+TEST_CASE("fw client: a file name over 30 characters is listed, refused by the check, and nothing is armed") {
+  const std::string at30 = std::string(up::kUpdateNameMax - 4, 'b') + ".ptf";
+  const std::string at31 = std::string(up::kUpdateNameMax - 3, 'b') + ".ptf";
+  Bare b;
+  b.store.put_file(at30, b.img.bytes());
+  b.store.put_file(at31, b.img.bytes());
+  unsigned seen = 0;
+  NEED(b.svc.ui_list_begin() == Fault::Ok);
+  bool first = false;
+  up::FwEntry e;
+  while (b.svc.ui_list_next(e, first)) {
+    seen += (e.name == at30 || e.name == at31) ? 1u : 0u;
+  }
+  b.svc.ui_list_end();
+  CHECK(seen == 2u);  // both are shown
+  b.store.calls.clear();
+  CHECK(b.svc.ui_check_begin(at31.c_str()) == Fault::NameLong);
+  CHECK(b.svc.phase() == up::FwPhase::Idle);
+  CHECK(b.store.calls.empty());  // refused before the card was asked anything
+  CHECK(b.svc.ui_install() == Fault::NotArmed);
+  CHECK(!b.store.has(up::kFwInfoName));
+  CHECK(up::refusal_of(Fault::NameLong) == fwp::Refusal::NameTooLong);
+  // 30 characters pass the check, and a stale armed check is not replaced by a refused one
+  CHECK(b.svc.ui_check_begin(at30.c_str()) == Fault::Ok);
+  CHECK(b.drive().state == State::Checked);
+  CHECK(b.svc.ui_check_begin(at31.c_str()) == Fault::NameLong);
+  CHECK(b.svc.ui_install() == Fault::Ok);  // the earlier good check still stands
+}
+
 TEST_CASE("fw client: every refusal of a check names its reason and touches nothing") {
   {
     Bare b;
@@ -721,6 +751,7 @@ TEST_CASE("fw client: every fault maps to its port refusal (the whole table), an
       {Fault::OnHost, fwp::Refusal::OnComputer},
       {Fault::NotArmed, fwp::Refusal::NotChecked},
       {Fault::Expired, fwp::Refusal::Expired},
+      {Fault::NameLong, fwp::Refusal::NameTooLong},
   };
   static_assert(sizeof kTable / sizeof kTable[0] == static_cast<unsigned>(Fault::Count), "one row per Fault");
   for (unsigned i = 0; i < static_cast<unsigned>(Fault::Count); ++i) {

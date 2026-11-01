@@ -62,6 +62,8 @@ bool valid_image_name(const char* name) noexcept {
   return true;
 }
 
+bool update_name_ok(const char* name) noexcept { return valid_image_name(name) && length(name) <= kUpdateNameMax; }
+
 bool removable_name(const char* name) noexcept {
   if (name == nullptr) {
     return false;

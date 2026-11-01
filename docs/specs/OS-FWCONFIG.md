@@ -46,7 +46,8 @@ It adds no new way to write flash. The bootloader still does the flashing, from 
    - storage is busy;
    - an export or a recording is running;
    - the project has unsaved changes (`SAVE THE PROJECT FIRST`);
-   - a console `fw` operation is in progress (one owner; `FwPhase` is not Idle or Done).
+   - a console `fw` operation is in progress (one owner; `FwPhase` is not Idle or Done);
+   - the chosen file's name has more than 30 characters (`.ptf` included): `NAME TOO LONG: 30 MAX` on the dialog's line, before question 1 (OS-BUG-FWNAMELEN, `docs/specs/OS-BUG-FWNAMELEN.md`; the SD bootloader flashed another file for such a name).
 3. **Question 1** (an OS-KEYROWDLG question): `UPDATE TO <name>? F1 YES`. Any other key cancels it.
 4. **The check.** The file is read and validated on the card again, sliced at 2 KiB a pass. A progress dialog shows `CHECKING <name>` with a bar, and F8 CANCEL.
    - **If it fails**, the dialog's own line says `NOT A VALID IMAGE: <fault> AT <offset>` (amended 2026-10-19: once the dialog is open, a failure or a refusal shows on its line, not on the strip). Nothing is written, and the dialog returns to the list.

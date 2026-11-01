@@ -194,3 +194,32 @@ TEST_CASE("path guard: the last guard accepts exactly three paths") {
     }
   }
 }
+
+// OS-BUG-FWNAMELEN: the SD bootloader flashed the FIRST .ptf of Firmware/ for a 33-character name (observed 2026-10-31; 21, 29 and 30 installed). An update is never armed for a name over
+// kUpdateNameMax (30, ".ptf" included); such a file is still a valid image name (it may be stored, listed and read), only update_name_ok says no.
+TEST_CASE("path guard: an update is armed for names of at most 30 characters, 31 is refused, longer names stay storable") {
+  static_assert(up::kUpdateNameMax == 30, "the longest name proven on the unit");
+  const auto name_of = [](std::size_t total) { return std::string(total - up::kSuffixLen, 'a') + ".ptf"; };
+  for (const std::size_t n : {5u, 21u, 29u, 30u}) {
+    INFO(n);
+    CHECK(name_of(n).size() == n);
+    CHECK(up::update_name_ok(name_of(n).c_str()));
+  }
+  for (const std::size_t n : {31u, 33u, 40u, 52u}) {
+    INFO(n);
+    CHECK(name_of(n).size() == n);
+    CHECK(up::valid_image_name(name_of(n).c_str()));  // still storable and readable ...
+    CHECK(up::readable_name(name_of(n).c_str()));
+    CHECK(!up::update_name_ok(name_of(n).c_str()));   // ... never armed
+  }
+  // The names of the unit's observation.
+  CHECK(up::update_name_ok("o3os_1.0.1-stbase.1-bench.ptf"));          // 29: installed
+  CHECK(up::update_name_ok("o3os_1.0.1-stereo2.1-bench.ptf"));         // 30: installed
+  CHECK(!up::update_name_ok("o3os_1.0.1-stereobase.1-bench.ptf"));     // 33: flashed the first .ptf instead
+  // A name the guard refuses stays refused whatever its length.
+  CHECK(!up::update_name_ok("a b.ptf"));
+  CHECK(!up::update_name_ok("a..b.ptf"));
+  CHECK(!up::update_name_ok("_o3up.tmp"));
+  CHECK(!up::update_name_ok(""));
+  CHECK(!up::update_name_ok(nullptr));
+}

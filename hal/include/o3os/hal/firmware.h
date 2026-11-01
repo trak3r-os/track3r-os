@@ -31,6 +31,10 @@
 namespace o3os::hal::firmware {
 
 inline constexpr std::size_t kNameCap = 53;                   // the longest image name (48-character stem + ".ptf") and a NUL
+// The longest file name, ".ptf" included, that an update may be armed for (OS-BUG-FWNAMELEN; NEW COMMUNITY OS BEHAVIOUR, the limit is OBSERVED, the bootloader's rule is an open research question).
+// On the unit (2026-10-31) the SD bootloader flashed the FIRST .ptf of Firmware/, with no error, when the named file's name had 33 characters; names of 21, 29 and 30 installed (the limit lies
+// between 30 and 33). So a longer file may be stored and listed but is never armed: the guard (platform/mk66/update/path_guard.h update_name_ok) and the dialog both use this number.
+inline constexpr std::size_t kUpdateNameMax = 30;
 inline constexpr std::uint32_t kCheckLifetimeMs = 30000;       // a Checked result is good this long (the console's token lifetime)
 
 struct File {
@@ -51,6 +55,7 @@ enum class Refusal : std::uint8_t {
   NoFolder,     // no Firmware/ folder
   NotFound,
   BadName,      // a name the writer does not accept (the bootloader could not be given it)
+  NameTooLong,  // a valid name over kUpdateNameMax characters: the bootloader may flash another file instead (OS-BUG-FWNAMELEN)
   NotChecked,   // install() without a good check: none made, cancelled, the card went to a computer or was changed since
   Expired,      // install() later than kCheckLifetimeMs after the check
   Io            // the card failed

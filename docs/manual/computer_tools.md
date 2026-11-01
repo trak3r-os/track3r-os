@@ -118,7 +118,7 @@ python3 -I platform/mk66/tools/o3console.py --put track3r-os-<version>.ptf
 ```
 
 1. Any SD card in the unit takes the file. To make the tool check which card it is, find the card's volume serial (the `fw` command prints it in the form `XXXX-XXXX`) and pass it with `--expect-volume XXXX-XXXX`. The tool then refuses to write to a different card.
-2. The name on the card must start with a letter or a digit. It may use letters, digits, dots, underscores and dashes, up to 48 characters not counting `.ptf`, and it must end in `.ptf`. Use `--name` to give the file another name on the card.
+2. The name on the card must start with a letter or a digit. It may use letters, digits, dots, underscores and dashes, and it must end in `.ptf`. The whole name, `.ptf` included, has at most 30 characters: with a longer name the SD bootloader was seen flashing the first `.ptf` of `Firmware/` instead of your file, so `--put` and `--update` refuse it before anything is written. Use `--name` to give the file another name on the card.
 3. The unit checks the file again after it is written. The tool prints `ok`, the name, the size, the CRC-32 and the image length.
 
 A file on the card does not update the unit. To flash it, follow the update steps in [Installing track3r-os](install.md). The unit flashes the first `.ptf` in `Firmware/`, so keep only one.

@@ -296,6 +296,7 @@ TEST_CASE("firmware store: refusals write nothing and change nothing") {
   CHECK(store.remove("PolyendTracker_0.55.ptf") == Fault::NotFound);
   CHECK(store.write_fwinfo("README.TXT") == Fault::BadName);
   CHECK(store.write_fwinfo("PolyendTracker_0.55.ptf") == Fault::NotFound);
+  CHECK(store.write_fwinfo((std::string(up::kUpdateNameMax - 3, 'a') + ".ptf").c_str()) == Fault::NameLong);  // OS-BUG-FWNAMELEN: 31 characters, a valid image name, never handed over
   CHECK(card.medium.blocks_written == written);  // not one sector
   CHECK(outside(fat) == tree);
   CHECK(has(names_in_firmware(fat), "PolyendTracker_1.9.0.ptf"));
@@ -383,6 +384,14 @@ TEST_CASE("firmware store: _fwinfo holds exactly the bare name") {
   NEED(store.write_fwinfo("PolyendTracker_1.9.0.ptf") == Fault::Ok);
   const std::vector<std::uint8_t> info2 = read_file(fat, "Firmware/_fwinfo");
   CHECK(std::string(info2.begin(), info2.end()) == "PolyendTracker_1.9.0.ptf");
+  // OS-BUG-FWNAMELEN: a name of exactly kUpdateNameMax characters is handed over (31 is refused in the refusals test)
+  const std::string longest = "PolyendTracker_0.123456789.ptf";
+  static_assert(sizeof("PolyendTracker_0.123456789.ptf") - 1 == up::kUpdateNameMax, "the longest name is the limit");
+  CHECK(store.remove_fwinfo() == Fault::Ok);
+  NEED(upload(store, longest.c_str(), bytes(700, 7)) == Fault::Ok);
+  NEED(store.write_fwinfo(longest.c_str()) == Fault::Ok);
+  const std::vector<std::uint8_t> info3 = read_file(fat, "Firmware/_fwinfo");
+  CHECK(std::string(info3.begin(), info3.end()) == longest);
   CHECK(outside(fat) == tree);
   CHECK(fat.open_files() == 0u);
 }

@@ -60,7 +60,7 @@ An image of track3r-os has the `diag` console on its USB serial port and can wri
 
 1. Back up the card. Connect the unit by USB (it enumerates as `16d0:0e9f`, the same USB ID as the official Tracker; the product name is "Track3r", the maker "track3r-os").
 2. Any SD card in the unit takes the file. To make the tool check the card, find its volume serial (the `fw` command of the `diag` console prints it as `XXXX-XXXX`, a FAT volume ID) and pass it with `--expect-volume XXXX-XXXX`; the tool then refuses to write to a different card.
-3. Send the file. The name must match `[0-9A-Za-z][0-9A-Za-z._-]{0,47}.ptf`:
+3. Send the file. The name must match `[0-9A-Za-z][0-9A-Za-z._-]{0,25}.ptf` and has at most 30 characters with `.ptf` (with a longer name the SD bootloader was seen flashing the first `.ptf` of `Firmware/` instead of the file you named, so the tool and the unit refuse it):
 
    ```sh
    python3 -I platform/mk66/tools/o3console.py --put track3r-os-v0.5.1.ptf --name track3r-os-v0.5.1.ptf

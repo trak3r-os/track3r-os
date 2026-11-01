@@ -45,12 +45,12 @@ jobs:
           O3OS_CI_ARCHIVE_DIR: ${{ github.workspace }}/arm-archive
         run: tools/ci.sh toolchain
       - name: Check the tag and the update file name
-        # The unit's path guard takes [0-9A-Za-z][0-9A-Za-z._-]{0,47}.ptf and the file must not look like an official one (no "Polyend" prefix).
+        # The unit's path guard takes [0-9A-Za-z][0-9A-Za-z._-]{0,25}.ptf (at most 30 characters in all: the SD bootloader may flash another file on a longer name, OS-BUG-FWNAMELEN) and the file must not look like an official one (no "Polyend" prefix).
         run: |
           set -euo pipefail
           [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]] || { echo "tag $TAG is not v<major>.<minor>.<patch>[-suffix]"; exit 1; }
           name="track3r-os-${TAG}.ptf"
-          [[ "$name" =~ ^[0-9A-Za-z][0-9A-Za-z._-]{0,47}\.ptf$ && "$name" != *..* ]] || { echo "$name is not a name the unit's path guard accepts"; exit 1; }
+          [[ "$name" =~ ^[0-9A-Za-z][0-9A-Za-z._-]{0,25}\.ptf$ && "$name" != *..* ]] || { echo "$name (${#name} characters) is not a name the unit accepts: at most 30 characters with .ptf (stem of 26 at most), so the tag $TAG is too long"; exit 1; }
           echo "PTF=$name" >> "$GITHUB_ENV"
       - name: Build the MK66 image twice in fresh directories
         run: |

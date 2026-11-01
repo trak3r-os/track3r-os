@@ -576,6 +576,10 @@ void FwService::arm(shell::Shell& sh, const shell::Args& a) noexcept {
     sh.out().text("usage: fw arm <name> <crc32hex>  (name: <stem>.ptf)\n");
     return;
   }
+  if (!update_name_ok(a.argv[2])) {
+    err(sh.out(), Fault::NameLong);  // (the bootloader would flash another file: OS-BUG-FWNAMELEN)
+    return;
+  }
   const Fault f = begin_check(a.argv[2]);
   if (f != Fault::Ok) {
     err(sh.out(), f);
@@ -587,6 +591,9 @@ void FwService::arm(shell::Shell& sh, const shell::Args& a) noexcept {
 
 // The start of a check, `fw arm`'s and the client's: the card free and writable (the update would write), the file readable. Arming on Ok.
 Fault FwService::begin_check(const char* name) noexcept {
+  if (!update_name_ok(name)) {
+    return valid_image_name(name) ? Fault::NameLong : Fault::BadName;  // the one door of every arming: never a name the bootloader mishandles (OS-BUG-FWNAMELEN)
+  }
   if (host_.storage_busy()) {
     return Fault::CardBusy;
   }
@@ -745,6 +752,9 @@ Fault FwService::ui_check_begin(const char* name) noexcept {
   // Everything that can refuse is tried before anything is dropped: a refused call leaves a console token and a passed check that waits for ui_install() as they were.
   if (!valid_image_name(name)) {
     return Fault::BadName;
+  }
+  if (!update_name_ok(name)) {
+    return Fault::NameLong;  // (before anything is dropped, like the other refusals)
   }
   if (host_.card_on_host()) {
     return Fault::OnHost;

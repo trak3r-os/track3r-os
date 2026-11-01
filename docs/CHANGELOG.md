@@ -4,6 +4,10 @@ User-visible changes of the Community OS, newest first, one entry per change, in
 
 ## Unreleased
 
+### Fixed
+
+- **Update file names over 30 characters are refused.** With a longer `.ptf` name the card update could install the first `.ptf` of the `Firmware` folder instead, with no error. The Update screen now shows `NAME TOO LONG: 30 MAX` for such a file and asks nothing; rename the file to 30 characters or fewer (`.ptf` included). `o3console.py` refuses the same names.
+
 ## v1.0.1 (date to be set at publication)
 
 ### Fixed

@@ -252,7 +252,7 @@ Start with the **.ptf** file on the card and your project saved.
 
 1. Press `Config`, then `F4` (**INFO**). The key row now has `F8` (**UPDATE**). <!-- QA-CFG-040 -->
 2. Press `F8`. A list opens with every **.ptf** file in the folder and its size. The first file is marked **RESET TARGET**: it is the one the reset button installs. A name too long for that row is shortened with three dots; the question in step 3 shows it whole. <!-- QA-CFG-042 -->
-3. Choose a file with `Up` and `Down`. The cursor stops at both ends. <!-- QA-CFG-043 --> Press `F1` (**UPDATE**). The unit asks **UPDATE TO** and the name of the file. <!-- QA-CFG-044 -->
+3. Choose a file with `Up` and `Down`. The cursor stops at both ends. <!-- QA-CFG-043 --> Press `F1` (**UPDATE**). The unit asks **UPDATE TO** and the name of the file. <!-- QA-CFG-044 --> A file whose name has more than 30 characters (`.ptf` included) is listed but cannot be chosen for an update: the line says **NAME TOO LONG: 30 MAX** and no question is asked. With a name that long the SD bootloader was seen flashing another file instead, so rename the file on a computer first. <!-- QA-CFG-266 -->
 4. Press `F1` (**YES**). A bar shows the unit reading the file. Nothing is written yet. <!-- QA-CFG-046 -->
 5. When the file passes, the unit says **IMAGE OK**, with the length of the image and a CRC. The CRC is a code worked out from every byte of the file, so two copies of the same file give the same code. Press `F1` (**INSTALL**) within 30 seconds. <!-- QA-CFG-048 -->
 6. The screen says **UPDATING: DO NOT POWER OFF**. The unit restarts by itself with the new firmware. Config, then **INFO**, shows the new build. <!-- QA-CFG-054 -->

@@ -434,6 +434,25 @@ std::string token_of(const Rig& r) {
 
 }  // namespace
 
+// OS-BUG-FWNAMELEN: the console never arms a name the SD bootloader mishandles (over 30 characters with .ptf); the file may be on the card, `fw arm` says why and arms nothing.
+TEST_CASE("fw arm: a name over 30 characters is refused with a reason and nothing is armed") {
+  Armed a;
+  const std::string at30 = std::string(up::kUpdateNameMax - 4, 'c') + ".ptf";
+  const std::string at31 = std::string(up::kUpdateNameMax - 3, 'c') + ".ptf";
+  Rig r;
+  r.store.put_file(at30, std::vector<std::uint8_t>(a.file.begin(), a.file.end()));
+  r.store.put_file(at31, std::vector<std::uint8_t>(a.file.begin(), a.file.end()));
+  r.command("fw arm " + at31 + " " + hex8s(a.crc));
+  CHECK(r.said("ERR name over 30 characters"));
+  CHECK(!r.svc.armed());
+  CHECK(token_of(r).empty());
+  CHECK(!r.store.has(up::kFwInfoName));
+  r.clear();
+  r.command("fw arm " + at30 + " " + hex8s(a.crc));  // the longest proven name arms as before
+  CHECK(token_of(r).size() == 8u);
+  CHECK(r.svc.armed());
+}
+
 TEST_CASE("fw arm: the file is re-read and fully re-validated, and the token is single use") {
   Armed a;
   Rig r;

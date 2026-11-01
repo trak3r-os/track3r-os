@@ -29,6 +29,8 @@ Firmware update over USB (OS-006c; the device side is `fw` in platform/mk66/READ
 and the file in windows of 4096 bytes past the last acknowledgement the unit printed, and prints the unit's reply (`ok <name> <bytes> <crc> image <length>`,
 or `ERR <reason> at <offset>`). `--update` runs `fw arm` and `fw update <token>` (the unit then restarts into the bootloader), waits for the port to disappear
 and come back (up to --reboot-timeout seconds), runs `version` and prints it; `--expect-version` makes a version that does not contain the text a failure.
+The name (the file's own, `--name`, or `--update`'s) is at most 30 characters with `.ptf` (OS-BUG-FWNAMELEN: with a longer one the SD bootloader may flash the first .ptf of Firmware/
+instead; both commands refuse it with exit status 1 before the port is opened).
 It needs `--yes-update` because it restarts the unit. `--expect-volume` is an optional check: it refuses both when the card's volume serial (`fw` reports it) is a different one.
 Since OS-FWANY (maintainer decision 2026-10-13) and OS-ANYCARD (2026-10-17) the unit needs no marker file on the card and the tool needs no volume: any writable FAT card with a
 Firmware/ folder takes `fw put`, whatever card is in the unit. The first install of an image that has `fw` goes the old way, by card.
@@ -133,14 +135,29 @@ def run(fd, commands, timeout, out):
 # ---- firmware update over USB (OS-006c) ----------------------------------------------------------------------------------------
 
 WINDOW = 4096  # bytes the host may have outstanding past the last `+N` acknowledgement (the unit's receive ring is sized for it)
-NAME_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z._-]{0,47}\.ptf$", re.IGNORECASE | re.ASCII)
+# OS-BUG-FWNAMELEN: the longest file name an update may be armed for, ".ptf" included (hal/firmware.h kUpdateNameMax). OBSERVED on the unit 2026-10-31: with a 33-character name the SD bootloader
+# flashed the FIRST .ptf of Firmware/ with no error; 21, 29 and 30 installed. The unit stores names up to 52, but this tool never puts or arms one over 30.
+UPDATE_NAME_MAX = 30
+NAME_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z._-]{0,%d}\.ptf$" % (UPDATE_NAME_MAX - 4 - 1), re.IGNORECASE | re.ASCII)
 EXPECT_SP = "0x20030000"
 RAMFUNC_L = "0x1FFF0000:0xC000"
 
 
 def valid_image_name(name):
-    """The device's path guard, as far as a host can check it: [0-9A-Za-z][0-9A-Za-z._-]{0,47} then .ptf (any case), no '..'."""
+    """The device's path guard, as far as a host can check it, and the update limit: [0-9A-Za-z][0-9A-Za-z._-]{0,25} then .ptf (any case), no '..', at most UPDATE_NAME_MAX characters in all."""
     return bool(NAME_RE.fullmatch(name)) and ".." not in name
+
+
+def name_problem(name):
+    """None for a name the tool may put or arm, else the reason in one sentence (nothing has been written yet when this is asked)."""
+    if len(name) > UPDATE_NAME_MAX and not name.lower().endswith(".ptf"):
+        return "%r is not a .ptf file: the unit updates only from <name>.ptf (at most %d characters in all): give --name" % (name, UPDATE_NAME_MAX)
+    if len(name) > UPDATE_NAME_MAX:
+        return ("%r has %d characters: over %d (with .ptf) the SD bootloader may flash another file instead of this one; "
+                "give --name with at most %d characters" % (name, len(name), UPDATE_NAME_MAX, UPDATE_NAME_MAX))
+    if not valid_image_name(name):
+        return "%r is not a name the unit accepts (<1..26 of 0-9A-Za-z._-, first alphanumeric>.ptf, no '..', at most %d characters in all): give --name" % (name, UPDATE_NAME_MAX)
+    return None
 
 
 def local_check(path, out):
@@ -637,12 +654,23 @@ def self_test_fw(problems):
             f.write(selftest_image(bad_config=True))
         data = selftest_image()
         # the name rule
-        for ok_name in (name, "Track3r_0.3.2.ptf", "x.PTF", "a-b_c.ptf", "A" * 48 + ".ptf"):
+        for ok_name in (name, "Track3r_0.3.2.ptf", "x.PTF", "a-b_c.ptf", "A" * 26 + ".ptf", "o3os_1.0.1-stereo2.1-bench.ptf"):
             if not valid_image_name(ok_name):
                 problems.append("name %r refused" % ok_name)
-        for bad_name in (".ptf", "a b.ptf", "a..b.ptf", "a/b.ptf", "../a.ptf", ".a.ptf", "a.txt", "A" * 49 + ".ptf"):
+        for bad_name in (".ptf", "a b.ptf", "a..b.ptf", "a/b.ptf", "../a.ptf", ".a.ptf", "a.txt", "A" * 27 + ".ptf", "o3os_1.0.1-stereobase.1-bench.ptf"):
             if valid_image_name(bad_name):
                 problems.append("name %r accepted" % bad_name)
+        # the update limit (OS-BUG-FWNAMELEN): 30 characters in all pass, 31 and the observed 33-character name are refused with a reason before anything is written
+        if len("A" * 26 + ".ptf") != UPDATE_NAME_MAX or name_problem("A" * 26 + ".ptf") is not None:
+            problems.append("a name of %d characters refused" % UPDATE_NAME_MAX)
+        for long_name in ("A" * 27 + ".ptf", "o3os_1.0.1-stereobase.1-bench.ptf"):
+            why = name_problem(long_name)
+            if not why or "characters" not in why or "bootloader" not in why:
+                problems.append("name %r (%d characters) not refused with a reason" % (long_name, len(long_name)))
+        # a long name that is not a .ptf gets its own message, not the bootloader one
+        why = name_problem("A" * 40 + ".txt")
+        if not why or ".ptf file" not in why or "bootloader" in why:
+            problems.append("a long non-.ptf name not refused with its own message: %s" % why)
         # the local gate: a good image passes, a bad flash configuration is never sent
         quiet = io.StringIO()
         if not local_check(good, quiet):
@@ -783,6 +811,18 @@ def self_test_fw(problems):
                         problems.append("%s with expect_volume=%r did not go as far as the port without a volume complaint (%d: %s)" % (kind, volume, rc, sys.stderr.getvalue()))
                     sys.stderr.truncate(0)
                     sys.stderr.seek(0)
+            # OS-BUG-FWNAMELEN: a name over the update limit is refused by --put (the file's own name or --name) and by --update BEFORE the port is looked at: nothing is opened, nothing is written
+            long_name = "o3os_1.0.1-stereobase.1-bench.ptf"
+            long_put = os.path.join(tmp, long_name)
+            with open(long_put, "wb") as f:
+                f.write(selftest_image())
+            for label, kw in (("put (file name)", dict(base, put=long_put)), ("put (--name)", dict(base, name=long_name)), ("update", dict(base, put=None, update=long_name))):
+                rc = firmware_main(_ap.Namespace(**kw), "/nonexistent/o3-selftest")
+                text = sys.stderr.getvalue()
+                if rc != 1 or "characters" not in text or "cannot open" in text:
+                    problems.append("%s with a %d-character name was not refused before the port (%d: %s)" % (label, len(long_name), rc, text))
+                sys.stderr.truncate(0)
+                sys.stderr.seek(0)
         finally:
             sys.stderr = saved_err
         for descriptor in (fd, fd2, fd3, fd4):
@@ -924,8 +964,9 @@ def firmware_main(args, port):
         return 1
     if args.put:
         name = args.name or os.path.basename(args.put)
-        if not valid_image_name(name):
-            print("o3console: %r is not a name the unit accepts (<1..48 of 0-9A-Za-z._-, first alphanumeric>.ptf, no '..'): give --name" % name, file=sys.stderr)
+        problem = name_problem(name)
+        if problem:
+            print("o3console: " + problem, file=sys.stderr)
             return 1
         try:
             with open(args.put, "rb") as f:
@@ -940,8 +981,9 @@ def firmware_main(args, port):
             return 4
     else:
         name = args.update
-        if not valid_image_name(name):
-            print("o3console: %r is not an image name of the form <stem>.ptf" % name, file=sys.stderr)
+        problem = name_problem(name)
+        if problem:
+            print("o3console: " + problem, file=sys.stderr)
             return 1
         if not args.yes_update:
             print("o3console: --update restarts the unit into the bootloader: add --yes-update", file=sys.stderr)

@@ -64,7 +64,7 @@ An image of track3r-os has the `diag` console on its USB serial port and can wri
 
 1. Back up the card. Connect the unit by USB (it enumerates as `16d0:0e9f`, the same USB ID as the official Tracker; the product name is "Track3r", the maker "track3r-os").
 2. Any SD card in the unit takes the file. To make the tool check the card, find its volume serial (the `fw` command of the `diag` console prints it as `XXXX-XXXX`, a FAT volume ID) and pass it with `--expect-volume XXXX-XXXX`; the tool then refuses to write to a different card.
-3. Send the file. The name must match `[0-9A-Za-z][0-9A-Za-z._-]{0,47}.ptf`:
+3. Send the file. The name must match `[0-9A-Za-z][0-9A-Za-z._-]{0,25}.ptf` and has at most 30 characters with `.ptf` (with a longer name the SD bootloader was seen flashing the first `.ptf` of `Firmware/` instead of the file you named, so the tool and the unit refuse it):
 
    ```sh
    python3 -I platform/mk66/tools/o3console.py --put track3r-os-v0.5.1.ptf --name track3r-os-v0.5.1.ptf
@@ -2954,7 +2954,7 @@ Start with the **.ptf** file on the card and your project saved.
 
 1. Press `Config`, then `F4` (**INFO**). The key row now has `F8` (**UPDATE**).
 2. Press `F8`. A list opens with every **.ptf** file in the folder and its size. The first file is marked **RESET TARGET**: it is the one the reset button installs. A name too long for that row is shortened with three dots; the question in step 3 shows it whole.
-3. Choose a file with `Up` and `Down`. The cursor stops at both ends.  Press `F1` (**UPDATE**). The unit asks **UPDATE TO** and the name of the file.
+3. Choose a file with `Up` and `Down`. The cursor stops at both ends.  Press `F1` (**UPDATE**). The unit asks **UPDATE TO** and the name of the file.  A file whose name has more than 30 characters (`.ptf` included) is listed but cannot be chosen for an update: the line says **NAME TOO LONG: 30 MAX** and no question is asked. With a name that long the SD bootloader was seen flashing another file instead, so rename the file on a computer first.
 4. Press `F1` (**YES**). A bar shows the unit reading the file. Nothing is written yet.
 5. When the file passes, the unit says **IMAGE OK**, with the length of the image and a CRC. The CRC is a code worked out from every byte of the file, so two copies of the same file give the same code. Press `F1` (**INSTALL**) within 30 seconds.
 6. The screen says **UPDATING: DO NOT POWER OFF**. The unit restarts by itself with the new firmware. Config, then **INFO**, shows the new build.
@@ -3122,7 +3122,7 @@ python3 -I platform/mk66/tools/o3console.py --put track3r-os-<version>.ptf
 ```
 
 1. Any SD card in the unit takes the file. To make the tool check which card it is, find the card's volume serial (the `fw` command prints it in the form `XXXX-XXXX`) and pass it with `--expect-volume XXXX-XXXX`. The tool then refuses to write to a different card.
-2. The name on the card must start with a letter or a digit. It may use letters, digits, dots, underscores and dashes, up to 48 characters not counting `.ptf`, and it must end in `.ptf`. Use `--name` to give the file another name on the card.
+2. The name on the card must start with a letter or a digit. It may use letters, digits, dots, underscores and dashes, and it must end in `.ptf`. The whole name, `.ptf` included, has at most 30 characters: with a longer name the SD bootloader was seen flashing the first `.ptf` of `Firmware/` instead of your file, so `--put` and `--update` refuse it before anything is written. Use `--name` to give the file another name on the card.
 3. The unit checks the file again after it is written. The tool prints `ok`, the name, the size, the CRC-32 and the image length.
 
 A file on the card does not update the unit. To flash it, follow the update steps in [Installing track3r-os](install.md). The unit flashes the first `.ptf` in `Firmware/`, so keep only one.

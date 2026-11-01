@@ -10,6 +10,7 @@
 #include <o3os/app/text_format.h>
 
 #include <cstdint>
+#include <cstring>
 
 namespace o3os::app {
 
@@ -23,6 +24,9 @@ using hal::firmware::Refusal;
 // The texts that two cases share are one string.
 constexpr const char* kCheckAgain = "CHECK AGAIN";
 constexpr const char* kCheckExpired = "THE CHECK EXPIRED: CHECK AGAIN";
+// A name over hal::firmware::kUpdateNameMax makes the SD bootloader flash another file (OS-BUG-FWNAMELEN); the text names the limit (a test keeps the two together).
+constexpr const char* kNameTooLong = "NAME TOO LONG: 30 MAX";
+static_assert(hal::firmware::kUpdateNameMax == 30, "kNameTooLong names the limit: change both together");
 
 const char* refusal_text(Refusal r) noexcept {
   switch (r) {
@@ -36,6 +40,7 @@ const char* refusal_text(Refusal r) noexcept {
     case Refusal::NoFolder: return "NO FIRMWARE FOLDER ON THE CARD";
     case Refusal::NotFound: return "THE FILE IS NOT ON THE CARD ANY MORE";
     case Refusal::BadName: return "THE UPDATE CANNOT TAKE THIS FILE NAME";
+    case Refusal::NameTooLong: return kNameTooLong;
     case Refusal::NotChecked: return kCheckAgain;
     case Refusal::Expired: return kCheckExpired;
     case Refusal::Io: return "CARD READ ERROR";
@@ -178,6 +183,10 @@ bool firmware_go(ActionContext& ctx, core::ActionArg) noexcept {
       }
       if (v.n == 0) {
         return false;
+      }
+      if (std::strlen(v.chosen()) > hal::firmware::kUpdateNameMax) {  // listed, never armed: the question is not even asked (the port refuses it too: NameTooLong)
+        to_list(v, kNameTooLong);
+        return true;
       }
       step(v, FirmwareView::Phase::AskUpdate);
       return true;

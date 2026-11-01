@@ -550,6 +550,51 @@ TEST_CASE("firmware: question 2 is taken back by another control, by F8, by the 
   }
 }
 
+// OS-BUG-FWNAMELEN (new Community OS behaviour; the 30 is OBSERVED): the SD bootloader flashed the first .ptf of Firmware/ for a 33-character name. A name over 30 characters (".ptf" included) is
+// listed like any other, but UPDATE on it is refused on the dialog's line, before question 1 and before the port is asked anything; 30 characters pass.
+TEST_CASE("firmware: a file name over 30 characters is listed but UPDATE refuses it: NAME TOO LONG, no question, nothing asked of the port") {
+  const std::string at30 = "o3os_1.0.1-stereo2.1-bench.ptf";
+  const std::string at31 = "o3os_1.0.1-stereo2.1-benchs.ptf";
+  const std::string at33 = "o3os_1.0.1-stereobase.1-bench.ptf";
+  NEED(at30.size() == hal::firmware::kUpdateNameMax);
+  NEED(at31.size() == hal::firmware::kUpdateNameMax + 1u);
+  NEED(at33.size() == 33u);
+  Rig rig;
+  rig.sink.clear_files();
+  rig.sink.add(at33, 800000);
+  rig.sink.add(at31, 800000);
+  rig.sink.add(at30, 800000);
+  rig.tap(Button::F8);
+  NEED(rig.fw().n == 3);
+  CHECK(std::string(rig.fw().files[0].name) == at33);  // shown
+  for (unsigned i = 0; i < 2; ++i) {
+    rig.sink.calls.clear();
+    rig.tap(Button::F1);
+    CHECK(rig.fw().phase == Phase::List);  // no question 1
+    CHECK(std::string(rig.fw().msg.c_str()) == "NAME TOO LONG: 30 MAX");
+    CHECK(rig.fw().bad);
+    CHECK(rig.overlay() == OverlayId::FirmwareUpdate);
+    CHECK(rig.sink.calls.empty());  // the port was not asked
+    CHECK(rig.sink.installs == 0u);
+    rig.tap(Button::Down);
+  }
+  CHECK(std::string(rig.fw().chosen()) == at30);
+  rig.tap(Button::F1);  // 30 characters: the question is asked as always
+  CHECK(rig.fw().phase == Phase::AskUpdate);
+  CHECK(rig.fw().msg.empty());
+  rig.tap(Button::F1);
+  CHECK(rig.sink.count("begin_check " + at30) == 1u);
+  // The port refuses a name too (the service's NameLong): the same line.
+  Rig port;
+  port.sink.check_refusal = Refusal::NameTooLong;
+  port.tap(Button::F8);
+  port.tap(Button::F1);
+  port.tap(Button::F1);
+  CHECK(port.fw().phase == Phase::List);
+  CHECK(std::string(port.fw().msg.c_str()) == "NAME TOO LONG: 30 MAX");
+  CHECK(port.fw().bad);
+}
+
 TEST_CASE("firmware: every refusal says why and starts nothing: the port's own (computer, busy storage, a console job), an export, an unsaved project") {
   struct Case {
     Refusal why;
