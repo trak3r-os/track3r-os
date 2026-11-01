@@ -4,14 +4,41 @@ User-visible changes of the Community OS, newest first, one entry per change, in
 
 ## Unreleased
 
+## v1.1.0 (date to be set at publication)
+
 ### New
 
-- **Song: BRIDGE puts transition slots between two patterns.** In the Song screen's TOOLS dialog (`F6`) the OP row has one more value, BRIDGE: put the cursor on a slot (or select two), set SLOTS from 1 to 16 and press `F1`. The new slots go between the slot and the next one, each a new pattern in which more and more steps are the next pattern's, so the music moves from one to the other step by step; the same two patterns always give the same bridge. Nothing is written when the song, the pattern pool or the undo memory cannot take it, and one undo takes it all back.
+- **SID-style instrument, built in.** A new sound engine next to TB-303, FM and Chip, in the ENGINE picker with no card file: saw, triangle, pulse with PWM, noise and combined waves, sync and ring from an internal modulator, a stepped ADSR and a low-pass, band-pass or high-pass filter with a 6581 or 8580 model switch. Its pages and views were checked on the unit and its CPU cost is about 4 to 5 % of a block a voice (measured on a test build); the listening to the waves and the filter is not done yet. New Community OS behaviour.
+- **Stereo samples, opt-in per instrument.** Load a stereo file with STEREO on Sample load, then set the instrument's STEREO row to STEREO: the note plays its left and right sides. At most four stereo voices play at once; the next ones play the mix. Stereo plays only forward, on the Modern engine, with no filter, Overdrive, Bit depth or tremolo. The sample edit page works on both sides; COMPRESSOR and the Amiga conversion ask you to make it mono first, and a `.pti` export keeps the mix only. Four stereo voices cost about 4 percentage points of the CPU on the unit. A project that uses it is saved with a newer instrument version; any other project is byte for byte as before. The listening is not done yet.
+- **USB audio outputs of 2, 4, 6, 8 or 10 channels, per project.** On Mixer, STEMS, the OUTPUTS row sets the number the computer sees; `F6` twice applies it and the unit reconnects. The USB return stays only below 10 channels. Checked on Linux; macOS and Windows are not checked.
+- **Song: STAGE and TIMELINE pages.** TIMELINE draws the song as blocks as wide as the slots are long, with the pattern's color, a lane per track with a tick for every step that holds a note (the note map), and an ENERGY row; at most 12 tracks are drawn. STAGE shows the playing slot and the next in large type with a countdown; it is no longer in the Song key cycle, and the countdown is on TIMELINE's info line while the song plays.
+- **Song: BRIDGE puts transition slots between two patterns.** In the Song screen's TOOLS dialog (`F6`) the OP row has one more value, BRIDGE: put the cursor on a slot (or select two), set SLOTS from 1 to 16 and press `F1`. The new slots go between the slot and the next one, each a new pattern in which more and more steps are the next pattern's, so the music moves from one to the other step by step; the same two patterns always give the same bridge. Nothing is written when the song, the pattern pool or the undo memory cannot take it, and one undo takes it all back. Checked on the unit except by ear.
 - **Song: FORM builds a song shape from 1 to 3 patterns.** In the Song screen's TOOLS dialog (`F6`) the OP row has a new value, FORM: choose LOOP>SONG, POP or TECHNO and how many tracks are drums, and `F1` adds the form's 8, 9 or 10 slots after your selection. The first slot is the pattern with some tracks cleared (the music in LOOP>SONG, the drums in POP, all but the kick in TECHNO), a break the pattern without the kick, and so on; the changed versions are new patterns, your own are not touched. The footer shows the plan; when the song, the pattern pool or the undo memory cannot take it, the strip says so and nothing is written. One undo takes it all back.
+- **Import: module files are recognized by their header, and 15-sample Soundtracker MODs load.** The File screen reads the first bytes of a file, not its name, to know what it is; a file no reader takes says NOT A MODULE THIS OS READS and changes nothing.
+- **Step effects 23, 24, 33 and 36 start their LFO.** As FX 35 does, on a sampler track. Checked on the unit by capture for 23, 24 and 33; FX 36 on wavetable and granular instruments is not checked by ear.
+- **Config and Record: Left and Right edit the value under the cursor** (`Shift` for the coarse step). The pages change only with the F-keys or the screen button.
+- **Update from the unit refuses images that are not padded.** The Update screen (Config, INFO, `F8`) says IMAGE NOT PADDED: MAY NOT BOOT and asks nothing for an image that does not end on a 4 KiB boundary; v1.0.1 and v1.0.0 are such images (see Fixed and the installing guide).
+
+### Changed
+
+- **Cheaper reversed voices.** PLAYBACK and the Reverse step effect (26) take a faster path with the same sound (bit-identical on the host): six reversed voices cost +0.23 percentage points on the unit, against +6.19 before. The listening is not done yet.
 
 ### Fixed
 
+- **Overdrive and Bit depth shape module instruments** (issue #2). Step effects 38 and 39 and the Perform OVERDRIVE and BIT DEPTH rows did nothing on TB-303, FM and Chip tracks; they now shape them with the sampler's curve. The listening is not done yet.
+- **The update dialog reaches every file of `Firmware/`.** It pages through them twelve at a time and shows `FILE n / total`; the old limit of the first 12 files is gone.
 - **Update file names over 30 characters are refused.** With a longer `.ptf` name the card update could install the first `.ptf` of the `Firmware` folder instead, with no error. The Update screen now shows `NAME TOO LONG: 30 MAX` for such a file and asks nothing; rename the file to 30 characters or fewer (`.ptf` included). `o3console.py` refuses the same names.
+- **A boot crash caused by the image's last flash sector.** The SD bootloader leaves a short final 4 KiB sector as it was, so a development image once crashed at boot on stale bytes. Images are now padded to a whole sector and the image gate checks it; the Update screen refuses an unpadded image.
+- **Saving after a card remount.** A slot skipped during revalidation keeps its check pending, so a save never points a project at a missing or changed WAV.
+- **The demo kit no longer overwrites a project's instruments.** A project of only module or MIDI instruments lost slots 1 to 4 at boot; the kit now loads only when the project has no sample or module instrument and nothing in slots 1 to 48. New Community OS behaviour.
+- **MOD import.** A 15-sample Soundtracker file's loop start is read in bytes, and a MOD with no room for one pattern is refused before the NEW question. Both passed on the unit.
+- **Chip and SID labels.** Chip's Wave view draws its trace below the wave's name, as SID's does; the label on SID's Wave page is right.
+- **Config: the `APPLY?` mark** on `F7` is honored only while its question is on the strip, and a later `F7` asks again.
+- **TIMELINE draws at most the 12 tracks that Pattern can show.**
+
+### For developers
+
+- **Effect inserts, console only (no screen yet).** An effect module (kind 2) can run as a track insert, bound from the `diag` console after `mod load`: mono, up to four at once, with a tail rule and a CPU guard that forces a heavy one to dry. Inserts are saved in the project as an optional chunk and come back after a reload. `biquad` is the first sample effect module (a filter with mix; its cost on the unit is not measured). Nothing in this is a feature for users yet.
 
 ## v1.0.1 (date to be set at publication)
 
