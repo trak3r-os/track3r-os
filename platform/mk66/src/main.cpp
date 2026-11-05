@@ -481,9 +481,11 @@ int main() {
       mk66::console::log("input: pad scanner did not answer, blink code 13 once, retrying every second");
     }
     if (pads_code_done && shown_code == 0 && ms - pads_code_from < mk66::blink::period_ms(mk66::blink::kInputDegraded)) {
-      led_from_sram_l(mk66::blink::led_on(mk66::blink::kInputDegraded, ms - pads_code_from));
+      led_from_sram_l(mk66::blink::led_on(mk66::blink::kInputDegraded, ms - pads_code_from));  // a fault code: shows whatever the STATUS LED row says
     } else {
-      led_from_sram_l(mk66::blink::led_on(shown_code, ms));
+      // OS-STATUSLED: led_on_status keeps a fault code (shown_code >= 1) blinking whatever the STATUS LED row says, and with the
+      // heartbeat off (blink::g_heartbeat_on false) the heartbeat (shown_code 0) keeps the LED dark.
+      led_from_sram_l(mk66::blink::led_on_status(shown_code, ms, mk66::blink::g_heartbeat_on));
     }
     if (ms / 1000u != last_second) {
       last_second = ms / 1000u;

@@ -49,6 +49,7 @@
 // region (SDRAM), not in SRAM_U.
 
 #include <o3os/audio/app_tap.h>
+#include <o3os/audio/insert_host.h>
 #include <o3os/audio/module_voices.h>
 #include <o3os/audio/play_position.h>
 #include <o3os/core/param.h>
@@ -201,7 +202,7 @@ class ModuleUi {
   static const char* module_name_of(const model::Project& project, unsigned slot) noexcept;
 
   // ---- the engine picker -----------------------------------------------------------------------------------------------------------------
-  // Reads modules/instruments/, adds the built-in instrument modules (module/builtin.h: there with no card) and the project's missing modules (`project` may be null). Entries are sorted by name.
+  // Reads modules/instruments/, adds the built-in instrument modules (module/builtin.h: there with no card) and the project's missing modules (`project` may be null; a module that only an insert record names is an effect: not listed here). Entries are sorted by name.
   void scan_instruments(const model::Project* project) noexcept;
   unsigned instrument_count() const noexcept { return inst_count_; }
   const CatalogEntry* instrument_at(unsigned i) const noexcept { return i < inst_count_ ? &inst_[i] : nullptr; }
@@ -209,6 +210,52 @@ class ModuleUi {
   void set_card_on_computer(bool on) noexcept { card_on_computer_ = on; }
   PickResult pick(model::Editor& editor, unsigned slot, unsigned entry) noexcept;
   static const char* pick_text(PickResult r) noexcept;  // upper case, for the notification strip
+
+  // ---- the effect inserts (OS-INSFX S4, docs/specs/OS-INSFX.md) ----------------------------------------------------------------------------
+  // The one path from a screen or the console to the insert host and the project's INSX records (Editor::set_insert / clear_insert: not an undo step, D9; MODR is never pruned). Main loop only.
+  // `track` 0..15 and `slot` 0 or 1 (INS A / INS B); the host's key is track * 2 + slot. Without the host (attach_inserts: a bare ModuleUi, the simulator) only the records are edited by remove and bypass.
+  void attach_inserts(audio::InsertHost& host) noexcept { inserts_ = &host; }
+  bool has_inserts() const noexcept { return inserts_ != nullptr; }
+  void scan_effects(const model::Project* project) noexcept;  // modules/effects/, the built-in effects and the modules an INSX record of the project names that the card lacks (greyed)
+  unsigned effect_count() const noexcept { return eff_count_; }
+  const CatalogEntry* effect_at(unsigned i) const noexcept { return i < eff_count_ ? &eff_[i] : nullptr; }
+  // The measured cost of an insert of the module (cycles of a block, the largest of its bound instances; 0: none measured, or none bound): the picker's figure.
+  std::uint32_t insert_cost_of(const char* stem) const noexcept;
+  // What the page shows of the cell (track, slot): the host's instance there. False: none bound there (a record whose module is missing, or an empty cell). `bypass` is the user's own, `forced` a net's (OVER BUDGET).
+  struct InsertCell {
+    bool bypass;
+    bool forced;
+    std::uint32_t cost;  // cycles of a block, 0 never measured
+  };
+  bool insert_cell(unsigned track, unsigned slot, InsertCell& out) const noexcept;
+  enum class InsertResult : std::uint8_t {
+    Ok,
+    OnComputer,    // the card is the computer's: no module is loaded from it
+    NoHost,        // no insert host in this build
+    BadWhere,      // not a track insert cell (the master's is S6)
+    NoEntry,
+    Missing,       // the module is not on the card
+    Quarantined,
+    LoadFailed,
+    NotEffect,     // an instrument or an app
+    NotRunnable,   // loaded, but this build cannot call it
+    Full,          // the host or the project holds its four inserts
+    NoCpu,         // admission refused it (the CPU governor)
+    NoRoom,        // the module memory or the module table is full
+    Taken,         // an insert is there already (delete it first)
+    Leaving,       // the insert that was there is still leaving: retry
+    NoInsert,      // nothing there to remove or bypass
+    NotBound,      // the record is there and its module is not running (missing at the load, refused)
+    Refused,       // the host or the project refused it
+  };
+  // Binds the effect module `stem` (the picker's entry) at (track, slot): loads it from the card when it is not in the set (the console's `ins bind` too), admits it, writes its record (the module's default
+  // parameters, bypass off) and its place in MODR. A refusal leaves the project and the host as they were; a module this call loaded stays in the set (latent: the set has no per-module release, only clear()).
+  InsertResult insert_assign(model::Editor& editor, unsigned track, unsigned slot, const char* stem) noexcept;
+  // Unbinds the insert and removes its record (also a record the load left unbound).
+  InsertResult insert_remove(model::Editor& editor, unsigned track, unsigned slot) noexcept;
+  // Bypass on or off (off: a reset, admitted like a bind: NoCpu), the record's flag follows. A net's forced bypass is cleared by off.
+  InsertResult insert_bypass(model::Editor& editor, unsigned track, unsigned slot, bool on) noexcept;
+  static const char* insert_text(InsertResult r) noexcept;  // upper case, for the notification strip
 
   // ---- apps ---------------------------------------------------------------------------------------------------------------------------
   void scan_apps() noexcept;
@@ -358,7 +405,9 @@ class ModuleUi {
  private:
   static constexpr unsigned o3m_params_max = O3M_PARAMS_MAX;
 
-  void scan(const char* dir, unsigned kind, CatalogEntry* out, unsigned& count, const model::Project* project) noexcept;
+  // Which of the project's modules that the card lacks are listed (greyed): none for the apps, the names no INSX record uses for the instruments, only the names an INSX record uses for the effects.
+  enum class Missing : std::uint8_t { None, NotInserted, Inserted };
+  void scan(const char* dir, unsigned kind, CatalogEntry* out, unsigned& count, const model::Project* project, Missing missing) noexcept;
   void classify(CatalogEntry& e) const noexcept;
   bool load(const char* stem) noexcept;  // loads `stem` into the set unless it is there; false: not available (last_status_ says why)
   void fault(int set_index, module::ViewStatus verdict) noexcept;
@@ -388,6 +437,9 @@ class ModuleUi {
   unsigned inst_count_ = 0;
   CatalogEntry apps_[kModuleCatalogMax] = {};
   unsigned app_count_ = 0;
+  audio::InsertHost* inserts_ = nullptr;  // OS-INSFX S4
+  CatalogEntry eff_[kModuleCatalogMax] = {};
+  unsigned eff_count_ = 0;
   module::Status last_status_ = module::Status::Ok;
   std::uint32_t refused_caps_ = 0;  // with last_status_ CapUnsupported: the capability word of the refused file
   std::uint32_t drawn_ = 0;

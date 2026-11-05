@@ -104,6 +104,23 @@ void fill_sound_project(model::Project& p) noexcept {
   }
 }
 
+void fill_insert_project(model::Project& p) noexcept {
+  fill_demo_project(p);
+  (void)p.add_module("biquad", 6, 1, 8);
+  (void)p.add_module("reverb", 6, 1, 8);
+  const struct {
+    std::uint8_t where, slot, module, flags;
+  } kRecords[3] = {{0, 0, 0, 0}, {0, 1, 1, model::kInsertFlagBypass}, {2, 0, 0, 0}};
+  for (const auto& r : kRecords) {
+    model::InsertRecord rec{};
+    rec.where = r.where;
+    rec.slot = r.slot;
+    rec.module = r.module;
+    rec.flags = r.flags;
+    (void)p.set_insert(rec);
+  }
+}
+
 void fill_tb303_project(model::Project& p) noexcept {
   p.reset();
   (void)p.create_pattern(1, 16);

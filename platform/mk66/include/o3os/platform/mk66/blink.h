@@ -60,4 +60,20 @@ constexpr bool led_on(std::uint8_t pulses, std::uint32_t ms) noexcept {
   return t % (kPulseOnMs + kPulseOffMs) < kPulseOnMs;
 }
 
+// OS-STATUSLED: whether the heartbeat (pattern 0) blinks at all — the Config > DISPLAY screen's STATUS LED row (BLINK / OFF) and the
+// `diag status` console command. Not saved: BLINK (true) at every boot, so no settings file changes. Single-writer flag: the writers are
+// the app (its Config row, copied to the flag by appimg::pass(), app_main.cpp) and the `diag status` command, both from the main loop
+// thread only; the reader is main.cpp's main loop, which drives the LED. The heartbeat is polled from that loop, not from an ISR or a
+// timer, so the volatile flag needs no critical section.
+inline volatile bool g_heartbeat_on = true;
+
+// OS-STATUSLED: the LED level with the STATUS LED option in force: with the heartbeat off (`heartbeat_on` false) pattern 0 keeps the LED
+// dark, while a fault code (pulses >= 1, the sticky codes that replace the heartbeat) still shows.
+constexpr bool led_on_status(std::uint8_t pulses, std::uint32_t ms, bool heartbeat_on) noexcept {
+  if (pulses == 0u) {
+    return heartbeat_on && led_on(0u, ms);
+  }
+  return led_on(pulses, ms);
+}
+
 }  // namespace o3os::platform::mk66::blink

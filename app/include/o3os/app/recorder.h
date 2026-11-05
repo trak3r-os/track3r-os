@@ -15,6 +15,11 @@
 //               from a step of the pattern if one was asked for: Free (now), Step, Bar (every 16th step) or Pattern (step 0), to the SAMPLE, so that the take lines up with the
 //               timeline (RecTap in audio/taps.h). The aligned modes fall back to Free when the transport is stopped (there is no step to wait for). STOP, a full arena, or STOP AT (OS-REC2: the
 //               next step, bar or pattern start, or N bars after the take began, to the sample on the same timeline: RecStop below) ends it.
+//   COUNT-IN (OS-RECCOUNT, RC1; NEW COMMUNITY OS BEHAVIOUR). With the Record card's COUNT-IN row on (OFF, 1, 2, 4 BARS) a bar-aligned take (LOOP = N BARS, or START ON = BAR) counts
+//               N bars in before it records: from stop the transport is started at once (plain play, not Config's count-in) and the take records from the first step of bar N+1; with the
+//               transport running it waits for the next bar boundary, then N more bars, and records from there. The wait runs here on the main loop (count_in_poll): the tap is armed during
+//               the LAST count-in bar, so its Align::Bar picks the boundary after the N bars (nothing under audio/ is involved). A Stop or F1 during the count-in gives the take up. Never
+//               for FREE, STEP, PATTERN, LEVEL, and never for the OVERDUB (that keeps Config's COUNT-IN, QA-REC-032). OFF is today's behaviour exactly.
 //   REVIEW      the finished take lies in the arena: its overview is drawn (take_overview.h), its start and end can be trimmed, and SAVE makes the window the audio of an
 //               instrument slot (SampleBank::take_commit: fresh memory, handed to the voices at the next safe point; nothing a voice reads is ever rewritten). Saving a WAV to the card
 //               needs the SD write layer, which this tree has not got (storage is read only): the Record screen says so.
@@ -111,6 +116,18 @@ inline constexpr unsigned kRecLoopChoices = 1u + kRecMaxBars;  // OS-LOOPER: LOO
 
 inline constexpr std::uint32_t kSourceSettleMs = 200;  // after the ADC's input switch changed: 200 ms (this OS's settle time)
 
+// OS-RECCOUNT (RC1): the Record card's own COUNT-IN row (right after LOOP), session-only like the rest of RecorderConfig (not in settings.o3st). Values OFF, 1, 2, 4 BARS
+// (a bar is kStepsPerBar steps, the grid Align::Bar uses). It applies to a bar-aligned take only (LOOP = N BARS, or START ON = BAR): from stop F1 starts the transport at once
+// (plain play, NOT Config's play_count_in: the row replaces the Config COUNT-IN for that take) and the take records from the first step of bar N+1; with the transport running the
+// take waits for the next bar boundary, then N more bars, and records from there. Never to FREE, STEP, PATTERN, LEVEL, and never to OVERDUB (the overdub keeps the Config COUNT-IN,
+// QA-REC-032). The N-bar wait runs on the main loop (Recorder::count_in_poll): the take is armed during the LAST count-in bar, so the tap's Align::Bar picks the boundary after the N
+// bars; nothing under audio/ is touched. OFF (0, the default) is today's behaviour exactly.
+inline constexpr unsigned kRecCountInChoices = 4;
+inline constexpr std::uint8_t kRecCountInBars[kRecCountInChoices] = {0, 1, 2, 4};  // OFF, 1 BAR, 2 BARS, 4 BARS
+constexpr unsigned rec_count_in_index(std::uint8_t bars) noexcept {
+  return bars >= 4u ? 3u : (bars >= 2u ? 2u : (bars >= 1u ? 1u : 0u));
+}
+
 struct RecorderConfig {
   hal::capture::Source source = hal::capture::Source::LineMix;
   std::uint8_t gain[kGainBanks] = {0, 0, 0, 0};  // percent, per bank: our defaults (all 0)
@@ -123,11 +140,15 @@ struct RecorderConfig {
   std::uint8_t loop_bars = 0;      // OS-LOOPER: LOOP, 0 = OFF, else 1..kRecMaxBars (runtime only)
   std::uint8_t loop_vol = 100;     // LOOP VOL 0..100 (runtime only)
   std::uint8_t loop_fb = 100;      // FEEDBACK 0..100: the part of the loop kept under a layer (OS-LOOPER L2; runtime only; 100 adds, 0 replaces)
+  std::uint8_t count_in = 0;       // OS-RECCOUNT: COUNT-IN, 0 = OFF, else an entry of kRecCountInBars (runtime only, session-only)
   RecTapKind tap = RecTapKind::Master;
   std::uint8_t track = 0;  // for RecTapKind::Track: 0..15
   hal::capture::Region region = hal::capture::Region::Europe;
   std::uint16_t radio_freq = 8750;  // our default, 87.5 MHz
 };
+
+// Whether the COUNT-IN row applies to a take of this config: a LOOP take, or START ON = BAR (the bar-aligned takes). Not to the others, and never to the overdub (that is not a take of the row).
+constexpr bool count_in_applies(const RecorderConfig& c) noexcept { return c.loop_bars != 0u || c.align == RecAlign::Bar; }
 
 // What the engine's input path is told: the input strip's feed, the REC tap's channel and source, the input strip's level, and the route byte of every strip (audio::route bits).
 struct EnginePlan {
@@ -173,6 +194,14 @@ constexpr unsigned wait_steps_left(audio::RecTap::Align align, unsigned step, un
 }
 // The beat a wait shows as a count-in does (beats left, the running one included, 4..1 in a bar): a wait of less than one beat is never started (`shown` false), one that has begun goes on to its end.
 constexpr unsigned wait_beat(unsigned steps_left, bool shown) noexcept { return steps_left != 0u && (steps_left >= 4u || shown) ? (steps_left + 3u) / 4u : 0u; }
+// OS-RECCOUNT: the steps from `step` of a pattern `pattern_len` steps long to its next bar boundary (the running step is not one; the boundary at step 0 after the wrap included). Pure.
+constexpr unsigned steps_to_bar_boundary(unsigned step, unsigned pattern_len) noexcept {
+  if (pattern_len == 0u || step >= pattern_len) {
+    return 0;
+  }
+  const unsigned next = (step / kStepsPerBar + 1u) * kStepsPerBar;
+  return next < pattern_len ? next - step : pattern_len - step;
+}
 // What STOP AT does while the transport is `playing` or not: without a running timeline there is nothing to count or to wait for, so it is Manual.
 constexpr RecStop effective_stop(RecStop stop, bool playing) noexcept { return playing ? stop : RecStop::Manual; }
 // The boundary a take told to stop waits for (Free: it stops at once), and the Step events after which a Bars take ends by itself (0: it does not).
@@ -230,6 +259,16 @@ class Recorder {
   // ---- Control (the actions) ----
   // `tempo_x100` (OS-LOOPER): the tempo the bars of a loop take are made at, BPM x 100 (0: unknown): a loop whose N bars at that tempo do not fit the free arena is refused (NoRoom) at once, not given up at the end.
   ArmResult arm(bool playing, std::uint32_t tempo_x100 = 0) noexcept;
+  // OS-RECCOUNT: arm a take that counts `count_in` bars in first (the COUNT-IN row applies: the take is bar-aligned). `playing` is the transport as arm() takes it (the caller starts
+  // it when it was stopped), `step` and `pattern` the published position at this moment, `from_stop` whether the transport was stopped (its start at step 0 is then the first
+  // counted boundary). The tap is
+  // NOT armed yet: the count-in phase runs on the main loop (count_in_poll), which arms the take during the LAST count-in bar, so the tap's Align::Bar picks the boundary after the N bars
+  // (the take records from the first step of bar N+1 from stop, or from the (N+1)-th boundary with the transport running). A Stop or F1 during the phase gives the take up (stop()).
+  ArmResult arm_count_in(bool playing, unsigned count_in, unsigned step, unsigned pattern, bool from_stop, std::uint32_t tempo_x100 = 0) noexcept;
+  // OS-RECCOUNT, once a pass, from the App with the published position: `pattern` and `step` of the pattern `pattern_len` steps long now running (pattern_len 0: no position, the
+  // phase does not advance), `playing` the transport. Counts the bar boundaries that have come and arms the take during the last count-in bar (never within the last step before the
+  // boundary it waits for, unless that last step is all the last count-in bar has). Main loop only.
+  void count_in_poll(unsigned pattern, unsigned step, unsigned pattern_len, bool playing) noexcept;
   // The take ends: at the next block, or (OS-REC2) when STOP AT is STEP, BAR or PATTERN, the transport runs and the take is recording, at the sample of the next such boundary of the timeline
   // (stop_pending() is true meanwhile); a second call, a take still waiting for its start step, and every other STOP AT end it at the next block.
   void stop() noexcept;
@@ -256,6 +295,7 @@ class Recorder {
   void step_loop_vol(int detents) noexcept;
   void toggle_loop_mute() noexcept;
   void step_loop_fb(int detents) noexcept;
+  void step_count_in(int detents) noexcept;  // OS-RECCOUNT: COUNT-IN OFF / 1 BAR / 2 BARS / 4 BARS (the next take)
   // OS-LOOPER L2c (spec 3c): the overdub of a loop under review. All of it is main loop; the render's side is audio/loop_player.h.
   enum class Overdub : std::uint8_t { Started, Stopped, Ignored, Undoing, NoLoop };
   // F1 under a loop's review: begins a session (the bitmap is cleared here, then overdub-on is posted), or ends the running one (its punch-out ramp). Ignored while a punch-out is still being acknowledged or a
@@ -309,6 +349,16 @@ class Recorder {
   Note note() const noexcept { return note_; }
   // OS-METROALIGN: the alignment the armed take waits for (Free: it does not wait: no take, or one already recording), for the countdown of the strip.
   audio::RecTap::Align wait_align() const noexcept { return state_ == State::Armed ? wait_align_ : audio::RecTap::Align::Free; }
+  // OS-RECCOUNT: the armed take is in its count-in phase (the tap is not armed yet), and the steps left until the boundary the take starts at (for the strip's countdown, as
+  // wait_steps_left is for the plain wait: the beats of the whole N-bar count-in, not only the last bar's).
+  bool count_in_waiting() const noexcept { return state_ == State::Armed && count_in_bars_ != 0u; }
+  unsigned count_in_steps_left(unsigned step, unsigned pattern_len) const noexcept;
+  // OS-RECCOUNT: the count-in was given up because the tap refused the arm for kCiArmMaxTries passes; the App says so once. Consumed on read (main loop only).
+  bool count_in_arm_failed() noexcept {
+    const bool f = ci_arm_failed_;
+    ci_arm_failed_ = false;
+    return f;
+  }
   // Simulator only (scenario `playhead ... wait`): a recorder with no engine behind it that says it waits. Never called on the device.
   void sim_wait(audio::RecTap::Align a) noexcept {
     state_ = a == audio::RecTap::Align::Free ? State::Idle : State::Armed;
@@ -360,6 +410,10 @@ class Recorder {
   bool push_param(core::ParamId id, float value, std::uint32_t ramp) noexcept;
   void finish() noexcept;
   void give_up_take() noexcept;
+  // OS-RECCOUNT: arm() with an optional count-in phase (count_in != 0: the tap is armed later, by count_in_poll, during the last count-in bar).
+  ArmResult arm_impl(bool playing, std::uint32_t tempo_x100, unsigned count_in, unsigned step, unsigned pattern, bool from_stop) noexcept;
+  // OS-RECCOUNT: the count-in phase is over without a take (a Stop or F1 during it, or the arena cleared under it): nothing was recorded, the tap was never armed.
+  void give_up_count_in(bool lost) noexcept;
   // SampleBank::clear() (a project load, NEW, a kit) is about to empty the arena: a loop that reads it is released first, so that the render lets go before a loader overwrites it (a fade of one block).
   static void on_bank_clear(void* self) noexcept;
   static bool bank_clear_busy(void* self) noexcept;  // the render has not yet let go of the loop, or still has a take armed or recording, or still holds the DJ scratch ring (OS-DJ C1: the arena's other owner; the File actions refuse a load while it runs)
@@ -378,6 +432,21 @@ class Recorder {
   std::uint8_t loop_bars_ = 0;   // the bars of the loop being recorded or under review
   std::uint32_t loop_tempo_ = 0;
   audio::RecTap::Align wait_align_ = audio::RecTap::Align::Free;  // what the armed take waits for (arm(): effective_align); meaningful while Armed
+  // OS-RECCOUNT: the count-in phase of the armed take (count_in_bars_ != 0 while it runs: the tap is not armed yet). count_in_seen_ counts the bar boundaries that have come since the
+  // phase began (C_0, C_1, ...; the take starts at C_count_in); ci_prev_ / ci_len_ / ci_pattern_ are the position the last count_in_poll() read (kCiNone: none yet), ci_from_stop_ that the
+  // transport was stopped when the phase began (its start at step 0 is then C_0). ci_to_boundary_ is the last pass's steps to the next boundary (the arm's last-step guard), ci_arm_tries_
+  // the failed arm attempts since the count was reached, ci_arm_failed_ that the phase was given up over them.
+  std::uint8_t count_in_bars_ = 0;
+  std::uint8_t count_in_seen_ = 0;
+  std::uint32_t ci_prev_ = kCiNone;
+  std::uint32_t ci_len_ = 0;
+  std::uint8_t ci_pattern_ = 0;
+  unsigned ci_to_boundary_ = 0xFFFFu;
+  unsigned ci_arm_tries_ = 0;
+  bool ci_arm_failed_ = false;
+  bool ci_from_stop_ = false;
+  static constexpr std::uint32_t kCiNone = 0xFFFFFFFFu;
+  static constexpr unsigned kCiArmMaxTries = 128;  // passes (about 2 s) the phase retries a refused arm before it gives the count-in up
   bool ov_wanted_ = false;       // OS-LOOPER L2c: overdub-on was posted and not ended (the session may not have begun in the render yet)
   bool ov_seen_ = false;         // overdubbing() / restoring() as the last poll saw them (a change redraws, applies the plan, and rebuilds the overview when it ends)
   bool rst_seen_ = false;

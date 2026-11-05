@@ -24,6 +24,7 @@ constexpr int kCoarseFreq = 10;    // ... of the frequency ten channels
 constexpr int kCoarseTap = 4;
 constexpr int kCoarseThreshold = 3;  // ... of THRESHOLD nine dB
 constexpr int kCoarseStop = 4;    // ... of STOP AT four choices (a bar count moves by four bars)
+constexpr int kCoarseCountIn = 2;  // ... of COUNT-IN two choices (OFF, 2 BARS, 4 BARS)
 constexpr std::uint32_t kCoarseTrim = 16;  // ... of a trim marker sixteen overview slots
 
 bool on_record(const ActionContext& ctx) noexcept { return ctx.view.screen == ScreenId::Record && ctx.rec != nullptr && ctx.rec->ready(); }
@@ -110,6 +111,10 @@ bool edit(ActionContext& ctx, int detents, bool coarse) noexcept {
       if (frozen) return false;
       rec.step_loop(coarse ? detents * kCoarseStop : detents);
       return true;
+    case RecRow::CountIn:  // OS-RECCOUNT: read at F1, like LOOP: frozen while a take runs
+      if (frozen) return false;
+      rec.step_count_in(coarse ? detents * kCoarseCountIn : detents);
+      return true;
     case RecRow::LoopVol:
       rec.step_loop_vol(coarse ? detents * kCoarseGain : detents);
       return true;
@@ -189,6 +194,10 @@ bool record_reset(ActionContext& ctx, core::ActionArg) noexcept {
       if (frozen) return false;
       rec.step_loop(-100);  // OFF
       return true;
+    case RecRow::CountIn:  // OS-RECCOUNT: OFF
+      if (frozen) return false;
+      rec.step_count_in(-100);
+      return true;
     case RecRow::LoopVol:
       rec.step_loop_vol(100);  // unity
       return true;
@@ -265,19 +274,29 @@ bool record_toggle(ActionContext& ctx, core::ActionArg) noexcept {
   // the take begins at the first step after the count-in, to the sample. Otherwise an aligned take falls back to FREE while the transport is stopped, as before.
   // OS-SREC-LEVEL: LEVEL needs no timeline (the take listens for the level whether the transport runs or not), so it never counts in; only a LOOP, which is on the bars, does.
   // OS-LOOPER: a loop take is on the bars, so it needs the transport: stopped, F1 starts it (after the count-in when COUNT-IN is on; with it off the transport and the take start together).
+  // OS-RECCOUNT: the Record card's own COUNT-IN row applies to a bar-aligned take only (LOOP on, or START ON = BAR) and replaces the Config COUNT-IN for that take: from stop F1 starts the
+  // transport AT ONCE with plain play (not play_count_in) and the recorder counts the N bars in itself, recording from the first step of bar N+1; with the transport running the take waits
+  // for the next bar boundary, then N more bars. Never to FREE, STEP, PATTERN, LEVEL, and never to the OVERDUB above (QA-REC-032 keeps the Config count-in there).
   const bool looping = rec.cfg.loop_bars != 0u;
   if (looping && !ctx.view.play.playing && ctx.transport == nullptr) {
     return say(ctx, core::Severity::Warn, "THE LOOP NEEDS THE TRANSPORT");
   }
+  const bool was_playing = ctx.view.play.playing;
+  const unsigned row_ci = count_in_applies(rec.cfg) && (was_playing || ctx.transport != nullptr) ? rec.cfg.count_in : 0u;
   unsigned bars = 0;
-  if (!ctx.view.play.playing && ((rec.cfg.align != RecAlign::Free && rec.cfg.align != RecAlign::Level) || looping) && ctx.transport != nullptr && ctx.model.device.kind() == core::ParamKind::Device) {
+  if (!was_playing && ((rec.cfg.align != RecAlign::Free && rec.cfg.align != RecAlign::Level) || looping) && ctx.transport != nullptr && ctx.model.device.kind() == core::ParamKind::Device) {
     const float v = ctx.model.device.get(model::device_setting::CountIn);
     bars = v >= 1.5f ? 2u : (v >= 0.5f ? 1u : 0u);
   }
-  const bool start_transport = looping && !ctx.view.play.playing && bars == 0u;
+  if (row_ci != 0u) {
+    bars = 0;  // the row replaces the Config COUNT-IN for this take
+  }
+  const bool start_transport = (looping || row_ci != 0u) && !was_playing && bars == 0u;
   // The tempo the loop is made at: the sequencer's while it plays, else the project's (the arena must hold its bars; the header says when the tempo moves later).
-  const std::uint32_t tempo = !looping ? 0u : (ctx.view.play.playing && ctx.view.play.tempo_x100 != 0u ? ctx.view.play.tempo_x100 : (ctx.model.project != nullptr ? ctx.model.project->tempo_x100() : 0u));
-  switch (rec.arm(ctx.view.play.playing || bars != 0u || start_transport, tempo)) {
+  const std::uint32_t tempo = !looping ? 0u : (was_playing && ctx.view.play.tempo_x100 != 0u ? ctx.view.play.tempo_x100 : (ctx.model.project != nullptr ? ctx.model.project->tempo_x100() : 0u));
+  const bool arm_playing = was_playing || bars != 0u || start_transport;
+  const Recorder::ArmResult result = row_ci != 0u ? rec.arm_count_in(arm_playing, row_ci, ctx.view.play.step, ctx.view.play.pattern, !was_playing, tempo) : rec.arm(arm_playing, tempo);
+  switch (result) {
     case Recorder::ArmResult::Ok:
       if (bars != 0u) {
         if (!ctx.transport->play_count_in(ctx.view.edit.pattern, bars)) {
@@ -286,7 +305,7 @@ bool record_toggle(ActionContext& ctx, core::ActionArg) noexcept {
         }
         ctx.view.playing = true;
       } else if (start_transport) {
-        if (!ctx.transport->play(ctx.view.edit.pattern)) {
+        if (!ctx.transport->play(ctx.view.edit.pattern)) {  // OS-RECCOUNT: plain play, NOT the Config count-in: the row's own count-in runs in the recorder
           rec.stop();
           return say(ctx, core::Severity::Warn, "THE TRANSPORT DID NOT START");
         }

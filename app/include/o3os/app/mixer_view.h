@@ -2,13 +2,14 @@
 #pragma once
 
 // Where the cursor of the Mixer screen is and what it points at (OS-011b): pure functions of the model and the view, shared by the screen (which draws it), its actions (which
-// edit it) and the tests. The screen has four pages (Master pressed again goes to the next); the cursor is two numbers kept in the view's generated-page cursor (ParamView:
+// edit it) and the tests. The screen has five pages (Master pressed again goes to the next); the cursor is two numbers kept in the view's generated-page cursor (ParamView:
 // `row` and `env`), so the screen costs the main loop's SRAM nothing:
 //
 //   MIXER     env = the column: T1..Tn (the active tracks), then IN, SND A, SND B, CUE, MASTER (MixBus); row = the field of a track column: 0 LEVEL, 1 PAN (the buses have LEVEL only)
 //   ROUTING   row = the source: T1..Tn, LINE IN, RET A, RET B, OUT MODE; env = the destination: MAIN, CUE, SND A, SND B, REC, USB (a return has MAIN and CUE only; OUT MODE has none)
 //   MASTER FX row = the master section's eight parameters in table order (VOLUME, DRY, REVERB, DELAY, the three mutes, LIMITER), CUE LEVEL, then the twelve controls of the send effects (OS-SENDFX) and the limiter's three (OS-LIMIT)
 //   STEMS     row 0 = OUTPUTS (OS-USBOUTS: the number of USB outputs, a pending value applied by F6 twice), row n = the USB slot Sn (S1..), env = a source of the slot (T1..T12, ML, MR, SA, SB)
+//   INSERTS   row = the track T1..Tn, then MASTER; env = INS A (0) or INS B (1) (OS-INSFX S4: the effect modules on the strips; the MASTER cells are shown and not assignable until S6)
 
 #include <o3os/app/mix_board.h>
 #include <o3os/app/model.h>
@@ -20,17 +21,20 @@
 
 namespace o3os::app {
 
-enum class MixerPage : std::uint8_t { Mixer = 0, Routing = 1, MasterFx = 2, Stems = 3 };
-inline constexpr unsigned kMixerPages = 4;
+enum class MixerPage : std::uint8_t { Mixer = 0, Routing = 1, MasterFx = 2, Stems = 3, Inserts = 4 };
+inline constexpr unsigned kMixerPages = 5;
 
-// Eight labels for F1..F8 (docs/design/product-ux.md section 4, "Mixer and routing"): F1..F4 are the pages, F5 the cue level, F6 is the mock's PRESET (no presets exist yet),
-// F7 mutes and F8 solos what the cursor is on.
-inline constexpr const char* kMixerSoftKeys[8] = {"MIXER", "ROUTING", "MST FX", "STEMS", "CUE LVL", "--", "MUTE", "SOLO"};
+// Eight labels for F1..F8 (docs/design/product-ux.md section 4, "Mixer and routing"): F1..F4 are the pages, F5 the cue level, F6 the INSERTS page (OS-INSFX S4; it was the mock's PRESET,
+// which no preset ever filled), F7 mutes and F8 solos what the cursor is on.
+inline constexpr const char* kMixerSoftKeys[8] = {"MIXER", "ROUTING", "MST FX", "STEMS", "CUE LVL", "INSERTS", "MUTE", "SOLO"};
+// On the INSERTS page F7 is BYPASS (the insert under the cursor; the mute of a track does not apply there) and F8 stays SOLO, the track's (TRACKS ONLY on the master row).
+inline constexpr const char* kMixerInsertKeys[8] = {"MIXER", "ROUTING", "MST FX", "STEMS", "CUE LVL", "INSERTS", "BYPASS", "SOLO"};
 // On the STEMS page F6 is APPLY: the pending OUTPUTS value (OS-USBOUTS), pressed twice because the port re-enumerates.
 inline constexpr const char* kMixerStemKeys[8] = {"MIXER", "ROUTING", "MST FX", "STEMS", "CUE LVL", "APPLY", "MUTE", "SOLO"};
 // While Shift is held (OS-SHIFTROW): F7 UNMUTE (every strip), F8 UNSOLO (every strip): mixer.mute_none / mixer.solo_none, one undo unit each. Not REDO: F8 is SOLO here. F1 NAME (OS-NAMES): the track's name.
 inline constexpr const char* kMixerShiftKeys[8] = {"NAME", "-", "-", "-", "-", "-", "UNMUTE", "UNSOLO"};
 
+inline constexpr unsigned kInsertSlots = 2;   // OS-INSFX S4: the columns of the INSERTS page, INS A and INS B
 inline constexpr unsigned kStemSources = 16;  // the columns of a stem slot (audio::stem_src: T1..T12, ML, MR, SA, SB)
 // OS-SMALL3: the LIMITER switch (the model's last master parameter) is not a row: the limiter is always on (OS-LIMIT) and the card says so (OS-MIXHIDE); the stored value, the table and the OG import are untouched.
 static_assert(model::master_param::Limiter + 1u == model::master_param::kCount, "the hidden LIMITER parameter is the last of the master section");
@@ -99,6 +103,7 @@ inline unsigned rows(const Model& model, const ViewState& view) noexcept {
     case MixerPage::Routing: return tracks(model) + 4u;   // T1..Tn, LINE IN, RET A, RET B, OUT MODE
     case MixerPage::MasterFx: return kMasterFxRows;
     case MixerPage::Stems: return stem_rows(model) < 1u ? 1u : stem_rows(model) + 1u;  // the OUTPUTS row, then the slots (none without a map)
+    case MixerPage::Inserts: return tracks(model) + 1u;   // T1..Tn, MASTER
   }
   return 1;
 }
@@ -118,12 +123,16 @@ inline Cursor cursor(const Model& model, const ViewState& view) noexcept {
     case MixerPage::Routing: col_max = kRouteCols; break;
     case MixerPage::MasterFx: col_max = 1; break;
     case MixerPage::Stems: col_max = kStemSources; break;
+    case MixerPage::Inserts: col_max = kInsertSlots; break;
   }
   const unsigned row = view.mixer.row;
   const unsigned col = view.mixer.col;
   Cursor c{row >= row_max ? row_max - 1u : row, col >= col_max ? col_max - 1u : col};
   if (page == MixerPage::Mixer && bus_of(model, c.col) != kMixBuses) {
     c.row = 0;  // a bus has a level and no pan
+  }
+  if (page == MixerPage::Inserts && c.row == tracks(model)) {
+    c.col = 0;  // the master has one insert (INS A), dual mono
   }
   if (page == MixerPage::Routing && c.row >= tracks(model) + 1u) {
     // RET A, RET B reach MAIN and CUE only; OUT MODE has no column
@@ -159,6 +168,7 @@ inline core::ParamId focus(const Model& model, const ViewState& view) noexcept {
       return c.row < kMasterShownParams ? param_id(ParamKind::Master, 0, c.row) : core::ParamId::None;
     case MixerPage::Routing:
     case MixerPage::Stems:
+    case MixerPage::Inserts:
       break;
   }
   return core::ParamId::None;

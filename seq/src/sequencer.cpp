@@ -1208,10 +1208,7 @@ void Sequencer::finish_step() noexcept {
       }
       clk_tl_ = 8u * spt;
     }
-    const Q32 nominal = static_cast<Q32>(kMicrostepsPerStep) * spt;
-    const std::uint32_t s = swing();
-    const std::uint32_t factor = swing_odd_ ? 50u + s : 150u - s;  // percent of the nominal step (see the header: the pair arithmetic)
-    step_dur_ = nominal * factor / 100u;
+    step_dur_ = step_length_q32(spt, swing(), swing_odd_);
     swing_odd_ = !swing_odd_;
   }
   if (cfg_.emit_ticks) {

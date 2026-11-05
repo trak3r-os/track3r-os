@@ -289,9 +289,9 @@ bool parse_scenario(const std::string& text, std::vector<ScenarioCommand>& out, 
           ++i;
           continue;
         }
-        const std::uint32_t bit = word == "bindings" ? 1u : (word == "new" ? 2u : (word == "sound" ? 4u : (word == "tb303" ? 8u : 0u)));
+        const std::uint32_t bit = word == "bindings" ? 1u : (word == "new" ? 2u : (word == "sound" ? 4u : (word == "tb303" ? 8u : (word == "inserts" ? 16u : 0u))));
         if (bit == 0u || (flags & bit) != 0u) {
-          return bad("document takes nothing, or the words 'bindings', 'new', 'sound', 'tb303' and 'tracks <n>'");
+          return bad("document takes nothing, or the words 'bindings', 'new', 'sound', 'tb303', 'inserts' and 'tracks <n>'");
         }
         flags |= bit;
       }
@@ -650,7 +650,7 @@ bool run_scenario(const std::vector<ScenarioCommand>& commands, Simulator& sim, 
           error = "line " + std::to_string(cmd.line) + ": document: a card is in the slot already, so the document is the card's (put `document` before `card`)";
           return false;
         }
-        sim.open_document((cmd.value & 1u) != 0u, (cmd.value & 2u) != 0u, (cmd.value >> 8) & 0xFFu, (cmd.value & 4u) != 0u, (cmd.value & 8u) != 0u);
+        sim.open_document((cmd.value & 1u) != 0u, (cmd.value & 2u) != 0u, (cmd.value >> 8) & 0xFFu, (cmd.value & 4u) != 0u, (cmd.value & 8u) != 0u, (cmd.value & 16u) != 0u);
         break;
       case Kind::Disk: {
         using Phase = app::ViewState::DiskView::Phase;

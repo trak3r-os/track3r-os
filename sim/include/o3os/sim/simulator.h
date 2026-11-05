@@ -95,8 +95,9 @@ class Simulator final : private platform::host::CardClock {
   // `with_new` (OS-NEWKEEP, `document new`) also attaches a project sink that can do File > NEW (ALL or KEEP INSTRUMENTS) on this document, at once; it has no card, so OPEN does nothing.
   // `tracks` (OS-ZOOM, `document tracks <n>`): the project has n active tracks, 1..16; 0 keeps the demo's twelve.
   // `tb303` (OS-E2E-9, `document tb303`): fill_tb303_project() (the document of the TB-303 journey: a module instrument and an acid line, demo_project.h).
+  // `inserts` (OS-INSFX S4, `document inserts`): fill_insert_project(): the demo with three insert records (the Mixer INSERTS page; with `apps on` the picker lists the card's modules/effects).
   // `sound` (OS-E2E-2, `document sound`): fill_sound_project() instead of the demo (the document of the audio journeys: an empty pattern and four neutral instruments, demo_project.h).
-  void open_document(bool with_bindings = false, bool with_new = false, unsigned tracks = 0, bool sound = false, bool tb303 = false);
+  void open_document(bool with_bindings = false, bool with_new = false, unsigned tracks = 0, bool sound = false, bool tb303 = false, bool inserts = false);
   // OS-E2E-1b (scenario `card <fixture-dir>`, `card pull`, `card insert`): the simulator gets a card. open_card() copies the fixture folder into a fresh scratch directory (removed when the simulator ends, so
   // a `--twice` run starts clean), mounts it as the card of the app (the File screen lists it), gives the app the card's write side (File's SAVE, SAVE AS, EXPORT write there, through the real path guard),
   // the sample memory and bank, and a project loader that opens what the card holds (sim_project.h: File > OPEN and NEW work). It needs a document (`document` first: the loader replaces it), and a relative

@@ -101,6 +101,6 @@ snap qa_mix_032
 tap f5
 snap qa_mix_035
 
-# QA-MIX-036 (F6): unbound on the Mixer. Its key reads "--" and the press changes nothing on the MASTER FX page and says nothing.
+# QA-MIX-036 (F6): INSERTS on the Mixer (OS-INSFX S4; it was unbound). The press opens the INSERTS page from the MASTER FX page; the page itself is qa_inserts.txt.
 tap f6
 snap qa_mix_036

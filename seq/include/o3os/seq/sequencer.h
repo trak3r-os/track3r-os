@@ -117,6 +117,16 @@ inline constexpr std::uint8_t kMinTempoFxBpm = 40;              // PAR-082: "val
 // Our choice (spec 005c): each FX column acts alone, so a sequencer FX consumed in the second column does not stop the voice FX of a step without a note in the first. Setting this constant makes the second column stop the first.
 inline constexpr bool kSkipVoiceFxAfterSeqFx = false;
 
+// The length of one step in Q32 samples: kMicrostepsPerStep microsteps of `spt` (samples per tick, Q32, core::samples_per_tick_q32 at the
+// tempo in force and the step rate), scaled by the swing pair's factor for this step's parity (even: 150 - s, odd: 50 + s, percent; a pair
+// always adds to two nominal steps, see SWING above). One function for finish_step and the song time map (song_time.h, OS-MTC A1), so the
+// two cannot drift.
+constexpr core::Q32 step_length_q32(core::Q32 spt, std::uint32_t swing_percent, bool swing_odd) noexcept {
+  const core::Q32 nominal = static_cast<core::Q32>(kMicrostepsPerStep) * spt;
+  const std::uint32_t factor = swing_odd ? 50u + swing_percent : 150u - swing_percent;
+  return nominal * factor / 100u;
+}
+
 // The boundary a deferred mute toggle waits for (OS-MUTE): the bar (16 steps of the pattern, counted from its start) or the pattern's end (= the next pattern start).
 enum class MuteQuant : std::uint8_t { Bar = 1, Pattern = 2 };
 inline constexpr std::uint32_t kStepsPerBar = 16;

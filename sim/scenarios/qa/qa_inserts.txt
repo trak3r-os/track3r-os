@@ -1,0 +1,73 @@
+# OS-INSFX S4 (docs/specs/OS-INSFX.md): the Mixer's INSERTS page, docs/qa/catalogue/mixer.md (QA-MIX-058..069). One `snap qa_ins_NNN` per row with a visible result; the goldens are keyed qa_inserts/qa_ins_NNN.
+# The simulator has no insert host (no sound side to bind to): the page shows the project's records (name, bypass mark), the picker lists the card's modules/effects (apps on: biquad, chorus; the project also names
+# "reverb", which the card lacks), and an assign says NO SOUND IN THIS BUILD. The cost, the OVER BUDGET flag and the live binds are the doctests' (tests/mixer_inserts_test.cpp) and the unit's (qa_inserts.json).
+# The document (fill_insert_project): T1 INS A biquad, T1 INS B reverb (bypassed), T3 INS A biquad; twelve tracks.
+
+document inserts
+card e2e_card
+apps on
+wait 20
+
+# QA-MIX-058: F6 on the Mixer opens the INSERTS page: a grid of the tracks and MASTER by INS A and INS B, the module name in each cell, a bypassed one marked; the soft key row reads MIXER ... INSERTS BYPASS SOLO.
+tap master
+tap f6
+wait 20
+snap qa_ins_001
+
+# QA-MIX-059: Insert on an empty cell (T2 INS A) opens the picker of modules/effects: one line per card module, the module the project names and the card lacks (reverb) greyed MISSING FROM THE CARD.
+tap down
+tap insert
+wait 20
+snap qa_ins_002
+
+# QA-MIX-066: picking the greyed module says MODULE MISSING and binds nothing; the picker closes.
+tap down 2
+tap f1
+wait 20
+snap qa_ins_003
+wait 2500
+
+# QA-MIX-060: picking a card module in a build without the sound side says NO SOUND IN THIS BUILD (on the unit it binds: qa_inserts.json); the cell stays empty.
+tap insert
+tap f1
+wait 20
+snap qa_ins_004
+wait 2500
+
+# QA-MIX-063: Insert on a cell that has an insert says DELETE THE INSERT FIRST.
+tap up
+tap insert
+wait 20
+snap qa_ins_005
+wait 2500
+
+# QA-MIX-068: on the MASTER row the cells are shown and not assignable: Insert says MASTER INSERT: NOT YET.
+tap down 12
+tap insert
+wait 20
+snap qa_ins_006
+wait 2500
+
+# QA-MIX-064: Delete on an insert removes it (T1 INS A): the cell is empty again.
+tap up 12
+tap delete
+wait 20
+snap qa_ins_007
+wait 2500
+
+# QA-MIX-062: F7 BYPASS toggles the insert of the cell: T1 INS B was bypassed, F7 makes it live (the mark goes); F7 again bypasses it.
+tap right
+tap f7
+wait 20
+snap qa_ins_008
+wait 2500
+tap f7
+wait 20
+snap qa_ins_009
+wait 2500
+
+# QA-MIX-069: F7 on an empty cell says NO INSERT HERE.
+tap left
+tap f7
+wait 20
+snap qa_ins_010

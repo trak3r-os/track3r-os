@@ -658,7 +658,7 @@ TEST_CASE("config: a page change starts at its first row; SD and INFO have no ro
   CHECK(rig.row() == 2);
   rig.tap(Button::F2);
   CHECK(rig.row() == 0);
-  CHECK(app::kConfigScreen.count(rig.app->model(), rig.app->state()) == 5);  // DISPLAY, PAD LIGHTS, NUMBERING, MIDDLE C, THEME
+  CHECK(app::kConfigScreen.count(rig.app->model(), rig.app->state()) == 6);  // DISPLAY, PAD LIGHTS, NUMBERING, MIDDLE C, THEME, STATUS LED (OS-STATUSLED)
   rig.tap(Button::F3);
   CHECK(app::kConfigScreen.count(rig.app->model(), rig.app->state()) == 0);
   CHECK(app::kConfigScreen.focus_param(rig.app->model(), rig.app->state()) == core::ParamId::None);
@@ -668,6 +668,27 @@ TEST_CASE("config: a page change starts at its first row; SD and INFO have no ro
   CHECK(rig.get(ds::MetronomeVolume) == before);
   rig.tap(Button::F4);
   CHECK(app::kConfigScreen.count(rig.app->model(), rig.app->state()) == 0);
+}
+
+TEST_CASE("config: the DISPLAY page's STATUS LED row (OS-STATUSLED): a session choice, not a setting; the encoder toggles BLINK / OFF, Delete puts BLINK back") {
+  Rig rig;
+  rig.tap(Button::F2);
+  CHECK(app::kConfigScreen.count(rig.app->model(), rig.app->state()) == 6);  // DISPLAY, PAD LIGHTS, NUMBERING, MIDDLE C, THEME, STATUS LED
+  for (int i = 0; i < 5; ++i) {
+    rig.tap(Button::Down);  // STATUS LED is the sixth row of the DISPLAY page
+  }
+  CHECK(app::config_row(rig.app->state()) == app::ConfigRow::StatusLed);
+  CHECK(app::kConfigScreen.focus_param(rig.app->model(), rig.app->state()) == core::ParamId::None);  // no descriptor: not a setting
+  CHECK(rig.app->state().status_led_blink);                                                       // BLINK at boot, not saved
+  rig.turn(-1);
+  CHECK(!rig.app->state().status_led_blink);  // OFF
+  CHECK(rig.params().pending_n == 0u);        // nothing pending: the row writes no setting
+  rig.turn(1);
+  CHECK(rig.app->state().status_led_blink);  // BLINK again
+  rig.turn(-1);
+  rig.tap(Button::Delete);
+  CHECK(rig.app->state().status_led_blink);  // Delete puts the default (BLINK) back
+  CHECK(rig.params().pending_n == 0u);
 }
 
 TEST_CASE("config: the THEME row and the screen's theme follow each other: the row, Shift + Master, the App's own set_theme and a settings file loaded into the block") {

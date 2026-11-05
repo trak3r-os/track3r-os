@@ -82,6 +82,25 @@ bool SimApps::open(hal::storage::Storage& card, const std::string& root, const h
     stems_.emplace_back(a.stem);
   }
 
+  // OS-INSFX S4: two effect files for the Mixer INSERTS page's picker (modules/effects: the folder it lists). Placeholders only, like the apps' (no host object: the simulator has no insert host, so nothing binds them).
+  const fs::path fx_dir = fs::path(root) / "modules" / "effects";
+  fs::create_directories(fx_dir, ec);
+  if (ec) {
+    error = "modules/effects could not be made on the card: " + ec.message();
+    return false;
+  }
+  for (const char* stem : {"biquad", "chorus"}) {
+    const fs::path file = fx_dir / (std::string(stem) + ".tmod");
+    if (!fs::exists(file, ec)) {
+      std::ofstream out(file, std::ios::binary);
+      out << "o3sim: a placeholder for the effect list (sim/src/sim_apps.cpp)\n";
+      if (!out) {
+        error = file.string() + " could not be written";
+        return false;
+      }
+    }
+  }
+
   ui_.attach(set_, loader_, voices_);
   ui_.set_storage(&card);
   ui_.set_clock(&clock);

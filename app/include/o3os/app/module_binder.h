@@ -112,6 +112,8 @@ class ModuleBinder {
 
 // One line for the log: "modules: 2 instruments, 1 loaded, 1 bound, 1 muted".
 std::size_t describe_modules(const ModuleReport& r, char* out, std::size_t cap) noexcept;
+// The inserts' part of that line on its own, for the diag log, whose lines hold 55 characters (the summary above is cut before it): "inserts: 2, 2 bound, 0 skipped".
+std::size_t describe_inserts(const ModuleReport& r, char* out, std::size_t cap) noexcept;
 // A problem as a line: "mod: instrument 3 muted: tb303 not found (modules/instruments/tb303.tmod)". `slot` 0xFF names the module only.
 std::size_t describe_module_problem(const ModuleProblem& p, char* out, std::size_t cap) noexcept;
 

@@ -102,7 +102,7 @@ class ParamsScreen final : public Screen {
   // OS-INSTUI-ARROWS: the F-key `key` (0..4) pressed again on the page it already shows steps the windows of its group, wrapping: a sample instrument's MOD key (F4) the six envelopes. False where the
   // group has one window (nothing moves; a module has four pages at most, O3M_PARAMS_MAX / 8).
   bool next_window(const Model& model, ViewState& view, unsigned key) const noexcept;
-  // The pages a module instrument has (its parameters, eight to a page; at least 1), and the pages of the other kinds (ip::kGroups).
+  // The pages a module instrument has (its parameters, eight to a page; 0 for a module with no parameters: no page key, F1 does nothing, OS-MODPAGEKEYS follow-up), and the pages of the other kinds (ip::kGroups).
   unsigned module_page_count(const Model& model, const ViewState& view) const noexcept;
   bool pad_roles(const Model& model, const ViewState& view, PadRole (&roles)[48]) const noexcept override;
   // OS-INSTUI S5: an empty slot of an open project shows the type chooser (F1 SAMPLE, F2 MIDI, F3 PASTE, F4 MODULE, F5 LOAD): the screen's field level is context instrument.empty there.

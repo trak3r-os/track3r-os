@@ -1046,7 +1046,8 @@ bool install_demo_kit(SampleBank& bank, audio::VoicePool& voices, model::Project
   bank.set_used(kit.samples);
   (void)model::demo::add_instruments(project, unity_level(project_law(project)));
   if (model::demo::pattern_is_empty(project, 1)) {
-    (void)model::demo::fill_pattern(project, 1);
+    // OS-BUG-TEMPOLOAD: Do not set tempo here; the caller decides whether to set it (boot/new path) or preserve it (load path).
+    (void)model::demo::fill_pattern(project, 1, false);
   }
   bank.set_demo_kit(true);
   return true;

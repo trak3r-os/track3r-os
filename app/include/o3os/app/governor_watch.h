@@ -22,8 +22,9 @@ namespace o3os::app {
 
 // What a module costs, for the pages that pick or show it: the measured cycles of ONE voice for a whole block (ModuleVoices::voice_cost) as "~16% PER VOICE" (whole percent of the block, rounded),
 // "<1% PER VOICE" under half a percent, and "UNMEASURED" while no note of it has sounded for two blocks (0).
+// OS-INSFX S4: the same figure without the unit of a voice, for an effect insert (one instance): "~2%", "<1%", "UNMEASURED".
 template <std::size_t N>
-void append_voice_cost(core::FixedString<N>& s, std::uint32_t cycles) noexcept {
+void append_block_cost(core::FixedString<N>& s, std::uint32_t cycles) noexcept {
   if (cycles == 0u) {
     s.append("UNMEASURED");
     return;
@@ -36,7 +37,29 @@ void append_voice_cost(core::FixedString<N>& s, std::uint32_t cycles) noexcept {
     append_uint(s, percent);
     s.append("%");
   }
-  s.append(" PER VOICE");
+}
+// The right-hand text of a cell of the Mixer's INSERTS page: OVER BUDGET (a net forced the instance to dry), else BYPASS (the record's flag), else NOT BOUND (a record with no instance while the build
+// has the host: `expect_bound`), and the measured cost after it ("BYPASS  ~2%") while an instance is bound and has one. Nothing is appended for a plain insert that was never measured.
+template <std::size_t N>
+void append_insert_status(core::FixedString<N>& s, bool bypass, bool bound, bool forced, bool expect_bound, std::uint32_t cost) noexcept {
+  if (bound && forced) {
+    s.append("OVER BUDGET");
+  } else if (bypass) {
+    s.append("BYPASS");
+  } else if (!bound && expect_bound) {
+    s.append("NOT BOUND");
+  }
+  if (bound && cost != 0u) {
+    s.append(s.size() != 0u ? "  " : "");
+    append_block_cost(s, cost);
+  }
+}
+template <std::size_t N>
+void append_voice_cost(core::FixedString<N>& s, std::uint32_t cycles) noexcept {
+  append_block_cost(s, cycles);
+  if (cycles != 0u) {
+    s.append(" PER VOICE");
+  }
 }
 
 class GovernorWatch {

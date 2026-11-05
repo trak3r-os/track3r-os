@@ -50,6 +50,7 @@ bool module_engine(ActionContext& ctx, core::ActionArg) noexcept {
     }
   }
   ctx.view.modules.picker = static_cast<std::uint8_t>(at);
+  ctx.view.modules.insert_where = ModulesView::kEngine;
   ctx.view.overlay = OverlayId::ModulePicker;
   return true;
 }
@@ -66,6 +67,18 @@ bool module_pick(ActionContext& ctx, core::ActionArg) noexcept {
   }
   if (ctx.edit == nullptr) {
     (void)say(ctx, core::Severity::Info, ModuleUi::pick_text(ModuleUi::PickResult::NoProject));
+    return true;
+  }
+  if (ctx.view.modules.insert_where != ModulesView::kEngine) {  // OS-INSFX S4: the Mixer's INSERTS page asked: an effect for the cell, the module system's one path to the host and the project
+    ModuleUi& mu = *ctx.model.modules;
+    const CatalogEntry* e = mu.effect_at(ctx.view.modules.picker);
+    const unsigned where = ctx.view.modules.insert_where;
+    ModuleUi::InsertResult r = ModuleUi::InsertResult::NoEntry;
+    if (e != nullptr) {
+      r = e->state == CatalogEntry::State::Missing ? ModuleUi::InsertResult::Missing
+                                                    : (e->state == CatalogEntry::State::Quarantined ? ModuleUi::InsertResult::Quarantined : mu.insert_assign(*ctx.edit, where / 2u, where % 2u, e->stem));
+    }
+    (void)say(ctx, r == ModuleUi::InsertResult::Ok ? core::Severity::Info : core::Severity::Warn, ModuleUi::insert_text(r));
     return true;
   }
   const ModuleUi::PickResult res = ctx.model.modules->pick(*ctx.edit, instrument_slot(ctx.view), ctx.view.modules.picker);

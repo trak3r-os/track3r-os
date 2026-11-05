@@ -35,7 +35,8 @@ constexpr unsigned kPages = 6;
 
 constexpr std::uint16_t kFieldDisk = 0xFFF0;  // OS-USBDISK U2b: the two rows of the USB page that are not settings (a field no descriptor has)
 constexpr std::uint16_t kFieldReadOnly = 0xFFF1;
-bool virtual_field(std::uint16_t field) noexcept { return field == kFieldDisk || field == kFieldReadOnly; }
+constexpr std::uint16_t kFieldStatusLed = 0xFFF2;  // OS-STATUSLED: the DISPLAY page's last row, not a setting either (a session choice, RAM only)
+bool virtual_field(std::uint16_t field) noexcept { return field == kFieldDisk || field == kFieldReadOnly || field == kFieldStatusLed; }
 
 struct Rows {
   std::uint16_t field[ParamView::kConfigRows] = {};
@@ -95,6 +96,9 @@ Rows rows_of(const ViewState& view) noexcept {
     r.field[r.n++] = kFieldDisk;
     r.field[r.n++] = kFieldReadOnly;
   }
+  if (page == kPageDisplay && r.n + 1u <= static_cast<unsigned>(ParamView::kConfigRows)) {  // OS-STATUSLED: STATUS LED after the settings
+    r.field[r.n++] = kFieldStatusLed;
+  }
   return r;
 }
 
@@ -126,7 +130,9 @@ constexpr Licence kLicences[] = {
 ConfigRow config_row(const ViewState& view) noexcept {
   const Rows rows = rows_of(view);
   const std::uint16_t field = rows.n == 0 ? std::uint16_t{0} : rows.field[row_of(view, rows)];
-  return field == kFieldDisk ? ConfigRow::CardAsDisk : (field == kFieldReadOnly ? ConfigRow::ReadOnly : ConfigRow::Param);
+  return field == kFieldDisk ? ConfigRow::CardAsDisk
+       : (field == kFieldReadOnly ? ConfigRow::ReadOnly
+       : (field == kFieldStatusLed ? ConfigRow::StatusLed : ConfigRow::Param));
 }
 
 bool config_page_has_rows(const ViewState& view) noexcept { return rows_of(view).n != 0u; }
@@ -212,13 +218,15 @@ void ConfigScreen::render(const Model& model, const ViewState& view, Renderer& r
     }
     char text[core::kParamTextChars + 1];
     for (unsigned i = 0; i < rows.n; ++i) {
-      if (virtual_field(rows.field[i])) {  // OS-USBDISK U2b: CARD AS DISK (an action: its value says what F7 does now) and READ ONLY (this session's choice)
+      if (virtual_field(rows.field[i])) {  // OS-USBDISK U2b: CARD AS DISK (an action: its value says what F7 does now) and READ ONLY (this session's choice); OS-STATUSLED: STATUS LED (this session's choice)
         if (!hidden({name_x, cell_y(i), 40 * cell_w, cell_h})) {
           const bool sel_row = i == cursor;
           const bool disk = rows.field[i] == kFieldDisk;
-          const char* value = !disk ? (config_read_only_shown(view) ? "On" : "Off")
-                                    : (view.disk.phase == ViewState::DiskView::Phase::Out ? "OUT: F7 EJECTS" : (view.disk.phase == ViewState::DiskView::Phase::Working ? "WORKING..." : "F7: SHARE"));
-          r.text(name_x, cell_y(i), disk ? "CARD AS DISK" : "READ ONLY", sel_row ? Color::SelText : Color::TextDim);
+          const bool status_led = rows.field[i] == kFieldStatusLed;
+          const char* value = disk ? (view.disk.phase == ViewState::DiskView::Phase::Out ? "OUT: F7 EJECTS" : (view.disk.phase == ViewState::DiskView::Phase::Working ? "WORKING..." : "F7: SHARE"))
+                           : (status_led ? (view.status_led_blink ? "BLINK" : "OFF")
+                           : (config_read_only_shown(view) ? "On" : "Off"));
+          r.text(name_x, cell_y(i), disk ? "CARD AS DISK" : (status_led ? "STATUS LED" : "READ ONLY"), sel_row ? Color::SelText : Color::TextDim);
           r.text(value_x, cell_y(i), value, sel_row ? Color::SelText : Color::Text);
         }
         continue;
@@ -251,12 +259,21 @@ void ConfigScreen::render(const Model& model, const ViewState& view, Renderer& r
     }
     if (rows.n != 0u && card_x + 18 * cell_w <= ui::kScreenW && virtual_field(rows.field[cursor]) && !hidden({card_x, row_y(0), ui::kScreenW - card_x, 6 * f.row_pitch})) {
       const bool disk = rows.field[cursor] == kFieldDisk;  // what the row does, in the card on the right
-      r.text(card_x, cell_y(0), disk ? "CARD AS DISK" : "READ ONLY", Color::Text);
-      r.text(card_x, cell_y(1), disk ? "F7 twice: the computer gets the card" : "On: the computer can only read it", Color::TextDim, Face::Label);
-      r.text(card_x, cell_y(2), disk ? "Saves and loads stop meanwhile" : "Off: it can write to the card too", Color::TextDim, Face::Label);
-      r.text(card_x, cell_y(3), disk ? "Playing and recording go on" : "Chosen here, for this session only", Color::TextDim, Face::Label);
-      if (disk) {
-        r.text(card_x, cell_y(4), view.disk.audio ? "USB AUDIO pauses meanwhile" : "Eject: F7 twice, or on the computer", Color::TextDim, Face::Label);
+      const bool status_led = rows.field[cursor] == kFieldStatusLed;
+      if (status_led) {  // OS-STATUSLED
+        r.text(card_x, cell_y(0), "STATUS LED", Color::Text);
+        r.text(card_x, cell_y(1), "BLINK: the heartbeat blinks", Color::TextDim, Face::Label);
+        r.text(card_x, cell_y(2), "OFF: the LED stays dark", Color::TextDim, Face::Label);
+        r.text(card_x, cell_y(3), "a fault code still blinks", Color::TextDim, Face::Label);
+        r.text(card_x, cell_y(4), "not saved: BLINK at boot", Color::TextDim, Face::Label);
+      } else {
+        r.text(card_x, cell_y(0), disk ? "CARD AS DISK" : "READ ONLY", Color::Text);
+        r.text(card_x, cell_y(1), disk ? "F7 twice: the computer gets the card" : "On: the computer can only read it", Color::TextDim, Face::Label);
+        r.text(card_x, cell_y(2), disk ? "Saves and loads stop meanwhile" : "Off: it can write to the card too", Color::TextDim, Face::Label);
+        r.text(card_x, cell_y(3), disk ? "Playing and recording go on" : "Chosen here, for this session only", Color::TextDim, Face::Label);
+        if (disk) {
+          r.text(card_x, cell_y(4), view.disk.audio ? "USB AUDIO pauses meanwhile" : "Eject: F7 twice, or on the computer", Color::TextDim, Face::Label);
+        }
       }
     } else if (rows.n != 0u && card_x + 18 * cell_w <= ui::kScreenW) {
       const unsigned field = rows.field[cursor];
@@ -389,7 +406,7 @@ void ConfigScreen::render(const Model& model, const ViewState& view, Renderer& r
     const ConfigRow special = config_row(view);
     const char* usb_left = special == ConfigRow::CardAsDisk ? "F7 twice: the computer gets the card (saves and loads stop)" : (special == ConfigRow::ReadOnly ? "encoder: On = the computer only reads the card" : usb_note);
     const char* left = page == kPageMidi ? "stored; the clock and router read them later"
-                                         : (page == kPageDisplay ? "a change applies at once"
+                                         : (page == kPageDisplay ? (config_row(view) == ConfigRow::StatusLed ? "not saved: BLINK again at boot" : "a change applies at once")
                                                                  : (page == kPageUsb ? usb_left
                                                                                      : (page == kPagePattern ? "live recording, metronome and pads"
                                                                                                              : (page == kPageSd ? "read only" : "ADR 0005: the core is GPL, the module SDK MIT"))));

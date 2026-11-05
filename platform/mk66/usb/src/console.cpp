@@ -23,6 +23,8 @@
 //   poke       OS-HW1: one 32-bit write, I2S0's registers only (the audio clock bring-up is what it is for)
 //   audio      OS-HW1: `audio start` calls the audio device's start() again from here (the main loop) when it failed at boot
 //   rot        OS-HW1: REG_ROTATE written through the display driver, the display idle (not saved)
+//   status     OS-STATUSLED: the status LED's heartbeat on/off (blink.h g_heartbeat_on, through appimg::status_led), the Config > DISPLAY
+//              screen's STATUS LED row's choice; not saved (BLINK at every boot). A fault blink code still shows with off.
 //   sd         OS-007e: the SD card (slot, mount, identity, speed, counters); `sd mount` initialises and mounts it again. Reads the card.
 //   ls         OS-007e: a directory of the card, a pager. A read.
 //   load       OS-007e: starts loading an OG project folder of the card into the document (appimg::start_project_load): reads the card, replaces the
@@ -627,6 +629,23 @@ void cmd_rot(shell::Shell& sh, const shell::Args& a) {
   sh.out().text("rot: REG_ROTATE = ").dec(value).text(" (not saved)\n");
 }
 
+// `status [blink|off]` (OS-STATUSLED): the status LED's heartbeat — the Config > DISPLAY screen's STATUS LED row's choice, set here
+// through appimg so the row and the console share one state. Not saved: BLINK at every boot. Off stops the heartbeat only: a fault blink
+// code still shows. Main loop only, no allocation, no blocking.
+void cmd_status(shell::Shell& sh, const shell::Args& a) {
+  if (a.argc == 1) {
+    sh.out().text("status: heartbeat ").text(appimg::status_led_heartbeat() ? "blink" : "off").text(" (not saved)\n");
+    return;
+  }
+  if (a.argc != 2 || !(same(a.argv[1], "blink") || same(a.argv[1], "off"))) {
+    sh.out().text("usage: status [blink|off]\n");
+    return;
+  }
+  const bool on = same(a.argv[1], "blink");
+  appimg::status_led(on);
+  sh.out().text("status: heartbeat ").text(on ? "blink" : "off").text(" (not saved; a fault code still blinks)\n");
+}
+
 // `sd`: the slot, the mount, the card, the counters (storage/sd_text.h); the loader's last summary is the last line but one. `sd mount` runs the
 // card's initialisation and the mount again (a card put back in, a retry after a failure): it blocks for the card's own time (the display stays
 // serviced), and not while the card is in use (a project loading, a save, a firmware upload, a listing: OS-SDSWAP, OS-USBDISK F3) or on the computer (`ERR card on host`).
@@ -828,7 +847,7 @@ bool parse_value(const char* s, float& out) {
 }
 
 // OS-INSFX S1: effect modules as per-track inserts (audio/insert_host.h). `ins` / `ins list`: the totals and the bound inserts; `ins bind <track 1..16> <slot 1..2> <module>` (the module
-// loaded by `mod load` first), `ins unbind <track> <slot>`, `ins bypass <track> <slot> on|off` (off is a reset of the effect). S3b: each one is written to the project (INSX), so a save keeps it and a
+// is loaded from modules/effects when it is not in the set; S4: the same path as the Mixer's INSERTS page), `ins unbind <track> <slot>`, `ins bypass <track> <slot> on|off` (off is a reset of the effect). S3b: each one is written to the project (INSX), so a save keeps it and a
 // load binds the saved ones (not undoable).
 void cmd_ins(shell::Shell& sh, const shell::Args& a) {
   std::uint32_t track = 0;
@@ -854,7 +873,7 @@ void cmd_ins(shell::Shell& sh, const shell::Args& a) {
   } else if (std::strcmp(sub, "bypass") == 0 && a.argc == 5 && two && (std::strcmp(a.argv[4], "on") == 0 || std::strcmp(a.argv[4], "off") == 0)) {
     why = appimg::insert_bypass(track - 1u, slot - 1u, std::strcmp(a.argv[4], "on") == 0);
   } else {
-    sh.out().text("usage: ins [list] | bind <1..16> <1..2> <module> | unbind <1..16> <1..2> | bypass <1..16> <1..2> on|off\n");
+    sh.out().text("usage: ins [list] | bind <1..16> <1..2> <module> (loads it from the card) | unbind <1..16> <1..2> | bypass <1..16> <1..2> on|off\n");
     return;
   }
   sh.out().text("ins: ").text(sub).text(" ").text(why == nullptr ? "ok" : why).nl();
@@ -1444,6 +1463,7 @@ constexpr shell::Command kCommands[] = {
     bind(Cmd::Power, &cmd_power),   bind(Cmd::Disk, &cmd_disk),
     bind(Cmd::Guard, &cmd_guard),
     bind(Cmd::Ins, &cmd_ins),
+    bind(Cmd::Status, &cmd_status),
 };
 static_assert(sizeof(kCommands) / sizeof(kCommands[0]) == static_cast<std::size_t>(Cmd::Count), "every command has a handler");
 

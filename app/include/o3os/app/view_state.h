@@ -59,6 +59,9 @@ struct ModulesView {
   std::uint8_t apps = 0;
   std::uint8_t picker = 0;
   std::uint8_t app_row = 0;
+  // OS-INSFX S4: what the picker is for. kEngine: the engine of the instrument in view (F1 of the Instrument page); else the insert it fills, the host's key track * 2 + slot (the Mixer's INSERTS page, Insert).
+  static constexpr std::uint8_t kEngine = 0xFF;
+  std::uint8_t insert_where = kEngine;
   // OS-H3A, Pattern F7 TOOLS: the list's cursor, the line it says when a launch was refused (a pointer to a literal; the notification strip waits behind a modal overlay), and whether the running app
   // was opened from the list (its exit chord then goes back to Pattern, one level of return, and not to MODULES).
   std::uint8_t tools = 0;
@@ -219,6 +222,10 @@ struct ViewState {
     Request request = Request::None;
   };
   DiskView disk;
+  // OS-STATUSLED: the Config > DISPLAY screen's STATUS LED row (BLINK / OFF): whether the status LED's heartbeat blinks (a fault code
+  // still shows with OFF). A session choice, RAM only, not saved, like READ ONLY above: BLINK at every boot. The platform reads it
+  // (App::status_led_blink) and drives the LED with it.
+  bool status_led_blink = true;
   int navigator = 0;                    // the Navigator's chosen cell: an index into the screen registry
 
   bool playing = false;  // the transport is running (the Play button's last accepted request): the status strip's PLAY / STOP badge

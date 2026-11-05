@@ -791,6 +791,7 @@ constexpr core::Binding kBase[] = {
     bind(kMixerCtx, tap(button_ref(Button::F4)), kMixerPage, ArgFrom::Fixed, 3),
     bind(kMixerCtx, tap(button_ref(Button::F5)), kMixerCue),
     bind(kMixerStemsCtx, tap(button_ref(Button::F6)), kMixerApply),  // OS-USBOUTS: STEMS page only (its field level): APPLY the pending OUTPUTS value (twice)
+    bind(kMixerCtx, tap(button_ref(Button::F6)), kMixerPage, ArgFrom::Fixed, 4),  // OS-INSFX S4: the INSERTS page (on STEMS the field-level binding above wins)
     bind(kMixerCtx, tap(button_ref(Button::F7)), kMixerMute),
     bind(kMixerCtx, tap(button_ref(Button::F8)), kMixerSolo),
     bind(kMixerCtx, tap(button_ref(Button::F1), kShift), kMixerName),  // OS-NAMES: NAME, the track under the cursor

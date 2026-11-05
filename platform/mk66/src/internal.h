@@ -134,6 +134,11 @@ bool input_degraded() noexcept;
 // key scanner has refused its first configurations since the bus opened and has never answered (the retries go on, a late answer brings the pads online).
 void input_audio_started() noexcept;
 bool pads_gave_no_answer() noexcept;
+// OS-STATUSLED: the STATUS LED option (blink.h g_heartbeat_on; the Config > DISPLAY screen's STATUS LED row and the `diag status`
+// command). Not saved: BLINK at every boot. pass() copies the app's choice to the platform's flag each pass; status_led() sets both at
+// once, so the row and the console never disagree. Main loop only.
+bool status_led_heartbeat() noexcept;
+void status_led(bool on) noexcept;
 // OS-USBDISK U1c, the boot disk (mode (b)): true when the chord Shift + F1 + F7 was held at power-up (init() decides, once). main.cpp then mounts nothing, loads nothing and never opens the
 // outputs. boot_disk_open() is its last step, after the USB port started with the DISK set: the card's owner becomes the computer and the card is started for it. Main loop only.
 bool boot_disk() noexcept;

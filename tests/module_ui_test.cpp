@@ -8,6 +8,8 @@
 #include <o3os/app/actions.h>
 #include <o3os/app/app.h>
 #include <o3os/app/buttons.h>
+#include <o3os/app/chrome.h>
+#include <o3os/app/frame.h>
 #include <o3os/app/module_ui.h>
 #include <o3os/app/screens/modules_screen.h>
 #include <o3os/app/screens/overlay.h>
@@ -27,6 +29,7 @@
 #include <o3os/sim/demo_project.h>
 #include <o3os/sim/eve_raster.h>
 #include <o3os/sim/raster_display.h>
+#include <o3os/ui/components.h>
 #include <o3os/ui/renderer.h>
 
 #include <cmath>
@@ -554,6 +557,69 @@ TEST_CASE("module ui: the key row shows a key for each page the module has and b
     }
     CHECK(rig.app->failed_frames() == 0u);
   }
+}
+
+TEST_CASE("module ui: a module with no parameters has no page key at all, F1 does nothing, and the info line says why (OS-MODPAGEKEYS follow-up)") {
+  Rig rig;
+  const o3m_module mod = paged_module("ZP", 0u, nullptr, 0u);  // bound, but with no parameter
+  CHECK(rig.mods->set.add_native("ZP", mod));
+  model::Project& p = rig.project();
+  CHECK(p.add_module("ZP", 2, O3M_ABI_MAJOR, O3M_ABI_MINOR) == model::Status::Ok);
+  constexpr unsigned slot = 30;  // (a slot a pad can select: the first 48; the demo project's instrument there is replaced)
+  model::Instrument in;
+  model::init_instrument(in, model::InstrumentKind::Module);
+  in.module_index = 3u;  // (after Viewer, Hog and Gone)
+  std::strcpy(in.name, "ZP");
+  CHECK(p.set_instrument(slot, in) == model::Status::Ok);
+  const int idx = rig.mods->set.find("ZP");
+  NEED(idx >= 0);
+  std::uint8_t* mem = nullptr;
+  std::uint32_t addr = 0;
+  NEED(rig.mods->set.cold().take(sizeof(VState), 16, mem, addr));
+  std::memset(mem, 0, sizeof(VState));
+  CHECK(rig.mods->voices.bind(slot, mod, module::fault_id("ZP"), mem, p.instrument(slot)->params, p.instrument(slot)->param_len) == audio::ModuleVoices::Bind::Ok);
+  rig.goto_instrument(slot);
+  // the key row: no page key at all, blank like any page the module does not have (not dimmed)
+  app::ParamsKeyRow row{};
+  app::params_key_row(rig.app->model(), rig.app->state(), row);
+  for (unsigned k = 0; k < 5; ++k) {
+    CAPTURE(k);
+    CHECK(std::string(row.label[k]).empty());
+    CHECK(((row.dim >> k) & 1u) == 0u);
+  }
+  // F1 does nothing (no page to go to). The view starts on a page the module does not have, so the check also fails on the old code, where F1 brought the view back to page 0.
+  app::ViewState& v = const_cast<app::ViewState&>(rig.app->state());  // (a test steers a state that only a key press would)
+  const unsigned page_index = app::screen_index(app::ScreenId::Instrument);
+  v.page[page_index] = 2u;
+  CHECK(rig.invoke("instrument.page", ActionArg(0)) == app::DispatchResult::Unchanged);  // the dispatch reports no change
+  CHECK(v.page[page_index] == 2u);                                                       // the page is unchanged
+  // the info line says why the parameter area is empty: its band holds exactly the pixels of the line drawn with that text
+  rig.pass(2500);  // let the last notice run out (it shares the info line)
+  const ui::Theme& theme = ui::theme(ui::theme_id_at(0));
+  const std::vector<std::uint8_t> frame = picture(theme, [&](ui::Renderer& r) { app::render_scene(rig.app->model(), rig.app->state(), r); });
+  const char* kLeft = "MODULE ZP NO PARAMETERS: nothing to edit";
+  const char* kRight = "delete: default   FX1 + FX2: learn";
+  const std::vector<std::uint8_t> ref = picture(theme, [&](ui::Renderer& r) {
+    const app::Frame f = app::make_frame(r.theme(), app::kFrameRows);
+    app::draw_chrome_bands(r, f, ui::Rect{0, 0, ui::kScreenW, f.strip.h + f.header.h});  // the bottom band's fill, as the screen draws it
+    const int y = ui::caps_y(r.theme(), ui::Face::Label, f.info.y, f.info.h);
+    const int pad = r.theme().metrics.pad;
+    r.text(2 * pad, y, kLeft, ui::Color::ChromeText, ui::Face::Label);
+    r.text(ui::kScreenW - 2 * pad - r.text_width(kRight, ui::Face::Label), y, kRight, ui::Color::ChromeText, ui::Face::Label);
+  });
+  const app::Frame f = app::make_frame(theme, app::kFrameRows);
+  bool same = true;
+  for (int y = f.info.y; y < f.info.y + f.info.h && same; ++y) {
+    for (int x = 0; x < ui::kScreenW; ++x) {
+      const std::size_t i = (static_cast<std::size_t>(y) * ui::kScreenW + static_cast<std::size_t>(x)) * 4;
+      if (frame[i] != ref[i] || frame[i + 1] != ref[i + 1] || frame[i + 2] != ref[i + 2] || frame[i + 3] != ref[i + 3]) {
+        same = false;
+        break;
+      }
+    }
+  }
+  CHECK(same);
+  CHECK(rig.app->failed_frames() == 0u);
 }
 
 TEST_CASE("module ui: a short blob is extended with the module's defaults by the first edit, as one undo unit") {

@@ -193,6 +193,17 @@ if(TARGET o3m_biquad_test)
   add_dependencies(o3m_biquad_test o3m_biquad_gen)
 endif()
 
+# OS-INSFX-FX1: DRIVE, module 1 of the first effect pack, a saturation insert (soft/asymmetric shape, drive, tone, DC blocker, mix, output) for a track (modules/effects/drive). Not built in:
+# a .tmod for /modules/effects/ on the card, so the image does not grow. The descriptor header is generated into the build tree; the module's own host test compares it with a double-precision
+# reference of the same maths.
+o3m_manifest(drive effects/drive/module.json GENERATE)
+o3m_add_module(drive SOURCES effects/drive/drive.cpp OPT -O2 VERSION 1.0.0 GEN)
+o3m_add_test(drive effects/drive/tests/drive_test.cpp)
+if(TARGET o3m_drive_test)
+  target_include_directories(o3m_drive_test PRIVATE ${O3M_GEN_DIR})  # drive_gen.h: the parameter ids and ranges
+  add_dependencies(o3m_drive_test o3m_drive_gen)
+endif()
+
 # OS-012d: the built-in modules. The packed .tmod files of the TB-303, chip, FM and SID go into a generated table (tools/o3m_embed.py: the bytes as const arrays, flash on the MK66) that
 # the images link (o3m_builtin) and hand to module::ModuleSet::set_builtins; module/builtin.h says how they meet the card's copies. The notices the code in them requires
 # (builtin/NOTICES.txt and Open303's licence text) are in the same file as a string. Without the cross compiler there are no .tmod files: the table is empty and the tests that need it say so.

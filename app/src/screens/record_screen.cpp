@@ -61,6 +61,7 @@ const char* row_name(RecRow row) noexcept {
     case RecRow::TrimStart: return "TRIM START";
     case RecRow::TrimEnd: return "TRIM END";
     case RecRow::Loop: return "LOOP";
+    case RecRow::CountIn: return "COUNT-IN";  // OS-RECCOUNT: right after LOOP
     case RecRow::LoopVol: return "LOOP VOL";
     case RecRow::Feedback: return "FEEDBACK";
     case RecRow::Threshold: return "THRESHOLD";
@@ -116,6 +117,14 @@ void row_value(core::FixedString<N>& s, const Recorder& rec, RecRow row, bool pl
       } else {
         append_uint(s, rec.cfg.loop_bars);
         s.append(rec.cfg.loop_bars == 1u ? " BAR" : " BARS");
+      }
+      break;
+    case RecRow::CountIn:  // OS-RECCOUNT: OFF, 1 BAR, 2 BARS, 4 BARS
+      if (rec.cfg.count_in == 0u) {
+        s.append("OFF");
+      } else {
+        append_uint(s, rec.cfg.count_in);
+        s.append(rec.cfg.count_in == 1u ? " BAR" : " BARS");
       }
       break;
     case RecRow::LoopVol:
@@ -244,7 +253,7 @@ void RecordScreen::render(const Model& model, const ViewState& view, Renderer& r
   const Recorder::State state = rec != nullptr ? rec->state() : Recorder::State::Idle;
   const bool live = state == Recorder::State::Armed || state == Recorder::State::Recording;
   const bool listening = state == Recorder::State::Armed && rec->wait_align() == audio::RecTap::Align::Level;  // OS-SREC-LEVEL: armed, listening for the THRESHOLD (rec is not null while a take is armed)
-  const Rect lane = {m.pad + 4, row_y(8) + m.pad, ui::kScreenW - 2 * (m.pad + 4), 7 * f.row_pitch - 2 * m.pad};
+  const Rect lane = {m.pad + 4, row_y(9) + m.pad, ui::kScreenW - 2 * (m.pad + 4), 6 * f.row_pitch - 2 * m.pad};  // OS-RECCOUNT: the card has one row more (nine): the lane gives up one
 
   draw_chrome_bands(r, f, covered);
 

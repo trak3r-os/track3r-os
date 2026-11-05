@@ -493,3 +493,17 @@ Budget: a track insert aims at 3 points or less (spec section 6). Static check o
 | `ins` on the Dense8 song, the insert on track 1 | about 1.3 % to 1.5 % | 3,925 cycles (1.5 %), forced 0/0, underruns 0, render max 118.8 % |
 
 Measured on the unit (v1.0.1-insfx8.1-bench, build a5886211; min cycles of the bench, 261,225 cycles a 64-frame block): the effect costs about 39 % more than the estimates (1,666 against 1.2k and 2,645 against 1.9k). The cap of four instances stands by arithmetic (about 6 % for four) and the aggregate insert net covers it; **no four-instance run was done on the unit**. Method: bench image (`-DO3OS_BENCH=ON`), transport stopped, `mod load biquad` as the only loaded effect, console `bench insert 64` (the HIL file `platform/mk66/tools/hil/qa_biquad.json`, QA-GLB-170), then `ins` on the Dense8 song for the in-song figure. The cap of four instances (spec section 6) stays unless these say otherwise.
+
+## OS-INSFX-FX1: the DRIVE insert (2026-11-05; `docs/roadmap/BACKLOG.md` OS-INSFX-FX1, `modules/effects/drive/`)
+
+One effect instance on a track insert: a polynomial soft clipper (`v = clamp((2/3) g x + b, -1, 1)`, `y = v (1.5 - 0.5 v^2) - b (1.5 - 0.5 b^2)`, the bias `b` is the SHAPE, the 2/3 folded into the control-rate gain so the small-signal gain is 1), a one-pole tone, a DC blocker (`R = 0.995`), the mix and the output level folded into its two coefficients; five per-sample values ramped in steps of 16 samples from a once-a-block control step (four host exp2 only while the drive, tone or output moves).
+Budget: a track insert aims at 3 points or less (spec section 6), about the biquad's 1,666 cycles a block. Static check of the packed file (`tmod-perf` section 5, from the mk66 build): no VDIV and no call in the sample loop; the sample loop is about 25 instructions (8 multiplies) and its dependent chain about 29 cycles a sample; hot 1,328 B, cold 1,648 B, file 3,108 B, state 88 B (the o3m_pack line of the CI build).
+
+| Row | Estimate [est] | Measured (unit) |
+|---|---|---|
+| `insert_effect`, settled, render() of 64 frames | about 1.9k cycles (0.7 %): about 29 cycles a sample for the shaper + tone + DC blocker + mix chain, plus about 120 for the control step | HW pending (QA-GLB-176) |
+| `insert_effect_mod`, set_param on the Drive every block + render() | about 2.5k cycles (1.0 %): the derivation (four exp2) is about 600 | HW pending (QA-GLB-176) |
+| `insert`, the whole insert with the adapter | the above plus the adapter (about 2.2k cycles on the unit, S1) | HW pending (QA-GLB-176) |
+| `ins` on the Dense8 song, the insert on track 1 | about 0.7 % to 1.0 % | HW pending (QA-GLB-176) |
+
+Method when measured: bench image (`-DO3OS_BENCH=ON`), transport stopped, `mod load drive` as the only loaded effect, console `bench insert 64` (the HIL file `platform/mk66/tools/hil/qa_drive.json`, QA-GLB-176), then `ins` on the Dense8 song for the in-song figure.

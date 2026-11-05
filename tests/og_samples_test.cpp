@@ -1210,12 +1210,10 @@ TEST_CASE("og samples: the demo kit only goes where it overwrites no instrument 
       CHECK(std::strcmp(model.project.instrument(0)->name, "KICK") == 0);
     }
     CHECK(model.project.instrument_count() == before.size() + (c.kit ? 4u : 0u));
-    // Pattern 1 and the tempo: the kit's own only when it was installed into an empty pattern 1; untouched when the kit was refused or pattern 1 already had a note.
+    // Pattern 1: the kit fills an empty pattern 1; untouched when the kit was refused or pattern 1 already had a note. The tempo is the project's own in every case: the kit never changes it (OS-BUG-TEMPOLOAD).
     if (c.kit && !notes) {
       CHECK_FALSE(o3os::model::demo::pattern_is_empty(model.project, 1));
-      CHECK(model.project.tempo_x100() != kTempo);
     } else {
-      CHECK(model.project.tempo_x100() == kTempo);
       if (notes) {
         NEED(model.project.pattern(1) != nullptr);
         const o3os::model::Step& s = model.project.pattern(1)->steps[5][7];
@@ -1226,6 +1224,7 @@ TEST_CASE("og samples: the demo kit only goes where it overwrites no instrument 
         CHECK(o3os::model::demo::pattern_is_empty(model.project, 1));
       }
     }
+    CHECK(model.project.tempo_x100() == kTempo);  // the kit never changes the tempo, installed or not
     for (std::size_t i = 0; i < before.size(); ++i) {  // what the project had is as it was, with the kit or without
       const Instrument* now = model.project.instrument(c.have[i].slot);
       NEED(now != nullptr);
@@ -1361,5 +1360,101 @@ TEST_CASE("og samples: new audio in a slot ends the demo kit's flag (OS-BUG-PAST
   CHECK(rig.bank.demo_kit());
   rig.bank.adopt(0, rig.arena.data() + 90000, 100);
   CHECK_FALSE(rig.bank.demo_kit());
+}
+
+// OS-BUG-TEMPOLOAD: tempo preservation when demo kit is installed during load
+TEST_CASE("og samples: loaded project with no instruments at 135 BPM keeps its tempo (OS-BUG-TEMPOLOAD)") {
+  // Create a project with tempo 13500 and no instruments, save it, then load it.
+  // The demo kit will be installed, but the tempo must be preserved.
+  o3os::model::ModelArena& source = o3os::test::og::arena(0);
+  source.project.reset();
+  NEED(source.project.create_pattern(1, 32) == o3os::model::Status::Ok);
+  NEED(source.project.set_tempo_x100(13500) == o3os::model::Status::Ok);
+  CHECK(source.project.tempo_x100() == 13500);
+  CHECK(source.project.instrument_count() == 0);
+
+  Bytes saved;
+  o3os::formats::native::Progress progress = o3os::test::save(source.project, saved);
+  CHECK(progress == o3os::formats::native::Progress::Done);
+
+  o3os::model::ModelArena& target = o3os::test::og::arena(1);
+  target.project.reset();
+  LawRig rig(target);
+
+  // Simulate the load path directly with install_demo_kit
+  o3os::formats::native::Report report;
+  progress = o3os::test::load(target, saved, &report);
+  CHECK(progress == o3os::formats::native::Progress::Done);
+  CHECK(report.error == o3os::formats::native::Error::None);
+
+  // Simulate the load path: install_demo_kit which calls fill_pattern with set_tempo=false
+  if (target.project.instrument_count() == 0 && o3os::app::demo_kit_fits(target.project)) {
+    NEED(o3os::app::install_demo_kit(rig.bank, *rig.voices, target.project, rig.arena.data(), static_cast<std::uint32_t>(rig.arena.size())));
+  }
+
+  // Tempo must be preserved at 13500
+  CHECK(target.project.tempo_x100() == 13500);
+}
+
+TEST_CASE("og samples: loaded project with no instruments at 130 BPM keeps its tempo (OS-BUG-TEMPOLOAD edge)") {
+  // Edge case: a project saved at exactly 130.00 BPM (the default) with no instruments must also keep its tempo.
+  o3os::model::ModelArena& source = o3os::test::og::arena(0);
+  source.project.reset();
+  NEED(source.project.create_pattern(1, 32) == o3os::model::Status::Ok);
+  NEED(source.project.set_tempo_x100(13000) == o3os::model::Status::Ok);
+  CHECK(source.project.tempo_x100() == 13000);
+  CHECK(source.project.instrument_count() == 0);
+
+  Bytes saved;
+  o3os::formats::native::Progress progress = o3os::test::save(source.project, saved);
+  CHECK(progress == o3os::formats::native::Progress::Done);
+
+  o3os::model::ModelArena& target = o3os::test::og::arena(1);
+  target.project.reset();
+  LawRig rig(target);
+
+  o3os::formats::native::Report report;
+  progress = o3os::test::load(target, saved, &report);
+  CHECK(progress == o3os::formats::native::Progress::Done);
+
+  if (target.project.instrument_count() == 0 && o3os::app::demo_kit_fits(target.project)) {
+    NEED(o3os::app::install_demo_kit(rig.bank, *rig.voices, target.project, rig.arena.data(), static_cast<std::uint32_t>(rig.arena.size())));
+  }
+
+  // Tempo must be preserved at 13000 (not overwritten to 12000)
+  CHECK(target.project.tempo_x100() == 13000);
+}
+
+TEST_CASE("og samples: loaded project with instruments keeps its tempo (OS-BUG-TEMPOLOAD regression)") {
+  // A project with instruments should keep its tempo; the demo kit is not installed.
+  o3os::model::ModelArena& source = o3os::test::og::arena(0);
+  source.project.reset();
+
+  // Add an instrument
+  o3os::model::Instrument in;
+  o3os::model::init_instrument(in, o3os::model::InstrumentKind::Sample);
+  std::memcpy(in.name, "TEST", 5);
+  NEED(source.project.set_instrument(0, in) == o3os::model::Status::Ok);
+
+  NEED(source.project.create_pattern(1, 32) == o3os::model::Status::Ok);
+  NEED(source.project.set_tempo_x100(13700) == o3os::model::Status::Ok);
+  CHECK(source.project.tempo_x100() == 13700);
+  CHECK(source.project.instrument_count() == 1);
+
+  Bytes saved;
+  o3os::formats::native::Progress progress = o3os::test::save(source.project, saved);
+  CHECK(progress == o3os::formats::native::Progress::Done);
+
+  o3os::model::ModelArena& target = o3os::test::og::arena(1);
+  target.project.reset();
+  LawRig rig(target);
+
+  o3os::formats::native::Report report;
+  progress = o3os::test::load(target, saved, &report);
+  CHECK(progress == o3os::formats::native::Progress::Done);
+
+  // With an instrument in the project, the demo kit refuses to install and the tempo is unchanged
+  CHECK_FALSE(o3os::app::install_demo_kit(rig.bank, *rig.voices, target.project, rig.arena.data(), static_cast<std::uint32_t>(rig.arena.size())));
+  CHECK(target.project.tempo_x100() == 13700);
 }
 

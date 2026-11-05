@@ -128,7 +128,7 @@ The soft keys `F1` to `F8`, left to right, as the key row shows them.
 | [Sample load](sample_load.md) | `Sample Loader` | **LOAD**, **UP**, **ENTER**, **ADD**, **PLAY**, **RESCAN**, **WT AUTO**, **CH MIX** |
 | [Sample edit](sample_edit.md) | `Sample Editor` | **CROP**, **NORM**, **REVERSE**, **FADE IN**, **FADE OUT**, **AMP**, **PREVIEW**, **UNDO** |
 | [Record](record.md) | `Sample Recorder` | **REC/STOP**, **MONITOR**, **SAVE**, **DISCARD**, **SEEK-**, **SEEK+**, **SAVE WAV**, **PREVIEW** |
-| [Mixer](mixer.md) | `Master` | **MIXER**, **ROUTING**, **MST FX**, **STEMS**, **CUE LVL**, -, **MUTE**, **SOLO** |
+| [Mixer](mixer.md) | `Master` | **MIXER**, **ROUTING**, **MST FX**, **STEMS**, **CUE LVL**, **INSERTS**, **MUTE**, **SOLO** |
 | [File](file.md) | `File` | **OPEN**, **RESCAN**, **NEW**, **SAVE**, **SAVE AS**, **IMPORT**, **EXPORT**, - |
 
 <!-- /manual-tables -->

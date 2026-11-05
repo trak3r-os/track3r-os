@@ -6,6 +6,7 @@
 #include "param_access.h"
 
 #include <o3os/app/mixer_view.h>
+#include <o3os/app/module_ui.h>
 #include <o3os/app/screens/mixer_screen.h>
 #include <o3os/app/text_format.h>
 #include <o3os/audio/graph_params.h>
@@ -192,8 +193,81 @@ bool edit_at_cursor(ActionContext& ctx, core::ActionArg detents, bool coarse) no
         return outputs_turn(ctx, detents);
       }
       return detents != 0 && stem_cell(ctx, detents > 0);
+    case MixerPage::Inserts:
+      return false;  // (an insert's own parameters are the next slice's page)
   }
   return false;
+}
+
+// ---- the INSERTS page (OS-INSFX S4). The cursor's cell is (row = the track, col = INS A / INS B); the master's row is shown and not assignable (S6). Every refusal is a toast of the Mixer's own.
+
+bool insert_refuse(ActionContext& ctx, const char* text) noexcept { return ctx.view.notify.post(core::Severity::Warn, text, "mixer", ViewState::kMessageMs); }
+bool insert_say(ActionContext& ctx, ModuleUi::InsertResult r) noexcept {
+  return ctx.view.notify.post(r == ModuleUi::InsertResult::Ok ? core::Severity::Info : core::Severity::Warn, ModuleUi::insert_text(r), "mixer", ViewState::kMessageMs);
+}
+
+// What the insert actions need: the module system, the editor and the cell, or a refusal said.
+struct InsertCursor {
+  ModuleUi* ui;
+  unsigned track;
+  unsigned slot;
+};
+bool insert_cursor(ActionContext& ctx, InsertCursor& out) noexcept {
+  const mixer::Cursor c = mixer::cursor(ctx.model, ctx.view);
+  if (c.row >= mixer::tracks(ctx.model)) {
+    return insert_refuse(ctx, "MASTER INSERT: NOT YET") && false;
+  }
+  if (ctx.model.modules == nullptr) {
+    return insert_refuse(ctx, "NO MODULE SYSTEM IN THIS BUILD") && false;
+  }
+  if (ctx.model.project == nullptr || ctx.edit == nullptr) {
+    return insert_refuse(ctx, ModuleUi::pick_text(ModuleUi::PickResult::NoProject)) && false;
+  }
+  out = {ctx.model.modules, c.row, c.col};
+  return true;
+}
+
+// Insert: the picker of /modules/effects for the cell (the engine picker's overlay, view.modules.insert_where says what it is for).
+bool insert_open(ActionContext& ctx) noexcept {
+  InsertCursor at{};
+  if (!insert_cursor(ctx, at)) {
+    return true;  // (the refusal is said: a labelled key answers)
+  }
+  const model::Project& project = *ctx.model.project;
+  if (project.find_insert(at.track, at.slot) != nullptr) {
+    return insert_say(ctx, ModuleUi::InsertResult::Taken);
+  }
+  if (project.inserts().count >= model::kMaxInserts) {
+    return insert_say(ctx, ModuleUi::InsertResult::Full);
+  }
+  at.ui->scan_effects(ctx.model.project);
+  ctx.view.modules.picker = 0;
+  ctx.view.modules.insert_where = static_cast<std::uint8_t>(at.track * 2u + at.slot);
+  ctx.view.overlay = OverlayId::ModulePicker;
+  return true;
+}
+
+bool insert_remove(ActionContext& ctx) noexcept {
+  InsertCursor at{};
+  if (!insert_cursor(ctx, at)) {
+    return true;
+  }
+  const ModuleUi::InsertResult r = at.ui->insert_remove(*ctx.edit, at.track, at.slot);
+  return r == ModuleUi::InsertResult::Ok ? ctx.view.notify.post(core::Severity::Info, "INSERT DELETED", "mixer", ViewState::kMessageMs) : insert_say(ctx, r);
+}
+
+// F7: bypass on, or off when the insert is bypassed (by the user or by a net: OVER BUDGET is cleared the same way).
+bool insert_toggle(ActionContext& ctx) noexcept {
+  InsertCursor at{};
+  if (!insert_cursor(ctx, at)) {
+    return true;
+  }
+  const model::InsertRecord* rec = ctx.model.project->find_insert(at.track, at.slot);
+  ModuleUi::InsertCell cell{};
+  const bool live = at.ui->insert_cell(at.track, at.slot, cell);
+  const bool bypassed = live ? (cell.bypass || cell.forced) : (rec != nullptr && (rec->flags & model::kInsertFlagBypass) != 0u);
+  const ModuleUi::InsertResult r = at.ui->insert_bypass(*ctx.edit, at.track, at.slot, !bypassed);
+  return r == ModuleUi::InsertResult::Ok ? ctx.view.notify.post(core::Severity::Info, bypassed ? "INSERT ON" : "INSERT BYPASSED", "mixer", ViewState::kMessageMs) : insert_say(ctx, r);
 }
 
 }  // namespace
@@ -225,6 +299,9 @@ bool mixer_reset(ActionContext& ctx, core::ActionArg arg) noexcept {
   }
   if (focus_param(ctx) != core::ParamId::None) {
     return param_reset(ctx, 0);
+  }
+  if (mixer::page_of(ctx.view) == MixerPage::Inserts) {
+    return insert_remove(ctx);  // Delete takes the insert out (the host and the record), final like the Mixer's other edits; the insert needs no mix board
   }
   MixBoard* mix = ctx.mix;
   if (mix == nullptr) {
@@ -302,13 +379,19 @@ bool mixer_reset(ActionContext& ctx, core::ActionArg arg) noexcept {
       (void)mix->commit_stems();
       return true;
     }
+    case MixerPage::Inserts:
+      return false;  // (handled above)
   }
   return false;
 }
 
-// Insert: the cursor's source joins the slot (the same edit as a turn up of the encoder, without the detent).
+// Insert: on STEMS the cursor's source joins the slot (the same edit as a turn up of the encoder, without the detent); on INSERTS the picker of the effect for the cell (OS-INSFX S4).
 bool mixer_stem_set(ActionContext& ctx, core::ActionArg) noexcept {
-  return ctx.view.screen == ScreenId::Mixer && mixer::page_of(ctx.view) == MixerPage::Stems && stem_cell(ctx, true);
+  if (ctx.view.screen != ScreenId::Mixer) {
+    return false;
+  }
+  const MixerPage page = mixer::page_of(ctx.view);
+  return page == MixerPage::Inserts ? insert_open(ctx) : (page == MixerPage::Stems && stem_cell(ctx, true));
 }
 
 namespace {
@@ -378,6 +461,11 @@ bool flag_at_cursor(ActionContext& ctx, bool solo) noexcept {
       }
       return flag_refused(ctx, "TRACKS ONLY");  // ML, MR (and the solo of SA, SB)
     }
+    case MixerPage::Inserts:
+      if (!solo) {
+        return insert_toggle(ctx);  // the mute key is BYPASS here
+      }
+      return c.row < tracks ? toggle_param(ctx, core::param_id(core::ParamKind::Track, c.row, tp::Solo)) : flag_refused(ctx, "TRACKS ONLY");  // the solo key is the track's, as on ROUTING
   }
   return false;
 }
@@ -420,7 +508,8 @@ bool mixer_name(ActionContext& ctx, core::ActionArg) noexcept {
   switch (mixer::page_of(ctx.view)) {
     case MixerPage::Mixer:
     case MixerPage::Stems: track = c.col; break;
-    case MixerPage::Routing: track = c.row; break;
+    case MixerPage::Routing:
+    case MixerPage::Inserts: track = c.row; break;
     case MixerPage::MasterFx: break;
   }
   const model::TrackSlot* slot = track < tracks && ctx.model.project != nullptr ? ctx.model.project->track(track) : nullptr;

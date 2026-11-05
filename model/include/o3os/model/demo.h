@@ -30,8 +30,9 @@ Status add_instruments(Project& project, std::uint8_t volume = 50) noexcept;
 // True when pattern `id` has no step with anything in it (a pattern that does not exist counts as empty).
 bool pattern_is_empty(const Project& project, std::uint32_t id) noexcept;
 
-// Creates pattern `id` if it does not exist (32 steps on every track) and fills tracks 1..4 as described above; sets the tempo to 120 BPM. The
-// pattern must be empty (Exists: it is not, nothing is written).
-Status fill_pattern(Project& project, std::uint32_t id) noexcept;
+// Creates pattern `id` if it does not exist (32 steps on every track) and fills tracks 1..4 as described above. The
+// pattern must be empty (Exists: it is not, nothing is written). If `set_tempo` is true (default), also sets the tempo to 120 BPM.
+// OS-BUG-TEMPOLOAD: set_tempo=false for the load path to preserve the project's saved tempo.
+Status fill_pattern(Project& project, std::uint32_t id, bool set_tempo = true) noexcept;
 
 }  // namespace o3os::model::demo

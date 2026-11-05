@@ -17,7 +17,9 @@ inline constexpr const char* kConfigShiftKeys[8] = {"-", "-", "-", "-", "-", "-"
 
 // OS-USBDISK U2b: the USB page's two rows after its settings are not settings. CARD AS DISK is an action row (F7 twice hands the card to the computer; F7 twice again takes it back), READ ONLY a
 // session choice (the encoder toggles it; RAM only, Q4). config_row() says which one the cursor is on (Param on every other row and page).
-enum class ConfigRow : std::uint8_t { Param, CardAsDisk, ReadOnly };
+// OS-STATUSLED: the DISPLAY page's last row, STATUS LED (BLINK / OFF), is not a setting either: a session choice (the encoder toggles it; RAM only, BLINK at every boot; a fault blink code
+// still shows with OFF; the platform reads it through App::status_led_blink).
+enum class ConfigRow : std::uint8_t { Param, CardAsDisk, ReadOnly, StatusLed };
 ConfigRow config_row(const ViewState& view) noexcept;
 // False on SD and INFO (no parameter row): F7 has no label there and does nothing (OS-QAFIX-7).
 bool config_page_has_rows(const ViewState& view) noexcept;
@@ -44,7 +46,8 @@ inline bool config_read_only_shown(const ViewState& view) noexcept {
 //            MIDI OUT and OUT CHANNEL at boot and when they change) and the control-change input of MIDI Learn (MIDI IN and IN CHANNEL, App::poll_midi_cc).
 //   DISPLAY  group 1: DISPLAY brightness (the FT812 backlight: Low 20, Medium 50, High 128 of 128) and PAD LIGHTS brightness (the pad LEDs at 1/3, 2/3, 3/3 of their levels), NUMBERING (PAR-120: from 0,
 //            from 1, hex: the Pattern view's row numbers) and MIDDLE C (PAR-084: the name of MIDI note 60, C-3..C-6; C-5 is what note names that start at C-0 give for note 60, the default: the Pattern view's note names and the note popup follow), and THEME (Amiga, Black, White: the screen redraws in it at once;
-//            Shift + Master still cycles it, and the setting follows).
+//            Shift + Master still cycles it, and the setting follows). STATUS LED (BLINK / OFF, OS-STATUSLED, new Community OS behaviour; the last row of the page, not a
+//            setting: a session choice, RAM only, BLINK again at every boot): whether the status LED's heartbeat blinks. Off stops the heartbeat only: a fault blink code still shows.
 //   SD       what the card layer knows (hal/storage.h VolumeInfo): present, mounted, the file system, its size and cluster. The volume label and the free space are not shown: no call of the
 //            card layer gives them cheaply (FatFs f_getfree scans the whole FAT, seconds on a big card), and a page must not stall the main loop (OS-CFGWIRE dropped the two rows).
 //   INFO     the product and the build id the platform tells the App (PAR-116: build number), the free sample memory, who made it (CREATED BY trak3r-os, AUTHORS), and the licences (ADR 0005: the core

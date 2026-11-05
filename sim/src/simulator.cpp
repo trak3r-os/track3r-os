@@ -159,7 +159,7 @@ hal::storage::shot::Refusal SimShot::Host::card_refusal() noexcept {
 
 bool Simulator::screenshot_running() const { return shot_ != nullptr && shot_->service.active(); }
 
-void Simulator::open_document(bool with_bindings, bool with_new, unsigned tracks, bool sound, bool tb303) {
+void Simulator::open_document(bool with_bindings, bool with_new, unsigned tracks, bool sound, bool tb303, bool inserts) {
   app_.attach_document(nullptr);
   app_.attach_project_sink(nullptr);
   project_sink_.reset();
@@ -186,7 +186,9 @@ void Simulator::open_document(bool with_bindings, bool with_new, unsigned tracks
   app_.attach_param_ring(nullptr);
   document_ = std::make_unique<SimDocument>();
   std::memset(&document_->arena, 0, sizeof document_->arena);
-  if (tb303) {
+  if (inserts) {
+    fill_insert_project(document_->arena.project);
+  } else if (tb303) {
     fill_tb303_project(document_->arena.project);
   } else if (sound) {
     fill_sound_project(document_->arena.project);

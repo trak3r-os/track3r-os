@@ -147,7 +147,7 @@ TEST_CASE("sim audio: every misuse of the commands is refused when the script is
   CHECK(has(parse_error("encoder 1 x3 every 256\n"), "encoder needs one non-zero number of detents"));
   CHECK(has(parse_error("encoder 1 x3 each 5\n"), "encoder needs one non-zero number of detents"));
   CHECK(has(parse_error("encoder 0 x3\n"), "encoder needs one non-zero number of detents"));
-  CHECK(has(parse_error("document sound sound\n"), "document takes nothing, or the words 'bindings', 'new', 'sound', 'tb303' and 'tracks <n>'"));
+  CHECK(has(parse_error("document sound sound\n"), "document takes nothing, or the words 'bindings', 'new', 'sound', 'tb303', 'inserts' and 'tracks <n>'"));
 }
 
 TEST_CASE("sim audio: the engine renders at its own rate, a block every 1.45 ticks, and a render is the blocks of its ticks") {

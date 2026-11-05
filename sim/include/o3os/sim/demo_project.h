@@ -38,6 +38,9 @@ inline constexpr Tb303Step kTb303Line[] = {{0, 36, 96}, {2, 36, 96}, {3, 48, 127
 inline constexpr float kTb303Params[9] = {0.0f, 600.0f, 70.0f, 60.0f, 400.0f, 80.0f, 60.0f, -18.0f, 1.0f};  // waveform, cutoff Hz, resonance %, env mod %, decay ms, accent %, slide ms, volume dB, legato slide
 void fill_tb303_project(model::Project& project) noexcept;
 
+// OS-INSFX S4 (`document inserts`): the demo project with three insert records for the Mixer's INSERTS page: T1 INS A "biquad", T1 INS B "reverb" (bypassed; the card of `apps on` has no such file, so the picker greys it), T3 INS A "biquad".
+void fill_insert_project(model::Project& project) noexcept;
+
 // The same, then the project's Learn store: CC 74 bound to the cutoff of instrument 1 (pickup) and CC 71 to its resonance (jump).
 void fill_demo_project_with_bindings(model::Project& project) noexcept;
 

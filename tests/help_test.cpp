@@ -606,7 +606,7 @@ TEST_CASE("help: the base screens draw nothing inside the rectangle the page cov
   check_bare_under_help(*module.app, "a module app");
 }
 
-// Review of OS-HELP (rev-sf11): the Mixer has four pages, and what they draw depends on the model (the board gives the Routing page its meters, a stem map the Stems page its rows, the cursor on PAN a block under
+// Review of OS-HELP (rev-sf11): the Mixer has five pages, and what they draw depends on the model (the board gives the Routing page its meters, a stem map the Stems page its rows, the cursor on PAN a block under
 // the number), so the loop above, which sees the first page of a bare model, is not enough. Each page is looked at bare, with the board and without a stem map, and with both; the first page also with the cursor on PAN.
 // Before the fix the Routing page's meters (board), the PAN cursor block (board or bare) and the Stems page's "NO STEM MAP" line (bare, board without a map) were drawn under the help text.
 TEST_CASE("help: the Mixer pages draw nothing inside the rectangle the page covers (bare model, with the board, with a stem map, the cursor on PAN)") {
@@ -624,7 +624,7 @@ TEST_CASE("help: the Mixer pages draw nothing inside the rectangle the page cove
     for (unsigned page = 0; page < app::kMixerPages; ++page) {
       for (unsigned row = 0; row < (page == 0u ? 2u : 1u); ++row) {  // the first page: the cursor on LEVEL, then on PAN
         rig.go(ScreenId::Mixer);
-        rig.tap(static_cast<Button>(static_cast<unsigned>(Button::F1) + page));
+        rig.tap(page < 4u ? static_cast<Button>(static_cast<unsigned>(Button::F1) + page) : Button::F6);  // (F5 is CUE LVL; the fifth page, INSERTS, is F6)
         NEED(static_cast<unsigned>(app::mixer::page_of(rig.state())) == page);
         if (row == 1u) {
           rig.tap(Button::Down);

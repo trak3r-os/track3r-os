@@ -186,7 +186,7 @@ if(O3OS_PLATFORM STREQUAL "qemu")
     TIMEOUT 600)
   o3os_target_suite(seq DEPENDS seq midi core SOURCES seq_fx_test.cpp seq_control_test.cpp TIMEOUT 300)
   o3os_target_suite(seq_model DEPENDS seq midi model
-    SOURCES seq_rows_test.cpp seq_sequencer_test.cpp seq_follow_test.cpp seq_oracle_test.cpp seq_determinism_test.cpp seq_midi_link_test.cpp seq_pfx_test.cpp seq_metro_test.cpp seq_corefx_test.cpp seq_patswitch_test.cpp
+    SOURCES seq_rows_test.cpp seq_sequencer_test.cpp seq_follow_test.cpp seq_oracle_test.cpp seq_determinism_test.cpp seq_midi_link_test.cpp seq_pfx_test.cpp seq_metro_test.cpp seq_corefx_test.cpp seq_patswitch_test.cpp seq_song_time_test.cpp
     TIMEOUT 1800)
 
   o3os_label_tests()
@@ -562,6 +562,10 @@ set_tests_properties(wiring_audit wiring_audit_selftest PROPERTIES TIMEOUT 60)
 # OS-MANUALTOOLS: tools/manual_check.py and tools/manual_llms.py on a temporary repository (needs git).
 add_test(NAME manual_tools_selftest COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/manual_tools_test.py ${PROJECT_SOURCE_DIR})
 set_tests_properties(manual_tools_selftest PROPERTIES TIMEOUT 60)
+
+# OS-MERGETOOL: tools/o3merge.py (the merge helper: it resolves docs/manual/sync.lock, docs/qa/catalogue/README.md and docs/manual/llms*.txt itself) on temporary repositories (needs git).
+add_test(NAME o3merge_selftest COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/o3merge_test.py ${PROJECT_SOURCE_DIR})
+set_tests_properties(o3merge_selftest PROPERTIES TIMEOUT 60)
 
 # OS-MANUAL2 M2-2: tools/manual_tables.py (the chapters' and the cheat sheet's key tables from the firmware's key-row tables) on a scratch copy of its sources.
 add_test(NAME manual_tables_selftest COMMAND ${Python3_EXECUTABLE} -I ${PROJECT_SOURCE_DIR}/tools/manual_tables.py --self-test --root ${PROJECT_SOURCE_DIR})

@@ -66,7 +66,7 @@ set(O3OS_LABEL_RULES
   "^e2e_((card|pro)_)?fixture_fresh$" "app,formats,python"  # OS-E2E-1b, OS-E2E-13, J2: the generated cards of the journeys (tests/e2e_card_fixture_test.py, e2e_pro_fixture_test.py, e2e_og_fixture_test.py): a sim, format or python change runs them
   "^(project_python|heavy_song_python|hil_songs_python|med_python|med_import_python|med_openmpt|mod_python|modimp_openmpt)$" "formats,python"
   "^corefx_openmpt$" "formats,seq,audio,python"  # OS-COREFX: importer -> sequencer -> engine against libopenmpt
-  "^(med_python_selftest|mod_python_selftest|manual_tools_selftest|manual_tables_selftest|starter_python|testdata_python|e2e_report_selftest|qa_sheet_python_selftest)$" "python"
+  "^(med_python_selftest|mod_python_selftest|manual_tools_selftest|manual_tables_selftest|o3merge_selftest|starter_python|testdata_python|e2e_report_selftest|qa_sheet_python_selftest)$" "python"
   "^o3m_.*_test$" "audio"
   "^o3m_" "python"
   "^ring_tsan$" "core"

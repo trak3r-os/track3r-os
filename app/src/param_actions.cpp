@@ -124,6 +124,13 @@ static_assert(sizeof("THE CARD IS CHANGING HANDS: WAIT") - 1 <= core::kNotifyTex
 // The same, for the parameter under the cursor. READ ONLY is a session choice (Q4, RAM only): right is On, left is Off, Delete puts the default (On) back. The computer's disk takes the choice at the share
 // (disk_open) and keeps it until the eject: while the card is out, changing hands, or a share request waits for the platform, the edit is refused so the row never shows a policy the computer does not have.
 bool edit_focus(ActionContext& ctx, int detents, bool coarse, bool reset) noexcept {
+  if (special_row(ctx) == ConfigRow::StatusLed) {  // OS-STATUSLED: the STATUS LED row, BLINK (the default) / OFF; a session choice, RAM only, not saved
+    bool& blink = ctx.view.status_led_blink;
+    const bool next = reset || detents > 0 ? true : (detents < 0 ? false : blink);
+    const bool changed = next != blink;
+    blink = next;
+    return changed;
+  }
   if (special_row(ctx) == ConfigRow::ReadOnly) {
     ViewState::DiskView& d = ctx.view.disk;
     if (d.phase != ViewState::DiskView::Phase::Idle || d.request != ViewState::DiskView::Request::None) {
@@ -701,6 +708,10 @@ bool param_apply(ActionContext& ctx, core::ActionArg) noexcept {
   if (special_row(ctx) == ConfigRow::ReadOnly) {
     ctx.view.params.armed = false;
     return say_disk(ctx, core::Severity::Info, "TURN THE ENCODER TO CHOOSE");
+  }
+  if (special_row(ctx) == ConfigRow::StatusLed) {  // OS-STATUSLED: the encoder chooses, F7 has nothing to apply (not saved)
+    ctx.view.params.armed = false;
+    return say(ctx, core::Severity::Info, "TURN THE ENCODER TO CHOOSE");
   }
   ParamView& pv = ctx.view.params;
   if (pv.pending_n == 0) {

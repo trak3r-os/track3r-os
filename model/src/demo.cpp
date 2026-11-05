@@ -54,7 +54,7 @@ bool pattern_is_empty(const Project& project, std::uint32_t id) noexcept {
   return true;
 }
 
-Status fill_pattern(Project& project, std::uint32_t id) noexcept {
+Status fill_pattern(Project& project, std::uint32_t id, bool set_tempo) noexcept {
   if (!pattern_is_empty(project, id)) {
     return Status::Exists;
   }
@@ -95,7 +95,12 @@ Status fill_pattern(Project& project, std::uint32_t id) noexcept {
   if (result != Status::Ok) {
     return result;
   }
-  return project.set_tempo_x100(kTempoX100);
+  // OS-BUG-TEMPOLOAD: Only set the tempo for the boot/new path, not for the load path.
+  // The load path preserves the project's saved tempo; the boot/new path sets it to 120 BPM.
+  if (set_tempo) {
+    return project.set_tempo_x100(kTempoX100);
+  }
+  return Status::Ok;
 }
 
 }  // namespace o3os::model::demo

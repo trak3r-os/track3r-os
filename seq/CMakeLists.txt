@@ -10,6 +10,7 @@ o3os_library(seq
     src/offline.cpp
     src/perform.cpp
     src/sequencer.cpp
+    src/song_time.cpp
   DEPENDS core model audio midi)
 if(O3OS_CROSS)
   target_compile_options(seq PRIVATE -fno-tree-loop-distribute-patterns)

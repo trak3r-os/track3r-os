@@ -96,6 +96,7 @@ struct Rig {
   ha::BlockReport report = {};
   std::uint32_t block = 0;
   bool silent = false;                   // OS-SREC-LEVEL: the input is digital silence (a take that listens hears nothing until it is false)
+  bool encode = false;                   // OS-RECCOUNT: both input channels carry the absolute sample mod 30000, so a take's first frame names the sample it started at
   bool capture = false;                  // OS-LOOPER: keep the left channel of every TX block from `heard_from` on
   std::uint64_t heard_from = 0;
   std::vector<std::int16_t> heard;
@@ -138,9 +139,16 @@ struct Rig {
   void pass(unsigned ms = 16) {
     for (unsigned b = 0; b < (ms * 44u + 63u) / 64u; ++b) {
       for (std::uint32_t i = 0; i < ha::kBlock; ++i) {
-        const int l = silent ? 0 : 1000 + static_cast<int>((block * ha::kBlock + i) % 20000u);
-        in[2u * i] = static_cast<std::int16_t>(l);
-        in[2u * i + 1u] = static_cast<std::int16_t>(l / 2);
+        const std::uint32_t s = block * ha::kBlock + i;
+        if (encode) {
+          const std::int16_t v = static_cast<std::int16_t>(s % 30000u);
+          in[2u * i] = v;
+          in[2u * i + 1u] = v;
+        } else {
+          const int l = silent ? 0 : 1000 + static_cast<int>(s % 20000u);
+          in[2u * i] = static_cast<std::int16_t>(l);
+          in[2u * i + 1u] = static_cast<std::int16_t>(l / 2);
+        }
       }
       ++block;
       report = ha::BlockReport{};
@@ -199,13 +207,13 @@ TEST_CASE("record screen: the button opens it, its context is registered, the bu
   CHECK(rig.app->failed_frames() == 0);
   const std::uint8_t* page = &rig.state().page[app::screen_index(ScreenId::Record)];
   CHECK(*page == 0);
-  CHECK(app::kRecordScreen.count(rig.app->model(), rig.state()) == 6);  // SOURCE, GAIN, MONITOR, START ON, STOP AT, LOOP
+  CHECK(app::kRecordScreen.count(rig.app->model(), rig.state()) == 7);  // SOURCE, GAIN, MONITOR, START ON, STOP AT, LOOP, COUNT-IN (OS-RECCOUNT)
   rig.tap(Button::SampleRec);
   CHECK(*page == 1);
-  CHECK(app::kRecordScreen.count(rig.app->model(), rig.state()) == 4);  // TAP, START ON, STOP AT, LOOP
+  CHECK(app::kRecordScreen.count(rig.app->model(), rig.state()) == 5);  // TAP, START ON, STOP AT, LOOP, COUNT-IN
   rig.tap(Button::SampleRec);
   CHECK(*page == 2);
-  CHECK(app::kRecordScreen.count(rig.app->model(), rig.state()) == 6);  // FREQUENCY, REGION, GAIN, START ON, STOP AT, LOOP
+  CHECK(app::kRecordScreen.count(rig.app->model(), rig.state()) == 7);  // FREQUENCY, REGION, GAIN, START ON, STOP AT, LOOP, COUNT-IN
   rig.tap(Button::SampleRec);
   CHECK(*page == 0);
   // Up and down move the row, clamped.
@@ -215,9 +223,10 @@ TEST_CASE("record screen: the button opens it, its context is registered, the bu
   rig.tap(Button::Down);
   rig.tap(Button::Down);
   rig.tap(Button::Down);
-  CHECK(rig.state().record.row[0] == 5);
+  rig.tap(Button::Down);
+  CHECK(rig.state().record.row[0] == 6);  // COUNT-IN, the last row
   rig.tap(Button::Up);
-  CHECK(rig.state().record.row[0] == 4);
+  CHECK(rig.state().record.row[0] == 5);  // LOOP
 }
 
 TEST_CASE("record screen: entering owns the input path and leaving gives it back; the codec follows the source row, the encoder and Shift + encoder move the rows") {
@@ -287,7 +296,7 @@ TEST_CASE("record screen: F1 arms a take after the source has settled, F1 stops 
   rig.tap(Button::F1);  // stop
   rig.pass();
   CHECK(rig.rec->state() == app::Recorder::State::Review);
-  CHECK(app::kRecordScreen.count(rig.app->model(), rig.state()) == 8);  // + TRIM START, TRIM END (LOOP is the row before them: OS-LOOPER)
+  CHECK(app::kRecordScreen.count(rig.app->model(), rig.state()) == 9);  // + COUNT-IN, TRIM START, TRIM END (LOOP and COUNT-IN are the rows before them: OS-LOOPER, OS-RECCOUNT)
   // The trim rows move the markers.
   rig.tap(Button::Down);
   rig.tap(Button::Down);
@@ -295,7 +304,8 @@ TEST_CASE("record screen: F1 arms a take after the source has settled, F1 stops 
   rig.tap(Button::Down);
   rig.tap(Button::Down);
   rig.tap(Button::Down);
-  CHECK(rig.state().record.row[0] == 6);
+  rig.tap(Button::Down);
+  CHECK(rig.state().record.row[0] == 7);  // TRIM START
   rig.turn(3);
   CHECK(rig.rec->trim_start() > 0u);
   rig.tap(Button::Delete);
@@ -941,8 +951,8 @@ TEST_CASE("record screen: Shift + F3 crops the take to its window, after a quest
   NEED(rig.rec->state() == app::Recorder::State::Review);
   rig.shift_tap(Button::F3);
   CHECK(rig.message() == "NOTHING TO CROP: MOVE TRIM START OR END");
-  for (int i = 0; i < 6; ++i) {
-    rig.tap(Button::Down);  // ... TRIM START
+  for (int i = 0; i < 7; ++i) {
+    rig.tap(Button::Down);  // ... COUNT-IN, TRIM START
   }
   rig.turn(3);
   rig.tap(Button::Down);  // TRIM END
@@ -997,8 +1007,8 @@ TEST_CASE("record screen: F7 saves the take's window as a 16-bit mono WAV in Sam
   rig.tap(Button::F1);  // stop
   rig.pass();
   NEED(rig.rec->state() == app::Recorder::State::Review);
-  for (int i = 0; i < 6; ++i) {
-    rig.tap(Button::Down);  // ... LOOP, TRIM START
+  for (int i = 0; i < 7; ++i) {
+    rig.tap(Button::Down);  // ... LOOP, COUNT-IN, TRIM START
   }
   rig.turn(3);  // the trim start moves: the WAV is the window, not the whole take
   const std::uint32_t frames = rig.rec->trim_end() - rig.rec->trim_start();
@@ -1320,7 +1330,7 @@ TEST_CASE("record screen: the STOP AT row (OS-REC2) is the row before LOOP on ev
   CHECK_FALSE(rig.rec->stop_pending());
   rig.pass();
   CHECK(rig.rec->state() == app::Recorder::State::Review);
-  CHECK(app::rec_rows(RecMode::Sources, true).n == 8u);
+  CHECK(app::rec_rows(RecMode::Sources, true).n == 9u);
 }
 
 // OS-SHIFTROW: Shift + F5 / F6 CH-10 / CH+10 tune ten channels at a time on the RADIO page (the chip's own seek is the plain F5 / F6); Left / Right turn the page, wrapping, each page keeping its row.
@@ -1407,7 +1417,8 @@ struct StepScript {
   std::uint64_t spacing = 1000;  // samples a step
   std::uint32_t bump_at = 0xFFFFFFFFu;  // the step whose successor comes one sample late (an odd loop length)
   bool stop_now = false;
-  std::vector<std::uint64_t> bars;  // absolute sample of every Step event whose index is a multiple of 16
+  unsigned value_len = 64;  // OS-RECCOUNT: the pattern length the step value wraps with (the sequencer's song_step_); the tap's bar boundaries are the values that are multiples of 16
+  std::vector<std::uint64_t> bars;  // absolute sample of every Step event whose value is a multiple of 16
   audio::SeqEvent buffer[audio::kMaxEventsPerBlock];
   static std::uint32_t step(void* self, std::uint64_t start, std::uint32_t n, audio::SeqEvent* out, std::uint32_t cap) noexcept {
     StepScript& s = *static_cast<StepScript*>(self);
@@ -1425,8 +1436,8 @@ struct StepScript {
       e.offset = static_cast<std::uint16_t>(s.next - start);
       e.kind = audio::EventKind::Step;
       e.track = audio::kNoTrack;
-      e.value = static_cast<std::int32_t>(s.index % 64u);
-      if (s.index % 16u == 0u) {
+      e.value = static_cast<std::int32_t>(s.index % s.value_len);
+      if ((s.index % s.value_len) % 16u == 0u) {
         s.bars.push_back(s.next);
       }
       out[c++] = e;
@@ -1491,9 +1502,9 @@ TEST_CASE("loop screen: the LOOP row is the last row of every page, OFF to 16 BA
   CHECK(app::rec_rows(RecMode::Sources, false).row[5] == app::RecRow::Loop);
   CHECK(app::rec_rows(RecMode::Resample, false).row[3] == app::RecRow::Loop);
   CHECK(app::rec_rows(RecMode::Radio, false).row[5] == app::RecRow::Loop);
-  CHECK(app::rec_rows(RecMode::Sources, true, true).n == 8u);  // a loop under review: LOOP VOL and FEEDBACK in place of the two trim rows
-  CHECK(app::rec_rows(RecMode::Sources, true, true).row[6] == app::RecRow::LoopVol);
-  CHECK(app::rec_rows(RecMode::Sources, true, true).row[7] == app::RecRow::Feedback);
+  CHECK(app::rec_rows(RecMode::Sources, true, true).n == 9u);  // a loop under review: COUNT-IN, LOOP VOL and FEEDBACK after the page's rows
+  CHECK(app::rec_rows(RecMode::Sources, true, true).row[7] == app::RecRow::LoopVol);
+  CHECK(app::rec_rows(RecMode::Sources, true, true).row[8] == app::RecRow::Feedback);
   CHECK(app::rec_rows(RecMode::Radio, true, true).n <= app::kRecMaxRows);
   CHECK(rig.rec->cfg.loop_bars == 0u);
   rig.set_loop(1);
@@ -1533,7 +1544,7 @@ TEST_CASE("loop screen: F1 records the loop on the bars, it ends by itself and p
   CHECK(rig.rec->loop_bars() == 2u);
   CHECK(rig.engine.graph().loop().reading());
   CHECK(rig.engine.graph().loop().frames() == 32000u);
-  CHECK(app::kRecordScreen.count(rig.app->model(), rig.state()) == 8);  // + LOOP VOL, FEEDBACK
+  CHECK(app::kRecordScreen.count(rig.app->model(), rig.state()) == 9);  // + COUNT-IN, LOOP VOL, FEEDBACK
   // F1 under the review is the overdub (OS-LOOPER L2c), never another take over the loop's memory: on, then off.
   rig.tap(Button::F1);
   CHECK(rig.rec->state() == app::Recorder::State::Review);
@@ -1570,7 +1581,7 @@ TEST_CASE("loop screen: F1 records the loop on the bars, it ends by itself and p
   rig.tap(Button::F8);
   CHECK_FALSE(rig.engine.graph().loop().muted());
   // LOOP VOL is the last row under review: the encoder moves it, Delete is 100, and the render hears it.
-  while (rig.state().record.row[0] != 6) {
+  while (rig.state().record.row[0] != 7) {
     rig.tap(Button::Down);
   }
   rig.turn(-30);
@@ -1744,7 +1755,7 @@ TEST_CASE("loop screen: leaving the Record screen leaves the loop playing (a loo
   rig.tap(Button::SampleRec);
   CHECK(rig.state().screen == ScreenId::Record);
   CHECK(rig.rec->loop_review());
-  CHECK(app::kRecordScreen.count(rig.app->model(), rig.state()) == 8);
+  CHECK(app::kRecordScreen.count(rig.app->model(), rig.state()) == 9);
 }
 
 TEST_CASE("loop screen: SAVE with no free instrument slot keeps the review and the loop playing") {
@@ -2173,7 +2184,7 @@ TEST_CASE("loop screen: the input stays owned while a session is on, on any scre
 TEST_CASE("loop screen: a project load or NEW mid-session lets the loop go with TAKE LOST and the session writes nothing after; the FEEDBACK row steps and resets") {
   ReviewRig rig;
   // FEEDBACK is the last row under review.
-  while (rig.state().record.row[0] != 7) {
+  while (rig.state().record.row[0] != 8) {
     rig.tap(Button::Down);
   }
   CHECK(rig.rec->cfg.loop_fb == 100u);
@@ -2400,19 +2411,19 @@ TEST_CASE("record screen: START ON steps FREE, STEP, BAR, PATTERN and LEVEL; THR
   CHECK(std::string(app::kRecAlignNames[static_cast<unsigned>(app::RecAlign::Level)]) == "LEVEL");
   CHECK(static_cast<unsigned>(app::RecAlign::Level) == 4u);
   // The rows, per page: the two follow ALIGN for LEVEL only, and a take under review shows its trim rows instead (no page is longer than eight).
-  CHECK(app::rec_rows(RecMode::Sources, false, false, false).n == 6u);
-  CHECK(app::rec_rows(RecMode::Sources, false, false, true).n == 8u);
+  CHECK(app::rec_rows(RecMode::Sources, false, false, false).n == 7u);
+  CHECK(app::rec_rows(RecMode::Sources, false, false, true).n == 9u);
   CHECK(app::rec_rows(RecMode::Sources, false, false, true).row[3] == app::RecRow::Align);
   CHECK(app::rec_rows(RecMode::Sources, false, false, true).row[4] == app::RecRow::Threshold);
   CHECK(app::rec_rows(RecMode::Sources, false, false, true).row[5] == app::RecRow::PreRoll);
   CHECK(app::rec_rows(RecMode::Sources, false, false, true).row[6] == app::RecRow::StopAt);
   CHECK(app::rec_rows(RecMode::Resample, false, false, true).row[2] == app::RecRow::Threshold);
-  CHECK(app::rec_rows(RecMode::Resample, false, false, true).n == 6u);
-  CHECK(app::rec_rows(RecMode::Radio, false, false, true).n == 8u);
+  CHECK(app::rec_rows(RecMode::Resample, false, false, true).n == 7u);
+  CHECK(app::rec_rows(RecMode::Radio, false, false, true).n == 9u);
   CHECK(app::rec_rows(RecMode::Radio, false, false, true).row[5] == app::RecRow::PreRoll);
-  CHECK(app::rec_rows(RecMode::Sources, true, false, true).n == 8u);
-  CHECK(app::rec_rows(RecMode::Sources, true, false, true).row[6] == app::RecRow::TrimStart);
-  CHECK(app::rec_rows(RecMode::Sources, true, true, true).row[6] == app::RecRow::LoopVol);
+  CHECK(app::rec_rows(RecMode::Sources, true, false, true).n == 9u);
+  CHECK(app::rec_rows(RecMode::Sources, true, false, true).row[7] == app::RecRow::TrimStart);
+  CHECK(app::rec_rows(RecMode::Sources, true, true, true).row[7] == app::RecRow::LoopVol);
   app::RecorderConfig cfg;
   cfg.align = app::RecAlign::Level;
   CHECK(app::level_rows(cfg));
@@ -2427,7 +2438,7 @@ TEST_CASE("record screen: START ON steps FREE, STEP, BAR, PATTERN and LEVEL; THR
   rig.settle();
   level_goto_row(rig, 3);  // START ON
   CHECK(rig.rec->cfg.align == app::RecAlign::Bar);
-  CHECK(app::kRecordScreen.count(rig.app->model(), rig.state()) == 6);
+  CHECK(app::kRecordScreen.count(rig.app->model(), rig.state()) == 7);
   rig.turn(-1);
   CHECK(rig.rec->cfg.align == app::RecAlign::EachStep);
   rig.turn(-1);
@@ -2440,10 +2451,10 @@ TEST_CASE("record screen: START ON steps FREE, STEP, BAR, PATTERN and LEVEL; THR
   CHECK(rig.rec->cfg.align == app::RecAlign::Bar);
   rig.turn(1);
   CHECK(rig.rec->cfg.align == app::RecAlign::Pattern);
-  CHECK(app::kRecordScreen.count(rig.app->model(), rig.state()) == 6);
+  CHECK(app::kRecordScreen.count(rig.app->model(), rig.state()) == 7);
   rig.turn(1);
   CHECK(rig.rec->cfg.align == app::RecAlign::Level);
-  CHECK(app::kRecordScreen.count(rig.app->model(), rig.state()) == 8);
+  CHECK(app::kRecordScreen.count(rig.app->model(), rig.state()) == 9);
   rig.turn(1);  // (the last choice: no wrap)
   CHECK(rig.rec->cfg.align == app::RecAlign::Level);
   // THRESHOLD: a detent is 3 dB, Shift nine, -60 .. -6, Delete is -30.
@@ -2479,7 +2490,7 @@ TEST_CASE("record screen: START ON steps FREE, STEP, BAR, PATTERN and LEVEL; THR
   level_goto_row(rig, 3);
   rig.tap(Button::Delete);
   CHECK(rig.rec->cfg.align == app::RecAlign::Bar);
-  CHECK(app::kRecordScreen.count(rig.app->model(), rig.state()) == 6);
+  CHECK(app::kRecordScreen.count(rig.app->model(), rig.state()) == 7);
   CHECK(rig.rec->cfg.level_db == -30);  // (runtime only: the values stay in the recorder's configuration, nothing is stored)
 }
 
@@ -2514,16 +2525,16 @@ TEST_CASE("record screen: LEVEL armed with the transport stopped stays LEVEL (no
   CHECK(rig.rec->trim_start() == rig.rec->trim_floor());
   CHECK(rig.app->failed_frames() == 0);
   // Under review the two rows give way to the trim rows (the page is eight rows long).
-  CHECK(app::kRecordScreen.count(rig.app->model(), rig.state()) == 8);
-  CHECK(app::rec_rows(RecMode::Sources, true, false, app::level_rows(rig.rec->cfg)).row[6] == app::RecRow::TrimStart);
+  CHECK(app::kRecordScreen.count(rig.app->model(), rig.state()) == 9);
+  CHECK(app::rec_rows(RecMode::Sources, true, false, app::level_rows(rig.rec->cfg)).row[7] == app::RecRow::TrimStart);
 }
 
 TEST_CASE("record screen: LEVEL with LOOP is a bar-aligned loop: the two rows are hidden, START ON says why it does not change, and F1 waits for the bar") {
   LoopRig rig;
   rig.rec->cfg.align = app::RecAlign::Level;
-  CHECK(app::kRecordScreen.count(rig.app->model(), rig.state()) == 8);
+  CHECK(app::kRecordScreen.count(rig.app->model(), rig.state()) == 9);
   rig.rec->cfg.loop_bars = 1;
-  CHECK(app::kRecordScreen.count(rig.app->model(), rig.state()) == 6);  // THRESHOLD and PRE-ROLL are gone
+  CHECK(app::kRecordScreen.count(rig.app->model(), rig.state()) == 7);  // THRESHOLD and PRE-ROLL are gone
   level_goto_row(rig, 3);
   rig.turn(-1);
   CHECK(rig.message() == "LOOP STARTS THE TAKE ON A BAR");
@@ -2536,7 +2547,7 @@ TEST_CASE("record screen: LEVEL with LOOP is a bar-aligned loop: the two rows ar
   CHECK(rig.engine.graph().rec().state() != audio::RecTap::State::Listening);
   rig.tap(Button::F1);  // cancel
   rig.rec->cfg.loop_bars = 0;
-  CHECK(app::kRecordScreen.count(rig.app->model(), rig.state()) == 8);  // LEVEL again, with its rows
+  CHECK(app::kRecordScreen.count(rig.app->model(), rig.state()) == 9);  // LEVEL again, with its rows
 }
 
 TEST_CASE("record screen: F1 while the take listens cancels it with no take, and the level that comes later starts nothing") {
@@ -2569,4 +2580,425 @@ TEST_CASE("record screen: F1 while the take listens cancels it with no take, and
   CHECK(rig.rec->state() == app::Recorder::State::Armed);
   rig.tap(Button::F1);
   rig.pass();
+}
+
+// ---- OS-RECCOUNT (RC1): the Record card's COUNT-IN row (OFF, 1, 2, 4 BARS) and the N-bar count-in of a bar-aligned take, through the real App, Recorder, Engine and Graph ----
+namespace {
+
+// A LoopRig whose input encodes the absolute sample (both channels equal, so the mono take reads the sample back directly: take_data()[0] names the sample the take started at),
+// and whose published position follows the Step script every pass, so the App's count-in phase (Recorder::count_in_poll) runs as it does on the device.
+struct CiRig : LoopRig {
+  unsigned len = 64;      // the pattern length the position is published with
+  bool transport_on = false;
+  unsigned script_base = 0;  // the script index at the start of the current pattern segment (the position is published only once a Step event has fired)
+  bool started = false;        // any Step event has fired since the transport was started (playing is published only then, as the device does)
+  unsigned cur_pattern = 1;    // the pattern the position names now
+  unsigned cur_len = 64;
+  unsigned last_pattern = 1;   // the position published before the current segment's first event fired
+  unsigned last_step = 0;
+  unsigned pending_pattern = 0;  // a Song slot change waiting for the new pattern's first step event
+  unsigned pending_len = 0;
+  explicit CiRig(unsigned pattern_len = 0) : LoopRig() {
+    if (pattern_len != 0u) {
+      CHECK(test::arena(1).project.set_pattern_length(1, pattern_len) == model::Status::Ok);
+    }
+    len = static_cast<unsigned>(test::arena(1).project.pattern_length(1));
+    if (len == 0u) {
+      len = test::arena(1).project.default_pattern_length();
+    }
+    script.value_len = len;  // the step values wrap with the pattern length, as the sequencer's song_step_ does
+    cur_len = len;
+  }
+  // One app frame: the audio blocks and the app's pass, then the position the render published with the last block — the step of the last Step event that FIRED
+  // (on the device the sequencer publishes in the same block as the event, so a step the app sees running has already fired).
+  void cpass() {
+    pass();
+    if (script.index > script_base) {  // the current segment's first step has fired
+      started = true;
+      if (pending_pattern != 0u) {  // the new pattern's step 0 fired: the position moves to it now
+        cur_pattern = pending_pattern;
+        cur_len = pending_len;
+        script.value_len = pending_len;
+        pending_pattern = 0u;
+      }
+    }
+    const bool fired = script.index > script_base;
+    const unsigned pattern = fired ? cur_pattern : last_pattern;
+    const unsigned step = fired ? (script.index - 1u) % cur_len : last_step;  // the value of the last fired Step event
+    pos.publish(transport_on && started, pattern, step, kTempo, audio::PlayPosition::kNoOrder, 0);
+    last_pattern = pattern;
+    last_step = step;
+  }
+  template <typename F>
+  bool until(F done, int limit = 600) {  // hides LoopRig::until: the position must be published every pass
+    for (int i = 0; i < limit && !done(); ++i) {
+      cpass();
+    }
+    return done();
+  }
+  // The sequencer's side of the transport the F1 asked for: the pattern starts at step 0 (the first boundary), or mid-bar at `index` when it was already running.
+  void start_transport(unsigned index = 0u) {
+    script.running = true;
+    script.stop_now = false;
+    script.next = engine.sample_clock() + 3000;
+    script.index = index;
+    script_base = index;
+    started = false;
+    transport_on = true;
+    cpass();
+  }
+  // A Song slot change mid-run: the new pattern (id, len) starts at its step 0, which is a bar boundary.
+  void switch_pattern(unsigned id, unsigned new_len) {
+    pending_pattern = id;
+    pending_len = new_len;
+    script.next = engine.sample_clock() + 1000;
+    script.index = 0;
+    script_base = 0;
+  }
+  void stop_transport() {
+    script.running = false;
+    transport_on = false;
+    cpass();
+  }
+  void discard_take() {
+    if (rig_state() == app::Recorder::State::Review) {
+      tap(Button::F4);
+      tap(Button::F4);  // (the question first: E-SREC-09)
+    }
+  }
+  app::Recorder::State rig_state() const { return rec->state(); }
+};
+
+}  // namespace
+
+// The row itself: the last row of every page, right after LOOP; OFF, 1 BAR, 2 BARS, 4 BARS; a detent is one choice (Shift: two), no wrap at either end; Delete is OFF; frozen while a take runs.
+TEST_CASE("record screen (OS-RECCOUNT): the COUNT-IN row is the last row of every page: OFF, 1 BAR, 2 BARS, 4 BARS, no wrap, Delete OFF, frozen under a take") {
+  LoopRig rig;
+  CHECK(app::rec_rows(RecMode::Sources, false).row[6] == app::RecRow::CountIn);
+  CHECK(app::rec_rows(RecMode::Resample, false).row[4] == app::RecRow::CountIn);
+  CHECK(app::rec_rows(RecMode::Radio, false).row[6] == app::RecRow::CountIn);
+  CHECK(app::kRecCountInChoices == 4u);
+  CHECK(app::kRecCountInBars[0] == 0u);
+  CHECK(app::kRecCountInBars[1] == 1u);
+  CHECK(app::kRecCountInBars[2] == 2u);
+  CHECK(app::kRecCountInBars[3] == 4u);
+  CHECK(rig.rec->cfg.count_in == 0u);  // OFF: the default, session-only
+  CHECK(app::count_in_applies(rig.rec->cfg));  // START ON is BAR (the default)
+  rig.rec->cfg.align = app::RecAlign::Free;
+  CHECK_FALSE(app::count_in_applies(rig.rec->cfg));
+  rig.rec->cfg.align = app::RecAlign::Level;
+  CHECK_FALSE(app::count_in_applies(rig.rec->cfg));
+  rig.rec->cfg.align = app::RecAlign::Bar;
+  rig.rec->cfg.loop_bars = 3;
+  CHECK(app::count_in_applies(rig.rec->cfg));  // a LOOP take is bar-aligned
+  rig.rec->cfg.loop_bars = 0;
+  // To the row (index 6 on SOURCES) and through its values.
+  level_goto_row(rig, 6);
+  CHECK(rig.state().record.row[0] == 6);
+  rig.turn(1);
+  CHECK(rig.rec->cfg.count_in == 1u);
+  rig.turn(1);
+  CHECK(rig.rec->cfg.count_in == 2u);
+  rig.turn(1);
+  CHECK(rig.rec->cfg.count_in == 4u);
+  rig.turn(1);  // (the last choice: no wrap)
+  CHECK(rig.rec->cfg.count_in == 4u);
+  rig.turn(-100);
+  CHECK(rig.rec->cfg.count_in == 0u);
+  rig.turn(-1);  // (the first choice: no wrap either)
+  CHECK(rig.rec->cfg.count_in == 0u);
+  rig.shift_turn(2);  // coarse: two choices (OFF, 2 BARS, 4 BARS)
+  CHECK(rig.rec->cfg.count_in == 4u);
+  rig.tap(Button::Delete);
+  CHECK(rig.rec->cfg.count_in == 0u);
+  rig.turn(2);
+  CHECK(rig.rec->cfg.count_in == 2u);
+  // Frozen while a take is armed or recording (the row is read at F1).
+  rig.play(true);
+  rig.tap(Button::F1);
+  NEED((rig.rec->state() == app::Recorder::State::Armed || rig.rec->state() == app::Recorder::State::Recording));
+  rig.turn(1);
+  CHECK(rig.rec->cfg.count_in == 2u);
+  rig.tap(Button::Delete);
+  CHECK(rig.rec->cfg.count_in == 2u);
+  rig.tap(Button::F1);  // give the take up
+  rig.pass();
+  CHECK(rig.rec->state() == app::Recorder::State::Idle);
+  rig.play(false);
+  rig.pass();
+}
+
+// From stop: F1 with the row on starts the transport AT ONCE with plain play (NOT the Config count-in, which is on here to prove it) and the take records from the first step of
+// bar N+1 (N = 1 and 2): the first recorded frame is the first sample of that bar's boundary. The strip counts the beats of the whole wait down, as the OS-METROALIGN wait does.
+TEST_CASE("record screen (OS-RECCOUNT): from stop, F1 with COUNT-IN N starts the transport at once (plain play) and the take records from the first step of bar N+1") {
+  for (const unsigned n : {1u, 2u}) {
+    CiRig rig;
+    rig.encode = true;
+    rig.rec->cfg.count_in = static_cast<std::uint8_t>(n);
+    CHECK(rig.app->device_settings().set(model::device_setting::CountIn, 2.0f) == model::Status::Ok);  // Config COUNT-IN on: the row replaces it for this take
+    rig.settle();
+    const unsigned counted = rig.transport.counted;
+    const unsigned plays = rig.transport.plays;
+    rig.tap(Button::F1);
+    CHECK(rig.transport.plays == plays + 1u);  // plain play, at once
+    CHECK(rig.transport.counted == counted);   // NOT the Config count-in
+    CHECK(rig.rec->state() == app::Recorder::State::Armed);
+    CHECK(rig.rec->count_in_waiting());
+    CHECK(rig.rec->wait_align() == audio::RecTap::Align::Bar);
+    CHECK(rig.engine.graph().rec().state() == audio::RecTap::State::Idle);  // the tap is not armed yet: the count-in runs on the main loop
+    CHECK(rig.bank.take_held());                                            // the arena is held for the take meanwhile
+    rig.start_transport();                                                  // the sequencer's side of play(): the pattern starts at step 0
+    NEED(rig.until([&] { return rig.state().play.playing; }));  // the first step has fired and its position was read
+    rig.cpass();
+    // The strip counts the beats of the whole N-bar wait down (N=2: eight beats at step 0).
+    if (n == 2u) {
+      CHECK(rig.state().count_in.beat == 8u);
+      CHECK(rig.message().rfind("RECORDING IN", 0) == 0);
+    }
+    NEED(rig.until([&] { return rig.rec->state() == app::Recorder::State::Recording; }));
+    CHECK_FALSE(rig.rec->count_in_waiting());  // the phase armed the tap during the last count-in bar
+    CHECK(rig.engine.graph().rec().state() == audio::RecTap::State::Armed);
+    NEED(rig.script.bars.size() > n);
+    const std::uint64_t expect = rig.script.bars[n];  // C_N: the first step of bar N+1
+    NEED(rig.rec->frames() > 0u);
+    CHECK(rig.rec->take_data()[0] == static_cast<std::int16_t>(expect % 30000u));
+    for (int i = 0; i < 8; ++i) {
+      rig.cpass();
+    }
+    CHECK(rig.rec->frames() > 8u * ha::kBlock);
+    rig.tap(Button::F1);  // stop
+    rig.cpass();
+    CHECK(rig.rec->state() == app::Recorder::State::Review);
+    rig.discard_take();
+    rig.stop_transport();
+    CHECK(rig.rec->state() == app::Recorder::State::Idle);
+  }
+}
+
+// With the transport already running mid-bar: the take waits for the next bar boundary, then N more bars, and records from there (N=1 from mid-bar: the SECOND boundary).
+TEST_CASE("record screen (OS-RECCOUNT): with the transport running mid-bar, COUNT-IN 1 records from the second boundary") {
+  CiRig rig;
+  rig.encode = true;
+  rig.rec->cfg.count_in = 1u;
+  rig.settle();
+  rig.start_transport(3);  // mid-bar: step 3 of 64
+  NEED(rig.until([&] { return rig.state().play.playing; }));
+  rig.cpass();
+  const unsigned plays = rig.transport.plays;
+  rig.tap(Button::F1);
+  CHECK(rig.transport.plays == plays);  // the transport was running: nothing is asked of it
+  CHECK(rig.rec->state() == app::Recorder::State::Armed);
+  CHECK(rig.rec->count_in_waiting());
+  CHECK(rig.engine.graph().rec().state() == audio::RecTap::State::Idle);
+  NEED(rig.until([&] { return rig.rec->state() == app::Recorder::State::Recording; }));
+  NEED(rig.script.bars.size() >= 2u);
+  CHECK(rig.rec->take_data()[0] == static_cast<std::int16_t>(rig.script.bars[1] % 30000u));  // C_1: the second boundary from where F1 was pressed
+  rig.tap(Button::F1);
+  rig.cpass();
+  CHECK(rig.rec->state() == app::Recorder::State::Review);
+  rig.discard_take();
+  rig.stop_transport();
+}
+
+// A 16-step pattern wraps every bar: the count-in still counts its bars (N=4 from stop: the take starts at the first step of bar 5, the fifth boundary).
+TEST_CASE("record screen (OS-RECCOUNT): a 16-step pattern wraps and the count-in still counts its bars (N=4)") {
+  CiRig rig(16);  // pattern 1 is 16 steps long: every pass wraps
+  rig.encode = true;
+  rig.rec->cfg.count_in = 4u;
+  rig.settle();
+  rig.tap(Button::F1);
+  CHECK(rig.transport.plays == 1u);
+  CHECK(rig.rec->count_in_waiting());
+  rig.start_transport();
+  NEED(rig.until([&] { return rig.rec->state() == app::Recorder::State::Recording; }));
+  NEED(rig.script.bars.size() >= 5u);
+  CHECK(rig.rec->take_data()[0] == static_cast<std::int16_t>(rig.script.bars[4] % 30000u));  // C_4: the first step of bar 5
+  rig.tap(Button::F1);
+  rig.cpass();
+  rig.discard_take();
+  rig.stop_transport();
+}
+
+// FREE and LEVEL ignore the row: no count-in phase, no transport started from stop (FREE records at once, LEVEL listens), and with the transport running the wait is the plain one.
+TEST_CASE("record screen (OS-RECCOUNT): FREE and LEVEL ignore the row") {
+  {
+    CiRig rig;  // FREE, from stop: the take starts at once, the transport is not started
+    rig.encode = true;
+    rig.rec->cfg.count_in = 2u;
+    rig.rec->cfg.align = app::RecAlign::Free;
+    rig.settle();
+    rig.tap(Button::F1);
+    CHECK(rig.transport.plays == 0u);
+    CHECK(rig.rec->state() == app::Recorder::State::Recording);
+    CHECK_FALSE(rig.rec->count_in_waiting());
+    rig.tap(Button::F1);
+    rig.cpass();
+    CHECK(rig.rec->state() == app::Recorder::State::Review);
+    rig.discard_take();
+  }
+  {
+    CiRig rig;  // LEVEL, from stop: the take listens, no transport, no count-in
+    rig.rec->cfg.count_in = 4u;
+    rig.rec->cfg.align = app::RecAlign::Level;
+    rig.silent = true;
+    rig.settle();
+    rig.tap(Button::F1);
+    CHECK(rig.transport.plays == 0u);
+    CHECK(rig.rec->state() == app::Recorder::State::Armed);
+    CHECK(rig.rec->wait_align() == audio::RecTap::Align::Level);
+    CHECK(rig.engine.graph().rec().state() == audio::RecTap::State::Listening);
+    CHECK_FALSE(rig.rec->count_in_waiting());
+    rig.tap(Button::F1);  // cancel
+    rig.pass();
+    CHECK(rig.rec->state() == app::Recorder::State::Idle);
+    CHECK(rig.rec->frames() == 0u);
+  }
+  {
+    CiRig rig;  // PATTERN with the transport running: the plain wait, not a count-in phase
+    rig.rec->cfg.count_in = 2u;
+    rig.rec->cfg.align = app::RecAlign::Pattern;
+    rig.settle();
+    rig.start_transport(3);
+    NEED(rig.until([&] { return rig.state().play.playing; }));
+    rig.cpass();
+    rig.tap(Button::F1);
+    CHECK(rig.rec->state() == app::Recorder::State::Armed);
+    CHECK(rig.rec->wait_align() == audio::RecTap::Align::Pattern);
+    CHECK_FALSE(rig.rec->count_in_waiting());
+    CHECK(rig.engine.graph().rec().state() == audio::RecTap::State::Waiting);  // armed as today, on the pattern's step 0
+    rig.tap(Button::F1);
+    rig.cpass();
+    CHECK(rig.rec->state() == app::Recorder::State::Idle);
+    rig.stop_transport();
+  }
+}
+
+// The OVERDUB ignores the row: stopped, F1 under a loop's review counts in with the Config COUNT-IN (QA-REC-032), not with the row's bars.
+TEST_CASE("record screen (OS-RECCOUNT): the OVERDUB ignores the row (it keeps the Config COUNT-IN, QA-REC-032)") {
+  ReviewRig rig;
+  rig.play(false);
+  for (int i = 0; i < 6; ++i) {
+    rig.pass();
+  }
+  rig.rec->cfg.count_in = 4u;  // the row is on
+  CHECK(rig.app->device_settings().set(model::device_setting::CountIn, 1.0f) == model::Status::Ok);
+  rig.settle();
+  const unsigned counted = rig.transport.counted;
+  const unsigned plays = rig.transport.plays;
+  rig.tap(Button::F1);  // the overdub
+  CHECK(rig.transport.counted == counted + 1u);
+  CHECK(rig.transport.bars == 1u);  // the Config count-in, not the row's 4 bars
+  CHECK(rig.transport.plays == plays);
+  CHECK_FALSE(rig.rec->count_in_waiting());  // the overdub is not a take of the row
+  NEED(rig.until([&] { return rig.rec->overdubbing(); }, 30));
+  rig.tap(Button::F1);  // punch out
+  NEED(rig.until([&] { return !rig.rec->overdubbing(); }, 60));
+  CHECK(rig.app->device_settings().set(model::device_setting::CountIn, 0.0f) == model::Status::Ok);
+}
+
+// A Stop during the count-in gives the take up (no take, nothing held, the tap never armed), and so does F1.
+TEST_CASE("record screen (OS-RECCOUNT): a Stop or F1 during the count-in gives the take up and leaves no take") {
+  CiRig rig;
+  rig.encode = true;
+  rig.rec->cfg.count_in = 4u;
+  rig.settle();
+  rig.tap(Button::F1);  // from stop: the phase begins, the transport is asked to play
+  CHECK(rig.rec->state() == app::Recorder::State::Armed);
+  CHECK(rig.rec->count_in_waiting());
+  rig.start_transport();
+  for (int i = 0; i < 5; ++i) {  // a couple of bars in, the phase is still running
+    rig.cpass();
+  }
+  CHECK(rig.rec->state() == app::Recorder::State::Armed);
+  CHECK(rig.rec->count_in_waiting());
+  rig.stop_transport();  // the published transport falls
+  rig.cpass();
+  rig.cpass();
+  CHECK(rig.rec->state() == app::Recorder::State::Idle);
+  CHECK(rig.rec->frames() == 0u);
+  CHECK(rig.engine.graph().rec().state() == audio::RecTap::State::Idle);
+  CHECK_FALSE(rig.bank.take_held());
+  // F1 during the count-in: the same.
+  rig.tap(Button::F1);
+  CHECK(rig.rec->count_in_waiting());
+  rig.start_transport();
+  rig.cpass();
+  rig.cpass();
+  CHECK(rig.rec->state() == app::Recorder::State::Armed);
+  rig.tap(Button::F1);
+  rig.cpass();
+  CHECK(rig.rec->state() == app::Recorder::State::Idle);
+  CHECK(rig.rec->frames() == 0u);
+  CHECK(rig.engine.graph().rec().state() == audio::RecTap::State::Idle);
+  CHECK_FALSE(rig.bank.take_held());
+  rig.stop_transport();
+}
+
+// OS-RECCOUNT (review nit 1): a Song slot change mid count-in to a pattern of another length counts the new pattern's step 0 (a bar boundary the tap accepts), so the
+// take still starts on the right boundary (C_N), not one bar late.
+TEST_CASE("record screen (OS-RECCOUNT): a Song slot change mid count-in counts the new pattern's step 0: the take starts on the right boundary") {
+  for (const unsigned n : {1u, 2u}) {
+    CiRig rig;
+    rig.encode = true;
+    CHECK(test::arena(1).project.create_pattern(2, 32) == model::Status::Ok);  // the next song slot: a 32-step pattern
+    rig.rec->cfg.count_in = static_cast<std::uint8_t>(n);
+    rig.settle();
+    rig.tap(Button::F1);  // from stop, on pattern 1 (64 steps)
+    CHECK(rig.rec->count_in_waiting());
+    rig.start_transport();
+    NEED(rig.until([&] { return rig.state().play.playing; }));
+    for (int i = 0; i < 4; ++i) {
+      rig.cpass();  // a few steps into bar 1 of pattern 1
+    }
+    rig.switch_pattern(2, 32);  // the song goes to the 32-step pattern: its step 0 is a boundary
+    NEED(rig.until([&] { return rig.rec->state() == app::Recorder::State::Recording; }));
+    NEED(rig.script.bars.size() > n);
+    CHECK(rig.rec->take_data()[0] == static_cast<std::int16_t>(rig.script.bars[n] % 30000u));  // C_n: bars[0] is pattern 1's step 0, bars[1] the new pattern's step 0
+    rig.tap(Button::F1);
+    rig.cpass();
+    rig.discard_take();
+    rig.stop_transport();
+    CHECK(rig.rec->state() == app::Recorder::State::Idle);
+  }
+}
+
+// OS-RECCOUNT (review nit 2): in a 17-step pattern the final bar (step 16 to the wrap) is a single step, where the old "not within the last step before the boundary" guard
+// could never be met: the take arms as soon as the count reached N, and starts on the right boundary for count-in 1 and 2.
+TEST_CASE("record screen (OS-RECCOUNT): a 17-step pattern's one-step final bar still arms the take (count-in 1 and 2)") {
+  for (const unsigned n : {1u, 2u}) {
+    CiRig rig(17);  // pattern 1 is 17 steps long: boundaries at steps 0 and 16, and the final bar is the single step 16
+    rig.encode = true;
+    rig.rec->cfg.count_in = static_cast<std::uint8_t>(n);
+    rig.settle();
+    rig.tap(Button::F1);
+    CHECK(rig.rec->count_in_waiting());
+    rig.start_transport();
+    NEED(rig.until([&] { return rig.rec->state() == app::Recorder::State::Recording; }));
+    NEED(rig.script.bars.size() > n);
+    CHECK(rig.rec->take_data()[0] == static_cast<std::int16_t>(rig.script.bars[n] % 30000u));
+    rig.tap(Button::F1);
+    rig.cpass();
+    rig.discard_take();
+    rig.stop_transport();
+  }
+}
+
+// OS-RECCOUNT (review nit 3): the phase's arm is retried a bounded number of passes only; when the tap refuses it (another writer holds it), the count-in is given up
+// (no take, the hold back) and the strip says THE COUNT-IN DID NOT START once.
+TEST_CASE("record screen (OS-RECCOUNT): a count-in whose tap arm keeps failing is given up after a bounded number of passes, with the message") {
+  CiRig rig;
+  rig.encode = true;
+  rig.rec->cfg.count_in = 1u;
+  rig.settle();
+  rig.tap(Button::F1);
+  CHECK(rig.rec->count_in_waiting());
+  alignas(8) std::int16_t scratch[4096];
+  CHECK(rig.engine.graph().rec().arm(scratch, 4096u, 1, audio::RecTap::Align::Free, 0u));  // another writer takes the tap before the phase can arm it
+  rig.start_transport();
+  NEED(rig.until([&] { return rig.state().play.playing; }));
+  NEED(rig.until([&] { return rig.rec->state() == app::Recorder::State::Idle; }, 600));
+  CHECK(rig.rec->frames() == 0u);
+  CHECK_FALSE(rig.bank.take_held());
+  CHECK(rig.message() == "THE COUNT-IN DID NOT START");
+  rig.stop_transport();
 }

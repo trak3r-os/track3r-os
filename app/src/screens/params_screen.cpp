@@ -825,8 +825,7 @@ int instrument_in_use(const Model& model, int from, int dir) noexcept {
 unsigned ParamsScreen::pages() const noexcept { return ip::kGroups; }
 
 unsigned ParamsScreen::module_page_count(const Model& model, const ViewState& view) const noexcept {
-  const unsigned pages = module_page_total(model, view);
-  return pages == 0u ? 1u : pages;
+  return module_page_total(model, view);  // 0 for a module with no parameters: no page key at all, and F1 does nothing (OS-MODPAGEKEYS follow-up)
 }
 
 // The pages turned to by instrument.turn, which only the empty slot's type chooser binds to Left / Right now (a used slot's arrows edit the row), wrapping. A module's pages are its parameters' (eight to a page); the others' are the four groups, and the
@@ -943,7 +942,7 @@ void params_key_row(const Model& model, const ViewState& view, ParamsKeyRow& out
     static constexpr const char* kModulePages[4] = {"1-8", "9-16", "17-24", "25-32"};
     const unsigned pages = kParamsScreen.module_page_count(model, view);
     for (unsigned i = 0; i < 5; ++i) {
-      // A key shows only a page the module has (OS-MODPAGEKEYS: a module of two pages has F1 and F2); F3.. and F5 (not bound for a module) are blank, not dim, and the F-number boxes keep the row aligned.
+      // A key shows only a page the module has (OS-MODPAGEKEYS: a module of two pages has F1 and F2); a module with no parameters has no key at all; F3.. and F5 (not bound for a module) are blank, not dim, and the F-number boxes keep the row aligned.
       const char* named = i < 4u && i < pages ? module_page_at(model, view, i).name : nullptr;  // OS-INSTUI S10: the module's own name for the page (at most 7 characters), else the numbers
       out.label[i] = i >= 4u || i >= pages ? "" : (named != nullptr && named[0] != '\0' ? named : kModulePages[i]);
     }
@@ -1401,10 +1400,14 @@ void ParamsScreen::render(const Model& model, const ViewState& view, Renderer& r
   // The info line and the key row.
   if (!hidden(f.info)) {
     core::FixedString<64> text;
-    if (module_slot && rows.n == 0) {  // a module instrument whose module is not there (or has no parameters): the project keeps it, it plays nothing
+    if (module_slot && rows.n == 0) {  // a module instrument with no parameter rows: the module is not there, or it has no parameters (the project keeps it, it plays nothing)
       text.assign("MODULE ");
       append_clipped(text, ModuleUi::module_name_of(*model.project, slot), 24);
-      text.append(" NOT LOADED: instrument muted");
+      if (model.modules != nullptr && model.modules->bound_module(*model.project, slot) != nullptr) {
+        text.append(" NO PARAMETERS: nothing to edit");  // OS-MODPAGEKEYS follow-up: the key row is blank too, the screen says why
+      } else {
+        text.append(" NOT LOADED: instrument muted");
+      }
     } else if (chooser) {
       text.assign("instrument ");
       append_dec(text, static_cast<unsigned>(slot + 1), 2);

@@ -459,13 +459,18 @@ TEST_CASE("mixer: F1..F4 pick the page, the Master button again goes to the next
   CHECK(rig.page() == MixerPage::Stems);
   rig.tap(Button::F1);
   CHECK(rig.page() == MixerPage::Mixer);
-  rig.tap(Button::Master);  // pressed again: the next page, wrapping after the fourth
+  rig.tap(Button::Master);  // pressed again: the next page, wrapping after the fifth (OS-INSFX S4: INSERTS is the fifth, F6)
   CHECK(rig.page() == MixerPage::Routing);
   rig.tap(Button::Master);
   rig.tap(Button::Master);
   CHECK(rig.page() == MixerPage::Stems);
   rig.tap(Button::Master);
+  CHECK(rig.page() == MixerPage::Inserts);
+  rig.tap(Button::Master);
   CHECK(rig.page() == MixerPage::Mixer);
+  rig.tap(Button::F6);
+  CHECK(rig.page() == MixerPage::Inserts);
+  CHECK(rig.row() == 0);
   CHECK(rig.app->failed_frames() == 0);
 }
 

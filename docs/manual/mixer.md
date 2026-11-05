@@ -4,11 +4,11 @@
 
 Status: draft
 
-The Mixer has four pages, and two are not a fader strip. **ROUTING** decides where each track goes, to the speakers, the cue output, the recorder or the USB stems. **STEMS** decides what each USB slot carries, and, on its first row, how many outputs the USB stream has (2, 4, 6, 8 or 10). ROUTING, STEMS, the cue output and the two output modes are new in track3r-os. Hold `Master` and turn the encoder to set the master volume from any screen, and `Shift` + `F1` names a track. The Mixer has no undo. <!-- og: open -->
+The Mixer has five pages, and three are not a fader strip. **ROUTING** decides where each track goes, to the speakers, the cue output, the recorder or the USB stems. **STEMS** decides what each USB slot carries, and, on its first row, how many outputs the USB stream has (2, 4, 6, 8 or 10). **INSERTS** puts an effect module on a track. ROUTING, STEMS, INSERTS, the cue output and the two output modes are new in track3r-os. Hold `Master` and turn the encoder to set the master volume from any screen, and `Shift` + `F1` names a track. The Mixer has no undo. <!-- og: open -->
 
 ## What it is for
 
-Use the Mixer to set levels and pans, route tracks, mute and solo, and watch the master limiter. Press `Master`. `F1` to `F4` pick the page, with the cursor on its first row. `F6` has no function here. Pressing `Master` again turns to the next page. <!-- QA-MIX-031, QA-MIX-032, QA-MIX-033, QA-MIX-034, QA-MIX-036 -->
+Use the Mixer to set levels and pans, route tracks, mute and solo, put effects on tracks, and watch the master limiter. Press `Master`. `F1` to `F4` pick the page, with the cursor on its first row. `F6` opens **INSERTS** from the MIXER, ROUTING and MASTER FX pages; on **STEMS** it is **APPLY**. Pressing `Master` again turns to the next page. <!-- QA-MIX-031, QA-MIX-032, QA-MIX-033, QA-MIX-034, QA-MIX-036, QA-MIX-058 -->
 
 To set a level or a pan on the MIXER page, press `Left` or `Right` to pick the column and `Up` or `Down` to pick the field (level or pan). Turn the encoder to set the value. `Shift` makes the step coarse. `Delete` puts back the default.
 
@@ -17,6 +17,24 @@ To set a level or a pan on the MIXER page, press `Left` or `Right` to pick the c
 ## How it works
 <!-- sync: src=audio/include/o3os/audio/graph.h,app/include/o3os/app/mixer_view.h spec=docs/specs/OS-005-audio-engine.md qa=QA-MIX-002,QA-MIX-013,QA-MIX-020 -->
 
+### What is an insert?
+<!-- sync: src=app/src/module_ui.cpp,app/include/o3os/app/governor_watch.h,app/include/o3os/app/mixer_view.h spec=docs/specs/OS-INSFX.md qa=QA-MIX-058,QA-MIX-059,QA-MIX-060,QA-MIX-061,QA-MIX-062,QA-MIX-064,QA-MIX-067 -->
+
+An insert is an effect module placed on the sound of one track. The track's sound passes through the effect before it reaches the fader. Each track has two slots, **INS A** and **INS B**. A project holds up to four inserts. The picker lists the effect modules on the card, in the `modules/effects` folder.
+
+Each insert takes some of the processor's time in every audio block. Its cell shows that share as `~N%` or `<1%` of the block, the measured cost of that insert. Until a block has measured it, the cell is blank.
+
+**Bypass** keeps the insert in its slot and plays the track without it. The change is smooth, with no click. `F7` turns bypass on and off.
+
+If an insert costs more than its budget, the unit forces it to dry: the track plays without it, and the cell says **OVER BUDGET**. Bypass the insert with `F7` and bring it back with `F7` once the block has room. The mark clears.
+
+- **Stored:** the module and the bypass state of each insert are saved with the project.
+- **Live:** the cost in each cell, and the bypass mark.
+- **Ended:** `Delete` removes the insert. The Mixer has no undo, and an insert is not in the undo journal, so the removal is final.
+
+Not yet checked on the unit: the cost figures, OVER BUDGET and the click-free bypass.
+
+### Routing: where a track goes
 ### Routing: where a track goes
 
 Think of a mixing desk. Each track has a fader and a pan, and a set of switches for the buses it feeds. A bus is a shared sum. The buses are **MAIN** (the speakers), **CUE** (a second output for monitoring), **SND A** and **SND B** (the send effects), **REC** (what the recorder hears) and **USB** (the stems to the computer). New in track3r-os. <!-- QA-MIX-029 -->
@@ -86,9 +104,34 @@ Not yet checked on the unit.
 | Key row | `F1` to `F8`; see "Keys on this screen". |
 | Shift row | **NAME** on `F1`, **UNMUTE** on `F7`, **UNSOLO** on `F8`. |
 
-The pages: **MIXER** (tracks, then **IN**, **SNDA**, **SNDB**, **CUE**, **MST**; level and pan), **ROUTING**, **MASTER FX** (volume, dry, reverb, delay, three mutes, cue level, the send effects and the limiter's threshold, attack and release) and **STEMS** (a row for each USB slot **S1** on, a column for each source: **T1** to **T12**, **ML**, **MR**, **SA**, **SB**). On STEMS, `Insert` adds the source and `Delete` removes it. New in track3r-os. `Shift` + `Delete` restores the factory map. Both are final, so each asks first (**DELETE AGAIN** or **SHIFT+DELETE AGAIN**): press the same key again within two seconds to do it. <!-- QA-MIX-039 --> The encoder changes a value; `Shift` is coarse; `Delete` sets the default.
+The pages: **MIXER** (tracks, then **IN**, **SNDA**, **SNDB**, **CUE**, **MST**; level and pan), **ROUTING**, **MASTER FX** (volume, dry, reverb, delay, three mutes, cue level, the send effects and the limiter's threshold, attack and release), **STEMS** (a row for each USB slot **S1** on, a column for each source: **T1** to **T12**, **ML**, **MR**, **SA**, **SB**) and **INSERTS** (the tracks and **MASTER** down the side, **INS A** and **INS B** across; each cell shows the module's name, a bypass mark and the cost). New in track3r-os. On STEMS, `Insert` adds the source and `Delete` removes it. New in track3r-os. `Shift` + `Delete` restores the factory map. Both are final, so each asks first (**DELETE AGAIN** or **SHIFT+DELETE AGAIN**): press the same key again within two seconds to do it. <!-- QA-MIX-039 --> The encoder changes a value; `Shift` is coarse; `Delete` sets the default.
 
 ## More tasks
+
+### Put an effect on a track
+<!-- sync: src=app/src/screens/mixer_screen.cpp,app/src/module_ui.cpp qa=QA-MIX-058,QA-MIX-059,QA-MIX-060 -->
+
+Start on the MIXER, ROUTING or MASTER FX page. Move the cursor to an empty cell, such as track 2 **INS A**. The cell shows `-`.
+
+1. Press `F6` (**INSERTS**). The grid shows the tracks down the side and **INS A** and **INS B** across. <!-- QA-MIX-058 -->
+2. Move the cursor to the empty cell with `Up`, `Down`, `Left` and `Right`. <!-- QA-MIX-058 -->
+3. Press `Insert`. The picker opens, titled **INSERT T2 A**, with one line for each effect module on the card. <!-- QA-MIX-059 -->
+4. Move to a module and press `F1`. `F8` closes the picker and changes nothing. <!-- QA-MIX-060 -->
+
+You should see the picker close, the strip say **INSERT SET** and the cell show the module's name. The insert is saved with the project. <!-- QA-MIX-060 -->
+
+Not yet checked on the unit.
+
+### Bypass or remove an insert
+<!-- sync: src=app/src/screens/mixer_screen.cpp,app/src/module_ui.cpp qa=QA-MIX-062,QA-MIX-064 -->
+
+Start on the INSERTS page, with the cursor on a cell that holds an insert.
+
+1. Press `F7` (**BYPASS**). The strip says **INSERT BYPASSED**, and the cell shows the bypass mark. The track plays without the insert, with no click. <!-- QA-MIX-062 -->
+2. Press `F7` again. The strip says **INSERT ON**, and the effect starts again from a reset. <!-- QA-MIX-062 -->
+3. Press `Delete`. The strip says **INSERT DELETED**, and the cell is empty. <!-- QA-MIX-064 -->
+
+`Delete` cannot be undone. Not yet checked on the unit.
 
 ### Name a track
 
@@ -146,7 +189,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 | `F3` | **MST FX** | - |
 | `F4` | **STEMS** | - |
 | `F5` | **CUE LVL** | - |
-| `F6` | - | - |
+| `F6` | **INSERTS** | - |
 | `F7` | **MUTE** | **UNMUTE** |
 | `F8` | **SOLO** | **UNSOLO** |
 
@@ -161,9 +204,12 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 | `F3` (**MST FX**) | the MASTER FX page. The card reads **MASTER LIMITER**, **ALWAYS ON**. | QA-MIX-002 |
 | `F4` (**STEMS**) | the STEMS page, one column for each source. The first row is **OUTPUTS**, the slots follow. With no stem map the page says so. | QA-MIX-034, QA-MIX-050 |
 | `F5` (**CUE LVL**) | goes to the CUE LEVEL row of the MASTER FX page, from any page; on that row it changes nothing | QA-MIX-035 |
-| `F6` | on STEMS, **APPLY**: the number of outputs you chose, after a second press within two seconds. On the other pages nothing: the key reads `--` | QA-MIX-036, QA-MIX-052, QA-MIX-055 |
-| `F7` (**MUTE**) | mutes the track under the cursor, on MIXER, ROUTING and STEMS (the track of the column). On **SNDA** and **SNDB** it mutes the effect; on MASTER FX it mutes the bus of the DRY, REVERB or DELAY row; on STEMS **SA** and **SB** mute their effect. Anywhere else the strip says why. | QA-MIX-003, QA-MIX-037, QA-MIX-038 |
+| `F6` | on STEMS, **APPLY**: the number of outputs you chose, after a second press within two seconds. On the MIXER, ROUTING and MASTER FX pages it opens **INSERTS**. | QA-MIX-036, QA-MIX-052, QA-MIX-055, QA-MIX-058 |
+| `F7` (**MUTE**) | mutes the track under the cursor, on MIXER, ROUTING and STEMS (the track of the column). On **SNDA** and **SNDB** it mutes the effect; on MASTER FX it mutes the bus of the DRY, REVERB or DELAY row; on STEMS **SA** and **SB** mute their effect. On **INSERTS**, **BYPASS** toggles the insert of the cell. Anywhere else the strip says why. | QA-MIX-003, QA-MIX-037, QA-MIX-038, QA-MIX-062 |
 | `F8` (**SOLO**) | solos the track under the cursor, on MIXER, ROUTING and STEMS. On MASTER FX, and on a bus, the strip says **TRACKS ONLY**. | QA-MIX-004, QA-MIX-037, QA-MIX-038 |
+| `Insert` | on INSERTS, on an empty cell, opens the picker of effect modules; on a taken cell the strip says **DELETE THE INSERT FIRST** | QA-MIX-059, QA-MIX-063 |
+| `Delete` | on INSERTS, removes the insert of the cell | QA-MIX-064 |
+| `Up`, `Down`, `Left`, `Right` | on INSERTS, move between the cells; the MASTER row has one cell | QA-MIX-058 |
 | `Shift` + `F1` (**NAME**) | names the track under the cursor. On IN, SND A, SND B, CUE or MASTER, or on the MASTER FX page, the strip says **TRACKS ONLY**. | QA-MIX-010, QA-MIX-012 |
 | `Shift` + `F7` (**UNMUTE**) | unmutes every track | QA-MIX-003 |
 | `Shift` + `F8` (**UNSOLO**) | clears the solo of every track | QA-MIX-004 |
@@ -176,6 +222,18 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 
 ## Good to know
 
+- A track with a **STEREO** instrument goes through an insert as one mono signal: while an insert is on, the second channel of the instrument is dropped. Bypass the insert to hear both channels again. <!-- QA-INS-266 -->
+- The MASTER row shows its cells but takes no insert: **MASTER INSERT: NOT YET**. <!-- QA-MIX-068 -->
+- On a taken cell, `Insert` says **DELETE THE INSERT FIRST**. <!-- QA-MIX-063 -->
+- With four inserts in the project, `Insert` says **INSERTS FULL**. <!-- QA-MIX-063 -->
+- On an empty cell, `F7` says **NO INSERT HERE**. <!-- QA-MIX-069 -->
+- A greyed module in the picker reads **MISSING FROM THE CARD**, and `F1` on it says **MODULE MISSING**. <!-- QA-MIX-066 -->
+- With no effect module on the card, the picker has no line, and `F1` says **NO SUCH EFFECT**. <!-- QA-MIX-071 -->
+- When the card lacks an insert's module, its cell reads **NOT BOUND**, and `F7` says **MODULE MISSING: DELETE OR RELOAD**. <!-- QA-MIX-065 -->
+- A bind right after the `Delete` of the same cell says **INSERT LEAVING: TRY AGAIN**. Wait a moment and try again. <!-- QA-MIX-070 -->
+- `F7` says **NO CPU** when the block has no room for the effect. <!-- QA-MIX-067 -->
+- The inserts are saved with the project. Not yet checked on the unit: that they are bound again when the project opens. <!-- QA-MIX-060, QA-GLB-173 -->
+
 > **Careful**: The Mixer has no undo. `F8` here is **SOLO**, and `F8` on Pattern, Song or Params does not bring a Mixer change back. <!-- QA-MIX-013 -->
 
 - The master has no bit-depth stage. The MST FX page lists only the limiter. Bit depth is a step effect and a Perform slot. <!-- QA-MIX-002, QA-PRF-014 -->
@@ -183,7 +241,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 - The master limiter is always on. The page lists no headroom, saturation, EQ, bass, space or bit-depth stages. <!-- QA-MIX-002 -->
 - A muted track still exports as a stem, with its sound in it. <!-- QA-MIX-024 -->
 - The first hit after an unmute can be soft: it loses up to 1.45 ms to a short ramp. It never clicks. <!-- QA-MIX-025 -->
-- Not yet checked on the unit: mute and unmute mid-note, the master volume, naming, stems. Not checked against the original firmware: the pages and keys. <!-- og: open -->
+- Not yet checked on the unit: mute and unmute mid-note, the master volume, naming, stems, inserts. Not checked against the original firmware: the pages and keys. <!-- og: open -->
 
 ## See also
 

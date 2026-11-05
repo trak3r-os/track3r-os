@@ -3,6 +3,8 @@
 
 #include <o3os/app/chrome.h>
 #include <o3os/app/frame.h>
+#include <o3os/app/governor_watch.h>
+#include <o3os/app/module_ui.h>
 #include <o3os/app/pattern_layout.h>
 #include <o3os/app/text_format.h>
 #include <o3os/core/fixed_string.h>
@@ -23,7 +25,7 @@ namespace {
 namespace tp = model::track_param;
 namespace mp = model::master_param;
 
-constexpr const char* kPageNames[kMixerPages] = {"MIXER", "ROUTING", "MASTER FX", "STEMS"};
+constexpr const char* kPageNames[kMixerPages] = {"MIXER", "ROUTING", "MASTER FX", "STEMS", "INSERTS"};
 constexpr const char* kBusNames[kMixBuses] = {"IN", "SNDA", "SNDB", "CUE", "MST"};
 
 // The value of a model parameter as the project holds it, or the descriptor's default without one (the pages then say there is no project).
@@ -197,6 +199,7 @@ bool MixerScreen::step(const Model& model, ViewState& view, int dx, int dy) cons
     case MixerPage::Routing: col_max = static_cast<int>(kRouteCols); break;
     case MixerPage::MasterFx: col_max = 1; break;
     case MixerPage::Stems: col_max = static_cast<int>(kStemSources); break;
+    case MixerPage::Inserts: col_max = static_cast<int>(kInsertSlots); break;
   }
   int row = static_cast<int>(now.row) + dy;
   int col = static_cast<int>(now.col) + dx;
@@ -654,6 +657,92 @@ void draw_stems_page(const Model& model, const ViewState& view, Renderer& r, Rec
   }
 }
 
+// ---- the INSERTS page (OS-INSFX S4) -------------------------------------------------------------------------------------------
+
+// The effect modules on the strips: one row for each track and the master, INS A and INS B for columns. A cell: the module's name (the project's INSX record), then on the right what the host says: the bypass mark
+// (the record's flag: the user's), OVER BUDGET (a net forced it dry), NOT BOUND (a record whose module is not running), and the measured cost of the last block as a share of it ("~2%", as the picker says it).
+struct InsLayout {
+  int name_x;
+  int x0;
+  int col_w;
+};
+InsLayout make_ins_layout(const ui::Theme& t) noexcept {
+  const ui::Metrics& m = t.metrics;
+  InsLayout l{};
+  l.name_x = m.index_w + 2 * m.gap;
+  l.x0 = l.name_x + 14 * t.geometry(Face::Data).cell_w;
+  l.col_w = (ui::kScreenW - l.x0 - 2 * m.pad) / static_cast<int>(kInsertSlots);
+  return l;
+}
+
+void draw_inserts_page(const Model& model, const ViewState& view, Renderer& r, Rect covered, const MixLayout& l) noexcept {
+  const ui::Theme& t = r.theme();
+  const ui::Metrics& m = t.metrics;
+  const mixer::Cursor cur = mixer::cursor(model, view);
+  const InsLayout il = make_ins_layout(t);
+  const Frame& f = l.frame;
+  const int cell_h = t.geometry(Face::Data).cell_h;
+  const unsigned tracks = mixer::tracks(model);
+  const unsigned rows = tracks + 1u;
+  const unsigned visible = static_cast<unsigned>(kFrameRows);
+  const unsigned top = cur.row + 1u > visible ? cur.row + 1u - visible : 0u;  // the window follows the cursor down
+  const unsigned last = rows < top + visible ? rows : top + visible;
+  const auto hidden = [&](const Rect& rect) { return covers(covered, rect.x, rect.y, rect.w, rect.h); };
+  const auto row_y = [&](unsigned i) { return f.pane.y + static_cast<int>(i - top) * f.row_pitch; };
+  const Rect bar = {0, row_y(cur.row), ui::kScreenW, f.row_pitch};
+  if (!hidden(bar)) {
+    r.highlight_row(bar);
+  }
+  const ModuleUi* mu = model.modules;
+  core::FixedString<24> text;
+  for (unsigned i = top; i < last; ++i) {
+    const bool master = i == tracks;
+    const bool sel_row = i == cur.row;
+    const int y = row_y(i) + l.grid.cell_dy;
+    text.clear();
+    if (master) {
+      text.assign("MASTER");
+    } else {
+      text.assign("T");
+      append_uint(text, i + 1u);
+      const model::TrackSlot* slot = model.project != nullptr ? model.project->track(i) : nullptr;
+      if (slot != nullptr && slot->name[0] != '\0') {
+        text.append(" ");
+        append_clipped(text, slot->name, 9);
+      }
+    }
+    if (!hidden({il.name_x, y, 13 * t.geometry(Face::Data).cell_w, cell_h})) {
+      r.text(il.name_x, y, text.c_str(), sel_row ? Color::SelText : (master ? Color::TextDim : Color::Text));
+    }
+    for (unsigned s = 0; s < (master ? 1u : kInsertSlots); ++s) {
+      const Rect cell = {il.x0 + static_cast<int>(s) * il.col_w, row_y(i), il.col_w - m.gap, f.row_pitch};
+      if (hidden(cell)) {
+        continue;
+      }
+      const bool sel = sel_row && s == cur.col;
+      if (sel) {
+        r.panel(cell, Color::Accent);
+      }
+      const model::InsertRecord* rec = model.project != nullptr ? model.project->find_insert(master ? model::kInsertWhereMaster : i, s) : nullptr;
+      const model::ModuleRef* ref = rec != nullptr ? model.project->module(rec->module) : nullptr;
+      if (ref == nullptr) {
+        r.text(cell.x + m.pad, y, "-", sel ? Color::AccentText : Color::Empty);
+        continue;
+      }
+      const bool bypass = (rec->flags & model::kInsertFlagBypass) != 0u;
+      text.clear();
+      append_clipped(text, ref->name, 12);
+      r.text(cell.x + m.pad, y, text.c_str(), sel ? Color::AccentText : (bypass ? Color::TextDim : Color::Text));
+      ModuleUi::InsertCell live{};
+      const bool bound = !master && mu != nullptr && mu->insert_cell(i, s, live);
+      text.clear();
+      append_insert_status(text, bypass, bound, live.forced, !master && mu != nullptr && mu->has_inserts(), live.cost);
+      const Color ink = sel ? Color::AccentText : (bound && live.forced ? Color::Text : Color::TextDim);
+      r.text(cell.x + cell.w - m.pad - r.text_width(text.c_str(), Face::Label), ui::caps_y(t, Face::Label, row_y(i), f.row_pitch), text.c_str(), ink, Face::Label);
+    }
+  }
+}
+
 }  // namespace
 
 void MixerScreen::render(const Model& model, const ViewState& view, Renderer& r, Rect covered) const noexcept {
@@ -709,6 +798,14 @@ void MixerScreen::render(const Model& model, const ViewState& view, Renderer& r,
         break;
       case MixerPage::MasterFx:
         break;
+      case MixerPage::Inserts:
+        if (model.project != nullptr) {  // how many of the four the project holds
+          append_uint(text, model.project->inserts().count);
+          text.append("/");
+          append_uint(text, model::kMaxInserts);
+          strip.row().field("INS", Face::Data, text.c_str(), Color::ChromeDim, Color::ChromeText);
+        }
+        break;
     }
     strip.cpu(model.load);
   }
@@ -733,6 +830,12 @@ void MixerScreen::render(const Model& model, const ViewState& view, Renderer& r,
       }
       r.text(ml.lvl_x, cap_y, "LVL", Color::ChromeDim, Face::Label);
       r.text(ml.meter_x, cap_y, "METER", Color::ChromeDim, Face::Label);
+    } else if (page == MixerPage::Inserts) {
+      const InsLayout il = make_ins_layout(t);
+      static constexpr const char* kSlotNames[kInsertSlots] = {"INS A", "INS B"};
+      for (unsigned s = 0; s < kInsertSlots; ++s) {
+        r.text(il.x0 + static_cast<int>(s) * il.col_w + m.pad, cap_y, kSlotNames[s], s == cur.col ? Color::ChromeText : Color::ChromeDim, Face::Label);
+      }
     } else if (page == MixerPage::Stems) {
       const int name_x = m.index_w + 2 * m.gap;
       const int x0 = name_x + 4 * t.geometry(Face::Data).cell_w;
@@ -754,6 +857,7 @@ void MixerScreen::render(const Model& model, const ViewState& view, Renderer& r,
     case MixerPage::Routing: draw_routing_page(model, view, r, covered, l); break;
     case MixerPage::MasterFx: draw_master_page(model, view, r, covered, l); break;
     case MixerPage::Stems: draw_stems_page(model, view, r, covered, l); break;
+    case MixerPage::Inserts: draw_inserts_page(model, view, r, covered, l); break;
   }
 
   if (!hidden(f.info)) {
@@ -788,6 +892,20 @@ void MixerScreen::render(const Model& model, const ViewState& view, Renderer& r,
         left.assign(cur.row == kMasterCueRow ? "CUE LEVEL: the cue bus's level" : (cur.row < kMasterCueRow ? "the master section" : (cur.row - kMasterFirstFxRow < kSendFxDelayRows ? "SND A: the delay (new sound, the OG's controls)" : (cur.row < kMasterFirstLimRow ? "SND B: the reverb (new sound, the OG's controls)" : "LIMITER: always on (new sound, not saved)"))));
         right = "up / down: row  encoder: change  Delete: default";
         break;
+      case MixerPage::Inserts: {
+        right = "Insert: assign  Delete: remove  arrows: cell";
+        if (cur.row >= mixer::tracks(model)) {
+          left.assign("MASTER INS: shown, not assignable yet");
+          break;
+        }
+        left.assign("T");
+        append_uint(left, cur.row + 1u);
+        left.append(cur.col == 0u ? " INS A: " : " INS B: ");
+        const model::InsertRecord* rec = model.project != nullptr ? model.project->find_insert(cur.row, cur.col) : nullptr;
+        const model::ModuleRef* ref = rec != nullptr ? model.project->module(rec->module) : nullptr;
+        left.append(ref != nullptr ? ref->name : "empty");
+        break;
+      }
       case MixerPage::Stems: {
         const audio::StemMap* map = model.mix != nullptr ? model.mix->stems : nullptr;
         right = "Insert: add  Delete: remove  Shift+Delete: factory map  encoder: add/remove";
@@ -829,7 +947,7 @@ void MixerScreen::render(const Model& model, const ViewState& view, Renderer& r,
     draw_info_line(r, f, left.c_str(), right);
   }
   if (!hidden(f.keys) && !view.overlay_keys()) {
-    ui::soft_keys(r, f.keys, key_row(*this, view, page == MixerPage::Stems ? kMixerStemKeys : kMixerSoftKeys), 8);
+    ui::soft_keys(r, f.keys, key_row(*this, view, page == MixerPage::Stems ? kMixerStemKeys : (page == MixerPage::Inserts ? kMixerInsertKeys : kMixerSoftKeys)), 8);
   }
 }
 

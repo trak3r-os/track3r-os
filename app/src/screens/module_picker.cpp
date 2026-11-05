@@ -35,12 +35,15 @@ const char* state_text(const CatalogEntry& e) noexcept {
   return "";
 }
 
+// OS-INSFX S4: the picker is also the Mixer's INSERTS page's: the effect modules (modules/effects) for the insert in view.modules.insert_where.
+bool for_inserts(const ViewState& view) noexcept { return view.modules.insert_where != ModulesView::kEngine; }
+
 }  // namespace
 
 Rect ModulePickerOverlay::rect(const ui::Theme& theme) const noexcept { return picker_dialog(theme).outer; }
 
-int ModulePickerOverlay::count(const Model& model, const ViewState&) const noexcept {
-  return model.modules != nullptr ? static_cast<int>(model.modules->instrument_count()) : 0;
+int ModulePickerOverlay::count(const Model& model, const ViewState& view) const noexcept {
+  return model.modules == nullptr ? 0 : static_cast<int>(for_inserts(view) ? model.modules->effect_count() : model.modules->instrument_count());
 }
 
 bool ModulePickerOverlay::set_position(const Model& model, ViewState& view, int position) const noexcept {
@@ -55,24 +58,31 @@ void ModulePickerOverlay::render(const Model& model, const ViewState& view, ui::
   const ui::Theme& t = r.theme();
   const ui::Metrics& m = t.metrics;
   const Dialog d = picker_dialog(t);
+  const bool fx = for_inserts(view);
   core::FixedString<24> title;
-  title.assign("ENGINE  INSTRUMENT ");
-  append_dec(title, static_cast<unsigned>(view.instrument < 1 ? 1 : view.instrument), 2);
+  if (fx) {
+    title.assign("INSERT  T");  // "INSERT  T3 B": the track and the slot (INS A, INS B)
+    append_uint(title, view.modules.insert_where / 2u + 1u);
+    title.append((view.modules.insert_where & 1u) != 0u ? " B" : " A");
+  } else {
+    title.assign("ENGINE  INSTRUMENT ");
+    append_dec(title, static_cast<unsigned>(view.instrument < 1 ? 1 : view.instrument), 2);
+  }
   draw_dialog(r, d, title.c_str());
   const int x = d.body.x + 2 * m.pad;
   const int right = d.body.x + d.body.w - 2 * m.pad;
   const int pitch = m.row_pitch;
   const int cell = t.geometry(Face::Data).cell_w;
-  r.text(x, ui::caps_y(t, Face::Label, d.body.y, pitch), "Choose the module that plays this instrument.", Color::ChromeText, Face::Label);
+  r.text(x, ui::caps_y(t, Face::Label, d.body.y, pitch), fx ? "Choose the effect for this insert." : "Choose the module that plays this instrument.", Color::ChromeText, Face::Label);
   const ModuleUi* mu = model.modules;
-  const int total = mu != nullptr ? static_cast<int>(mu->instrument_count()) : 0;
+  const int total = count(model, view);
   const int cursor = view.modules.picker < total ? view.modules.picker : 0;
   const int first = cursor < kPickerRows ? 0 : cursor - kPickerRows + 1;
   if (total == 0) {
-    r.text(x, ui::caps_y(t, Face::Label, d.body.y + pitch, pitch), mu == nullptr ? "NO MODULE SYSTEM" : "NO MODULES IN modules/instruments ON THE CARD", Color::ChromeDim, Face::Label);
+    r.text(x, ui::caps_y(t, Face::Label, d.body.y + pitch, pitch), mu == nullptr ? "NO MODULE SYSTEM" : (fx ? "NO MODULES IN modules/effects ON THE CARD" : "NO MODULES IN modules/instruments ON THE CARD"), Color::ChromeDim, Face::Label);
   }
   for (int k = 0; k < kPickerRows && first + k < total; ++k) {
-    const CatalogEntry& e = *mu->instrument_at(static_cast<unsigned>(first + k));
+    const CatalogEntry& e = fx ? *mu->effect_at(static_cast<unsigned>(first + k)) : *mu->instrument_at(static_cast<unsigned>(first + k));
     const int y = d.body.y + (1 + k) * pitch;
     const bool sel = first + k == cursor;
     const bool bad = e.state == CatalogEntry::State::Missing || e.state == CatalogEntry::State::Quarantined;  // greyed: not available
@@ -81,9 +91,14 @@ void ModulePickerOverlay::render(const Model& model, const ViewState& view, ui::
       r.text(x, ui::caps_y(t, Face::Data, y, pitch), ">", Color::ChromeText, Face::Data);
     }
     r.text(x + 2 * cell, ui::caps_y(t, Face::Data, y, pitch), e.stem, ink, Face::Data);
-    if (e.state == CatalogEntry::State::Loaded) {  // OS-GOV: what a voice of the module cost when it last sounded (the render measures it); "UNMEASURED" until it has
+    if (e.state == CatalogEntry::State::Loaded || (fx && e.state == CatalogEntry::State::Ready)) {  // (an effect not loaded yet says UNMEASURED too: every card line has its cost)  OS-GOV: what a voice of the module cost when it last sounded (the render measures it); "UNMEASURED" until it has
       core::FixedString<24> cost;
-      append_voice_cost(cost, mu->voice_cost_of(e.stem));
+      if (fx) {
+        append_block_cost(cost, mu->insert_cost_of(e.stem));  // one instance of the effect, the figure the nets judge
+        cost.append(" PER INSERT");
+      } else {
+        append_voice_cost(cost, mu->voice_cost_of(e.stem));
+      }
       r.text(x + 15 * cell, ui::caps_y(t, Face::Label, y, pitch), cost.c_str(), Color::ChromeDim, Face::Label);
     }
     const char* state = state_text(e);

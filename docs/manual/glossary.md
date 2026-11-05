@@ -243,3 +243,7 @@ Euclid rhythm: a rhythm of E hits spread as evenly as possible over the steps of
 Ramp: values that move in a straight line from one end to the other, such as a volume from 127 down to 0 over a track. The FILL dialog writes it with MODE **RAMP**.
 
 Voice: one sound that is playing. Each note that sounds uses one voice, and the unit has a fixed number of voices.
+
+Insert: an effect module placed on the sound of one track, in the slot INS A or INS B of that track. See [Mixer](mixer.md).
+
+Bypass: the state of an insert in which the track plays without it, with no click. `F7` turns it on and off on the INSERTS page. See [Mixer](mixer.md).

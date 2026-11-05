@@ -214,7 +214,7 @@ Start on the Config screen. Press `F1` (**MIDI**). The page has nine rows. Move 
 A change takes effect at the next `Play`. If you turn TRANSPORT OUT to Off while the unit plays, the Stop of that run is still sent, so a device that got the Start is also stopped. The choice is kept on the card. `Delete` on a TRANSP row puts **On** back. Not yet checked on the unit. <!-- QA-CFG-220 --> <!-- QA-CFG-221 --> <!-- QA-CFG-222 --> <!-- QA-CFG-223 --> <!-- QA-CFG-225 --> <!-- QA-CFG-227 --> <!-- QA-CFG-228 --> <!-- QA-CFG-224 --> <!-- QA-CFG-226 -->
 
 ### Change the display, the pad lights and the notation
-<!-- sync: src=model/src/params.cpp,app/include/o3os/app/brightness.h,app/src/screens/pattern_screen.cpp,app/src/bindings.cpp qa=QA-CFG-213,QA-CFG-214,QA-CFG-215,QA-CFG-216 -->
+<!-- sync: src=model/src/params.cpp,app/include/o3os/app/brightness.h,app/src/screens/pattern_screen.cpp,app/src/bindings.cpp qa=QA-CFG-213,QA-CFG-214,QA-CFG-215,QA-CFG-216,QA-CFG-272,QA-CFG-273,QA-CFG-274 -->
 
 Press `F2` (**DISPLAY**). Move to a row and turn the encoder.
 
@@ -225,8 +225,9 @@ Press `F2` (**DISPLAY**). Move to a row and turn the encoder.
 | NUMBERING | From 0, From 1, Hex | How the step rows of the Pattern screen are numbered. The default is **From 1**. |
 | MIDDLE C | C-3, C-4, C-5, C-6 | The name of MIDI note 60 on the Pattern screen. The default is **C-5**. |
 | THEME | Amiga, Black, White | The colours of the screens. `Shift` + `Master` also steps to the next theme. |
+| STATUS LED | BLINK, OFF | Whether the status LED behind the F keys blinks its heartbeat. **OFF** stops the heartbeat only: a fault blink code still shows. Not saved: every boot starts with **BLINK**. |
 
-All five rows act at once, with nothing to apply. <!-- QA-CFG-213 --> <!-- QA-CFG-215 --> NUMBERING and MIDDLE C show on the Pattern screen: with **From 0** the step rows count from 00, and with MIDDLE C on **C-4** a note that reads C-5 by default reads C-4. <!-- QA-CFG-216 --> <!-- QA-CFG-214 -->
+The five setting rows act at once, with nothing to apply. <!-- QA-CFG-213 --> <!-- QA-CFG-215 --> NUMBERING and MIDDLE C show on the Pattern screen: with **From 0** the step rows count from 00, and with MIDDLE C on **C-4** a note that reads C-5 by default reads C-4. <!-- QA-CFG-216 --> <!-- QA-CFG-214 --> The STATUS LED row is not a setting: it is a choice of this session (RAM only), so it is not saved to the card and every boot starts with **BLINK**; `Delete` puts **BLINK** back. <!-- QA-CFG-272 --> <!-- QA-CFG-273 --> <!-- QA-CFG-274 -->
 
 Not yet checked on the unit: the MIDI and DISPLAY rows.
 

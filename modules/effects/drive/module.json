@@ -1,0 +1,20 @@
+{
+  "name": "Drive",
+  "id": "drive",
+  "kind": "effect",
+  "abi": "1.2",
+  "description": "A saturation insert for a track: soft or asymmetric clipping (SHAPE), input drive in dB, a one-pole tone low-pass, an always-on DC blocker, a dry/wet mix and an output level, with a view of the transfer curve. One mono instance.",
+  "state_bytes": 96,
+  "params": [
+    {"name": "Shape", "min": 0, "max": 1, "default": 0, "type": "int"},
+    {"name": "Drive", "min": 0, "max": 36, "default": 12, "unit": "db", "mod": true},
+    {"name": "Tone", "min": 500, "max": 20000, "default": 8000, "curve": "log", "unit": "hz", "mod": true},
+    {"name": "Mix", "min": 0, "max": 100, "default": 100, "unit": "percent", "mod": true},
+    {"name": "Output", "min": -24, "max": 6, "default": 0, "unit": "db", "mod": true}
+  ],
+  "views": [
+    {"name": "Curve", "min_size": [120, 80], "preferred_size": [380, 140]}
+  ],
+  "voices": 1,
+  "memory": {"hot_bytes": 1400, "sdram_bytes": 0}
+}

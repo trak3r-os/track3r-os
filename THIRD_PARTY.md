@@ -255,6 +255,10 @@ vendored and no oracle is third-party. The FM engine is **not** derived from Goo
 (Chowning, 1973) with this module's own eight algorithm tables, a polynomial sine fitted here, and an envelope model of its own. Its oracle (`modules/fm/tests/fm_test.cpp`) is an independent double-precision model written in the test and
 the Bessel functions of the first kind. The Chip's waveforms (pulse duty cycles, a 15-bit LFSR with two taps, triangle) are descriptions of how such chips work, not code. Both modules' sources are MIT like the SDK (SPDX headers); their tests, which use the OS's loader and draw recorder, are GPL-3.0-or-later like the rest of this repository.
 
+Written from scratch, no third-party code, data or formula note (OS-INSFX-FX1): the SD effect module `modules/effects/drive` (saturation: a polynomial soft clipper with a shape bias, a one-pole tone,
+a one-pole DC blocker, a dry/wet mix and an output level). Nothing was ported or transcribed from any clipper design, app note or library: the shaper, the blocker and the smoothing are this module's own, and its oracle
+(`modules/effects/drive/tests/drive_test.cpp`) is an independent double-precision model written in the test. The module's source is GPL-3.0-or-later like the rest of this repository (the SDK header it includes is MIT).
+
 ## pt2-clone's Paula (OS-005h)
 
 `audio/paula.h` re-implements the model of pt2-clone's Paula emulator (period-based sample-and-hold, minBLEP band limiting, the Amiga 500 / 1200 RC filters and the LED

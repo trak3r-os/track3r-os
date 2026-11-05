@@ -305,6 +305,15 @@ ModuleBinder::State ModuleBinder::step(std::size_t budget) noexcept {
   return state_;
 }
 
+namespace {
+void append_inserts(audio::diag::Text& t, const ModuleReport& r) noexcept {
+  t.str("inserts: ").dec(r.inserts).str(", ").dec(r.inserts_bound).str(" bound, ").dec(r.inserts_skipped).str(" skipped");
+  if (r.inserts_master != 0u) {
+    t.str(", ").dec(r.inserts_master).str(" master unbound");
+  }
+}
+}  // namespace
+
 std::size_t describe_modules(const ModuleReport& r, char* out, std::size_t cap) noexcept {
   audio::diag::Text t(out, cap);
   t.str("modules: ").dec(r.instruments).str(" instruments, ").dec(r.loaded).str(" loaded");
@@ -316,11 +325,15 @@ std::size_t describe_modules(const ModuleReport& r, char* out, std::size_t cap) 
     t.str(", ").dec(r.abi_differs).str(" saved with another ABI");
   }
   if (r.inserts != 0u) {
-    t.str("; inserts: ").dec(r.inserts).str(", ").dec(r.inserts_bound).str(" bound, ").dec(r.inserts_skipped).str(" skipped");
-    if (r.inserts_master != 0u) {
-      t.str(", ").dec(r.inserts_master).str(" master (not bound yet)");
-    }
+    t.str("; ");
+    append_inserts(t, r);
   }
+  return t.size();
+}
+
+std::size_t describe_inserts(const ModuleReport& r, char* out, std::size_t cap) noexcept {
+  audio::diag::Text t(out, cap);
+  append_inserts(t, r);
   return t.size();
 }
 

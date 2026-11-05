@@ -13,7 +13,7 @@
 
 namespace o3os::platform::mk66::console {
 
-enum class Cmd : unsigned { Help, Version, Stage, Cpu, Mem, Crash, Usb, Log, Input, Mix, Mon, Peek, Poke, Audio, Rot, Sd, Ls, Load, Inst, Mod, Reset, Fw, Radio, Voices, Key, Pad, Enc, State, Shot, Leds, Bench, Cache, Ogexp, Power, Disk, Guard, Ins, Count };
+enum class Cmd : unsigned { Help, Version, Stage, Cpu, Mem, Crash, Usb, Log, Input, Mix, Mon, Peek, Poke, Audio, Rot, Sd, Ls, Load, Inst, Mod, Reset, Fw, Radio, Voices, Key, Pad, Enc, State, Shot, Leds, Bench, Cache, Ogexp, Power, Disk, Guard, Ins, Status, Count };
 
 struct CommandInfo {
   const char* name;
@@ -57,7 +57,8 @@ inline constexpr CommandInfo kCommandInfo[] = {
     {"power", "power [press|release|pin|off [dry]]: the Power switch and the shutdown"},
     {"disk", "disk [share [ro]|eject]: give the card to the computer, take it back"},
     {"guard", "guard [n <1..255>]: the main-loop guard's window (OS-MAINGUARD)"},
-    {"ins", "ins [list|cost|bind t s mod|unbind t s|bypass t s on|off] (OS-INSFX)"},
+    {"ins", "ins [list|bind t s mod|unbind t s|bypass t s on|off] (bind loads mod)"},
+    {"status", "status [blink|off]: the status LED heartbeat (not saved)"},
 };
 static_assert(sizeof(kCommandInfo) / sizeof(kCommandInfo[0]) == static_cast<std::size_t>(Cmd::Count), "one row per Cmd");
 

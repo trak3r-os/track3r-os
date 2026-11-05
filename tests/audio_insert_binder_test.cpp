@@ -327,7 +327,11 @@ TEST_CASE("insert binder: a missing module, one that is not an effect and a refu
   CHECK(refused);
   char summary[200];
   (void)app::describe_modules(rep, summary, sizeof summary);
-  CHECK(std::string(summary).find("inserts: 4, 1 bound, 3 skipped") != std::string::npos);
+  CHECK(std::string(summary).find("; inserts: 4, 1 bound, 3 skipped") != std::string::npos);
+  char own[200];
+  (void)app::describe_inserts(rep, own, sizeof own);  // the log's own line: a log line holds 55 characters
+  CHECK(std::string(own) == "inserts: 4, 1 bound, 3 skipped");
+  CHECK(std::string(own).size() <= 55u);
   r.retire_and_release();
 }
 

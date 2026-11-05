@@ -358,6 +358,7 @@ void ModuleUi::reset() noexcept {
   app_state_bytes_ = 0;
   inst_count_ = 0;
   app_count_ = 0;
+  eff_count_ = 0;
 }
 
 // ---- the slot's module -------------------------------------------------------------------------------------------------------------------
@@ -594,9 +595,19 @@ void add_sorted(CatalogEntry* out, unsigned& count, const char* stem, bool built
   ++count;
 }
 
+// The project's MODR entry `m` is named by an INSX record (an effect insert), not by an instrument.
+bool named_by_insert(const model::Project& project, unsigned m) noexcept {
+  for (unsigned i = 0; i < project.inserts().count; ++i) {
+    if (project.inserts().rec[i].module == m) {
+      return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace
 
-void ModuleUi::scan(const char* dir, unsigned kind, CatalogEntry* out, unsigned& count, const model::Project* project) noexcept {
+void ModuleUi::scan(const char* dir, unsigned kind, CatalogEntry* out, unsigned& count, const model::Project* project, Missing missing) noexcept {
   count = 0;
   if (card_ != nullptr && card_->mounted()) {
     hal::storage::DirHandle d;
@@ -631,8 +642,11 @@ void ModuleUi::scan(const char* dir, unsigned kind, CatalogEntry* out, unsigned&
   for (unsigned i = 0; i < count; ++i) {
     classify(out[i]);
   }
-  for (unsigned m = 0; project != nullptr && m < project->module_count() && count < kModuleCatalogMax; ++m) {  // what the project names and the card lacks: greyed
+  for (unsigned m = 0; project != nullptr && missing != Missing::None && m < project->module_count() && count < kModuleCatalogMax; ++m) {  // what the project names and the card lacks: greyed
     const char* name = project->module(m)->name;
+    if (named_by_insert(*project, m) != (missing == Missing::Inserted)) {
+      continue;  // an effect only in the effects' list, never in the instruments'
+    }
     bool have = false;
     for (unsigned i = 0; i < count; ++i) {
       have = have || same_ci(out[i].stem, name);
@@ -646,9 +660,9 @@ void ModuleUi::scan(const char* dir, unsigned kind, CatalogEntry* out, unsigned&
   }
 }
 
-void ModuleUi::scan_instruments(const model::Project* project) noexcept { scan("modules/instruments", O3M_KIND_INSTRUMENT, inst_, inst_count_, project); }
+void ModuleUi::scan_instruments(const model::Project* project) noexcept { scan("modules/instruments", O3M_KIND_INSTRUMENT, inst_, inst_count_, project, Missing::NotInserted); }
 
-void ModuleUi::scan_apps() noexcept { scan("modules/apps", O3M_KIND_APP, apps_, app_count_, nullptr); }
+void ModuleUi::scan_apps() noexcept { scan("modules/apps", O3M_KIND_APP, apps_, app_count_, nullptr, Missing::None); }
 
 // ---- the engine picker ---------------------------------------------------------------------------------------------------------------
 
@@ -747,6 +761,199 @@ ModuleUi::PickResult ModuleUi::pick(model::Editor& editor, unsigned slot, unsign
     return PickResult::BindFailed;  // the instrument stays (muted), as a project with a module that cannot start
   }
   return PickResult::Ok;
+}
+
+// ---- the effect inserts (OS-INSFX S4) ---------------------------------------------------------------------------------------------------------
+
+void ModuleUi::scan_effects(const model::Project* project) noexcept { scan("modules/effects", O3M_KIND_EFFECT, eff_, eff_count_, project, Missing::Inserted); }
+
+std::uint32_t ModuleUi::insert_cost_of(const char* stem) const noexcept {
+  const int idx = set_ != nullptr && inserts_ != nullptr ? set_->find(stem) : -1;
+  const module::LoadedModule* lm = idx >= 0 ? set_->at(static_cast<unsigned>(idx)) : nullptr;
+  std::uint32_t cost = 0;
+  for (unsigned i = 0; lm != nullptr && lm->entry != nullptr && i < audio::InsertHost::kInstances; ++i) {
+    audio::InsertHost::Info in{};
+    if (inserts_->info(i, in) && in.mod == lm->entry && in.cost > cost) {
+      cost = in.cost;
+    }
+  }
+  return cost;
+}
+
+bool ModuleUi::insert_cell(unsigned track, unsigned slot, InsertCell& out) const noexcept {
+  for (unsigned i = 0; inserts_ != nullptr && i < audio::InsertHost::kInstances; ++i) {
+    audio::InsertHost::Info in{};
+    if (inserts_->info(i, in) && in.where == track * 2u + slot && !in.leaving) {
+      out = {in.user_bypass, in.forced, in.cost};
+      return true;
+    }
+  }
+  return false;
+}
+
+const char* ModuleUi::insert_text(InsertResult r) noexcept {
+  switch (r) {
+    case InsertResult::Ok: return "INSERT SET";
+    case InsertResult::OnComputer: return "CARD ON COMPUTER";
+    case InsertResult::NoHost: return "NO SOUND IN THIS BUILD";
+    case InsertResult::BadWhere: return "NO SUCH INSERT";
+    case InsertResult::NoEntry: return "NO SUCH EFFECT";
+    case InsertResult::Missing: return "MODULE MISSING";
+    case InsertResult::Quarantined: return "MODULE QUARANTINED UNTIL REBOOT";
+    case InsertResult::LoadFailed: return "MODULE REFUSED";
+    case InsertResult::NotEffect: return "NOT AN EFFECT MODULE";
+    case InsertResult::NotRunnable: return "MODULE CANNOT RUN IN THIS BUILD";
+    case InsertResult::Full: return "INSERTS FULL";
+    case InsertResult::NoCpu: return "NO CPU";
+    case InsertResult::NoRoom: return "NO ROOM, RELOAD";
+    case InsertResult::Taken: return "DELETE THE INSERT FIRST";
+    case InsertResult::Leaving: return "INSERT LEAVING: TRY AGAIN";
+    case InsertResult::NoInsert: return "NO INSERT HERE";
+    case InsertResult::NotBound: return "MODULE MISSING: DELETE OR RELOAD";
+    case InsertResult::Refused: return "INSERT REFUSED";
+  }
+  return "";
+}
+
+namespace {
+
+// The insert the host holds at `where` that is on its way out (a Delete a moment ago): a bind there is refused until it has gone.
+bool insert_leaving(const audio::InsertHost& host, unsigned where) noexcept {
+  for (unsigned k = 0; k < audio::InsertHost::kInstances; ++k) {
+    audio::InsertHost::Info in{};
+    if (host.info(k, in) && in.where == where && in.leaving) {
+      return true;
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
+ModuleUi::InsertResult ModuleUi::insert_assign(model::Editor& editor, unsigned track, unsigned slot, const char* stem) noexcept {
+  if (set_ == nullptr || loader_ == nullptr || inserts_ == nullptr) {
+    return InsertResult::NoHost;
+  }
+  if (track >= audio::kTracks || slot >= 2u) {
+    return InsertResult::BadWhere;
+  }
+  if (card_on_computer_ && set_->find(stem) < 0) {
+    return InsertResult::OnComputer;
+  }
+  const unsigned where = track * 2u + slot;
+  const model::Project& project = editor.project();
+  if (inserts_->bound(where)) {
+    return insert_leaving(*inserts_, where) ? InsertResult::Leaving : InsertResult::Taken;
+  }
+  // Room first, so a refused bind leaves the project and the host as they were: a record of this (where, slot) is replaced, a new one needs a free place of the four. (A module this call loads stays in the set
+  // when a later check refuses it: ModuleSet has no per-module release, only clear(), which needs every instance retired. Latent and harmless: it is the card's module and the next bind finds it loaded.)
+  if (project.find_insert(track, slot) == nullptr && project.inserts().count >= model::kMaxInserts) {
+    return InsertResult::Full;
+  }
+  if (!load(stem)) {
+    switch (last_status_) {
+      case module::Status::NotFound: return InsertResult::Missing;  // (no card layer is as missing as no file)
+      case module::Status::NoMemory: return InsertResult::NoRoom;
+      case module::Status::Quarantined: return InsertResult::Quarantined;
+      default: return InsertResult::LoadFailed;
+    }
+  }
+  const int idx = set_->find(stem);
+  const module::LoadedModule* lm = idx >= 0 ? set_->at(static_cast<unsigned>(idx)) : nullptr;
+  if (lm == nullptr || lm->header.kind != O3M_KIND_EFFECT) {
+    return InsertResult::NotEffect;
+  }
+  if (lm->entry == nullptr) {
+    return InsertResult::NotRunnable;
+  }
+  const o3m_module& mod = *lm->entry;
+  int ref = -1;
+  for (unsigned i = 0; i < project.module_count(); ++i) {
+    if (std::strcmp(project.module(i)->name, stem) == 0) {
+      ref = static_cast<int>(i);
+    }
+  }
+  if (ref < 0 && project.module_count() >= model::kMaxModules) {
+    return InsertResult::NoRoom;
+  }
+  const std::uint16_t fault = module::fault_id(stem);
+  const module::ModuleSet::StateMark mark = set_->state_mark();
+  bool took = false;
+  audio::InsertHost::Bind b = inserts_->bind(where, mod, fault, nullptr, nullptr, 0, false);  // a free record that held this module keeps its state block
+  if (b == audio::InsertHost::Bind::NeedState) {
+    std::uint8_t* mem = nullptr;
+    std::uint32_t addr = 0;
+    if (!set_->take_state(mod.state_bytes, mem, addr)) {
+      return InsertResult::NoRoom;
+    }
+    took = true;
+    std::memset(mem, 0, mod.state_bytes);
+    b = inserts_->bind(where, mod, fault, mem, nullptr, 0, false);
+  }
+  if (b != audio::InsertHost::Bind::Ok) {
+    if (took) {
+      set_->state_rollback(mark);
+    }
+    switch (b) {
+      case audio::InsertHost::Bind::NoInstance: return InsertResult::Full;
+      case audio::InsertHost::Bind::NoCpu: return InsertResult::NoCpu;
+      case audio::InsertHost::Bind::WhereTaken: return InsertResult::Leaving;
+      default: return InsertResult::Refused;
+    }
+  }
+  // The project's record: the module in MODR (added when the project had not named it), the module's default parameters, bypass off.
+  if (ref < 0) {
+    if (editor.add_module(stem, std::strlen(stem), lm->header.abi_major, lm->header.abi_minor) != model::Status::Ok) {
+      (void)inserts_->unbind(where);
+      return InsertResult::NoRoom;
+    }
+    ref = static_cast<int>(project.module_count()) - 1;
+  }
+  model::InsertRecord rec;
+  std::memset(&rec, 0, sizeof rec);
+  rec.module = static_cast<std::uint8_t>(ref);
+  rec.where = static_cast<std::uint8_t>(track);
+  rec.slot = static_cast<std::uint8_t>(slot);
+  rec.n = static_cast<std::uint8_t>(mod.param_count < model::kInsertParamsMax ? mod.param_count : model::kInsertParamsMax);
+  for (unsigned i = 0; i < rec.n; ++i) {
+    rec.param[i] = mod.params[i].def;
+  }
+  if (editor.set_insert(rec) != model::Status::Ok) {
+    (void)inserts_->unbind(where);  // the project cannot hold it: it does not play either (a project that does not say it is not what is heard)
+    return InsertResult::Refused;
+  }
+  return InsertResult::Ok;
+}
+
+ModuleUi::InsertResult ModuleUi::insert_remove(model::Editor& editor, unsigned track, unsigned slot) noexcept {
+  if (track >= audio::kTracks || slot >= 2u) {
+    return InsertResult::BadWhere;
+  }
+  const bool was_bound = inserts_ != nullptr && inserts_->unbind(track * 2u + slot);
+  const bool recorded = editor.clear_insert(track, slot) == model::Status::Ok;  // also a record the load left unbound
+  return was_bound || recorded ? InsertResult::Ok : InsertResult::NoInsert;
+}
+
+ModuleUi::InsertResult ModuleUi::insert_bypass(model::Editor& editor, unsigned track, unsigned slot, bool on) noexcept {
+  if (track >= audio::kTracks || slot >= 2u) {
+    return InsertResult::BadWhere;
+  }
+  const model::InsertRecord* cur = editor.project().find_insert(track, slot);
+  if (inserts_ != nullptr) {
+    switch (inserts_->set_bypass(track * 2u + slot, on, false)) {
+      case audio::InsertHost::Toggle::Done: break;
+      case audio::InsertHost::Toggle::NoCpu: return InsertResult::NoCpu;
+      case audio::InsertHost::Toggle::NotBound: return cur != nullptr ? InsertResult::NotBound : InsertResult::NoInsert;
+    }
+  } else if (cur == nullptr) {
+    return InsertResult::NoInsert;
+  }
+  if (cur != nullptr) {  // the flag is the project's
+    model::InsertRecord next = *cur;
+    next.flags = on ? static_cast<std::uint8_t>(next.flags | model::kInsertFlagBypass) : static_cast<std::uint8_t>(next.flags & ~model::kInsertFlagBypass);
+    (void)editor.set_insert(next);
+  }
+  return InsertResult::Ok;
 }
 
 // ---- apps ------------------------------------------------------------------------------------------------------------------------------------

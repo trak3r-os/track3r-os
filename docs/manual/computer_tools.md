@@ -57,7 +57,7 @@ The tool sends each command, waits for the prompt `o3> ` and prints the reply. I
 The exit status tells you what happened: `0` means every reply was complete, `1` means a usage or port error, and `2` means a reply did not end with the prompt before the timeout.
 
 ### The commands you can use
-<!-- sync: src=platform/mk66/usb/src/console.cpp,platform/mk66/usb/include/o3os/platform/mk66/usb/command_table.h -->
+<!-- sync: src=platform/mk66/usb/src/console.cpp,platform/mk66/usb/include/o3os/platform/mk66/usb/command_table.h,app/src/module_ui.cpp,platform/mk66/src/app_main.cpp spec=docs/specs/OS-INSFX.md qa=QA-GLB-161,QA-GLB-162,QA-GLB-163,QA-GLB-164,QA-GLB-165,QA-MIX-072 -->
 
 The console has more commands than this table. The table lists the ones that are useful to a player or a tester. Each line is the command as you type it.
 
@@ -77,8 +77,10 @@ The console has more commands than this table. The table lists the ones that are
 | `ls` | a folder of the card, read only | for example `ls Projects` |
 | `fw` | the firmware files on the card, and the card's volume serial | also `fw put`, `fw rm`, `fw arm` and `fw update`. Use the tool for these, see below |
 | `radio` | the FM radio state, its last failure, its registers and pins | `radio retry` tries again |
+| `ins` | the inserts of the project: the totals of the insert stage, then one line for each bound insert with its track, slot, module, `on` or `bypassed`, and its cost | `ins bind <track> <slot> <module>` puts an effect on a track and loads the module from the card when it is not loaded yet; `ins unbind <track> <slot>` removes it; `ins bypass <track> <slot> on` or `off` bypasses it. A refusal says why and changes nothing: **DELETE THE INSERT FIRST** (the slot is taken), **NO INSERT HERE** (the slot is empty), **NOT AN EFFECT MODULE**, **MODULE MISSING**, **INSERTS FULL**. These are the INSERTS page's messages, see [Mixer](mixer.md) <!-- QA-GLB-161, QA-GLB-162, QA-GLB-163, QA-GLB-164, QA-GLB-165, QA-MIX-072 --> |
 | `voices` | the sampler voices in use, the peak since boot, the steals and `advanced` | `advanced` counts the short stretches (one a block, about 690 a second for each) in which a voice on a muted track was moved along without being rendered. It stays at 0 while no track is muted. |
 | `rot` | the display orientation, `rot 0` to `rot 7` | not saved |
+| `status` | the status LED heartbeat: `status blink` or `status off` | not saved: every boot starts with blink; a fault code still blinks with off |
 | `state` | the app state as one `key=value` line | for example the screen, the cursor and play |
 | `shot` | the screen, as framed data | the tool `--shot` option asks for it |
 | `leds` | the pad LED levels, on one line | |

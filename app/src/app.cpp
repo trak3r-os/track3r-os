@@ -594,6 +594,11 @@ void App::poll_play_position() noexcept {
   const audio::PlayPosition::Value v = play_position_->read();
   const audio::PlayPosition::Value old = state_.play;
   state_.play = v;
+  if (recorder() != nullptr && model_.project != nullptr) {  // OS-RECCOUNT: the count-in phase of an armed take advances on the published position (and may arm the take)
+    unsigned len = model_.project->pattern_length(v.pattern);
+    len = len != 0u ? len : model_.project->default_pattern_length();  // (the sequencer's rule for a missing pattern)
+    recorder()->count_in_poll(v.pattern, v.step, len, v.playing);
+  }
   poll_count_in(v, old.count_in);
   // The badge (PLAY / STOP, and what the Play key toggles from) is the Play key's last accepted request, so that it answers at once; the sequencer then follows a block later. It also follows the
   // sequencer where the sequencer decides on its own: an external MIDI Start, Continue or Stop under a clock slave (OS-MIDISLV), the end of a song that does not loop. Only the sequencer's CHANGES
@@ -674,15 +679,21 @@ void App::poll_play_position() noexcept {
 // OS-METROALIGN: the same visuals for the wait of a take armed on a RUNNING transport (no count-in is published then): the steps still to wait come from the position's step and the pattern's length
 // (wait_steps_left), shown when at least one beat is left when the take is armed, and over when the take starts or the transport stops. `old_count_in` is the previous pass's: the pass in which a count-in ends
 // still has the recorder's last word (a take that waits), whose countdown would be a bar long, so it is skipped. The take itself is not touched: only what is shown.
+// OS-RECCOUNT: the same visuals for the take's own count-in phase (the Record card's COUNT-IN row): the beats left of the whole N-bar wait come from the recorder (count_in_steps_left), and the countdown is
+// over when the take starts (the phase arms it during the last count-in bar, and the last bar counts down as a plain wait) or when the transport stops.
 void App::poll_count_in(const audio::PlayPosition::Value& v, unsigned old_count_in) noexcept {
   ViewState::CountIn& c = state_.count_in;
   unsigned beat = v.playing ? (static_cast<unsigned>(v.count_in) + 3u) / 4u : 0u;
   if (v.playing && v.count_in == 0u && old_count_in == 0u && recorder() != nullptr && model_.project != nullptr) {
-    const audio::RecTap::Align wait = recorder()->wait_align();
-    if (wait != audio::RecTap::Align::Free) {
-      unsigned len = model_.project->pattern_length(v.pattern);
-      len = len != 0u ? len : model_.project->default_pattern_length();  // (the sequencer's rule for a missing pattern)
-      beat = wait_beat(wait_steps_left(wait, v.step, len), c.beat != 0u);
+    unsigned len = model_.project->pattern_length(v.pattern);
+    len = len != 0u ? len : model_.project->default_pattern_length();  // (the sequencer's rule for a missing pattern)
+    if (recorder()->count_in_waiting()) {  // OS-RECCOUNT: the take's own count-in phase: the beats of the whole N-bar wait left, not only the next bar's
+      beat = wait_beat(recorder()->count_in_steps_left(v.step, len), c.beat != 0u);
+    } else {
+      const audio::RecTap::Align wait = recorder()->wait_align();
+      if (wait != audio::RecTap::Align::Free) {
+        beat = wait_beat(wait_steps_left(wait, v.step, len), c.beat != 0u);
+      }
     }
   }
   if (beat == c.beat) {
@@ -2540,6 +2551,10 @@ void App::poll_recorder() noexcept {
   }
   const bool in_view = state_.screen == ScreenId::Record;
   if (recorder()->poll(clock_.uptime_ms(), in_view, rec_mode_of_page(state_.page[screen_index(ScreenId::Record)]), state_.play.playing, preview_ == nullptr || preview_->live_idle()) && in_view) {
+    dirty_ = true;
+  }
+  if (recorder()->count_in_arm_failed()) {  // OS-RECCOUNT: the count-in could not arm the take within its bounded retries: it was given up, say so once
+    (void)state_.notify.post(core::Severity::Warn, "THE COUNT-IN DID NOT START", "record", ViewState::kMessageMs);
     dirty_ = true;
   }
   if (recorder()->save_timed_out()) {  // the render did not acknowledge within kSaveWaitMs: the wait ends, nothing was saved, the loop stays in review

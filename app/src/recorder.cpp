@@ -350,31 +350,38 @@ bool Recorder::poll(std::uint64_t now_ms, bool in_view, RecMode mode, bool playi
   }
   if (state_ == State::Armed || state_ == State::Recording) {
     RecTap& tap = w_.graph->rec();
-    if (!w_.bank->take_held()) {
-      tap.disarm();  // the arena was cleared under the take: end it (the render stops at the next block); finish() sees the hold gone
-    }
-    const RecTap::State ts = tap.state();
-    if (ts == RecTap::State::Done) {
-      finish();
+    if (count_in_bars_ != 0u) {
+      // OS-RECCOUNT: the count-in phase: the tap is not armed yet, so there is no tap state to map; only the arena can take the take away (a project load under the count-in).
+      if (!w_.bank->take_held()) {
+        give_up_count_in(true);
+      }
     } else {
-      const State next = (ts == RecTap::State::Waiting || ts == RecTap::State::Listening) ? State::Armed : State::Recording;
-      if (next != state_) {
-        state_ = next;
-        touch();
+      if (!w_.bank->take_held()) {
+        tap.disarm();  // the arena was cleared under the take: end it (the render stops at the next block); finish() sees the hold gone
       }
-      if (ts == RecTap::State::Armed && wait_align_ == RecTap::Align::Level && w_.bank->take_held()) {
-        floor_ = tap.settle_ring();  // OS-SREC-LEVEL: the ring is put in time order before the overview reads it (the render writes behind it, never in it); idempotent
-      }
-      // Fed only for a snapshot of Armed (the tap's state of a take that records): after a Waiting or Listening snapshot the trigger may land before frames() is read, and frames() is then
-      // the unordered pre-roll ring, which the overview (not reset before finish()) must not see. The next poll sees Armed, with the ring settled above.
-      if (take_ != nullptr && ts == RecTap::State::Armed) {
-        const std::uint32_t written = tap.frames();
-        ov_.feed(take_, written, kFeedBudget);
-        frames_ = written;
-        const std::uint32_t t = tenths(written);
-        if (t != shown_tenths_) {
-          shown_tenths_ = t;
+      const RecTap::State ts = tap.state();
+      if (ts == RecTap::State::Done) {
+        finish();
+      } else {
+        const State next = (ts == RecTap::State::Waiting || ts == RecTap::State::Listening) ? State::Armed : State::Recording;
+        if (next != state_) {
+          state_ = next;
           touch();
+        }
+        if (ts == RecTap::State::Armed && wait_align_ == RecTap::Align::Level && w_.bank->take_held()) {
+          floor_ = tap.settle_ring();  // OS-SREC-LEVEL: the ring is put in time order before the overview reads it (the render writes behind it, never in it); idempotent
+        }
+        // Fed only for a snapshot of Armed (the tap's state of a take that records): after a Waiting or Listening snapshot the trigger may land before frames() is read, and frames() is then
+        // the unordered pre-roll ring, which the overview (not reset before finish()) must not see. The next poll sees Armed, with the ring settled above.
+        if (take_ != nullptr && ts == RecTap::State::Armed) {
+          const std::uint32_t written = tap.frames();
+          ov_.feed(take_, written, kFeedBudget);
+          frames_ = written;
+          const std::uint32_t t = tenths(written);
+          if (t != shown_tenths_) {
+            shown_tenths_ = t;
+            touch();
+          }
         }
       }
     }
@@ -403,6 +410,14 @@ bool Recorder::poll(std::uint64_t now_ms, bool in_view, RecMode mode, bool playi
 // ---- Control ----------------------------------------------------------------------------------------------------------------------------
 
 Recorder::ArmResult Recorder::arm(bool playing, std::uint32_t tempo_x100) noexcept {
+  return arm_impl(playing, tempo_x100, 0u, 0u, 0u, false);
+}
+
+Recorder::ArmResult Recorder::arm_count_in(bool playing, unsigned count_in, unsigned step, unsigned pattern, bool from_stop, std::uint32_t tempo_x100) noexcept {
+  return arm_impl(playing, tempo_x100, count_in, step, pattern, from_stop);
+}
+
+Recorder::ArmResult Recorder::arm_impl(bool playing, std::uint32_t tempo_x100, unsigned count_in, unsigned step, unsigned pattern, bool from_stop) noexcept {
   if (!ready() || !owned_) {
     return ArmResult::NotReady;
   }
@@ -458,6 +473,40 @@ Recorder::ArmResult Recorder::arm(bool playing, std::uint32_t tempo_x100) noexce
     w_.graph->loop().set_muted(false);
     w_.graph->loop().capture(auto_steps);
   }
+  if (count_in != 0u) {
+    // OS-RECCOUNT: the count-in phase of a bar-aligned take. The arena is held now (the take will use it), but the tap is NOT armed: count_in_poll() arms it on the main loop during the
+    // LAST count-in bar, with Align::Bar, so that it picks the boundary after the N bars. From stop the transport is started by the caller (plain play), so `playing` is true here and the
+    // phase's first boundary is the transport's start at step 0.
+    loop_take_ = looping;
+    loop_bars_ = looping ? cfg.loop_bars : 0u;
+    loop_tempo_ = looping ? tempo_x100 : 0u;
+    loop_mode_ = mode_;
+    loop_review_ = false;
+    take_ = pcm;
+    capacity_ = cap;
+    frames_ = 0;
+    shown_tenths_ = 0;
+    trim_start_ = 0;
+    floor_ = 0;
+    trim_end_ = 0;
+    stop_pending_ = false;
+    auto_end_ = auto_steps != 0u;
+    ov_.reset();
+    wait_align_ = audio::RecTap::Align::Bar;  // the take waits for a bar (the phase counts the bars; the strip's countdown reads count_in_steps_left)
+    count_in_bars_ = static_cast<std::uint8_t>(count_in > 0xFFu ? 0xFFu : count_in);
+    count_in_seen_ = 0;
+    ci_prev_ = from_stop ? kCiNone : step;
+    ci_len_ = 0;
+    ci_pattern_ = static_cast<std::uint8_t>(pattern);  // the pattern at F1: a later change of it is a switch (counted), not this one
+    ci_to_boundary_ = 0xFFFFu;
+    ci_arm_tries_ = 0;
+    ci_arm_failed_ = false;
+    ci_from_stop_ = from_stop;
+    state_ = State::Armed;
+    note_ = Note::None;
+    touch();
+    return ArmResult::Ok;
+  }
   bool armed = false;
   if (align == audio::RecTap::Align::Level) {
     // OS-SREC-LEVEL: the pre-roll in frames (ms x rate); the region must hold the ring and a second of take behind it, else the arena is too full for a take that means anything.
@@ -502,8 +551,106 @@ Recorder::ArmResult Recorder::arm(bool playing, std::uint32_t tempo_x100) noexce
   return ArmResult::Ok;
 }
 
+// OS-RECCOUNT: one pass of the count-in phase of the armed take, from the published position: `pattern` and `step` of the pattern `pattern_len` steps long now running (pattern_len 0:
+// no position, the phase does not advance), `playing` the transport. Main loop only. The bar boundaries that have come since the phase began are counted (C_0, C_1, ...; the take starts
+// at C_N, N = count_in_bars_), and during the LAST count-in bar the tap is armed with Align::Bar, so that it picks C_N. A bar lasts at least 300 ms at the top tempo (800 BPM) and a pass is
+// 16 ms, so the pass that sees the last count-in bar begin has a whole bar of margin.
+void Recorder::count_in_poll(unsigned pattern, unsigned step, unsigned pattern_len, bool playing) noexcept {
+  if (state_ != State::Armed || count_in_bars_ == 0u || w_.graph == nullptr || pattern_len == 0u) {
+    return;
+  }
+  if (!playing) {
+    ci_prev_ = kCiNone;  // (the stop gives the take up in poll(); the reference is reset in case the phase survives it, which it does not)
+    return;
+  }
+  if (ci_prev_ == kCiNone) {
+    if (ci_from_stop_) {
+      count_in_seen_ = static_cast<std::uint8_t>(step / kStepsPerBar + 1u);  // the transport started at step 0: that boundary is C_0
+      ci_from_stop_ = false;
+    }
+    ci_prev_ = step;
+    ci_len_ = pattern_len;
+    ci_pattern_ = static_cast<std::uint8_t>(pattern);
+  } else if (pattern != ci_pattern_) {
+    // Another pattern is running (a Song slot change, a pattern switch): its step 0 is a bar boundary the tap accepts and it was never counted, so count it now, with every
+    // boundary of the new pattern the position has already passed (on the device the position shows the new pattern only from the block its step 0 fired in).
+    count_in_seen_ = static_cast<std::uint8_t>(count_in_seen_ + step / kStepsPerBar + 1u);
+    ci_prev_ = step;
+    ci_len_ = pattern_len;
+    ci_pattern_ = static_cast<std::uint8_t>(pattern);
+  } else if (pattern_len == ci_len_) {
+    if (step > ci_prev_) {
+      count_in_seen_ = static_cast<std::uint8_t>(count_in_seen_ + (step / kStepsPerBar - ci_prev_ / kStepsPerBar));
+    } else if (step < ci_prev_) {  // the pattern wrapped: the boundaries in (ci_prev_, len-1] and in [0, step]
+      count_in_seen_ = static_cast<std::uint8_t>(count_in_seen_ + ((ci_len_ - 1u) / kStepsPerBar - ci_prev_ / kStepsPerBar) + (step / kStepsPerBar + 1u));
+    }
+    ci_prev_ = step;
+  } else {  // the same pattern, another length (edited under the count-in): the reference moves, nothing is counted
+    ci_prev_ = step;
+    ci_len_ = pattern_len;
+  }
+  const unsigned to_boundary = steps_to_bar_boundary(step, pattern_len);
+  // Arm as soon as the count has reached N (the last count-in bar is running). The "not within the last step before the boundary" guard applies only when this pass is what moved
+  // into that last step (a delayed pass: the boundary may be imminent and the arm could reach the render after its Step event); a last count-in bar of a single step (a 17/33/49-step
+  // pattern) would never pass that guard, so once the count is reached the take arms whatever the distance.
+  const bool into_last_step = to_boundary < 2u && ci_to_boundary_ >= 2u;
+  ci_to_boundary_ = to_boundary;
+  if (count_in_seen_ >= count_in_bars_ && !into_last_step) {
+    // (seen > N: whole boundaries passed within one pass — impossible at the top tempo, a bar is >= 300 ms against a 16 ms pass — or the guard skipped a pass; arm at once anyway,
+    // the tap then picks the next boundary, which is the best that is left.)
+    const std::uint32_t auto_steps = loop_take_ ? kStepsPerBar * loop_bars_ : stop_auto_steps(cfg.stop, cfg.stop_bars, true);
+    if (w_.graph->rec().arm(take_, capacity_, 1, audio::RecTap::Align::Bar, auto_steps)) {
+      count_in_bars_ = 0;  // the phase is over: from here on the take is a plain armed bar-aligned one (poll() maps the tap's Waiting, the strip counts the last bar as a plain wait)
+      ci_arm_tries_ = 0;
+      touch();
+    } else if (++ci_arm_tries_ >= kCiArmMaxTries) {
+      // The tap refuses the arm (it is not Idle): retry a bounded number of passes, then give the count-in up as a Stop during it does, and let the App say so once.
+      ci_arm_failed_ = true;
+      give_up_count_in(false);
+    }
+  }
+}
+
+// OS-RECCOUNT: the steps left until the boundary the count-in take starts at, from `step` of a pattern `pattern_len` steps long: to the next boundary, plus a bar per count-in bar still to
+// come (the strip's countdown, as wait_steps_left is for the plain wait).
+unsigned Recorder::count_in_steps_left(unsigned step, unsigned pattern_len) const noexcept {
+  const unsigned seen = count_in_seen_ < count_in_bars_ ? count_in_seen_ : count_in_bars_;
+  return steps_to_bar_boundary(step, pattern_len) + kStepsPerBar * (count_in_bars_ - seen);
+}
+
+// OS-RECCOUNT: the count-in phase ends without a take (a Stop or F1 during it, or the arena cleared under it): the tap was never armed, so there is nothing for the render to finish. The
+// hold goes back at once and the state is Idle with no take (Note::Lost when a project load took the arena).
+void Recorder::give_up_count_in(bool lost) noexcept {
+  if (w_.graph != nullptr) {
+    w_.graph->rec().disarm();  // (harmless on an Idle tap: arm_as() resets the flag)
+    if (loop_take_) {
+      w_.graph->loop().release();
+    }
+  }
+  count_in_bars_ = 0;
+  count_in_seen_ = 0;
+  ci_prev_ = kCiNone;
+  ci_len_ = 0;
+  ci_pattern_ = 0;
+  ci_to_boundary_ = 0xFFFFu;
+  ci_arm_tries_ = 0;
+  // (ci_arm_failed_ is not cleared here: the App reads it once to say the count-in did not start)
+  ci_from_stop_ = false;
+  loop_take_ = false;
+  w_.bank->take_end(0);
+  stop_pending_ = false;
+  state_ = State::Idle;
+  note_ = lost ? Note::Lost : Note::None;
+  give_up_take();
+  touch();
+}
+
 void Recorder::stop() noexcept {
   if ((state_ == State::Armed || state_ == State::Recording) && w_.graph != nullptr) {
+    if (count_in_bars_ != 0u) {  // OS-RECCOUNT: the count-in phase: the tap is not armed yet, the take is given up at once (as a waiting take is, at the next block)
+      give_up_count_in(false);
+      return;
+    }
     audio::RecTap& tap = w_.graph->rec();
     const audio::RecTap::Align boundary = stop_boundary(effective_stop(cfg.stop, playing_));
     if (loop_take_ || boundary == audio::RecTap::Align::Free || stop_pending_ || tap.state() != audio::RecTap::State::Armed) {  // (a loop take's early end is a cancel, at the next block)
@@ -618,6 +765,16 @@ void Recorder::step_loop(int detents) noexcept {
   const int next = clamp_int(static_cast<int>(cfg.loop_bars) + detents, 0, static_cast<int>(kRecMaxBars));
   if (next != static_cast<int>(cfg.loop_bars)) {
     cfg.loop_bars = static_cast<std::uint8_t>(next);
+    touch();
+  }
+}
+
+// OS-RECCOUNT: the COUNT-IN row steps through OFF, 1 BAR, 2 BARS, 4 BARS (no wrap at either end; a detent is one choice, however many it turns).
+void Recorder::step_count_in(int detents) noexcept {
+  const int next = clamp_int(static_cast<int>(rec_count_in_index(cfg.count_in)) + detents, 0, static_cast<int>(kRecCountInChoices) - 1);
+  const std::uint8_t v = kRecCountInBars[static_cast<unsigned>(next)];
+  if (v != cfg.count_in) {
+    cfg.count_in = v;
     touch();
   }
 }

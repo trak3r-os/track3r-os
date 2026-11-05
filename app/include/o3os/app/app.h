@@ -287,6 +287,10 @@ class App {
   void set_disk_state(ViewState::DiskView::Phase phase, bool claims_busy, bool audio, bool writable) noexcept;
   ViewState::DiskView::Request take_disk_request() noexcept;
   bool disk_read_only() const noexcept { return state_.disk.read_only; }
+  // OS-STATUSLED: the Config > DISPLAY STATUS LED row's session choice (RAM only, not saved: BLINK at every boot). The platform copies it
+  // to its LED flag each pass (appimg::pass, app_main.cpp) and drives the status LED with it; a fault code still shows with OFF. Main loop only.
+  bool status_led_blink() const noexcept { return state_.status_led_blink; }
+  void set_status_led_blink(bool on) noexcept { state_.status_led_blink = on; }
   // OS-USBDISK F3: a job of the app is running (the File / Sample load listing, the audition's reader, an import, an export): it may read the card on its next pass, so the card must
   // not be handed to a computer meanwhile. Conservative: any running job of the runner counts.
   bool card_jobs_busy() const noexcept { return session_.jobs.running() != 0u; }
