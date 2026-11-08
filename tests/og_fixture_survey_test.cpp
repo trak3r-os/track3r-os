@@ -56,6 +56,7 @@ struct Counts {
   unsigned mti_ok = 0, pti_ok = 0, instruments_skipped = 0, instruments_err = 0;
   unsigned pamd_ok = 0, pamd_err = 0;
   unsigned sanitised = 0, crc_warn = 0, unverified = 0;
+  unsigned fx_above_42 = 0;  // OS-CEFXIDS: raw OG FX type bytes above 42, the ids the S0 map now reads as tracker-ce FX (expected 0 on fixtures-1)
   unsigned pattern_tracks_identical = 0, bitmask_agree = 0, bitmask_total = 0;
   unsigned projects_stable = 0;
   unsigned groups_identical = 0, settings_chunks = 0, pamd_identical = 0;
@@ -92,10 +93,11 @@ bool pattern_header_byte(std::size_t i) { return i >= 4 && i < 28; }
 
 // Offsets of a 392-byte instrument that an export may change (docs/formats/og.md): header, padding, the live
 // pointer, the frame count, the wavetable window number, reserved bytes, junk behind the name's NUL, the
-// overdrive and bit depth of versions that had none, and the CRC.
+// overdrive and bit depth of versions that had none, and the CRC. (279 is the play-thru flag since OS-CEPLAYTHRU P1:
+// the fixtures hold 0 there, measured, and the export writes the model's 0.)
 bool instrument_free_byte(std::size_t i) {
   return (i >= 4 && i < 16) || (i >= 17 && i < 20) || (i >= 21 && i < 53) || (i >= 53 && i < 76) || i == 77 ||
-         (i >= 86 && i < 88) || i == 273 || i == 279 || (i >= 385 && i < 388) || i >= 388;
+         (i >= 86 && i < 88) || i == 273 || (i >= 385 && i < 388) || i >= 388;
 }
 
 }  // namespace
@@ -160,6 +162,19 @@ TEST_CASE("og fixtures: every project of the fixture card imports, exports and i
       (pattern_reader.import_report().tracks == 8 ? c.patterns8 : c.patterns12) += 1;
       c.sanitised += pattern_reader.import_report().sanitised;
       CHECK(!pattern_reader.import_report().unverified_version);
+      {  // the FX type bytes of the raw file, before any map: the survey that says no fixture holds an id above 42
+        const Bytes& pf = pattern_files.back();
+        if (pf.size() == 6184 || pf.size() == 9260) {
+          const unsigned tracks = pf.size() == 6184 ? 8u : 12u;
+          for (unsigned t = 0; t < tracks; ++t) {
+            for (unsigned s = 0; s < 128; ++s) {
+              const std::size_t at = 28 + 769u * t + 1 + 6u * s;
+              if (pf[at + 2] > 42) ++c.fx_above_42;
+              if (pf[at + 4] > 42) ++c.fx_above_42;
+            }
+          }
+        }
+      }
     }
 
     std::vector<Item> mtis = list(group / "instruments", og_ns::FileClass::Mti);
@@ -278,6 +293,7 @@ TEST_CASE("og fixtures: every project of the fixture card imports, exports and i
         }
       }
       CHECK(tw.export_report().drops.engine_fx == 0);
+      CHECK(tw.export_report().drops.ce_fx == 0);  // OS-CEFXIDS: no fixture pattern exports a tracker-ce FX
       CHECK(tw.export_report().drops.volume_dropped == 0);
     }
 
@@ -358,10 +374,10 @@ TEST_CASE("og fixtures: every project of the fixture card imports, exports and i
 
   std::printf("og fixture survey: %u project folders; projects ok %u err %u; patterns ok %u err %u (8-track %u, 12-track %u); "
               "instruments .mti ok %u, .pti ok %u, skipped %u, err %u; pattern names ok %u err %u; sanitised %u; "
-              "crc warnings %u; unverified %u\n",
+              "crc warnings %u; unverified %u; raw FX ids above 42 %u\n",
               c.groups, c.projects_ok, c.projects_err, c.patterns_ok, c.patterns_err, c.patterns8, c.patterns12,
               c.mti_ok, c.pti_ok, c.instruments_skipped, c.instruments_err, c.pamd_ok, c.pamd_err, c.sanitised,
-              c.crc_warn, c.unverified);
+              c.crc_warn, c.unverified, c.fx_above_42);
   std::printf("og fixture survey: round trip: pattern track blocks identical %u of %u; usage bitmask agrees %u of %u; "
               "instruments identical but for the header bytes %u of %u (%zu distinct byte offsets differ in some file); projects stable %u of %u\n",
               c.pattern_tracks_identical, c.patterns_ok, c.bitmask_agree, c.bitmask_total, instrument_identical,
@@ -386,6 +402,7 @@ TEST_CASE("og fixtures: every project of the fixture card imports, exports and i
   CHECK(c.bitmask_agree == c.bitmask_total);
   CHECK(c.projects_stable == c.projects_ok);
   CHECK(c.projects_ok == c.groups);
+  CHECK(c.fx_above_42 == 0);  // OS-CEFXIDS risk 6: no fixture pattern holds an OG FX id above 42, so nothing in fixtures-1 changes meaning
 }
 
 TEST_CASE("og fixtures: values of the PAR-006 pinned table") {

@@ -29,6 +29,9 @@ class PlayPosition {
     std::uint32_t tempo_x100 = 0;   // BPM x 100 in force; 0 before the first publish
     std::uint16_t queued = kNoOrder;  // the song position a live jump waits for (Sequencer::queue_jump), kNoOrder for none (OS-SONG1)
     std::uint8_t count_in = 0;        // OS-METRO: the steps of the count-in still to run, the one running included (0: not counting in); `step` stays on row 1 (0) meanwhile (OS-COUNTIN: the count-in counts on row 1, the pattern is silent)
+    std::uint16_t loop_first = kNoOrder;  // OS-SONG3 S7: the slots the song loops (Sequencer::set_loop), both kNoOrder for none; loop_first <= loop_last
+    std::uint16_t loop_last = kNoOrder;
+    bool looping() const noexcept { return loop_first != kNoOrder; }
   };
 
   // Render context only (the one writer). `order` >= 255 is "none" (the order list has at most 255 positions, 0..254). `ustep` is held at 47.
@@ -42,6 +45,11 @@ class PlayPosition {
 
   // The live jump that waits, one word of its own (the Song screen blinks the slot; it is never matched against the step). Render context only.
   void publish_queued(std::uint32_t order) noexcept { queued_.store(order < 0xFFFFu ? order : 0xFFFFu, std::memory_order_relaxed); }
+
+  // OS-SONG3 S7: the looped range of slots, one halfword (first | last << 8; 0xFFFF none, which no range is: a position is 0..254). Render context only (the one writer); it fills the padding of the class.
+  void publish_loop(std::uint32_t first, std::uint32_t last) noexcept {
+    loop_.store(first < 0xFFu && last < 0xFFu ? static_cast<std::uint16_t>(first | (last << 8)) : std::uint16_t{0xFFFFu}, std::memory_order_relaxed);
+  }
 
   // The count-in (OS-METRO), one word of its own like the live jump: the steps left, the running one included, 0 when the transport is not counting in. Render context only.
   void publish_count_in(std::uint32_t steps) noexcept { count_in_.store(steps < 0xFFu ? steps : 0xFFu, std::memory_order_relaxed); }
@@ -79,6 +87,11 @@ class PlayPosition {
     v.tempo_x100 = tempo_.load(std::memory_order_relaxed);
     v.queued = static_cast<std::uint16_t>(queued_.load(std::memory_order_relaxed));
     v.count_in = static_cast<std::uint8_t>(count_in_.load(std::memory_order_relaxed));
+    const std::uint16_t lp = loop_.load(std::memory_order_relaxed);
+    if (lp != 0xFFFFu) {
+      v.loop_first = lp & 0xFFu;
+      v.loop_last = lp >> 8;
+    }
     return v;
   }
 
@@ -95,6 +108,7 @@ class PlayPosition {
   std::atomic<std::uint32_t> count_in_{0};
   std::atomic<std::uint16_t> tracks_[kTrackWords] = {};  // E-PERF-07: override | pending << 8 (render context writes, main loop reads)
   std::atomic<std::uint16_t> track_wait_{0};             // bit t: track t waits for its loop end
+  std::atomic<std::uint16_t> loop_{0xFFFFu};             // OS-SONG3 S7: first | last << 8, 0xFFFF none
 };
 
 }  // namespace o3os::audio

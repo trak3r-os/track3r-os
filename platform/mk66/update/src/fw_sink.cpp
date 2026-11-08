@@ -66,7 +66,7 @@ fwp::CheckStatus FwServiceSink::poll_check() noexcept {
   s.image = u.image;
   s.crc = u.crc;
   s.offset = u.offset;
-  s.offset_known = u.fault != Fault::NotPadded;  // the end of the HEX stream is a byte count, not an image address
+  s.offset_known = u.fault != Fault::NotPadded && u.fault != Fault::LastSector;  // the end of the HEX stream is a byte count, not an image address
   s.fault = s.state == fwp::CheckStatus::State::Failed ? fault_name(u.fault) : nullptr;
   return s;
 }

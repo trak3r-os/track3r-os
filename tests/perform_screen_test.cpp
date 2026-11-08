@@ -836,3 +836,125 @@ TEST_CASE("perform keys E-PERF-07: Shift+F7 queues the next song pattern, F6 the
   CHECK(rig.log.sent.size() == before);
   CHECK(rig.app->failed_frames() == 0);
 }
+
+// ---- OS-NOREMIX (2026-11-08): the REMIX page of OS-PERFREMIX R2/R3 is gone. What stays: Q5 a (leaving Perform sends the tracks that are not on the song back, E-PERF-07's overrides too) and
+// H9 (a pad that the DJ page took never reaches the bank). The sequencer is not in these tests: the published words are set by hand. ----
+
+namespace {
+
+constexpr std::uint32_t kTrackWait = 0x10000u;
+
+std::vector<Command> sent_of(const Rig& rig, Command::Kind kind) {
+  std::vector<Command> out;
+  for (const Command& c : rig.log.sent) {
+    if (c.kind == kind) {
+      out.push_back(c);
+    }
+  }
+  return out;
+}
+
+// Patterns 1..3 exist and the song plays its first; returns that pattern.
+unsigned play_song(Rig& rig, audio::PlayPosition& position) {
+  (void)test::arena(1).project.create_pattern(2, 16);
+  (void)test::arena(1).project.create_pattern(3, 16);
+  const unsigned song = rig.project().order(0);
+  position.publish(true, song, 0, 12000, 0);
+  rig.pass(1);
+  return song;
+}
+
+}  // namespace
+
+TEST_CASE("perform: leaving Perform for a screen but Master or Song sends the tracks that are not on the song back at once (Q5 a)") {
+  Rig rig;
+  audio::PlayPosition position;
+  rig.app->attach_play_position(&position);
+  const unsigned song = play_song(rig, position);
+  NEED(song == 1u);
+  position.publish_track_pattern(2, 3);                        // track 3 plays 3: an E-PERF-07 override
+  position.publish_track_pattern(5, kTrackWait | (2u << 8));  // track 6 waits for 2
+  rig.pass(1);
+  rig.log.sent.clear();
+  rig.tap(Button::Master);  // the Mixer and Song keep the mode
+  CHECK(rig.app->state().screen == ScreenId::Mixer);
+  rig.tap(Button::Song);
+  CHECK(rig.app->state().screen == ScreenId::Song);
+  CHECK(sent_of(rig, Command::Kind::SetTrackPattern).empty());
+  rig.tap(Button::Pattern);  // anywhere else ends it, in the pass of the change
+  CHECK(rig.app->state().screen == ScreenId::Pattern);
+  const std::vector<Command> c = sent_of(rig, Command::Kind::SetTrackPattern);
+  NEED(c.size() == 1u);
+  CHECK(c[0].b == 0u);
+  CHECK(c[0].c == ((1u << 2) | (1u << 5)));
+  // nothing off the song, or not playing: nothing is sent
+  position.publish_track_pattern(2, 0);
+  position.publish_track_pattern(5, 0);
+  rig.pass(1);
+  rig.log.sent.clear();
+  rig.tap(Button::Performance);
+  rig.tap(Button::Pattern);
+  CHECK(sent_of(rig, Command::Kind::SetTrackPattern).empty());
+  position.publish_track_pattern(2, 3);
+  position.publish(false, song, 0, 12000, 0);
+  rig.pass(1);
+  rig.tap(Button::Performance);
+  rig.tap(Button::Pattern);
+  CHECK(sent_of(rig, Command::Kind::SetTrackPattern).empty());
+  // a ring that refuses the command: retried the next pass, once
+  position.publish(true, song, 0, 12000, 0);
+  rig.pass(1);
+  rig.tap(Button::Performance);
+  rig.log.open = false;
+  rig.tap(Button::Pattern);
+  CHECK(rig.log.sent.empty());
+  rig.log.open = true;
+  rig.pass(1);
+  NEED(sent_of(rig, Command::Kind::SetTrackPattern).size() == 1u);
+  CHECK(sent_of(rig, Command::Kind::SetTrackPattern)[0].c == (1u << 2));
+  rig.pass(1);
+  CHECK(sent_of(rig, Command::Kind::SetTrackPattern).size() == 1u);
+}
+
+TEST_CASE("perform (H9): a pad that the DJ page took no longer reaches the bank at its release, so a slot stays when LATCH is off") {
+  Rig rig;
+  rig.affect(0);
+  rig.tap(Button::Rec);  // EDIT: the encoder stores a value
+  rig.pad_down(pad_of(0, 1));
+  rig.turn(+30);
+  rig.pad_up(pad_of(0, 1));
+  rig.tap(Button::Rec);
+  CHECK(rig.bank().active(0));  // LATCH is on (the default): the FX goes on at the stored 30
+  rig.tap(Button::F6);          // LATCH off
+  CHECK_FALSE(rig.bank().latch());
+  rig.tap(Button::Performance);  // the DJ page
+  CHECK(rig.app->state().dj_page());
+  CHECK(rig.board->pads == 0u);
+  rig.pad_down(pad_of(0, 1));  // the DJ page's pad (dj.pad), not the bank's
+  CHECK(rig.board->pads == 0u);
+  rig.pad_up(pad_of(0, 1));
+  CHECK(rig.bank().active(0));  // the release must not reach PerformBank::pad_up, which would end the slot (LATCH off, the pad's row)
+  CHECK_FALSE(rig.bank().held(0));
+  // on the slots page the same pad still ends it: the press is the bank's
+  rig.tap(Button::Performance);
+  CHECK_FALSE(rig.app->state().dj_page());
+  rig.pad_down(pad_of(0, 1));
+  CHECK(rig.board->pads != 0u);
+  rig.pad_up(pad_of(0, 1));
+  CHECK_FALSE(rig.bank().active(0));
+  CHECK(rig.board->pads == 0u);
+}
+
+TEST_CASE("perform: the Performance button cycles SLOTS, DJ, SLOTS (two pages)") {
+  Rig rig;
+  CHECK(app::kPerformScreen.pages() == 2u);
+  CHECK_FALSE(rig.app->state().dj_page());
+  rig.tap(Button::Performance);
+  CHECK(rig.app->state().dj_page());
+  rig.tap(Button::Performance);
+  CHECK_FALSE(rig.app->state().dj_page());
+  const bool latch = rig.bank().latch();
+  rig.tap(Button::F6);
+  CHECK(rig.bank().latch() == !latch);  // the slots' key acts again
+  CHECK(rig.app->failed_frames() == 0);
+}

@@ -1,0 +1,9 @@
+{
+  "name": "gen_ramp",
+  "author": "track3r-os",
+  "flags": ["GENERATOR"],
+  "scratch": 0,
+  "params": [
+    { "label": "Wave", "type": "l", "default": 0, "options": ["Ramp", "Saw", "Square"] }
+  ]
+}

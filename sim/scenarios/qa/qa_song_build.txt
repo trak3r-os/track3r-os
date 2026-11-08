@@ -1,4 +1,4 @@
-# OS-SONG-FORM (docs/specs/OS-SONG-BUILD.md; new Community OS behaviour): FORM, the fifth OP of F6 TOOLS on the Song ORDER page. One `snap qa_sng_NNN` per row with a visible result; the goldens are keyed qa_song_build/qa_sng_NNN.
+# OS-SONG-FORM (docs/specs/OS-SONG-BUILD.md; new Community OS behaviour): FORM, the fifth OP of F6 TOOLS on the Song LIST page. One `snap qa_sng_NNN` per row with a visible result; the goldens are keyed qa_song_build/qa_sng_NNN.
 # The demo's song is one slot holding pattern 1, so each build takes that one pattern as A (B and C are A) and puts the form's slots after it.
 
 # QA-SNG-097: F6 opens the dialog, the OP row turned to FORM: the FORM row (LOOP>SONG), the DRUMS row (TRACKS 1-4), the help line and the plan in the footer.
@@ -51,7 +51,6 @@ tap f8
 # are two patterns (the demo's single pattern has equal steps in both: the picture shows the slots, the steps' spread is the host test's).
 # QA-SNG-107: F6, the OP row turned from FORM (where the scenario above left it: the dialog keeps its OP) to BRIDGE: the SLOTS row (4), the help line and the plan in the footer (PATTERN 01 TO 02  4 SLOTS  4 NEW PATTERNS).
 document
-tap song
 press shift
 tap insert
 release shift

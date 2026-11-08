@@ -50,15 +50,16 @@ std::uint8_t rank_of(std::uint32_t id) noexcept {
   }
 }
 
-// The newest minor version of a chunk this reader knows: INST is at 1.5 (the sample rate, the playback engine, the MIDI fields, the Sine LFO, the stereo flag), PERF and SCEN at 1.1 (the Perform FX 20 and 21),
-// APPM at 1.1 (OS-APPUX S3: up to 12 apps), every other chunk at 1.0.
+// The newest minor version of a chunk this reader knows: INST is at 1.8 (the sample rate, the playback engine, the MIDI fields, the Sine LFO, the stereo flag, the twelve WT bytes, the play-thru flag, the module RATE), PERF and SCEN at 1.2 (the Perform FX 20 and 21, then the PLAYMODE values 4..23, OS-PERFMODES M3),
+// APPM at 1.1 (OS-APPUX S3: up to 12 apps), USBS at 1.1 (OS-USBOUTS), NOTE at 1.1 (OS-SCALES28: the appended official scale), every other chunk at 1.0.
 std::uint32_t known_minor(std::uint32_t id) noexcept {
   switch (id) {
-    case kChunkInst: return kInstVersionStereo & 0xFFu;
+    case kChunkInst: return kInstVersionRate & 0xFFu;
     case kChunkPerf:
-    case kChunkScen: return kStateVersionFx & 0xFFu;
+    case kChunkScen: return kStateVersionPlayOrder & 0xFFu;
     case kChunkAppm: return state_chunks::kAppsVersionV11 & 0xFFu;
     case kChunkUsbs: return state_chunks::kUsbVersionCount & 0xFFu;
+    case kChunkNote: return state_chunks::kNoteVersionScale & 0xFFu;
     default: return kChunkVersion & 0xFFu;
   }
 }
@@ -73,7 +74,7 @@ void v1_bounds(std::uint32_t id, std::uint32_t minor, std::size_t& lo, std::size
     case kChunkTrak: lo = kTrakFixed; hi = kTrakMax; break;
     case kChunkModr: lo = kModrFixed; hi = kModrMax; break;
     case kChunkSong: lo = kSongFixed; hi = kSongMax; break;
-    case kChunkInst: lo = kInstFixed; hi = kInstMax + (minor >= 1 ? kInstRate : 0) + (minor >= 2 ? kInstEngine : 0) + (minor >= 3 ? kInstMidi : 0) + (minor >= 5 ? kInstStereo : 0); break;
+    case kChunkInst: lo = kInstFixed; hi = kInstMax + (minor >= 1 ? kInstRate : 0) + (minor >= 2 ? kInstEngine : 0) + (minor >= 3 ? kInstMidi : 0) + (minor >= 5 ? kInstStereo : 0) + (minor >= 6 ? kInstWt : 0) + (minor >= 7 ? kInstPlayThru : 0) + (minor >= 8 ? kInstModRate : 0); break;
     case kChunkPatt: lo = kPattHead + kPattTrackFixed; hi = kPattMax; break;
     case kChunkSets: lo = settings_chunks::kFixed; hi = settings_chunks::kSetsMax; break;
     case kChunkLrnb: lo = settings_chunks::kFixed; hi = settings_chunks::kLrnbMax; break;
@@ -82,7 +83,7 @@ void v1_bounds(std::uint32_t id, std::uint32_t minor, std::size_t& lo, std::size
     case kChunkMixr: lo = hi = state_chunks::kMixBytes; break;
     case kChunkPerf: lo = hi = state_chunks::kPerfBytes; break;
     case kChunkAppm: lo = state_chunks::kAppsFixed; hi = minor >= 1 ? state_chunks::kAppsMax : state_chunks::kAppsMax10; break;
-    case kChunkNote: lo = hi = state_chunks::kNoteBytes; break;
+    case kChunkNote: lo = state_chunks::kNoteBytes; hi = state_chunks::kNoteBytes + (minor >= 1 ? 1 : 0); break;  // 1.1 appends the official scale (OS-SCALES28)
     case kChunkMute: lo = state_chunks::kMuteFixed; hi = state_chunks::kMuteMax; break;
     case kChunkScen: lo = hi = state_chunks::kSceneBytes; break;
     case kChunkSnfx: lo = state_chunks::kSendFxFixed; hi = state_chunks::kSendFxMax; break;
@@ -750,7 +751,38 @@ bool Reader::parse_inst(std::size_t len) noexcept {
     const std::uint8_t stereo = c.u8();
     inst_.stereo = stereo <= model::kInstStereoMax && kind == static_cast<std::uint32_t>(model::InstrumentKind::Sample) ? stereo : std::uint8_t{0};
   }
-  for (model::Lfo& l : inst_.sampler.lfo) {  // OS-LFOSINE: the shapes are 0..4 before INST 1.4 and 0..5 from it; a larger one (one this version does not have, or a stray 5 in an older chunk) plays as Triangle, as the engine has always held it
+  if (chunk_minor_ >= 6) {  // OS-CEWTENV W1: version 1.6 appends the twelve WT bytes after the stereo byte, wt_bend and wt_sust of the six slots in slot order
+    for (model::Lfo& l : inst_.sampler.lfo) {
+      l.wt_bend = c.u8();
+      l.wt_sust = c.u8();
+    }
+    for (unsigned i = 0; i < model::kLfos; ++i) {  // OS-CEWTENV W3a review: a 1.6 chunk's WT bytes on a slot whose loop is not 2 or 3 are zeroed on read: they mean nothing there (only 2 and 3 are WT), and keeping them would force 1.6 on every later save
+      if (!model::is_wt_loop(inst_.sampler.envelope[i].loop)) {
+        inst_.sampler.lfo[i].wt_bend = 0;
+        inst_.sampler.lfo[i].wt_sust = 0;
+      }
+    }
+  }
+  if (chunk_minor_ >= 7) {  // OS-CEPLAYTHRU P1: version 1.7 appends the play-thru flag after the WT bytes; a value above 1 reads 0, as the stereo byte does, and an older chunk reads 0
+    const std::uint8_t thru = c.u8();
+    inst_.slice_thru = thru <= model::kInstSliceThruMax ? thru : std::uint8_t{0};
+  }
+  if (chunk_minor_ >= 8) {  // OS-MODRATE S3: version 1.8 appends the module RATE after the play-thru byte; a value above 2 reads 0, as the stereo byte does, a RATE on a non-Module instrument reads 0, and an older chunk reads 0
+    const std::uint8_t rate = c.u8();
+    inst_.rate = rate <= model::kInstRateMax && kind == static_cast<std::uint32_t>(model::InstrumentKind::Module) ? rate : std::uint8_t{0};
+  }
+  if (chunk_minor_ < 6) {  // OS-CEWTENV W1 (spec A3): an older chunk has no WT bytes; a loop of 2 or more in it came from a tracker-ce file through an older build, which had already lost the contour and played the slot as an LFO: it reads as loop 1
+    for (model::Envelope& e : inst_.sampler.envelope) {
+      if (e.loop >= 2) {
+        e.loop = 1;
+      }
+    }
+  }
+  for (std::uint32_t i = 0; i < model::kLfos; ++i) {  // OS-LFOSINE: the shapes are 0..4 before INST 1.4 and 0..5 from it; a larger one (one this version does not have, or a stray 5 in an older chunk) plays as Triangle, as the engine has always held it.
+    model::Lfo& l = inst_.sampler.lfo[i];
+    if (chunk_minor_ >= 6 && model::is_wt_loop(inst_.sampler.envelope[i].loop)) {
+      continue;  // OS-CEWTENV W1: a WT slot of a chunk of the WT minor: the shape is the contour 0..255, verbatim (the loop is tested exactly: only 2 and 3 are WT slots)
+    }
     const std::uint8_t last = chunk_minor_ >= 4 ? model::kLfoShapeSine : std::uint8_t{4};
     l.shape = l.shape > last ? model::kLfoShapeTriangle : l.shape;
   }

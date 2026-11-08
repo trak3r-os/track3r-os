@@ -35,7 +35,7 @@ tap f8
 wait 3000
 snap qa_prf_105
 
-# QA-PRF-106: leaving the page (the button again) is the slots; the DJ page is at rest when it comes back: centred, SMOOTH, the groups kept.
+# QA-PRF-106: leaving the page (the button again; DJ is followed by the slots) is the slots; the DJ page is at rest when it comes back: centred, SMOOTH, the groups kept.
 tap performance
 snap qa_prf_106
 

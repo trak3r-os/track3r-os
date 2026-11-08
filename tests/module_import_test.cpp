@@ -4,16 +4,27 @@
 // and the texts of the strip and the report page. The importers' own rules are modimp_import_test.cpp and med_import_test.cpp.
 #include <doctest/doctest.h>
 
+#include "support/memory_io.h"
 #include "support/mmd_fixture.h"
 #include "support/modimp_fixture.h"
+#include "support/module_blob.h"
 #include "support/need.h"
 #include "support/static_slot.h"
+
+#include <o3os/formats/med/import.h>
+#include <o3os/formats/med/mmd.h>
+#include <o3os/formats/mod/import.h>
+#include <o3os/formats/native.h>
 
 #include <o3os/app/module_import.h>
 #include <o3os/app/sample_bank.h>
 #include <o3os/audio/voices.h>
+#include <o3os/module/loader.h>
 #include <o3os/platform/host/fake_storage.h>
 
+#include <dlfcn.h>
+
+#include <cctype>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -30,6 +41,12 @@ using app::ModuleImport;
 using app::ModuleSummary;
 using app::OgSampleLoader;
 using Bytes = std::vector<std::uint8_t>;
+
+// The values behind ModuleImport's `static_cast<std::uint8_t>(engine_)` (app/src/module_import.cpp begin_import, into ImportModuleOptions::engine), which the
+// importer module's imp_begin reads back as opts->engine (modules/importers/tracker/tracker.cpp: 0 Auto, 1 Amiga, 2 Modern).
+static_assert(static_cast<std::uint8_t>(ImportEngine::Auto) == 0u && static_cast<std::uint8_t>(ImportEngine::Amiga) == 1u &&
+                  static_cast<std::uint8_t>(ImportEngine::Modern) == 2u,
+              "ImportEngine's values are the importer module's options engine: 0 Auto, 1 Amiga, 2 Modern");
 
 namespace {
 
@@ -84,6 +101,13 @@ Bytes s3m_bytes() {
 
 Bytes med_bytes() { return test::mmd::build(test::mmd::sample_module(1)); }
 
+// The base of a buffer aligned up to `align` (a power of two): Arena::init wants both its views 64-aligned, and a heap buffer is only 16-aligned.
+template <std::size_t align>
+std::uint8_t* align_up(std::uint8_t* p) noexcept {
+  const std::uintptr_t up = (reinterpret_cast<std::uintptr_t>(p) + (align - 1u)) & ~static_cast<std::uintptr_t>(align - 1u);
+  return reinterpret_cast<std::uint8_t*>(up);
+}
+
 struct Rig {
   platform::host::FakeStorage card;
   std::unique_ptr<model::ModelArena> arena = std::make_unique<model::ModelArena>();
@@ -91,16 +115,54 @@ struct Rig {
   std::unique_ptr<OgSampleLoader> loader = std::make_unique<OgSampleLoader>();
   std::vector<std::int16_t> pcm = std::vector<std::int16_t>(200000, std::int16_t{-1});
   audio::VoicePool* pool = nullptr;
+  // OS-FLASHDIET I2/I3: the module host the platform hands over, with the tracker host object registered as a native importer entry (the module path).
+  // with_module=false registers no native entry: with no importer file on the card either, begin() refuses the import (NO IMPORTER).
+  module::ModuleSet mset;
+  module::ModuleLoader mloader;
+  // The arenas' target-side base: on the host the buffer is a 64-bit heap pointer, so a fixed 32-bit base stands in for the address the target
+  // sees (the native importer entry never dereferences it; Arena only checks that base and mem are 64-aligned and that base + size fits in 32 bits).
+  // OS-BUG-IMPFLAKE: the truncated heap pointer as the base let ASLR refuse a Rig's arena (addr + size over 4 GiB, or mem not 64-aligned), and the
+  // import then failed with NO MODULE MEMORY; the buffers are 64 bytes larger so their base can be aligned up into them.
+  static constexpr std::uint32_t kHotAddr = 0x20000000u;
+  static constexpr std::uint32_t kColdAddr = 0x30000000u;
+  std::vector<std::uint8_t> hot = std::vector<std::uint8_t>(8 * 1024 + 64);
+  std::vector<std::uint8_t> cold = std::vector<std::uint8_t>(192 * 1024 + 64);
+  void* so = nullptr;
 
-  Rig() {
+  explicit Rig(bool with_module = true) {
     static test::StaticSlot<audio::VoicePool> slot;
     pool = &slot.make();
     arena->project.reset();
+    std::uint8_t* const hot_mem = align_up<64>(hot.data());
+    std::uint8_t* const cold_mem = align_up<64>(cold.data());
+    mset.hot().init(hot_mem, kHotAddr, static_cast<std::uint32_t>(hot.size() - static_cast<std::size_t>(hot_mem - hot.data())));
+    mset.cold().init(cold_mem, kColdAddr, static_cast<std::uint32_t>(cold.size() - static_cast<std::size_t>(cold_mem - cold.data())));
+    if (with_module) {
+      so = dlopen(O3M_TRACKER_HOST_SO, RTLD_NOW | RTLD_LOCAL);
+      CHECK(so != nullptr);
+      if (so != nullptr) {
+        const o3m_module* entry = static_cast<const o3m_module*>(dlsym(so, "o3m_entry"));
+        CHECK(entry != nullptr);
+        if (entry != nullptr) {
+          CHECK(mset.add_native("tracker", *entry));
+        }
+      }
+      import->set_module_host(&mset, &mloader, nullptr, "tracker");
+    }
+  }
+  ~Rig() {
+    if (so != nullptr) {
+      dlclose(so);
+    }
   }
 
   // The project phase to its end in steps of `budget` bytes of the platform's budget; the state it ended in.
   ModuleImport::State run(const std::string& path, ImportEngine engine = ImportEngine::Auto, std::size_t budget = 16384) {
-    if (import->begin(card, path.c_str(), *arena, engine) != ModuleImport::Start::Started) {
+    const ModuleImport::Start began = import->begin(card, path.c_str(), *arena, engine);
+    if (began == ModuleImport::Start::Failed) {
+      return ModuleImport::State::Failed;  // refused at begin (OS-FLASHDIET I2, QA-FIL-139/140)
+    }
+    if (began != ModuleImport::Start::Started) {
       return ModuleImport::State::Idle;
     }
     for (unsigned i = 0; i < 2000000 && import->state() == ModuleImport::State::Running; ++i) {
@@ -451,7 +513,7 @@ TEST_CASE("module import: begin() writes nothing to the document; the importer's
   NEED(m.arena->project.create_pattern(1, 32) == model::Status::Ok);
   NEED(m.arena->project.append_order(1) == model::Status::Ok);
   const std::uint32_t before = m.arena->project.generation();
-  CHECK(m.import->begin(m.card, "MOD/absent.mod", *m.arena, ImportEngine::Auto) == ModuleImport::Start::Started);
+  CHECK(m.import->begin(m.card, "MOD/absent.mod", *m.arena, ImportEngine::Auto) == ModuleImport::Start::Failed);  // OS-FLASHDIET I2 (QA-FIL-139/140): not Started
   CHECK(m.import->state() == ModuleImport::State::Failed);
   CHECK_FALSE(m.import->document_touched());
   CHECK(m.import->step(16384) == ModuleImport::State::Failed);
@@ -497,7 +559,7 @@ TEST_CASE("module import: a module under a wrong or empty name imports by its he
     Rig r;
     r.card.add_file(c.path, c.kind == 0 ? mod_bytes() : (c.kind == 1 ? s3m_bytes() : med_bytes()));
     const ModuleImport::State end = r.run(c.path);
-    INFO(c.path << " kind " << c.kind);
+    INFO(std::string(c.path) << " kind " << c.kind);  // a std::string: a const char* would print as a pointer
     if (c.imports) {
       CHECK(end == ModuleImport::State::Done);
       CHECK(r.import->summary().ok);
@@ -760,4 +822,404 @@ TEST_CASE("module import: the maintainer's test files import, every sample instr
     }
   }
   CHECK(imported > 0);
+}
+
+namespace {
+
+// OS-FLASHDIET I2: the project the native writer makes of `p` (the bytes a save would hold: the runtime counters are not in it).
+Bytes native_project_bytes(const model::Project& p) {
+  formats::native::Writer w;
+  test::VectorSink sink;
+  w.begin(p, sink);
+  while (w.step(4096) == formats::Progress::Running) {
+  }
+  return sink.bytes;
+}
+
+// OS-FLASHDIET I2: the PCM of every slot the import reports, through the feed: rate, frames and the samples, flat.
+Bytes pcm_of(app::ModuleImport& imp) {
+  Bytes out;
+  for (unsigned slot = 0; slot < 64; ++slot) {
+    const std::uint32_t frames = imp.frames(slot);
+    if (frames == 0u) {
+      continue;
+    }
+    const std::uint32_t rate = imp.rate(slot);
+    out.insert(out.end(), reinterpret_cast<const std::uint8_t*>(&rate), reinterpret_cast<const std::uint8_t*>(&rate) + 4);
+    out.insert(out.end(), reinterpret_cast<const std::uint8_t*>(&frames), reinterpret_cast<const std::uint8_t*>(&frames) + 4);
+    std::vector<std::int16_t> buf(frames, std::int16_t{-1});
+    CHECK(imp.read(slot, 0, frames, buf.data()));
+    out.insert(out.end(), reinterpret_cast<const std::uint8_t*>(buf.data()), reinterpret_cast<const std::uint8_t*>(buf.data()) + frames * 2);
+  }
+  return out;
+}
+
+bool summary_same(const ModuleSummary& a, const ModuleSummary& b) {
+  return a.ok == b.ok && a.format == b.format && a.amiga_commands == b.amiga_commands && a.channels == b.channels && a.patterns == b.patterns &&
+         a.order == b.order && a.tracks_kept == b.tracks_kept && a.tracks_dropped == b.tracks_dropped && a.instruments == b.instruments &&
+         a.instruments_refused == b.instruments_refused && a.cmd_approx == b.cmd_approx && a.cmd_dropped == b.cmd_dropped && a.clamped == b.clamped &&
+         a.dropped_groups == b.dropped_groups && std::strcmp(a.name, b.name) == 0;
+}
+
+// OS-FLASHDIET I3: the reference side of the equality sweep drives the importers of formats_tracker directly (the image does not link
+// them any more, and app::ModuleImport has no linked path: the module is the only one). The same readers the tracker module runs, over
+// the fixture's bytes, in an arena of its own, with the same options the proxy passes the module.
+class NoBytes final : public core::ByteSource {
+ public:
+  core::IoResult read(void*, std::size_t) noexcept override { return {0, core::IoStatus::Failed}; }
+};
+
+struct LinkedRef {
+  std::unique_ptr<model::ModelArena> arena = std::make_unique<model::ModelArena>();
+  formats::mod::ImportReader mod_reader;
+  formats::med::ImportReader med_reader;
+  formats::FormatReader* reader = nullptr;
+  bool is_med = false;
+  ModuleSummary summary;
+  // the readers keep the source they were begun with: it must outlive run() (the PCM is read after it)
+  std::unique_ptr<formats::med::SpanSource> span;
+
+  bool run(const Bytes& bytes, const char* path, ImportEngine engine) {
+    arena->project.reset();
+    const std::size_t head = bytes.size() < formats::kSniffBytes ? bytes.size() : formats::kSniffBytes;
+    const auto seen = ModuleImport::decide(path, bytes.data(), head, static_cast<std::uint32_t>(bytes.size()));
+    is_med = seen == ModuleImport::Probe::Med;
+    span = std::make_unique<formats::med::SpanSource>(bytes.data(), static_cast<std::uint32_t>(bytes.size()));
+    NoBytes none;
+    formats::ReadParams params;
+    params.size_hint = static_cast<std::uint32_t>(bytes.size());
+    params.random = span.get();
+    if (is_med) {
+      reader = &med_reader;
+      med_reader.options() = formats::med::ImportReader::amiga_default();
+      med_reader.options().engine_fx = engine != ImportEngine::Modern;  // as the proxy's begin_import did
+    } else {
+      reader = &mod_reader;
+      mod_reader.options() = formats::mod::ImportOptions{};
+      mod_reader.options().engine_fx = engine == ImportEngine::Auto ? formats::mod::EngineFx::Auto
+                                       : (engine == ImportEngine::Amiga ? formats::mod::EngineFx::On : formats::mod::EngineFx::Off);
+    }
+    reader->begin(none, *arena, params);
+    formats::Progress p = formats::Progress::Running;
+    for (unsigned i = 0; i < 2000000 && p == formats::Progress::Running; ++i) {
+      p = reader->step(ModuleImport::kMinCells);
+    }
+    if (p != formats::Progress::Done) {
+      return false;
+    }
+    summary = ModuleSummary{};
+    summary.valid = true;
+    summary.ok = true;
+    const formats::FormatReport& rep = reader->report();
+    summary.dropped_groups = rep.dropped_groups;
+    summary.clamped = rep.sanitised;
+    if (is_med) {
+      const formats::med::ImportReport& r = med_reader.importer().report();
+      summary.format = ModuleSummary::Format::Med;
+      summary.amiga_commands = med_reader.options().engine_fx;
+      summary.channels = static_cast<std::uint8_t>(r.tracks_used);
+      summary.patterns = r.patterns;
+      summary.order = r.order;
+      summary.tracks_kept = r.tracks_kept;
+      summary.tracks_dropped = r.tracks_dropped;
+      summary.instruments = r.instruments;
+      summary.instruments_refused = r.instruments_refused;
+      for (unsigned i = 0; i < 256u; ++i) {
+        summary.cmd_approx += r.cmd_approx[i];
+        summary.cmd_dropped += r.cmd_dropped[i];
+      }
+    } else {
+      const formats::mod::ImportReport& r = mod_reader.importer().report();
+      summary.format = r.kind == formats::mod::Kind::S3m ? ModuleSummary::Format::S3m : ModuleSummary::Format::Mod;
+      summary.amiga_commands = r.engine_fx;
+      summary.channels = r.channels;
+      summary.patterns = r.med.patterns;
+      summary.order = r.med.order;
+      summary.tracks_kept = r.med.tracks_kept;
+      summary.tracks_dropped = r.med.tracks_dropped;
+      summary.instruments = r.med.instruments;
+      summary.instruments_refused = static_cast<std::uint16_t>(r.med.instruments_refused + (r.instruments_beyond > 0xFFFFu ? 0xFFFFu : r.instruments_beyond));
+      for (const formats::mod::FxTally& f : r.fx) {
+        summary.cmd_approx += f.approx;
+        summary.cmd_dropped += f.dropped;
+      }
+    }
+    {  // the name the proxy writes: the base name, upper case
+      const char* base = path;
+      for (const char* q = path; *q != '\0'; ++q) {
+        base = *q == '/' ? q + 1 : base;
+      }
+      std::size_t n = 0;
+      for (const char* q = base; *q != '\0' && n < ModuleSummary::kNameChars; ++q) {
+        const char c = *q;
+        summary.name[n++] = (c >= 'a' && c <= 'z') ? static_cast<char>(c - ('a' - 'A')) : c;
+      }
+      summary.name[n] = '\0';
+    }
+    return true;
+  }
+
+  std::uint32_t frames(unsigned slot) const {
+    if (is_med) {
+      return slot < formats::med::caps::kMaxSamples && med_reader.importer().report().instrument[slot].result == formats::med::InstResult::Sample
+                 ? med_reader.importer().pcm_frames(slot)
+                 : 0u;
+    }
+    return slot < formats::mod::caps::kSlots && mod_reader.importer().report().med.instrument[slot].result == formats::med::InstResult::Sample
+               ? mod_reader.importer().pcm_frames(slot)
+               : 0u;
+  }
+  std::uint32_t rate(unsigned slot) const { return is_med ? med_reader.importer().pcm_rate() : mod_reader.importer().pcm_rate(slot); }
+  bool read(unsigned slot, std::uint32_t first, std::uint32_t n, std::int16_t* dst) const {
+    return (is_med ? med_reader.importer().read_pcm(slot, first, n, dst) : mod_reader.importer().read_pcm(slot, first, n, dst)).ok();
+  }
+};
+
+// The PCM of every slot the reference import reports, flat — the same shape pcm_of() gives the module path.
+Bytes pcm_of_reader(const LinkedRef& r) {
+  Bytes out;
+  for (unsigned slot = 0; slot < 64; ++slot) {
+    const std::uint32_t frames = r.frames(slot);
+    if (frames == 0u) {
+      continue;
+    }
+    const std::uint32_t rate = r.rate(slot);
+    out.insert(out.end(), reinterpret_cast<const std::uint8_t*>(&rate), reinterpret_cast<const std::uint8_t*>(&rate) + 4);
+    out.insert(out.end(), reinterpret_cast<const std::uint8_t*>(&frames), reinterpret_cast<const std::uint8_t*>(&frames) + 4);
+    std::vector<std::int16_t> buf(frames, std::int16_t{-1});
+    CHECK(r.read(slot, 0, frames, buf.data()));
+    out.insert(out.end(), reinterpret_cast<const std::uint8_t*>(buf.data()), reinterpret_cast<const std::uint8_t*>(buf.data()) + frames * 2);
+  }
+  return out;
+}
+
+}  // namespace
+
+// OS-FLASHDIET I2/I3: the import through the importer module (the native entry of the tracker host object here, the packed tracker.tmod on the unit)
+// makes the same project and the same PCM as the linked importers, byte for byte, for every fixture and every engine choice (F7): the generated MOD, S3M and
+// OctaMED modules and, when the fetched test data is in build-fixtures/, every module file of it. I3: the linked side comes from formats_tracker in the
+// test build (the image does not link it any more).
+TEST_CASE("module import (OS-FLASHDIET I2): through the module the project and the PCM are the linked importer's, byte for byte") {
+  struct Fixture {
+    std::string path;
+    Bytes bytes;
+  };
+  std::vector<Fixture> fixtures = {
+      {"MOD/kc.mod", mod_bytes()},
+      {"S3M/test.s3m", s3m_bytes()},
+      {"MED/v0.mmd0", test::mmd::build(test::mmd::sample_module(0))},
+      {"MED/v1.mmd1", test::mmd::build(test::mmd::sample_module(1))},
+      {"MED/v2.mmd2", test::mmd::build(test::mmd::sample_module(2))},
+      {"MED/v3.mmd3", test::mmd::build(test::mmd::sample_module(3))},
+  };
+  {
+    const std::filesystem::path dir(O3_BUILD_FIXTURES_DIR);
+    std::error_code ec;
+    if (std::filesystem::is_directory(dir, ec)) {
+      unsigned added = 0;
+      for (auto it = std::filesystem::recursive_directory_iterator(dir, ec); !ec && it != std::filesystem::recursive_directory_iterator(); it.increment(ec)) {
+        if (!it->is_regular_file(ec)) {
+          continue;
+        }
+        std::string ext = it->path().extension().string();
+        for (char& c : ext) {
+          c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        if (ext != ".mod" && ext != ".s3m" && ext != ".med" && ext != ".mmd0" && ext != ".mmd1" && ext != ".mmd2" && ext != ".mmd3") {
+          continue;
+        }
+        if (it->file_size(ec) > 4u * 1024u * 1024u || ec) {
+          continue;
+        }
+        std::ifstream in(it->path(), std::ios::binary);
+        Bytes bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        fixtures.push_back({"FIX/" + it->path().filename().string(), bytes});
+        if (++added >= 40) {
+          break;
+        }
+      }
+      MESSAGE("build-fixtures: ", added, " module file(s) added to the equality sweep");
+    }
+  }
+  for (const Fixture& f : fixtures) {
+    for (const ImportEngine engine : {ImportEngine::Auto, ImportEngine::Amiga, ImportEngine::Modern}) {  // the F7 choice: all three sweep the equality
+      INFO(f.path << " engine " << static_cast<unsigned>(engine));
+      Rig a;  // the module path (the native importer entry)
+      a.card.add_file(f.path, f.bytes);
+      NEED(a.run(f.path, engine) == ModuleImport::State::Done);
+      LinkedRef b;  // the linked readers of formats_tracker, driven directly (I3): the reference
+      NEED(b.run(f.bytes, f.path.c_str(), engine));
+      CHECK(native_project_bytes(a.arena->project) == native_project_bytes(b.arena->project));
+      CHECK(pcm_of(*a.import) == pcm_of_reader(b));
+      CHECK(summary_same(a.import->summary(), b.summary));
+    }
+  }
+}
+
+// OS-FLASHDIET I2 (3.6): no modules/importers/tracker.tmod on the card: the import fails at begin() with NO IMPORTER, nothing is reset, the strip says
+// so and the REPORT page names the file to copy.
+TEST_CASE("module import (OS-FLASHDIET I2): no importer file on the card: NO IMPORTER at begin, the document untouched, the report names the file") {
+  Rig r(false);  // no native entry, and the card holds no importer file
+  r.import->set_module_host(&r.mset, &r.mloader, nullptr, "tracker");
+  r.card.add_file("MOD/kc_test.mod", mod_bytes());
+  NEED(r.arena->project.create_pattern(1, 32) == model::Status::Ok);
+  NEED(r.arena->project.append_order(1) == model::Status::Ok);
+  const std::uint32_t generation = r.arena->project.generation();
+  CHECK(r.import->begin(r.card, "MOD/kc_test.mod", *r.arena, ImportEngine::Auto) == ModuleImport::Start::Failed);  // QA-FIL-139/140: refused at begin, not Started
+  CHECK(r.import->state() == ModuleImport::State::Failed);
+  CHECK_FALSE(r.import->document_touched());
+  CHECK(r.arena->project.generation() == generation);
+  CHECK(r.arena->project.song_length() == 1);
+  CHECK(std::string(r.import->summary().error) == "NO IMPORTER");
+  char line[64];
+  app::module_strip_text(r.import->summary(), line, sizeof line);
+  CHECK(std::string(line) == "IMPORT KC_TEST.MOD FAILED: NO IMPORTER");
+  app::ModuleReportText text;
+  app::module_report_text(r.import->summary(), text);
+  NEED(text.count >= 4);
+  CHECK(std::string(text.line[1]) == "FAILED    NO IMPORTER");
+  CHECK(std::string(text.line[2]) == "          NEEDS MODULES/IMPORTERS/TRACKER.TMOD");
+  CHECK(std::string(text.line[3]) == "          FROM THE STARTER ZIP OF THIS RELEASE");
+  for (unsigned i = 0; i < text.count; ++i) {
+    CHECK(std::strlen(text.line[i]) <= app::ModuleReportText::kChars);
+  }
+}
+
+// OS-FLASHDIET I2 (QA-FIL-139/140): the refusal at begin() is a Failed start, and the platform's one decision on it (import_replaces_document) says NO replace: with no
+// importer file on the card, the open project is unchanged and its module instruments stay loaded in the set (on the target the Settle's set.clear() would have unloaded
+// them, and the binder's Modules phase never ran: the document survived but its instruments and inserts stayed silent). This fails on the code that returned Started
+// here and let start_module_import run begin_replace anyway.
+TEST_CASE("module import (OS-FLASHDIET I2, QA-FIL-139/140): no importer file: a Failed start, no replace, the open project and its loaded modules untouched") {
+  Rig r(false);  // no native importer entry, and the card holds no importer file
+  r.import->set_module_host(&r.mset, &r.mloader, nullptr, "tracker");
+  r.card.add_file("MOD/kc_test.mod", mod_bytes());
+  r.card.add_file("modules/instruments/test.tmod", module::test::good_blob().file());  // the open project's SD instrument
+  NEED(r.mloader.begin(r.card, r.mset, "test", nullptr));
+  while (r.mloader.state() == module::ModuleLoader::State::Running) {
+    (void)r.mloader.step(4096);
+  }
+  NEED(r.mloader.state() == module::ModuleLoader::State::Done);
+  CHECK(r.mset.count() == 1);  // the module instrument is loaded in the set
+  CHECK(r.mset.find("test") >= 0);
+  NEED(r.arena->project.create_pattern(1, 32) == model::Status::Ok);
+  NEED(r.arena->project.append_order(1) == model::Status::Ok);
+  const std::uint32_t generation = r.arena->project.generation();
+  const ModuleImport::Start began = r.import->begin(r.card, "MOD/kc_test.mod", *r.arena, ImportEngine::Auto);
+  CHECK(began == ModuleImport::Start::Failed);  // (the bug returned Started here)
+  CHECK_FALSE(app::import_replaces_document(began));  // the decision of start_module_import / SimProject::import_module: no begin_replace, show the strip directly
+  CHECK(r.import->state() == ModuleImport::State::Failed);
+  CHECK_FALSE(r.import->document_touched());
+  CHECK(std::string(r.import->summary().error) == "NO IMPORTER");
+  CHECK(r.arena->project.generation() == generation);  // the document is unchanged
+  CHECK(r.arena->project.song_length() == 1);
+  CHECK(r.arena->project.pattern(1) != nullptr);
+  CHECK(r.mset.count() == 1);  // the open project's module instrument is still loaded
+  CHECK(r.mset.find("test") >= 0);
+  CHECK(r.mset.importer_count() == 0);  // nothing was loaded or dropped
+}
+
+// OS-FLASHDIET I2 (3.6): an importer file for another firmware (wrong kind, ABI or layout tag) fails at begin() the same way, with IMPORTER FOR OTHER FIRMWARE.
+TEST_CASE("module import (OS-FLASHDIET I2): an importer file of another firmware: IMPORTER FOR OTHER FIRMWARE at begin, the document untouched") {
+  Rig r(false);
+  r.import->set_module_host(&r.mset, &r.mloader, nullptr, "tracker");
+  r.card.add_file("MOD/kc_test.mod", mod_bytes());
+  module::test::Blob bad = module::test::blob_importer();
+  bad.h.reserved2[1] ^= 1u;  // the layout tag of another build
+  bad.seal();
+  r.card.add_file("modules/importers/tracker.tmod", bad.file());
+  NEED(r.arena->project.create_pattern(1, 32) == model::Status::Ok);
+  NEED(r.arena->project.append_order(1) == model::Status::Ok);
+  const std::uint32_t generation = r.arena->project.generation();
+  CHECK(r.import->begin(r.card, "MOD/kc_test.mod", *r.arena, ImportEngine::Auto) == ModuleImport::Start::Failed);
+  CHECK(r.import->state() == ModuleImport::State::Failed);
+  CHECK_FALSE(r.import->document_touched());
+  CHECK(r.arena->project.generation() == generation);
+  CHECK(r.arena->project.song_length() == 1);
+  CHECK(std::string(r.import->summary().error) == "IMPORTER FOR OTHER FIRMWARE");
+  char line[64];
+  app::module_strip_text(r.import->summary(), line, sizeof line);
+  CHECK(std::string(line) == "IMPORT KC_TEST.MOD FAILED: IMPORTER FOR OTHER FIRMWARE");
+  app::ModuleReportText text;
+  app::module_report_text(r.import->summary(), text);
+  NEED(text.count >= 4);
+  CHECK(std::string(text.line[1]) == "FAILED    IMPORTER FOR OTHER FIRMWARE");
+  CHECK(std::string(text.line[2]) == "          NEEDS MODULES/IMPORTERS/TRACKER.TMOD");
+  CHECK(std::string(text.line[3]) == "          FROM THE STARTER ZIP OF THIS RELEASE");
+  // a kind 3 file of the wrong ABI minor is the same refusal
+  Rig q(false);
+  q.import->set_module_host(&q.mset, &q.mloader, nullptr, "tracker");
+  q.card.add_file("MOD/kc_test.mod", mod_bytes());
+  module::test::Blob old = module::test::blob_importer();
+  old.h.abi_minor = 10;  // the kind exists from 1.11: an unknown kind for the header
+  old.seal();
+  q.card.add_file("modules/importers/tracker.tmod", old.file());
+  CHECK(q.import->begin(q.card, "MOD/kc_test.mod", *q.arena, ImportEngine::Auto) == ModuleImport::Start::Failed);
+  CHECK(q.import->state() == ModuleImport::State::Failed);
+  CHECK(std::string(q.import->summary().error) == "IMPORTER FOR OTHER FIRMWARE");
+}
+
+// OS-FLASHDIET I3 review: begin() with no module host at all (set_module_host never called) is refused at the top, even when the card holds a
+// valid modules/importers/tracker.tmod whose header check would pass: NO IMPORTER at begin, the document untouched (the first step would have
+// dereferenced the null host).
+TEST_CASE("module import (OS-FLASHDIET I3): no module host: NO IMPORTER at begin even with tracker.tmod on the card, the document untouched") {
+  Rig r(false);  // no set_module_host: modules_ and loader_ stay null
+  r.card.add_file("MOD/kc_test.mod", mod_bytes());
+  r.card.add_file("modules/importers/tracker.tmod", module::test::blob_importer().file());  // a valid kind 3 file: the header check would pass
+  NEED(r.arena->project.create_pattern(1, 32) == model::Status::Ok);
+  NEED(r.arena->project.append_order(1) == model::Status::Ok);
+  const std::uint32_t generation = r.arena->project.generation();
+  CHECK(r.import->begin(r.card, "MOD/kc_test.mod", *r.arena, ImportEngine::Auto) == ModuleImport::Start::Failed);
+  CHECK(r.import->state() == ModuleImport::State::Failed);
+  CHECK_FALSE(r.import->document_touched());
+  CHECK(r.arena->project.generation() == generation);
+  CHECK(r.arena->project.song_length() == 1);
+  CHECK(r.arena->project.pattern(1) != nullptr);
+  CHECK(std::string(r.import->summary().error) == "NO IMPORTER");
+  char line[64];
+  app::module_strip_text(r.import->summary(), line, sizeof line);
+  CHECK(std::string(line).find("FAILED: NO IMPORTER") != std::string::npos);  // (the refusal is at the top of begin(), before name_from: no name on the strip)
+}
+
+// OS-FLASHDIET I2 (3.6): no room in the module region can only be found after the reset: the import fails with NO MODULE MEMORY and leaves the document
+// empty (valid), as any failure after the first step does.
+TEST_CASE("module import (OS-FLASHDIET I2): no room in the module region: NO MODULE MEMORY after the reset, the document empty") {
+  Rig r(false);
+  r.import->set_module_host(&r.mset, &r.mloader, nullptr, "tracker");
+  r.cold.assign(128 + 64, 0);  // the importer's cold part does not fit the 128 aligned bytes
+  r.mset.cold().init(align_up<64>(r.cold.data()), Rig::kColdAddr, 128);
+  r.card.add_file("MOD/kc_test.mod", mod_bytes());
+  r.card.add_file("modules/importers/tracker.tmod", module::test::blob_importer().file());  // a valid kind 3 file: the header check passes
+  NEED(r.arena->project.create_pattern(1, 32) == model::Status::Ok);
+  NEED(r.arena->project.append_order(1) == model::Status::Ok);
+  CHECK(r.import->begin(r.card, "MOD/kc_test.mod", *r.arena, ImportEngine::Auto) == ModuleImport::Start::Started);
+  CHECK(r.import->state() == ModuleImport::State::Running);
+  CHECK_FALSE(r.import->document_touched());
+  (void)r.import->step(1);  // the first step: the document is reset, then the load finds no room
+  CHECK(r.import->document_touched());
+  for (unsigned i = 0; i < 2000000 && r.import->state() == ModuleImport::State::Running; ++i) {
+    (void)r.import->step(16384);
+  }
+  CHECK(r.import->state() == ModuleImport::State::Failed);
+  CHECK(r.arena->project.song_length() == 0);  // empty, valid
+  CHECK(std::string(r.import->summary().error) == "NO MODULE MEMORY");
+  char line[64];
+  app::module_strip_text(r.import->summary(), line, sizeof line);
+  CHECK(std::string(line) == "IMPORT KC_TEST.MOD FAILED: NO MODULE MEMORY");
+  CHECK(r.mset.importer_count() == 0);  // nothing is left loaded
+}
+
+// OS-FLASHDIET I2 (3.6): the proxy's unload and reload order through the module: close() unloads the importer (its close() and shutdown(), the state
+// block, the arenas back to the marks taken before the load), and the next import begins it again at the first step after Settle and writes the same
+// project. (A card-loaded importer is dropped from the set at close() too; the QEMU suite checks that on the real tracker.tmod.)
+TEST_CASE("module import (OS-FLASHDIET I2): close() unloads the importer, the next import reloads it and writes the same project") {
+  Rig a;  // the module path (the tracker host object as a native importer entry)
+  a.card.add_file("MOD/kc.mod", mod_bytes());
+  NEED(a.run("MOD/kc.mod") == ModuleImport::State::Done);
+  const Bytes first = native_project_bytes(a.arena->project);
+  CHECK(a.mset.importer_count() == 1);  // loaded at the first step after Settle
+  a.import->close();
+  CHECK(a.mset.importer_count() == 1);  // a native entry stays registered (only a card-loaded importer is dropped, see unload_importer)
+  NEED(a.run("MOD/kc.mod") == ModuleImport::State::Done);
+  CHECK(a.mset.importer_count() == 1);  // the second import began it again
+  CHECK(native_project_bytes(a.arena->project) == first);
 }

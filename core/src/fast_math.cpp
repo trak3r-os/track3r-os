@@ -4,6 +4,9 @@
 #include <cstdint>
 #include <cstring>
 
+// sin_fast / cos_fast moved to fast_sincos.cpp (OS-CEPTFX S2): they must keep the -ffp-contract=off build of their old home,
+// audio/src/module_voices.cpp, while exp2_fast / log2_fast below stay as core always built them.
+
 namespace o3os::core {
 
 float exp2_fast(float x) noexcept {

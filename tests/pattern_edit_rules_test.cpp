@@ -331,7 +331,13 @@ TEST_CASE("step edit: the picker walk ends in None at both ends, and a placehold
   CHECK((s.fx[0].type == 46 && s.fx[0].value == 1));  // OS-COREFX appended the tracker FX: Bit Depth is no longer the last, one place up is the tracker Arpeggio (0..255)
   s.fx[0] = {62, 9};
   edit::fx_type_delta(s, 0, 1);
-  CHECK((s.fx[0].type == 0 && s.fx[0].value == 0));  // the last entry is Panbrello (CF3)
+  CHECK(s.fx[0].type == 96);  // OS-CEWTENV W6b appended w, y, z after Panbrello (CF3): one place up is w
+  s.fx[0] = {98, 9};
+  edit::fx_type_delta(s, 0, 1);
+  CHECK((s.fx[0].type == 0 && s.fx[0].value == 0));  // the last entry is z (Grain Length)
+  s.fx[0] = {96, 9};
+  edit::fx_type_delta(s, 0, -1);
+  CHECK(s.fx[0].type == 62);  // Panbrello precedes w
   s.fx[0] = {62, 9};
   edit::fx_type_delta(s, 0, -1);
   CHECK((s.fx[0].type == 61 && s.fx[0].value == 9));  // Global volume slide precedes it
@@ -624,13 +630,19 @@ TEST_CASE("fx table: the model's rows and the sequencer's table state the same r
   // Two tables of this tree (model/fx_table.h for the editor, seq/fx.h for the sequencer) must never drift; type 0 carries no value, so its range is not compared.
   for (unsigned t = 1; t < fx::kTypeCount; ++t) {
     CHECK_MESSAGE(fx::kRows[t].lo == seq::kFxInfo[t].min, "type " << t);
-    CHECK_MESSAGE(fx::kRows[t].hi == seq::kFxInfo[t].max, "type " << t);
+    if (t == static_cast<unsigned>(seq::fx::kChance)) {
+      // OS-CECHANCE C2: the editor's row reaches 174 like the sequencer's (0..100 a probability, 101..174 the conditions of ADR 0004 amendment 4).
+      CHECK(fx::kRows[t].hi == seq::fx::kChanceMax);
+      CHECK(seq::kFxInfo[t].max == seq::fx::kChanceMax);
+    } else {
+      CHECK_MESSAGE(fx::kRows[t].hi == seq::kFxInfo[t].max, "type " << t);
+    }
   }
 }
 
-TEST_CASE("fx table: 43 types and 17 tracker FX, a picker of 60 executable ones (the first 34, then Swing, Gate, Chord, Arp, Tune, the two Slides, Overdrive, Bit Depth and the tracker FX), placeholders carried and never picked") {
+TEST_CASE("fx table: 43 types and 17 tracker FX, a picker of 63 executable ones (the first 34, then Swing, Gate, Chord, Arp, Tune, the two Slides, Overdrive, Bit Depth, the tracker FX and w, y, z), placeholders carried and never picked") {
   CHECK(fx::kTypeCount == 43u);
-  CHECK(fx::kPickerCount == 60u);
+  CHECK(fx::kPickerCount == 63u);
   CHECK(sizeof(fx::kRows) / sizeof(fx::kRows[0]) == 43u);
   CHECK(sizeof(fx::kCoreRows) / sizeof(fx::kCoreRows[0]) == fx::kCoreCount);
   CHECK(fx::kCoreFirst == seq::fx::kTrkArp);  // OS-COREFX: the model's table and the sequencer's ids are one range
@@ -654,13 +666,14 @@ TEST_CASE("fx table: 43 types and 17 tracker FX, a picker of 60 executable ones 
     CHECK(fx::kRows[t].start <= fx::kRows[t].hi);
   }
   CHECK(placeholders == 0u);  // 17 Swing and 20 Gate Length run since OS-CFGWIRE; 14, 21, 40, 41, 42 since OS-PFX; 38 Overdrive and 39 Bit depth since OS-IFX1
-  for (unsigned t = 0; t < 256; ++t) {  // OS-COREFX: the tracker FX are known, executable and in the picker; 43..45 and 63..255 are none of the three
+  for (unsigned t = 0; t < 256; ++t) {  // OS-COREFX: the tracker FX are known, executable and in the picker; 43..45 and 63..255 are none of the three, except 96 and 97 (OS-CEWTENV W6a: known and executable, not in the picker until W6b)
     const bool core = t >= 46u && t <= 62u;
+    const bool ce = t >= fx::kCeFirst && t < fx::kCeFirst + fx::kCeCount;
     CHECK_MESSAGE(fx::is_core(static_cast<std::uint8_t>(t)) == core, "type " << t);
-    CHECK_MESSAGE(fx::is_known(static_cast<std::uint8_t>(t)) == (t < fx::kTypeCount || core), "type " << t);
+    CHECK_MESSAGE(fx::is_known(static_cast<std::uint8_t>(t)) == (t < fx::kTypeCount || core || ce), "type " << t);
     if (t >= fx::kTypeCount) {
-      CHECK_MESSAGE(fx::is_executable(static_cast<std::uint8_t>(t)) == core, "type " << t);
-      CHECK_MESSAGE(seen[t] == core, "type " << t);
+      CHECK_MESSAGE(fx::is_executable(static_cast<std::uint8_t>(t)) == (core || ce), "type " << t);
+      CHECK_MESSAGE(seen[t] == (core || ce), "type " << t);  // OS-CEWTENV W6b: 96, 97 and 98 are in the picker
     }
   }
   for (unsigned i = 0; i < fx::kCoreCount; ++i) {  // the same range as the sequencer's table, and a default inside it
@@ -705,7 +718,20 @@ TEST_CASE("fx table: 43 types and 17 tracker FX, a picker of 60 executable ones 
   CHECK(fx::type_of_picker(57) == 60);
   CHECK(fx::type_of_picker(58) == 61);
   CHECK(fx::type_of_picker(59) == 62);
-  CHECK(fx::type_of_picker(60) == 0);
+  CHECK(fx::type_of_picker(60) == 96);  // OS-CEWTENV W6b appends w, y and z
+  CHECK(fx::type_of_picker(61) == 97);
+  CHECK(fx::type_of_picker(62) == 98);
+  CHECK(fx::type_of_picker(63) == 0);
+  CHECK(fx::picker_index(96) == 60);
+  CHECK(fx::picker_index(98) == 62);
+  CHECK(fx::row(96).hi == 255);  // w and y: two nibbles; z: 0..100, 50 (100 ms) to start
+  CHECK(fx::row(97).hi == 255);
+  CHECK(fx::row(98).lo == 0);
+  CHECK(fx::row(98).hi == 100);
+  CHECK(fx::row(98).start == 50);
+  CHECK(seq::fx_kind(98) == seq::FxKind::Voice);
+  CHECK(seq::fx_group(98, 0) == seq::FxGroup::GranLenFx);
+  CHECK(seq::fx_group(98, 1) == seq::FxGroup::GranLenFx);
   CHECK(fx::type_of_picker(255) == 0);
   CHECK(fx::type_of_picker(-1) == -1);
   CHECK(fx::picker_index(38) == 41);
@@ -780,6 +806,123 @@ TEST_CASE("fx table: Chord 14, Arp 21, Tune 40 and Slide up / down 41, 42 are ex
   CHECK(fx::kRows[40].start == 24);  // Tune: 24 is no change
   CHECK(fx::kRows[14].start == 0);
   CHECK(fx::kRows[21].start == 0);
+}
+
+TEST_CASE("fx table: Chance 4 reaches 174 in the editor, the pads and Fill RANDOM stay in 0..100, the coarse walk follows F12 (OS-CECHANCE C2)") {
+  const std::uint8_t ch = seq::fx::kChance;
+  CHECK(fx::kRows[ch].hi == seq::fx::kChanceMax);
+  CHECK(fx::kRows[ch].hi == 174u);
+  CHECK(fx::random_hi(ch) == 100u);    // Chance draws in 0..100 only
+  CHECK(fx::random_hi(2) == 100u);     // Micro-move: its whole range
+  CHECK(fx::random_hi(15) == 200u);    // Tempo
+  CHECK(fx::random_hi(41) == 255u);    // Slide up
+  CHECK(fx::random_hi(46) == 255u);    // a tracker FX
+  const edit::Rule one{true, true};
+  edit::Last last;
+  model::Step s = model::kEmptyStep;
+  s.fx[0] = {ch, 100};
+  for (int v = 101; v <= 174; ++v) {  // the plain turn walks every value up to 174
+    edit::fx_value_delta(s, 0, 1, one, last);
+    CHECK(s.fx[0].value == v);
+  }
+  edit::fx_value_delta(s, 0, 1, one, last);
+  CHECK(s.fx[0].value == 174u);  // and stops there
+  for (int v = 173; v >= 0; --v) {  // and back down to 0
+    edit::fx_value_delta(s, 0, -1, one, last);
+    CHECK(s.fx[0].value == v);
+  }
+  edit::fx_value_delta(s, 0, -1, one, last);
+  CHECK(s.fx[0].value == 0u);
+  // The coarse walk (a delta of more than one detent, F12 parity with tracker-ce): 0..100 by the delta clamped at 100, then 101, 102, 103, then +6 up to 174, and back.
+  const auto coarse = [&](int from, int d) {
+    s.fx[0] = {ch, static_cast<std::uint8_t>(from)};
+    edit::fx_value_delta(s, 0, d, one, last);
+    return static_cast<int>(s.fx[0].value);
+  };
+  CHECK(coarse(99, 16) == 100);
+  CHECK(coarse(5, 300) == 100);
+  CHECK(coarse(100, 16) == 101);
+  CHECK(coarse(101, 16) == 102);
+  CHECK(coarse(102, 16) == 103);
+  CHECK(coarse(103, 16) == 109);
+  CHECK(coarse(169, 16) == 174);
+  CHECK(coarse(174, 16) == 174);  // stopped at the top
+  CHECK(coarse(105, 16) == 111);  // a value a fine turn put between the coarse stops
+  CHECK(coarse(174, -16) == 168);
+  CHECK(coarse(108, -16) == 102);
+  CHECK(coarse(103, -16) == 102);
+  CHECK(coarse(102, -16) == 101);
+  CHECK(coarse(101, -16) == 100);
+  CHECK(coarse(100, -16) == 84);
+  CHECK(coarse(5, -300) == 0);
+  CHECK(coarse(105, -16) == 102);
+  // The pads map 0..47 over 0..100 for Chance.
+  s.fx[0] = {ch, 55};
+  edit::fx_pad(s, 0, 0, one, last);
+  CHECK(s.fx[0].value == 0u);
+  edit::fx_pad(s, 0, 47, one, last);
+  CHECK(s.fx[0].value == 100u);
+  edit::fx_pad(s, 0, 24, one, last);
+  CHECK(s.fx[0].value == (24 * 100) / 47);
+  // An absolute value (the Fill's CONSTANT / FROM..TO, a key) reaches 174 and is kept.
+  edit::fx_value_set(s, 0, 140, one, last);
+  CHECK(s.fx[0].value == 140u);
+  edit::fx_value_set(s, 0, 255, one, last);
+  CHECK(s.fx[0].value == 174u);
+  // A value carried into Chance by a type change is held to 174 too.
+  s.fx[0] = {2, 200};
+  edit::fx_type_delta(s, 0, 1);
+  CHECK(s.fx[0].type == ch);
+  CHECK(s.fx[0].value == 174u);
+}
+
+TEST_CASE("fx text: the words of Chance say what the sequencer reads, for every stored value 0..255 (OS-CECHANCE C2)") {
+  // The sequencer reads a value after fx_sanitize (read_row), so a value past 174 reads as 174, and the info line has to say the same. The word forms are this OS's (the spec's
+  // CHANCE 50 % / CHANCE WITH LAST / CHANCE NOT LAST / CHANCE PLAY 2 SKIP 3 / CHANCE SKIP 2 PLAY 3), not tracker-ce's grid labels.
+  const auto words = [](std::uint8_t type, unsigned value, bool& said) {
+    core::FixedString<32> s;
+    said = app::append_fx_value(s, type, static_cast<std::uint8_t>(value));
+    return std::string(s.data(), s.size());
+  };
+  for (unsigned v = 0; v < 256; ++v) {
+    CAPTURE(v);
+    bool said = false;
+    std::uint8_t t = seq::fx::kChance;
+    std::uint8_t r = static_cast<std::uint8_t>(v);
+    seq::fx_sanitize(t, r);
+    CHECK(t == seq::fx::kChance);
+    const unsigned rv = r;
+    std::string want;
+    if (rv <= 100u) {
+      want = "CHANCE " + std::to_string(rv) + " %";
+    } else if (rv == seq::fx::kChanceWithLast) {
+      want = "CHANCE WITH LAST";
+    } else if (rv == seq::fx::kChanceNotLast) {
+      want = "CHANCE NOT LAST";
+    } else {
+      std::uint32_t n = 0, m = 0;
+      seq::fx::chance_cycle(static_cast<std::uint8_t>(rv), n, m);
+      const bool skip_first = rv >= 139u;
+      want = skip_first ? "CHANCE SKIP " : "CHANCE PLAY ";
+      want += std::to_string(n);
+      want += skip_first ? " PLAY " : " SKIP ";
+      want += std::to_string(m);
+    }
+    CHECK(words(seq::fx::kChance, v, said) == want);
+    CHECK(said);
+  }
+  // The words fit the info line's width (the 24 characters Chord's longest word uses).
+  core::FixedString<24> line;
+  CHECK(app::append_fx_value(line, seq::fx::kChance, 174));
+  CHECK(line.size() <= 24u);
+  CHECK(std::string(line.c_str()) == "CHANCE SKIP 6 PLAY 6");
+  // The cycle words pinned as literals, not rebuilt from the same branches as the formatter (the loop above does that): the first value of each cycle
+  // range, and one inside Play N / Skip M.
+  bool said = false;
+  CHECK(words(seq::fx::kChance, 103, said) == "CHANCE PLAY 1 SKIP 1");
+  CHECK(words(seq::fx::kChance, 111, said) == "CHANCE PLAY 2 SKIP 3");
+  CHECK(words(seq::fx::kChance, 139, said) == "CHANCE SKIP 1 PLAY 1");
+  CHECK(said);
 }
 
 TEST_CASE("fx text: the words of Chord, Arp, Tune and Slide say what the sequencer reads, for every stored value 0..255 (OS-PFX)") {
@@ -918,22 +1061,67 @@ TEST_CASE("fx text: the words of the tracker FX say what the engine reads, for e
   }
 }
 
+TEST_CASE("fx text: the words of w, y and z fit the 24-character info line for every stored value, and the glyphs (OS-CEWTENV W6b)") {
+  const auto words = [](std::uint8_t type, unsigned value, bool& said) {
+    core::FixedString<24> s;  // the Pattern screen's info line
+    said = app::append_fx_value(s, type, static_cast<std::uint8_t>(value));
+    return std::string(s.data(), s.size());
+  };
+  CHECK(app::fx_type_char(seq::fx::kAmpEnvFx) == 'w');
+  CHECK(app::fx_type_char(seq::fx::kFilterEnvFx) == 'y');
+  CHECK(app::fx_type_char(seq::fx::kGranLenFx) == 'z');
+  CHECK(app::fx_type_char(99) == '?');
+  for (unsigned v = 0; v < 256; ++v) {
+    CAPTURE(v);
+    bool said = false;
+    const unsigned x = v >> 4, y = v & 15u;
+    const int warp = static_cast<int>(y) - 8;
+    const std::string w = words(seq::fx::kAmpEnvFx, v, said);
+    CHECK(said);
+    CHECK(w == "AMP ENV x" + std::to_string(x) + " WARP " + (warp < 0 ? "-" : "+") + std::to_string(std::min(warp < 0 ? -warp : warp, 7)));
+    CHECK(w.size() <= 24u);
+    const std::string f = words(seq::fx::kFilterEnvFx, v, said);
+    CHECK(said);
+    CHECK(f == "FLT ENV " + std::to_string(x == 0u ? 1u : x * 8u) + "/" + std::to_string(y * 8u) + " MS");
+    CHECK(f.size() <= 24u);
+    const std::string z = words(seq::fx::kGranLenFx, v, said);
+    CHECK(said);
+    CHECK(z.rfind("GRAIN ", 0) == 0u);
+    CHECK(z.size() <= 24u);
+  }
+  bool said = false;
+  CHECK(words(seq::fx::kAmpEnvFx, 0x88, said) == "AMP ENV x8 WARP +0");
+  CHECK(words(seq::fx::kGranLenFx, 0, said) == "GRAIN 1 MS");  // 44 samples
+  CHECK(words(seq::fx::kGranLenFx, 50, said) == "GRAIN 100 MS");  // 4,410 samples
+  CHECK(words(seq::fx::kGranLenFx, 100, said) == "GRAIN 1000 MS");  // 44,100 samples
+  CHECK(words(seq::fx::kGranLenFx, 200, said) == "GRAIN 1000 MS");  // held to 100
+}
+
 TEST_CASE("scales: 40 masks and names, four rows corrected, is_in_scale exhaustive against the reference vectors") {
   CHECK(core::kScaleCount == 40u);
+  CHECK(core::kScaleNameChars == 11u);  // OS-SCALES28 Q4c: the display names, at most 11 characters
   for (unsigned i = 0; i < core::kScaleCount; ++i) {
     CHECK_MESSAGE((core::kScaleDef[i] == vectors::kScaleMask[i]) == !core::scale_corrected(i), "scale " << i);  // the reference masks, but the four rows PAR-073 names (OS-PTOOLS)
     CHECK((core::kScaleDef[i] & 1u) != 0u);  // the root is always in
     CHECK(core::kScaleDef[i] < 4096u);
     CHECK(std::strlen(core::kScaleNames[i]) <= core::kScaleNameChars);
     CHECK(core::kScaleNames[i][0] != '\0');
+    CHECK(core::kScaleNames[i][std::strlen(core::kScaleNames[i]) - 1] != ' ');  // no trailing space (the old "Phrygian " had one)
     CHECK(core::scale_corrected(i) == (i == 11 || i == 17 || i == 23 || i == 36));
   }
+  // OS-SCALES28 Q4c: one name table, the display names of the official order (spec section 3.1), shared by the Note panel and the Fill dialog.
   CHECK(std::string(core::kScaleNames[0]) == "No scale");
-  CHECK(std::string(core::kScaleNames[11]) == "Melo Min");
-  CHECK(std::string(core::kScaleNames[17]) == "Blues Maj");
+  CHECK(std::string(core::kScaleNames[5]) == "Lydian");
+  CHECK(std::string(core::kScaleNames[8]) == "Phrygian");
+  CHECK(std::string(core::kScaleNames[11]) == "Mel. minor");
+  CHECK(std::string(core::kScaleNames[12]) == "Harm. minor");
+  CHECK(std::string(core::kScaleNames[16]) == "Blues");
+  CHECK(std::string(core::kScaleNames[17]) == "Blues major");
+  CHECK(std::string(core::kScaleNames[20]) == "Hung. minor");
   CHECK(std::string(core::kScaleNames[23]) == "Todi");
-  CHECK(std::string(core::kScaleNames[36]) == "Gipsy");
-  CHECK(std::string(core::kScaleNames[8]) == "Phrygian ");  // the name keeps a trailing space
+  CHECK(std::string(core::kScaleNames[24]) == "Whole tone");
+  CHECK(std::string(core::kScaleNames[36]) == "Gypsy minor");
+  CHECK(std::string(core::kScaleNames[39]) == "Enigmatic");
   CHECK(core::kScaleDef[4] != core::kScaleDef[11]);        // Dorian and Melo Min no longer share a mask
   // OS-PTOOLS, PAR-073: the four corrected rows are the standard scales (semitones above the root).
   const auto semis = [](unsigned scale) {
@@ -971,6 +1159,28 @@ TEST_CASE("scales: 40 masks and names, four rows corrected, is_in_scale exhausti
   for (unsigned n = 0; n < 12; ++n) {
     CHECK(core::is_in_scale(static_cast<std::uint8_t>(n), 0, 3) == c_major[n]);
     CHECK(core::is_in_scale(static_cast<std::uint8_t>(n + 12 * 5), 0, 3) == c_major[n]);  // any octave
+  }
+}
+
+// OS-SCALES28: the core table is "No scale" plus the official firmware's 39 scales in the official order (core index = official index + 1), so the 39 masks are pinned here
+// against the official rows of docs/specs/OS-SCALES28.md section 3.1 (facts from tracker-ce@7fd6c2c:core/source/scales.h:11-51, no code taken); Todi (core 23, official 22) is
+// the one row that differs on purpose (kept standard, OS-PTOOLS).
+TEST_CASE("scales: the 39 masks are the official rows in the official order (Todi excepted)") {
+  const std::uint16_t official[39] = {
+      0x0FFF, 0x05AD, 0x0AB5, 0x06AD, 0x0AD5, 0x05D5, 0x056B, 0x05AB,
+      0x05B3, 0x06B5, 0x0AAD, 0x09AD, 0x0BB5, 0x06BD, 0x0EB5, 0x04E9,
+      0x029D, 0x04A9, 0x0295, 0x09CD, 0x06CD, 0x0AD3, 0x05AB, 0x0555,
+      0x0B6D, 0x055B, 0x018D, 0x04A3, 0x02A5, 0x0463, 0x0B6D, 0x028D,
+      0x06D5, 0x09B3, 0x05B1, 0x09CD, 0x0AAB, 0x09AB, 0x0D53,
+  };
+  static_assert(sizeof official / sizeof official[0] == 39, "the 39 official scales");
+  for (unsigned i = 0; i < 39; ++i) {
+    if (i == 22) {  // Todi: the official row is a copy of its Phrygian; ours keeps the standard definition
+      CHECK(core::kScaleDef[i + 1] == 0x09CBu);  // 0 1 3 6 7 8 11
+      CHECK(core::kScaleDef[i + 1] != official[i]);
+    } else {
+      CHECK_MESSAGE(core::kScaleDef[i + 1] == official[i], "official scale " << i);
+    }
   }
 }
 

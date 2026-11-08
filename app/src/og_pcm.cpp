@@ -159,7 +159,8 @@ std::uint32_t og_resample(const AmigaKernel& kernel, const std::int16_t* src, st
   }
   n = n > total - from ? total - from : n;
   const float* const tab = kernel.table();
-  const float rho = static_cast<float>(step_q32) * (1.0f / kTwoPow32);  // source frames per output frame
+  // source frames per output frame, the Q32.32 step as its two 32-bit halves (a uint64 -> float conversion would call __aeabi_ul2f)
+  const float rho = static_cast<float>(static_cast<std::uint32_t>(step_q32 >> 32)) + static_cast<float>(static_cast<std::uint32_t>(step_q32)) * (1.0f / kTwoPow32);
   const float scale = static_cast<float>(AmigaKernel::kRes) / (rho > 1.0f ? rho : 1.0f);  // table steps per source frame
   const float limit = static_cast<float>(AmigaKernel::kLimit);
   const std::int64_t count = static_cast<std::int64_t>(frames);

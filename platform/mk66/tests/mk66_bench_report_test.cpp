@@ -6,19 +6,26 @@
 
 #include <o3os/platform/mk66/bench_report.h>
 
+#include "mk66_text_pools.h"
+
 #include <cstring>
 
 namespace bench = o3os::platform::mk66::bench;
 
 TEST_CASE("mk66 bench: every kernel has a name that find_kernel returns, in the table's order") {
   constexpr std::size_t kCount = static_cast<std::size_t>(bench::Kernel::Count);
-  CHECK(kCount == 26u);  // (OS-303PERF: tb303_128 joined; OS-LOOPER L2b: looper; OS-USBDISK U1d: disk; OS-ODD11 UTAIL: burst; OS-DJ: dj; OS-PERF-CPU2: voice_rev, voice_pan; OS-STEREO: voice_st)
+  CHECK(kCount == 27u);  // (OS-303PERF: tb303_128 joined; OS-LOOPER L2b: looper; OS-USBDISK U1d: disk; OS-ODD11 UTAIL: burst; OS-DJ: dj; OS-PERF-CPU2: voice_rev, voice_pan; OS-STEREO: voice_st; OS-CEWTENV W3a: wt)
   for (std::size_t i = 0; i < kCount; ++i) {
     const bench::KernelInfo& k = bench::kKernelInfo[i];
     INFO(k.name);
     CHECK(bench::find_kernel(k.name) == static_cast<bench::Kernel>(i));
-    CHECK(std::strlen(k.help) <= 80u);
-    CHECK(std::strchr(k.help, '\n') == nullptr);
+    const char* help = o3os::platform::mk66::testing::bench_pool_text(k.help);
+    CHECK(help != nullptr);
+    if (help == nullptr) {
+      continue;
+    }
+    CHECK(std::strlen(help) <= 80u);
+    CHECK(std::strchr(help, '\n') == nullptr);
     for (const char* c = k.name; *c != '\0'; ++c) {
       CHECK(((*c >= 'a' && *c <= 'z') || (*c >= '0' && *c <= '9') || *c == '_'));
     }
@@ -31,6 +38,7 @@ TEST_CASE("mk66 bench: every kernel has a name that find_kernel returns, in the 
   CHECK(bench::find_kernel("burst") == bench::Kernel::Burst);
   CHECK(bench::find_kernel("dj") == bench::Kernel::DjMaster);
   CHECK(bench::find_kernel("insert") == bench::Kernel::Insert);  // OS-INSFX S1: the effect insert's adapter
+  CHECK(bench::find_kernel("wt") == bench::Kernel::Wt);            // OS-CEWTENV W3a: the contour bank's own lines
   CHECK(bench::find_kernel("voice") == bench::Kernel::Voice);
   CHECK(bench::find_kernel("tb303") == bench::Kernel::Tb303);
   CHECK(bench::find_kernel("tb303_128") == bench::Kernel::Tb303x128);  // OS-303PERF: the same instance asked for 128 frames a call

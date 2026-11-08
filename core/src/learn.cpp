@@ -10,7 +10,7 @@ constexpr float kPickupReach = 1.0f;
 
 bool bindable_kind(ParamKind kind) noexcept {
   return kind == ParamKind::Instrument || kind == ParamKind::Track || kind == ParamKind::Master ||
-         kind == ParamKind::Project || kind == ParamKind::Device;
+         kind == ParamKind::Project || kind == ParamKind::Device || kind == ParamKind::Insert;
 }
 
 }  // namespace
@@ -24,6 +24,9 @@ bool learn_valid(const LearnBinding& b) noexcept {
     return false;
   }
   if ((b.flags & kLearnFollow) != 0 && (param_kind(b.param) != ParamKind::Instrument || param_index(b.param) != 0)) {
+    return false;
+  }
+  if (param_kind(b.param) == ParamKind::Insert && !insert_param_valid(b.param)) {  // OS-INSFX S7: an insert id this version has (a track's slot or the master's, a field below 32)
     return false;
   }
   return true;

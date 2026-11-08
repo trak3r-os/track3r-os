@@ -4,6 +4,7 @@
 #include "action_handlers.h"
 
 #include <o3os/app/amiga_convert.h>
+#include <o3os/app/play_mode.h>
 #include <o3os/app/sample_bank.h>
 #include <o3os/app/screens/sample_edit_screen.h>
 #include <o3os/app/screens/wave_screen.h>
@@ -17,10 +18,11 @@ namespace {
 constexpr int kLaneColumns = 768;
 constexpr int kCoarse = 16;
 constexpr int kMaxClicks = 1 << 16;
+constexpr int clamp_clicks(int clicks) noexcept { return clicks > kMaxClicks ? kMaxClicks : (clicks < -kMaxClicks ? -kMaxClicks : clicks); }
 constexpr const char* kMakeMono = "STEREO: MAKE MONO FIRST";  // OS-STEREO S7: Compressor and the Amiga conversion refuse a stereo sample (the STEREO row of the source page set to MONO)
 
 bool say(ActionContext& ctx, core::Severity severity, const char* text) noexcept {
-  return ctx.view.notify.post(severity, text, "edit", ViewState::kMessageMs);
+  return say_tag(ctx, severity, text, "edit");
 }
 
 PointsRec rec_of(const model::Instrument& in) noexcept {
@@ -46,6 +48,13 @@ void apply_rec(model::Instrument& in, const PointsRec& r) noexcept {
     in.engine = r.engine;
     in.sampler.tune = r.tune;
   }
+  if (r.pm != 0xFFu) {  // a WAVETABLE plugin's run (S4c): the play mode and its window, as play_mode_set leaves them
+    in.sampler.play_mode = r.pm;
+    in.sampler.sample_type = r.pm == kPlayModeWavetable ? 1u : 0u;
+    in.sampler.wavetable_window_size = r.wsz;
+    in.sampler.wavetable_window = r.wpos;
+    model::wt_slot_follow_mode(in);
+  }
 }
 
 bool move_edge(ActionContext& ctx, int clicks, bool coarse) noexcept {
@@ -55,7 +64,7 @@ bool move_edge(ActionContext& ctx, int clicks, bool coarse) noexcept {
   }
   SampleEditState& st = ctx.view.sedit;
   const SampleEditState before = st;
-  clicks = clicks > kMaxClicks ? kMaxClicks : (clicks < -kMaxClicks ? -kMaxClicks : clicks);
+  clicks = clamp_clicks(clicks);
   const Window w = sedit_window(st, pcm.frames);
   std::int64_t per_click = w.span / static_cast<std::uint32_t>(kLaneColumns);
   per_click = per_click < 1 ? 1 : per_click;
@@ -125,7 +134,7 @@ bool fx_edit(ActionContext& ctx, int clicks, bool coarse) noexcept {
   SampleEditState& st = ctx.view.sedit;
   const unsigned row = st.fx_sel < kFxCount ? st.fx_sel : 0u;
   const FxParamDef& d = kFxParams[row];
-  clicks = clicks > kMaxClicks ? kMaxClicks : (clicks < -kMaxClicks ? -kMaxClicks : clicks);
+  clicks = clamp_clicks(clicks);
   int v = st.fx[row];
   for (int n = clicks < 0 ? -clicks : clicks; n > 0; --n) {
     int step = coarse ? d.coarse : d.step;
@@ -144,6 +153,61 @@ bool fx_edit(ActionContext& ctx, int clicks, bool coarse) noexcept {
 
 bool sedit_fx(ActionContext& ctx, core::ActionArg arg) noexcept { return fx_edit(ctx, arg, false); }
 bool sedit_fx_coarse(ActionContext& ctx, core::ActionArg arg) noexcept { return fx_edit(ctx, arg, true); }
+
+// The PLUGINS page (OS-CEPTFX S4a): no card access here. The encoder moves the listing index (list focus; the App's pass reads the plugin's header after it) or the value of the row; a run (S4b) or a scan
+// in progress holds both, so the listing and the plugin in view stay what the run was asked with.
+namespace {
+bool plug_busy(const ActionContext& ctx, const PtfxPage* page) noexcept {
+  return ctx.view.sedit.running || (page->cat != nullptr && page->cat->state() == module::PtfxCatalog::State::Scanning);
+}
+
+bool plug_edit(ActionContext& ctx, int clicks, bool coarse) noexcept {
+  PtfxPage* page = ctx.model.samples != nullptr ? ctx.model.samples->ptfx_page() : nullptr;
+  if (page == nullptr || page->cat == nullptr || clicks == 0) {
+    return false;
+  }
+  if (plug_busy(ctx, page)) {
+    return say(ctx, core::Severity::Info, "BUSY");
+  }
+  SampleEditState& st = ctx.view.sedit;
+  if (st.plug_focus == 0u) {
+    const int count = static_cast<int>(page->cat->count());
+    if (count == 0) {
+      return false;
+    }
+    const int to = static_cast<int>(st.plug_sel) + clamp_clicks(clicks) * (coarse ? 10 : 1);
+    const std::uint8_t next = static_cast<std::uint8_t>(to < 0 ? 0 : (to > count - 1 ? count - 1 : to));
+    const bool changed = next != st.plug_sel;
+    st.plug_sel = next;
+    st.plug_param = 0;
+    return changed;
+  }
+  return page->bump(st.plug_param, clicks, coarse);  // (bump holds the clicks to its own range)
+}
+}  // namespace
+
+bool sedit_plug(ActionContext& ctx, core::ActionArg arg) noexcept { return plug_edit(ctx, arg, false); }
+bool sedit_plug_coarse(ActionContext& ctx, core::ActionArg arg) noexcept { return plug_edit(ctx, arg, true); }
+
+bool sedit_plug_do(ActionContext& ctx, core::ActionArg arg) noexcept {
+  PtfxPage* page = ctx.model.samples != nullptr ? ctx.model.samples->ptfx_page() : nullptr;
+  if (page == nullptr || page->cat == nullptr) {
+    return say(ctx, core::Severity::Info, "NO PLUGINS HERE");
+  }
+  SampleEditState& st = ctx.view.sedit;
+  if (plug_busy(ctx, page)) {
+    return say(ctx, core::Severity::Info, "BUSY");
+  }
+  if (arg == 1) {  // F1 APPLY: the App's pass checks the plugin and the sample and runs it (the refusal is its strip text)
+    st.plug_apply = true;
+    return true;
+  }
+  if (arg == 2) {  // F2 RESCAN: the App starts the catalogue job (the listing and the plugin in view are read again)
+    st.plug_scan = true;
+    return true;
+  }
+  return arg == 3 ? page->reset_all() : page->reset(st.plug_param);
+}
 
 // F1..F6, and Shift + F4 (DC REMOVE, OS-SEDFX): the effect (arg = EditOp) is asked for; the App starts the job. On the FX page F1 / F2 are FILTER and COMPRESSOR (OS-AUDIT-15).
 bool sedit_run(ActionContext& ctx, core::ActionArg arg) noexcept {
@@ -240,6 +304,21 @@ bool sample_commit(ActionContext& ctx, core::ActionArg) noexcept {
   PointsRec before = rec_of(*in);
   const std::uint32_t old_frames = ctx.samples->pcm(slot).frames;
   PointsRec after = st.ready_op == EditOp::Crop ? crop_points(before, old_frames, st.ready_a, st.ready_b) : before;
+  const PtfxJob* const run = st.ready_plug ? &ctx.samples->ptfx_job() : nullptr;  // OS-CEPTFX S4c: the run that made the staged buffer (it stays in the bank until the next one)
+  if (run != nullptr) {
+    // A generator made a new sample (the old points name frames of the old one): the whole range, no slices. An effect that added frames (Add Silence) moves the points as a crop would.
+    after = run->generator() ? PointsRec{} : insert_points(before, old_frames, run->body_a(), run->body_b(), run->prepend(), run->append());
+  }
+  const bool wavetable = run != nullptr && run->wavetable();
+  const unsigned wsize = wavetable ? wt_fit_size(in->sampler.wavetable_window_size, st.staged_frames) : 0u;
+  if (wsize != 0u) {  // the plugin makes single-cycle frames: the instrument plays them as a wavetable, in the same undo unit as the audio (F8 puts the mode back)
+    before.pm = in->sampler.play_mode;
+    before.wsz = in->sampler.wavetable_window_size;
+    before.wpos = in->sampler.wavetable_window;
+    after.pm = kPlayModeWavetable;
+    after.wsz = static_cast<std::uint16_t>(wsize);
+    after.wpos = wt_clamp_pos(st.staged_frames, wsize, in->sampler.wavetable_window);
+  }
   if (st.ready_op == EditOp::Amiga) {  // one undo unit: the audio, and the rate, engine and tune it goes with (the points are fractions of the length: they follow it)
     const int tune = in->sampler.tune + (st.ready_period == kAmigaPeriod16 ? kAmigaTune16 : 0);
     if (tune > 24) {  // the tune was raised while the job ran
@@ -263,6 +342,14 @@ bool sample_commit(ActionContext& ctx, core::ActionArg) noexcept {
     (void)ctx.edit->set_instrument(slot, edited);
   }
   st.staged = nullptr;
+  st.ready_plug = false;
+  if (wavetable && wsize == 0u) {  // under 32 frames the sample has no window: the mode stays
+    (void)say(ctx, core::Severity::Warn, "WAVETABLE NEEDS A SAMPLE OF 32 FRAMES");
+  }
+  if (run != nullptr && run->generator()) {  // the length changed: a selection of the old one means nothing
+    st.a = st.b = 0;
+    st.first = st.span = 0;
+  }
   if (st.ready_op == EditOp::Amiga) {
     (void)say(ctx, core::Severity::Info, st.ready_period == kAmigaPeriod16 ? "AMIGA 16574 HZ, ENGINE AMIGA, TUNE +12" : "AMIGA 8287 HZ, ENGINE AMIGA");
     st.a = st.b = 0;  // the length changed: a selection of the old one means nothing

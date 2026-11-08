@@ -22,9 +22,12 @@ namespace o3os::app {
 
 namespace {
 
-bool say(ActionContext& ctx, const char* text) noexcept { return ctx.view.notify.post(core::Severity::Info, text, "instrument", ViewState::kMessageMs); }
+bool say(ActionContext& ctx, const char* text) noexcept { return say_tag(ctx, core::Severity::Info, text, "instrument"); }
 
 bool on_screen(const ActionContext& ctx) noexcept { return ctx.view.screen == ScreenId::Instrument; }
+
+// OS-INSFX S5: the keys that edit the instrument in view (NAME, COPY, PASTE, DELETE, INIT, SAVE) do not act on an insert's page: there the rows are the insert's parameters.
+bool on_instrument_page(const ActionContext& ctx) noexcept { return on_screen(ctx) && !params_insert_target(ctx.view); }
 
 // The instrument in view becomes `to` (1..64): the notes the pads of this screen hold end first, on the instrument that started them (O2).
 bool select_to(ActionContext& ctx, int to) noexcept {
@@ -33,6 +36,13 @@ bool select_to(ActionContext& ctx, int to) noexcept {
   }
   release_live_pads(ctx);
   ctx.view.instrument = to;
+  ctx.view.params.insert = ParamView::kNoInsert;  // OS-INSFX S5: an instrument chosen on an insert's page takes the page over
+  std::uint8_t& page = ctx.view.page[screen_index(ScreenId::Instrument)];
+  if (page == ParamsScreen::kMixPage) {  // OS-MODSENDS: MIX belongs to the module instrument it was opened on: another slot opens on its first page
+    page = 0;
+    ctx.view.params.row = 0;
+    ctx.view.params.discard_pending();
+  }
   return true;
 }
 
@@ -61,6 +71,19 @@ bool instrument_page(ActionContext& ctx, core::ActionArg arg) noexcept {
   const unsigned key = static_cast<unsigned>(arg);
   switch (params_slot_kind(ctx.model, ctx.view)) {
     case SlotKind::Module:
+      if (key == 4u) {  // OS-INSFX-ABI2 A9: a module has at most four pages (F1..F4), F5 is PRESET (an instrument module's page and an insert's)
+        return preset_open(ctx);
+      }
+      if (key == 0u && kParamsScreen.module_page_count(ctx.model, ctx.view) == 0u) {  // OS-MODSENDS: a module with no pages: F1 leaves MIX (as the second Shift + F2 does)
+        std::uint8_t& page = ctx.view.page[screen_index(ScreenId::Instrument)];
+        if (page != ParamsScreen::kMixPage || params_insert_target(ctx.view)) {
+          return false;
+        }
+        page = 0;
+        ctx.view.params.row = 0;
+        ctx.view.params.discard_pending();
+        return true;
+      }
       return key < kParamsScreen.module_page_count(ctx.model, ctx.view) && param_group(ctx, arg);
     case SlotKind::Empty:  // the type chooser has its own keys (context instrument.empty): nothing of the pages is here
       return false;
@@ -107,9 +130,10 @@ bool instrument_step(ActionContext& ctx, core::ActionArg arg) noexcept {
   return on_screen(ctx) && arg != 0 && select_to(ctx, ctx.view.instrument + (arg < 0 ? -1 : 1));
 }
 
-// Shift + F6 / F7 (O1): the previous / next instrument that holds something; with none that way, nothing.
+// Shift + F6 / F7 (O1): the previous / next instrument that holds something; with none that way, nothing. OS-INSFX S5: not on an insert's page (the key row dims the Shift row there; the rows are the insert's
+// parameters, and choosing an instrument stays with the pads and the plain F6 / F7).
 bool instrument_used(ActionContext& ctx, core::ActionArg arg) noexcept {
-  return on_screen(ctx) && arg != 0 && select_to(ctx, instrument_in_use(ctx.model, ctx.view.instrument, arg));
+  return on_instrument_page(ctx) && arg != 0 && select_to(ctx, instrument_in_use(ctx.model, ctx.view.instrument, arg));
 }
 
 namespace {
@@ -133,7 +157,7 @@ bool say_done(ActionContext& ctx, unsigned slot, const char* what) noexcept {
 // is touched, and the bank's slot is made silent at the next quiet handover (the PCM stays in the arena until the next project load, which is what an undo needs). A module instance stays bound (there is
 // no unbind): the gate of ModuleUi::sync_slots keeps it from sounding, and ModuleUi::pick refuses a new module on the slot until the project is reloaded.
 bool instrument_delete(ActionContext& ctx, core::ActionArg) noexcept {
-  if (!on_screen(ctx) || ctx.edit == nullptr) {
+  if (!on_instrument_page(ctx) || ctx.edit == nullptr) {
     return false;
   }
   const unsigned slot = slot_in_view(ctx);
@@ -185,7 +209,7 @@ void own_sample_path(model::Instrument& in, unsigned slot) noexcept {
 // Shift + F1 NAME (OS-INSTUI S7): the on-screen keyboard (text_entry.h) over the instrument's name, the whole of it selected; F8 keeps the typed name as one undo unit (text.accept ->
 // instrument_rename_accept), F7 leaves it as it was. The stored field decides what can be typed: up to 32 characters (kInstrumentNameMax), every key of the keyboard.
 bool instrument_name(ActionContext& ctx, core::ActionArg) noexcept {
-  if (!on_screen(ctx)) {
+  if (!on_instrument_page(ctx)) {
     return false;
   }
   const model::Instrument* in = ctx.model.project != nullptr ? ctx.model.project->instrument(slot_in_view(ctx)) : nullptr;
@@ -222,9 +246,9 @@ bool instrument_rename_accept(ActionContext& ctx) noexcept {
   return true;
 }
 
-// Shift + F2 COPY: the clipboard takes the instrument (its parameters by value, its audio by reference: sample_bank.h). A module instrument has a running instance that cannot be duplicated.
+// Shift + F2 COPY: the clipboard takes the instrument (its parameters by value, its audio by reference: sample_bank.h). A module instrument has a running instance that cannot be duplicated: its key opens MIX.
 bool instrument_copy(ActionContext& ctx, core::ActionArg) noexcept {
-  if (!on_screen(ctx)) {
+  if (!on_instrument_page(ctx)) {
     return false;
   }
   const unsigned slot = slot_in_view(ctx);
@@ -232,8 +256,9 @@ bool instrument_copy(ActionContext& ctx, core::ActionArg) noexcept {
   if (in == nullptr) {
     return say(ctx, "NOTHING TO COPY");
   }
-  if (in->kind == model::InstrumentKind::Module) {
-    return say(ctx, "A MODULE INSTRUMENT CANNOT BE COPIED");
+  if (in->kind == model::InstrumentKind::Module) {  // OS-MODSENDS: a module instrument cannot be copied (its running instance); its Shift + F2 key is MIX, the page of PANNING and the sends
+    (void)kParamsScreen.open_mix(ctx.model, ctx.view);
+    return true;
   }
   if (ctx.samples == nullptr || !ctx.samples->ready()) {
     return say(ctx, "NO CLIPBOARD (NO SAMPLE MEMORY)");
@@ -246,7 +271,7 @@ bool instrument_copy(ActionContext& ctx, core::ActionArg) noexcept {
 // module instance cannot be unbound: delete it first, S5). A sample instrument shares the copied audio (no copy, no arena: SampleBank::paste_audio) and gets this slot's sample file name; a MIDI
 // instrument comes with its channel. The notes the pads hold end first (O2); the audio side follows at the next quiet handover.
 bool instrument_paste(ActionContext& ctx, core::ActionArg) noexcept {
-  if (!on_screen(ctx) || ctx.edit == nullptr) {
+  if (!on_instrument_page(ctx) || ctx.edit == nullptr) {
     return false;
   }
   SampleBank* bank = ctx.samples;
@@ -314,7 +339,7 @@ bool instrument_load(ActionContext& ctx, core::ActionArg) noexcept {
 // Shift + Delete INIT (D8): every parameter back to its descriptor's default, one undo unit, no dialog. The kind, the sample, the module and the name stay. A module's blob goes back to the module's
 // own defaults (and the running instance is told); a sample or MIDI instrument is rebound at the next quiet handover.
 bool instrument_init(ActionContext& ctx, core::ActionArg) noexcept {
-  if (!on_screen(ctx) || ctx.edit == nullptr) {
+  if (!on_instrument_page(ctx) || ctx.edit == nullptr) {
     return false;
   }
   const unsigned slot = slot_in_view(ctx);

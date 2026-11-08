@@ -18,6 +18,10 @@
 //   Samples/<name>.wav                        Target        a WAV the recorder or the sample editor made: NEVER replaced (no Backup form exists)
 //   instruments                               folder        (OS-INSTUI S7) the .pti library: a sample instrument saved on its own, in the OG's instrument format
 //   instruments/<name>.pti                    Target        <name> valid_name(); NEVER replaced (no Backup form exists): a name that is taken gets another (app/save_service.h)
+//   modules                                   folder        make_dir        (OS-MODPRESET P3) the module folder of the card: only presets/ below it is ours
+//   modules/presets                           folder        make_dir
+//   modules/presets/<stem>                    folder        make_dir        <stem>: valid_name() (the module file stem, one folder per module)
+//   modules/presets/<stem>/<name>.o3mp        Target        <name> valid_name(), at most kPresetNameMax (30) bytes: the rule of tools/o3preset.py valid_file_name; NEVER replaced (no Backup form exists)
 //   Settings                                  folder
 //   Settings/device.o3st                      Target        the device settings file
 //   Settings/device.o3st.bak                  Backup
@@ -65,6 +69,10 @@ inline constexpr char kProjectsDir[] = "Projects";
 inline constexpr char kSamplesDir[] = "Samples";
 inline constexpr char kSettingsDir[] = "Settings";
 inline constexpr char kInstrumentsDir[] = "instruments";  // OS-INSTUI S7
+inline constexpr char kModulesDir[] = "modules";  // OS-MODPRESET P3: modules/presets/<stem>/<name>.o3mp (the .tmod files of modules/ are never touched)
+inline constexpr char kPresetsDir[] = "presets";
+inline constexpr char kPresetSuffix[] = ".o3mp";
+inline constexpr std::size_t kPresetNameMax = 30;  // = FILE_NAME_MAX of tools/o3preset.py: "modules/presets/" + 31 + "/" + 30 + ".o3mp" is 84 bytes
 inline constexpr char kExportDir[] = "Export";  // OS-WAVEXP: Export/<project>/<project>_Song0001.wav
 inline constexpr char kScreenshotsDir[] = "Screenshots";  // OS-SCREENSHOT: Screenshots/SHOT_0001.bmp (hal/screenshot_file.h)
 inline constexpr char kAppExportDir[] = "AppExport";  // OS-H4: AppExport/<app>/<stem>.<ext>, the files an SD app module writes (ADR 0014 amendment A)
@@ -345,11 +353,31 @@ constexpr Place classify(const char* path) noexcept {
   const bool exports = detail::same(c[0].begin, c[0].n, kExportDir);
   const bool app_files = detail::same(c[0].begin, c[0].n, kAppExportDir);
   const bool screens = detail::same(c[0].begin, c[0].n, kScreenshotsDir);
-  if (!projects && !samples && !settings && !instruments && !exports && !app_files && !screens) {
+  const bool modules = detail::same(c[0].begin, c[0].n, kModulesDir);
+  if (!projects && !samples && !settings && !instruments && !exports && !app_files && !screens && !modules) {
     return Place::None;
   }
   if (n == 1) {
     return Place::Folder;
+  }
+  if (modules) {  // OS-MODPRESET P3: modules/presets/<stem>/<name>.o3mp and nothing else below modules/; created by a rename of the Temp, never replaced
+    if (!detail::same(c[1].begin, c[1].n, kPresetsDir)) {
+      return Place::None;
+    }
+    if (n == 2) {
+      return Place::Folder;
+    }
+    if (!detail::valid_name(c[2].begin, c[2].n)) {
+      return Place::None;
+    }
+    if (n == 3) {
+      return Place::Folder;
+    }
+    if (detail::same(c[3].begin, c[3].n, kTempName)) {
+      return Place::Temp;
+    }
+    const std::size_t stem = detail::stem_of(c[3], kPresetSuffix);
+    return (stem != static_cast<std::size_t>(-1) && stem <= kPresetNameMax && detail::valid_name(c[3].begin, stem)) ? Place::Target : Place::None;
   }
   if (app_files) {  // OS-H4: AppExport/<app>/<stem>.<ext>, a file an app wrote; created by a rename of the Temp, never replaced, and nothing deeper than the app's folder
     if (!detail::valid_name(c[1].begin, c[1].n)) {

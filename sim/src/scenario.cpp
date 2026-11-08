@@ -289,9 +289,9 @@ bool parse_scenario(const std::string& text, std::vector<ScenarioCommand>& out, 
           ++i;
           continue;
         }
-        const std::uint32_t bit = word == "bindings" ? 1u : (word == "new" ? 2u : (word == "sound" ? 4u : (word == "tb303" ? 8u : (word == "inserts" ? 16u : 0u))));
+        const std::uint32_t bit = word == "bindings" ? 1u : (word == "new" ? 2u : (word == "sound" ? 4u : (word == "tb303" ? 8u : (word == "inserts" ? 16u : (word == "events" ? 32u : 0u)))));
         if (bit == 0u || (flags & bit) != 0u) {
-          return bad("document takes nothing, or the words 'bindings', 'new', 'sound', 'tb303', 'inserts' and 'tracks <n>'");
+          return bad("document takes nothing, or the words 'bindings', 'new', 'sound', 'tb303', 'inserts', 'events' and 'tracks <n>'");
         }
         flags |= bit;
       }
@@ -419,6 +419,10 @@ bool parse_scenario(const std::string& text, std::vector<ScenarioCommand>& out, 
         return bad("card full takes nothing, or the word off");
       }
       cmd.value = w.size() == 3 ? 7u : 6u;
+    } else if (verb == "card" && w.size() == 2 && lower(w[1]) == "ptfx") {
+      // OS-CEPTFX S4a: `card ptfx` (a fixture folder named `ptfx` is written `./ptfx`): synthetic header-only plugins into the card's Effects/ (the PLUGINS page of Sample edit lists them).
+      cmd.kind = ScenarioCommand::Kind::Card;
+      cmd.value = 8u;
     } else if (verb == "card") {
       const bool copy = w.size() == 4 && lower(w[1]) == "copy";
       if (w.size() != 2 && !copy) {
@@ -650,7 +654,7 @@ bool run_scenario(const std::vector<ScenarioCommand>& commands, Simulator& sim, 
           error = "line " + std::to_string(cmd.line) + ": document: a card is in the slot already, so the document is the card's (put `document` before `card`)";
           return false;
         }
-        sim.open_document((cmd.value & 1u) != 0u, (cmd.value & 2u) != 0u, (cmd.value >> 8) & 0xFFu, (cmd.value & 4u) != 0u, (cmd.value & 8u) != 0u, (cmd.value & 16u) != 0u);
+        sim.open_document((cmd.value & 1u) != 0u, (cmd.value & 2u) != 0u, (cmd.value >> 8) & 0xFFu, (cmd.value & 4u) != 0u, (cmd.value & 8u) != 0u, (cmd.value & 16u) != 0u, (cmd.value & 32u) != 0u);
         break;
       case Kind::Disk: {
         using Phase = app::ViewState::DiskView::Phase;
@@ -663,6 +667,13 @@ bool run_scenario(const std::vector<ScenarioCommand>& commands, Simulator& sim, 
       }
       case Kind::Card: {
         std::string why;
+        if (cmd.value == 8u) {  // `card ptfx`: demo plugins into the card's Effects/
+          if (!sim.card_ptfx(why)) {
+            error = "line " + std::to_string(cmd.line) + ": card ptfx: " + why;
+            return false;
+          }
+          break;
+        }
         if (cmd.value >= 6u) {  // `card full` / `card full off`: the card's room, which needs no card yet
           sim.set_card_full(cmd.value == 6u);
           break;

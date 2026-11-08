@@ -26,6 +26,7 @@ o3os_library(audio
     src/module_voices.cpp
     src/module_governor.cpp
     src/insert_host.cpp
+    src/insert_key.cpp
     src/paula.cpp
     src/amiga_voices.cpp
     src/med_tick.cpp
@@ -38,6 +39,7 @@ o3os_library(audio
     src/master_dj_filter.cpp
     src/master_scratch.cpp
     src/master_kill_eq.cpp
+    src/wt_contour.cpp
   DEPENDS core hal usb module)
 # meter_level() takes a square root (main loop only): without errno handling it is one VSQRT, and the image does not pull newlib's errno
 # machinery (the 80 bytes of `_impure_data` in .data) and a sqrtf for it.

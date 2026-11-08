@@ -23,6 +23,7 @@ enum class Role : std::uint8_t {
   Render,        // the software-pended render line: sequencer tick and the whole audio graph
   PinChange,     // pad / button / encoder pin interrupts: flags for the main loop
   Unassigned,    // a line nobody has claimed: below everything with a role
+  PluginGate,    // SVCall: a .ptfx plugin's return through the call gate (OS-CEPTFX S2b); still the lowest system handler
 };
 
 namespace prio {
@@ -36,6 +37,7 @@ inline constexpr std::uint8_t kMidiOutTimer = 96;
 inline constexpr std::uint8_t kRender = 128;
 inline constexpr std::uint8_t kPinChange = 160;
 inline constexpr std::uint8_t kUnassigned = 224;
+inline constexpr std::uint8_t kPluginGate = 240;  // SVCall, the .ptfx call gate's return (OS-CEPTFX S2b)
 }  // namespace prio
 
 constexpr std::uint8_t priority(Role role) noexcept {
@@ -50,6 +52,7 @@ constexpr std::uint8_t priority(Role role) noexcept {
     case Role::Render: return prio::kRender;
     case Role::PinChange: return prio::kPinChange;
     case Role::Unassigned: return prio::kUnassigned;
+    case Role::PluginGate: return prio::kPluginGate;
   }
   return prio::kUnassigned;  // not reached: every enumerator is handled above
 }
@@ -73,6 +76,7 @@ inline constexpr RoleInfo kTable[] = {
     {Role::Render, prio::kRender, "render", "sequencer tick and the whole audio graph, at most 60 % of the block"},
     {Role::PinChange, prio::kPinChange, "pins", "pad, button and encoder pin interrupts: flags for main"},
     {Role::Unassigned, prio::kUnassigned, "unassigned", "a line nobody has claimed"},
+    {Role::PluginGate, prio::kPluginGate, "plugin_gate", "SVCall: a .ptfx plugin's return through the call gate"},
 };
 inline constexpr unsigned kRoleCount = sizeof(kTable) / sizeof(kTable[0]);
 
@@ -100,7 +104,8 @@ constexpr bool table_matches_function() noexcept {
   }
   return true;
 }
-static_assert(kRoleCount == static_cast<unsigned>(Role::Unassigned) + 1u, "every Role has a row");
+static_assert(kRoleCount == static_cast<unsigned>(Role::PluginGate) + 1u, "every Role has a row");
+static_assert(prio::kUnassigned < prio::kPluginGate, "SVCall keeps the lowest priority of the system handlers");
 static_assert(table_matches_function(), "kTable lists the Roles in enum order with strictly increasing priorities");
 
 // The ADR 0013 order, checked where it is written: a reordering is a compile error, not a latent priority inversion.

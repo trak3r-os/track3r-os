@@ -6,11 +6,14 @@ usage: testdata_test.py REPO_ROOT
 
   - the committed manifest passes the validator;
   - the validator refuses a licence outside the allow-list for a bundled file, a bad path, a bad hash, a duplicate target, 'Maintainer-own'
-    outside Projects/t-v16/ and a file outside the asset with no https url;
+    outside Projects/t-v16/, a file outside the asset with no https url, and a bundled file under ptfx-sdk/;
   - the asset built twice from fake sources is byte-identical, its entries are sorted with one time stamp, and `fetch --zip` unpacks it into a
     temporary directory with every file equal to its source;
   - an asset whose SHA-256 differs from the manifest is refused before anything is written, a source file that differs from the manifest fails
-    the pack, a stray, a changed or a missing member of the asset is refused with nothing written, `--third-party` lists a manual entry and counts a failed download, and an output directory inside the repository outside build*/ is refused.
+    the pack, a stray, a changed or a missing member of the asset is refused with nothing written, `--third-party` lists a manual entry and counts a failed download, and an output directory inside the repository outside build*/ is refused;
+  - a plain `fetch` downloads only the asset (an offline `fetch --zip FILE` touches no network), `--third-party` brings every file outside
+    the asset including ptfx-sdk/, and `fetch --only ptfx-sdk/` brings just those without the release asset; `--only` with a prefix that
+    matches nothing is refused.
 Nothing here uses the network.
 """
 import copy
@@ -86,6 +89,12 @@ def main():
     bad(lambda c: c["files"][-1].pop("url"), "needs an https url", "no url")
     bad(lambda c: c["files"][-1].update(url="http://example.invalid/x"), "needs an https url", "http url")
     bad(lambda c: c.update(schema=2), "schema", "schema")
+    # OS-CEPTFX S0: ptfx-sdk/ is a third root; a file outside the asset may live there, a bundled one may not
+    bad(lambda c: c["files"].append(dict(dest="ptfx-sdk/x.h", sha256=sha(b"x"), size=1, licence="MIT", author="a", source="s", bundled=False)),
+        "needs an https url", "SDK file without a url")
+    bad(lambda c: c["files"].append(dict(dest="ptfx-sdk/x.h", sha256=sha(b"x"), size=1, licence="MIT", author="a", source="s", bundled=True,
+                                         url="https://example.invalid/x")), "may not go into the asset", "bundled SDK file")
+    bad(lambda c: c["files"][0].update(dest="ptfx-sdkx/y"), "outside", "near-miss root")
 
     with tempfile.TemporaryDirectory() as tmp:
         src_tv, src_o3 = os.path.join(tmp, "tv"), os.path.join(tmp, "o3")
@@ -165,14 +174,35 @@ def main():
         # --third-party: a manual entry is listed and not downloaded; a failing download is counted (http_get replaced, no network)
         calls = []
         orig = td.http_get
-        td.http_get = lambda url: calls.append(url) or (_ for _ in ()).throw(td.TestdataError("no network in the test"))
+
+        def fake_get(url):
+            calls.append(url)
+            if url == "https://example.invalid/sdk.h":
+                return b"SDK"
+            raise td.TestdataError("no network in the test")
+
+        td.http_get = fake_get
         try:
             m3 = copy.deepcopy(m)
             m3["files"].append(dict(dest="O3TEST/WTABLE/by_hand.wav", sha256=sha(b"y"), size=1, licence="terms", author="a", source="s", bundled=False,
                                     url="https://example.invalid/page", manual=True))
+            m3["files"].append(dict(dest="ptfx-sdk/tracker_plugin.h", sha256=sha(b"SDK"), size=3, licence="MIT", author="a", source="s", bundled=False,
+                                    url="https://example.invalid/sdk.h"))
             td.validate_manifest(m3)
             assert td.cmd_fetch(m3, os.path.join(tmp, "dest6"), zpath, True) == 2
-            assert calls == ["https://example.invalid/outside.mod"], calls
+            assert calls == ["https://example.invalid/outside.mod", "https://example.invalid/sdk.h"], calls
+            # a plain fetch downloads only the asset: no network at all, exit 0 (an offline `fetch --zip FILE` works)
+            del calls[:]
+            assert td.cmd_fetch(m3, os.path.join(tmp, "dest7"), zpath, False) == 0
+            assert calls == [], calls
+            assert not os.path.exists(os.path.join(tmp, "dest7", "ptfx-sdk"))
+            # --only brings just that root's files, without the release asset (zip_file is not even read)
+            del calls[:]
+            assert td.cmd_fetch(m3, os.path.join(tmp, "dest8"), None, False, "ptfx-sdk/") == 0
+            assert calls == ["https://example.invalid/sdk.h"], calls
+            with open(os.path.join(tmp, "dest8", "ptfx-sdk", "tracker_plugin.h"), "rb") as f:
+                assert f.read() == b"SDK"
+            expect_error(lambda: td.cmd_fetch(m3, os.path.join(tmp, "dest9"), None, False, "nope/"), "matches no file", "--only without a match")
         finally:
             td.http_get = orig
 

@@ -5,12 +5,16 @@
 // written: no card write layer (the simulator), no card, a write-protected card or an exFAT one (any other card is written: no marker, OS-ANYCARD).
 #include "action_handlers.h"
 
+#include <o3os/app/module_ui.h>
 #include <o3os/app/recorder.h>
 #include <o3os/app/sample_bank.h>
 #include <o3os/app/save_service.h>
+#include <o3os/app/screens/params_screen.h>
 #include <o3os/app/screens/wave_screen.h>
 #include <o3os/app/text_format.h>
 #include <o3os/model/editor.h>
+
+#include <cstring>
 
 namespace o3os::app {
 
@@ -76,6 +80,7 @@ bool save_report(ActionContext& ctx, SaveService::Start start) noexcept {
     case SaveService::Start::PtiTooLong: return say(ctx, core::Severity::Warn, "TOO LONG FOR A .PTI AT 44100 HZ");
     case SaveService::Start::PtiBits: return say(ctx, core::Severity::Warn, "12/8 BIT ENGINE: NOT SAVED AS A .PTI");
     case SaveService::Start::PtiLevel: return say(ctx, core::Severity::Warn, "LEVEL TOO LOW FOR A .PTI (1.1.14 LAW)");
+    case SaveService::Start::BadValues: return say(ctx, core::Severity::Warn, "VALUES NOT SAVEABLE (A PARAMETER IS NOT A NUMBER)");  // OS-MODPRESET P3
   }
   return false;
 }
@@ -166,12 +171,92 @@ bool name_accept(ActionContext& ctx) noexcept {
   return say(ctx, core::Severity::Info, text.c_str());
 }
 
+// OS-MODPRESET P4: the keyboard for a preset's name (TextEntryView::Target::Preset): Shift + F5 on a bound module's parameter page (instrument_save) or in the F5 PRESET list (preset_save).
+// The suggested name is the instrument's name, or the effect's display name, sanitised as a file stem; the filter is the FileName one and the cap kPresetNameMax (the guard's preset rule).
+bool preset_name_open(ActionContext& ctx) noexcept {
+  const ParamTarget target = params_target(ctx.view);
+  if (ctx.model.modules == nullptr || ctx.model.project == nullptr) {
+    return say(ctx, core::Severity::Info, "NO MODULE SYSTEM IN THIS BUILD");
+  }
+  const o3m_module* m = ctx.model.modules->bound_module(*ctx.model.project, target);
+  if (m == nullptr || ctx.model.modules->param_count(*ctx.model.project, target) == 0u) {
+    return say(ctx, core::Severity::Info, "NO MODULE HERE");
+  }
+  if (ctx.saves == nullptr || !ctx.saves->attached() || ctx.session == nullptr) {
+    return say(ctx, core::Severity::Warn, "NO CARD WRITE LAYER");
+  }
+  if (ctx.saves->gate() != hal::storage::WriteStatus::Ok) {  // as Save As: nobody types a name for a save that cannot go
+    return say(ctx, core::Severity::Warn, SaveService::gate_text(ctx.saves->gate()));
+  }
+  char name[kPresetNameMax + 1] = {};
+  if (target.insert) {
+    const char* display = m->name != nullptr && m->name[0] != '\0' ? m->name : ModuleUi::module_name_of(*ctx.model.project, target);
+    SaveService::instrument_file_stem(display, 0, name, sizeof name);
+  } else {
+    const model::Instrument* in = target.slot < model::kMaxInstruments ? ctx.model.project->instrument(target.slot) : nullptr;
+    SaveService::instrument_file_stem(in != nullptr ? in->name : "", target.slot, name, sizeof name);
+  }
+  TextEntryView& t = ctx.view.text;
+  t.entry.begin(name, kPresetNameMax, TextEntry::Filter::FileName);
+  t.target = TextEntryView::Target::Preset;
+  t.message = "";
+  ctx.view.overlay = OverlayId::TextEntry;
+  return true;
+}
+
+// F8 in the keyboard for a preset (Target::Preset, OS-MODPRESET P4): the typed name goes to SaveService::save_preset with the values in force (ModuleUi::capture_preset), as a NewOnly .o3mp in
+// modules/presets/<stem>/; a taken name got the next free one and the strip says the name the file got. A name the card cannot take stays in the keyboard with the reason.
+bool preset_accept(ActionContext& ctx) noexcept {
+  TextEntryView& t = ctx.view.text;
+  if (t.entry.length() == 0u) {
+    t.message = "TYPE A NAME";
+    return true;
+  }
+  if (!SaveService::project_name_ok(t.entry.text())) {  // the guard's rule; the entry's cap is kPresetNameMax
+    t.message = "NOT A NAME: LETTERS, DIGITS, SPACE, -";
+    return true;
+  }
+  if (ctx.saves == nullptr || !ctx.saves->attached() || ctx.session == nullptr || ctx.model.modules == nullptr || ctx.model.project == nullptr) {
+    ctx.view.overlay = OverlayId::None;
+    t.target = TextEntryView::Target::None;
+    return say(ctx, core::Severity::Warn, "NO CARD WRITE LAYER");
+  }
+  formats::preset::Preset p;
+  const bool captured = ctx.model.modules->capture_preset(*ctx.model.project, params_target(ctx.view), p);
+  char final_name[kPresetNameMax + 8] = {};
+  const SaveService::Start start = captured ? ctx.saves->save_preset(ctx.session->jobs, p, t.entry.text(), final_name, sizeof final_name) : SaveService::Start::Empty;
+  if (start == SaveService::Start::BadName) {
+    t.message = "NOT A NAME THE CARD TAKES";  // the keyboard stays open
+    return true;
+  }
+  ctx.view.overlay = OverlayId::None;
+  t.target = TextEntryView::Target::None;
+  if (start == SaveService::Start::Started) {
+    core::FixedString<core::kNotifyTextChars> text;  // "PRESET SAVED: <NAME>": the name the file got, upper case (a taken name became "<name> 2")
+    text.assign("PRESET SAVED: ");
+    for (unsigned i = 0; final_name[i] != '\0' && final_name[i] != '.' && text.size() + 1u < core::kNotifyTextChars; ++i) {
+      const char c = final_name[i];
+      const char up[2] = {static_cast<char>(c >= 'a' && c <= 'z' ? c - 'a' + 'A' : c), '\0'};
+      text.append(up);
+    }
+    (void)say(ctx, core::Severity::Info, text.c_str());
+    return true;
+  }
+  if (!captured) {
+    return say(ctx, core::Severity::Info, "NO MODULE HERE");
+  }
+  return save_report(ctx, start);
+}
+
 // F8 in the keyboard: the typed name goes to the save. A name the card cannot take, or that is taken, is said inside the keyboard and it stays open; any other answer closes it
 // and the strip says how the save went.
 bool text_accept(ActionContext& ctx, core::ActionArg) noexcept {
   TextEntryView& t = ctx.view.text;
   if (ctx.view.overlay == OverlayId::TextEntry && t.target == TextEntryView::Target::Instrument) {
     return instrument_rename_accept(ctx);  // OS-INSTUI S7: the instrument's name (an undo unit)
+  }
+  if (ctx.view.overlay == OverlayId::TextEntry && t.target == TextEntryView::Target::Preset) {
+    return preset_accept(ctx);  // OS-MODPRESET P4: the preset's file name
   }
   if (ctx.view.overlay == OverlayId::TextEntry && (t.target == TextEntryView::Target::Track || t.target == TextEntryView::Target::Pattern || t.target == TextEntryView::Target::Project)) {
     return name_accept(ctx);  // OS-NAMES: a track's, a pattern's or the project's name (an undo unit)
@@ -209,15 +294,28 @@ bool text_accept(ActionContext& ctx, core::ActionArg) noexcept {
 }
 
 // Shift + F5 on the Instrument screen (OS-INSTUI S7): the sample instrument in view and its audio as instruments/<name>.pti (the OG's instrument format, SaveService::save_instrument), never over
-// an existing file. A MIDI or module instrument says so; the card's gate (no card, write protected, exFAT) and the other refusals say why on the strip like every save.
+// an existing file. OS-MODPRESET P4: on a bound module's parameter page — a module instrument's or an insert's — the same key opens the keyboard for a preset's name instead, and the save is a
+// .o3mp (preset_name_open / preset_accept). A MIDI instrument says so; an insert whose module is not bound has a blank SAVE; the card's gate (no card, write protected, exFAT) and the other refusals
+// say why on the strip like every save.
 bool instrument_save(ActionContext& ctx, core::ActionArg) noexcept {
   if (ctx.view.screen != ScreenId::Instrument) {
+    return false;
+  }
+  const ParamTarget target = params_target(ctx.view);
+  if (ctx.model.modules != nullptr && ctx.model.project != nullptr && ctx.model.modules->bound_module(*ctx.model.project, target) != nullptr &&
+      ctx.model.modules->param_count(*ctx.model.project, target) != 0u) {
+    return preset_name_open(ctx);  // OS-MODPRESET P4: a bound module's page saves a preset
+  }
+  if (params_insert_target(ctx.view)) {  // OS-INSFX S5: an insert whose module is not bound
     return false;
   }
   const unsigned slot = static_cast<unsigned>(ctx.view.instrument < 1 ? 0 : ctx.view.instrument - 1);
   const model::Instrument* in = ctx.model.project != nullptr ? ctx.model.project->instrument(slot) : nullptr;
   if (in == nullptr) {
     return say(ctx, core::Severity::Info, "NOTHING TO SAVE");
+  }
+  if (in->kind == model::InstrumentKind::Module) {
+    return say(ctx, core::Severity::Info, "NO MODULE HERE");  // a module instrument whose module is not bound
   }
   if (in->kind != model::InstrumentKind::Sample) {
     return say(ctx, core::Severity::Info, "SAMPLE INSTRUMENTS ONLY");

@@ -1,0 +1,10 @@
+# OS-MODPRESET P1: the reference preset as hex text, 96 bytes (no binary in git). Written by hand from docs/formats/o3-preset.md section 2,
+# not by the C++ writer or the Python tool: tests/preset_format_test.cpp and tests/o3preset_test.py both hold their output equal to it.
+# module tb303, kind instrument, module version 0x00010000, entries Cutoff 0.5, Resonance 0.25, Env Mod 1.0, Decay 2.5.
+# Hex digit pairs; whitespace and lines starting with # are ignored.
+46 4f 52 4d 00 00 00 58 4f 33 4d 50 4d 50 53 54
+00 00 00 3d 01 00 05 74 62 33 30 33 01 00 01 00
+00 04 06 43 75 74 6f 66 66 3f 00 00 00 09 52 65
+73 6f 6e 61 6e 63 65 3e 80 00 00 07 45 6e 76 20
+4d 6f 64 3f 80 00 00 05 44 65 63 61 79 40 20 00
+00 00 43 52 43 20 00 00 00 06 01 00 37 1d dd 4f

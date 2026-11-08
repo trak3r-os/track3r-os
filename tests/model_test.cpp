@@ -39,7 +39,7 @@ Instrument sample_instrument() {
 static_assert(sizeof(Step) == 7 && alignof(Step) == 1, "step");
 static_assert(sizeof(Pattern) == 14384, "pattern");
 static_assert(sizeof(Instrument) == 720, "instrument");
-static_assert(kModelArenaBytes == 1934312, "arena");
+static_assert(kModelArenaBytes == 1934344, "arena");
 static_assert(alignof(ModelArena) == 8, "arena alignment");
 static_assert(kMaxPatterns * sizeof(Pattern) + kMaxInstruments * sizeof(Instrument) + kUnknownPoolBytes < kModelArenaBytes,
               "the pools are most of the arena");
@@ -61,9 +61,15 @@ TEST_CASE("model: step is seven packed bytes, fx classes follow ADR 0004") {
   CHECK(fx_class(0) == FxClass::Og);
   CHECK(fx_class(42) == FxClass::Og);
   CHECK(fx_class(43) == FxClass::Reserved);
+  CHECK(fx_class(96) == FxClass::Reserved);  // tracker-ce FX (ADR 0004 amendment 3) stay Reserved until defined
   CHECK(fx_class(127) == FxClass::Reserved);
   CHECK(fx_class(128) == FxClass::Engine);
   CHECK(fx_class(255) == FxClass::Engine);
+  CHECK(kFxOgLast == 42);
+  CHECK(kFxOgCeLast == 74);   // the last OG id that maps to a tracker-ce id
+  CHECK(kFxCeFirst == 96);    // the first tracker-ce FX id
+  CHECK(kFxCeOffset == 53);   // model id = OG id + kFxCeOffset, so 43..74 land on 96..127
+  CHECK(kFxOgCeLast + kFxCeOffset == kFxReservedLast);  // 74 + 53 = 127: the mapped range ends at the reserved range's end
   CHECK(is_empty(kEmptyStep));
   Step s = kEmptyStep;
   s.vol = 0;  // volume 0 is a value, not "unset"
@@ -454,6 +460,24 @@ TEST_CASE("model: instrument validation") {
   CHECK(p.clear_instrument(70) == Status::BadIndex);
   CHECK(p.instrument(3) == nullptr);
   CHECK(p.instrument_count() == 1);
+  CHECK(p.check_invariants());
+}
+
+// OS-CEPLAYTHRU review fold: the play-thru flag is a Sample instrument's only. The canonical form of set_instrument clears it on any other kind (the native writer stores it only for a Sample instrument, so it would vanish on save); validate_instrument still accepts it on any kind, so an OG file with byte 279 set on a non-Sample instrument loads.
+TEST_CASE("model: the play-thru flag is kept on a Sample instrument and cleared on any other kind") {
+  Project& p = fresh();
+  Instrument in = sample_instrument();
+  in.slice_thru = 1;
+  NEED(p.set_instrument(0, in) == Status::Ok);
+  CHECK(p.instrument(0)->slice_thru == 1);  // a Sample instrument keeps it
+  Instrument midi = sample_instrument();
+  midi.kind = InstrumentKind::Midi;
+  midi.midi_channel = 5;
+  midi.slice_thru = 1;
+  CHECK(p.set_instrument(10, midi) == Status::Ok);  // not rejected: the load path accepts it
+  NEED(p.instrument(10) != nullptr);
+  CHECK(p.instrument(10)->kind == InstrumentKind::Midi);
+  CHECK(p.instrument(10)->slice_thru == 0);  // the canonical form clears it
   CHECK(p.check_invariants());
 }
 

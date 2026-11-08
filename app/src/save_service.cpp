@@ -3,6 +3,7 @@
 // that talks to the writer; nothing in this file names a path the guard does not know.
 #include <o3os/app/save_service.h>
 
+#include <o3os/app/module_ui.h>
 #include <o3os/app/pti_load.h>
 #include <o3os/app/recorder.h>
 #include <o3os/app/sample_bank.h>
@@ -25,6 +26,10 @@ constexpr bool same_text(const char* a, const char* b) noexcept {
   return *a == *b;
 }
 static_assert(same_text(guard::kInstrumentsDir, kInstrumentsFolder), "the Instrument screen lists the folder SAVE writes to (sample_load_view.h)");
+// OS-MODPRESET P3: the ModuleUi reads and lists the preset folders this layer writes to; its copies of the guard's names (module_ui.h, which does not include the guard) are these.
+static_assert(same_text(guard::kModulesDir, kPresetModulesDir) && same_text(guard::kPresetsDir, kPresetsDir) && same_text(guard::kPresetSuffix, kPresetSuffix) &&
+                  guard::kPresetNameMax == kPresetNameMax && guard::kPathCap == kPresetPathCap,
+              "module_ui.h's preset paths are the guard's rows for modules/presets/");
 static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "the WAV source writes the samples as they are in memory: WAV is little-endian");
 
 void put16(std::uint8_t* p, std::uint32_t v) noexcept {
@@ -973,6 +978,97 @@ SaveService::Start SaveService::save_instrument(core::JobRunner& jobs, const mod
   pti_hz_ = started == Start::Started ? check.source_hz : 0u;
   if (started == Start::Started) {
     pti_job_ = slot_;  // (only here: a refused press, such as a second one while this save runs, leaves it for the job in progress)
+  }
+  return started;
+}
+
+// OS-MODPRESET P3: the .o3mp of a module instance, modules/presets/<stem>/<name>.o3mp. The folder chain (modules, modules/presets, modules/presets/<stem>: all Folder rows of the guard, made by
+// the job's MakeDirs), the Temp in it, and a NewOnly rename to the Target: the file is never replaced, no Backup form exists and nothing is removed. A taken name gets "<name> 2" .. "<name> 99"
+// (the .pti library's rule), the stem cut to leave room for the number, as save_instrument does.
+SaveService::Start SaveService::save_preset(core::JobRunner& jobs, const formats::preset::Preset& preset, const char* name, char* final, std::size_t cap) noexcept {
+  if (writer_ == nullptr || card_ == nullptr) {
+    return Start::NoWriter;
+  }
+  reconcile();
+  if (user_blocked()) {
+    return Start::Busy;
+  }
+  if (claim_ != nullptr && claim_()) {
+    return Start::CardInUse;
+  }
+  const std::size_t name_len = name != nullptr ? std::strlen(name) : 0u;
+  if (name_len == 0u || name_len > guard::kPresetNameMax || !guard::valid_name(name) || !formats::preset::is_stem(preset.module) || !guard::valid_name(preset.module)) {
+    return Start::BadName;  // (the module stem is a folder name too: a stem is_stem takes but valid_name refuses, "my+synth", makes no folder the job could make)
+  }
+  for (unsigned i = 0; i < preset.count && i < formats::preset::kMaxEntries; ++i) {
+    if (!__builtin_isfinite(preset.entries[i].value)) {
+      return Start::BadValues;  // a NaN or an infinity in the blob: the writer never writes one, so the save refuses it with its own reason, not BadName
+    }
+    if (preset.entries[i].name[0] == '\0') {
+      return Start::BadValues;  // an empty parameter name is the module's fault, not the user's file name: valid() would refuse it as BadName
+    }
+  }
+  if (!formats::preset::valid(preset)) {
+    return Start::BadName;
+  }
+  if (writer_->gate() != WriteStatus::Ok) {
+    return Start::NotWritable;
+  }
+  char dir[guard::kPathCap];
+  if (!guard::join(dir, sizeof dir, guard::kModulesDir, guard::kPresetsDir, preset.module)) {
+    return Start::BadName;
+  }
+  // The first free "<name>.o3mp", "<name> 2.o3mp" .. "<name> 99.o3mp" in the folder (one directory lookup a probe).
+  char stem[guard::kPresetNameMax + 1];
+  std::memcpy(stem, name, name_len + 1u);
+  char file[guard::kPresetNameMax + sizeof guard::kPresetSuffix];
+  bool found = false;
+  for (unsigned n = 1u; n <= 99u && !found; ++n) {
+    char base[guard::kPresetNameMax + 1];
+    std::strcpy(base, stem);
+    std::size_t len = std::strlen(base);
+    if (n > 1u) {
+      const std::size_t keep = guard::kPresetNameMax - 3u;  // " 99"
+      len = len < keep ? len : keep;
+      while (len != 0u && (base[len - 1u] == ' ' || base[len - 1u] == '.')) {
+        --len;
+      }
+      base[len++] = ' ';
+      if (n >= 10u) {
+        base[len++] = static_cast<char>('0' + n / 10u);
+      }
+      base[len++] = static_cast<char>('0' + n % 10u);
+      base[len] = '\0';
+    }
+    if (!guard::valid_name(base) || len + sizeof guard::kPresetSuffix > sizeof file) {
+      return Start::NoName;
+    }
+    std::memcpy(file, base, len);
+    std::memcpy(file + len, guard::kPresetSuffix, sizeof guard::kPresetSuffix);
+    char path[guard::kPathCap];
+    if (!guard::join(path, sizeof path, dir, file)) {
+      return Start::NoName;
+    }
+    found = card_->exists(path, nullptr) == hal::storage::Status::NotFound;
+    if (found) {
+      std::memcpy(stem, base, len + 1u);
+    }
+  }
+  if (!found) {
+    return Start::NoName;
+  }
+  const std::size_t bytes = formats::preset::write(preset, preset_buf_, sizeof preset_buf_);
+  if (bytes == 0u) {
+    return Start::Empty;  // (valid(preset) passed, so the writer cannot refuse: still, nothing is started on an empty file)
+  }
+  buffer_.set(preset_buf_, bytes);
+  const Start started = launch(jobs, dir, file, AtomicSave::Mode::NewOnly, buffer_, stem, Kind::Preset, false, "PRESET ");
+  if (started == Start::Started && final != nullptr && cap != 0u) {
+    std::size_t at = 0;
+    for (; file[at] != '\0' && at + 1u < cap; ++at) {
+      final[at] = file[at];
+    }
+    final[at] = '\0';
   }
   return started;
 }

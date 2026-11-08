@@ -69,11 +69,13 @@ constexpr hal::irq::Role role_of(Irq line) noexcept {
 
 // Cortex-M4 system handlers (exception numbers 4..15) the boot code gives a priority to, per the same table.
 // MemManage, BusFault and UsageFault are Fault (they must preempt any ISR that causes them); SysTick has its row;
-// PendSV is the render's fallback line; SVCall is unused by this OS and left lowest.
+// PendSV is the render's fallback line; SVCall is the .ptfx call gate's return (OS-CEPTFX S2b) and keeps the lowest
+// priority of the system handlers. Any level works from thread mode, but the gate must never be called inside a
+// critical section: a PRIMASK/BASEPRI held around the call would mask the plugin's own return through SVC.
 inline constexpr hal::irq::Role kMemManageRole = hal::irq::Role::Fault;
 inline constexpr hal::irq::Role kBusFaultRole = hal::irq::Role::Fault;
 inline constexpr hal::irq::Role kUsageFaultRole = hal::irq::Role::Fault;
-inline constexpr hal::irq::Role kSvCallRole = hal::irq::Role::Unassigned;
+inline constexpr hal::irq::Role kSvCallRole = hal::irq::Role::PluginGate;
 inline constexpr hal::irq::Role kPendSvRole = hal::irq::Role::Render;
 inline constexpr hal::irq::Role kSysTickRole = hal::irq::Role::SysTick;
 
@@ -85,7 +87,7 @@ constexpr bool priorities_representable() noexcept {
   const hal::irq::Role all[] = {hal::irq::Role::Fault,        hal::irq::Role::AudioDma, hal::irq::Role::SysTick,
                                 hal::irq::Role::MidiUart,     hal::irq::Role::Usb,      hal::irq::Role::Completion,
                                 hal::irq::Role::MidiOutTimer, hal::irq::Role::Render,   hal::irq::Role::PinChange,
-                                hal::irq::Role::Unassigned};
+                                hal::irq::Role::Unassigned,   hal::irq::Role::PluginGate};
   for (const hal::irq::Role role : all) {
     if ((hal::irq::priority(role) & kLowMask) != 0u) {
       return false;

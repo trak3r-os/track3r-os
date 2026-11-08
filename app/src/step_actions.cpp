@@ -38,6 +38,9 @@ bool toggle_track_param(ActionContext& ctx, core::ActionArg arg, unsigned field)
   if (!track_arg_ok(ctx, arg)) {
     return false;
   }
+  // OS-SONG3 S4: a hand mute / solo while a PREVIEW audition runs ends the audition first (the saved solo set comes back), so this toggle and its undo unit act on the
+  // player's state, never on the audition's mask.
+  (void)song_preview_end(ctx.session != nullptr ? ctx.session->state_editor() : nullptr, ctx.view, ctx.params);
   const core::ParamId id = core::param_id(core::ParamKind::Track, static_cast<unsigned>(arg), field);
   float now = 0.0f;
   if (!read_param(ctx.model, id, now)) {
@@ -45,6 +48,12 @@ bool toggle_track_param(ActionContext& ctx, core::ActionArg arg, unsigned field)
   }
   return write_param(ctx, id, now != 0.0f ? 0.0f : 1.0f) == WriteResult::Changed;
 }
+
+// The thunk context of the FX edits (OS-FLASHDIET T1): the FX column under the cursor and the action's argument.
+struct FxArg {
+  int column;
+  core::ActionArg arg;
+};
 
 }  // namespace
 
@@ -54,9 +63,8 @@ bool step_note(ActionContext& ctx, core::ActionArg arg) noexcept {
   if (!can_edit(ctx) || arg < 0 || !model::edit::is_enterable_note(static_cast<unsigned>(arg))) {
     return false;
   }
-  const pe::Edited e = pe::edit_selection(ctx, [&](model::Step& s, const Rule& r, Last& l) {
-    pe::write_note(s, static_cast<unsigned>(arg), r, l);
-  });
+  const pe::Edited e = pe::edit_selection(
+      ctx, [](model::Step& s, const Rule& r, Last& l, void* p) { pe::write_note(s, static_cast<unsigned>(*static_cast<const core::ActionArg*>(p)), r, l); }, &arg);
   return pe::finish_entry(ctx, e, true);
 }
 
@@ -109,9 +117,9 @@ bool step_midi_note(ActionContext& ctx, core::ActionArg arg) noexcept {
   if (b.row0 != b.row1 || b.track0 != b.track1) {
     return false;
   }
-  const pe::Edited e = pe::edit_selection(ctx, [&](model::Step& s, const Rule& r, Last& l) {
-    pe::write_note(s, static_cast<unsigned>(arg) + 1u, r, l);
-  });
+  const pe::Edited e = pe::edit_selection(
+      ctx,
+      [](model::Step& s, const Rule& r, Last& l, void* p) { pe::write_note(s, static_cast<unsigned>(*static_cast<const core::ActionArg*>(p)) + 1u, r, l); }, &arg);
   return pe::finish_entry(ctx, e, false);
 }
 
@@ -119,7 +127,8 @@ bool step_note_delta(ActionContext& ctx, core::ActionArg arg) noexcept {
   if (!can_edit(ctx)) {
     return false;
   }
-  const pe::Edited e = pe::edit_selection(ctx, [&](model::Step& s, const Rule& r, Last& l) { model::edit::note_delta(s, arg, r, l); });
+  const pe::Edited e = pe::edit_selection(
+      ctx, [](model::Step& s, const Rule& r, Last& l, void* p) { model::edit::note_delta(s, *static_cast<const core::ActionArg*>(p), r, l); }, &arg);
   return pe::finish_entry(ctx, e, false);
 }
 
@@ -134,9 +143,8 @@ bool step_instrument(ActionContext& ctx, core::ActionArg arg) noexcept {
   if (!can_edit(ctx) || arg < 1 || arg > static_cast<core::ActionArg>(model::edit::kInstrumentSlots)) {
     return false;
   }
-  const pe::Edited e = pe::edit_selection(ctx, [&](model::Step& s, const Rule& r, Last& l) {
-    model::edit::instrument_set(s, static_cast<unsigned>(arg), r, l);
-  });
+  const pe::Edited e = pe::edit_selection(
+      ctx, [](model::Step& s, const Rule& r, Last& l, void* p) { model::edit::instrument_set(s, static_cast<unsigned>(*static_cast<const core::ActionArg*>(p)), r, l); }, &arg);
   return pe::finish_entry(ctx, e, true);
 }
 
@@ -144,8 +152,8 @@ bool step_instrument_delta(ActionContext& ctx, core::ActionArg arg) noexcept {
   if (!can_edit(ctx)) {
     return false;
   }
-  const pe::Edited e =
-      pe::edit_selection(ctx, [&](model::Step& s, const Rule& r, Last& l) { model::edit::instrument_delta(s, arg, r, l); });
+  const pe::Edited e = pe::edit_selection(
+      ctx, [](model::Step& s, const Rule& r, Last& l, void* p) { model::edit::instrument_delta(s, *static_cast<const core::ActionArg*>(p), r, l); }, &arg, false, true);
   return pe::finish_entry(ctx, e, false);
 }
 
@@ -154,8 +162,9 @@ bool step_instrument_coarse(ActionContext& ctx, core::ActionArg arg) noexcept {
   if (!can_edit(ctx)) {
     return false;
   }
-  const int d = pe::clampi(arg, -kMaxCoarse, kMaxCoarse) * kInstrCoarse;
-  const pe::Edited e = pe::edit_selection(ctx, [&](model::Step& s, const Rule& r, Last& l) { model::edit::instrument_delta(s, d, r, l, 64); });
+  int d = pe::clampi(arg, -kMaxCoarse, kMaxCoarse) * kInstrCoarse; // (the thunk context: non-const, edit_selection takes void*)
+  const pe::Edited e = pe::edit_selection(
+      ctx, [](model::Step& s, const Rule& r, Last& l, void* p) { model::edit::instrument_delta(s, *static_cast<const int*>(p), r, l, 64); }, &d, false, true);
   return pe::finish_entry(ctx, e, false);
 }
 
@@ -165,9 +174,8 @@ bool step_vol(ActionContext& ctx, core::ActionArg arg) noexcept {
   if (!can_edit(ctx) || arg < 0 || arg > model::kVolumeMax) {
     return false;
   }
-  const pe::Edited e = pe::edit_selection(ctx, [&](model::Step& s, const Rule& r, Last&) {
-    model::edit::volume_set(s, static_cast<unsigned>(arg), r);
-  });
+  const pe::Edited e = pe::edit_selection(
+      ctx, [](model::Step& s, const Rule& r, Last&, void* p) { model::edit::volume_set(s, static_cast<unsigned>(*static_cast<const core::ActionArg*>(p)), r); }, &arg);
   return pe::finish_entry(ctx, e, false);
 }
 
@@ -175,10 +183,9 @@ bool step_vol_pad(ActionContext& ctx, core::ActionArg arg) noexcept {
   if (!can_edit(ctx) || arg < 0 || arg >= static_cast<core::ActionArg>(model::edit::kPadCount)) {
     return false;
   }
-  const int value = model::edit::map_int(arg, 0, 47, 0, model::kVolumeMax);
-  const pe::Edited e = pe::edit_selection(ctx, [&](model::Step& s, const Rule& r, Last&) {
-    model::edit::volume_set(s, static_cast<unsigned>(value), r);
-  });
+  int value = model::edit::map_int(arg, 0, 47, 0, model::kVolumeMax); // (the thunk context: non-const)
+  const pe::Edited e = pe::edit_selection(
+      ctx, [](model::Step& s, const Rule& r, Last&, void* p) { model::edit::volume_set(s, static_cast<unsigned>(*static_cast<const int*>(p)), r); }, &value);
   return pe::finish_entry(ctx, e, true);
 }
 
@@ -186,7 +193,8 @@ bool step_vol_delta(ActionContext& ctx, core::ActionArg arg) noexcept {
   if (!can_edit(ctx)) {
     return false;
   }
-  const pe::Edited e = pe::edit_selection(ctx, [&](model::Step& s, const Rule& r, Last&) { model::edit::volume_delta(s, arg, r); });
+  const pe::Edited e = pe::edit_selection(
+      ctx, [](model::Step& s, const Rule& r, Last&, void* p) { model::edit::volume_delta(s, *static_cast<const core::ActionArg*>(p), r); }, &arg, false, true);
   return pe::finish_entry(ctx, e, false);
 }
 
@@ -200,9 +208,14 @@ bool step_fx_type(ActionContext& ctx, core::ActionArg arg) noexcept {
   if (!can_edit(ctx) || fx < 0 || arg < 0 || arg > 255) {
     return false;
   }
-  const pe::Edited e = pe::edit_selection(ctx, [&](model::Step& s, const Rule&, Last&) {
-    model::edit::fx_type_set(s, static_cast<unsigned>(fx), static_cast<unsigned>(arg));
-  });
+  FxArg fx_arg{fx, arg}; // the thunk context (non-const: edit_selection takes void*)
+  const pe::Edited e = pe::edit_selection(
+      ctx,
+      [](model::Step& s, const Rule&, Last&, void* p) {
+        const FxArg& c = *static_cast<const FxArg*>(p);
+        model::edit::fx_type_set(s, static_cast<unsigned>(c.column), static_cast<unsigned>(c.arg));
+      },
+      &fx_arg);
   return pe::finish_entry(ctx, e, false);
 }
 
@@ -211,9 +224,14 @@ bool step_fx_type_delta(ActionContext& ctx, core::ActionArg arg) noexcept {
   if (!can_edit(ctx) || fx < 0) {
     return false;
   }
-  const pe::Edited e = pe::edit_selection(ctx, [&](model::Step& s, const Rule&, Last&) {
-    model::edit::fx_type_delta(s, static_cast<unsigned>(fx), arg);
-  });
+  FxArg fx_arg{fx, arg}; // the thunk context (non-const: edit_selection takes void*)
+  const pe::Edited e = pe::edit_selection(
+      ctx,
+      [](model::Step& s, const Rule&, Last&, void* p) {
+        const FxArg& c = *static_cast<const FxArg*>(p);
+        model::edit::fx_type_delta(s, static_cast<unsigned>(c.column), c.arg);
+      },
+      &fx_arg);
   return pe::finish_entry(ctx, e, false);
 }
 
@@ -222,9 +240,14 @@ bool step_fx_value(ActionContext& ctx, core::ActionArg arg) noexcept {
   if (!can_edit(ctx) || fx < 0) {
     return false;
   }
-  const pe::Edited e = pe::edit_selection(ctx, [&](model::Step& s, const Rule& r, Last& l) {
-    model::edit::fx_value_set(s, static_cast<unsigned>(fx), arg, r, l);
-  });
+  FxArg fx_arg{fx, arg}; // the thunk context (non-const: edit_selection takes void*)
+  const pe::Edited e = pe::edit_selection(
+      ctx,
+      [](model::Step& s, const Rule& r, Last& l, void* p) {
+        const FxArg& c = *static_cast<const FxArg*>(p);
+        model::edit::fx_value_set(s, static_cast<unsigned>(c.column), c.arg, r, l);
+      },
+      &fx_arg);
   return pe::finish_entry(ctx, e, false);
 }
 
@@ -233,9 +256,14 @@ bool step_fx_value_delta(ActionContext& ctx, core::ActionArg arg) noexcept {
   if (!can_edit(ctx) || fx < 0) {
     return false;
   }
-  const pe::Edited e = pe::edit_selection(ctx, [&](model::Step& s, const Rule& r, Last& l) {
-    model::edit::fx_value_delta(s, static_cast<unsigned>(fx), arg, r, l);
-  });
+  FxArg fx_arg{fx, arg}; // the thunk context (non-const: edit_selection takes void*)
+  const pe::Edited e = pe::edit_selection(
+      ctx,
+      [](model::Step& s, const Rule& r, Last& l, void* p) {
+        const FxArg& c = *static_cast<const FxArg*>(p);
+        model::edit::fx_value_delta(s, static_cast<unsigned>(c.column), c.arg, r, l);
+      },
+      &fx_arg, false, true);
   return pe::finish_entry(ctx, e, false);
 }
 
@@ -247,9 +275,14 @@ bool step_fx_pad(ActionContext& ctx, core::ActionArg arg) noexcept {
   if (!can_edit(ctx) || fx < 0 || arg < 0 || arg >= static_cast<core::ActionArg>(model::edit::kPadCount)) {
     return false;
   }
-  const pe::Edited e = pe::edit_selection(ctx, [&](model::Step& s, const Rule& r, Last& l) {
-    model::edit::fx_pad(s, static_cast<unsigned>(fx), static_cast<unsigned>(arg), r, l);
-  });
+  FxArg fx_arg{fx, arg}; // the thunk context (non-const: edit_selection takes void*)
+  const pe::Edited e = pe::edit_selection(
+      ctx,
+      [](model::Step& s, const Rule& r, Last& l, void* p) {
+        const FxArg& c = *static_cast<const FxArg*>(p);
+        model::edit::fx_pad(s, static_cast<unsigned>(c.column), static_cast<unsigned>(c.arg), r, l);
+      },
+      &fx_arg);
   return pe::finish_entry(ctx, e, true);
 }
 
@@ -288,7 +321,8 @@ bool step_clear(ActionContext& ctx, core::ActionArg arg) noexcept {
   if (elements == 0) {
     return false;
   }
-  const pe::Edited e = pe::edit_selection(ctx, [&](model::Step& s, const Rule&, Last&) { model::edit::clear(s, elements); });
+  const pe::Edited e = pe::edit_selection(
+      ctx, [](model::Step& s, const Rule&, Last&, void* p) { model::edit::clear(s, *static_cast<const unsigned*>(p)); }, &elements);
   if (e.refused > 0 && !e.changed && !e.failed) {
     return pe::say(ctx, core::Severity::Info, "PAST TRACK END");
   }
@@ -338,7 +372,8 @@ bool step_insert(ActionContext& ctx, core::ActionArg) noexcept {
 }
 
 // Pull (Shift + Delete; NEW COMMUNITY OS BEHAVIOUR, no parity claimed, OS-DELPULL): the exact inverse of Insert. The step at the block's first row (the cursor step with no block; OS-QAFIX-17) is deleted and every selected track is pulled up from there through
-// step 127, whose step is cleared; what lies past the track's length is pulled too (the model keeps it). The cursor and the block stay. Insert then Pull gives the pattern back (the step Insert
+// step 127, whose step is cleared; what lies past the track's length is pulled too (the model keeps it). After a pull that changed something the cursor goes down by the JUMP like Delete
+// (OS-DELJUMP: no wrap, the block ends, JUMP 0 stays); a refused pull or one that changed nothing does not move. Insert then Pull gives the pattern back (the step Insert
 // pushed past 127, if it had a note, is gone). It replaces the backspace (the steps before the cursor pulled up, the cursor following), which is not an inverse of anything.
 bool step_pull(ActionContext& ctx, core::ActionArg) noexcept {
   if (!can_edit(ctx)) {
@@ -375,6 +410,9 @@ bool step_pull(ActionContext& ctx, core::ActionArg) noexcept {
   }
   if (refused > 0 && !changed) {
     return pe::say(ctx, core::Severity::Info, "PAST TRACK END");
+  }
+  if (changed) {
+    pe::move_cursor_by_step(ctx, 0, false);  // OS-DELJUMP: after a pull the cursor goes down by the JUMP like Delete (no wrap; it ends the selection; JUMP 0: stays)
   }
   return changed;
 }
@@ -517,6 +555,8 @@ bool pattern_invert(ActionContext& ctx, core::ActionArg) noexcept {
 // Pattern: the flag is written at once (the pad shows what the user did, the undo unit is this press) but the strip and the sequencer keep the old mute until the boundary, which the sequencer
 // applies on its exact sample (MuteQuant); a second press while it waits puts the flag back and cancels it, and nothing ever reached the graph.
 bool track_mute(ActionContext& ctx, core::ActionArg arg) noexcept {
+  // OS-SONG3 S4: a hand mute while a PREVIEW audition runs ends the audition first, on the deferred path too (it writes the param directly below).
+  (void)song_preview_end(ctx.session != nullptr ? ctx.session->state_editor() : nullptr, ctx.view, ctx.params);
   TrackSink* sink = ctx.mix != nullptr ? ctx.mix->tracks : nullptr;
   if (sink == nullptr || !track_arg_ok(ctx, arg)) {
     return toggle_track_param(ctx, arg, model::track_param::Mute);

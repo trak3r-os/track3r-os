@@ -16,6 +16,7 @@
 #include <o3os/sim/eve_raster.h>
 #include <o3os/sim/raster_display.h>
 #include <o3os/ui/assets.h>
+#include <o3os/ui/boot_logo.h>
 #include <o3os/ui/boot_screen.h>
 #include <o3os/ui/plot/ram_g_map.h>
 #include <o3os/usb/identity.h>
@@ -76,9 +77,11 @@ TEST_CASE("display boot: the logo is the first frame, the backlight waits for it
   CHECK(disp.stats().frames == 0u);  // nothing has been drawn: the first frame of the driver is the boot frame
   CHECK(disp.backlight() == 0);
 
-  // The logo's bytes are in the chip's RAM_G where the display list points, and the rest of its region is untouched.
-  const o3os::ui::BootLogo logo = o3os::ui::boot_logo();
-  CHECK(std::memcmp(chip.ram_g_all().data() + o3os::ui::plot::kRamGBootLogo, logo.bytes, logo.size) == 0);
+  // The logo's raw bytes are in the chip's RAM_G where the display list points (OS-FLASHDIET A5: inflated from its
+  // stream by the upload), and the rest of its region is untouched.
+  std::uint8_t logo_px[o3os::ui::kBootLogoBytes];
+  CHECK(o3os::ui::boot_logo_bitmap(logo_px, sizeof logo_px));
+  CHECK(std::memcmp(chip.ram_g_all().data() + o3os::ui::plot::kRamGBootLogo, logo_px, o3os::ui::kBootLogoBytes) == 0);
 
   CHECK(o3os::ui::show_boot_screen(disp, o3os::usb::kProductString, kBuild));
   CHECK(disp.stats().frames == 1u);

@@ -159,6 +159,8 @@ if(O3OS_PLATFORM STREQUAL "host")
   add_subdirectory(third_party/open303)
   # OS-005h: pt2-clone's Paula emulator, the Paula model's oracle (host only).
   add_subdirectory(third_party/pt2-clone)
+  # OS-CECHIP C1: tracker-ce's CHIP engine, the oracle of Chip's new waves (host only).
+  add_subdirectory(third_party/tracker-ce-chip)
 
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sim/CMakeLists.txt")
     add_subdirectory(sim)

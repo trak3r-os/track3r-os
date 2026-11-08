@@ -39,10 +39,11 @@ O3OS_AUDIO_INLINE std::int32_t q15_from_float(float x) noexcept {
   return static_cast<std::int32_t>(v + (v >= 0.0f ? 0.5f : -0.5f));
 }
 
-// Mono float planar to interleaved stereo int16 with L = R, `frames` frames. `out` is 4-byte aligned (callers).
-O3OS_AUDIO_HOT void float_to_q15_dup(const float* mono, std::int16_t* out, std::uint32_t frames) noexcept;
+// OS-CEWTENV room: the four functions of this file (these two, generate and generate_noise below) are flash (O3OS_AUDIO_COLD), 694 B out of `.ramfunc_l`: the two conversions have no caller in the image
+// (the tests use them), and the tone runs only in the O3OS_AUDIO_TEST image (or from a console test-source ParamChange). Mono float planar to interleaved stereo int16 with L = R, `frames` frames. `out` is 4-byte aligned (callers).
+O3OS_AUDIO_COLD void float_to_q15_dup(const float* mono, std::int16_t* out, std::uint32_t frames) noexcept;
 // Two float planes to interleaved stereo int16 (left first), `frames` frames. `out` is 4-byte aligned (callers).
-O3OS_AUDIO_HOT void float_to_q15_stereo(const float* left, const float* right, std::int16_t* out, std::uint32_t frames) noexcept;
+O3OS_AUDIO_COLD void float_to_q15_stereo(const float* left, const float* right, std::int16_t* out, std::uint32_t frames) noexcept;
 
 // ---- Tone -----------------------------------------------------------------------------------------------------------------
 // The HW-A tone tells the channels apart (a swapped or mis-mapped pair must be visible on the bench): the LEFT channel (the first word
@@ -114,10 +115,10 @@ class TestTone {
 
   // `n` (at most kBlock) mono float samples of the tone, the gain ramping linearly toward its target, the phase advanced by
   // `n` samples whatever the gain. Writes exactly n samples.
-  O3OS_AUDIO_HOT void generate(float* out, std::uint32_t n) noexcept;
+  O3OS_AUDIO_COLD void generate(float* out, std::uint32_t n) noexcept;  // flash: once a block per strip whose test tone is audible (hot.h lists the exception)
   // The same, with the same fade and gain, but white noise instead of the sine: a xorshift32 `state` (never 0) read as a signed fraction in
   // [-1, 1). The phase accumulator is not used (the noise has none).
-  O3OS_AUDIO_HOT void generate_noise(float* out, std::uint32_t n, std::uint32_t& state) noexcept;
+  O3OS_AUDIO_COLD void generate_noise(float* out, std::uint32_t n, std::uint32_t& state) noexcept;
   // Advances the phase by n samples without producing any (a silenced block keeps the tone on its timeline).
   void skip(std::uint32_t n) noexcept { phase_q32_ += n * phase_inc_q32_; }
 

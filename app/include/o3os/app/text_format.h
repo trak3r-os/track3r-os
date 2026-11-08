@@ -14,14 +14,9 @@
 
 namespace o3os::app {
 
-// Exactly `digits` decimal digits, zero padded; a larger value keeps its low digits.
-inline char* put_dec(char* dst, unsigned value, unsigned digits) noexcept {
-  for (unsigned i = digits; i > 0; --i) {
-    dst[i - 1] = static_cast<char>('0' + value % 10u);
-    value /= 10u;
-  }
-  return dst + digits;
-}
+// Exactly `digits` decimal digits, zero padded; a larger value keeps its low digits. One out-of-line copy
+// (text_format.cpp, OS-FLASHDIET T2), not one per call site.
+char* put_dec(char* dst, unsigned value, unsigned digits) noexcept;
 
 // Two upper-case hexadecimal digits.
 inline char* put_hex2(char* dst, unsigned value) noexcept {
@@ -39,26 +34,29 @@ inline char* put_str(char* dst, const char* s) noexcept {
   return dst;
 }
 
+namespace detail {
+
+// The one implementation behind every FixedString<N> wrapper below (text_format.cpp, OS-FLASHDIET T2), whatever
+// N: appends at buf[len], never past cap (buf holds cap + 1 bytes and buf[len] stays '\0'), false when the text
+// was cut. append_dec writes exactly `digits` zero-padded digits (at most 10; a larger value keeps its low
+// digits); append_uint as many digits as `value` has.
+bool append_dec(char* buf, std::size_t cap, std::size_t& len, unsigned value, unsigned digits) noexcept;
+bool append_uint(char* buf, std::size_t cap, std::size_t& len, unsigned value) noexcept;
+
+}  // namespace detail
+
 // Appends `digits` (at most 10) zero-padded decimal digits to `s`; false if the text was cut.
+// (OS-FLASHDIET P2: a forwarder over the one out-of-line writer, written straight into the string; it was a copy per capacity, 40 bytes each.)
 template <std::size_t N>
-bool append_dec(core::FixedString<N>& s, unsigned value, unsigned digits) noexcept {
-  char tmp[10];
-  if (digits > sizeof(tmp)) {
-    digits = sizeof(tmp);
-  }
-  put_dec(tmp, value, digits);
-  return s.append(tmp, digits);
+[[gnu::always_inline]] inline bool append_dec(core::FixedString<N>& s, unsigned value, unsigned digits) noexcept {
+  return detail::append_dec(core::detail::FixedStringAccess::buf(s), N, core::detail::FixedStringAccess::len(s), value, digits);
 }
 
 // Appends the decimal digits of `value`, as many as it has (no padding); false if the text was cut. (append_dec pads to a fixed width and
 // keeps the low digits of a larger number, which is what a field wants and a count does not.)
 template <std::size_t N>
-bool append_uint(core::FixedString<N>& s, unsigned value) noexcept {
-  unsigned digits = 1;
-  for (unsigned v = value; v >= 10u; v /= 10u) {
-    ++digits;
-  }
-  return append_dec(s, value, digits);
+[[gnu::always_inline]] inline bool append_uint(core::FixedString<N>& s, unsigned value) noexcept {
+  return detail::append_uint(core::detail::FixedStringAccess::buf(s), N, core::detail::FixedStringAccess::len(s), value);
 }
 
 // OS-QAFIX-RESCAN: the strip line after a list was read again: "READ AGAIN: 12 ITEMS", "READ AGAIN: 1 ITEM", "READ AGAIN: NO ITEMS" (`more`: the listing

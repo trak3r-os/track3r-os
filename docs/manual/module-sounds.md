@@ -93,7 +93,18 @@ The filter mixes a low pass, a band pass and a high pass. **MODE** picks the mix
 
 The real chip has one filter shared by its three voices. Here every track has its own filter. After you release a key, a resonant filter rings on for a moment. <!-- QA-MOD-234 -->
 
-Not yet checked on the unit: everything in this chapter.
+### PAN and the sends: the MIX page
+
+Every module instrument (TB-303, FM, Chip, SID, Sine and the built-in ones) has three rows of its own that belong to the OS, not to the module: **PANNING** (0 to 100, 50 is the centre), **DELAY SEND** and **REVERB SEND** (0 to 100, in steps of 10, 0 is no send). They sit on the **MIX** page. On the Instrument screen press `Shift` + `F2` (**MIX**); a page key or `Left` / `Right` brings back the module's pages. <!-- QA-INS-307 -->
+
+- The pan and the sends act when a note starts, and a change you make while the note rings is heard at once on the tracks that hold the module. The Panning step FX and the Perform PAN still add on top of the instrument's pan, as they do for a sample. <!-- QA-INS-309 QA-INS-310 -->
+- `F8` (**UNDO**) takes back an edit. The three values are saved with the project and loaded again. <!-- QA-INS-308 QA-INS-311 -->
+- A project saved earlier sounds the same: the pan reads 50 and both sends 0. <!-- QA-INS-311 -->
+- **RATE** (new in track3r-os): TB-303, FM, SID, Chip and Sine have a fourth row on the MIX page, **RATE** (FULL, 1/2, 1/4). At 1/2 or 1/4 the module is asked for half or a quarter of the samples and each one is held twice or four times: the sound turns crunchier and aliased on purpose, and the module costs about half or a quarter of its CPU. FULL is the sound you had before. Changing the row never cuts a note: while the instrument sounds the change waits, and once it is silent the instrument restarts with its parameters as they were (a note started in that instant, a few milliseconds, is skipped). RATE belongs to the instrument: it is saved with the project, a loaded project plays it, and **UNDO** and **REDO** step it like any other change. Putting another module on the slot starts it at FULL until you set RATE again. <!-- QA-INS-312 QA-INS-313 -->
+
+Not yet checked on the unit: the MIX page and its RATE row.
+
+Not yet checked on the unit: everything else in this chapter.
 
 ## Try it
 <!-- sync: src=modules/tb303/module.json,modules/tb303/tb303_dsp.h qa=QA-MOD-145,QA-MOD-146,QA-MOD-147,QA-MOD-148 -->

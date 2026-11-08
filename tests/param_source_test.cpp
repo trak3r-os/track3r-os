@@ -51,7 +51,7 @@ TEST_CASE("source params: every row exists, is a number or a choice of its own, 
     CHECK_MESSAGE(d.group == ip::GroupSource, d.name);
     CHECK_MESSAGE(std::strlen(d.name) <= core::kParamNameChars, d.name);
   }
-  CHECK(model::param_desc(source_id(0, ip::kSourceFirst + ip::kSourceRows)) == nullptr);  // 0x1D is nothing
+  CHECK(model::param_desc(source_id(0, ip::kSourceFirst + ip::kSourceRows)) == nullptr);  // 0x1D (PlayThru, OS-CEPLAYTHRU P2) is a virtual field like 0x1E/0x1F: no table row
   CHECK(model::param_desc(source_id(0, 0x13)) == nullptr);                                  // and the engine's live ids are not parameters
   CHECK(model::param_desc(source_id(63, ip::PlayMode)) != nullptr);
   CHECK(model::param_desc(source_id(64, ip::PlayMode)) == nullptr);

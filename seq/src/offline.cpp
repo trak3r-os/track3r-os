@@ -121,6 +121,7 @@ void OfflineRender::build_sequencer() noexcept {
   c.song_loop = false;      // the song stops at the end of its last pattern
   c.pattern_once = true;    // a pattern is played once
   c.emit_clock = false;     // no MIDI: the export's sequencer has no link, and no clock to send
+  c.emit_mtc = false;       // OS-MTC A3 (A-9): and no time code (the default, said here as for the clock)
   c.start_lead = 0;
   c.pattern_stop = 0;
   c.order_stop = 0;

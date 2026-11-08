@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// OS-PTOOLS part 1 and OS-FILL2: the Fill dialog's rows (app/fill_view.h): the descriptors are valid, the eight rows are used or dim by WHAT, TYPE and MODE, their captions follow, the enumerated rows roll over, the others stop
-// at their ends, KEY steps the scale and (Shift) the root, FX TYPE lists the picker, FROM and TO follow the domain of WHAT, a row that does not apply does not change.
+// OS-PTOOLS part 1, OS-FILL2 and OS-PTOOLS2 S3c: the Fill dialog's rows (app/fill_view.h): the descriptors are valid, the seven rows are used or dim by WHAT, TYPE and MODE, their captions follow, the enumerated rows roll over, the others stop
+// at their ends, KEY steps the scale and (Shift) the root, FX TYPE lists the picker, FROM and TO follow the domain of WHAT, a row that does not apply does not change; and the footer names the selection as the target (fill_target_text).
 #include <doctest/doctest.h>
 
 #include <o3os/app/fill_view.h>
@@ -41,13 +41,12 @@ bool used(const FillView& f, FillRow row) { return fill_row_used(f, row); }
 
 }  // namespace
 
-TEST_CASE("fill view: eight rows, every descriptor is valid and the defaults are the dialog's") {
-  static_assert(kFillRows == 8, "the dialog has eight rows");
+TEST_CASE("fill view: seven rows, every descriptor is valid and the defaults are the dialog's") {
+  static_assert(kFillRows == 7, "the dialog has seven rows (OS-PTOOLS2 S3c: no SCOPE row)");
   const FillView f;
   for (unsigned i = 0; i < kFillRows; ++i) {
     CHECK_MESSAGE(core::param_desc_valid(fill_desc(static_cast<FillRow>(i))), "row " << i);
   }
-  CHECK(text(f, FillRow::Scope) == "TRACK");
   CHECK(text(f, FillRow::What) == "NOTE");
   CHECK(text(f, FillRow::Type) == "EVERY N");
   CHECK(text(f, FillRow::Count) == "1");
@@ -100,7 +99,7 @@ TEST_CASE("fill view: which rows are used for each WHAT, TYPE and MODE, and what
     CHECK(used(f, FillRow::Count));
   }
   // The rows that are always used.
-  for (const FillRow row : {FillRow::Scope, FillRow::What, FillRow::Type, FillRow::Count, FillRow::From}) {
+  for (const FillRow row : {FillRow::What, FillRow::Type, FillRow::Count, FillRow::From}) {
     CHECK(used(f, row));
   }
 }
@@ -170,9 +169,18 @@ TEST_CASE("fill view: KEY steps the scale in a ring of forty and, with Shift, th
   CHECK(f.plan.scale == 5);
   CHECK(f.plan.root == 0);
   fill_set(f, FillRow::Key, 8.0f);
-  CHECK(text(f, FillRow::Key) == "C Phrygian");  // the trailing space is not shown
+  CHECK(text(f, FillRow::Key) == "C Phrygian");
   fill_set(f, FillRow::Key, 99.0f);               // clamped to the last scale
   CHECK(f.plan.scale == 39);
+  // OS-SCALES28 Q4c: the KEY row shows the one name table's display names, the same the Note panel shows.
+  fill_set(f, FillRow::Key, 5.0f);
+  CHECK(text(f, FillRow::Key) == "C Lydian");      // was "C Lyd Maj"
+  fill_set(f, FillRow::Key, 16.0f);
+  CHECK(text(f, FillRow::Key) == "C Blues");      // was "C Blues Min"
+  fill_set(f, FillRow::Key, 20.0f);
+  CHECK(text(f, FillRow::Key) == "C Hung. minor");  // one of the 27: the panel reaches it with the encoder
+  fill_set(f, FillRow::Key, 0.0f);
+  CHECK(text(f, FillRow::Key) == "No scale");
   // The root has no step for INSTR and VOLUME (the row is dim).
   fill_set(f, FillRow::What, 1.0f);
   CHECK_FALSE(fill_step_coarse(f, FillRow::Key, 1));
@@ -189,12 +197,14 @@ TEST_CASE("fill view: FX TYPE lists every picker type but None in picker order, 
   CHECK(text(f, FillRow::Key) == "Off");
   for (unsigned i = 1; i < model::fx::kPickerCount; ++i) {
     CHECK_MESSAGE(f.plan.fx_type == model::fx::kPickerOrder[i], "entry " << i);
-    CHECK_MESSAGE(text(f, FillRow::Key) == fx_picker_name(i), "entry " << i);
+    char name[kFxNameMax];
+    fx_picker_name(i, name, sizeof name);
+    CHECK_MESSAGE(text(f, FillRow::Key) == name, "entry " << i);
     CHECK(fill_step(f, FillRow::Key, 1));
   }
   CHECK(f.plan.fx_type == model::fx::kPickerOrder[1]);  // 59 steps: round
   CHECK(fill_step(f, FillRow::Key, -1));                 // below Off is the last entry
-  CHECK(text(f, FillRow::Key) == "Panbrello");
+  CHECK(text(f, FillRow::Key) == "Grain Length");  // the last entry since OS-CEWTENV W6b (z)
   // D3: a new type puts FROM and TO at its default; the same type keeps what was set.
   fill_set(f, FillRow::Key, static_cast<float>(model::fx::picker_index(17)));  // Swing, default 50, 25..75
   CHECK((f.plan.from == 50 && f.plan.to == 50));
@@ -274,4 +284,50 @@ TEST_CASE("fill view: an FX value is clamped to the type's range") {
   fill_set(f, FillRow::Key, static_cast<float>(model::fx::picker_index(13)));  // Break pattern: one value
   CHECK((f.plan.from == 1 && f.plan.to == 1));
   CHECK_FALSE(fill_step(f, FillRow::From, 1));
+}
+
+TEST_CASE("fill view: OS-PTOOLS2 S3c, the footer names the selection as the target") {
+  char buf[48];
+  const auto target = [&](const Selection& sel, int steps, int tracks) {
+    (void)fill_target_text(sel, 0, 0, steps, tracks, buf, sizeof buf);
+    return std::string(buf);
+  };
+  Selection sel;
+  // Nothing selected: the cursor step.
+  CHECK(target(sel, 64, 12) == "STEP  TRACK 1  ROW 1");
+  sel.active = true;  // a one-cell selection is still the step
+  sel.start_row = sel.end_row = 4;
+  sel.start_track = sel.end_track = 2;
+  CHECK(target(sel, 64, 12) == "STEP  TRACK 3  ROW 5");
+  // A block: rows 1-8 of track 3.
+  sel.start_row = 0;
+  sel.end_row = 7;
+  sel.start_track = sel.end_track = 2;
+  CHECK(target(sel, 64, 12) == "BLOCK  TRACK 3  ROWS 1-8");
+  // A block over several tracks.
+  sel.start_track = 1;
+  sel.end_track = 3;
+  CHECK(target(sel, 64, 12) == "BLOCK  TRACKS 2-4  ROWS 1-8");
+  // Shift + Up at row 1: the whole column of one track (rows 1-64 of 64 steps).
+  sel.clear();
+  sel.active = true;
+  sel.column = true;
+  sel.start_row = 0;
+  sel.end_row = 63;
+  sel.start_track = sel.end_track = 2;
+  CHECK(target(sel, 64, 12) == "TRACK 3  ROWS 1-64");
+  // ... and again: every track, the pattern.
+  sel.start_track = 0;
+  sel.end_track = 11;
+  CHECK(target(sel, 64, 12) == "PATTERN  ALL TRACKS  ROWS 1-64");
+  // One track in the pattern: its column is the track, not the pattern.
+  sel.end_track = 0;
+  CHECK(target(sel, 64, 1) == "TRACK 1  ROWS 1-64");
+  // A block that happens to cover every row of one track is that track.
+  sel.clear();
+  sel.active = true;
+  sel.start_row = 0;
+  sel.end_row = 63;
+  sel.start_track = sel.end_track = 2;
+  CHECK(target(sel, 64, 12) == "TRACK 3  ROWS 1-64");
 }

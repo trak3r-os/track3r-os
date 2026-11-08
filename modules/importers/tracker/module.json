@@ -1,0 +1,12 @@
+{
+  "name": "Tracker",
+  "id": "tracker",
+  "kind": "importer",
+  "abi": "1.11",
+  "description": "OS-FLASHDIET I3: the MOD / S3M / MED importers as one importer module (kind 3, ABI 1.11), built from the formats_tracker library's sources (formats/mod, formats/med, formats/src/volume_level.cpp and the model and core sources they call) plus the module libc shim; the image does not link them any more, this file on the card (modules/importers/tracker.tmod, in the starter zip) is where they run. Its descriptor carries the importer table (o3m_entry.importer: the three formats and begin/step/read_pcm/report/close) and the packer writes the importer layout tag to header word 44, so the loader accepts the file (check_header/read_desc) and the set holds it apart from the playable modules. At begin the OS hands it the opened file's read window (o3m_file_window), its own model arena and the import options; the import runs in the module and the report is copied out (formats/import_module.h).",
+  "state_bytes": 65536,
+  "memory": {
+    "hot_bytes": 0,
+    "sdram_bytes": 0
+  }
+}

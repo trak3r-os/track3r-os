@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Pattern F7 TOOLS (OS-H3A, ADR 0014 slice H3; docs/specs/OS-H3A.md section 2): the list opens over the Pattern screen, F1 runs the item under the cursor. An app is launched with the Pattern's
+// Pattern F7 TOOLS (OS-H3A, ADR 0014 slice H3; docs/specs/OS-H3A.md section 2): the list is the verb menu's APPS page (OS-PTOOLS2 S6b), F1 runs the item under the cursor. An app is launched with the Pattern's
 // block as its launch context (ModuleUi::launch_app's `ctx`, its second caller after MODULES) and its page opens; its exit chord comes back to Pattern with the cursor and the block as they were
 // (module_actions.cpp: ViewState::modules.from_tools). NEW COMMUNITY OS BEHAVIOUR.
+// OS-PTOOLS2 S1: the list remembers its row and opens in STEP and WATCH while playing (refused only in LIVE); the exports are its last rows (tools_list.h). Since OS-PTOOLS2 S3 the list is the F7 verb
+// menu's APPS > row, so this is tools_open's own behaviour when the menu runs it. S6b: the page is the menu's (ViewState::verb_menu.apps), the ToolsList overlay and its key table are gone; a small app then runs in the panel.
 #include "action_handlers.h"
 #include "param_access.h"
 #include "pattern_edit_util.h"
@@ -14,25 +16,30 @@
 
 namespace o3os::app {
 
-// F7. Refused while the view follows the play line (LIVE, or WATCH while playing): the cursor is not the user's then, and the tools start from it. It says so (OS-BUG-TOOLSPLAY, finding 13 of the random
-// walk: the key is labelled and was silent). Under an overlay or on another screen the key is not this one's. Anything else that stops it says why.
+// F7. OS-PTOOLS2 S1 (maintainer decision Q5): the list opens in STEP and in WATCH while the transport plays, because the target is the block or the cursor step, which the user's own arrows and Shift set; it is
+// refused only in LIVE, where the playhead holds the cursor (it said STOP PLAYING TO OPEN TOOLS in WATCH too, OS-BUG-TOOLSPLAY). Under an overlay or on another screen the key is not this one's. Anything else that
+// stops it says why.
 bool tools_open(ActionContext& ctx, core::ActionArg) noexcept {
   ViewState& v = ctx.view;
   if (v.overlay != OverlayId::None || v.screen != ScreenId::Pattern) {
     return false;
   }
-  if (pe::select_follows(ctx)) {
-    return pe::say(ctx, core::Severity::Info, "STOP PLAYING TO OPEN TOOLS");
+  if (pattern_editable(v) && !v.edit.rec_free && v.play.playing) {  // LIVE: Edit following the playhead (OS-RECMODE2)
+    return pe::say(ctx, core::Severity::Info, "THE PLAYHEAD HOLDS THE CURSOR IN LIVE");
   }
   if (ctx.model.project == nullptr || ctx.session == nullptr || ctx.session->document() == nullptr) {  // the tools edit the project: with none open (the demo) there is nothing to run them on
     return pe::say(ctx, core::Severity::Info, "NO PROJECT");
   }
-  if (ctx.model.modules != nullptr) {  // (the fixed entries need no module system: without one the list holds only them)
+  if (ctx.model.modules != nullptr) {  // (without a module system the page is empty)
     ctx.model.modules->scan_tools();  // the card may have changed since the last look: one directory read and the 64-byte header of each app not loaded yet
   }
-  v.modules.tools = 0;
+  const unsigned count = tools_count(ctx.model);  // OS-PTOOLS2 S1: the page opens on the row it was left on (session state), kept inside the list (the card changes its length).
+  if (v.modules.tools >= count) {
+    v.modules.tools = static_cast<std::uint8_t>(count == 0u ? 0u : count - 1u);
+  }
   v.modules.tools_msg = "";
-  v.overlay = OverlayId::Tools;
+  v.overlay = OverlayId::VerbMenu;  // OS-PTOOLS2 S6b: the verb menu's APPS page (the ToolsList overlay is retired)
+  v.verb_menu.apps = true;
   return true;
 }
 
@@ -55,35 +62,16 @@ static o3m_launch_ctx tools_context(const ViewState& v) noexcept {
   return lc;
 }
 
-// F1 in the list: a fixed entry runs its action, an app is launched. A refused launch keeps the list up and says why inside it (the strip waits behind a modal overlay): the first launch of an app that edits the project or writes files answers "F1 AGAIN".
+// F1 in the list: the app under the cursor is launched. A refused launch keeps the list up and says why inside it (the strip waits behind a modal overlay): the first launch of an app that writes files answers "F1 AGAIN"
+// (OS-PTOOLS2 S6, Q9b: an app that only edits the project is not confirmed from here).
 bool tools_run(ActionContext& ctx, core::ActionArg) noexcept {
   ViewState& v = ctx.view;
-  if (v.overlay != OverlayId::Tools) {
+  if (v.overlay != OverlayId::VerbMenu || !v.verb_menu.apps) {
     return false;
   }
   ToolItem item;
-  if (!tools_item(ctx.model, v.modules.tools, item, v.edit.selection.active)) {
+  if (!tools_item(ctx.model, v.modules.tools, item)) {
     return false;  // an empty list: nothing to run
-  }
-  if (item.kind == ToolItem::Kind::ExportPattern || item.kind == ToolItem::Kind::ExportSelection) {  // the list closes first: the export's own refusals (no card, a save running, ...) say why on the strip, and its progress overlay opens over Pattern
-    v.overlay = OverlayId::None;
-    v.modules.tools_msg = "";
-    return item.kind == ToolItem::Kind::ExportPattern ? export_pattern(ctx, 0) : export_selection(ctx, 0);
-  }
-  if (item.kind != ToolItem::Kind::App) {  // PAT-OPS-A: DUPLICATE, EXPAND, SHRINK. The list closes first (the strip waits behind a modal overlay) and a redraw is due whatever happens; Edit must be on, as for a paste; the edit is
-                                             // the undoable pattern.op, one unit (it says why when it does nothing)
-    v.overlay = OverlayId::None;
-    v.modules.tools_msg = "";
-    if (!pe::edit_enabled(ctx)) {
-      (void)pe::say(ctx, core::Severity::Info, pe::kEditOff);
-    } else {
-      const core::ActionArg op = static_cast<core::ActionArg>(item.kind) - static_cast<core::ActionArg>(ToolItem::Kind::Duplicate);  // (Duplicate, Expand, Shrink: model::ops::Op 0, 1, 2)
-      (void)dispatch(action_registry(), core::action_id("pattern.op"), op, ctx);
-    }
-    return true;
-  }
-  if (ctx.model.modules == nullptr) {
-    return false;  // (an App item exists only with a module system)
   }
   ModuleUi& mu = *ctx.model.modules;
   const o3m_launch_ctx lc = tools_context(v);
@@ -99,6 +87,7 @@ bool tools_run(ActionContext& ctx, core::ActionArg) noexcept {
   }
   v.modules.app_row = 0;
   v.modules.from_tools = true;
+  v.modules.panel = mu.app_panel_fits();  // OS-PTOOLS2 S6: a small app renders in the TOOLS panel beside the grid (ModuleAppScreen); a larger one opens its page
   (void)switch_screen(screen_registry(), ctx.model, ctx.view, ScreenId::ModuleApp);
   return true;
 }

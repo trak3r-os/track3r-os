@@ -6,7 +6,7 @@
 // the engine is seq::MidiLink (seq/midi_link.h), which turns it into the sequencer's, the router's and the clock-follow loop's own configurations.
 //
 // WHAT IS PERSISTENT (OS-013a). The device settings file holds CLOCK IN, CLOCK SYNC, CLOCK MODE, MIDI OUT and OUT CHANNEL, which seq::sync_config_from_settings() turns into `mode`,
-// `in_port`, `sync_correction`, `out_ports`, `note_ports` and `notes_channel` (and, since E-CFG-03, TRANSPORT IN / OUT into `transport_in` / `transport_out`) (MIDI IN and IN CHANNEL filter MIDI Learn's input in the main loop and are not part of this struct).
+// `in_port`, `sync_correction`, `out_ports`, `note_ports` and `notes_channel` (and, since E-CFG-03, TRANSPORT IN / OUT into `transport_in` / `transport_out`; since OS-MTC A3, MTC OUT / MTC START into `mtc_fps` / `mtc_hour`) (MIDI IN and IN CHANNEL filter MIDI Learn's input in the main loop and are not part of this struct).
 // The rest (the offsets, FOLLOW, the CC numbers, and CLOCK OUT / the notes' ports as the project may override them) has no row in the settings table. Since OS-004d they are the PROJECT's: the
 // project file's MIDI chunk (docs/formats/o3-project.md; seq::project_midi_state / apply_project_midi), applied after the device settings when a project is loaded and stored in the project
 // whenever they change; a project without the chunk leaves them as they are, and a reboot returns them to their defaults.
@@ -15,6 +15,7 @@
 
 #include <o3os/core/audio_clock.h>
 #include <o3os/midi/in.h>
+#include <o3os/midi/mtc.h>
 #include <o3os/midi/out.h>
 
 #include <atomic>
@@ -50,6 +51,11 @@ struct MidiConfig {
   // E-CFG-03: TRANSPORT IN / OUT of the Config MIDI page (device settings 23 and 24; sync_config_from_settings). Written by the main loop with the rest of the value, read by the render at a block start.
   bool transport_in = true;                 // false: Start, Continue, Stop and SPP from the followed port are ignored (the clock is still followed)
   bool transport_out = true;                // false: no Start, Continue, Stop or SPP goes out (the clock still does)
+  // OS-MTC A3: MTC OUT and MTC START of the Config MIDI page (device settings 27 and 28; sync_config_from_settings). The time code goes to `out_ports`, as the clock does.
+  std::uint8_t mtc_fps = 0;                 // 0 Off, else 24, 25 or 30: the quarter frames and full frames the sequencer makes (midi/mtc.h)
+  std::uint8_t mtc_hour = 1;                // 0..23: the hour of the time code at the song's first step (Logic's default plays bar 1 at 01:00:00:00)
+  // OS-MTC B3: MTC IN of the Config MIDI page (device setting 29; sync_config_from_settings). The unit chases the time code of that port (midi/mtc_in.h); not Off turns the clock follow off and mutes MTC OUT.
+  std::uint8_t mtc_in = 0;                  // 0 Off, 1 DIN, 2 USB
 };
 static_assert(std::is_trivially_copyable<MidiConfig>::value, "the config is copied bytewise through SeqLockBox");
 
@@ -72,6 +78,9 @@ constexpr MidiConfig sanitized(MidiConfig c) noexcept {
   for (std::uint8_t& n : c.cc_number) {
     n = n > 127u ? kCcUnassigned : n;
   }
+  c.mtc_fps = mtc::valid_fps(c.mtc_fps) ? c.mtc_fps : std::uint8_t{0};
+  c.mtc_hour = c.mtc_hour > mtc::kMaxHour ? mtc::kMaxHour : c.mtc_hour;
+  c.mtc_in = c.mtc_in > 2u ? std::uint8_t{0} : c.mtc_in;
   for (std::uint32_t p = 0; p < kPortCount; ++p) {
     c.in_offset_dms[p] = detail::clamp_to<std::int16_t>(c.in_offset_dms[p], -kMaxOffsetDms, kMaxOffsetDms);
     c.out_offset_dms[p] = detail::clamp_to<std::int16_t>(c.out_offset_dms[p], -kMaxOffsetDms, kMaxOffsetDms);
@@ -89,7 +98,17 @@ struct SyncStatus {
   std::uint32_t clocks = 0;     // clocks of the followed port the loop has been given since the mode was set
   std::uint32_t error_us = 0;   // |the loop's last error| in microseconds
   std::uint32_t transport_events = 0;  // Start, Continue, Stop, SPP applied since boot
+  // OS-MTC B3 (MTC IN not Off; all 0 otherwise): the chaser's state for the Config row's info line (`MTC 01:00:12:05 25 LOCKED`) and the console.
+  std::uint8_t mtc_state = 0;           // MtcState below
+  std::uint8_t mtc_code = 1;            // the master's rate code: 0 24, 1 25, 2 29.97 drop-frame, 3 30
+  std::uint32_t mtc_time = 0;           // the last time the master named, packed hh << 24 | mm << 16 | ss << 8 | ff (0 until a whole cycle was read)
+  std::int32_t mtc_rate_ppm = 0;        // the master's rate against the unit's audio clock, parts per million from 1.0
+  std::int32_t mtc_error_us = 0;        // the run's phase error against the master at the last step, microseconds (positive: the unit is ahead)
+  std::uint32_t mtc_relocations = 0;    // relocations and stops of the chase since the mode was set
 };
+// What a chase says (SyncStatus::mtc_state). Off: MTC IN is Off. Waiting: no master yet (Idle). Reading: quarter frames come, the time is not known yet. Armed: the start is scheduled (the unit's run began or waits for its sample). Locked: the run agrees with the master.
+// Freewheel: quarter frames are missing, the run goes on at the last rate. Rate: the master's rate is outside 0.94..1.06 (not followed). PastEnd: the master is past the song's end (silence, it waits for a locate back).
+enum class MtcState : std::uint8_t { Off = 0, Waiting = 1, Reading = 2, Armed = 3, Locked = 4, Freewheel = 5, Rate = 6, PastEnd = 7 };
 
 // 0.1 ms in the units the engine works in.
 constexpr std::int32_t offset_us(std::int16_t dms) noexcept { return static_cast<std::int32_t>(dms) * 100; }

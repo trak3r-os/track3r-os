@@ -1,0 +1,289 @@
+{
+ "name": "qa_events",
+ "title": "OS-MIDIREC S2b, S2c and S3, rows QA-PAT-412..428 of docs/qa/catalogue/pattern.md (docs/specs/OS-MIDIREC.md S2, S3): the edits of the EVENTS list — the encoder and Shift + encoder on the cursor row's field, the pads on DATA / VAL, Insert, Delete, UNDO and REDO inside the list, QUANT — and the MIDI out check QA-PAT-425 (an amidi capture, owed on the unit). By hand, Edit on (Rec), the transport stopped, the loaded project's pattern with notes and CCs (for the CH row a MIDI instrument, as qa_instrmidi.json sets one up). Nothing is saved; every edit is one undo unit, F8 UNDO takes it back.",
+ "steps": [
+  {
+   "run": "_load_tv16"
+  },
+  {
+   "keys": [
+    "-shift"
+   ],
+   "gap": 0.2,
+   "note": "(Shift released, in case a former run left it down)"
+  },
+  {
+   "keys": [
+    "f7"
+   ],
+   "gap": 0.3,
+   "if_state": {
+    "overlay": "NAVIGATOR"
+   },
+   "note": "(a leftover Navigator is closed: F7 is CLOSE, F8 would GO since OS-NAV2)"
+  },
+  {
+   "keys": [
+    "f8"
+   ],
+   "gap": 0.3,
+   "if_state": {
+    "overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|FILL|PLAY_MODE|TOOLS|EVENTS)$"
+   },
+   "note": "(a leftover overlay is put away: F8 is Back)"
+  },
+  {
+   "say": "QA-PAT-424 (the transport stopped, WATCH): F7, Down x4, F1 opens the list; any edit key (the encoder, a pad on DATA or VAL) says TURN EDIT ON on the strip and writes nothing — the info line's undo count is unchanged, and F8 UNDO on the grid afterwards says NOTHING TO UNDO HERE for these keys."
+  },
+  {
+   "keys": [
+    "f7"
+   ],
+   "gap": 0.3
+  },
+  {
+   "keys": [
+    "down"
+   ],
+   "gap": 0.25
+  },
+  {
+   "keys": [
+    "down"
+   ],
+   "gap": 0.25
+  },
+  {
+   "keys": [
+    "down"
+   ],
+   "gap": 0.25
+  },
+  {
+   "keys": [
+    "down"
+   ],
+   "gap": 0.25
+  },
+  {
+   "keys": [
+    "f1"
+   ],
+   "gap": 0.5
+  },
+  {
+   "state": {
+    "overlay": "EVENTS"
+   },
+   "within": 3
+  },
+  {
+   "enc": 1,
+   "gap": 0.3,
+   "note": "any edit key in WATCH: the strip says TURN EDIT ON, nothing is written, no undo unit"
+  },
+  {
+   "pad": 5,
+   "gesture": "tap",
+   "note": "a pad on DATA in WATCH says TURN EDIT ON too (a pad step takes no gap)"
+  },
+  {
+   "keys": [
+    "f8"
+   ],
+   "gap": 0.4,
+   "note": "BACK: the refusal is on the strip behind the closed overlay"
+  },
+  {
+   "shot": "qa_pat_424"
+  },
+  {
+   "state": {
+    "overlay": "NONE"
+   },
+   "within": 3
+  },
+  {
+   "keys": [
+    "rec"
+   ],
+   "gap": 0.3,
+   "note": "STEP (Edit on); the list opens from F7 TOOLS, Down x4 (EVENTS), F1"
+  },
+  {
+   "keys": [
+    "f7"
+   ],
+   "gap": 0.3
+  },
+  {
+   "keys": [
+    "down"
+   ],
+   "gap": 0.25
+  },
+  {
+   "keys": [
+    "down"
+   ],
+   "gap": 0.25
+  },
+  {
+   "keys": [
+    "down"
+   ],
+   "gap": 0.25
+  },
+  {
+   "keys": [
+    "down"
+   ],
+   "gap": 0.25
+  },
+  {
+   "keys": [
+    "f1"
+   ],
+   "gap": 0.5
+  },
+  {
+   "state": {
+    "overlay": "EVENTS"
+   },
+   "within": 3
+  },
+  {
+   "say": "QA-PAT-412: on a NOTE row, Right twice (the DATA field boxed): the encoder is a semitone, Shift + encoder an octave, a pad the pad's note (heard as on the grid). Each is one undo unit: F8 on the grid after BACK takes one edit back at a time."
+  },
+  {
+   "keys": [
+    "right"
+   ],
+   "gap": 0.25
+  },
+  {
+   "keys": [
+    "right"
+   ],
+   "gap": 0.25
+  },
+  {
+   "enc": 1,
+   "gap": 0.3,
+   "note": "DATA +1 semitone"
+  },
+  {
+   "shot": "qa_pat_412"
+  },
+  {
+   "keys": [
+    "+shift"
+   ],
+   "gap": 0.3
+  },
+  {
+   "enc": 1,
+   "gap": 0.3,
+   "note": "Shift + encoder: an octave"
+  },
+  {
+   "shot": "qa_pat_412b"
+  },
+  {
+   "keys": [
+    "-shift"
+   ],
+   "gap": 0.3
+  },
+  {
+   "pad": 5,
+   "gesture": "tap",
+   "note": "a pad on DATA: the pad board's note"
+  },
+  {
+   "shot": "qa_pat_412c"
+  },
+  {
+   "say": "QA-PAT-413: on a note with VAL --- (Right three times to VAL): the first encoder detent is 127, then down by 1; the pads ramp 0..127 (pad 47 is 127, pad 0 is 0). One undo unit each."
+  },
+  {
+   "say": "QA-PAT-414: TIME of a note at .00: the encoder +24 microsteps reads .50 and the grid's FX 2 of that step holds the Micro-move; back to .00 removes it; past .96 the note moves to the next step at .00 when its note column is free, else the strip says STEP 0nn HOLDS A NOTE and nothing is written."
+  },
+  {
+   "say": "QA-PAT-415: Shift + encoder on TIME moves the note one step with its LEN (its end moves too); its CC rows stay on their step; the cursor in the list follows the moved row."
+  },
+  {
+   "say": "QA-PAT-416: the encoder on a CC row's TIME moves it one step at a time (Shift + encoder four steps): the same FX column when it is free there, else the other one, else the strip says STEP 0nn: NO FREE FX COLUMN."
+  },
+  {
+   "say": "QA-PAT-417: the encoder on LEN moves the end (the OFF) one step; moving past the next note removes the end; a gated note (the G flag) refuses with THE GATE FX SETS THIS LENGTH and nothing is written."
+  },
+  {
+   "say": "QA-PAT-418: on a CC row, Right to TYPE: the encoder cycles CC A..F (F is type 37) and the value stays; then Right three times to VAL: the encoder steps the value 0..127, the pads ramp."
+  },
+  {
+   "say": "QA-PAT-419: on a NOTE row, Right to CH (needs a MIDI instrument, as qa_instrmidi.json sets up): the encoder picks the MIDI instrument on that channel and IN follows; a channel with none says NO MIDI INSTRUMENT ON CH nn. The CH of a CC row does not move (read-only)."
+  },
+  {
+   "say": "QA-PAT-420: on a NOTE row, Right five times to IN: the encoder walks the instruments as the grid's Instr column does (Shift + encoder eight places)."
+  },
+  {
+   "say": "QA-PAT-421: Insert on a NOTE row copies the note (note, instrument, volume) onto the row's end step and the cursor goes to the new row; on a note with nothing below it, or a next note, the strip says NO FREE STEP AFTER THIS NOTE. Insert on a CC row copies the letter and value onto the next step of the scope with a free FX column. Shift + Insert adds a CC A 000 (on a CC row, a NOTE when the step's note column is empty). On an empty list Insert adds a NOTE and Shift + Insert a CC A at the scope's first step. Each is one undo unit."
+  },
+  {
+   "say": "QA-PAT-422: Delete on a NOTE row clears its bytes and its end (an OFF written in its place when it ended the note above, so that note keeps its LEN); on a CC row it clears the FX column; on an OFF, CUT or FADE row of its own it clears the note column. The cursor goes to the nearest row in time."
+  },
+  {
+   "say": "QA-PAT-423: F7 UNDO and Shift + F7 REDO inside the list: the edit is taken back or done again as one named unit (the strip says UNDO EVENT / REDO EVENT after BACK), the list projects again and the cursor stays on its event; F8 on the grid after BACK undoes the same units."
+  },
+  {
+   "say": "QA-PAT-425 (the MIDI out after list edits, the check owed on the unit): a MIDI instrument on a track, a CC A on step 1 and a note on step 1 moved to 001.50 with the encoder on TIME. Run `amidi -d -p hw:1,0,0` on the PC (USB; the device setting MIDI OUT includes USB), press Play (the transport stopped first, Edit off) and capture one pass. Expect the CC (Bn) at the step's start, the note-on (9n) about half a step later (24 of 48 microsteps; at 120 BPM and 4 steps a beat half a step is 62 ms), and the note-off (8n, same channel and note) at the LEN's end. A step quantised with F2 (QA-PAT-426) must then send its note-on with the CC. Nothing is left on after Stop. This is a capture by hand: the unit has not been checked."
+  },
+  {
+   "say": "QA-PAT-426: F2 QUANT on a NOTE row at 009.50 moves it to 010.00 when step 10 is free (an offset under 24 microsteps snaps back to .00 instead; the Micro-move goes); the cursor follows the row, one undo unit."
+  },
+  {
+   "say": "QA-PAT-427: Shift + F2 quantises every NOTE and end row the filter shows as one undo unit; the strip says QUANTISED n, or QUANTISED n, m LEFT (STEP TAKEN) when a target step holds a note. F7 takes the whole operation back."
+  },
+  {
+   "say": "QA-PAT-428: F2 on a CC row says CC IS ON THE STEP and writes nothing; on a row already on its step it says ALREADY ON THE STEP."
+  },
+  {
+   "keys": [
+    "f8"
+   ],
+   "gap": 0.4,
+   "note": "BACK: the grid cursor lands on the row's step, track and column"
+  },
+  {
+   "state": {
+    "overlay": "NONE"
+   },
+   "within": 3
+  }
+ ],
+ "finally": [
+  {
+   "keys": [
+    "f8"
+   ],
+   "gap": 0.3,
+   "if_state": {
+    "overlay": "~^(LEARN|NAVIGATOR|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|FILL|PLAY_MODE|TOOLS|EVENTS)$"
+   },
+   "note": "(a leftover overlay is put away: F8 is Back)"
+  },
+  {
+   "keys": [
+    "-shift"
+   ],
+   "gap": 0.2
+  },
+  {
+   "keys": [
+    "pattern"
+   ],
+   "gap": 0.3
+  }
+ ]
+}

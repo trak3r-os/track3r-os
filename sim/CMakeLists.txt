@@ -3,7 +3,7 @@
 # runs the app on a fixed tick and replays scenario scripts. Host only; may use the standard library; may include
 # every layer (tools/check_layers.py).
 o3os_library(sim
-  SOURCES src/eve_raster.cpp src/raster_display.cpp src/simulator.cpp src/scenario.cpp src/scenario_assert.cpp src/audio_check.cpp src/audio_fingerprint.cpp src/sim_audio.cpp src/sim_apps.cpp src/sim_project.cpp src/screens.cpp src/budget.cpp
+  SOURCES src/eve_raster.cpp src/raster_display.cpp src/simulator.cpp src/scenario.cpp src/scenario_assert.cpp src/audio_check.cpp src/audio_fingerprint.cpp src/sim_audio.cpp src/sim_apps.cpp src/sim_project.cpp src/sim_ptfx.cpp src/screens.cpp src/budget.cpp
           src/gallery.cpp src/legibility.cpp
           src/screens_app.cpp src/screens_file.cpp src/screens_sample.cpp src/screens_mixer.cpp src/screens_pattern.cpp src/screens_params.cpp src/screens_modules.cpp src/demo_project.cpp src/screens_record.cpp src/screens_legibility.cpp
   DEPENDS app platform_host platform_host_fat usb platform_mk66_pure)  # platform_host_fat: the card on a FAT32 image (OS-QANET D1); usb: the device name of the boot screen (usb/identity.h); platform_mk66_pure: the screenshot service (OS-SCREENSHOT) runs in the simulator too
@@ -11,6 +11,10 @@ o3os_library(sim
 # OS-E2E-9: the TB-303 journey binds the module's HOST shared object (the .so the module tests dlopen: modules/CMakeLists.txt) to the engine, so the simulator needs it built and its path.
 add_dependencies(sim o3m_tb303_host)
 target_compile_definitions(sim PRIVATE O3SIM_TB303_HOST_SO="$<TARGET_FILE:o3m_tb303_host>")
+# OS-FLASHDIET I2: the importer module (the starter zip's modules/importers/tracker.tmod) stands in the simulator as the tracker's host object,
+# registered as a native importer entry by SimProject::attach_importer, so File > IMPORT runs through the module like on the unit.
+add_dependencies(sim o3m_tracker_host)
+target_compile_definitions(sim PRIVATE O3SIM_TRACKER_HOST_SO="$<TARGET_FILE:o3m_tracker_host>")
 target_link_libraries(sim PUBLIC ${CMAKE_DL_LIBS})
 
 # OS-APPUX S0: the shipped apps are host shared objects in the simulator's card (scenario `apps on`, sim/include/o3os/sim/sim_apps.h). O3SIM_APPS is the list of apps with a manifest
@@ -93,6 +97,14 @@ add_custom_target(e2e_og_fixture ALL
   COMMAND $<TARGET_FILE:o3og_fixture> "${_cards}/e2e_og"
   COMMENT "Generating the OG migration journey's card (o3og_fixture) into ${_cards}/e2e_og" VERBATIM)
 add_dependencies(e2e_og_fixture o3og_fixture)
+# OS-CEPAT S2: the tracker-ce-style v6 project of the card ce_v6 (sim/scenarios/qa/qa_file_ce.txt), written by `o3og_fixture <dir> ce` into
+# ${_cards}/ce_v6 on every build: Projects/CE Demo/{project.mt, patterns/pattern_01.mtp}, pattern structure v6. Never committed.
+add_custom_target(ce_v6_fixture ALL
+  COMMAND ${CMAKE_COMMAND} -E remove_directory "${_cards}/ce_v6"
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${_cards}/ce_v6"
+  COMMAND $<TARGET_FILE:o3og_fixture> "${_cards}/ce_v6" ce
+  COMMENT "Generating the tracker-ce v6 project's card (o3og_fixture ce) into ${_cards}/ce_v6" VERBATIM)
+add_dependencies(ce_v6_fixture o3og_fixture)
 # OS-E2E-9: the cards of the reference-player journeys (scenarios/e2e/e2e_ref_*.txt: a ProTracker, a Scream Tracker 3 and an OctaMED module, and the Paula journey's MOD) are GENERATED too, by
 # tools/e2e_ref_cards.py (tools/mod_build.py and tools/mmd_build.py: nothing here is a real module, nothing is committed), into the same folder on every build. The reference tests read the
 # very bytes back from it (tests/e2e_openmpt_ref.py), so a module and the reference's render of it cannot drift apart.
@@ -110,6 +122,17 @@ add_custom_command(OUTPUT ${_qanet_stamp}
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/../tools/qanet_card.py o3pj_tool
   COMMENT "Generating the random user's card (tools/qanet_card.py) into ${_cards}/qanet_card" VERBATIM)
 add_custom_target(qanet_card_fixture ALL DEPENDS ${_qanet_stamp})
+# OS-MODPRESET P4: the card of the preset QA journey (sim/scenarios/qa/qa_presets.txt): modules/presets/reverb/ holds one good card preset, one damaged file (a byte of a good file
+# flipped after `o3preset.py make`, so its CRC fails: PRESET DAMAGED) and one of another module (the native "widen" effect: PRESET OF WIDEN). GENERATED, never committed (a binary file
+# does not belong in git).
+add_custom_target(qa_presets_card_fixture ALL
+  COMMAND ${CMAKE_COMMAND} -E remove_directory "${_cards}/qa_presets_card"
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${_cards}/qa_presets_card/modules/presets/reverb"
+  COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/o3preset.py make --module reverb --kind effect --module-version 0x00010005 --set Mode=1 --set Cutoff=8000 --set Resonance=30 --set Mix=50 -o "${_cards}/qa_presets_card/modules/presets/reverb/Card Bright.o3mp"
+  COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/o3preset.py make --module reverb --kind effect --set Mode=0 -o "${_cards}/qa_presets_card/modules/presets/reverb/Damaged.o3mp"
+  COMMAND ${Python3_EXECUTABLE} -I -c "import pathlib,sys; p = pathlib.Path(sys.argv[1]); b = bytearray(p.read_bytes()); b[len(b) // 2] ^= 0xFF; p.write_bytes(bytes(b))" "${_cards}/qa_presets_card/modules/presets/reverb/Damaged.o3mp"
+  COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/o3preset.py make --module widen --kind effect --set Mode=2 -o "${_cards}/qa_presets_card/modules/presets/reverb/Wrong Module.o3mp"
+  COMMENT "Generating the preset QA journey's card (tools/o3preset.py) into ${_cards}/qa_presets_card" VERBATIM)
 # OS-QANET D1: the same cards as FAT32 IMAGES (sparse, 64 MiB each: tests/tools/o3fatimg.cpp, FatImage), for `card <name>` through the unit's FatFs (platform/host/fat: FatFsStorage). A fixture that is a file is
 # an image, and `card <name>` with a --cards folder that has <name>.img and no folder <name> finds it: o3sim --cards <build>/sim/cards_fat runs the card scenarios on the images (ctest scenario_fatfs_*, below).
 # Written again on every build, after the fixtures they hold (a second for all of them).
@@ -316,7 +339,7 @@ add_custom_target(update_goldens
   COMMAND ${Python3_EXECUTABLE} -I ${_update_tool} --o3sim $<TARGET_FILE:o3sim> --sim-src ${CMAKE_CURRENT_SOURCE_DIR}
           --sim-bin ${CMAKE_CURRENT_BINARY_DIR} --goldens ${_goldens} --shards ${O3SIM_GALLERY_SHARDS} --cards ${_cards}
   COMMENT "Rewriting sim/goldens.txt from the scenarios and the gallery (parallel, O3OS_GOLDEN_ONLY=<name> for one)" VERBATIM USES_TERMINAL)
-add_dependencies(update_goldens o3sim e2e_card_fixture e2e_ref_fixture e2e_pro_fixture e2e_og_fixture)
+add_dependencies(update_goldens o3sim e2e_card_fixture e2e_ref_fixture e2e_pro_fixture e2e_og_fixture qa_presets_card_fixture)
 add_test(NAME update_goldens_selftest COMMAND ${Python3_EXECUTABLE} -I ${_update_tool} --self-test)
 
 # OS-E2E-4: cmake --build <dir> --target update_audio_fingerprints rewrites tests/audio_fingerprints/*.json from the journeys that opt in, and writes <dir>/sim/fingerprint/fingerprint_diff.md (what moved) and

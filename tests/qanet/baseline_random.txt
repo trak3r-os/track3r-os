@@ -54,7 +54,20 @@ R2 | MIXER | text.auto 0 | 69@296 | bound key changes nothing and says nothing (
 R2 | MIXER | text.key 0 | 69@295 | bound key changes nothing and says nothing (text.key) [1x in the run] | new
 # The line `R2 | PATTERN | pattern.invert 0` left the baseline after OS-AUDIT-56 (column blocks: Shift + Left/Right grow a column block, which changed the walk and what Invert acts on); it no longer occurs in the LONG run (shard 2, seeds 10..18).
 # The line `R1 | FILE | tap f1` (the residuals of the verify of OS-QAFIX-4) left the baseline on 2026-10-31: the walk's random stream moved with the dev merges after OS-AUDIT-56 (OS-SID, OS-IMPORT-ANY, the Config APPLY? arm, OS-STEREO slice (b), OS-SONG-VIEW2 slice 3), and it no longer occurs in the LONG run (shards 1 and 2); in the same move `file.rescan` and `shift+cursor.jump_end` took new repros and `shift+param.coarse -1` on Config came in.
-R2 | PATTERN | pattern.preview 0 | 1@47 | bound key changes nothing and says nothing (pattern.preview) [59x in the run] | new
+# Known issue, OS-MIDIREC (decided, spec 3.4 F5 / A14 / 3.7 Q5 a): F5 PREVIEW held in the EVENTS list sounds the row's step
+# through the engine (hold_note) and writes no step, opens no unit and posts no strip text, so the walk hears nothing of it —
+# and while the transport plays the walk cannot hear it at all. The sound is the feedback, as the grid's pattern.preview
+# (whose own silent line below is `new`). These two lines are the events.preview twins of that policy, not a regression.
+R2 | PATTERN | events.preview 0 | 50@62 | bound key changes nothing and says nothing (events.preview) while the transport plays [1x in the run] | OS-MIDIREC
+R2 | PATTERN | shift+events.preview 0 | 50@53 | bound key changes nothing and says nothing (events.preview) while the transport plays [1x in the run] | OS-MIDIREC
+# The line `R2 | PATTERN | pattern.preview 0` left the baseline after OS-PTOOLS2 S3c (the Fill dialog's target is the selection now, no SCOPE row), which moved the walk's
+# random stream; it no longer occurs in the run. The walk is not stuck in a modal: it still reaches Pattern and presses F5 (the keys walk covers every bound key of every
+# state and is green), and pattern_preview is silent by design when it acts — it sounds the step through the engine's PreviewSink (hold_note) and posts no strip text and
+# changes no view state, so the R2 rule reads "changes nothing and says nothing" (the sound is the engine's, the same policy as the events.preview lines above). A stream
+# that presses F5 on a note-holding step again can bring the line back as a new finding.
+# OS-PTOOLS2 S1: F2 VARY is live only while the fill draws at random and its key cap is blank otherwise (QA-PAT-451), so in a fixed fill
+# the bound F2 changes nothing and says nothing. By design, like the preview lines above; the maintainer's call.
+R2 | PATTERN | fill.vary 0 | 1@133 | bound key changes nothing and says nothing (fill.vary) while the transport plays | OS-PTOOLS2 S1
 R2 | PATTERN | shift+cursor.page -1 | 33@8 | bound key changes nothing and says nothing (cursor.page) [5x in the run] | new
 R2 | PATTERN | shift+cursor.page 1 | 104@204 | bound key changes nothing and says nothing (cursor.page) [1x in the run] | new
 R2 | PERFORM | dj.key 0 | 143@237 | bound key changes nothing and says nothing (dj.key) [1x in the run] | OS-DJ

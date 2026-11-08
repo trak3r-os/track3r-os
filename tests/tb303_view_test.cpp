@@ -95,7 +95,7 @@ TEST_CASE("tb303 views: the module declares two views and draws both through the
   NEED(open_tb303(tb));
   CHECK(tb.entry->view_count == 2u);
   NEED(tb.entry->ui != nullptr);
-  CHECK(tb.entry->abi_minor == 8u);  // ABI 1.8: pitch and the page table (module.json); the built-in module carries a version
+  CHECK(tb.entry->abi_minor == 13u);  // ABI 1.13: pitch and the page table (1.8), the RATE flag (1.13, OS-MODRATE); the built-in module carries a version
   ViewHost host;
   Params p;
   // the corners and the middle of the three parameters the views read

@@ -283,6 +283,18 @@ TEST_CASE("diag shed: the guard's counters on one line, the HIL gates' 'shed 0 b
   CHECK(std::strlen(small) == sizeof small - 1u);
 }
 
+TEST_CASE("diag wtbake: the bake pool's use and the refused calls on one line, bounded (OS-CEWTENV W3c)") {
+  char buf[128];
+  const std::size_t n = diag::format_wt_bake(3, 128, 0, buf, sizeof buf);
+  CHECK(n == std::strlen(buf));
+  CHECK(std::strcmp(buf, "wtbake  used 3/128  refused 0 calls") == 0);
+  diag::format_wt_bake(128, 128, 17, buf, sizeof buf);
+  CHECK(std::strcmp(buf, "wtbake  used 128/128  refused 17 calls") == 0);
+  char small[12];
+  diag::format_wt_bake(128, 128, 17, small, sizeof small);
+  CHECK(std::strlen(small) == sizeof small - 1u);
+}
+
 TEST_CASE("diag voices: in use, peak and steals on one line, bounded (OS-VOX)") {
   char buf[128];
   const std::size_t n = diag::format_voices(9, 16, 12, 3, 4021, buf, sizeof buf);

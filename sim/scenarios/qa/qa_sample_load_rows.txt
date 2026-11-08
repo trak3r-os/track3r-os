@@ -1,0 +1,141 @@
+# OS-FINALQA: six rows of docs/qa/catalogue/sample_load.md that need a card, proven with asserts
+# only (no `snap` here, so this scenario needs no golden). The card is qanet_card (generated into
+# <build>/sim/cards by the qanet_card_fixture target, found with --cards): its root's .wav list has
+# 195 entries -- 6 folders first (Backup, Instruments, Modules, Projects, Recordings, Samples),
+# then 189 sample files, names compared case-folded -- so every jump and page lands on a known row:
+#   0 Backup, 1 Instruments, 8 '808 sine 481.wav', 9 '808 stab 843.iff', 10 '808_369.wav',
+#   11 '808_972.wav', 16 '808_loop_243.wav', 48 'chord stab 091.wav', 97 'noise perc 964.wav',
+#   146 'root 10.wav', 178 'stab_break_550.aiff', 193 'vox_721.wav', 194 'vox_chord_373.wav'.
+# The document is the demo one: instruments 1..10 hold samples (instrument 1 is "KICK"), so the
+# first free slots are 11 and 12. The state line's keys used below: sel= the entry under the cursor
+# (spaces as _), msg= the last strip text (spaces as _), keys= the prompt in force, overlay=,
+# instrument=, screen=; the model's inst.<n>.name and digest.
+
+document
+card qanet_card
+wait 500
+tap sampleload
+wait 2000
+assert state screen=SAMPLE_LOAD sel=Backup
+
+# The listing is complete: F6 RESCAN ends with the strip's count (195 items at the root).
+tap f6
+wait 2000
+assert state msg=READ_AGAIN:_195_ITEMS
+assert state sel=Backup
+
+mark model q015
+
+# QA-SLD-015 (OS-SHIFTROW): Shift + F1..F5 put the cursor on 0/4, 1/4, 2/4, 3/4 of the list and on
+# its last entry (195 entries: 0, 48, 97, 146, 194). The cursor starts on 0, so move it away first.
+tap down
+assert state sel=Instruments
+press shift
+tap f1
+assert state sel=Backup
+tap f2
+assert state sel=chord_stab_091.wav
+tap f3
+assert state sel=noise_perc_964.wav
+tap f4
+assert state sel=root_10.wav
+tap f5
+assert state sel=vox_chord_373.wav
+release shift
+# A jump loads nothing:
+assert model digest=@q015
+
+# QA-SLD-016 (OS-NAV3): Shift + Down / Up move a page (16 rows), clamped at both ends without
+# wrapping; the plain Up / Down still move one row. From the last entry (194):
+press shift
+tap up
+assert state sel=stab_break_550.aiff
+tap down
+assert state sel=vox_chord_373.wav
+release shift
+tap up
+assert state sel=vox_721.wav
+tap down
+assert state sel=vox_chord_373.wav
+press shift
+tap f1
+release shift
+assert state sel=Backup
+press shift
+tap down
+assert state sel=808_loop_243.wav
+tap up
+assert state sel=Backup
+release shift
+assert model digest=@q015
+
+# QA-SLD-026 (OS-AUDIT-A1, E-LOAD-06): F2 (UP) reads the folder above and puts the cursor on the
+# folder just left: root -> Samples -> Samples/Drums, then F2 lands on Drums, F2 again on Samples.
+tap down 5
+assert state sel=Samples
+tap f3
+wait 1500
+tap down 4
+assert state sel=Drums
+tap f3
+wait 1500
+tap f2
+wait 1500
+assert state sel=Drums
+tap f2
+wait 1500
+assert state sel=Samples
+
+# QA-SLD-027 (OS-AUDIT-A1, E-LOAD-23): a visit to the File screen keeps the Sample load cursor:
+# the same folder, and the cursor back on the same entry (found by its name) once the list is read.
+press shift
+tap f1
+release shift
+tap down 8
+assert state sel=808_sine_481.wav
+tap file
+wait 2000
+assert state screen=FILE
+tap sampleload
+wait 2000
+assert state sel=808_sine_481.wav
+
+# QA-SLD-033 (OS-AUDIT-A7, SLD-MULTI): Shift + Right marks the file under the cursor and steps down
+# one row; F1 with files marked loads them in list order into the next free instruments from the
+# target on -- instruments 1..10 are there, so 11 and 12 -- and never over one that is there.
+press shift
+tap f1
+release shift
+tap down 8
+assert state sel=808_sine_481.wav
+press shift
+tap right
+release shift
+assert state sel=808_stab_843.iff
+tap down
+assert state sel=808_369.wav
+press shift
+tap right
+release shift
+assert state sel=808_972.wav
+tap f1
+wait 3000
+assert state msg=~^LOADED_2_OF_2
+assert model inst.1.name=KICK
+assert model inst.11.name="808 sine 481"
+assert model inst.12.name=808_369
+
+# QA-SLD-019 (OS-BUG-SLDOVER): F1 over an instrument that is there (instrument 1 "KICK") asks first;
+# the second F1 within four seconds loads and replaces it.
+press shift
+tap f4
+release shift
+assert state sel=root_10.wav
+mark model r019
+tap f1
+assert state overlay=NOTIFY msg=REPLACE_01_KICK:_F1_AGAIN keys=F1:REPLACE?
+assert model inst.1.name=KICK
+assert model digest=@r019
+tap f1
+wait 2000
+assert model inst.1.name="root 10"

@@ -20,11 +20,17 @@
 #include <o3os/module/loader.h>
 #include <o3os/platform/host/dir_storage.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
+#include <limits>
 #include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -265,7 +271,7 @@ TEST_CASE("module loader: refusals leave the arenas and the set as they were") {
   };
   const Case cases[] = {
       {"bad magic", [](Blob& b) { b.h.magic = 0; b.seal(); }, Status::BadMagic},
-      {"newer minor", [](Blob& b) { b.h.abi_minor = 11; b.seal(); }, Status::AbiMinor},
+      {"newer minor", [](Blob& b) { b.h.abi_minor = static_cast<std::uint8_t>(kOsAbiMinor + 1); b.seal(); }, Status::AbiMinor},
       {"another major", [](Blob& b) { b.h.abi_major = 2; b.seal(); }, Status::AbiMajor},
       {"crc", [](Blob& b) { b.h.image_crc ^= 1; }, Status::BadCrc},
       {"an image byte changed", [](Blob& b) { b.image[20] ^= 1; }, Status::BadCrc},
@@ -476,14 +482,14 @@ TEST_CASE("module loader: the size is gated per minor: 64 bytes with minor 8, 80
   big_label.put(Layout18::labels + 4, 17);
   big_label.seal();
   Blob minor9 = blob18();
-  minor9.h.abi_minor = 11;
+  minor9.h.abi_minor = static_cast<std::uint8_t>(kOsAbiMinor + 1);
   minor9.seal();
   const Case cases[] = {{"size 64, minor 8", size64, Status::BadDescriptor},
                         {"size 80, minor 7", size80, Status::BadDescriptor},
                         {"pitch not Thumb", pitch_even, Status::BadDescriptor},
                         {"pages with no count", pages_no_count, Status::BadDescriptor},
                         {"17 labels", big_label, Status::BadDescriptor},
-                        {"minor 11 (newer than this OS)", minor9, Status::AbiMinor}};
+                        {"a minor newer than this OS", minor9, Status::AbiMinor}};
   for (const Case& c : cases) {
     Rig rig;
     rig.card.write("modules/instruments/bad.tmod", c.blob.file());
@@ -538,5 +544,340 @@ TEST_CASE("module set: a native entry's struct_size is per minor too (add_native
   CHECK(!set.add_native("five", five_pages));
   CHECK(set.count() == 2u);
   CHECK(set.at(0)->desc.struct_size == 64);
+  CHECK(set.at(1)->desc.struct_size == 80);
+}
+
+// ---- ABI 1.12 (OS-INSFX-ABI2 A1, Level C): the loader and add_native take the fourth descriptor tail -------------------------------------------------------
+
+TEST_CASE("module loader: a 1.12 effect loads whatever the step size, with the 100-byte descriptor; a bad tail is refused with the arenas given back") {
+  for (const std::size_t budget : {std::size_t{7}, std::size_t{64}, std::size_t{4096}}) {
+    Rig rig;
+    rig.card.write("modules/effects/fx.tmod", blob_fx12().file());
+    NEED(rig.run("fx", budget) == ModuleLoader::State::Done);
+    const LoadedModule* m = rig.set.at(0);
+    NEED(m != nullptr);
+    CHECK(m->header.abi_minor == 12);
+    CHECK(m->header.kind == O3M_KIND_EFFECT);
+    CHECK(m->desc.struct_size == 100);
+    CHECK(m->desc.param_count == 3);
+  }
+  struct Case {
+    const char* what;
+    Blob blob;
+  };
+  Blob widens_no_render = blob_fx12();
+  widens_no_render.relocs.erase(std::remove(widens_no_render.relocs.begin(), widens_no_render.relocs.end(), LayoutFx::desc + 84u), widens_no_render.relocs.end());
+  widens_no_render.put(LayoutFx::desc + 84, 0);
+  widens_no_render.h.reloc_count = static_cast<std::uint32_t>(widens_no_render.relocs.size());
+  widens_no_render.seal();
+  Blob big_count = blob_fx12();
+  big_count.put(LayoutFx::desc + 96, 33);
+  big_count.seal();
+  Blob nan_value = blob_fx12();
+  nan_value.put(LayoutFx::values0, 0x7FC00000u);  // a quiet NaN
+  nan_value.seal();
+  Blob size84 = blob_fx12();
+  size84.put(LayoutFx::desc + 12, 84);
+  size84.seal();
+  Blob minor13 = blob_fx12();
+  minor13.h.abi_minor = static_cast<std::uint8_t>(kOsAbiMinor + 1);
+  minor13.seal();
+  const Case cases[] = {{"WIDENS without render_st", widens_no_render}, {"33 presets", big_count}, {"a NaN preset value", nan_value}, {"size 84 with minor 12", size84}};
+  for (const Case& c : cases) {
+    Rig rig;
+    rig.card.write("modules/effects/bad.tmod", c.blob.file());
+    CAPTURE(std::string(c.what));
+    CHECK(rig.run("bad", 64) == ModuleLoader::State::Failed);
+    CHECK(rig.loader.status() == Status::BadDescriptor);
+    CHECK(rig.set.count() == 0);
+    CHECK(rig.set.hot().used() == 0);
+    CHECK(rig.set.cold().used() == 0);
+    CHECK(rig.set.quarantined("bad"));  // a validation failure: quarantined until the reboot
+  }
+  {  // a 1.12 file under an OS of 1.11 would be refused by the minor rule: here the same file one minor above this OS's
+    Rig rig;
+    rig.card.write("modules/effects/new.tmod", minor13.file());
+    CHECK(rig.run("new", 64) == ModuleLoader::State::Failed);
+    CHECK(rig.loader.status() == Status::AbiMinor);
+  }
+}
+
+namespace {
+
+std::uint32_t s_render_st(void*, const float*, const float*, float*, float*, std::uint32_t) { return 0; }
+const o3m_param kFxParams[3] = {{"A", 0.0f, 1.0f, 0.5f, 0}, {"Key", 0.0f, 16.0f, 0.0f, O3M_PARAM_INT | O3M_PARAM_KEY}, {"B", -10.0f, 10.0f, 0.0f, 0}};
+const float kV0[3] = {0.25f, 3.0f, -2.0f};
+const float kV1[2] = {1.0f, 16.0f};
+const float kVHigh[1] = {2.0f};
+const float kVNan[1] = {std::numeric_limits<float>::quiet_NaN()};
+const float kVInf[1] = {std::numeric_limits<float>::infinity()};
+const o3m_preset kPresets[2] = {{"Warm", kV0, 3}, {"Wide", kV1, 2}};
+const o3m_preset kPresetNoName[1] = {{nullptr, kV0, 3}};
+const o3m_preset kPresetEmptyName[1] = {{"", kV0, 3}};
+const o3m_preset kPresetLongName[1] = {{"0123456789ABCDEF", kV0, 3}};
+const o3m_preset kPresetCtl[1] = {{"A\tB", kV0, 3}};
+const o3m_preset kPresetNoValues[1] = {{"X", nullptr, 3}};
+const o3m_preset kPresetZero[1] = {{"X", kV0, 0}};
+const o3m_preset kPresetMany[1] = {{"X", kV0, 4}};  // four values for three parameters
+const o3m_preset kPresetHigh[1] = {{"X", kVHigh, 1}};
+const o3m_preset kPresetNan[1] = {{"X", kVNan, 1}};
+const o3m_preset kPresetInf[1] = {{"X", kVInf, 1}};
+const o3m_preset kPresetOne[1] = {{"A", kV0, 1}};
+const o3m_preset kPresetMax[32] = {{"A", kV0, 1}, {"B", kV0, 1}, {"C", kV0, 1}, {"D", kV0, 1}, {"E", kV0, 1}, {"F", kV0, 1}, {"G", kV0, 1}, {"H", kV0, 1},
+                                   {"I", kV0, 1}, {"J", kV0, 1}, {"K", kV0, 1}, {"L", kV0, 1}, {"M", kV0, 1}, {"N", kV0, 1}, {"O", kV0, 1}, {"P", kV0, 1},
+                                   {"Q", kV0, 1}, {"R", kV0, 1}, {"S", kV0, 1}, {"T", kV0, 1}, {"U", kV0, 1}, {"V", kV0, 1}, {"W", kV0, 1}, {"X", kV0, 1},
+                                   {"Y", kV0, 1}, {"Z", kV0, 1}, {"a", kV0, 1}, {"b", kV0, 1}, {"c", kV0, 1}, {"d", kV0, 1}, {"e", kV0, 1}, {"f", kV0, 1}};
+// KEY shapes
+const o3m_param kKeyRange8[1] = {{"Key", 0.0f, 8.0f, 0.0f, O3M_PARAM_INT | O3M_PARAM_KEY}};
+const o3m_param kKeyFloat[1] = {{"Key", 0.0f, 16.0f, 0.0f, O3M_PARAM_KEY}};
+const o3m_param kKeyMin1[1] = {{"Key", 1.0f, 16.0f, 1.0f, O3M_PARAM_INT | O3M_PARAM_KEY}};
+const o3m_param kKey2[2] = {{"K1", 0.0f, 16.0f, 0.0f, O3M_PARAM_INT | O3M_PARAM_KEY}, {"K2", 0.0f, 16.0f, 0.0f, O3M_PARAM_INT | O3M_PARAM_KEY}};
+const o3m_param kKey3[3] = {{"K1", 0.0f, 16.0f, 0.0f, O3M_PARAM_INT | O3M_PARAM_KEY}, {"K2", 0.0f, 16.0f, 0.0f, O3M_PARAM_INT | O3M_PARAM_KEY},
+                            {"K3", 0.0f, 16.0f, 0.0f, O3M_PARAM_INT | O3M_PARAM_KEY}};
+const o3m_labels kLabelsKey[1] = {{nullptr, 2}};  // a key with labels (the table says it has two)
+const char* const kNames2[2] = {"No", "Yes"};
+const o3m_labels kLabelsWithNames[1] = {{kNames2, 2}};
+
+// A native effect of ABI 1.12 (the 100-byte descriptor) with the given tail; tests change the fields they break.
+o3m_module fx_native(std::uint32_t kind = O3M_KIND_EFFECT) {
+  o3m_module m = {O3M_ABI_MAJOR, kStereoAbiMinor, kind, static_cast<std::uint32_t>(O3M_MODULE_SIZE(12)), "fx", 16, 3, kFxParams, n_init, n_render, n_set_param, n_note_on, n_note_off, n_shutdown, nullptr, 0};
+  m.render_st = &s_render_st;
+  m.fx_flags = O3M_FX_WIDENS;
+  m.presets = kPresets;
+  m.preset_count = 2;
+  return m;
+}
+
+}  // namespace
+
+// ABI 1.13 (OS-MODRATE S2, Level C): the RATE bit of fx_flags is an instrument's, from minor 13 (the rule of read_desc, applied to a native entry).
+TEST_CASE("module set: add_native takes O3M_FX_RATE on an instrument of 1.13 and refuses it on an effect, below 1.13 and with WIDENS") {
+  static const o3m_param kPlain[2] = {{"A", 0.0f, 1.0f, 0.0f, 0}, {"B", 0.0f, 1.0f, 0.0f, 0}};
+  const auto instrument = [](std::uint32_t minor, std::uint32_t flags) {
+    o3m_module m = fx_native(O3M_KIND_INSTRUMENT);
+    m.abi_minor = minor;
+    m.render_st = nullptr;
+    m.fx_flags = flags;
+    m.params = kPlain;
+    m.param_count = 2;
+    m.presets = nullptr;
+    m.preset_count = 0;
+    return m;
+  };
+  static ModuleSet set;
+  set.clear();
+  static const o3m_module rate = instrument(13, O3M_FX_RATE);
+  static const o3m_module plain = instrument(13, 0);
+  CHECK(set.add_native("rate", rate));
+  CHECK(set.add_native("plain", plain));
+  CHECK(set.at(0)->entry == &rate);
+  CHECK(set.count() == 2u);
+  set.clear();
+  CHECK_FALSE(set.add_native("old", instrument(12, O3M_FX_RATE)));  // the bit did not exist at 1.12
+  CHECK_FALSE(set.add_native("wide", instrument(13, O3M_FX_WIDENS)));
+  CHECK_FALSE(set.add_native("both", instrument(13, O3M_FX_RATE | O3M_FX_WIDENS)));
+  CHECK_FALSE(set.add_native("other", instrument(13, 4u)));
+  o3m_module effect = fx_native();
+  effect.abi_minor = 13;
+  effect.fx_flags = O3M_FX_RATE;
+  CHECK_FALSE(set.add_native("fx", effect));
+  effect.fx_flags = O3M_FX_WIDENS;
+  CHECK(set.add_native("fx", effect));  // WIDENS is still an effect's at 1.13
+}
+
+TEST_CASE("module set: add_native takes a 1.12 entry (render_st, WIDENS, presets, a KEY) and applies the rules of read_desc to its tail") {
+  static ModuleSet set;
+  set.clear();
+  const o3m_module ok = fx_native();
+  CHECK(set.add_native("ok", ok));
+  CHECK(set.at(0)->desc.struct_size == 100);
+  CHECK(set.at(0)->entry == &ok);
+  // shapes that load (the set keeps a pointer to each entry: they are static)
+  static const o3m_module capable = [] {
+    o3m_module m = fx_native();
+    m.fx_flags = 0;  // stereo-capable: render_st, no WIDENS
+    return m;
+  }();
+  static const o3m_module mono = [] {
+    o3m_module m = fx_native();
+    m.render_st = nullptr;
+    m.fx_flags = 0;
+    m.presets = nullptr;
+    m.preset_count = 0;  // a plain mono effect at 1.12 (a KEY parameter may still be there)
+    return m;
+  }();
+  static const o3m_param kPlain[2] = {{"A", 0.0f, 1.0f, 0.0f, 0}, {"B", 0.0f, 1.0f, 0.0f, 0}};
+  static const float kVHalf[2] = {0.5f, 1.0f};
+  static const o3m_preset kHalf[1] = {{"Half", kVHalf, 2}};
+  static const o3m_module inst = [] {
+    o3m_module m = fx_native(O3M_KIND_INSTRUMENT);  // presets on an instrument are allowed (Q8 a)
+    m.render_st = nullptr;
+    m.fx_flags = 0;
+    m.params = kPlain;
+    m.param_count = 2;
+    m.presets = kHalf;
+    m.preset_count = 1;
+    return m;
+  }();
+  static const o3m_module two_keys = [] {
+    o3m_module m = fx_native();
+    m.params = kKey2;
+    m.param_count = 2;
+    m.presets = nullptr;
+    m.preset_count = 0;
+    return m;
+  }();
+  static const o3m_module max32 = [] {
+    o3m_module m = fx_native();
+    m.presets = kPresetMax;
+    m.preset_count = 32;
+    return m;
+  }();
+  static const o3m_module one = [] {
+    o3m_module m = fx_native();
+    m.presets = kPresetOne;
+    m.preset_count = 1;
+    return m;
+  }();
+  CHECK(set.add_native("capable", capable));
+  CHECK(set.add_native("mono", mono));
+  CHECK(set.add_native("inst", inst));
+  CHECK(set.add_native("keys2", two_keys));
+  CHECK(set.add_native("p32", max32));
+  CHECK(set.add_native("p1", one));
+  CHECK(set.count() == 7u);
+  // every refusal (a fresh set each time: add_native must not have touched it)
+  struct Case {
+    const char* what;
+    o3m_module m;
+  };
+  std::vector<Case> bad;
+  const auto add = [&bad](const char* what, const o3m_module& m) { bad.push_back({what, m}); };
+  {
+    o3m_module m = fx_native(O3M_KIND_INSTRUMENT);
+    m.params = kPlain;
+    m.param_count = 2;
+    m.presets = nullptr;
+    m.preset_count = 0;
+    add("render_st on an instrument", m);
+    m.render_st = nullptr;
+    m.presets = kPresetMany;  // an instrument's presets are checked like an effect's: a preset with more values than parameters
+    m.preset_count = 1;
+    m.fx_flags = 0;
+    add("a preset of four values on a module with two parameters", m);
+  }
+  {
+    o3m_module m = fx_native();
+    m.fx_flags = 2;
+    add("an unknown fx_flags bit", m);
+  }
+  {
+    o3m_module m = fx_native();
+    m.render_st = nullptr;
+    add("WIDENS without render_st", m);
+  }
+  {
+    o3m_module m = fx_native();
+    m.presets = nullptr;
+    add("a preset count with no table", m);
+  }
+  {
+    o3m_module m = fx_native();
+    m.preset_count = 0;
+    add("a table with no preset count", m);
+  }
+  {
+    o3m_module m = fx_native();
+    m.presets = kPresetMax;
+    m.preset_count = 33;
+    add("33 presets", m);
+  }
+  {
+    o3m_module m = fx_native();
+    m.params = nullptr;
+    add("params NULL with parameters", m);
+  }
+  for (const auto& [what, table] : std::initializer_list<std::pair<const char*, const o3m_preset*>>{{"a preset with no name", kPresetNoName},
+                                                                                                    {"a preset with an empty name", kPresetEmptyName},
+                                                                                                    {"a preset name of 16 characters", kPresetLongName},
+                                                                                                    {"a preset name with a control character", kPresetCtl},
+                                                                                                    {"a preset with no values", kPresetNoValues},
+                                                                                                    {"a preset with a count of 0", kPresetZero},
+                                                                                                    {"a preset with more values than parameters", kPresetMany},
+                                                                                                    {"a value above its range", kPresetHigh},
+                                                                                                    {"a NaN value", kPresetNan},
+                                                                                                    {"an infinite value", kPresetInf}}) {
+    o3m_module m = fx_native();
+    m.presets = table;
+    m.preset_count = 1;
+    add(what, m);
+  }
+  for (const auto& [what, table, count] : std::initializer_list<std::tuple<const char*, const o3m_param*, std::uint32_t>>{
+           {"a KEY of 0..8", kKeyRange8, 1}, {"a KEY that is not INT", kKeyFloat, 1}, {"a KEY of 1..16", kKeyMin1, 1}, {"three KEYs", kKey3, 3}}) {
+    o3m_module m = fx_native();
+    m.params = table;
+    m.param_count = count;
+    m.presets = nullptr;
+    m.preset_count = 0;
+    add(what, m);
+  }
+  {
+    o3m_module m = fx_native(O3M_KIND_INSTRUMENT);
+    m.render_st = nullptr;
+    m.fx_flags = 0;
+    m.params = kKey2;
+    m.param_count = 2;
+    m.presets = nullptr;
+    m.preset_count = 0;
+    add("a KEY on an instrument", m);
+  }
+  {
+    o3m_module m = fx_native();
+    m.params = kKeyRange8;  // placeholder replaced below: a KEY with a label entry
+    static const o3m_param key17[1] = {{"Key", 0.0f, 16.0f, 0.0f, O3M_PARAM_INT | O3M_PARAM_KEY}};
+    m.params = key17;
+    m.param_count = 1;
+    m.labels = kLabelsKey;
+    m.presets = nullptr;
+    m.preset_count = 0;
+    add("a KEY with a label entry", m);
+    m.labels = kLabelsWithNames;
+    add("a KEY with labels", m);
+  }
+  {
+    o3m_module m = fx_native();
+    m.struct_size = static_cast<std::uint32_t>(O3M_MODULE_SIZE(11));
+    add("1.12 with the 1.11 size", m);
+    m = fx_native();
+    m.abi_minor = 11;
+    add("1.11 with the 1.12 size", m);
+    m = fx_native();
+    m.abi_minor = kOsAbiMinor + 1;
+    m.struct_size = static_cast<std::uint32_t>(sizeof(o3m_module));
+    add("a minor newer than the OS's", m);
+  }
+  for (const Case& c : bad) {
+    static ModuleSet fresh;
+    fresh.clear();
+    CAPTURE(std::string(c.what));
+    CHECK(!fresh.add_native("bad", c.m));
+    CHECK(fresh.count() == 0u);
+  }
+}
+
+TEST_CASE("module set: a native entry of 1.11 or below with the 1.12 members set loads as before (they are not read below 1.12)") {
+  static ModuleSet set;
+  set.clear();
+  o3m_module m = fx_native();
+  m.abi_minor = 11;
+  m.struct_size = static_cast<std::uint32_t>(O3M_MODULE_SIZE(11));  // an 84-byte descriptor: the four words past it are not part of the module
+  m.fx_flags = 0xFFFFFFFFu;  // junk that 1.12 would refuse
+  m.preset_count = 99;
+  CHECK(set.add_native("old11", m));
+  o3m_module a = fx_native(O3M_KIND_INSTRUMENT);  // an instrument at 1.8 whose parameter has the KEY bit: not honoured, not refused
+  a.abi_minor = 8;
+  a.struct_size = static_cast<std::uint32_t>(O3M_MODULE_SIZE(8));
+  CHECK(set.add_native("old8", a));
+  CHECK(set.at(0)->desc.struct_size == 84);
   CHECK(set.at(1)->desc.struct_size == 80);
 }

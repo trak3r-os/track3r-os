@@ -16,8 +16,9 @@ namespace o3os::model {
 //        -3 -> 254, -4 -> 255 (PAR-007: i8, -1 empty, -2 fade, -3 cut, -4 off).
 // instr  0 none | 1..64 = instrument slot + 1
 // vol    0..127, 255 not set
-// fx     type 0 None, 1..42 OG types, 43..127 reserved for core FX,
-//        128..255 declared by the instrument's engine module (ADR 0004); value is a byte
+// fx     type 0 None, 1..42 OG types, 43..95 core FX (43..62 assigned by ADR 0004 amendments 1 and 2,
+//        63..95 free), 96..127 tracker-ce FX (the OG id + kFxCeOffset, ADR 0004 amendment 3), 128..255
+//        declared by the instrument's engine module (ADR 0004); value is a byte
 inline constexpr std::uint8_t kNoteEmpty = 0;
 inline constexpr std::uint8_t kNoteFirst = 1;
 inline constexpr std::uint8_t kNoteLast = 128;
@@ -30,6 +31,9 @@ inline constexpr std::uint8_t kVolumeUnset = 255;
 
 inline constexpr std::uint8_t kFxNone = 0;
 inline constexpr std::uint8_t kFxOgLast = 42;
+inline constexpr std::uint8_t kFxOgCeLast = 74;   // the last OG id that maps to a tracker-ce id (74 + kFxCeOffset = 127)
+inline constexpr std::uint8_t kFxCeFirst = 96;   // the first tracker-ce FX id in the model and a .o3pj (ADR 0004 amendment 3)
+inline constexpr std::uint8_t kFxCeOffset = 53;  // a tracker-ce model id is the OG id + kFxCeOffset, for OG ids 43..74
 inline constexpr std::uint8_t kFxReservedLast = 127;
 inline constexpr std::uint8_t kFxEngineFirst = 128;
 

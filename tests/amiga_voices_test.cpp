@@ -691,6 +691,39 @@ TEST_CASE("amiga voices: the Slice FX forces the slice, value modulo the count, 
   CHECK(r.blk[8][kBlk - 1] == slice_level(1));
 }
 
+// OS-CEPLAYTHRU P2: with the descriptor's slice_thru, the Amiga voice plays its slice on to the sample end (beat_slice_span is the one rule of both engines), the Slice FX's forced slice too.
+TEST_CASE("amiga voices: a beat slice with play through runs to the sample end, forced slice too (OS-CEPLAYTHRU P2)") {
+  static Slices sl;
+  Rig r(&pool_a(), &pool_p());
+  r.a->set_filter(audio::paula::Model::Off, false);
+  SampleDesc d = sl.desc();
+  d.slice_thru = 1;
+  r.p->set_sample(0, d);
+  // the span itself: the note's slice and the forced one end at the length, not at the next bound
+  std::uint32_t from = 0, len = 0;
+  bool ok = audio::beat_slice_span(d, 24, audio::kNoForcedSlice, from, len);
+  CHECK(ok);
+  CHECK((from == 0u && len == 400u));
+  ok = audio::beat_slice_span(d, 60, 1, from, len);  // forced 1 % 4 = slice 1
+  CHECK(ok);
+  CHECK((from == 100u && len == 300u));
+  // the render: the same note without the flag stops at its slice's own end (slice 0 is 100 frames, over well before 16 blocks); with the flag it plays on (still sounding at 16 blocks)
+  r.p->set_sample(0, sl.desc());          // no flag
+  CHECK(r.send(note_on(0, 24, 0, 127)));   // slice 0
+  r.blocks(16);
+  CHECK(r.blk[0][kBlk - 1] == 0);
+  r.p->set_sample(0, d);                   // slice_thru = 1
+  CHECK(r.send(note_on(1, 24, 0, 127)));   // slice 0 again, on track 1
+  r.blocks(16);
+  CHECK(r.blk[1][kBlk - 1] != 0);          // it runs to the sample end
+  // the Slice FX's forced slice too: track 2, forced 1 (slice 1, [100, 400) with play through; alone it would be over by now)
+  r.p->set_forced_slice(2, 1);
+  CHECK(r.send(note_on(2, 60, 0, 127)));
+  r.blocks(16);
+  CHECK(r.blk[2][kBlk - 1] != 0);
+  r.p->clear_forced_slices();
+}
+
 // ---- OS-BUG-PASTE24 E1 (QA-INS-203): the peak of an Amiga instrument against the instrument's own gain ------------------------------------------------------
 // The unit read an Amiga instrument above its gain (a square chip wave, levels 25 and 37, full scale at level 45) while the Modern engine peaked exactly at it. Host findings, held here:
 //  - a note that names no velocity (a pad: audio::kLiveVelocityDefault) plays at amiga_vol / 64, and the gain it comes from is the Modern engine's: a triangle peaks within the volume's rounding of it;

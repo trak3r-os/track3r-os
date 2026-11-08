@@ -255,6 +255,38 @@ TEST_CASE("hex validator: the image must end on a 4 KiB boundary (OS-GATE-BOOTCR
   CHECK(std::strcmp(up::fault_name(Fault::NotPadded), "image not padded: may not boot") == 0);
 }
 
+TEST_CASE("hex validator: the image must end at or below 0xFF000, the last flash sector stays empty (OS-BUG-LASTSECTOR)") {
+  constexpr std::size_t kLimit = 0xFF000;
+  static_assert(kLimit == up::kLastSectorStart, "the test's limit is the validator's");
+  // Exactly 0xFF000 is accepted, whole and in odd chunks, and one sector below it too.
+  for (const std::size_t end : {kLimit - 4096, kLimit}) {
+    CAPTURE(end);
+    const std::string text = hex_of(good_image(end - 0x410, false));
+    const Verdict v = validate(text);
+    CHECK(v.ok);
+    CHECK(v.length == end);
+    CHECK(validate(text, 7).ok);
+  }
+  // One byte past it (not padded either: the last-sector rule is named first), the next boundary 0x100000 and a few more are refused with the reason named.
+  for (const std::size_t end : {kLimit + 1, kLimit + 4096 - 1, kLimit + 0x800, std::size_t{0x100000}}) {
+    CAPTURE(end);
+    const std::string text = hex_of(good_image(end - 0x410, false));
+    const Verdict v = validate(text);
+    CHECK_FALSE(v.ok);
+    CHECK(v.fault == Fault::LastSector);
+    CHECK(v.offset == text.size());
+    CHECK(v.length == 0u);
+    CHECK(validate(text, 1000).fault == Fault::LastSector);
+  }
+  // A padded image that fills the last sector is the case that hung the unit.
+  CHECK(validate(hex_of(good_image(0x100000 - 0x410 - 100))).fault == Fault::LastSector);
+  // Another defect of the image is reported first.
+  std::vector<std::uint8_t> bad_sp = good_image(0x100000 - 0x410, false);
+  put_word(bad_sp, 0, 0x20020000u);
+  CHECK(validate(hex_of(bad_sp)).fault == Fault::BadSp);
+  CHECK(std::strcmp(up::fault_name(Fault::LastSector), "image reaches last flash sector") == 0);
+}
+
 TEST_CASE("hex validator: the flash configuration field must be exactly ffffffffffffffffffffffffdef9ffff") {
   const std::vector<std::uint8_t> good = good_image();
   NEED(accepts(hex_of(good)));

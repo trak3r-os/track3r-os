@@ -80,8 +80,8 @@ def SAY(text):
     return {"say": text}
 
 
-# The Song screen has 3 pages (ORDER, ARRANGEMENT, TIMELINE) and the Song key turns them round: from page 1 two presses reach page 0, from page 2 one. Expects the Song screen up.
-SONG_PAGE0 = [K("song", gap=0.4, if_state={"page": "1"}, note="(page 0 first: Song again cycles ORDER / ARRANGEMENT / TIMELINE)"), K("song", gap=0.4, if_state={"page": "2"})]
+# The Song screen has 2 pages (LIST, TIMELINE: OS-SONG3 S1 folded ARRANGEMENT into LIST) and the Song key turns them round: from page 1 one press reaches page 0. Expects the Song screen up.
+SONG_PAGE0 = [K("song", gap=0.4, if_state={"page": "1"}, note="(page 0 first: Song again cycles LIST / TIMELINE)")]
 
 KEYROW = ["0,458,800,22"]
 
@@ -185,13 +185,12 @@ nav += [
     SAY("PATTERN"),
     ST({"screen": "PATTERN", "overlay": "NONE"}, within=3),
     SHOT("pattern", compare=CMP("screens", "pattern_start"), soft=True, note="(soft: the key-cap row against the simulator's golden; needs --sim or --golden-dir)"),
-    # SONG, three pages (OS-SONG-VIEW2: ORDER, ARRANGEMENT, TIMELINE)
+    # SONG, two pages (OS-SONG3 S1: LIST, TIMELINE)
     K("song", gap=0.5), ST({"screen": "SONG"}, within=3),
     *SONG_PAGE0, ST({"screen": "SONG", "page": "0"}, within=2),
     SHOT("song_order", compare=CMP("screens", "song_start"), soft=True),
-    K("song", gap=0.4), ST({"screen": "SONG", "page": "1"}, within=2),
-    SHOT("song_arrangement", compare=CMP("screens", "song_page2"), soft=True),
-    K("song", gap=0.4), ST({"screen": "SONG", "page": "2"}, within=2, note="the Timeline page"),
+    K("song", gap=0.4), ST({"screen": "SONG", "page": "1"}, within=2, note="the Timeline page"),
+    SHOT("song_timeline", compare=CMP("screens", "song_page2"), soft=True),
     K("song", gap=0.4), ST({"screen": "SONG", "page": "0"}, within=2),
     # INSTRUMENT (Params): F1 the SOURCE page, F2..F5 the four pages (the engine picker is the F4 of a free slot, OS-INSTUI S5: below)
     K("params", gap=0.5), ST({"screen": "INSTRUMENT"}, within=3),
@@ -255,15 +254,15 @@ nav += [
     K("f3", gap=0.4), ST({"screen": "CONFIG", "page": "2"}, within=2), SHOT("config_sd"),
     K("f4", gap=0.4), ST({"screen": "CONFIG", "page": "3"}, within=2), SHOT("config_info"),
     K("f1", gap=0.4), ST({"screen": "CONFIG", "page": "0"}, within=2),
-    # NAVIGATOR and MODULES (OS-NAV2, 0.4.9: Shift + Pattern, tapped or held, opens the grid and it STAYS open; F7 or Pattern closes with no view change; F8 or F1 = GO; Shift + F5 = the last cell, MODULES)
+    # NAVIGATOR and MODULES (OS-NAV2, 0.4.9; OS-APPSNAV: the Master + Song or Song + Pattern chord opens the grid and it STAYS open; F7 or Pattern closes with no view change; F8 or F1 = GO; Shift + F5 = the last cell, MODULES)
     K("pattern", gap=0.5), ST({"screen": "PATTERN"}, within=3),
-    K("+shift", "+pattern", "-pattern", "-shift", gap=0.5, note="(Shift + Pattern tapped: the grid opens and stays open after both are released)"),
+    K("+song", "+pattern", "-pattern", "-song", gap=0.5, note="(Song + Pattern chord, either order: the grid opens and stays open after both are released)"),
     ST({"overlay": "NAVIGATOR"}, within=3),
     SHOT("navigator"),
     K("f7", gap=0.4), ST({"screen": "PATTERN", "overlay": "NONE"}, within=3, note="F7 = CLOSE: no view change"),
-    K("+shift", "+pattern", "-pattern", "-shift", gap=0.5), ST({"overlay": "NAVIGATOR"}, within=3),
+    K("+song", "+pattern", "-pattern", "-song", gap=0.5), ST({"overlay": "NAVIGATOR"}, within=3),
     K("pattern", gap=0.4), ST({"screen": "PATTERN", "overlay": "NONE"}, within=3, note="Pattern again closes it"),
-    K("+shift", "+pattern", "-pattern", "-shift", gap=0.5), ST({"overlay": "NAVIGATOR"}, within=3),
+    K("+song", "+pattern", "-pattern", "-song", gap=0.5), ST({"overlay": "NAVIGATOR"}, within=3),
     ENC(32, gap=0.4, note="(the encoder moves one cell a detent and clamps at the last cell, MODULES; Shift + F5 is unbound in the Navigator since OS-SHIFTROW)"),
     K("f8", gap=0.5, note="F8 = GO"),
     ST({"screen": "MODULES", "overlay": "NONE"}, within=3),
@@ -589,6 +588,35 @@ md = open_song("~^${PROJ}$", "load:\\s+Projects/${PROJ}", "~(?i)^(OPENING_|PROJE
 add("qa_cpu_moddrive", "OS-BUG-MODDRIVE: the CPU of the step FX 38 / 39 on 1, 4 and 8 TB-303 tracks against the same song without them: opened from File, `cpu reset`, Play, 8 reads of `cpu` 2.5 s apart. "
     "ASSERTS underrun 0 and guard shed 0; the mean `render last` is reported. The project must be on the card first (`o3pj_tool gen moddrive1|4|8` and the `off` controls)",
     md, finally_=[K("-shift", gap=0.2)] + clear_overlays() + [K("pattern", gap=0.4), RUN("_stop")], vars_={"PROJ": "ModDrive1"})
+
+# qa_cpu_wt (OS-CEWTENV W3a, docs/specs/OS-CEWTENV.md 3.10 items 1, 2, 3 and 4): the CPU of the cutoff WT Env on the unit, in three arms, one run of this scenario per arm
+# (`--var PROJ=...`, one folder on the card per run): PROJ=Dense8 (no WT: the baseline, must be within noise of the same image's qa_cpu_dense run), PROJ=Dense8wt6 (6 sampler voices with a
+# cutoff WT Env, no warps) and PROJ=Dense8wt12 (12 voices, cutoff WT Env, both warps +7/+7). The arms are made by `python3 -I platform/mk66/tools/hil/gen_wt_arms.py [Dense8 folder] [out]`
+# into build-sdtest/ (never into git). Each run: opened from File, `cpu reset`, `cpu perf off`, Play, 24 reads of `cpu` 2.5 s apart over 60 s, then on a bench image `bench worst` and the
+# `bench wt` kernel (wt_eval no warp / both warps, warm and cold; wt_make one contour / all 256; the sample arena's free bytes before / after the bank). ASSERTS underrun 0 and guard shed 0
+# at every read; the mean is reported against 85 % of the block.
+cw = open_song("~^${PROJ}$", "load:\\s+Projects/${PROJ}", "~(?i)^(OPENING_|PROJECT_)${PROJ}",
+               "OS-CEWTENV W3a (3.10): the CPU of the cutoff WT Env on the unit, three arms, one per run: `--var PROJ=Dense8` (no WT, the baseline), `PROJ=Dense8wt6` (6 voices, cutoff WT Env, no warps) "
+               "or `PROJ=Dense8wt12` (12 voices, cutoff WT Env, both warps +7/+7). BEFORE the run: make the arms (`python3 -I platform/mk66/tools/hil/gen_wt_arms.py <Dense8 folder> <out>`, the folders land in "
+               "build-sdtest/) and copy ONE arm folder into Projects/ on the card (card reader or the unit's USB Disk mode). Use the release image for `cpu`, then the bench image (-DO3OS_BENCH=ON, mk66-bench) "
+               "of the same build id for `bench worst` and `bench wt` (cpu-budget.md section 5).") + [
+    RUN("_play"), W(5.0, note="settle"),
+    VOX({"min_in_use": 4}, soft=True, note="(soft: the sampler voices sound; Dense8wt6 has 6, Dense8wt12 12 in use)"),
+    MIX({"channels": {"MST L": {"min_rms_db": -60}}, "within": 6}, note="the song sounds"),
+    CMD("voices", note="arm ${PROJ}: voices at the start of the window"),
+    CMD("cpu reset", note="OS-CEWTENV 3.10 item 1: the 60 s window starts"), CMD("cpu perf off")] + cpu_reads(
+        STRESS_WINDOW, 2.5, "W", expect=[r"underrun 0 \(", r"guard\s+shed 0 blocks"]) + [
+    STAT("W", min_n=STRESS_WINDOW, show=True, note="arm ${PROJ}: the mean of the %d reads of `render last` (cycles). REPORTED against the 85 %% target (221,952 of 261,120) and against the other arms" % STRESS_WINDOW),
+    CMD("voices", note="arm ${PROJ}: in use / peak / steals, and `advanced` at the end of the window"),
+    CMD("mod", soft=True, note="arm ${PROJ}: module instances and cycles per voice"),
+    CMD("bench worst", soft=True, show=True, note="OS-CEWTENV 3.10: the stage split of the worst block since `cpu reset` (soft: only a bench image has `bench`)"),
+    CMD("bench wt", soft=True, show=True, expect=[r"BENCH wt_eval ", r"BENCH wt_eval_warp ", r"BENCH wt_eval_baked ", r"BENCH wt_make_1 ", r"BENCH wt_make_all ", r"BENCH wt_arena "],
+        note="OS-CEWTENV 3.10 items 2, 3 and 4: the wt bench lines (wt_eval no warp / both warps, warm and cold; wt_make one contour / all 256; the sample arena's free bytes before / after the bank; soft with its expect: only a bench image has `bench`)"),
+    RUN("_stop")]
+add("qa_cpu_wt", "OS-CEWTENV W3a (3.10): the CPU of the cutoff WT Env on the unit in three arms, one run per `--var PROJ=` (Dense8 no WT, Dense8wt6 6 voices no warps, Dense8wt12 12 voices both warps +7/+7; "
+    "the arms are made by hil/gen_wt_arms.py into build-sdtest/): opened from File, `cpu reset`, Play, 24 reads of `cpu` 2.5 s apart over 60 s, then on a bench image `bench worst` and `bench wt`. "
+    "ASSERTS underrun 0 and guard shed 0 at every read; the mean is reported",
+    cw, finally_=[K("-shift", gap=0.2)] + clear_overlays() + [K("pattern", gap=0.4), RUN("_stop")], vars_={"PROJ": "Dense8wt6"})
 
 # ======================================================================================================================================
 # 5. slices_pads (OS-SLICEFIX)
@@ -1097,7 +1125,7 @@ def midi_row(row):
             K("up", repeat=10, gap=0.1)] + ([K("down", repeat=row, gap=0.2)] if row else [])
 
 
-# rows of the MIDI page (the kGroupMidi rows of model/src/params.cpp kDevice, in table order): 0 CLOCK IN, 1 CLOCK SYNC, 2 CLOCK MODE, 3 MIDI IN, 4 MIDI OUT, 5 IN CHANNEL, 6 OUT CHANNEL.
+# rows of the MIDI page (the order of config_screen.cpp kMidiOrder since OS-MTC B3): 0 CLOCK IN, 1 CLOCK SYNC, 2 CLOCK MODE, 3 TRANSP IN, 4 TRANSP OUT, 5 MTC OUT, 6 MTC START, 7 MTC IN, 8 MIDI IN, 9 MIDI OUT, 10 IN CHANNEL, 11 CC MAP, 12 OUT CHANNEL.
 # (METRO VOL left this page with OS-METRO.) `up` x10 clamps at the first row, which is CLOCK IN: the scenarios start from the top and count only from there. If a row is added above
 # CLOCK IN, midi_row(0) still lands on the first row: re-check the `down` counts that follow.
 add("cfg_clock_master", "setup for MANUAL.md: Config MIDI, CLOCK IN Internal, CLOCK MODE Master, MIDI OUT DIN + USB: the unit sends MIDI clock while it plays (writes Settings/device.o3st)", [CARD_STEP] + clear_overlays() + to_pattern() + [
@@ -1109,6 +1137,19 @@ add("cfg_clock_slave_usb", "setup for MANUAL.md: Config MIDI, CLOCK IN USB (the 
 add("cfg_clock_internal", "setup for MANUAL.md: Config MIDI, CLOCK IN Internal, CLOCK MODE Off (the defaults; writes Settings/device.o3st)", [CARD_STEP] + clear_overlays() + to_pattern() +
     midi_row(0) + [K("delete", gap=0.3), K("down", repeat=2, gap=0.2), K("delete", gap=0.3), SHOT("clock_internal"), K("pattern", gap=0.5)],
     finally_=clear_overlays() + [K("pattern", gap=0.4)], needs=["card"])
+
+# OS-MTC A3: sets the MTC rows for the host tool `midi_clock_tool.py mtc` (platform/mk66/tools/hil/MTC.md): MTC OUT 25 fps (row 5 of the MIDI page, after TRANSP OUT), MTC START 01 (row 6, the default). The finally block
+# puts MTC OUT back to Off, so a later run does not send time code. Writes Settings/device.o3st (twice: a device setting is saved 1.5 s after the change).
+add("cfg_mtc_out", "OS-MTC A3 setup: Config MIDI, MTC OUT 25 fps, MTC START 01 (the unit sends MIDI Time Code from the first Play on: run the host tool `midi_clock_tool.py mtc` as MTC.md says; writes Settings/device.o3st)", [CARD_STEP] + clear_overlays() + to_pattern() +
+    midi_row(5) + [K("delete", gap=0.3, note="MTC OUT: Off first, a known start"), ENC(2, note="MTC OUT: 25 fps (Off, 24, 25, 30)"), SHOT("mtc_out_25"),
+    K("down", gap=0.2), K("delete", gap=0.3, note="MTC START: 01, the default (01:00:00:00, Logic's)"), SHOT("mtc_start_01"), K("pattern", gap=0.5)],
+    finally_=clear_overlays() + midi_row(5) + [K("delete", gap=0.3, note="MTC OUT back to Off"), K("pattern", gap=0.4)], needs=["card"])
+
+# OS-MTC B3: sets MTC IN to USB (row 7 of the MIDI page, after MTC START) and MTC START 01, for the host tool `midi_clock_tool.py mtc-send` as the master (MTC.md). The finally block puts MTC IN back to Off, so a later
+# run does not chase a time code. Writes Settings/device.o3st (twice: a device setting is saved 1.5 s after the change).
+add("cfg_mtc_in", "OS-MTC B3 setup: Config MIDI, MTC IN USB, MTC START 01 (the unit chases the MIDI Time Code that the host tool `midi_clock_tool.py mtc-send` sends: run it as MTC.md says; writes Settings/device.o3st)", [CARD_STEP] + clear_overlays() + to_pattern() +
+    midi_row(6) + [K("delete", gap=0.3, note="MTC START: 01, the default (01:00:00:00, Logic's)"), K("down", gap=0.2), K("delete", gap=0.3, note="MTC IN: Off first, a known start"), ENC(2, note="MTC IN: USB (Off, DIN, USB)"), SHOT("mtc_in_usb"), K("pattern", gap=0.5)],
+    finally_=clear_overlays() + midi_row(7) + [K("delete", gap=0.3, note="MTC IN back to Off"), K("pattern", gap=0.4)], needs=["card"])
 
 
 # ======================================================================================================================================

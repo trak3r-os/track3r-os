@@ -6,7 +6,8 @@ usage: o3project_roundtrip.py O3PJ_TOOL O3PROJECT_PY WORKDIR
 
 For the empty (default), the small, the maximal, the settings (project settings and Learn bindings: its SETS and LRNB chunks, OS-002d),
 the state fixture (the project-level state of OS-004d: its MIDI, USBS, MIXR, PERF and APPM chunks and instruments of INST 1.2), the persist2 fixture (the
-session state of OS-PERSIST2: its NOTE, MUTE, SCEN and SNFX chunks), the OG fixture (an OG import: its OGPM and OGPN chunks) and the OG v17 fixture (the same from a v17 project, the layout assumed for 1.9.2, whose OGPM chunk
+session state of OS-PERSIST2: its NOTE, MUTE, SCEN and SNFX chunks), the scales fixture (OS-SCALES28: the persist2 fixture with Hirajoshi as the scale, so a NOTE 1.1 chunk), the lfosine and stereo fixtures (INST 1.4 and 1.5), the wt fixture (OS-CEWTENV W1: WT slots, so INST 1.6
+with its twelve WT bytes), the playthru fixture (OS-CEPLAYTHRU P1: the play-thru flag on instrument 0, so INST 1.7 with its byte), the OG fixture (an OG import: its OGPM and OGPN chunks) and the OG v17 fixture (the same from a v17 project, the layout assumed for 1.9.2, whose OGPM chunk
 is 1.1 and carries the byte at 0x80C, OS-004c):
   1. C++ writes the file; Python reads and rewrites it; the two files are byte-identical;
   2. C++ reads the Python-written file and saves it again: still byte-identical (C++ -> Python -> C++);
@@ -80,9 +81,11 @@ def join_chunks(chunks, crc_version=0x0100, crc_tail=0):
 
 
 # Size and CRC-32 of the fixtures written by the build before OS-BUG-PASTE24 (the commit of the S1 commit's parent), from its o3pj_tool; the `law` fixture is the og fixture with the LAW chunk and is checked below.
-PRE_LAW = {"empty": (186, 0xE8816302), "small": (2648, 0x3F04F4E7), "maximal": (1888426, 0xC58BE9E8),  # (OS-LFOSINE: same size, its LFO shape bytes are 0..4 now: the reader reads a larger one as Triangle)
+PRE_LAW = {"empty": (186, 0xE8816302), "small": (2648, 0x3F04F4E7), "maximal": (1890090, 0x692144EA),  # (OS-LFOSINE: same size, its LFO shape bytes are 0..4 now: the reader reads a larger one as Triangle; OS-CEWTENV W1: its random envelope loops of 2 or more are WT slots, so its INST chunks are 1.6 now, 26 bytes more each than the 1.1 chunk)
  "settings": (2720, 0x230EA0D8), "state": (3372, 0xA8D283E1),
            "midi13": (3336, 0x9276CAC9), "persist2": (3032, 0x40AD3678), "og": (24864, 0x1C13F03D), "og17": (24864, 0xBE53BEBB)}
+# OS-SCALES28: the `scales` fixture (the persist2 fixture with Hirajoshi as the scale, so a NOTE 1.1 chunk: the same size, the 8-byte payload losing the pad byte).
+SCALES_PIN = (3032, 0xEFA67DC5)  # the size and CRC-32 of this writer's output (taken from the CI build of this commit, 22833d75)
 
 
 def main():
@@ -97,7 +100,7 @@ def main():
     if cpp_limits != py_limits:
         sys.exit("FAILED: the limits tables differ\nC++:\n%s\nPython:\n%s" % (cpp_limits.decode(), py_limits.decode()))
 
-    for kind in ("empty", "small", "maximal", "settings", "state", "midi13", "persist2", "lfosine", "stereo", "og", "og17", "law", "insx"):
+    for kind in ("empty", "small", "maximal", "settings", "state", "midi13", "persist2", "scales", "lfosine", "stereo", "wt", "playthru", "modrate", "og", "og17", "law", "insx"):
         a, b, c = (os.path.join(work, "%s.%s.o3p" % (kind, tag)) for tag in ("cpp", "py", "cpp2"))
         run([tool, "gen", kind, a])
         if kind in PRE_LAW:  # OS-BUG-PASTE24: a project whose law is 0 writes no LAW chunk: the file is the one the build before it wrote (size and CRC-32 taken from that build's o3pj_tool)
@@ -119,7 +122,19 @@ def main():
                 if x != y:
                     sys.exit("FAILED: %s: dumps differ at line %d\nC++:    %s\nPython: %s" % (kind, n + 1, x[:300], y[:300]))
             sys.exit("FAILED: %s: dumps differ in length (%d vs %d lines)" % (kind, len(cpp_dump), len(py_dump)))
-        print("%s: %d bytes, %d dump lines: identical" % (kind, len(read(a)), len(cpp_dump)))
+        print("%s: %d bytes, crc %08x, %d dump lines: identical" % (kind, len(read(a)), zlib.crc32(read(a)) & 0xFFFFFFFF, len(cpp_dump)))
+
+    # OS-SCALES28: the `scales` fixture (the NOTE 1.1 chunk, Hirajoshi, lock on): its size and CRC-32 are pinned (taken from this writer once the NOTE bytes below had been checked).
+    scales = read(os.path.join(work, "scales.cpp.o3p"))
+    if (len(scales), zlib.crc32(scales) & 0xFFFFFFFF) != SCALES_PIN:
+        sys.exit("FAILED: scales: %d bytes, crc %08x; wanted %r" % (len(scales), zlib.crc32(scales) & 0xFFFFFFFF, SCALES_PIN))
+    sc_chunks = split_chunks(scales)
+    if {c: (len(p), p[:2]) for c, p in sc_chunks if c == b"NOTE"} != {b"NOTE": (8, b"\x01\x01")}:
+        sys.exit("FAILED: the scales fixture's NOTE chunk is not 8 bytes of version 1.1")
+    if dict(sc_chunks)[b"NOTE"] != b"\x01\x01\x07\x00\x05\x01\x04\x1a":
+        sys.exit("FAILED: the scales fixture's NOTE payload is not 1.1, scale10 0, Hirajoshi (26) appended: %r" % dict(sc_chunks)[b"NOTE"])
+    if any(l != "note root=7 scale=26 octave=5 lock=1 jump=4" for l in run([tool, "dump", os.path.join(work, "scales.cpp.o3p")]).stdout.decode().splitlines() if l.startswith("note ")):
+        sys.exit("FAILED: the scales fixture does not dump the official scale 26")
 
     # OS-BUG-PASTE24: the LAW chunk. The `law` fixture is the og fixture (an OG v16 import) with the volume law 1: the same chunks, and between SNFX's place and the OG chunks the 12 bytes of LAW; both
     # sides read it (the dumps above are identical and say `law=1`), and a project of law 0 says nothing.
@@ -330,8 +345,12 @@ def main():
 
     def appended(cid):
         def edit(p):
-            minor = b"\x06" if cid == b"INST" else b"\x01"  # INST is at 1.5 (1.3 is the sample rate, the engine, the MIDI fields; 1.4 is OS-LFOSINE's, no field; 1.5 is OS-STEREO's stereo byte): its next minor is 1.6 (the tail of 0xAB bytes reads as out-of-range fields: the defaults)
-            return b"\x01" + minor + p[2:] + b"\xab" * 20000
+            if cid == b"INST":
+                # INST is at 1.7 (1.3 is the sample rate, the engine, the MIDI fields; 1.4 is OS-LFOSINE's, no field; 1.5 is OS-STEREO's stereo byte; 1.6 is OS-CEWTENV W1's twelve WT bytes; 1.7 is OS-CEPLAYTHRU P1's play-thru flag): 1.8 is OS-MODRATE S3's module RATE byte): its next minor is 1.9.
+                # The 1.1 payload ends at the rate, so the appended bytes are read as the engine (0xAB, above the table: automatic), the twelve MIDI bytes (out of range: the defaults), the stereo byte (above 1: 0),
+                # the twelve WT bytes (zeros), the play-thru byte (above 1: 0), the module RATE byte of 1.8 (0xAB, above 2: 0) and the 0xAB tail past them is skipped.
+                return b"\x01\x09" + p[2:] + b"\xab" * 14 + b"\x00" * 12 + b"\x05" + b"\xab" * 20000
+            return b"\x01\x01" + p[2:] + b"\xab" * 20000
         return [(c, edit(p) if c == cid else p) for c, p in chunks]
 
     accepted = {kind.decode().strip(): appended(kind) for kind in (b"PHDR", b"TRAK", b"MODR", b"SONG", b"PATT", b"INST")}
@@ -409,7 +428,7 @@ def main():
         sys.exit("FAILED: a file with no state chunks reads as having some")
     # A newer minor of each state chunk with appended bytes is read at any length and written back without them (the state fixture again).
     for cid in parts:
-        newer = b"\x01\x02" if cid in (b"PERF", b"APPM", b"USBS") else b"\x01\x01"  # PERF (OS-PERFFX P1), APPM (OS-APPUX S3) and USBS (OS-USBOUTS) are at 1.1: their next minor is 1.2
+        newer = b"\x01\x03" if cid == b"PERF" else b"\x01\x02" if cid in (b"APPM", b"USBS") else b"\x01\x01"  # PERF is at 1.2 (OS-PERFFX P1, then OS-PERFMODES M3): its next minor is 1.3; APPM (OS-APPUX S3) and USBS (OS-USBOUTS) are at 1.1: 1.2
         if cid == b"USBS":
             pass  # a USBS 1.1 chunk holds one more byte, so its newer-minor case is the one with the count, below
         else:
@@ -531,6 +550,41 @@ def main():
     perf_dump = "\n".join(rewrite_alike("PERF row 4", edit_part(b"PERF", lambda p: p[:36] + b"\x04" + p[37:])))
     if "perf 4 fx=5 row=0 " not in perf_dump:
         sys.exit("FAILED: PERF row 4 did not read as off")
+    # OS-PERFMODES M3: PERF 1.2 (no new byte, the same 99), written only when a slot holds PLAYMODE (id 18) with a value 4..23 in any of its three rows (the custom orders C1..C20). C7 (value 10) in slot 3 row 2 makes the
+    # chunk 1.2 and it is written back byte for byte; in a 1.0 or 1.1 chunk a PLAYMODE value above 3 reads as RND (3) and the file comes back with the lowest version that holds what was read; in 1.2 a value above 23 is held to 23.
+    def pm_slot(slot, fx, row, vals, version):
+        def edit(p):
+            p = bytearray(p)
+            p[0:2] = version
+            o = 3 + 8 * slot  # the version, the slot count, then 12 slots of 8 bytes
+            p[o] = fx
+            p[o + 1] = row
+            for r, v in enumerate(vals):
+                struct.pack_into(">h", p, o + 2 + 2 * r, v)
+            return bytes(p)
+        return edit
+    c7 = pm_slot(3, 18, 2, [0, 10, 0], b"\x01\x02")
+    dump_c7 = rewrite_alike("PERF 1.2 with C7 in slot 3 row 2", edit_part(b"PERF", c7), expect=join_chunks(edit_part(b"PERF", c7)))
+    if "perf 3 fx=18 row=2 values=0,10,0" not in dump_c7:
+        sys.exit("FAILED: PERF 1.2 with C7 in slot 3 row 2 did not read as itself")
+    dump_rnd = rewrite_alike("PERF 1.1 with PLAYMODE 8 reads as RND (3) and writes 1.0", edit_part(b"PERF", pm_slot(3, 18, 2, [0, 8, 0], b"\x01\x01")),
+                             expect=join_chunks(edit_part(b"PERF", pm_slot(3, 18, 2, [0, 3, 0], b"\x01\x00"))))
+    if "perf 3 fx=18 row=2 values=0,3,0" not in dump_rnd:
+        sys.exit("FAILED: PERF 1.1 PLAYMODE 8 did not read as 3")
+    dump_rnd = rewrite_alike("PERF 1.0 with PLAYMODE 8 reads as RND (3) and writes 1.0", edit_part(b"PERF", pm_slot(3, 18, 2, [0, 8, 0], b"\x01\x00")),
+                             expect=join_chunks(edit_part(b"PERF", pm_slot(3, 18, 2, [0, 3, 0], b"\x01\x00"))))
+    if "perf 3 fx=18 row=2 values=0,3,0" not in dump_rnd:
+        sys.exit("FAILED: PERF 1.0 PLAYMODE 8 did not read as 3")
+    dump_held = rewrite_alike("PERF 1.2 with PLAYMODE 24 is held to 23", edit_part(b"PERF", pm_slot(3, 18, 2, [0, 24, 0], b"\x01\x02")),
+                              expect=join_chunks(edit_part(b"PERF", pm_slot(3, 18, 2, [0, 23, 0], b"\x01\x02"))))
+    if "perf 3 fx=18 row=2 values=0,23,0" not in dump_held:
+        sys.exit("FAILED: PERF 1.2 PLAYMODE 24 did not read as 23")
+    rewrite_alike("PERF 1.2 with the FX 20 only writes 1.1 (the lowest version that holds it)", edit_part(b"PERF", pm_slot(3, 20, 2, [0, 15, 0], b"\x01\x02")),
+                  expect=join_chunks(edit_part(b"PERF", pm_slot(3, 20, 2, [0, 15, 0], b"\x01\x01"))))
+    rewrite_alike("PERF 1.2 with neither a C order nor the FX 20 or 21 writes 1.0", edit_part(b"PERF", lambda p: b"\x01\x02" + p[2:]), expect=state)
+    rewrite_alike("PERF 1.2 with a PLAYMODE value of 3 only writes 1.0", edit_part(b"PERF", pm_slot(3, 18, 2, [0, 3, 0], b"\x01\x02")),
+                  expect=join_chunks(edit_part(b"PERF", pm_slot(3, 18, 2, [0, 3, 0], b"\x01\x00"))))
+    refused_alike("PERF 1.2 a byte long", edit_part(b"PERF", lambda p: b"\x01\x02" + p[2:] + b"\0"))
     # INST 1.2: an engine above the table reads as automatic (the chunk is then written as 1.1); the engine byte survives in a 1.2 chunk.
     inst0 = [p for c, p in sc if c == b"INST"][0]
     if inst0[-1] != 2:
@@ -603,10 +657,10 @@ def main():
         pyr = run(py + ["check", path], expect_ok=False)
         if error_kind(cpp.stderr) != "malformed" or error_kind(pyr.stderr) != "malformed":
             sys.exit("FAILED: INST 1.3 %s: C++ says %r, Python says %r" % (name, error_kind(cpp.stderr), error_kind(pyr.stderr)))
-    # a newer minor (1.6; 1.4 is OS-LFOSINE's, no field; 1.5 is OS-STEREO's byte) with a tail: read as far as 1.5 (the first tail byte, 0xCD, is a stereo flag above 1: mono), the tail lost, the twelve kept
-    newer, dump_new = alike13("INST 1.6", lambda c, p: b"\x01\x06" + p[2:] + b"\xcd" * 700 if c == b"INST" and p[:2] == b"\x01\x03" else p)
-    if newer != m13 or "m13=100,6,3,12,40,75,129,130,131,1,128,33" not in dump_new or "stereo=0" not in dump_new:
-        sys.exit("FAILED: INST 1.6 was not read as far as 1.5 and written back as the 1.3 chunk without its tail")
+    # a newer minor (1.9; 1.8 is OS-MODRATE S3's module RATE byte; 1.4 is OS-LFOSINE's, no field; 1.5 is OS-STEREO's byte; 1.6 is OS-CEWTENV W1's twelve WT bytes; 1.7 is OS-CEPLAYTHRU P1's play-thru flag) with a tail: read as far as 1.7 (the first tail byte, 0xCD, is a stereo flag above 1: mono, then twelve WT bytes of 0: none, then the play-thru byte 0xCD above 1: 0, then the RATE byte 0xCD above 2: 0), the tail lost, the rest kept
+    newer, dump_new = alike13("INST 1.9", lambda c, p: b"\x01\x09" + p[2:] + b"\xcd" + b"\x00" * 12 + b"\xcd" + b"\xcd" * 700 if c == b"INST" and p[:2] == b"\x01\x03" else p)
+    if newer != m13 or "m13=100,6,3,12,40,75,129,130,131,1,128,33" not in dump_new or "stereo=0" not in dump_new or "play_thru=0" not in dump_new:
+        sys.exit("FAILED: INST 1.9 was not read as far as 1.8 and written back as the 1.3 chunk without its tail")
     # OS-LFOSINE: the LFO shape bytes out of range, on both readers alike. The six LFOs sit 36 bytes before the 96 of the slices and the 19 of the tail (blob length 2, rate 4, engine 1, the twelve
     # of 1.3; a sample instrument has no blob). A 1.3 chunk with a shape of 5 or more, and a 1.4 chunk with one of 6 or more, reads as Triangle (2); a 1.4 chunk keeps 5.
     def shapes_of(p):
@@ -644,7 +698,7 @@ def main():
     if st_inst[0][:2] != b"\x01\x05" or st_inst[0][-1:] != b"\x01" or [p[:2] for p in st_inst].count(b"\x01\x05") != 1:
         sys.exit("FAILED: the stereo fixture's instrument 0 is not the one INST 1.5 chunk, ending with the flag: %r" % st_inst[0][-4:])
     dump_st = run([tool, "dump", os.path.join(work, "stereo.cpp.o3p")]).stdout.decode().splitlines()
-    if sum(1 for l in dump_st if l.endswith("stereo=1")) != 1 or sum(1 for l in dump_st if l.startswith("instrument ") and l.endswith("stereo=0")) != len(st_inst) - 1:
+    if sum(1 for l in dump_st if "stereo=1 play_thru=" in l) != 1 or sum(1 for l in dump_st if l.startswith("instrument ") and "stereo=0 play_thru=" in l) != len(st_inst) - 1:
         sys.exit("FAILED: the stereo fixture's dump does not show stereo=1 on instrument 0 only")
 
     def alike_st(name, edit):
@@ -665,19 +719,209 @@ def main():
         sys.exit("FAILED: the stereo fixture is not read back and written again as it was")
     # a 1.4 file (the byte taken off, labelled 1.4: the Sine LFO is still there) reads 0 and is written back as 1.4
     old14, dump14 = alike_st("INST 1.4", lambda p: b"\x01\x04" + p[2:-1])
-    if any(l.endswith("stereo=1") for l in dump14) or [p[:2] for c, p in split_chunks(old14) if c == b"INST"].count(b"\x01\x05") != 0 or [p[:2] for c, p in split_chunks(old14) if c == b"INST"][0] != b"\x01\x04":
+    if any("stereo=1 play_thru=" in l for l in dump14) or [p[:2] for c, p in split_chunks(old14) if c == b"INST"].count(b"\x01\x05") != 0 or [p[:2] for c, p in split_chunks(old14) if c == b"INST"][0] != b"\x01\x04":
         sys.exit("FAILED: an INST 1.4 file did not read as mono and write back as 1.4")
     # a value above 1 reads 0 (as the engine does) and is written back without the flag
     two, dump2v = alike_st("INST 1.5 stereo = 2", lambda p: p[:-1] + b"\x02")
-    if any(l.endswith("stereo=2") or l.endswith("stereo=1") for l in dump2v) or [p[:2] for c, p in split_chunks(two) if c == b"INST"].count(b"\x01\x05") != 0:
+    if any("stereo=2 play_thru=" in l or "stereo=1 play_thru=" in l for l in dump2v) or [p[:2] for c, p in split_chunks(two) if c == b"INST"].count(b"\x01\x05") != 0:
         sys.exit("FAILED: an INST 1.5 stereo flag of 2 did not read as mono")
     # the length is exact in 1.5 (a byte long or short is Malformed); a flag on a MIDI instrument reads 0 on both sides, the file loads (the midi13 fixture's MIDI instrument, its 1.3 chunk relabelled 1.5 with the flag)
     refused_alike("INST 1.5 a byte long", [(c, p + b"\0" if c == b"INST" and p[:2] == b"\x01\x05" else p) for c, p in st_chunks])
     refused_alike("INST 1.5 a byte short", [(c, p[:-1] if c == b"INST" and p[:2] == b"\x01\x05" else p) for c, p in st_chunks])
     midi_st, dump_mst = alike13("INST 1.5 stereo on a MIDI instrument", lambda c, p: b"\x01\x05" + p[2:] + b"\x01" if c == b"INST" and p[:2] == b"\x01\x03" and p[3] == 2 else p)
-    if any(l.endswith("stereo=1") for l in dump_mst.splitlines()) or [p[:2] for c, p in split_chunks(midi_st) if c == b"INST"].count(b"\x01\x05") != 0:
+    if any("stereo=1 play_thru=" in l for l in dump_mst.splitlines()) or [p[:2] for c, p in split_chunks(midi_st) if c == b"INST"].count(b"\x01\x05") != 0:
         sys.exit("FAILED: an INST 1.5 stereo flag on a MIDI instrument did not read as mono (and write back without it)")
     print("stereo: INST 1.5 is written for a stereo sample instrument only (the rest of the file is the small fixture's), a 1.4 file and a value above 1 read as mono, the length is exact, a flag on a MIDI instrument reads as mono, both sides alike")
+
+    # OS-CEWTENV W1, INST 1.6 (the twelve WT bytes after the stereo byte, written only for a WT slot (a loop of 2 or 3) or a non-zero WT byte): the `wt` fixture is the small project with WT slots on instrument 0,
+    # so only that instrument's chunk is 1.6, twelve bytes longer than the small fixture's, the twelve bytes at its tail being wt_bend, wt_sust of the six slots in slot order; both sides read and write 1.6 alike (the loop above).
+    wt_chunks = split_chunks(read(os.path.join(work, "wt.cpp.o3p")))
+    wt_inst = [p for c, p in wt_chunks if c == b"INST"]
+    if [(c, p) for c, p in wt_chunks if c != b"INST"] != [(c, p) for c, p in sm_chunks if c != b"INST"] or wt_inst[1:] != sm_inst[1:] or len(wt_inst) != len(sm_inst):
+        sys.exit("FAILED: the wt fixture differs from the small fixture in more than instrument 0")
+    if wt_inst[0][:2] != b"\x01\x06" or [p[:2] for p in wt_inst].count(b"\x01\x06") != 1 or len(wt_inst[0]) != len(sm_inst[0]) + 26:
+        sys.exit("FAILED: the wt fixture's instrument 0 is not the one INST 1.6 chunk, 26 bytes longer than the small fixture's (1.6's layout is 1.5's whole: the engine, the twelve MIDI bytes, the stereo byte and the twelve WT bytes after the rate): %r" % wt_inst[0][:2])
+    if wt_inst[0][-12:] != bytes([0, 0, 0, 0, 0x9C, 40, 0, 0, 0x17, 99, 0, 0]):  # OS-CEWTENV W3a review: slot 1's loop is 0, so its WT bytes write as 0 (only loops 2 and 3 carry them)
+        sys.exit("FAILED: the twelve WT bytes are not the tail of the wt fixture's INST chunk: %r" % wt_inst[0][-12:])
+    dump_wt = run([tool, "dump", os.path.join(work, "wt.cpp.o3p")]).stdout.decode().splitlines()
+    if not any("lfo 37" in l and "wt=156,40" in l for l in dump_wt) or not any("lfo 200" in l and "wt=23,99" in l for l in dump_wt):
+        sys.exit("FAILED: the wt fixture's dump does not show the contours and the WT bytes")
+
+    def alike_wt(name, edit):
+        a, b, c2 = (os.path.join(work, "wt.%s.o3p" % tag) for tag in ("edit", "py", "cpp2"))
+        write(a, join_chunks([(c, edit(p) if c == b"INST" and p[2] == 0 else p) for c, p in wt_chunks]))
+        run(py + ["rewrite", a, b])
+        run([tool, "resave", a, c2])
+        if read(b) != read(c2):
+            sys.exit("FAILED: %s: Python and C++ rewrote it differently (first difference at byte %d)" % (name, first_difference(read(b), read(c2))))
+        cpp_dump = run([tool, "dump", a]).stdout.decode().splitlines()
+        if cpp_dump != run(py + ["dump", a]).stdout.decode().splitlines():
+            sys.exit("FAILED: %s: the dumps differ" % name)
+        return read(c2), cpp_dump
+
+    def sampler_at(p):
+        name, path = p[6], p[7 + p[6]]
+        return 8 + name + path  # the sampler block's offset in the payload
+
+    def env_loop(p, i):
+        return p[sampler_at(p) + 44 + 20 * i + 18]
+
+    def lfo_shape(p, i):
+        return p[sampler_at(p) + 44 + 120 + 6 * i]
+
+    def slot0(p, chunks):
+        return [q for c, q in split_chunks(chunks) if c == b"INST" and q[2] == 0][0]
+
+    # the written file is read back and written again byte for byte, on both sides
+    again, _ = alike_wt("INST 1.6 as written", lambda p: p)
+    if again != read(os.path.join(work, "wt.cpp.o3p")):
+        sys.exit("FAILED: the wt fixture is not read back and written again as it was")
+    # an older chunk (1.5: the twelve WT bytes taken off) with a loop of 2 or 3 reads as loop 1 (an LFO: what those files played, spec A3) and a contour shape as Triangle, on both sides; the next save writes no 1.6
+    old, _ = alike_wt("INST 1.5 with a WT slot", lambda p: b"\x01\x05" + p[2:-12])
+    o0 = slot0(old, old)
+    if o0[:2] == b"\x01\x06" or env_loop(o0, 2) != 1 or env_loop(o0, 4) != 1 or lfo_shape(o0, 2) != 2 or lfo_shape(o0, 4) != 2:
+        sys.exit("FAILED: an INST 1.5 chunk with loop 2 did not read as loop 1 (and the contour shape as Triangle) on both sides: %r" % o0[:2])
+    # a newer minor (1.9) with a tail past the flag and the RATE byte of 1.8 (a Sample instrument: the byte reads 0): read as of 1.8 (the WT slot and the flag kept, RATE 0), the tail skipped, the next save writes 1.7 with the flag and without the tail — the same skip an older reader
+    # (INST 1.6) performs on the flag byte itself, which is the payload's tail, after every field it knows
+    wtpt = [(c, b"\x01\x07" + p[2:] + b"\x01" if c == b"INST" and p[2] == 0 else p) for c, p in wt_chunks]  # the wt fixture's instrument 0 as 1.7 with the flag
+    tailed, dump_tail = alike_wt("INST 1.9 with a tail", lambda p: b"\x01\x09" + p[2:] + b"\x01" + b"\x00" + b"\xde\xad")
+    if tailed != join_chunks(wtpt) or not any("wt=156,40" in l for l in dump_tail) or not any("play_thru=1" in l for l in dump_tail):
+        sys.exit("FAILED: an INST 1.9 chunk was not read as of 1.8 (WT and flag kept, RATE 0) with its tail lost on the next save")
+    print("wt: INST 1.6 is written for a WT slot or a non-zero WT byte only (the rest of the file is the small fixture's), an older chunk's loop 2 reads as 1 and its contour shape as Triangle, a newer minor's tail is skipped, both sides alike")
+
+    # OS-CEPLAYTHRU P1, INST 1.7 (the play-thru flag after the twelve WT bytes of 1.6, written only for a Sample instrument with the flag set): the `playthru` fixture is the small project with the flag on instrument 0,
+    # so only that instrument's chunk is 1.7, 27 bytes longer than the small fixture's (1.7's layout is 1.6's whole: the engine, the twelve MIDI bytes, the stereo byte, the twelve WT bytes and the flag after the rate), the
+    # flag its last byte; both sides read and write 1.7 alike (the loop above).
+    pt_chunks = split_chunks(read(os.path.join(work, "playthru.cpp.o3p")))
+    pt_inst = [p for c, p in pt_chunks if c == b"INST"]
+    if [(c, p) for c, p in pt_chunks if c != b"INST"] != [(c, p) for c, p in sm_chunks if c != b"INST"] or pt_inst[1:] != sm_inst[1:] or len(pt_inst) != len(sm_inst):
+        sys.exit("FAILED: the playthru fixture differs from the small fixture in more than instrument 0")
+    if pt_inst[0][:2] != b"\x01\x07" or [p[:2] for p in pt_inst].count(b"\x01\x07") != 1 or len(pt_inst[0]) != len(sm_inst[0]) + 27 or pt_inst[0][-1:] != b"\x01":
+        sys.exit("FAILED: the playthru fixture's instrument 0 is not the one INST 1.7 chunk, 27 bytes longer than the small fixture's, ending with the flag: %r" % pt_inst[0][:2])
+    dump_pt = run([tool, "dump", os.path.join(work, "playthru.cpp.o3p")]).stdout.decode().splitlines()
+    if sum(1 for l in dump_pt if l.endswith("play_thru=1")) != 1 or sum(1 for l in dump_pt if l.startswith("instrument ") and l.endswith("play_thru=0")) != len(pt_inst) - 1:
+        sys.exit("FAILED: the playthru fixture's dump does not show play_thru=1 on instrument 0 only")
+
+    def alike_pt(name, edit, expect=None):
+        a, b, c2 = (os.path.join(work, "playthru.%s.o3p" % tag) for tag in ("edit", "py", "cpp2"))
+        write(a, join_chunks([(c, edit(p) if c == b"INST" and p[2] == 0 else p) for c, p in pt_chunks]))
+        run(py + ["rewrite", a, b])
+        run([tool, "resave", a, c2])
+        if read(b) != read(c2):
+            sys.exit("FAILED: %s: Python and C++ rewrote it differently (first difference at byte %d)" % (name, first_difference(read(b), read(c2))))
+        cpp_dump = run([tool, "dump", a]).stdout.decode().splitlines()
+        if cpp_dump != run(py + ["dump", a]).stdout.decode().splitlines():
+            sys.exit("FAILED: %s: the dumps differ" % name)
+        if expect is not None and read(c2) != expect:
+            sys.exit("FAILED: %s: not written back as expected (first difference at byte %d)" % (name, first_difference(read(c2), expect)))
+        return read(c2), cpp_dump
+
+    # the written file is read back and written again byte for byte, on both sides
+    again, dump_again = alike_pt("INST 1.7 as written", lambda p: p)
+    if again != read(os.path.join(work, "playthru.cpp.o3p")) or not any("play_thru=1" in l for l in dump_again):
+        sys.exit("FAILED: the playthru fixture is not read back and written again as it was")
+    # an older chunk (1.6: the flag byte taken off) reads the flag 0 and is written back as the small fixture's file (no WT, no flag: the 1.1 chunk)
+    old, dump_old = alike_pt("INST 1.6 without the flag", lambda p: b"\x01\x06" + p[2:-1], expect=read(os.path.join(work, "small.cpp.o3p")))
+    if any("play_thru=1" in l for l in dump_old):
+        sys.exit("FAILED: an INST 1.6 chunk read the flag as set")
+    # a value above 1 reads 0 (the stereo rule) and is written back without the flag: the small fixture's file again
+    two, dump_two = alike_pt("INST 1.7 play_thru = 2", lambda p: p[:-1] + b"\x02", expect=read(os.path.join(work, "small.cpp.o3p")))
+    if any(l.endswith("play_thru=2") or l.endswith("play_thru=1") for l in dump_two) or [p[:2] for c, p in split_chunks(two) if c == b"INST"].count(b"\x01\x07") != 0:
+        sys.exit("FAILED: an INST 1.7 play-thru flag of 2 did not read as 0")
+    # a WT slot and the flag together (the wt fixture's instrument 0 relabelled 1.7 with the flag appended): both sides keep the WT bytes and the flag, 13 bytes at the tail, and write 1.7 back
+    wta, dump_wta = alike_wt("INST 1.7 with a WT slot and the flag", lambda p: b"\x01\x07" + p[2:] + b"\x01")
+    dump_wta_text = "\n".join(dump_wta)
+    if wta != join_chunks(wtpt) or "wt=156,40" not in dump_wta_text or "play_thru=1" not in dump_wta_text:
+        sys.exit("FAILED: a WT slot and the flag together did not read and write back as 1.7 on both sides")
+    # a 1.7 chunk read by a 1.6 reader skips the flag byte safely: emulated with the reference at INST known_minor 6 and the 1.7 read taken out — the chunk loads as of 1.6, the byte is the payload's tail, the report says
+    # newer_minor, and the next save writes no 1.7 (the small fixture's file)
+    src = open(ref).read()
+    marker = "if (version & 0xFF) >= 7:"
+    if src.count(marker) != 1:
+        sys.exit("FAILED: the reference's 1.7 read is not the one line this test expects")
+    path16 = os.path.join(work, "o3project_16.py")
+    write(path16, src.replace(marker, "if False:  # the emulated 1.6 reader does not read the flag").encode())
+    spec16 = importlib.util.spec_from_file_location("o3project_16", path16)
+    prev16 = importlib.util.module_from_spec(spec16)
+    spec16.loader.exec_module(prev16)
+    orig_known = prev16.known_minor
+    prev16.known_minor = lambda cid: 6 if cid == b"INST" else orig_known(cid)
+    view16 = prev16.parse(read(os.path.join(work, "playthru.cpp.o3p")))
+    if view16["instruments"][0]["play_thru"] != 0 or prev16.build(view16) != read(os.path.join(work, "small.cpp.o3p")):
+        sys.exit("FAILED: a 1.6 reader did not skip the 1.7 flag byte safely (flag reads 0, the next save writes no 1.7)")
+    print("playthru: INST 1.7 is written for a flagged sample instrument only (the rest of the file is the small fixture's), a 1.6 file and a value above 1 read as 0, a WT slot and the flag together write 1.7 with 13 tail bytes, a 1.6 reader skips the byte, both sides alike")
+
+    # OS-MODRATE S3, INST 1.8 (the module RATE after the play-thru byte of 1.7, written only for a Module instrument with a RATE other than 0): the `modrate` fixture is the small project with RATE 2 on the
+    # Module instrument (slot 50), so only that chunk is 1.8, 28 bytes longer than the small fixture's (the 1.2 to 1.7 fields at their defaults), the RATE its last byte; both sides read and write it alike, and every other chunk is the small fixture's.
+    mr_chunks = split_chunks(read(os.path.join(work, "modrate.cpp.o3p")))
+    mr_inst = [p for c, p in mr_chunks if c == b"INST"]
+    sm_mod = [p for p in sm_inst if p[2] == 50][0]
+    if [(c, p) for c, p in mr_chunks if c != b"INST"] != [(c, p) for c, p in sm_chunks if c != b"INST"] or len(mr_inst) != len(sm_inst):
+        sys.exit("FAILED: the modrate fixture differs from the small fixture in more than the INST chunks")
+    if [p for p in mr_inst if p[2] != 50] != [p for p in sm_inst if p[2] != 50]:
+        sys.exit("FAILED: the modrate fixture's other instruments are not the small fixture's, byte for byte")
+    mr_mod = [p for p in mr_inst if p[2] == 50][0]
+    if mr_mod[:2] != b"\x01\x08" or len(mr_mod) != len(sm_mod) + 28 or mr_mod[-1:] != b"\x02" or [p[:2] for p in mr_inst].count(b"\x01\x08") != 1:
+        sys.exit("FAILED: the modrate fixture's Module instrument is not the one INST 1.8 chunk, 28 bytes longer than the small fixture's (the fields of 1.2 to 1.7 at their defaults, then the RATE), ending with the RATE: %r" % mr_mod[:2])
+    dump_mr = run([tool, "dump", os.path.join(work, "modrate.cpp.o3p")]).stdout.decode().splitlines()
+    if sum(1 for l in dump_mr if " mod_rate=2 " in l) != 1 or sum(1 for l in dump_mr if l.startswith("instrument ") and " mod_rate=0 " in l) != len(mr_inst) - 1:
+        sys.exit("FAILED: the modrate fixture's dump does not show mod_rate=2 on the Module instrument only")
+
+    def alike_mr(name, edit, expect=None, slot=50):
+        a, b, c2 = (os.path.join(work, "modrate.%s.o3p" % tag) for tag in ("edit", "py", "cpp2"))
+        write(a, join_chunks([(c, edit(p) if c == b"INST" and p[2] == slot else p) for c, p in mr_chunks]))
+        run(py + ["rewrite", a, b])
+        run([tool, "resave", a, c2])
+        if read(b) != read(c2):
+            sys.exit("FAILED: %s: Python and C++ rewrote it differently (first difference at byte %d)" % (name, first_difference(read(b), read(c2))))
+        cpp_dump = run([tool, "dump", a]).stdout.decode().splitlines()
+        if cpp_dump != run(py + ["dump", a]).stdout.decode().splitlines():
+            sys.exit("FAILED: %s: the dumps differ" % name)
+        if expect is not None and read(c2) != expect:
+            sys.exit("FAILED: %s: not written back as expected (first difference at byte %d)" % (name, first_difference(read(c2), expect)))
+        return read(c2), cpp_dump
+
+    small_file = read(os.path.join(work, "small.cpp.o3p"))
+    again, dump_again = alike_mr("INST 1.8 as written", lambda p: p, expect=read(os.path.join(work, "modrate.cpp.o3p")))
+    if not any(" mod_rate=2 " in l for l in dump_again):
+        sys.exit("FAILED: the modrate fixture is not read back with its RATE")
+    # an older chunk (1.7: the RATE byte taken off) reads RATE 0 and is written back as the small fixture's file
+    _, dump_old = alike_mr("INST 1.7 without the RATE", lambda p: b"\x01\x07" + p[2:-1], expect=small_file)
+    if any(" mod_rate=2 " in l for l in dump_old):
+        sys.exit("FAILED: an INST 1.7 chunk read a RATE")
+    # a RATE above 2 reads 0 and is written back without it: the small fixture's file again
+    alike_mr("INST 1.8 RATE 3", lambda p: p[:-1] + b"\x03", expect=small_file)
+    alike_mr("INST 1.8 RATE 255", lambda p: p[:-1] + b"\xff", expect=small_file)
+    # a RATE on a MIDI instrument (slot 48, a 1.1 chunk widened to the 1.8 layout) reads 0 (the canonical form clears it): written back as it was, the Module RATE kept
+    midi48 = [p for p in sm_inst if p[2] == 48][0]
+    if midi48[:2] != b"\x01\x01":
+        sys.exit("FAILED: the small fixture's MIDI instrument is not an INST 1.1 chunk (%r): this test builds its 1.8 form from it" % midi48[:2])
+    # the 1.8 form of a 1.1 chunk: the engine byte (automatic), the twelve MIDI bytes at their defaults, the stereo byte, the twelve WT bytes, the play-thru byte, then the RATE
+    form18 = b"\x00" + bytes([127, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 100]) + b"\x00" + b"\x00" * 12 + b"\x00" + b"\x01"
+    alike_mr("INST 1.8 RATE on a MIDI instrument", lambda p: b"\x01\x08" + p[2:] + form18, expect=read(os.path.join(work, "modrate.cpp.o3p")), slot=48)
+    # a wrong size is refused by both sides: the RATE byte missing from a 1.8 chunk, and a spare byte after it
+    for name, edit in (("1.8 without the byte", lambda p: p[:-1]), ("1.8 with a spare byte", lambda p: p + b"\x00")):
+        bad = os.path.join(work, "modrate.bad.o3p")
+        write(bad, join_chunks([(c, edit(p) if c == b"INST" and p[2] == 50 else p) for c, p in mr_chunks]))
+        cpp = run([tool, "dump", bad], expect_ok=False)
+        pyr = run(py + ["check", bad], expect_ok=False)
+        if error_kind(cpp.stderr) != "malformed" or error_kind(pyr.stderr) != "malformed":
+            sys.exit("FAILED: INST %s: C++ says %r, Python says %r" % (name, error_kind(cpp.stderr), error_kind(pyr.stderr)))
+    # a 1.8 chunk read by a 1.7 reader skips the RATE byte safely: emulated with the reference at INST known_minor 7 and the 1.8 read taken out
+    marker8 = "if (version & 0xFF) >= 8:"
+    if src.count(marker8) != 1:
+        sys.exit("FAILED: the reference's 1.8 read is not the one line this test expects")
+    path17 = os.path.join(work, "o3project_17.py")
+    write(path17, src.replace(marker8, "if False:  # the emulated 1.7 reader does not read the RATE").encode())
+    spec17 = importlib.util.spec_from_file_location("o3project_17", path17)
+    prev17 = importlib.util.module_from_spec(spec17)
+    spec17.loader.exec_module(prev17)
+    orig_known17 = prev17.known_minor
+    prev17.known_minor = lambda cid: 7 if cid == b"INST" else orig_known17(cid)
+    view17 = prev17.parse(read(os.path.join(work, "modrate.cpp.o3p")))
+    if view17["instruments"][50].get("mod_rate", 0) != 0 or prev17.build(view17) != small_file:
+        sys.exit("FAILED: a 1.7 reader did not skip the 1.8 RATE byte safely (RATE reads 0, the next save writes no 1.8)")
+    print("modrate: INST 1.8 is written for a Module instrument with a RATE only (the rest of the file is the small fixture's), a 1.7 file and a value above 2 read as 0, a wrong size is malformed, a 1.7 reader skips the byte, both sides alike")
 
     # OS-PERSIST2: the session state, NOTE, MUTE, SCEN and SNFX. Tolerant: a value out of its range is its default, alike on both sides (the dumps show what was taken); the shape of a chunk is
     # the only error. An older build keeps the four as unknown chunks and writes them back byte for byte (emulated below, and checked against the real previous reader by hand).
@@ -691,7 +935,7 @@ def main():
     if {c: (len(p), p[:2]) for c, p in pc if c in session} != {b"NOTE": (7, b"\x01\x00"), b"MUTE": (19, b"\x01\x00"), b"SCEN": (295, b"\x01\x00"), b"SNFX": (27, b"\x01\x00")}:
         sys.exit("FAILED: the session chunks are not 7, 19, 295 and 27 bytes of version 1.0")
     dump2 = run([tool, "dump", os.path.join(work, "persist2.cpp.o3p")]).stdout.decode().splitlines()
-    for line in ("note root=7 scale=9 octave=5 lock=1 jump=4", "mute modes=1,0,0,2,0,0,0,0,0,0,0,0,0,0,0,1", "scenes latch=0 stored=1,0,1",
+    for line in ("note root=7 scale=15 octave=5 lock=1 jump=4", "mute modes=1,0,0,2,0,0,0,0,0,0,0,0,0,0,0,1", "scenes latch=0 stored=1,0,1",
                  "sendfx values=1,1,18,3500,70,0,1,100,0,77,15,1", "scene 0 slot 0 fx=1 row=2 values=-100,100,1"):
         if line not in dump2:
             sys.exit("FAILED: the persist2 fixture's dump has no %r line" % line)
@@ -718,7 +962,8 @@ def main():
     if [c for c, _ in older_view["unknown"]] != session + [b"XTRA", b"EMPT"] or prev.build(older_view) != p2:
         sys.exit("FAILED: a reader that does not know the session chunks does not keep them and write them back byte for byte")
     # The strict chunks of OS-004d next to them are not disturbed: the state fixture's file with the four added after APPM is the same on both sides.
-    both = rewrite_alike("state and session chunks together", sc[:m0 + 5] + [x for x in pc if x[0] in session] + sc[m0 + 5:])
+    combined = sc[:m0 + 5] + [x for x in pc if x[0] in session] + sc[m0 + 5:]
+    both = rewrite_alike("state and session chunks together", combined)
     if not (any(l.startswith("midi ") for l in both) and any(l.startswith("sendfx ") for l in both)):
         sys.exit("FAILED: the OS-004d and OS-PERSIST2 chunks together are not both read")
 
@@ -752,15 +997,16 @@ def main():
     def put(payload, at, data):
         return payload[:at] + data + payload[at + len(data):]
 
-    note_ok = "note root=7 scale=9 octave=5 lock=1 jump=4"
-    taken("NOTE root 12", b"NOTE", lambda x: put(x, 2, b"\x0c"), "note root=0 scale=9 octave=5 lock=1 jump=4")
-    taken("NOTE root 255", b"NOTE", lambda x: put(x, 2, b"\xff"), "note root=0 scale=9 octave=5 lock=1 jump=4")
+    note_ok = "note root=7 scale=15 octave=5 lock=1 jump=4"  # the official index (OS-SCALES28): the 1.0 byte 9 is Blues = 15
+    taken("NOTE root 12", b"NOTE", lambda x: put(x, 2, b"\x0c"), "note root=0 scale=15 octave=5 lock=1 jump=4")
+    taken("NOTE root 255", b"NOTE", lambda x: put(x, 2, b"\xff"), "note root=0 scale=15 octave=5 lock=1 jump=4")
     taken("NOTE scale 12", b"NOTE", lambda x: put(x, 3, b"\x0c"), "note root=7 scale=0 octave=5 lock=1 jump=4")
-    taken("NOTE octave 10", b"NOTE", lambda x: put(x, 4, b"\x0a"), "note root=7 scale=9 octave=3 lock=1 jump=4")
-    taken("NOTE lock 2", b"NOTE", lambda x: put(x, 5, b"\x02"), "note root=7 scale=9 octave=5 lock=0 jump=4")
-    taken("NOTE jump 33", b"NOTE", lambda x: put(x, 6, b"\x21"), "note root=7 scale=9 octave=5 lock=1 jump=1")
+    taken("NOTE scale 11 (the twelfth pad, the official 23)", b"NOTE", lambda x: put(x, 3, b"\x0b"), "note root=7 scale=23 octave=5 lock=1 jump=4")
+    taken("NOTE octave 10", b"NOTE", lambda x: put(x, 4, b"\x0a"), "note root=7 scale=15 octave=3 lock=1 jump=4")
+    taken("NOTE lock 2", b"NOTE", lambda x: put(x, 5, b"\x02"), "note root=7 scale=15 octave=5 lock=0 jump=4")
+    taken("NOTE jump 33", b"NOTE", lambda x: put(x, 6, b"\x21"), "note root=7 scale=15 octave=5 lock=1 jump=1")
     taken("NOTE everything out", b"NOTE", lambda x: x[:2] + b"\xff" * 5, "note root=0 scale=0 octave=3 lock=0 jump=1")
-    taken("NOTE the edges are valid", b"NOTE", lambda x: x[:2] + bytes([11, 11, 9, 1, 32]), "note root=11 scale=11 octave=9 lock=1 jump=32")
+    taken("NOTE the edges are valid", b"NOTE", lambda x: x[:2] + bytes([11, 11, 9, 1, 32]), "note root=11 scale=23 octave=9 lock=1 jump=32")
     taken("MUTE mode 3", b"MUTE", lambda x: put(x, 3 + 3, b"\x03"), "mute modes=1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1")
     taken("MUTE mode 255", b"MUTE", lambda x: put(x, 3 + 15, b"\xff"), "mute modes=1,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0")
     taken("MUTE 4 tracks", b"MUTE", lambda x: x[:2] + b"\x04" + x[3:3 + 4], "mute modes=1,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0")
@@ -778,6 +1024,43 @@ def main():
         taken("SCEN 1.0 FX %d" % fx, b"SCEN", lambda x, fx=fx: put(x, 4 + 1, bytes([fx])), "scene 0 slot 0 fx=0 row=0 values=0,0,0")
     rewrite_alike("SCEN 1.1 without the ids is written back as 1.0", edit2(b"SCEN", lambda x: b"\x01\x01" + x[2:]), expect=p2)
     taken("SCEN 1.1 FX 22", b"SCEN", lambda x: put(b"\x01\x01" + x[2:], 4 + 1, b"\x16"), "scene 0 slot 0 fx=0 row=0 values=0,0,0")
+    # OS-PERFMODES M3: SCEN 1.2 likewise (no new byte, the same 295), written only when a slot of a stored scene holds PLAYMODE (id 18) with a value 4..23. C7 (value 10) in scene 0 slot 3 row 2 makes the chunk 1.2,
+    # written back byte for byte; in a 1.0 or 1.1 chunk a PLAYMODE value above 3 reads as RND (3); in 1.2 a value above 23 is held to 23.
+    def scen_pm(version, slot, fx, row, vals):
+        def edit(x):
+            x = bytearray(x)
+            x[0:2] = version
+            o = 5 + 8 * slot  # the version, LATCH, the count, scene 0's stored flag, then its 12 slots of 8 bytes
+            x[o] = fx
+            x[o + 1] = row
+            for r, v in enumerate(vals):
+                struct.pack_into(">h", x, o + 2 + 2 * r, v)
+            return bytes(x)
+        return edit
+    scen_c7 = scen_pm(b"\x01\x02", 3, 18, 2, [0, 10, 0])
+    dump_sc7 = rewrite_alike("SCEN 1.2 with C7 in scene 0 slot 3 row 2", edit2(b"SCEN", scen_c7), expect=join_chunks(edit2(b"SCEN", scen_c7)))
+    if "scene 0 slot 3 fx=18 row=2 values=0,10,0" not in dump_sc7:
+        sys.exit("FAILED: SCEN 1.2 with C7 in scene 0 slot 3 row 2 did not read as itself")
+    dump_srnd = rewrite_alike("SCEN 1.1 with PLAYMODE 8 reads as RND (3) and writes 1.0", edit2(b"SCEN", scen_pm(b"\x01\x01", 3, 18, 2, [0, 8, 0])),
+                              expect=join_chunks(edit2(b"SCEN", scen_pm(b"\x01\x00", 3, 18, 2, [0, 3, 0]))))
+    if "scene 0 slot 3 fx=18 row=2 values=0,3,0" not in dump_srnd:
+        sys.exit("FAILED: SCEN 1.1 PLAYMODE 8 did not read as 3")
+    dump_sheld = rewrite_alike("SCEN 1.2 with PLAYMODE 24 is held to 23", edit2(b"SCEN", scen_pm(b"\x01\x02", 3, 18, 2, [0, 24, 0])),
+                               expect=join_chunks(edit2(b"SCEN", scen_pm(b"\x01\x02", 3, 18, 2, [0, 23, 0]))))
+    if "scene 0 slot 3 fx=18 row=2 values=0,23,0" not in dump_sheld:
+        sys.exit("FAILED: SCEN 1.2 PLAYMODE 24 did not read as 23")
+    # A value past the +-100 reset is clamped first, in C++ and in tools/o3project.py alike: 200 is 23, not 0.
+    dump_sbig = rewrite_alike("SCEN 1.2 with PLAYMODE 200 is held to 23", edit2(b"SCEN", scen_pm(b"\x01\x02", 3, 18, 2, [0, 200, 0])),
+                              expect=join_chunks(edit2(b"SCEN", scen_pm(b"\x01\x02", 3, 18, 2, [0, 23, 0]))))
+    if "scene 0 slot 3 fx=18 row=2 values=0,23,0" not in dump_sbig:
+        sys.exit("FAILED: SCEN 1.2 PLAYMODE 200 did not read as 23")
+    # C7 only in a stored scene: SCEN 1.2, PERF 1.0 (the state fixture's file with the session chunks added, the SCEN edited).
+    both_c7 = [(c, scen_c7(p) if c == b"SCEN" else p) for c, p in combined]
+    dump_both = rewrite_alike("C7 only in a stored scene: SCEN 1.2, PERF 1.0", both_c7, expect=join_chunks(both_c7))
+    if "scene 0 slot 3 fx=18 row=2 values=0,10,0" not in dump_both or not any(l.startswith("perf 0 fx=1 row=2 ") for l in dump_both):
+        sys.exit("FAILED: the combined file with C7 in a stored scene did not read as itself")
+    if [p[:2] for c, p in split_chunks(join_chunks(both_c7)) if c == b"PERF"] != [b"\x01\x00"]:
+        sys.exit("FAILED: PERF is not 1.0 when only a stored scene holds C7")
     taken("SCEN row 4", b"SCEN", lambda x: put(x, 4 + 1 + 1, b"\x04"), "scene 0 slot 0 fx=1 row=0 values=-100,100,1")
     taken("SCEN value 101", b"SCEN", lambda x: put(x, 4 + 1 + 2, struct.pack(">h", 101)), "scene 0 slot 0 fx=1 row=2 values=0,100,1")
     taken("SCEN value -101", b"SCEN", lambda x: put(x, 4 + 1 + 4, struct.pack(">h", -101)), "scene 0 slot 0 fx=1 row=2 values=-100,0,1")
@@ -826,7 +1109,7 @@ def main():
         refused_alike("%s 2.0" % cid.decode(), edit2(cid, lambda x: b"\x02\x00" + x[2:] + b"\0" * 33), "newer major version")
         refused_alike("%s 2.0, 3 bytes" % cid.decode(), edit2(cid, lambda x: b"\x02\x00\x00"), "newer major version")
         # A newer minor only appends: read as far as 1.0 goes, written back without the rest, at any length.
-        nm = b"\x01\x02" if cid == b"SCEN" else b"\x01\x01"  # SCEN is at 1.1 (OS-PERFFX P1): its next minor is 1.2
+        nm = b"\x01\x03" if cid == b"SCEN" else b"\x01\x02" if cid == b"NOTE" else b"\x01\x01"  # SCEN is at 1.2 (OS-PERFFX P1, then OS-PERFMODES M3) and NOTE at 1.1 (OS-SCALES28): their next minors are 1.3 and 1.2
         rewrite_alike("%s %d.%d with appended fields" % (cid.decode(), nm[0], nm[1]), edit2(cid, lambda x: nm + x[2:] + b"\xab" * 5000), expect=p2)
         rewrite_alike("%s %d.%d with one appended byte" % (cid.decode(), nm[0], nm[1]), edit2(cid, lambda x: nm + x[2:] + b"\xab"), expect=p2)
         refused_alike("%s %d.%d shorter than 1.0" % (cid.decode(), nm[0], nm[1]), edit2(cid, lambda x: nm + x[2:3]))
@@ -846,6 +1129,48 @@ def main():
     if not any(l.startswith("unknown ") and "id=ZZZZ" in l for l in keep):
         sys.exit("FAILED: an unknown chunk next to the session chunks was not kept")
     print("session state: the tolerant readings, the malformed chunks, newer minors, the order, older files, a previous reader and unknown chunks are read alike on both sides")
+
+    # OS-SCALES28: the scales fixture's NOTE 1.1 chunk, damaged the ways the spec's reader table lists; both sides read it alike (the C++ side is tests/note11_format_test.cpp).
+    def edit_scales(fn):
+        return [(c, fn(p) if c == b"NOTE" else p) for c, p in sc_chunks]
+
+    d = rewrite_alike("NOTE 1.1 as written (Hirajoshi)", edit_scales(lambda x: x), expect=scales)
+    if "note root=7 scale=26 octave=5 lock=1 jump=4" not in d:
+        sys.exit("FAILED: the scales fixture's NOTE 1.1 does not dump the official scale 26")
+    # a 1.1 scale above 38 falls back to the 1.0 byte's scale (0 here: Chromatic) and the next save is 1.0
+    d = rewrite_alike("NOTE 1.1 scale 39", edit_scales(lambda x: x[:7] + b"\x27"),
+                      expect=join_chunks([(c, b"\x01\x00\x07\x00\x05\x01\x04" if c == b"NOTE" else p) for c, p in sc_chunks]))
+    if "note root=7 scale=0 octave=5 lock=1 jump=4" not in d:
+        sys.exit("FAILED: a NOTE 1.1 scale of 39 did not fall back to the 1.0 byte's Chromatic")
+    # a 1.1 chunk that holds one of the twelve (scale10 0, scale 15 = Blues) loads with it and is written back as 1.0 with its pad byte
+    rewrite_alike("NOTE 1.1 holding one of the twelve", edit_scales(lambda x: b"\x01\x01" + x[2:7] + b"\x0f"),
+                  expect=join_chunks([(c, b"\x01\x00\x07\x09\x05\x01\x04" if c == b"NOTE" else p) for c, p in sc_chunks]))
+    # 1.1 of 7 bytes is Malformed; 1.2 of 9 bytes reads as 1.1 (newer minor) and writes 1.1 back
+    refused_alike("NOTE 1.1 a byte short", edit_scales(lambda x: x[:-1]))
+    rewrite_alike("NOTE 1.2 of 9 bytes", edit_scales(lambda x: b"\x01\x02" + x[2:] + b"\xab"), expect=scales)
+    # The older build (every published build, which knows NOTE 1.0 only; emulated like the playthru 1.6 reader above: known_minor NOTE 0 and the 1.1 read taken out): the scales fixture loads
+    # as a newer minor with the scale the 1.0 byte says (0: Chromatic) and the other four fields kept, and its next save writes NOTE 1.0 with scale byte 0; every other fixture is unchanged.
+    src = open(ref).read()
+    marker11 = "if minor >= 1 and scale11 is not None and scale11 <= NOTE_FIELDS[1][0]:"
+    if src.count(marker11) != 1:
+        sys.exit("FAILED: the reference's 1.1 read is not the one line this test expects")
+    path10 = os.path.join(work, "o3project_note10.py")
+    write(path10, src.replace(marker11, "if False:  # the emulated 1.0 reader does not read the appended byte").encode())
+    spec10 = importlib.util.spec_from_file_location("o3project_note10", path10)
+    prev10 = importlib.util.module_from_spec(spec10)
+    spec10.loader.exec_module(prev10)
+    orig_known10 = prev10.known_minor
+    prev10.known_minor = lambda cid: 0 if cid == b"NOTE" else orig_known10(cid)
+    view10 = prev10.parse(scales)
+    if view10["note"] != [7, 0, 5, 1, 4]:
+        sys.exit("FAILED: a 1.0 reader did not read the 1.1 chunk as the 1.0 byte's scale with the other fields kept: %r" % view10["note"])
+    out10 = prev10.build(view10)
+    if dict(split_chunks(out10)).get(b"NOTE") != b"\x01\x00\x07\x00\x05\x01\x04":
+        sys.exit("FAILED: a 1.0 reader's next save does not write NOTE 1.0 with scale byte 0: %r" % dict(split_chunks(out10)).get(b"NOTE"))
+    p2file = read(os.path.join(work, "persist2.cpp.o3p"))
+    if prev10.build(prev10.parse(p2file)) != p2file:
+        sys.exit("FAILED: a 1.0 reader did not write the persist2 fixture (NOTE 1.0) back byte for byte")
+    print("scales: NOTE 1.1 (the official scale) round-trips both ways, the fallback and the shape rules of the damaged 1.1 chunks are read alike on both sides, and a 1.0 reader reads it as a newer minor (Chromatic) and writes 1.0")
     # OS-BUG-PASTE24: the LAW chunk, read alike on both sides, damaged or not. The base is the og fixture with the law (an OG v16 import: OGPM and OGPN after LAW) and the persist2 fixture (NOTE..SNFX before it).
     lw = split_chunks(read(os.path.join(work, "law.cpp.o3p")))
     law_file = read(os.path.join(work, "law.cpp.o3p"))

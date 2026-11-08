@@ -1,0 +1,28 @@
+{
+ "name": "qa_phaser",
+ "title": "OS-INSFX-FX1, the Phaser effect module (modules/effects/phaser, kind 2) as a track insert from the console: loaded from the card, bound with `diag ins`, heard, its tail ends at once, and its cost read with `diag bench insert` (bench image). Console only: the insert is NOT saved (S3), and the console has no insert parameter verb, so the Stages, Period, Depth, Centre and Feedback sweeps are a hand check once the Mixer's INSERTS page and the parameter page exist (S4, S5). Needs modules/effects/phaser.tmod on the card (the build's modules/phaser.tmod, copied by the tester). Reset the unit first so that phaser is the only effect module loaded (`diag bench insert` times the first loaded effect). Writes nothing to the card. Leaves no insert bound",
+ "steps": [
+  {"say": "OS-INSFX-FX1, rows QA-GLB-197, 198, 199 and 200 of docs/qa/catalogue/global.md (a unit step is named by the row id its note begins with; QA-GLB-198 and 199 are host tests). Put modules/effects/phaser.tmod on the card, reset the unit so that no other effect module is loaded, and open the project the run is about (the Dense8 song of OS-DENSE, or any project with a sounding track 1). The insert is console-bound: it is lost on save and on reload until the project record lands (slice S3). The default setting is 4 stages, a 2 s period, depth 60 %, centre 800 Hz, feedback 35 %, mix 50 %: track 1 must have a slow phase sweep (two notches moving through the mids), and be no louder than the bypassed track (`ins bypass 1 1 on` and `off` to compare)"},
+  {"keys": ["-shift"], "gap": 0.2, "note": "(Shift released, in case a former run left it down)"},
+  {"cmd": "mod load phaser", "expect": "mod: phaser: (started|already loaded)", "note": "QA-GLB-197: the packed module passes the loader on the unit"},
+  {"cmd": "mod", "expect": "mod: phaser (v1\\.0\\.0|unversioned) ABI", "within": 10, "poll": 1.0, "show": true, "note": "QA-GLB-197: loaded, version 1.0.0; `mod` also says where its hot part runs (the SRAM_L slab or SDRAM): read it against the hot size of the build (about 1.6 KB)"},
+  {"cmd": "ins bind 1 1 phaser", "expect": "ins: bind ok", "note": "QA-GLB-197: bound to track 1, slot 1, with its default parameters"},
+  {"run": "_play"},
+  {"wait": 3.0},
+  {"cmd": "ins", "expect": ["ins: track 1 slot 1: .+ (in|on),", "state SRAM"], "show": true, "note": "QA-GLB-197: the insert runs (phase on) and its measured cycles and share of the block are on the line (the figure the spec estimates at 1.3 % [est] (about 3.5k cycles a block settled at 4 stages, 4.1k at 6))"},
+  {"cmd": "cpu", "show": true, "note": "QA-GLB-197: the load with the insert on; underruns 0; read it against the same project with no insert"},
+  {"cmd": "ins", "expect": ["ins: \\d+ blocks, inserts \\d+ cycles", "forced 0/0"], "show": true, "note": "QA-GLB-197: nothing was forced to dry"},
+  {"say": "QA-GLB-197, by ear: track 1 has a slow phase sweep (the defaults: a gentle swirl, no zipper or click while it moves) and its LEVEL IS THE SAME OR LOWER than bypassed (the check DRIVE failed at its defaults: compare with `ins bypass 1 1 on`, and look for a hotter or clipped stem); the other tracks are unchanged. Then `ins bypass 1 1 on`: the clean sound returns with no click"},
+  {"cmd": "ins bypass 1 1 on", "expect": "ins: bypass ok", "note": "QA-GLB-197: bypass is the host's one-block ramp to dry"},
+  {"wait": 1.0},
+  {"cmd": "ins bypass 1 1 off", "expect": "ins: bypass ok", "note": "QA-GLB-197: off resets the module (shutdown, init) and the effect starts from silence: no thump"},
+  {"wait": 1.0},
+  {"run": "_stop"},
+  {"wait": 1.5},
+  {"cmd": "ins", "expect": "ins: track 1 slot 1: (?!.*tail).+ (in|on),", "show": true, "note": "QA-GLB-197: a second and a half after the stop there is no `tail` word: the phaser returns 0 once its sections have rung out (a few hundredths of a second at the defaults)"},
+  {"cmd": "cpu", "show": true, "note": "QA-GLB-197: the render figure is a stopped transport's, with the phaser bound and idle"},
+  {"cmd": "ins unbind 1 1", "expect": "ins: unbind ok", "note": "QA-GLB-197: leaves no insert bound"},
+  {"cmd": "bench insert 64", "if_reply_not": "not in this image", "expect": ["BENCH insert_effect \\d+ 64 avg \\d+ max \\d+", "BENCH insert_effect_mod \\d+ 64 avg \\d+ max \\d+", "BENCH insert_ramp \\d+ 64 avg \\d+ max \\d+", "BENCH insert \\d+ 64 avg \\d+ max \\d+ \\(.*, adapter \\d+ cycles \\(\\d+\\.\\d%\\) peak \\d+\\)", "BENCH done"], "timeout": 20, "show": true, "note": "QA-GLB-200: bench image (`-DO3OS_BENCH=ON`), transport stopped, phaser the only loaded effect: `insert_effect` is the settled render() of 64 frames at the defaults (4 stages), `insert_effect_mod` the same with set_param on Period, the first MOD target, every block (a sweep between 5,075 and 15,025 ms), `insert` the whole insert with the adapter. Quote min, avg and max in cycles and as a share of the 261,225-cycle block against the budget (docs/architecture/cpu-budget.md, the OS-INSFX-FX1 rows)"},
+  {"say": "QA-GLB-200: copy the four BENCH lines (min / avg / max) into docs/architecture/cpu-budget.md, the OS-INSFX-FX1 rows, and into the module's README; the cap of four instances stays or is lowered from them (spec section 6)"}
+ ]
+}

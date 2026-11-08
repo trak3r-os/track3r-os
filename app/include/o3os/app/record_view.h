@@ -77,6 +77,31 @@ constexpr RecRows rec_rows(RecMode mode, bool review, bool loop_review = false, 
   return r;
 }
 
+// OS-RECBADGE (new Community OS behaviour, maintainer 2026-11-08): the chips the Record screen's status strip shows for what is switched on, left to right in this order: MONITOR, REC (ARMED while the
+// take only waits for its start), OVERDUB (UNDO while a layer is being undone), LOOP (the LOOP row is on, or a loop is under review). A bit mask so the screen draws the set and a test can check it.
+enum RecBadge : std::uint8_t { kBadgeMonitor = 1, kBadgeRec = 2, kBadgeArmed = 4, kBadgeOverdub = 8, kBadgeUndo = 16, kBadgeLoop = 32 };
+
+constexpr std::uint8_t rec_badges(bool monitor, bool recording, bool armed, bool overdubbing, bool restoring, bool loop_row_on, bool loop_review) noexcept {
+  std::uint8_t b = 0;
+  if (monitor) {
+    b |= kBadgeMonitor;
+  }
+  if (recording) {
+    b |= kBadgeRec;
+  } else if (armed) {
+    b |= kBadgeArmed;
+  }
+  if (restoring) {
+    b |= kBadgeUndo;
+  } else if (overdubbing) {
+    b |= kBadgeOverdub;
+  }
+  if (loop_row_on || loop_review) {
+    b |= kBadgeLoop;
+  }
+  return b;
+}
+
 struct RecordView {
   std::uint8_t row[3] = {0, 0, 0};  // the cursor of each page
 };

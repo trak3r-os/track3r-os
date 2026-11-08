@@ -240,20 +240,24 @@ action view.mode 3
 tap rec
 tap note
 action cursor.jump_fraction 0
+# OS-PTOOLS2 S3c: the selection is the fill's target (no SCOPE row). Shift + Up at step 1 selects the whole track, so the fills below are the track's and the dialog's footer says TRACK 1  ROWS 1-64.
+press shift
+tap up
+release shift
 
-# F4 FILL opens the dialog: eight rows (SCOPE TRACK, WHAT NOTE, TYPE EVERY N, N, MODE CONST, KEY, VALUE; TO is dim in CONST), the steps the rule chooses, and its own key row (F1 FILL, F8 BACK).
+# F4 FILL opens the dialog: seven rows (WHAT NOTE, TYPE EVERY N, N, MODE CONST, KEY, VALUE; TO is dim in CONST), the steps the rule chooses over the selected track, the footer naming the target, and its own key row (F1 FILL, F8 BACK).
 tap f4
 snap qa_pat_086
 
 # For the manual (docs/manual/pattern_tools.md): EVERY N with N 4, so the line shows the rule (every fourth step, 16 of 64); then N 1 again, the state the rows below start from.
-tap down 3
+tap down 2
 tap right 3
 snap qa_pat_086_n4
 tap left 3
-tap up 3
+tap up 2
 
-# TYPE EUCLID (two places on), EVENTS 5 (the row after it, one place up from 4): the line shows which steps will be written (steps 1, 14, 27, 40 and 53 of the 64).
-tap down 2
+# TYPE EUCLID (two places on), EVENTS 5 (the row after it, one place on from 4): the line shows which steps will be written (steps 1, 14, 27, 40 and 53 of the 64).
+tap down
 tap right 2
 tap down
 tap right
@@ -269,21 +273,22 @@ snap qa_pat_088
 tap f8
 snap qa_pat_089
 
-# Shift + Fx no longer repeats the last fill (OS-QJUMP): it jumps to 3/4 of the pattern (row 49 of the 64) and nothing is written; Shift + Note jumps back to the top.
+# Shift + Fx no longer repeats the last fill (OS-QJUMP): it jumps to 3/4 of the pattern (row 49 of the 64) and nothing is written; Shift + Note jumps back to the top. In Edit the jump also selects the rows it crossed (OS-SELSHIFT).
 press shift
 tap fx
 snap qa_pat_090
 tap note
 release shift
 
-# A block (Shift + Down x7) makes the dialog open on SCOPE BLOCK; EVERY N with N 2: only the block's steps. (The waits let the strip's notices of the fills before run out.)
+# A block (Shift + Down x7, with the track selection cleared first) is the dialog's target: the footer says BLOCK  TRACK 1  ROWS 1-8; EVERY N with N 2: only the block's steps. (The waits let the strip's notices of the fills before run out.)
 wait 6000
+action select.clear
 press shift
 tap down 7
 release shift
 tap f4
-tap up 8
-tap down 2
+tap up 7
+tap down
 tap left 2
 tap down
 tap right
@@ -297,21 +302,21 @@ tap rec
 tap f4
 snap qa_pat_093
 
-# OS-FILL2 (docs/specs/OS-FILL2.md): QA-PAT-300..309, the value modes, FROM and TO, and FX in the Fill dialog. Rec turns Edit on again; the block of the fill above is still selected: it is cleared, so the dialog opens
-# on SCOPE TRACK, and every fill below is undone with F8 (the project is as it was for the rows after this block). The session keeps TYPE (EVERY N) and N 2 from QA-PAT-091: N goes back to 1. The last Rec leaves Browse.
+# OS-FILL2 (docs/specs/OS-FILL2.md): QA-PAT-300..309, the value modes, FROM and TO, and FX in the Fill dialog. Rec turns Edit on again; the block of the fill above is still selected: it is cleared and the track is selected instead (the column of Shift + Up at step 1),
+# so every fill below is the track's and is undone with F8 (the project is as it was for the rows after this block). The session keeps TYPE (EVERY N) and N 2 from QA-PAT-091: N goes back to 1. The last Rec leaves Browse.
 wait 3000
 tap rec
 action select.clear
+action select.column_all
 tap f4
-tap up 8
-tap down
+tap up 7
 tap right 2
 tap down 2
 tap left
 tap down
 tap right
 
-# QA-PAT-300: WHAT VOLUME, MODE RAMP: the dialog opens with the fade (FROM 127 down to TO 0), KEY is dim, the caption of row 7 is FROM.
+# QA-PAT-300: WHAT VOLUME, MODE RAMP: the dialog opens with the fade (FROM 127 down to TO 0), KEY is dim, the caption of the FROM row (row 5) is FROM.
 snap qa_pat_300
 
 # QA-PAT-301: F1 writes the ramp on every step of the track (the volume column carries 7F down to 00), the strip says the mode and the range; F8 gives every byte back.
@@ -322,8 +327,7 @@ wait 6000
 
 # QA-PAT-302: WHAT FX 1, FX TYPE Chance (seven places down the picker from Off), MODE RANDOM, TO 100 (Shift + encoder is ten a detent).
 tap f4
-tap up 8
-tap down
+tap up 7
 tap right
 tap down 3
 tap right
@@ -344,8 +348,7 @@ wait 6000
 
 # QA-PAT-304: WHAT NOTE, KEY Dorian (the encoder steps the scale) and C# (Shift + encoder steps the root): the row says `C# Dorian`.
 tap f4
-tap up 8
-tap down
+tap up 7
 tap left 3
 tap down 4
 tap right 4
@@ -480,7 +483,7 @@ action step.fx_type 62
 action step.fx_value 58
 snap qa_pat_144
 
-# QA-PAT-145: the list ends with them: Vol held opens it on Panbrello, the last of the 60 entries, with its description under it.
+# QA-PAT-145: the list continues with them: Vol held opens it on Panbrello (followed since OS-CEWTENV W6b by w, y and z), with its description under it.
 press vol
 wait 700
 snap qa_pat_145
@@ -521,13 +524,14 @@ press shift
 snap qa_pat_167_shift
 release shift
 
-# OS-WAVEXP: QA-PAT-180, F7 opens the TOOLS list; its first entry is EXPORT PATTERN, and with no module system (the simulator has none) one dim line under a rule says so.
+# OS-WAVEXP, OS-TOOLSDEDUP: QA-PAT-180, F7 and APPS > open the APPS page, which lists tool apps only (the exports are the verb menu's pads 14 and 15); with no module system (the simulator has none) one dim line says so.
 wait 700
 tap f7
+pad 15
 snap qa_pat_180
 tap f8
 
-# OS-WAVEXP slice B: QA-PAT-185, a block adds EXPORT SELECTION under EXPORT PATTERN in the TOOLS list (the cursor still opens on EXPORT PATTERN); without a block the list is as QA-PAT-180 shows it.
+# OS-WAVEXP slice B, OS-TOOLSDEDUP: QA-PAT-185, the verb menu itself (no APPS page) with a block and without: the EXPORT SEL pad is the one that needs the block.
 wait 700
 press shift
 tap down 3
@@ -690,7 +694,7 @@ release f1
 wait 10
 playhead stop
 
-# PAT-OPS-A (docs/specs/PAT-OPS.md): QA-PAT-280..283, DUPLICATE x2, EXPAND x2 and SHRINK /2 of the F7 TOOLS list (the list itself is QA-PAT-180 and 185). This block sets its own state: the demo document in Edit, its pattern 64 steps long.
+# PAT-OPS-A (docs/specs/PAT-OPS.md): QA-PAT-280..283, DUPLICATE x2, EXPAND x2 and SHRINK /2, the pads 10, 11 and 12 of the F7 verb menu (OS-TOOLSDEDUP: the APPS page no longer lists them; the page is QA-PAT-180 and 185). This block sets its own state: the demo document in Edit, its pattern 64 steps long.
 # EXPAND x2 takes it to 128, every note spread to twice its row with an empty row between (QA-PAT-280); DUPLICATE x2 would pass 128 steps and is refused, nothing written (QA-PAT-281); SHRINK /2 keeps the even steps and
 # takes it to 64 again (QA-PAT-282); with Edit off an entry says TURN EDIT ON and writes nothing (QA-PAT-283); back in Edit DUPLICATE x2 repeats the 64 steps into 128 (QA-PAT-284).
 document
@@ -704,30 +708,25 @@ action view.mode 0
 action cursor.jump_fraction 0
 action cursor.home
 tap f7
-tap down 2
-tap f1
+pad 10
 snap qa_pat_280
 wait 3000
 tap f7
-tap down 1
-tap f1
+pad 9
 snap qa_pat_281
 wait 3000
 tap f7
-tap down 3
-tap f1
+pad 11
 snap qa_pat_282
 wait 3000
 action view.mode 3
 tap f7
-tap down 1
-tap f1
+pad 9
 snap qa_pat_283
 wait 3000
 action view.mode 0
 tap f7
-tap down 1
-tap f1
+pad 9
 snap qa_pat_284
 wait 3000
 
@@ -767,3 +766,259 @@ wait 20
 snap qa_pat_314
 release shift
 wait 3000
+
+# OS-CECHANCE C2 (docs/specs/OS-CECHANCE.md section 3.5): QA-PAT-330..334, the Chance conditions beyond 0..100 in the editor. The demo document; Edit for STEP (view.mode 0; the block above left it on Edit, so Rec would toggle it off), the cursor to step 1, the Fx key on the FX1 column,
+# Chance picked. The zoom is 8 tracks from QA-PAT-275's block above (an FX column is hidden at 8 and 12), so two pattern.zoom presses bring it back to 5; the pads' mode is TRACKS from the OS-PADOCT block, so pads.mode 0 (NOTES): the pads write the values (QA-PAT-333) and the note (QA-PAT-334).
+# The info line reads the value in words (app/fx_text.h); the grid keeps the hex.
+document
+wait 3000
+press f1
+wait 450
+pad 0
+release f1
+wait 10
+action view.mode 0
+action pads.mode 0
+action pattern.zoom
+action pattern.zoom
+action cursor.track 0
+action cursor.jump_fraction 0
+action cursor.home
+action pattern.column 3
+assert state pattern=1 track=0 row=0 col=FX1
+action step.fx_type 4
+
+# QA-PAT-330: value 101 (hex 65): the info line reads CHANCE WITH LAST; 102 (66) reads CHANCE NOT LAST.
+action step.fx_value 101
+assert model pat.1.0.0.fx1=4:101
+snap qa_pat_330
+action step.fx_value 102
+assert model pat.1.0.0.fx1=4:102
+snap qa_pat_330b
+
+# QA-PAT-331: a cycle value: 103 (67) CHANCE PLAY 1 SKIP 1, 111 (6F) CHANCE PLAY 2 SKIP 3, 174 (AE) CHANCE SKIP 6 PLAY 6.
+action step.fx_value 103
+assert model pat.1.0.0.fx1=4:103
+snap qa_pat_331b
+action step.fx_value 111
+assert model pat.1.0.0.fx1=4:111
+snap qa_pat_331c
+action step.fx_value 174
+assert model pat.1.0.0.fx1=4:174
+snap qa_pat_331
+
+# QA-PAT-332: the coarse walk (Shift + encoder, 16 a detent): from 100 up 101, 102, 103, 109 (6D); back down 103, 102, 101, 100.
+action step.fx_value 100
+press shift
+encoder 1
+release shift
+assert model pat.1.0.0.fx1=4:101
+press shift
+encoder 1
+release shift
+assert model pat.1.0.0.fx1=4:102
+press shift
+encoder 1
+release shift
+assert model pat.1.0.0.fx1=4:103
+press shift
+encoder 1
+release shift
+assert model pat.1.0.0.fx1=4:109
+snap qa_pat_332
+press shift
+encoder -1
+release shift
+assert model pat.1.0.0.fx1=4:103
+press shift
+encoder -1
+release shift
+assert model pat.1.0.0.fx1=4:102
+press shift
+encoder -1
+release shift
+assert model pat.1.0.0.fx1=4:101
+press shift
+encoder -1
+release shift
+assert model pat.1.0.0.fx1=4:100
+
+# QA-PAT-333: the pads write 0..100 for Chance: pad 47 = 100, pad 0 = 0, pad 24 = 51 (a pad entry moves the cursor on by JUMP, so back to the top between the pads).
+pad 47
+assert model pat.1.0.0.fx1=4:100
+action cursor.jump_fraction 0
+pad 0
+assert model pat.1.0.0.fx1=4:0
+action cursor.jump_fraction 0
+pad 24
+assert model pat.1.0.0.fx1=4:51
+snap qa_pat_333
+
+# OS-CEWTENV W6b (docs/specs/OS-CEWTENV.md 3.7): QA-PAT-340..342, the step FX w (96), y (97) and z (98) in the editor: the grid glyph and the info line in words (host: pattern_edit_rules_test holds the picker order and ranges).
+# Straight after the block of QA-PAT-333 (no `document` here: it is refused after `audio on` below): Edit, zoom 5, pads NOTES and the FX1 column are still set, so only the cursor goes back to step 1 on track 1.
+action cursor.track 0
+action cursor.jump_fraction 0
+action cursor.home
+action pattern.column 3
+assert state pattern=1 track=0 row=0 col=FX1
+
+# QA-PAT-340 / 341 / 342: z (98) at its start value 50 (hex 32; the value left by the Chance block, 51, is in range and kept, so it is set); the grid draws z32 and the info line reads GRAIN 100 MS.
+action step.fx_type 98
+action step.fx_value 50
+assert model pat.1.0.0.fx1=98:50
+snap qa_pat_341
+action step.fx_value 0
+assert model pat.1.0.0.fx1=98:0
+snap qa_pat_342
+
+# QA-PAT-341b: w (96) at hex 88 (x8, warp +0): AMP ENV x8 WARP +0.
+action step.fx_type 96
+action step.fx_value 136
+assert model pat.1.0.0.fx1=96:136
+snap qa_pat_341b
+
+# QA-PAT-341c: y (97) at hex 24 (36: attack x2 = 16 ms, decay y4 = 32 ms): FLT ENV 16/32 MS.
+action step.fx_type 97
+action step.fx_value 36
+assert model pat.1.0.0.fx1=97:36
+snap qa_pat_341c
+
+# OS-FXREC S2 (docs/specs/OS-FXREC.md, section 3): QA-PAT-324, a MIDI Learn bound CUTOFF knob records the filter FX on the play line of the cursor's track during LIVE. The demo document with its
+# bindings (CC 74 on instrument 1's cutoff, pickup): the knob catches the 0.30 at 38 and then moves; three play positions write three Low-pass values on track 1's rows, and the strip says REC FX: CUTOFF.
+document bindings
+wait 3000
+action view.mode 0
+action cursor.track 0
+action cursor.jump_fraction 0
+playhead 3
+midicc 1 74 38
+assert model pat.1.0.3.fx1=27:30
+playhead 5
+midicc 1 74 100
+assert model pat.1.0.5.fx1=27:79
+playhead 5 30
+midicc 1 74 127
+assert model pat.1.0.6.fx1=27:100
+assert model pat.1.0.5.fx1=27:79
+snap qa_pat_324
+playhead stop
+
+# QA-PAT-334: Play 1 / Skip 1 (103) on the note of step 1: the 16-step pattern at 120 BPM is a 2 s pass, so the 7.9 s render holds four passes; the note sounds on the passes 1 and 3 only (the render is sound there and silent in the passes 2 and 4).
+document sound
+audio on
+wait 30
+press f1
+wait 450
+pad 0
+release f1
+wait 10
+action view.mode 0
+action cursor.track 0
+action cursor.jump_fraction 0
+action cursor.home
+pad 12
+tap up
+tap instr
+encoder 2
+action pattern.column 3
+action step.fx_type 4
+action step.fx_value 103
+assert model pat.1.0.0.fx1=4:103
+tap rec
+render take 7900
+tap play
+assert state playing=1
+wait 8000
+assert audio take onset=1.5+-2
+assert audio take in=0-1500 sound
+assert audio take in=2100-3900 silent
+assert audio take in=4100-5900 sound
+assert audio take in=6100-7800 silent
+tap play
+assert state playing=0
+snap qa_pat_334
+
+# OS-SCALES28 S2 (docs/specs/OS-SCALES28.md, the S2 row): QA-PAT-429..434 (the spec's QA-PAT-324..329 are taken by OS-FXREC S2). While Note is held on Pattern the encoder and
+# Up / Down walk all 39 scales in the official order, as a ring of 39; pad row 2 keeps its twelve. The sound document of QA-PAT-334 above (audio is on, so no `document` / `playhead` here), stopped, Edit, cursor at the top.
+action view.mode 0
+action cursor.jump_fraction 0
+action cursor.home
+press note
+wait 700
+assert state overlay=STEP_POPUP
+
+# QA-PAT-429: the encoder walks the ring, one scale a detent: +26 from Chromatic is Hirajoshi (the official 26, one of the 27: no pad of row 2 is Front) and the top line names it; -27 wraps to Enigmatic (38), +1 wraps back to Chromatic.
+encoder 26
+snap qa_pat_429
+encoder -27
+snap qa_pat_429_wrap
+encoder 1
+
+# QA-PAT-430: Up and Down step the same ring (Down +1, Up -1): Down from Chromatic is Minor; two Ups wrap to Enigmatic.
+tap down
+snap qa_pat_430
+tap up
+tap up
+snap qa_pat_430_wrap
+
+# QA-PAT-431: pad row 2 keeps the twelve from one of the 27: pad 2 of row 2 sets Major (the official 2) and its pad is Front again.
+pad 13
+snap qa_pat_431
+
+# QA-PAT-432: SCALE LOCK on with Hirajoshi: the NOTES pads lay out the scale and the MIDI keyboard snaps to it. Lock on (the last pad), the encoder to Hirajoshi (24 more); let go of Note first (while the panel is held the keyboard writes nothing), then a MIDI C#4 (61) snaps to C4 (60) and is written at the cursor as model note 61 (the model stores the MIDI note + 1).
+pad 47
+encoder 24
+snap qa_pat_432
+release note
+midinote 1 61 100
+assert model pat.1.0.0.note=61
+midinote 1 61 off
+
+# QA-PAT-433: the info line names the scale in force: with Note let go, the line reads `scale Hirajoshi C-4`.
+wait 10
+assert state overlay=NONE
+snap qa_pat_433
+
+# QA-PAT-434: save, reload, scale back: the encoder to one of the 27 that no pad holds (Hung. minor, the official 19); the host tests write NOTE 1.1 for it and read it back (note11_format_test, persist2_app_test), the unit saves, power-cycles and loads it.
+press note
+wait 700
+encoder -7
+snap qa_pat_434
+release note
+wait 10
+
+# OS-PTOOLS2 S1 (QA-PAT-447..449). Edit, three notes on track 1 (steps 1 to 3), a block over them.
+action view.mode 0
+action select.clear
+action cursor.jump_fraction 0
+action cursor.home
+action step.note 61
+action step.note 63
+action step.note 65
+action cursor.home
+action select.extend 1
+action select.extend 1
+wait 10
+
+# QA-PAT-447: with a block the info line says what it is and what the keys do: `BLOCK 3 STEPS  ENC: TRANSPOSE  F7: TOOLS ...` (the parts that do not fit are left off, from the end).
+snap qa_pat_447
+
+# QA-PAT-448 (OS-TOOLSDEDUP): F6 EVENTS works on the APPS page too: the menu, APPS >, F6 opens the EVENTS overlay over the cursor's track (the page lists tool apps only, so with none the soft-key row is EVENTS and BACK).
+tap f7
+pad 15
+tap f6
+snap qa_pat_448
+tap f8
+
+# QA-PAT-449: F7 while playing in WATCH with a block opens the verb menu (it was refused before, OS-BUG-TOOLSPLAY); APPS > opens the APPS page. In WATCH the info line is bare: the block hint is an Edit thing (ENC, PAD and DEL all need Edit), so qa_pat_449_watch shows no hint.
+action view.mode 3
+action select.clear
+tap play
+wait 100
+action select.extend 1
+snap qa_pat_449_watch
+tap f7
+snap qa_pat_449
+tap f8
+tap play
+wait 100

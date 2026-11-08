@@ -11,6 +11,8 @@
 #include <o3os/ui/components.h>
 #include <o3os/ui/plot/wave_view.h>
 
+#include <cstring>
+
 namespace o3os::app {
 
 using ui::Color;
@@ -70,6 +72,148 @@ int lane_x(const Window& w, std::uint32_t frame) noexcept {
   return kLaneX + static_cast<int>(static_cast<std::uint64_t>(frame - w.first) * static_cast<std::uint64_t>(kLaneW - 1) / w.span);
 }
 
+// The empty listing's line, by PtfxCatalog::State (Done and Cancelled: the folder holds no plugin).
+constexpr const char* kPtfxWhy[] = {"SCANNING...", "SCANNING...", "NO PLUGINS", "NO CARD", "NO EFFECTS FOLDER", "CARD ERROR", "NO PLUGINS"};
+constexpr unsigned kPtfxWhyCount = sizeof kPtfxWhy / sizeof kPtfxWhy[0];
+
+struct PlugTag {
+  std::uint16_t bit;
+  const char* name;
+};
+constexpr PlugTag kPlugTags[] = {{module::kPtfxFlagGenerator, "GEN"}, {module::kPtfxFlagWavetable, "WT"}, {module::kPtfxFlagStereo, "ST"}, {module::kPtfxFlagConvertToMono, "MONO"}};
+
+constexpr unsigned kPlugListRows = 7;  // the list's rows under its header (the parameters use six, the author line the seventh)
+
+// The PLUGINS page under the readout: the list (left, 300 px), the plugin's parameters (right, two columns of six), the author and the scratch under them. Reads what the App's pass loaded: nothing here touches the card.
+void draw_plug_page(const Model& model, const SampleEditState& st, bool valid, Renderer& r, const Frame& f, const Rect& covered, int top) noexcept {
+  constexpr int kListW = 300;
+  constexpr int kParamX = kLaneX + 312;
+  constexpr int kColW = 228;
+  const ui::FontGeometry& g = r.theme().geometry(Face::Data);
+  const int cell_w = g.cell_w;
+  const int ty_off = (f.row_pitch - g.cell_h) / 2;
+  const PtfxPage* page = model.samples != nullptr ? model.samples->ptfx_page() : nullptr;
+  const module::PtfxCatalog* cat = page != nullptr ? page->cat : nullptr;
+  const unsigned n = cat != nullptr ? cat->count() : 0u;
+  const unsigned sel = n == 0u ? 0u : (st.plug_sel < n ? st.plug_sel : n - 1u);
+  const bool list_focus = st.plug_focus == 0u;
+
+  core::FixedString<48> head;
+  head.assign("PLUGINS ");
+  append_uint(head, n);
+  if (cat != nullptr && cat->truncated()) {
+    head.append("+");
+  }
+  if (cat != nullptr && cat->skipped_long() != 0u) {
+    head.append(" (");
+    append_uint(head, cat->skipped_long());
+    head.append(" SKIPPED)");
+  }
+  if (!covers(covered, kLaneX, top, kListW, f.row_pitch)) {
+    r.text(kLaneX + 6, top + ty_off, head.c_str(), Color::Accent);
+  }
+
+  if (n == 0u) {
+    const char* why = "NO PLUGINS HERE";
+    if (cat != nullptr) {
+      const unsigned s = static_cast<unsigned>(cat->state());
+      why = kPtfxWhy[s < kPtfxWhyCount ? s : kPtfxWhyCount - 1u];
+    }
+    if (!covers(covered, kLaneX, top + f.row_pitch, kListW, f.row_pitch)) {
+      r.text(kLaneX + 6, top + f.row_pitch + ty_off, why, Color::TextDim);
+    }
+    return;
+  }
+
+  const unsigned first = sel < kPlugListRows ? 0u : sel - kPlugListRows + 1u;
+  for (unsigned i = 0; i < kPlugListRows && first + i < n; ++i) {
+    const module::PtfxEntry& e = cat->entry(first + i);
+    const Rect cell = {kLaneX, top + static_cast<int>(i + 1u) * f.row_pitch, kListW, f.row_pitch};
+    if (covers(covered, cell.x, cell.y, cell.w, cell.h)) {
+      continue;
+    }
+    const bool refused = e.status != module::PtfxStatus::Ok || e.quarantined;
+    const bool here = first + i == sel;
+    if (here && list_focus) {
+      r.highlight_row(cell);
+    }
+    const bool dim = refused || (!valid && (e.flags & module::kPtfxFlagGenerator) == 0u);  // 3.7: with no sample only a generator can run
+    const Color ink = here ? (list_focus ? Color::SelText : Color::Accent) : (dim ? Color::TextDim : Color::Text);
+    if (here && refused) {
+      r.text(cell.x + 6, cell.y + ty_off, ptfx_refusal_text(e), ink);
+      continue;
+    }
+    core::FixedString<32> name;
+    append_clipped(name, e.display_name, 16);
+    r.text(cell.x + 6, cell.y + ty_off, name.c_str(), ink);
+    // The tags are whole words that fit what is left of the list's width ("GEN WT ST MONO" in full when it has the room).
+    core::FixedString<14> tags;
+    const unsigned fit = static_cast<unsigned>((kListW - 6 - 17 * cell_w) / cell_w);
+    for (unsigned k = 0; !refused && k < sizeof kPlugTags / sizeof kPlugTags[0]; ++k) {
+      if ((e.flags & kPlugTags[k].bit) != 0u) {
+        const bool first_tag = tags.size() == 0;
+        if (tags.size() + (first_tag ? 0u : 1u) + std::strlen(kPlugTags[k].name) > fit) {
+          break;
+        }
+        tags.append(first_tag ? "" : " ");
+        tags.append(kPlugTags[k].name);
+      }
+    }
+    r.text(cell.x + 6 + 17 * cell_w, cell.y + ty_off, tags.c_str(), here ? ink : Color::TextDim);
+  }
+
+  // The plugin in view: its name, then its parameters.
+  const module::PtfxEntry& e = cat->entry(sel);
+  const bool refused = e.status != module::PtfxStatus::Ok || e.quarantined;
+  const bool ready = page != nullptr && page->loaded(sel) && page->ready();
+  core::FixedString<48> title;
+  append_clipped(title, ready ? page->info().name : e.display_name, 24);
+  if (!refused && !valid && (e.flags & module::kPtfxFlagGenerator) == 0u) {
+    title.append("  NO SAMPLE");
+  }
+  if (!covers(covered, kParamX, top, kLaneX + kLaneW - kParamX, f.row_pitch)) {
+    r.text(kParamX + 6, top + ty_off, title.c_str(), refused ? Color::TextDim : Color::Accent);
+  }
+  if (!ready) {
+    if (!refused && !covers(covered, kParamX, top + f.row_pitch, kLaneX + kLaneW - kParamX, f.row_pitch)) {
+      r.text(kParamX + 6, top + f.row_pitch + ty_off, page != nullptr && page->loaded(sel) ? "CARD ERROR: RESCAN" : "READING...", Color::TextDim);
+    }
+    return;
+  }
+  const module::PtfxInfo& info = page->info();
+  for (unsigned p = 0; p < page->params(); ++p) {
+    const Rect cell = {kParamX + static_cast<int>(p / 6u) * kColW, top + static_cast<int>(p % 6u + 1u) * f.row_pitch, kColW - 6, f.row_pitch};
+    if (covers(covered, cell.x, cell.y, cell.w, cell.h)) {
+      continue;
+    }
+    const bool here = !list_focus && st.plug_param == p;
+    if (here) {
+      r.highlight_row(cell);
+    }
+    r.text(cell.x + 6, cell.y + ty_off, info.params[p].label, here ? Color::SelText : Color::TextDim);
+    core::FixedString<PtfxPage::kValueChars> value;
+    page->format_value(p, value);
+    r.text(cell.x + 6 + 9 * cell_w, cell.y + ty_off, value.c_str(), here ? Color::SelText : Color::Text);
+  }
+  const Rect line = {kParamX, top + 7 * f.row_pitch, kLaneX + kLaneW - kParamX, f.row_pitch};
+  if (!covers(covered, line.x, line.y, line.w, line.h)) {
+    core::FixedString<48> by;
+    if (info.author[0] != '\0') {
+      by.assign("BY ");
+      append_clipped(by, info.author, 16);
+      by.append("   ");
+    }
+    if (info.scratch_size == 0u) {
+      by.append("NO SCRATCH");
+    } else {
+      by.append("SCRATCH ");
+      append_uint(by, (info.scratch_size + 1023u) / 1024u);
+      by.append(" KB");
+    }
+    r.text(line.x + 6, line.y + ty_off, by.c_str(), Color::TextDim);
+  }
+}
+
 }  // namespace
 
 Window sedit_window(const SampleEditState& state, std::uint32_t frames) noexcept {
@@ -121,11 +265,120 @@ bool sedit_sync(const Model& model, ViewState& view) noexcept {
 
 void SampleEditScreen::enter(const Model& model, ViewState& view) const noexcept { (void)sedit_sync(model, view); }
 
-bool sedit_fx_page(const ViewState& view) noexcept { return view.page[screen_index(ScreenId::SampleEdit)] != 0u; }
+bool sedit_fx_page(const ViewState& view) noexcept { return view.page[screen_index(ScreenId::SampleEdit)] == 1u; }
 
-Context SampleEditScreen::field_context(const Model&, const ViewState& view) const noexcept { return sedit_fx_page(view) ? Context::SampleEditFx : Context::None; }
+bool sedit_plug_page(const ViewState& view) noexcept { return view.page[screen_index(ScreenId::SampleEdit)] == 2u; }
 
-bool SampleEditScreen::set_position(const Model&, ViewState& view, int position) const noexcept {
+Context SampleEditScreen::field_context(const Model&, const ViewState& view) const noexcept {
+  return sedit_fx_page(view) ? Context::SampleEditFx : (sedit_plug_page(view) ? Context::SampleEditPlug : Context::None);
+}
+
+namespace {
+// The PLUGINS page's cursor (OS-CEPTFX S4a): the listing index while the list has the focus, else the parameter row (12 at most, two columns of six: column = p / 6). The parameters have the focus only
+// when the plugin in view has some.
+const PtfxPage* plug_page(const Model& model) noexcept { return model.samples != nullptr ? model.samples->ptfx_page() : nullptr; }
+
+int plug_count(const Model& model, const ViewState& view) noexcept {
+  const PtfxPage* page = plug_page(model);
+  if (page == nullptr) {
+    return 0;
+  }
+  if (view.sedit.plug_focus != 0u) {
+    return static_cast<int>(page->params());
+  }
+  return page->cat != nullptr ? static_cast<int>(page->cat->count()) : 0;
+}
+
+bool plug_set(const Model& model, ViewState& view, int position) {
+  const int n = plug_count(model, view);
+  if (n <= 0) {
+    return false;
+  }
+  const std::uint8_t to = static_cast<std::uint8_t>(position < 0 ? 0 : (position >= n ? n - 1 : position));
+  SampleEditState& st = view.sedit;
+  if (st.plug_focus != 0u) {
+    const bool moved = st.plug_param != to;
+    st.plug_param = to;
+    return moved;
+  }
+  const bool moved = st.plug_sel != to;
+  st.plug_sel = to;
+  st.plug_param = 0;
+  return moved;
+}
+
+// Up / Down walk the focused column, Left / Right move the focus (list <-> parameters) and the column of the parameters. A run holds the cursor (the plugin in view is what the run was asked with).
+bool plug_step(const Model& model, ViewState& view, int dx, int dy) {
+  SampleEditState& st = view.sedit;
+  const PtfxPage* page = plug_page(model);
+  if (page == nullptr || st.running) {
+    return false;
+  }
+  const int np = static_cast<int>(page->params());
+  if (st.plug_focus != 0u && np == 0) {
+    st.plug_focus = 0;
+  }
+  if (dy != 0) {
+    if (st.plug_focus == 0u) {
+      return plug_set(model, view, static_cast<int>(st.plug_sel) + (dy < 0 ? -1 : 1));
+    }
+    const int col = st.plug_param / 6;
+    const int lo = col * 6;
+    const int hi = lo + 5 < np - 1 ? lo + 5 : np - 1;
+    const int to = static_cast<int>(st.plug_param) + (dy < 0 ? -1 : 1);
+    const int fit = to < lo ? lo : (to > hi ? hi : to);
+    const bool moved = fit != st.plug_param;
+    st.plug_param = static_cast<std::uint8_t>(fit);
+    return moved;
+  }
+  if (dx > 0) {
+    if (st.plug_focus == 0u) {
+      if (np == 0) {
+        return false;
+      }
+      st.plug_focus = 1;
+      st.plug_param = 0;
+      return true;
+    }
+    if (st.plug_param < 6u && np > 6) {
+      st.plug_param = static_cast<std::uint8_t>(st.plug_param + 6 < np ? st.plug_param + 6 : np - 1);
+      return true;
+    }
+    return false;
+  }
+  if (dx < 0) {
+    if (st.plug_focus == 0u) {
+      return false;
+    }
+    if (st.plug_param >= 6u) {
+      st.plug_param = static_cast<std::uint8_t>(st.plug_param - 6);
+    } else {
+      st.plug_focus = 0;
+    }
+    return true;
+  }
+  return false;
+}
+}  // namespace
+
+int SampleEditScreen::count(const Model& model, const ViewState& view) const noexcept {
+  if (sedit_plug_page(view)) {
+    return plug_count(model, view);
+  }
+  return sedit_fx_page(view) ? static_cast<int>(kFxCount) : 2;
+}
+
+int SampleEditScreen::position(const ViewState& view) const noexcept {
+  if (sedit_plug_page(view)) {
+    return view.sedit.plug_focus != 0u ? view.sedit.plug_param : view.sedit.plug_sel;
+  }
+  return sedit_fx_page(view) ? view.sedit.fx_sel : view.sedit.edge;
+}
+
+bool SampleEditScreen::set_position(const Model& model, ViewState& view, int position) const noexcept {
+  if (sedit_plug_page(view)) {
+    return plug_set(model, view, position);
+  }
   if (sedit_fx_page(view)) {  // the FX page's rows
     const std::uint8_t row = static_cast<std::uint8_t>(position < 0 ? 0 : (position >= static_cast<int>(kFxCount) ? kFxCount - 1 : position));
     const bool moved = view.sedit.fx_sel != row;
@@ -139,6 +392,9 @@ bool SampleEditScreen::set_position(const Model&, ViewState& view, int position)
 }
 
 bool SampleEditScreen::step(const Model& model, ViewState& view, int dx, int dy) const noexcept {
+  if (sedit_plug_page(view)) {
+    return plug_step(model, view, dx, dy);
+  }
   if (sedit_fx_page(view)) {  // a list of rows: any arrow moves along it, round
     const int d = dy != 0 ? dy : dx;
     const int rows = static_cast<int>(kFxCount);
@@ -164,7 +420,9 @@ void SampleEditScreen::render(const Model& model, const ViewState& view, Rendere
   const bool has_sel = valid && st.b > st.a;
   const unsigned rate = inst != nullptr ? inst->sample_rate : 0u;
   const auto hidden = [&](const Rect& rect) { return covers(covered, rect.x, rect.y, rect.w, rect.h); };
-  const bool fx = sedit_fx_page(view);
+  const bool fx_only = sedit_fx_page(view);
+  const bool plug = sedit_plug_page(view);
+  const bool fx = fx_only || plug;  // both pages have the small waveform and none of the edit page's lines
   const Rect lane = {kLaneX, f.pane.y + kLaneTop, kLaneW, fx ? kLaneHFx : kLaneH};
 
   draw_chrome_bands(r, f, covered);
@@ -271,7 +529,7 @@ void SampleEditScreen::render(const Model& model, const ViewState& view, Rendere
       r.text(cell.x + 6 + 7 * cell_w, ty, text.c_str(), sel ? Color::SelText : (has_sel ? Color::Text : Color::TextDim));
     }
   }
-  if (fx && valid) {
+  if (fx_only && valid) {
     // OS-AUDIT-15: the FX page. FILTER's three rows on the left under its caption, COMPRESSOR's six on the right; the history under the filter's rows.
     const int top = ry + f.row_pitch + 8;
     for (unsigned row = 0; row < kFxCount; ++row) {
@@ -306,6 +564,9 @@ void SampleEditScreen::render(const Model& model, const ViewState& view, Rendere
       append_free_kb(room, model.samples->free_samples());
       r.text(kLaneX + 6, top + 6 * f.row_pitch + (f.row_pitch - cell_h) / 2, room.c_str(), Color::Text);
     }
+  }
+  if (plug) {
+    draw_plug_page(model, st, valid, r, f, covered, ry + f.row_pitch + 8);
   }
   if (!fx && valid && !hidden({kLaneX, ry + f.row_pitch + 8, kLaneW, f.row_pitch})) {
     core::FixedString<80> text;
@@ -345,10 +606,13 @@ void SampleEditScreen::render(const Model& model, const ViewState& view, Rendere
       append_uint(left, st.b - st.a);
       left.append(" frames");
     }
-    draw_info_line(r, f, left.c_str(), fx ? "up / down: row   encoder: value (shift: coarse)   Sample edit: back" : "left / right: edge   up / down: zoom   shift + up / down: AMP %");
+    draw_info_line(r, f, left.c_str(),
+                   plug ? "up / down: row   left / right: list, values   encoder: plugin or value" : (fx ? "up / down: row   encoder: value (shift: coarse)   Sample edit: next page" : "left / right: edge   up / down: zoom   shift + up / down: AMP %"));
   }
   if (!hidden(f.keys) && !view.overlay_keys()) {
-    ui::soft_keys(r, f.keys, key_row(*this, view, st.running ? (fx ? kSampleEditFxBusySoftKeys : kSampleEditBusySoftKeys) : (fx ? kSampleEditFxSoftKeys : kSampleEditSoftKeys)), 8);
+    const char* const* plain = plug ? (st.running ? kSampleEditPlugBusySoftKeys : kSampleEditPlugSoftKeys)
+                                    : (st.running ? (fx ? kSampleEditFxBusySoftKeys : kSampleEditBusySoftKeys) : (fx ? kSampleEditFxSoftKeys : kSampleEditSoftKeys));
+    ui::soft_keys(r, f.keys, key_row(*this, view, plain), 8);
   }
 }
 

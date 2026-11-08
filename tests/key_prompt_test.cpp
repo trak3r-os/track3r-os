@@ -305,7 +305,7 @@ test::KeyBinding resolve_in_overlay(app::OverlayId id, std::uint8_t key) {
 }
 
 constexpr app::OverlayId kModal[] = {app::OverlayId::Learn,       app::OverlayId::Navigator, app::OverlayId::PatternChooser, app::OverlayId::LengthChooser, app::OverlayId::JumpChooser, app::OverlayId::ModulePicker,
-                                     app::OverlayId::TextEntry,   app::OverlayId::StepPopup, app::OverlayId::Fill,           app::OverlayId::PlayMode,      app::OverlayId::Tools,       app::OverlayId::ExportProgress, app::OverlayId::SongTools, app::OverlayId::FirmwareUpdate, app::OverlayId::Help};
+                                     app::OverlayId::TextEntry,   app::OverlayId::StepPopup, app::OverlayId::Fill,           app::OverlayId::PlayMode,      app::OverlayId::Preset,     app::OverlayId::VerbMenu, app::OverlayId::Events,      app::OverlayId::ExportProgress, app::OverlayId::SongTools, app::OverlayId::PatternTools, app::OverlayId::FirmwareUpdate, app::OverlayId::Help};
 
 }  // namespace
 
@@ -420,6 +420,10 @@ TEST_CASE("key prompt: a dialog's row is its own keys, every other key blank, th
   CHECK(test::read_owner_row(model, view).label[0] == "TYPE");
   CHECK(test::read_owner_row(model, view).label[1] == "CAPS");
   CHECK(test::read_owner_row(model, view).label[6] == "CANCEL");
+  // OS-MODPRESET P4: a preset's name is a save like Save As: F8 reads SAVE and there is no AUTO.
+  view.text.target = app::TextEntryView::Target::Preset;
+  CHECK(test::read_owner_row(model, view).label[5].empty());
+  CHECK(test::read_owner_row(model, view).label[7] == "SAVE");
   // The step popup and the export progress: F8 CANCEL alone.
   for (const app::OverlayId id : {app::OverlayId::StepPopup, app::OverlayId::ExportProgress}) {
     view.overlay = id;
@@ -435,6 +439,15 @@ TEST_CASE("key prompt: a dialog's row is its own keys, every other key blank, th
     const test::RowRead row = test::read_owner_row(model, view);
     CHECK(row.label[0] == "SELECT");
     CHECK(row.label[7] == "BACK");
+  }
+  // The PRESET list (OS-INSFX-ABI2 A9, OS-MODPRESET P4): LOAD and BACK when it holds a preset, Shift + F5 SAVE always (the list is only open over a bound module's page); a bare model has no module, so its list is empty and F1 reads blank (the doctests of module_ui_test and mixer_inserts_test hold the live case).
+  view.overlay = app::OverlayId::Preset;
+  {
+    const test::RowRead row = test::read_owner_row(model, view);
+    CHECK(row.label[0].empty());
+    CHECK(row.label[7] == "BACK");
+    const test::RowRead shifted = test::read_owner_row(model, view, true);
+    CHECK(shifted.label[4] == "SAVE");  // Shift + F5
   }
   // Learn without a target and without bindings: BACK alone; its CLEAR ALL asks and then reads CLR ALL? inverted.
   model.device.init(core::ParamKind::Device);  // (a bare Model's settings block holds whatever the stack held until init(): its Learn store must start empty)
@@ -660,4 +673,20 @@ TEST_CASE("key prompt: the Song TOOLS dialog owns the row: F1 APPLY, F8 BACK, ev
   char keys[app::kKeysLineChars + 1];
   CHECK(app::describe_keys(model, view, keys, sizeof keys) > 0u);
   CHECK(std::string(keys) == "F1:APPLY,F8:BACK");
+}
+
+TEST_CASE("key prompt: the TOOLS menu row says F1 RUN, F6 EVENTS and F8 BACK, also on an empty APPS page (OS-TOOLSDEDUP)") {
+  app::Model model;
+  app::ViewState view;
+  view.screen = ScreenId::Pattern;
+  view.overlay = app::OverlayId::VerbMenu;
+  test::RowRead row = test::read_owner_row(model, view);
+  CHECK(row.marked);
+  CHECK(row.label[0] == "RUN");
+  CHECK(row.label[5] == "EVENTS");
+  CHECK(row.label[7] == "BACK");
+  view.verb_menu.apps = true;  // no module system, so no tool app
+  row = test::read_owner_row(model, view);
+  CHECK(row.label[5] == "EVENTS");
+  CHECK(row.label[7] == "BACK");
 }

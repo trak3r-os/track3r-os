@@ -79,14 +79,13 @@ wait 100
 assert state screen=APP
 
 # QA-MOD-123 (OS-APPUX S2, 3.2): the one grammar of an app page, on Rhythm Gen opened from Pattern F7 TOOLS at the cursor (track 1, row 1: one lane of 16 rows). The OS puts no cursor over the app's rows: the app moves its own with
-# the keys it gets. No line of keys under the rows (the key row names APPLY and VARY). TOOLS lists the four fixed entries, then chords, humanize, morph, mutate, rhythmgen: nine presses of Down.
+# the keys it gets. No line of keys under the rows (the key row names APPLY and VARY). the APPS page lists the tool apps only (OS-TOOLSDEDUP): chords, humanize, morph, mutate, rhythmgen: four presses of Down.
 action nav.screen 0
 wait 20
 tap f7
+pad 15
 wait 20
-tap down 8
-tap f1
-wait 50
+tap down 4
 tap f1
 wait 100
 assert state screen=APP
@@ -165,31 +164,31 @@ tap f8
 wait 50
 assert state screen=MODULES
 
-# Humanize (eight rows: TIME, VOL, SEED, then the five target rows, TRACKS included) and Chords (the target rows are its second page, Right): the same rows in the same grammar.
+# Humanize (OS-PTOOLS2 S6, QA-PAT-461): a small tool app opened from TOOLS runs in the TOOLS panel beside the grid (its three rows, the block as the target): Down stops at SEED, the encoder moves it. F8 comes back (F1 would APPLY at once, with no confirm: tests/app_tools_panel_test.cpp; it selects what it wrote, so the scenario does not press it).
 action nav.screen 0
-wait 20
+wait 6000
 tap f7
+pad 15
 wait 20
-tap down 5
-tap f1
-wait 50
+tap up 20
+tap down 1
 tap f1
 wait 100
 assert state screen=APP
-tap down 4
+tap down 5
 encoder 2
 wait 20
-snap qa_mod_132_humanize
+snap qa_pat_461_panel_humanize
 tap f8
 wait 50
 assert state screen=PATTERN
+# Chords (eight rows, so the APP screen with the target rows as its second page, Right): the same rows in the same grammar.
 action nav.screen 0
 wait 20
 tap f7
+pad 15
 wait 20
-tap down 4
-tap f1
-wait 50
+tap up 20
 tap f1
 wait 100
 assert state screen=APP
@@ -200,14 +199,14 @@ tap f8
 wait 50
 assert state screen=PATTERN
 
-# QA-MOD-133 (OS-APPUX S5, 3.7): Mutate and Morph take an INSTRUMENT row (the last): the instrument the Pattern shows (01), moved inside the app by the encoder, Delete the launch instrument.
+# QA-MOD-133 (OS-APPUX S5, 3.7): Mutate and Morph take an INSTRUMENT row (the last): the instrument the Pattern shows (01), moved inside the app by the encoder, Delete the launch instrument. They keep the APP screen (OS-PTOOLS2 S6: only Humanize runs in the TOOLS panel).
 action nav.screen 0
-wait 20
+wait 6000
 tap f7
+pad 15
 wait 20
-tap down 7
-tap f1
-wait 50
+tap up 20
+tap down 3
 tap f1
 wait 100
 assert state screen=APP
@@ -221,10 +220,10 @@ assert state screen=PATTERN
 action nav.screen 0
 wait 20
 tap f7
+pad 15
 wait 20
-tap down 6
-tap f1
-wait 50
+tap up 20
+tap down 2
 tap f1
 wait 100
 assert state screen=APP
@@ -232,6 +231,64 @@ tap down 2
 encoder 1
 wait 20
 snap qa_mod_133_morph
+tap f8
+wait 50
+assert state screen=PATTERN
+
+# OS-APPSNAV (QA-MOD-252..254): Shift + Pattern lists the module apps that are not tools (the TOOLS APPS page keeps the others): loudness, midimon, scope, tuner (smfexport and tapcalc are tools).
+# F7 and Pattern close the list with no view change; F1 starts the chosen app the way Modules F1 LAUNCH does (QA-MOD-253), and leaving the app lands on MODULES.
+assert state screen=PATTERN overlay=NONE
+press shift
+tap pattern
+release shift
+wait 20
+assert state screen=PATTERN overlay=MODULE_PICKER keys=~F1:LAUNCH
+snap qa_mod_252_apps_list
+tap down 1
+wait 20
+snap qa_mod_252_apps_list_down
+press shift
+tap pattern
+release shift
+wait 20
+assert state screen=PATTERN overlay=NONE
+press shift
+tap pattern
+release shift
+wait 20
+assert state overlay=MODULE_PICKER
+tap pattern
+wait 20
+assert state screen=PATTERN overlay=NONE
+press shift
+tap pattern
+release shift
+wait 20
+tap f1
+wait 100
+assert state screen=APP overlay=NONE
+snap qa_mod_253_apps_launch
+tap f8
+wait 50
+assert state screen=MODULES
+tap pattern
+wait 20
+assert state screen=PATTERN
+
+# OS-PTOOLS2 S6 fold (QA-PAT-464): F1 in the panel shows the app's answer under the footer (the result, or why it did nothing). Last in the file: APPLY selects what it wrote.
+action nav.screen 0
+wait 6000
+tap f7
+pad 15
+wait 20
+tap up 20
+tap down 1
+tap f1
+wait 100
+assert state screen=APP
+tap f1
+wait 100
+snap qa_pat_464_panel_answer
 tap f8
 wait 50
 assert state screen=PATTERN

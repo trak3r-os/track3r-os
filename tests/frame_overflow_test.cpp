@@ -2,6 +2,7 @@
 // A frame that does not fit is dropped, never shown truncated: builder -> RasterDisplay -> Simulator -> scenario.
 #include <doctest/doctest.h>
 
+#include <o3os/core/action.h>
 #include <o3os/eve/display_list_builder.h>
 #include <o3os/eve/dl.h>
 #include <o3os/sim/eve_raster.h>
@@ -162,8 +163,10 @@ TEST_CASE("overflow: run_scenario stops on the first frame that does not fit and
     CHECK(snapshots == 0);
   }
 
-  // A later frame does not fit: the sink takes exactly the initial frame's words, and F8 (UNDO) with nothing to undo posts a notification, which makes the
-  // list longer (its text is drawn in the info line). The grid is drawn from tiles, one word a field, so moving the cursor does not change the size of the list.
+  // A later frame does not fit: the sink takes exactly the initial frame's words, and extending the selection by a row paints the block (a rectangle a row), which makes the list longer. The grid
+  // is drawn from tiles, one word a field, so moving the cursor does not change the size of the list.
+  // (OS-INFOLINE: this was F8 (UNDO) with nothing to undo, whose notification replaces the info line; "pads NOTES" now makes that line the longer one. A written note and a dialog over the grid
+  // both shorten the list: a note's fields are one word each, an empty instrument or volume two, and a dialog culls what it covers.)
   // (OS-FU3: this was a pad in the Instr column naming instrument 2, one glyph longer than 1; the strip's CPU and MEM now take the room that made the longer name fit.)
   // (OS-METRO: the METRO chip, on by default, is part of the info line that the notification replaces, so with it on the notification is no longer the longer list: the case runs with METRO Off.)
   std::size_t first = 0;
@@ -172,14 +175,14 @@ TEST_CASE("overflow: run_scenario stops on the first frame that does not fit and
     CHECK(probe.app().device_settings().set(model::device_setting::MetroMode, 0.0f) == model::Status::Ok);
     probe.step();
     first = probe.display().last_frame_words();
-    probe.tap(app::Button::F8);
+    probe.action(core::action_id("select.extend"), 1);
     CHECK(probe.display().last_frame_words() > first);  // the premise of this case
   }
   {
     sim::Simulator simulator(eve::kMaxDisplayListWords, first);
     CHECK(simulator.app().device_settings().set(model::device_setting::MetroMode, 0.0f) == model::Status::Ok);
     std::string error;
-    const auto cmds = parse("snap a\ntap f8\nsnap b\n");
+    const auto cmds = parse("snap a\naction select.extend 1\nsnap b\n");
     CHECK_FALSE(sim::run_scenario(cmds, simulator, count, error));
     CHECK(snapshots == 1);  // "a" was taken, "b" never
     CHECK(error.find("line ") == 0);

@@ -116,6 +116,29 @@ PointsRec crop_points(const PointsRec& in, std::uint32_t frames, std::uint32_t a
   return out;
 }
 
+PointsRec insert_points(const PointsRec& in, std::uint32_t frames, std::uint32_t a, std::uint32_t b, std::uint32_t prepend, std::uint32_t append) noexcept {
+  if (frames == 0u || b <= a || b > frames || (prepend == 0u && append == 0u) || prepend > 0x3FFFFFFFu - frames || append > 0x3FFFFFFFu - frames - prepend) {
+    return in;
+  }
+  const std::uint32_t n = frames + prepend + append;
+  PointsRec out;
+  const std::uint16_t p[kPointCount] = {in.points.start, in.points.loop_start, in.points.loop_end, in.points.end};
+  std::uint16_t q[kPointCount];
+  const unsigned k = in.slice_count > kMaxSliceCount ? kMaxSliceCount : in.slice_count;
+  for (unsigned i = 0; i < kPointCount + k; ++i) {  // one loop and one remap site for the points, then the slices
+    const std::uint32_t f = point_to_frame(i < kPointCount ? p[i] : in.slices[i - kPointCount], frames);
+    const unsigned to = frame_to_point(f <= a ? f : (f < b ? f + prepend : f + prepend + append), n);
+    if (i < kPointCount) {
+      q[i] = static_cast<std::uint16_t>(to);
+    } else {
+      (void)slice_add(out.slices, out.slice_count, to);
+    }
+  }
+  out.points = Points{q[0], q[1], q[2], q[3]};
+  (void)set_point(out.points, PointId::Start, out.points.start);  // an order that the rounding broke is made valid
+  return out;
+}
+
 // ---- Slices -----------------------------------------------------------------------------------------------------------------------------------
 
 unsigned slice_add(std::uint16_t* at, std::uint8_t& count, unsigned point, unsigned cap) noexcept {

@@ -235,5 +235,5 @@ const o3m_ui kUi = {O3M_UI_SIZE(SID_ABI_MINOR), nullptr, nullptr, view_draw, nul
 }  // namespace
 
 extern "C" O3M_EXPORT const o3m_module o3m_entry __attribute__((section(".o3m_entry"))) = {
-    SID_ENTRY_HEAD, sizeof(Voice), SID_ENTRY_PARAMS, init, render, set_param, note_on, note_off, shutdown, SID_ENTRY_VIEWS(&kUi), SID_ENTRY_TAIL(pitch),
+    SID_ENTRY_HEAD, sizeof(Voice), SID_ENTRY_PARAMS, init, render, set_param, note_on, note_off, shutdown, SID_ENTRY_VIEWS(&kUi), SID_ENTRY_TAIL(pitch), SID_ENTRY_FX,
 };

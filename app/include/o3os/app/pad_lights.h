@@ -91,7 +91,8 @@ void dj_pattern_roles(const Model& model, const ViewState& view, bool blink, Pad
 
 // The LEDs of a fixed PIANO / ISO / ... mode (pad_layer.h): view.padmode.fixed() says which. A note pad: the root Front, the other notes of the scale Back, a note outside the scale
 // and a pad with no note Off; the pattern jumps and the octave pads Back (the octave ones Off at the end of 0..9). STEP: step_roles. PATS: Back = has content, Front = playing (stopped:
-// the pattern being edited), blinking Front / Off = queued (`blink`: the phase, blink_on). VU: column c is track c, a 4-row bar from the bottom of the track's published peak (the board's
+// the pattern being edited), blinking Front / Off = queued (`blink`: the phase, blink_on). NOTES (OS-NOTESLED): the board's own notes (view.edit.pads) lit the same way, the root Front,
+// the others of the scale Back, a note outside the scale Off; with SCALE LOCK the board holds scale notes only, so only the roots stand out. VU: column c is track c, a 4-row bar from the bottom of the track's published peak (the board's
 // MeterState on the DbScale: a quarter of the scale a row), the top lit pad Front; FADERS: the same pads lit to the track's volume (a row is 25 %).
 void mode_roles(const Model& model, const ViewState& view, const PatternContent& content, bool blink, PadRole (&roles)[48]) noexcept;
 

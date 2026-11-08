@@ -233,19 +233,23 @@ TEST_CASE("upload: the simulator uploads the faces, icons and tiles through the 
   fake.record_uploads(kPlenty);
   CHECK(o3os::sim::load_assets(fake) == UploadResult::Ok);
   CHECK(fake.rejected_uploads() == 0u);
-  // The faces go first, in order, and each is sent from the generated bitmap itself: word aligned (the generator
-  // declares it, ADR 0011), at its word-aligned RAM_G address, in chunks of at most the cap (the 16x32 face needs two).
+  // The faces go first, in order. OS-FLASHDIET A4: each is inflated from its deflated stream through the staging
+  // chunk, so every upload carries the inflated bytes: the stream is word aligned (the generator declares it, ADR
+  // 0011), the RAM_G address is word aligned, each chunk is at most the cap, and the bytes are the face's raw bitmap.
   std::size_t at = 0;
   for (unsigned i = 0; i < o3os::ui::kFontCount; ++i) {
-    const o3os::ui::FontFace& face = o3os::ui::font_face(static_cast<o3os::ui::Font>(i));
-    CHECK(reinterpret_cast<std::uintptr_t>(face.bitmap) % kUploadAlign == 0);
+    const o3os::ui::Font font = static_cast<o3os::ui::Font>(i);
+    const o3os::ui::FontFace& face = o3os::ui::font_face(font);
+    CHECK(reinterpret_cast<std::uintptr_t>(face.z) % kUploadAlign == 0);
     CHECK(face.ram_g_addr % kUploadAlign == 0);
+    std::vector<std::uint8_t> px(face.bitmap_bytes);
+    CHECK(o3os::ui::face_bitmap(font, px.data(), px.size()));
     std::size_t sent = 0;
     while (sent < face.bitmap_bytes && at < fake.uploads().size()) {
       const auto& u = fake.uploads()[at++];
       CHECK(u.bytes.size() <= kMaxUploadBytes);
       CHECK(u.addr == face.ram_g_addr + sent);
-      CHECK(std::memcmp(u.bytes.data(), face.bitmap + sent, u.bytes.size()) == 0);
+      CHECK(std::memcmp(u.bytes.data(), px.data() + sent, u.bytes.size()) == 0);
       sent += u.bytes.size();
     }
     CHECK(sent == face.bitmap_bytes);
@@ -260,8 +264,11 @@ TEST_CASE("upload: the simulator uploads the faces, icons and tiles through the 
   RasterDisplay display(raster);
   CHECK(o3os::sim::load_assets(display) == UploadResult::Ok);
   for (unsigned i = 0; i < o3os::ui::kFontCount; ++i) {
-    const o3os::ui::FontFace& face = o3os::ui::font_face(static_cast<o3os::ui::Font>(i));
-    CHECK(std::memcmp(raster.ram_g() + face.ram_g_addr, face.bitmap, face.bitmap_bytes) == 0);
+    const o3os::ui::Font font = static_cast<o3os::ui::Font>(i);
+    const o3os::ui::FontFace& face = o3os::ui::font_face(font);
+    std::vector<std::uint8_t> px(face.bitmap_bytes);
+    CHECK(o3os::ui::face_bitmap(font, px.data(), px.size()));
+    CHECK(std::memcmp(raster.ram_g() + face.ram_g_addr, px.data(), face.bitmap_bytes) == 0);
   }
 }
 

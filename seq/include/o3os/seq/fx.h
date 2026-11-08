@@ -99,6 +99,26 @@ inline constexpr std::uint8_t kTrkGlobalVolSlide = 61;  // S3M Wxy (XM Hxy)
 inline constexpr std::uint8_t kTrkPanbrello = 62;     // S3M Yxy (IT Yxy)
 inline constexpr std::uint8_t kCoreLast = 62;
 inline constexpr std::uint8_t kEngineFirst = 128;
+// OS-CEWTENV W6a: the tracker-ce step FX w (43) and y (44) are stored as the model ids 96 and 97 (ADR 0004 amendment 3). They are voice FX 0..255 of their own
+// groups (the two nibbles x, y: docs/specs/OS-CEWTENV.md F9, F10, A7); the table below stays dense 0..62, so the lookups branch on these two (W6b: and on 98, z).
+inline constexpr std::uint8_t kAmpEnvFx = 96;      // w: the amp envelope slot's attack and decay or the amp WT slot's duration scale and warp offset
+inline constexpr std::uint8_t kFilterEnvFx = 97;   // y: the cutoff envelope slot's attack and decay
+inline constexpr std::uint8_t kGranLenFx = 98;     // z (W6b): the grain length of a granular instrument, 0..100 (F11); fx[0] wins (the group resolves column 0 first)
+
+// OS-CECHANCE C1: the Chance conditions beyond 0..100 (docs/specs/OS-CECHANCE.md). Verified parity (tracker-ce@7fd6c2c:core/source/mtSequencer.h:260-269, evaluation
+// mtSequencer.cpp:2185-2222): 0..100 is a probability; 101 Group with Last (plays when the last condition of the track fired), 102 Not Last (when it did not), 103..138 Play N / Skip M
+// and 139..174 Skip N / Play M (N, M 1..6, counted in passes of the pattern).
+inline constexpr std::uint8_t kChanceProbMax = 100;
+inline constexpr std::uint8_t kChanceMax = 174;
+inline constexpr std::uint8_t kChanceWithLast = 101;
+inline constexpr std::uint8_t kChanceNotLast = 102;
+inline constexpr std::uint8_t kChanceCycleFirst = 103;  // 103..138 Play N / Skip M, 139..174 Skip N / Play M
+// A cycle value v (103..174) decodes to its N, M: i = v - 103 (or v - 139), N = 1 + i / 6, M = 1 + i % 6.
+constexpr void chance_cycle(std::uint8_t v, std::uint32_t& n, std::uint32_t& m) noexcept {
+  const std::uint32_t i = v >= 139u ? static_cast<std::uint32_t>(v) - 139u : static_cast<std::uint32_t>(v) - 103u;
+  n = 1u + i / 6u;
+  m = 1u + i % 6u;
+}
 }  // namespace fx
 
 // Open item (spec 005c, "FX 37"): the triage fixes slot 37 as CC F; what the official firmware sends is an open research question. One constant.
@@ -130,6 +150,9 @@ enum class FxGroup : std::uint8_t {
   BitDepth,      // 39
   Tune,          // no step FX: the performance layer's TUNE alone (OS-PERFFX P5, appended like the two above)
   SampleEnd,     // no step FX: the performance layer's SMP END alone (OS-PERFFX P7; SMP POS uses Position, whose step FX 22 has no consumer)
+  AmpEnvFx,      // 96 (tracker-ce w, OS-CEWTENV W6a); mirrored as audio::kModGroupAmpEnv = 23
+  FilterEnvFx,   // 97 (tracker-ce y); audio::kModGroupFilterEnv = 24
+  GranLenFx,     // 98 (tracker-ce z, W6b); audio::kModGroupGranLen = 25
   kCount
 };
 inline constexpr std::uint32_t kFxGroupCount = static_cast<std::uint32_t>(FxGroup::kCount);
@@ -151,7 +174,7 @@ inline constexpr FxInfo kFxInfo[kFxInfoCount] = {
     {FxKind::Row, FxGroup::None, 0, 0},                  // 1 Off
     {FxKind::Row, FxGroup::None, 0, 100},                // 2 Micro-move
     {FxKind::Row, FxGroup::None, 0, 53},                 // 3 Roll
-    {FxKind::Row, FxGroup::None, 0, 100},                // 4 Chance
+    {FxKind::Row, FxGroup::None, 0, 174},                // 4 Chance (OS-CECHANCE C1: 0..100 a probability, 101..174 the conditions of ADR 0004 amendment 4)
     {FxKind::Row, FxGroup::None, 0, 100},                // 5 Random note
     {FxKind::Row, FxGroup::None, 0, 47},                 // 6 Random instrument
     {FxKind::RowVoice, FxGroup::Volume, 0, 100},         // 7 Random velocity
@@ -219,6 +242,9 @@ constexpr FxKind fx_kind(std::uint8_t type) noexcept {
   if (type < kFxInfoCount) {
     return kFxInfo[type].kind;
   }
+  if (type == fx::kAmpEnvFx || type == fx::kFilterEnvFx || type == fx::kGranLenFx) {
+    return FxKind::Voice;
+  }
   return fx_is_engine(type) ? FxKind::Voice : FxKind::Inert;
 }
 
@@ -226,6 +252,15 @@ constexpr FxKind fx_kind(std::uint8_t type) noexcept {
 constexpr FxGroup fx_group(std::uint8_t type, std::uint32_t column) noexcept {
   if (type < kFxInfoCount) {
     return kFxInfo[type].group;
+  }
+  if (type == fx::kAmpEnvFx) {
+    return FxGroup::AmpEnvFx;
+  }
+  if (type == fx::kFilterEnvFx) {
+    return FxGroup::FilterEnvFx;
+  }
+  if (type == fx::kGranLenFx) {
+    return FxGroup::GranLenFx;
   }
   return fx_is_engine(type) ? (column == 0u ? FxGroup::Engine0 : FxGroup::Engine1) : FxGroup::None;
 }

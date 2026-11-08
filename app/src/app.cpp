@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <o3os/app/app.h>
+#include <o3os/app/metro_sync.h>
 #include <o3os/app/mixer_view.h>
 
 #include "action_handlers.h"
@@ -22,6 +23,7 @@
 #include <o3os/app/text_format.h>
 #include <o3os/app/transient.h>
 #include <o3os/app/vel_scale.h>
+#include <o3os/formats/wav_sample.h>
 #include <o3os/model/params.h>
 
 #include <cstring>
@@ -190,6 +192,33 @@ void App::run_once() noexcept {
     if (event.kind == core::InputKind::Pad && event.value == 0 && state_.edit.step_hold.row >= 0) {
       (void)invoke(core::action_id("pads.step_up"), event.id);  // OS-PADS-B: a STEP pad's release ends its hold, and clears a lit step that was only tapped
     }
+    // OS-ENCLEARN: Instr + FX1 held, the encoder turned: the encoder's target moves, ahead of the bindings and of every other use of the encoder (a held Vol or Fx, the DJ pads below). Both keys are consumed, so
+    // the turn leaves no tap, no hold popup and no column jump behind. With either key let go the gesture ends: its STEP undo unit closes (sync_take) and the next one says "HAS NO FX" again.
+    if (event.kind == core::InputKind::Button && (event.id == static_cast<std::uint8_t>(Button::Instr) || event.id == static_cast<std::uint8_t>(Button::Vol))) {
+      const std::uint8_t bit = event.id == static_cast<std::uint8_t>(Button::Instr) ? 1u : 2u;
+      enc_keys_ = static_cast<std::uint8_t>(event.value != 0 ? (enc_keys_ | bit) : (enc_keys_ & ~bit));
+      if ((enc_keys_ & 3u) == 3u && state_.overlay == OverlayId::None && state_.screen != ScreenId::ModuleApp) {
+        enc_keys_ |= 4u;  // the pair went down: this gesture owns the encoder until both keys are up
+      } else if ((enc_keys_ & 3u) == 0u) {
+        enc_keys_ = 0;
+      }
+    }
+    if (event.kind == core::InputKind::Encoder && (enc_keys_ & 4u) != 0 && state_.overlay == OverlayId::None && state_.screen != ScreenId::ModuleApp) {
+      if ((enc_keys_ & 3u) == 3u) {
+        gestures_.consume(static_cast<std::uint8_t>(Button::Instr));
+        gestures_.consume(static_cast<std::uint8_t>(Button::Vol));
+        state_.edit.enc_take = true;  // STEP only keeps the undo group open (rec_take_sync); LIVE's take is open already
+        sync_take();
+        (void)invoke(core::action_id("enc.turn"), event.value);
+      }  // else one key was let go mid-gesture: the turn is swallowed (no Vol hold-encoder edit of the cursor step) until both are up
+      continue;
+    }
+    if (event.kind == core::InputKind::Button && event.value == 0 && (event.id == static_cast<std::uint8_t>(Button::Instr) || event.id == static_cast<std::uint8_t>(Button::Vol)) &&
+        (state_.edit.enc_take || state_.edit.enc_said)) {
+      state_.edit.enc_take = false;
+      state_.edit.enc_said = false;
+      sync_take();
+    }
     if (event.kind == core::InputKind::Encoder && state_.dj.filt_pad && state_.overlay == OverlayId::None && state_.dj_page()) {
       (void)invoke(core::action_id("dj.filter"), event.value);  // the DJ page's FILT pad held + the encoder: the filter, ahead of the bindings (a pad has no HoldEncoder; OS-DJ A2)
       continue;
@@ -225,8 +254,9 @@ void App::run_once() noexcept {
     // OS-QAFIX-E-PERF-08: Master and Song keep the Perform mode on (poll_perform), so a pad held across the change to either still gets its release there: its slot is let go. Only a pad whose press went to
     // the bank (PerformBoard::pads) is forwarded: another pad of the same slot is not, its release would clear the slot's held bit and skip the end of the FX that the first pad started.
     const std::uint64_t perform_bit = event.kind == core::InputKind::Pad && event.id < kPadCount ? std::uint64_t{1} << event.id : 0u;
-    const bool perform_held = perform_ != nullptr && (state_.screen == ScreenId::Mixer || state_.screen == ScreenId::Song) && (perform_->pads & perform_bit) != 0u;
-    if (event.kind == core::InputKind::Pad && event.value == 0 && !tracks_pad && (state_.screen == ScreenId::Perform || perform_held)) {
+    // OS-PERFREMIX R2 (H9): on Perform too, only a pad whose press went to the bank reaches perform.pad_up: a pad that the DJ page took no longer ends a slot at its release.
+    const bool perform_held = perform_ != nullptr && (state_.screen == ScreenId::Perform || state_.screen == ScreenId::Mixer || state_.screen == ScreenId::Song) && (perform_->pads & perform_bit) != 0u;
+    if (event.kind == core::InputKind::Pad && event.value == 0 && !tracks_pad && perform_held) {
       (void)invoke(core::action_id("perform.pad_up"), event.id);  // a Perform pad's release reloads its slot and lets go of it (OS-011b)
     }
     if (perform_ != nullptr && event.value == 0) {
@@ -256,6 +286,13 @@ void App::run_once() noexcept {
     const core::GestureHints hints{&hint_ctx, hint_wants, hint_chord, hint_hold_encoder};
     core::GestureList gestures;
     gestures_.feed(event, hints, gestures);
+    if (event.kind == core::InputKind::Button && event.value != 0 && state_.overlay == OverlayId::None &&
+        (event.id == static_cast<std::uint8_t>(Button::Instr) || event.id == static_cast<std::uint8_t>(Button::Vol)) &&
+        (enc_keys_ & 3u) == 3u && state_.screen != ScreenId::ModuleApp) {
+      // OS-ENCLEARN: Instr + FX1 together is the encoder's target; a plain press of the pair is nothing, so neither key gives its own tap or hold (no column jump, no popup).
+      gestures_.consume(static_cast<std::uint8_t>(Button::Instr));
+      gestures_.consume(static_cast<std::uint8_t>(Button::Vol));
+    }
     dispatch_gestures(gestures);
   }
   if (drained) {
@@ -285,6 +322,15 @@ void App::run_once() noexcept {
   if (state_.step_preview && state_.screen != ScreenId::Pattern) {
     stop_step_preview();  // another screen came up under the held key
   }
+  if (state_.song.preview.active() && state_.screen != ScreenId::Song && song_preview_end(session_.state_editor(), state_, params_out_)) {
+    dirty_ = true;  // OS-SONG3 S4: leaving the Song screen ends a PREVIEW audition (the saved solo set comes back, once)
+  }
+  if (state_.song.preview_resync && model_.project != nullptr) {
+    // OS-SONG3 S4: a Solo push that found the ring full left the engine a pass behind: re-send every strip's mute / solo until they all go.
+    if (song_solo_resync(*model_.project, params_out_)) {
+      state_.song.preview_resync = false;
+    }
+  }
   poll_hold();
   poll_take_pads();
   poll_head();
@@ -298,6 +344,8 @@ void App::run_once() noexcept {
   poll_pad_offset();
   poll_wave();
   poll_sedit();
+  poll_ptfx();
+  apply_ptfx();
   poll_samples();
   poll_peaks();
   poll_recorder();
@@ -415,6 +463,16 @@ bool App::feed_module_app(const core::InputEvent& event) noexcept {
       if (event.id == static_cast<std::uint8_t>(Button::F8) || event.id == static_cast<std::uint8_t>(Button::Play)) {
         return false;  // OS-KEYROWDLG S5: F8 is the page's BACK and Play the transport's, for every app, a 1.1-1.8 one included (it no longer gets either: a change for the apps already on a card): the bindings of the page act, the app never sees them (nor their release, which it never had)
       }
+      if (state_.modules.panel && event.value != 0 && event.id == static_cast<std::uint8_t>(Button::Down) && state_.modules.app_row + 1u >= mu.app_param_count()) {
+        return false;  // OS-PTOOLS2 S6: the panel shows the declared rows only; the app's own rows after them (the target) are not drawn, so its cursor does not go there (a press: a release always goes on)
+      }
+      if (state_.modules.panel && event.value != 0 && !shift) {  // (the app's grammar moves its row the same way: Up stops at 0, Down at the last declared row, held above)
+        if (event.id == static_cast<std::uint8_t>(Button::Up) && state_.modules.app_row != 0u) {
+          --state_.modules.app_row;
+        } else if (event.id == static_cast<std::uint8_t>(Button::Down)) {
+          ++state_.modules.app_row;
+        }
+      }
       const bool is_shift = event.id == static_cast<std::uint8_t>(Button::Shift);
       const std::uint64_t bit = event.id < 64u ? std::uint64_t{1} << event.id : 0u;
       if (event.value != 0) {
@@ -531,6 +589,12 @@ void App::reset_input() noexcept {
   stop_hold();
   state_.inst_pads = 0;
   tap_pads_ = 0;  // OS-PATTEMPO: a tap's release may have been lost too: the next release of that pad is a normal one
+  enc_keys_ = 0;  // OS-ENCLEARN: likewise
+  if (state_.edit.enc_take || state_.edit.enc_said) {
+    state_.edit.enc_take = false;  // and the encoder gesture is over: its STEP undo group closes
+    state_.edit.enc_said = false;
+    sync_take();
+  }
   if (perform_ != nullptr) {
     perform_->pads = 0;  // OS-QAFIX-E-PERF-08: (the notes_off below and the bank's own reset let go of the slots)
   }
@@ -606,9 +670,18 @@ void App::poll_play_position() noexcept {
   if (v.playing != old.playing && state_.playing != v.playing) {
     state_.playing = v.playing;
     dirty_ = true;
-    if (!v.playing && pattern_mode_edits(state_.mode[screen_index(ScreenId::Pattern)]) && !state_.edit.rec_free) {
-      (void)pattern_set_mode(state_, PatternMode::Browse);  // OS-RECMODE2: the transport stopped by itself (the end of a song): LIVE ends as with Play (STEP stays); the take closes in sync_take
+    if (!v.playing) {
+      // OS-SONG3 S4: the transport stopped by itself (an external MIDI Stop, the end of a song that does not loop): a PREVIEW audition ends with it.
+      (void)song_preview_end(session_.state_editor(), state_, params_out_);
+      if (pattern_mode_edits(state_.mode[screen_index(ScreenId::Pattern)]) && !state_.edit.rec_free) {
+        (void)pattern_set_mode(state_, PatternMode::Browse);  // OS-RECMODE2: the transport stopped by itself (the end of a song): LIVE ends as with Play (STEP stays); the take closes in sync_take
+      }
     }
+  }
+  // OS-MIDICCMAP S4: the run stopped, so the mapped track CCs (41..48) may send the same value again on the next run. On the sequencer's own stop edge, outside the badge's block above: the Stop key sets
+  // state_.playing at once (pattern_actions.cpp, song_actions.cpp), so when the sequencer's stop arrives that block is skipped and a clear inside it would never run.
+  if (old.playing && !v.playing && perform_ != nullptr) {
+    perform_->clear_cc_pattern();
   }
   // OS-PATSWITCH: a pick of the held PATTERN chooser waits for its boundary. It is over when the pattern shows (the landing), when the transport stops, when another pattern starts, and after a few step changes without
   // it (a guard against a command the sequencer never took); until then the view is not pulled back to the pattern that still plays (pattern_follow_play).
@@ -813,7 +886,7 @@ void App::poll_pad_offset() noexcept {
 // The chain in force. When it differs from the one the gesture layer last saw, a screen, a mode or an overlay has
 // changed: what the buttons held down mean is no longer what they meant, so the gesture layer forgets them, with two
 // exceptions that are still physically down: Shift (held across a screen change, a mode change or an overlay opening, it
-// still modifies the next key: Shift + Pattern opens the Navigator, and the jumps in it want Shift) and a button whose Hold has fired
+// still modifies the next key: Shift + Pattern opens the apps list, and the jumps in a list want Shift) and a button whose Hold has fired
 // (that Hold may be what changed the context, a held F1 opening a chooser, and its release still has to arrive as HoldEnd). A Shift whose release was lost is
 // therefore not cleared by a context change; reset_input() clears it.
 core::ContextChain App::sync_context() noexcept {
@@ -1141,6 +1214,13 @@ void App::report_jobs() noexcept {
       }
       continue;
     }
+    if (static_cast<int>(slot) == ptfx_slot_) {  // the PLUGINS page's scan: quiet, the page shows it (poll_ptfx redraws on a change)
+      if (st != core::SlotState::Running) {
+        ptfx_slot_ = -1;
+        session_.jobs.release(slot);
+      }
+      continue;
+    }
     if (saves_ != nullptr && (saves_->silent_slot(slot) || (saves_->quiet_slot(slot) && st != core::SlotState::Failed))) {  // the device settings' own save: not on the strip unless it fails; the RECENT file's: never (OS-FILES part B)
       if (st != core::SlotState::Running) {
         session_.jobs.release(slot);
@@ -1222,6 +1302,7 @@ void App::report_jobs() noexcept {
       state_.sedit.cancel = false;
       dirty_ = true;
       nothing_done = finish_edit(st);
+      edit_ptfx_ = false;
     }
     if (static_cast<int>(slot) == preview_slot_) {  // a failed audition read
       preview_slot_ = -1;
@@ -1265,7 +1346,9 @@ void App::report_jobs() noexcept {
           suffix.append(": ");
           suffix.append(why);
         }
-        if (std::strcmp(why, kSsndBeforeCommText) == 0) {  // OS-LOADCH: this reason is the whole strip (after the name it would be cut to nothing); every other reason keeps the name
+        // OS-LOADCH: the SSND reason is the whole strip (after the name it would be cut to nothing); every other reason keeps the name.
+        // OS-CEPTFX S3b: a plugin's own strip text (3.3, "PLUGIN ...") is the whole strip too.
+        if (std::strcmp(why, kSsndBeforeCommText) == 0 || std::strncmp(why, "PLUGIN ", 7) == 0) {
           text.assign(why);
         } else {
           compose(text, job->name(), suffix.c_str());
@@ -1774,6 +1857,12 @@ void App::shot_notice(const char* text, std::uint32_t ttl_ms, bool warn) noexcep
   }
 }
 
+void App::wtenv_notice(const char* text, std::uint32_t ttl_ms, bool warn) noexcept {
+  if (state_.notify.upsert(warn ? core::Severity::Warn : core::Severity::Info, text, "wtenv", ttl_ms)) {
+    dirty_ = true;
+  }
+}
+
 void App::set_card_on_computer(bool on) noexcept {
   if (state_.card_on_computer == on) {
     return;
@@ -1801,6 +1890,19 @@ void App::set_disk_state(ViewState::DiskView::Phase phase, bool claims_busy, boo
     d.writable = writable;
     state_.params.armed = false;  // a first press of the row is for the state it was made in
     dirty_ = true;
+  }
+}
+
+void App::set_mtc_status(std::uint8_t state, std::uint8_t code, std::uint32_t time) noexcept {
+  ViewState::MtcView& m = state_.mtc;
+  if (m.state != state || m.code != code || m.time != time) {
+    const bool shown = state_.screen == ScreenId::Config || m.state != state;  // the time moves a dozen times a second: only the screen that shows it redraws for it
+    m.state = state;
+    m.code = code;
+    m.time = time;
+    if (shown) {
+      dirty_ = true;
+    }
   }
 }
 
@@ -1866,6 +1968,11 @@ void App::power_begin() noexcept {
     return;
   }
   power_down_ = true;
+  // OS-SONG3 S4: the shutdown's save runs from run_once's power_down_ branch below (saves_->poll), and it writes the project as it holds it: end a PREVIEW audition first,
+  // restoring the saved solo set, so the file never gets the audition's flags.
+  if (song_preview_end(session_.state_editor(), state_, params_out_)) {
+    dirty_ = true;
+  }
   if (firmware_ != nullptr) {
     (void)firmware_abandon(state_, firmware_);  // OS-FWCONFIG: a check holds the card the shutdown's save needs; an install in the hand-over is not touched
   }
@@ -2031,6 +2138,11 @@ void App::poll_files() noexcept {
       }
     };
     if (pending == FileView::Pending::New) {  // F3 NEW: no folder to name
+      if (project_->loaded()) {
+        state_.notify.clear();  // OS-BUG-LATENT-1106: news about the project that was just replaced (a toast left from it) is not about this one
+        state_.fill.valid = false;  // OS-PTOOLS2 S3: the last fill is the session's, not the project's — F6 does not repeat project A's fill on project B
+        state_.verb_menu.forget_last();  // (nor project A's last TOOLS apply)
+      }
       (void)state_.notify.upsert(project_->loaded() ? core::Severity::Info : core::Severity::Error, project_->loaded() ? "NEW PROJECT" : "NEW PROJECT FAILED", "file",
                                  project_->loaded() ? kMessageMs : 4000);
       if (project_->loaded()) {
@@ -2049,7 +2161,10 @@ void App::poll_files() noexcept {
       } else {
         text.assign(project_->loaded() ? "MODULE IMPORTED" : "MODULE IMPORT FAILED");
       }
-      (void)state_.notify.upsert(project_->loaded() ? core::Severity::Info : core::Severity::Error, text.c_str(), "file", project_->loaded() ? kMessageMs : 4000);
+      // OS-FLASHDIET I3 review fold: the severity is the import's own outcome (sum->ok), not whether a project happens to be open: a failed
+      // import with the project still open (a refused begin) is an error, not an info.
+      const bool import_ok = sum != nullptr && sum->valid ? sum->ok : project_->loaded();
+      (void)state_.notify.upsert(import_ok ? core::Severity::Info : core::Severity::Error, text.c_str(), "file", import_ok ? kMessageMs : 4000);
       dirty_ = true;
       return;
     }
@@ -2071,6 +2186,9 @@ void App::poll_files() noexcept {
     label.append(refused ? state_.file.opening_name.c_str() : shown.c_str());  // (a refused open: folder() is the project that stays open, the name is the one that was asked for)
     core::FixedString<core::kNotifyTextChars> text;
     if (opened) {
+      state_.notify.clear();  // OS-BUG-LATENT-1106: as NEW above: a toast left from the replaced project would show over this one (QA-INS-281 showed a NO SLICES from instrument 2 of the one before)
+      state_.fill.valid = false;  // OS-PTOOLS2 S3: as NEW: a loaded project does not inherit the last fill
+      state_.verb_menu.forget_last();  // (nor the last TOOLS apply)
       compose(text, label.c_str(), recovered ? " RECOVERED" : " OPENED");  // (a recovery is whole in memory, still named .bak on the card: the next SAVE puts it back)
       (void)state_.notify.upsert(core::Severity::Info, text.c_str(), "file", kMessageMs);
       show_pattern();
@@ -2457,7 +2575,24 @@ void App::poll_perform() noexcept {
       dirty_ = true;
     } else if (state_.screen != ScreenId::Mixer && state_.screen != ScreenId::Song) {
       (void)bank.turn_off(perform_->sink());  // idempotent: a mode that is already off stays off (the rows stay selected)
+      if (state_.play.playing) {  // Q5 a: every track on another pattern, or waiting for one, goes back to the song at once (E-PERF-07's overrides too)
+        for (unsigned t = 0; t < seq::kPerfTracks; ++t) {
+          if (state_.track_pat[t] != 0u) {
+            perform_->back = static_cast<std::uint16_t>(perform_->back | (1u << t));
+          }
+        }
+        if (perform_->back != 0u) {
+          dirty_ = true;
+        }
+      }
     }
+  }
+  // What was marked goes out (once a pass; a ring that refused is retried; nothing while stopped: a Stop ends every queue and override).
+  if (!state_.play.playing) {
+    perform_->back = 0;
+  } else if (perform_->back != 0u && perform_->sink().push(seq::Command{seq::Command::Kind::SetTrackPattern, 0, 0, perform_->back})) {
+    perform_->back = 0;
+    dirty_ = true;
   }
   // A scene key held for the hold time stores the scene (OS-PERF2); its release then recalls nothing.
   PerformKeys& keys = perform_->keys;
@@ -2500,6 +2635,8 @@ void App::poll_dj() noexcept {
 // The engine's meters into the mixer board's ballistics (OS-011b), once a pass and only while a page that draws them is in view (a lock-free snapshot every 32 ms: the
 // render publishes a window, the bars follow it). A bar that moved is a frame.
 void App::poll_meters() noexcept {
+  // No poll under an overlay, the Pattern screen's right-hand panels (OS-PTOOLS2 S3p) included: the grid beside the panel is drawn from its own scrolled window (PatternView::draw),
+  // not from the stored one poll_pattern_meters watches, so its meters stand still until the panel closes. Known, accepted: following the drawn window would need that window's rule here.
   if (mix_ == nullptr || state_.overlay != OverlayId::None) {
     return;
   }
@@ -2550,6 +2687,11 @@ void App::poll_recorder() noexcept {
     return;
   }
   const bool in_view = state_.screen == ScreenId::Record;
+  if (metro_sync_ != nullptr) {
+    // OS-RECCOUNT RC2: while the take's own count-in phase runs on this screen, the click sounds even with METRO Off (MetroSync sends Main at the device's METRO VOL); when the
+    // phase ends (the take arms, is given up, or the screen is left) the device setting goes back. With the row OFF there is no phase, so no override.
+    metro_sync_->set_count_in_override(in_view && recorder()->count_in_waiting());
+  }
   if (recorder()->poll(clock_.uptime_ms(), in_view, rec_mode_of_page(state_.page[screen_index(ScreenId::Record)]), state_.play.playing, preview_ == nullptr || preview_->live_idle()) && in_view) {
     dirty_ = true;
   }
@@ -2627,6 +2769,103 @@ void App::finish_slice(core::SlotState state) noexcept {
 
 // The Sample edit screen's request: the effect starts as a job over the PCM of the instrument in view, writing into a free buffer of the bank's edit pool
 // (never over the audio the voices may read: screens/sample_edit_screen.h, THE EDIT PROTOCOL).
+
+// OS-CEPTFX S4a: the PLUGINS page's card work. The scan of /Effects is a quiet job (ptfx_slot_); a listing in progress forgets the plugin that was loaded (its rows are moving), and once the scan has ended the plugin under the
+// list's cursor has its header read here, in the main loop, one read a pass. A key only asks (SampleEditState::plug_scan); a failed header read is not retried until the cursor or the listing moves.
+void App::stop_ptfx_scan() noexcept {
+  if (ptfx_slot_ >= 0) {
+    session_.jobs.cancel(static_cast<unsigned>(ptfx_slot_));
+    session_.jobs.release(static_cast<unsigned>(ptfx_slot_));
+    ptfx_slot_ = -1;
+  }
+}
+
+void App::poll_ptfx() noexcept {
+  SampleEditState& st = state_.sedit;
+  PtfxPage* const page = samples_ != nullptr ? samples_->ptfx_page() : nullptr;
+  if (page == nullptr || page->cat == nullptr || storage_ == nullptr) {
+    st.plug_scan = false;
+    return;
+  }
+  module::PtfxCatalog& cat = *page->cat;
+  const bool in_view = state_.screen == ScreenId::SampleEdit && sedit_plug_page(state_);
+  using State = module::PtfxCatalog::State;
+  if (!edit_ptfx_ && (st.plug_scan || (in_view && cat.state() == State::Idle))) {  // (a run uses the catalogue's entries: no new listing meanwhile)
+    st.plug_scan = false;
+    stop_ptfx_scan();
+    page->forget();
+    bool start_failed = false;
+    if (cat.begin(*storage_) == module::PtfxCatalog::Begin::Started) {
+      const int slot = session_.jobs.start(cat);
+      if (slot < 0) {
+        cat.invalidate();  // every job slot is busy: the next pass asks again (nothing on the page moved: no redraw per pass)
+        start_failed = true;
+      } else {
+        ptfx_slot_ = slot;
+        shown_percent_[slot] = -1;
+      }
+    }
+    dirty_ = dirty_ || !start_failed;
+  }
+  const std::uint32_t seen = (static_cast<std::uint32_t>(cat.state()) << 16) | cat.count();
+  if (seen != ptfx_seen_) {
+    ptfx_seen_ = seen;
+    page->forget();  // a listing that moved: what was loaded is of another row
+    dirty_ = true;
+  }
+  if (!in_view || edit_ptfx_ || cat.state() == State::Scanning || cat.state() == State::Idle || cat.count() == 0u) {
+    return;
+  }
+  if (st.plug_sel >= cat.count()) {
+    st.plug_sel = static_cast<std::uint8_t>(cat.count() - 1u);
+  }
+  if (!page->loaded(st.plug_sel)) {
+    (void)page->load(*storage_, st.plug_sel);
+    if (page->params() == 0u) {
+      st.plug_focus = 0;
+    } else if (st.plug_param >= page->params()) {
+      st.plug_param = 0;
+    }
+    dirty_ = true;
+  }
+}
+
+// OS-CEPTFX S4b (docs/specs/OS-CEPTFX.md 3.7): F1 APPLY runs the picked plugin with the page's values through the S3b path (run_ptfx and its gates; the job ends in finish_edit). Every refusal is one strip
+// text and changes nothing. A generator (OS-CEPTFX S4c) needs no sample: on an empty slot it makes the sample and the instrument (finish_generated).
+void App::apply_ptfx() noexcept {
+  SampleEditState& st = state_.sedit;
+  if (!st.plug_apply) {
+    return;
+  }
+  st.plug_apply = false;
+  PtfxPage* const page = samples_ != nullptr ? samples_->ptfx_page() : nullptr;
+  const char* why = "NO PLUGINS HERE";
+  if (page != nullptr && page->cat != nullptr) {
+    const module::PtfxCatalog& cat = *page->cat;
+    const unsigned sel = st.plug_sel;
+    why = "NO PLUGINS";
+    if (cat.state() == module::PtfxCatalog::State::Scanning) {
+      why = "SCANNING...";  // F2 and F1 in one pass: the scan has just begun and the page has nothing loaded yet
+    } else if (sel < cat.count()) {
+      const module::PtfxEntry& e = cat.entry(sel);
+      if (e.status != module::PtfxStatus::Ok || e.quarantined) {
+        why = ptfx_refusal_text(e);
+      } else if ((e.flags & module::kPtfxFlagGenerator) == 0u && samples_->pcm(wave_slot(state_)).frames == 0u) {
+        why = "NO SAMPLE";
+      } else if (!page->loaded(sel) || !page->ready()) {
+        why = "PLUGIN FILE DAMAGED";  // the header could not be read again (the card, or another file under the name)
+      } else if (ptfx_runner_ == nullptr) {
+        why = "PLUGINS RUN ON THE TRACKER";  // (the simulator with no stand-in for this plugin)
+      } else {
+        why = ptfx_runner_(ptfx_runner_ctx_, sel, page->values());
+      }
+    }
+  }
+  if (why != nullptr) {
+    (void)state_.notify.upsert(core::Severity::Warn, why, "plugin", ViewState::kMessageMs);
+  }
+}
+
 void App::poll_sedit() noexcept {
   SampleEditState& st = state_.sedit;
   if (st.cancel) {  // OS-SEDIT-CANCEL: F8 while the effect runs; report_jobs says "<EFFECT> CANCELLED" and frees the slot, finish_edit keeps the audio as it was
@@ -2711,11 +2950,133 @@ void App::poll_sedit() noexcept {
   shown_percent_[job] = -1;
 }
 
+// OS-CEPTFX S3b: one plugin over the sample in view (the Sample edit selection when that screen is up, else the whole), through the edit protocol above: the result is written into a pool
+// buffer the job takes itself once the plugin has said how long it will be (prepend / append), and finish_edit commits it as one undo unit.
+// Note: edit_begin (the job's Size step) clears the undo and redo history of the bank when the slot is not the one the history is for, even if the run is cancelled afterwards.
+// OS-CEPTFX S4c: a generator ignores the selection and replaces the whole sample (one history step); on an empty slot it makes the sample (the bank's take path, like a load: mono, no history step) and
+// the instrument `Gen NN`, so it needs the Sample edit screen (the PLUGINS page) but no sample; a slot that holds another kind of instrument is refused.
+const char* App::ptfx_refusal(bool generator) const noexcept {
+  const SampleBank::Pcm pcm = samples_ != nullptr ? samples_->pcm(wave_slot(state_)) : SampleBank::Pcm{};
+  if ((pcm.frames == 0u && !generator) || state_.screen != ScreenId::SampleEdit) {  // sample.commit is enabled on the Sample edit screen only: the run needs it in view (the selection is its too)
+    return "OPEN A SAMPLE IN SAMPLE EDIT";
+  }
+  if (pcm.frames == 0u && samples_ != nullptr) {
+    const model::Instrument* in = samples_->project().instrument(wave_slot(state_));
+    if (in != nullptr && in->kind != model::InstrumentKind::None && in->kind != model::InstrumentKind::Sample) {
+      return "NO SAMPLE INSTRUMENT HERE";  // (the text of the engine and play-mode refusals: one literal)
+    }
+  }
+  return edit_slot_ >= 0 || import_slot_ >= 0 ? "ANOTHER JOB IS RUNNING" : nullptr;
+}
+
+const char* App::ptfx_not_ready_why() noexcept { return samples_ != nullptr ? samples_->ptfx_job().not_ready_why() : nullptr; }
+
+const char* App::run_ptfx(const PtfxJob::Plugin& plugin) noexcept {
+  if (samples_ != nullptr) {
+    samples_->ptfx_job().clear_not_ready_why();  // (a refusal before the job's own must not show the last run's)
+  }
+  const bool generator = plugin.info != nullptr && (plugin.info->flags & module::kPtfxFlagGenerator) != 0u;
+  if (const char* why = ptfx_refusal(generator)) {
+    return why;
+  }
+  const unsigned slot = wave_slot(state_);
+  const SampleBank::Pcm pcm = samples_->pcm(slot);
+  PtfxJob::Source src;
+  src.pcm = pcm.data;
+  src.frames = pcm.frames;
+  src.a = state_.sedit.a;
+  src.b = state_.sedit.b;
+  src.stereo = samples_->edit_stereo(slot) && pcm.side != nullptr;
+  src.side = pcm.side;
+  src.alloc = [](void* self, std::uint32_t frames, bool stereo) noexcept -> std::int16_t* {
+    App* const app = static_cast<App*>(self);
+    if (app->samples_->pcm(app->edit_target_).frames != 0u) {
+      return app->samples_->edit_begin(app->edit_target_, frames, stereo);  // S5: M and S for a stereo run (a CONVERT_TO_MONO result is committed as mono from it)
+    }
+    // OS-CEPTFX S4c: a generator on an empty slot writes into a take (the bank's load path: no history); edit_dst_ marks that this run holds it, and finish_edit commits or releases it
+    std::uint32_t room = 0;
+    std::int16_t* const buf = app->samples_->take_begin(room);
+    if (buf == nullptr) {
+      return nullptr;
+    }
+    if (room < frames) {
+      app->samples_->take_end(0);
+      return nullptr;
+    }
+    app->edit_dst_ = buf;
+    return buf;
+  };
+  src.alloc_ctx = this;
+  edit_target_ = slot;  // (the alloc reads it; a refused start leaves it as no job's)
+  edit_dst_ = nullptr;
+  PtfxJob& job = samples_->ptfx_job();
+  PtfxJob::Plugin run = plugin;  // the host table's sample rate is the instrument's (0: 44,100), set here where the project is known
+  if (const model::Instrument* in = samples_->project().instrument(slot)) {
+    run.sample_rate = in->sample_rate;
+  }
+  if (const char* why = job.begin(run, src)) {
+    return why;
+  }
+  const int js = session_.jobs.start(job);
+  if (js < 0) {
+    return "TOO MANY JOBS";
+  }
+  edit_slot_ = js;
+  edit_version_ = samples_->version(slot);
+  edit_dst_ = nullptr;
+  edit_op_ = EditOp::Amplify;
+  edit_ptfx_ = true;
+  state_.sedit.running = true;
+  dirty_ = true;
+  shown_percent_[js] = -1;
+  return nullptr;
+}
+
+void App::cancel_ptfx() noexcept {
+  if (edit_ptfx_ && edit_slot_ >= 0) {
+    session_.jobs.cancel(static_cast<unsigned>(edit_slot_));  // report_jobs says "... CANCELLED" and frees the slot; finish_edit keeps the audio as it was
+  }
+}
+
 // The effect ended. A good result for the sample it started on is staged and committed by the internal action sample.commit (one undo unit, one history step);
 // one for a sample that changed meanwhile, a failed or cancelled job, or a normalise with nothing to do, leaves the audio as it was. True when the strip has said there was nothing to do
 // (FQA-10b2: the job's DONE would otherwise replace it; false when the queue refused the notice, then DONE says the job ended).
 bool App::finish_edit(core::SlotState state) noexcept {
-  if (state != core::SlotState::Done || samples_ == nullptr || samples_->version(edit_target_) != edit_version_) {
+  // OS-CEPTFX S4c: a generator on an empty slot holds a take of the bank (edit_dst_): it is released unless the run's result is kept below
+  const bool take = edit_ptfx_ && edit_dst_ != nullptr && samples_ != nullptr;
+  if (state != core::SlotState::Done || samples_ == nullptr || samples_->version(edit_target_) != edit_version_ ||
+      (edit_ptfx_ && (!samples_->ptfx_job().done() || samples_->ptfx_job().result() == nullptr || (take && samples_->ptfx_job().result_frames() == 0u)))) {
+    if (take) {
+      samples_->take_end(0);
+    }
+    edit_dst_ = nullptr;
+    return false;
+  }
+  if (edit_ptfx_) {  // OS-CEPTFX S3b / S5: a plugin run: the same staging, one undo unit; the whole result is the sample, stereo or mono (the points are fractions of the length: they follow it)
+    PtfxJob& pj = samples_->ptfx_job();
+    if (take) {
+      return finish_generated(pj.result_frames());
+    }
+    SampleEditState& ps = state_.sedit;
+    const bool resized = pj.result_frames() != samples_->pcm(edit_target_).frames;
+    ps.staged = pj.result();
+    ps.staged_frames = pj.result_frames();
+    ps.ready_op = EditOp::Amplify;
+    ps.ready_slot = static_cast<std::uint8_t>(edit_target_);
+    ps.ready_stereo = pj.stereo_result();  // S5: M then S (the job's layout); a mono result, a generator's or CONVERT_TO_MONO's, drops the S block
+    ps.ready_a = ps.ready_b = ps.ready_period = 0;
+    ps.ready = true;
+    ps.ready_plug = true;  // S4c: sample.commit reads the job for the points (Add Silence, a generator) and the WAVETABLE mode
+    const DispatchResult kept = invoke(core::action_id("sample.commit"), 0);
+    ps.ready = false;
+    ps.ready_plug = false;
+    if (kept == DispatchResult::Disabled || kept == DispatchResult::Unknown) {  // the screen was left while the plugin ran: the action is Sample edit's and did not run
+      return state_.notify.upsert(core::Severity::Warn, "THE EDIT COULD NOT BE KEPT", "job", ViewState::kMessageMs);  // (true: it replaces the job's DONE; if the queue refuses it, false lets the DONE show)
+    }
+    if (resized) {  // a selection or window of the old length means nothing now (as after a crop)
+      ps.a = ps.b = 0;
+      ps.first = ps.span = 0;
+    }
     return false;
   }
   if (samples_->edit_job().unchanged()) {
@@ -2738,6 +3099,67 @@ bool App::finish_edit(core::SlotState state) noexcept {
     (void)state_.notify.post(core::Severity::Info, "DC PARTLY REMOVED: FULL SCALE LIMIT", "edit", ViewState::kMessageMs);
   }
   return false;
+}
+
+// OS-CEPTFX S4c: a generator ran on an empty slot and its take holds `frames` frames. It goes in like a loaded sample (new Community OS behaviour): the take is the slot's audio (the bank's
+// take_commit: adopted, a rebind requested, no history step, mono at the default 44,100 Hz) and the instrument is a sample instrument `Gen NN` (NN the slot's number as the screens show it), as a
+// load makes one: at 0 dB under the project's law, a wavetable when the plugin says so, the undo history kept where only this slot's instrument changed (the load's rule).
+bool App::finish_generated(std::uint32_t frames) noexcept {
+  const unsigned slot = edit_target_;
+  edit_dst_ = nullptr;
+  model::Project& project = samples_->project_arena().project;
+  const model::Instrument* old = project.instrument(slot);
+  const bool keep = old != nullptr && old->kind == model::InstrumentKind::Sample;  // a sample instrument whose audio is missing (a project loaded without its WAV) keeps everything but the audio
+  if (old != nullptr && old->kind != model::InstrumentKind::None && !keep) {        // the slot changed kind while the job ran: nothing is overwritten
+    samples_->take_end(0);
+    return state_.notify.upsert(core::Severity::Warn, "NO SAMPLE INSTRUMENT HERE", "job", ViewState::kMessageMs);
+  }
+  samples_->take_end(frames);
+  formats::wav::Info info;
+  info.sample_rate = 0;
+  info.frames = frames;
+  info.channels = 1;
+  model::Instrument inst;
+  if (keep) {
+    inst = *old;
+    inst.sample_rate = info.sample_rate;  // the take is at the default rate
+  } else {
+    core::FixedString<8> name;
+    name.assign("Gen ");
+    append_dec(name, slot + 1u, 2);
+    formats::wav::make_sample_instrument(info, slot, name.c_str(), inst);
+    inst.sampler.volume = unity_level(project_law(project));
+  }
+  if (samples_->ptfx_job().wavetable()) {
+    const unsigned size = wt_fit_size(0u, frames);
+    if (size != 0u) {
+      formats::wav::make_wavetable_fields(inst.sampler, size);
+      model::wt_slot_follow_mode(inst);
+    }
+  }
+  const model::Editor* doc = session_.document();
+  const bool tracked = doc != nullptr && &doc->project() == &project;
+  const bool was_sync = tracked && doc->in_sync();
+  if (!samples_->take_commit(slot, 0u, frames) || project.set_instrument(slot, inst) != model::Status::Ok) {  // the audio first: an instrument never stands without it
+    return state_.notify.upsert(core::Severity::Warn, "THE EDIT COULD NOT BE KEPT", "job", ViewState::kMessageMs);
+  }
+  if (tracked && !doc->in_sync()) {  // the instrument changed behind the editor's back
+    if (was_sync && session_.state_editor() != nullptr) {
+      if (session_.state_editor()->adopt_instrument_load(slot)) {
+        (void)state_.notify.post(core::Severity::Warn, "UNDO OF INSTRUMENT EDITS CLEARED BY THE LOAD", "history", ViewState::kMessageMs);
+      }
+    } else {
+      session_.reset_history();
+    }
+  }
+  SampleEditState& st = state_.sedit;
+  st.a = st.b = 0;
+  st.first = st.span = 0;
+  dirty_ = true;
+  core::FixedString<core::kNotifyTextChars> text;
+  text.assign("GENERATED: ");
+  text.append(inst.name);
+  return state_.notify.upsert(core::Severity::Info, text.c_str(), "job", ViewState::kMessageMs);
 }
 
 // The waveform of the sample in view (Sample load's card, Wave / Chop, Sample edit, Params' source visual): the peak cache is built for it when it is not the cache's already, as a job
@@ -2805,7 +3227,7 @@ bool App::pad_lights(PadRole (&roles)[48]) const noexcept {
     tracks_roles(model_, state_, state_.screen == ScreenId::Perform, flash_.lit(), blink_on(clock_.uptime_ms()), roles);
     return true;
   }
-  if (pads_mode_in_force()) {  // OS-PADS-B
+  if (pads_mode_in_force() || (state_.screen == ScreenId::Pattern && state_.padmode.effective() == PadMode::Notes)) {  // OS-PADS-B; OS-NOTESLED: NOTES lights its scale too (it is not a layer: the pads still play through the board)
     mode_roles(model_, state_, content_, blink_on(clock_.uptime_ms()), roles);
     return true;
   }

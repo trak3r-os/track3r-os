@@ -32,7 +32,7 @@ constexpr const char* const kGrainShapes[] = {"Square", "Triangle", "Gauss"};
 constexpr const char* const kGrainLoops[] = {"Forward", "Backward", "PingPong"};
 // OS-INSTUI S6, the MOD page: the SOURCE words, the LFO shape labels and the LFO speed labels (29, the tempo-sync rates;
 // the amp slot takes the last 24, from the sixth on).
-constexpr const char* const kModSources[] = {"Off", "Envelope", "LFO"};
+constexpr const char* const kModSources[] = {"Off", "Envelope", "LFO", "WT Env", "WT LFO"};  // OS-CEWTENV W7a: the last two are loop 2 and 3
 constexpr const char* const kLfoShapes[] = {"Rev Saw", "Saw", "Triangle", "Square", "Random", "Sine"};
 constexpr const char* const kLfoSpeeds[] = {"128 steps", "96 steps", "64 steps", "48 steps", "32 steps", "24 steps", "16 steps", "12 steps", "8 steps", "6 steps", "4 steps", "3 steps", "2 steps", "3/2 step", "1 step",
                                             "3/4 step", "1/2 step", "3/8 step", "1/3 step", "1/4 step", "3/16 step", "1/6 step", "1/8 step", "1/12 step", "1/16 step", "1/24 step", "1/32 step", "1/48 step", "1/64 step"};
@@ -53,6 +53,8 @@ constexpr const char* const kRecQuantize[] = {"Nearest step", "Playing step"};  
 constexpr const char* const kMetroModes[] = {"Off", "Cue", "Main"};                              // OS-METRO
 constexpr const char* const kCountIns[] = {"Off", "1 bar", "2 bars"};                            // OS-METRO
 constexpr const char* const kRecVelocity[] = {"Off", "External"};                                  // OS-RECMICRO
+constexpr const char* const kMtcRates[] = {"Off", "24 fps", "25 fps", "30 fps"};                    // OS-MTC A3 (midi::mtc::fps_of_setting)
+constexpr const char* const kMtcIns[] = {"Off", "DIN", "USB"};                                     // OS-MTC B3 (the port MTC IN chases)
 constexpr const char* const kPatSwitches[] = {"Step", "Pattern end"};                              // E-PAT-35
 constexpr const char* const kMidiOuts[] = {"Config", "DIN", "USB", "DIN + USB"};                   // OS-INSTUI S8b: the instrument's MIDI port (kMidiOut*); Config = the device's MIDI OUT
 
@@ -172,8 +174,8 @@ constexpr Row kVolumeEnvelopeAttack = at(env_time("ATTACK", 10, instrument_param
 
 // OS-INSTUI S6: SOURCE, a state of two bytes: `loop` is the field's byte and `enable` the next. The volume envelope's default is Envelope, the five others' Off.
 static_assert(offsetof(Envelope, enable) == offsetof(Envelope, loop) + 1u, "SOURCE reads loop and enable as two neighbouring bytes");
-constexpr Row kModSource = at(choice("SOURCE", kModSources, 3, instrument_param::SourceOff, kL, instrument_param::GroupEnvelope), O3_ENVELOPE(loop), ParamStore::EnvState);
-constexpr Row kVolumeModSource = at(choice("SOURCE", kModSources, 3, instrument_param::SourceEnvelope, kL, instrument_param::GroupEnvelope), O3_ENVELOPE(loop), ParamStore::EnvState);
+constexpr Row kModSource = at(choice("SOURCE", kModSources, 5, instrument_param::SourceOff, kL, instrument_param::GroupEnvelope), O3_ENVELOPE(loop), ParamStore::EnvState);
+constexpr Row kVolumeModSource = at(choice("SOURCE", kModSources, 5, instrument_param::SourceEnvelope, kL, instrument_param::GroupEnvelope), O3_ENVELOPE(loop), ParamStore::EnvState);
 
 #undef O3_ENVELOPE
 
@@ -259,6 +261,10 @@ constexpr Row kDevice[device_setting::kCount] = {
     at(choice("TRANSP IN", kOffOn, 2, 1, kL, kGroupMidi), 23, ParamStore::U8),                                // E-CFG-03: TRANSPORT IN (the caption holds 12 characters): On, Start / Stop / SPP from the followed port act (today's behaviour)
     at(choice("TRANSP OUT", kOffOn, 2, 1, kL, kGroupMidi), 24, ParamStore::U8),                               // E-CFG-03: TRANSPORT OUT: On, Start / Stop / SPP are sent (today's behaviour)
     at(choice("PAT SWITCH", kPatSwitches, 2, 0, kL, kGroupPattern), 25, ParamStore::U8),                      // E-PAT-35: Step (today's behaviour: a pick in the held PATTERN chooser switches at the next step)
+    at(choice("CC MAP", kOffOn, 2, 0, 0, kGroupMidi), 26, ParamStore::U8),                                   // OS-MIDICCMAP S1: Off (the official default); On: the fixed CC map listens on MIDI IN / IN CHANNEL. Not learnable (a device MIDI routing switch)
+    at(choice("MTC OUT", kMtcRates, 4, 0, 0, kGroupMidi), 27, ParamStore::U8),                               // OS-MTC A3: Off; 24, 25 or 30 fps: MIDI Time Code out. Not learnable (a controller must not start a time code)
+    at(number("MTC START", "h", ParamUnit::Int, 0, 23, 1, 23, 4, 0, kGroupMidi), 28, ParamStore::U8),        // OS-MTC A3: the hour of the time code at the song's first step, 1 (Logic's default: bar 1 at 01:00:00:00)
+    at(choice("MTC IN", kMtcIns, 3, 0, 0, kGroupMidi), 29, ParamStore::U8),                                  // OS-MTC B3: Off; DIN or USB: the unit chases the time code of that port. Not learnable (a controller must not hand the transport to a master)
 };
 
 static_assert(Settings::kValueBytes >= device_setting::kCount && Settings::kValueBytes >= project_setting::kCount &&
@@ -356,6 +362,45 @@ const core::ParamDesc& play_stereo_desc() noexcept {
   static constexpr const char* const kStereoChoices[] = {"MONO", "STEREO"};  // Instrument::stereo (INST 1.5)
   static constexpr ParamDesc kDesc = choice("STEREO", kStereoChoices, 2, 0, 0, instrument_param::GroupSource);
   return kDesc;
+}
+
+// OS-CEPLAYTHRU P2: the PLAY THRU row of the source page (Instrument::slice_thru, OG byte 279 / INST 1.7): OFF stops a slice at the next slice point, ON plays it to the sample end.
+const core::ParamDesc& play_thru_desc() noexcept {
+  static constexpr const char* const kThruChoices[] = {"OFF", "ON"};
+  static constexpr ParamDesc kDesc = choice("PLAY THRU", kThruChoices, 2, 0, 0, instrument_param::GroupSource);
+  return kDesc;
+}
+
+// OS-MODRATE S2: the RATE row of the MIX page of a rate-capable module instrument (a session value, app::ModuleUi).
+const core::ParamDesc& module_rate_desc() noexcept {
+  static constexpr const char* const kRateChoices[] = {"FULL", "1/2", "1/4"};
+  static constexpr ParamDesc kDesc = choice("RATE", kRateChoices, 3, 0, 0, instrument_param::GroupVoice);
+  return kDesc;
+}
+
+// OS-CEWTENV W7a: the five virtual WT fields (instrument_param::wt); one descriptor each for all six slots. WAVE and SUSTAIN have their own units (F001..U128; OFF, 1..99).
+const core::ParamDesc* wt_param_desc(unsigned field) noexcept {
+  namespace ip = instrument_param;
+  static constexpr ParamDesc kDescs[ip::kWtFields] = {
+      number("WAVE", "", ParamUnit::WtWave, 0, 255, 0, 255, 16, 0, ip::GroupEnvelope),
+      number("DURATION", "s", ParamUnit::Seconds, 2, static_cast<float>(ip::kWtDurationMax), 1000, 2000, 10, 0, ip::GroupEnvelope),  // 10 ms a step, 100 ms coarse; 0 and 1 play as 1000 ms, so the page starts at 2
+      number("WARP X", "", ParamUnit::Int, -7, 7, 0, 14, 7, 0, ip::GroupEnvelope),
+      number("WARP Y", "", ParamUnit::Int, -7, 7, 0, 14, 7, 0, ip::GroupEnvelope),
+      number("SUSTAIN", "%", ParamUnit::OffInt, 0, 99, 0, 99, 10, 0, ip::GroupEnvelope)};
+  return ip::is_wt_field(field) ? &kDescs[(field - ip::kWtFirst) % ip::kWtStride] : nullptr;
+}
+
+float wt_param_value(const Instrument& in, unsigned field) noexcept {
+  namespace ip = instrument_param;
+  const unsigned e = (field - ip::kWtFirst) / ip::kWtStride;
+  const Lfo& l = in.sampler.lfo[e];
+  switch ((field - ip::kWtFirst) % ip::kWtStride) {
+    case ip::WtWave: return static_cast<float>(l.shape);
+    case ip::WtDuration: return static_cast<float>(in.sampler.envelope[e].decay);
+    case ip::WtWarpX: return static_cast<float>(ip::wt_warp_of(l.wt_bend >> 4));
+    case ip::WtWarpY: return static_cast<float>(ip::wt_warp_of(l.wt_bend & 15u));
+    default: return static_cast<float>(l.wt_sust);
+  }
 }
 
 bool instrument_field_app_writable(unsigned field) noexcept {
@@ -539,7 +584,14 @@ float param_load(const void* owner, const ParamField& f) noexcept {
       return v;
     }
     case ParamStore::EnvState:  // p[0] is `loop`, p[1] `enable` (the assert at kModSource)
-      return p[1] == 0u ? 0.0f : (p[0] != 0u ? 2.0f : 1.0f);
+    {
+      // loop 0 Envelope, 2 WT Env (3), 3 WT LFO (4), any other nonzero byte LFO as before (OS-CEWTENV W7a)
+      // OS-CEWTENV W7b: slot 3 of a granular instrument is the grain length and the engine reads only bit 0x02 of its enable (W5); a loaded enable of 1 (an OG file, an older project) plays nothing, so it reads Off
+      // (the loaded byte is not rewritten). Any other mode counts enable 1 or 2 as on.
+      constexpr std::size_t kSlot3Loop = offsetof(Instrument, sampler) + offsetof(SamplerParams, envelope) + 3u * sizeof(Envelope) + offsetof(Envelope, loop);
+      const unsigned char enable = (f.offset == kSlot3Loop && static_cast<const Instrument*>(owner)->sampler.play_mode == 7u) ? static_cast<unsigned char>(p[1] & 2u) : p[1];
+      return enable == 0u ? 0.0f : (p[0] == 0u ? 1.0f : (p[0] == 2u ? 3.0f : (p[0] == 3u ? 4.0f : 2.0f)));
+    }
   }
   return 0.0f;
 }
@@ -569,8 +621,8 @@ bool param_store(void* owner, const ParamField& f, float value) noexcept {
     case ParamStore::F32:
       std::memcpy(p, &value, sizeof value);
       return true;
-    case ParamStore::EnvState:  // Off clears both, Envelope enables with no loop, LFO enables with the loop
-      p[0] = static_cast<unsigned char>(whole == 2 ? 1u : 0u);
+    case ParamStore::EnvState:  // Off clears both, Envelope enables with no loop, LFO enables with the loop (1), WT Env sets 2, WT LFO 3
+      p[0] = static_cast<unsigned char>(whole == 2 ? 1u : (whole >= 3 ? static_cast<unsigned>(whole) - 1u : 0u));
       p[1] = static_cast<unsigned char>(whole != 0 ? 1u : 0u);
       return true;
   }
@@ -591,6 +643,15 @@ void reset_instrument_params(Instrument& in) noexcept {
     e.hold = 0;
   }
   in.sampler.sample_type = 0;
+}
+
+void wt_slot_follow_mode(Instrument& in) noexcept {
+  std::uint8_t& enable = in.sampler.envelope[3].enable;  // the wavetable position slot (instrument_param kEnvelopes order)
+  if (in.sampler.play_mode == 7u) {                      // granular
+    enable = enable == 1u ? std::uint8_t{2u} : enable;
+  } else {
+    enable = enable == 2u ? std::uint8_t{1u} : enable;
+  }
 }
 
 }  // namespace o3os::model

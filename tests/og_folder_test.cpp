@@ -270,6 +270,135 @@ TEST_CASE("og folder: a project folder loads in slices and makes the model the r
   CHECK(snapshot(tmp.path) == before);
 }
 
+TEST_CASE("og folder: a folder with v6 patterns loads them, a damaged one is counted and the rest loads (OS-CEPAT S1)") {
+  TempDir tmp;
+  std::vector<FolderFile> files;
+  ProjectSpec ps;  // v16, "Synthetic Project"
+  files.push_back({"project.mt", project_bytes(ps)});
+  files.push_back({"patterns/pattern_01.mtp", pattern6_bytes(rich_pattern6(16, 6, 71))});  // 16 tracks
+  files.push_back({"patterns/pattern_02.mtp", pattern6_bytes(rich_pattern6(8, 6, 72))});   // 8 tracks
+  Bytes cut = pattern6_bytes(rich_pattern6(12, 6, 73));
+  cut.resize(5000);  // ends inside the rows: refused, counted
+  files.push_back({"patterns/pattern_05.mtp", cut});
+  write_folder(tmp.path, "Workspace", files);
+  const std::map<std::string, std::string> before = snapshot(tmp.path);
+
+  DirStorage card(tmp.path.string());
+  NEED(card.mount() == hs::Status::Ok);
+  OgFolderLoader& l = loader();
+  o3os::model::ModelArena& arena = o3os::test::og::arena(0);
+  arena.project.reset();
+  NEED(l.begin(card, "Workspace", arena));
+  NEED(run_loader(l, 4096) == OgFolderLoader::State::Done);
+
+  const o3os::app::OgLoadReport& rep = l.report();
+  CHECK(rep.project_ok);
+  CHECK(rep.version == 16);
+  CHECK(rep.patterns == 2);
+  CHECK(rep.patterns_failed == 1);  // the cut v6 file
+  CHECK(rep.error != formats::FormatError::None);  // the first file that did not read is reported ...
+  CHECK(std::strlen(rep.detail) > 0u);
+  CHECK(rep.storage_error == hs::Status::Ok);
+  CHECK(card.open_files() == 0u);
+  CHECK(card.open_dirs() == 0u);
+
+  const o3os::model::Project& p = arena.project;
+  NEED(p.pattern(1) != nullptr);
+  CHECK(p.pattern(1)->track_length[15] == 32);  // the 16-track v6 file holds all 16 lengths
+  NEED(p.pattern(2) != nullptr);
+  CHECK(p.pattern(2)->track_length[15] == 32);  // the 8-track one: tracks 9-16 take track 1's length
+  CHECK(p.pattern(5) == nullptr);               // the damaged one left nothing behind
+
+  // The model is the one the readers make from the same bytes.
+  o3os::model::ModelArena& direct = o3os::test::og::arena(1);
+  load_direct(files, direct);
+  check_same_model(p, direct.project);
+
+  // The card is as it was.
+  CHECK(snapshot(tmp.path) == before);
+}
+
+TEST_CASE("og folder: the v6 counters reach the load report and the strip names them (OS-CEPAT S2)") {
+  TempDir tmp;
+  std::vector<FolderFile> files;
+  ProjectSpec ps;  // v16, "Synthetic Project"
+  files.push_back({"project.mt", project_bytes(ps)});
+  PatternSpec6 p6 = empty_pattern6(8, 6);
+  auto st_in = [](PatternSpec6& pat, unsigned s, std::uint8_t t0, std::uint8_t v0, std::uint8_t t1, std::uint8_t v1, std::int8_t vol, std::int8_t m) {
+    std::uint8_t* e = pat.step[0][s];
+    e[0] = 60; e[1] = 1;
+    e[2] = t0; e[3] = v0; e[4] = t1; e[5] = v1;
+    e[6] = static_cast<std::uint8_t>(vol); e[7] = static_cast<std::uint8_t>(m);
+  };
+  auto st = [&p6, &st_in](unsigned s, std::uint8_t t0, std::uint8_t v0, std::uint8_t t1, std::uint8_t v1, std::int8_t vol, std::int8_t m) { st_in(p6, s, t0, v0, t1, v1, vol, m); };
+  st(0, 0, 0, 0, 0, 50, -1);     // volume 50 -> vol 63
+  st(1, 0, 0, 0, 0, 101, -1);    // above 100: full volume, counted in values_clamped
+  st(2, 0, 0, 0, 0, -1, 50);     // micromove into the first free column as FX 2
+  st(3, 4, 50, 5, 60, -1, 100);  // no free column: micromove dropped and counted
+  st(4, 75, 10, 43, 11, -1, -1); // OG 75 cleared and counted, OG 43 -> model 96
+  st(5, 74, 9, 128, 200, -1, -1);  // the boundaries: 74 -> 127 and 128 verbatim, neither counted
+  files.push_back({"patterns/pattern_01.mtp", pattern6_bytes(p6)});
+  // A second good pattern with counts of its own, so the report's totals are sums over the patterns and not the last pattern's (or the first's): 1 micromove dropped, 2 volumes
+  // above 100, 2 OG ids 75..127 cleared (76 and 100).
+  PatternSpec6 p6b = empty_pattern6(8, 6);
+  st_in(p6b, 0, 6, 1, 7, 2, -1, 20);      // no free column: micromove dropped and counted
+  st_in(p6b, 1, 0, 0, 0, 0, 120, -1);     // above 100: counted
+  st_in(p6b, 2, 0, 0, 0, 0, 101, -1);     // above 100: counted
+  st_in(p6b, 3, 76, 3, 100, 4, -1, -1);   // two ids cleared
+  files.push_back({"patterns/pattern_03.mtp", pattern6_bytes(p6b)});
+  Bytes cut = pattern6_bytes(rich_pattern6(8, 6, 99));
+  cut.resize(5000);  // ends inside the rows: refused, counted
+  files.push_back({"patterns/pattern_02.mtp", cut});
+  write_folder(tmp.path, "Workspace", files);
+
+  DirStorage card(tmp.path.string());
+  NEED(card.mount() == hs::Status::Ok);
+  OgFolderLoader& l = loader();
+  o3os::model::ModelArena& arena = o3os::test::og::arena(0);
+  arena.project.reset();
+  NEED(l.begin(card, "Workspace", arena));
+  NEED(run_loader(l, 4096) == OgFolderLoader::State::Done);
+
+  const o3os::app::OgLoadReport& rep = l.report();
+  CHECK(rep.patterns == 2);
+  CHECK(rep.patterns_failed == 1);
+  CHECK(rep.micromoves_dropped == 2);  // step 3 of pattern 1, step 0 of pattern 3
+  CHECK(rep.values_clamped == 3);      // step 1 of pattern 1, steps 1 and 2 of pattern 3
+  CHECK(rep.ce_fx_cleared == 3);       // step 4 of pattern 1 (OG 75 only: 74 and 128 are not counted), step 3 of pattern 3 (76 and 100)
+  CHECK(rep.storage_error == hs::Status::Ok);
+
+  const o3os::model::Project& p = arena.project;
+  NEED(p.pattern(1) != nullptr);
+  CHECK(p.pattern(2) == nullptr);  // the damaged one left nothing behind
+  const o3os::model::Step* s = p.pattern(1)->steps[0];
+  CHECK(s[0].vol == 63);
+  CHECK(s[1].vol == 127);
+  CHECK(s[2].fx[0].type == 2);
+  CHECK(s[2].fx[0].value == 50);
+  CHECK(s[3].fx[0].type == 4);
+  CHECK(s[3].fx[1].type == 5);  // the micromove was not stored
+  CHECK(s[4].fx[0].type == 0);
+  CHECK(s[4].fx[1].type == 96);
+  CHECK(s[4].fx[1].value == 11);
+  CHECK(s[5].fx[0].type == 127);
+  CHECK(s[5].fx[1].type == 128);
+  CHECK(s[5].fx[1].value == 200);
+  NEED(p.pattern(3) != nullptr);
+  const o3os::model::Step* t = p.pattern(3)->steps[0];
+  CHECK(t[0].fx[0].type == 6);
+  CHECK(t[0].fx[1].type == 7);  // the micromove was not stored
+  CHECK(t[1].vol == 127);
+  CHECK(t[2].vol == 127);
+  CHECK(t[3].fx[0].type == 0);
+  CHECK(t[3].fx[1].type == 0);
+
+  // The strip names what the folder lost (the summary line the unit's diag sd and log show).
+  char line[100];
+  const std::size_t n = o3os::app::describe_load(l, line, sizeof line);
+  CHECK(std::string(line, n) == "Workspace: v16, 2 patterns, 0 instruments, 1 failed, 2 MICRO-MOVES NOT KEPT, 6 VALUES CHANGED");
+  CHECK(n == std::strlen(line));
+}
+
 TEST_CASE("og folder: the folder is a path, with spaces, either case, a slash at either end") {
   TempDir tmp;
   const std::vector<FolderFile> files = synthetic_folder();

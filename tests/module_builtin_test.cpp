@@ -18,6 +18,7 @@
 #include <o3os/platform/host/dir_storage.h>
 
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -29,9 +30,23 @@ using namespace o3os::module;
 using namespace o3os::module::test;
 namespace fs = std::filesystem;
 
+#ifdef O3M_FIXTURE_DIR
+std::vector<std::uint8_t> slurp(const std::string& path) {
+  std::ifstream f(path, std::ios::binary);
+  f.seekg(0, std::ios::end);
+  const std::streamoff n = f.tellg();
+  f.seekg(0, std::ios::beg);
+  std::vector<std::uint8_t> out(n > 0 ? static_cast<std::size_t>(n) : std::size_t{0});
+  if (n > 0) {
+    f.read(reinterpret_cast<char*>(out.data()), n);
+  }
+  return out;
+}
+#endif
+
 struct Rig {
   fs::path root;
-  std::vector<std::uint8_t> flash;  // the built-in file's bytes (the table points here)
+  PackedFile packed;  // the built-in file in the table's OS-FLASHDIET A3 form: the header raw, the rest a stored-block stream (support/module_blob.h)
   BuiltinModule table[1];
   o3os::platform::host::DirStorage card;
   ModuleSet set;
@@ -46,7 +61,7 @@ struct Rig {
     fs::create_directories(p / "modules" / "instruments");
     return p;
   }
-  explicit Rig(const std::vector<std::uint8_t>& builtin_file) : root(make_root()), flash(builtin_file), table{{"test", flash.data(), static_cast<std::uint32_t>(flash.size())}}, card(root.string()) {
+  explicit Rig(const std::vector<std::uint8_t>& builtin_file) : root(make_root()), packed(pack_builtin_file(builtin_file)), table{packed.entry("test")}, card(root.string()) {
     (void)card.mount();
     set.set_builtins(table, 1);
     set.hot().init(slab, kHotAddr, sizeof slab);
@@ -150,7 +165,7 @@ TEST_CASE("built-in: a card copy that is not newer (older, equal, unversioned), 
   major.h.abi_major = 2;
   major.seal();
   Blob newer_than_os = blob_version(O3M_VERSION(2, 0, 0));
-  newer_than_os.h.abi_minor = 11;
+  newer_than_os.h.abi_minor = static_cast<std::uint8_t>(kOsAbiMinor + 1);
   newer_than_os.seal();
   const Case cases[] = {
       {"older", blob_version(O3M_VERSION(0, 9, 9)), Status::Older, O3M_VERSION(0, 9, 9)},
@@ -205,14 +220,33 @@ TEST_CASE("built-in: prefers_card is a strict order of module versions, within o
   CHECK(!prefers_card(unversioned, unversioned));                     // two unversioned files: the built-in one stays
 }
 
-TEST_CASE("built-in: the TB-303, chip, FM and SID are version 1.0.0 files of ABI 1.8 (the packer's --version, from the CMake rule; pitch, pages and labels need 1.8)") {
+TEST_CASE("built-in: the TB-303, FM and SID are version 1.0.0 files and chip 1.1.0, all four ABI 1.13: they carry the RATE flag (the packer's --version, from the CMake rule)") {
   NEED(kBuiltinModuleCount == 4u);
   for (unsigned i = 0; i < kBuiltinModuleCount; ++i) {
     CAPTURE(kBuiltinModules[i].stem);
     const o3m_file_header h = builtin_header(kBuiltinModules[i]);
     CHECK(check_header(h, kBuiltinModules[i].size) == Status::Ok);
-    CHECK(h.abi_minor == 8);
-    CHECK(h.module_version == O3M_VERSION(1, 0, 0));
+    CHECK(h.abi_minor == 13);  // OS-MODRATE: sid, fm, tb303 and chip (S5) carry O3M_FX_RATE (1.13)
+    CHECK(h.module_version == (std::strcmp(kBuiltinModules[i].stem, "chip") == 0 ? O3M_VERSION(1, 1, 0) : O3M_VERSION(1, 0, 0)));  // OS-CECHIP C2: Chip is 1.1.0
+  }
+}
+
+TEST_CASE("built-in: OS-FLASHDIET A3, each module's stream inflates to the byte-exact .tmod the build made") {
+  NEED(kBuiltinModuleCount == 4u);
+  for (unsigned i = 0; i < kBuiltinModuleCount; ++i) {
+    const BuiltinModule& b = kBuiltinModules[i];
+    CAPTURE(b.stem);
+    NEED(b.size > sizeof(o3m_file_header));
+    NEED(b.z_size > 0u);
+    std::vector<std::uint8_t> out(b.size);
+    NEED(builtin_file(b, out.data(), out.size()));  // the header raw plus the inflated rest, through core::Inflater
+#ifdef O3M_FIXTURE_DIR
+    const std::vector<std::uint8_t> file = slurp(std::string(O3M_FIXTURE_DIR) + "/" + b.stem + ".tmod");
+    NEED(!file.empty());
+    CHECK(out == file);  // byte for byte, the file tools/o3m_pack.py made
+#else
+    FAIL("O3M_FIXTURE_DIR is not set: the byte-for-byte comparison with the .tmod the build made is compiled out");  // it must never drop out silently
+#endif
   }
 }
 
@@ -266,6 +300,42 @@ TEST_CASE("built-in: a stem with no built-in copy behaves as before, and a broke
   CHECK(bad.set.quarantined("test"));
   CHECK(bad.set.hot().used() == 0);
   CHECK(bad.set.cold().used() == 0);
+}
+
+TEST_CASE("built-in: OS-FLASHDIET A3, a corrupt built-in stream itself (a flipped byte in z, a truncated z) ends the load Failed, the arenas back at their marks, nothing installed") {
+  const std::vector<std::uint8_t> file = blob_minor(kBlobMinor).file();
+  // A flipped byte in the deflate stream, not in the bytes it carries: in a stored block's LEN or NLEN, so the Inflater refuses the stream outright (a flipped payload byte
+  // inflates fine and is caught by the CRC instead: the case above). The stream the table points at is r.packed.z; the loader reads it through r.table[0].
+  for (std::size_t at : {std::size_t{1}, std::size_t{3}}) {
+    CAPTURE(at);
+    Rig r(file);
+    r.packed.z[at] ^= 0x55u;
+    const std::uint32_t hot_mark = r.set.hot().mark();
+    const std::uint32_t cold_mark = r.set.cold().mark();
+    CHECK(r.run() == ModuleLoader::State::Failed);
+    CHECK(r.loader.status() == Status::BadCrc);
+    CHECK(r.set.quarantined("test"));
+    CHECK(r.set.hot().used() == hot_mark);
+    CHECK(r.set.cold().used() == cold_mark);
+    CHECK(r.set.count() == 0);
+    CHECK(r.loaded() == nullptr);
+  }
+  // A truncated stream: z_size shorter than the file's rest, so the Inflater runs out of input before the final block.
+  const std::size_t z_len = pack_builtin_file(file).z.size();
+  for (std::size_t keep : {std::size_t{0}, std::size_t{4}, z_len / 2, z_len - 1}) {
+    CAPTURE(keep);
+    Rig r(file);
+    r.table[0].z_size = static_cast<std::uint32_t>(keep);
+    const std::uint32_t hot_mark = r.set.hot().mark();
+    const std::uint32_t cold_mark = r.set.cold().mark();
+    CHECK(r.run() == ModuleLoader::State::Failed);
+    CHECK(r.loader.status() == Status::BadCrc);
+    CHECK(r.set.quarantined("test"));
+    CHECK(r.set.hot().used() == hot_mark);
+    CHECK(r.set.cold().used() == cold_mark);
+    CHECK(r.set.count() == 0);
+    CHECK(r.loaded() == nullptr);
+  }
 }
 
 TEST_CASE("built-in: cancel() of a running built-in load gives the arenas back and does not restart it") {

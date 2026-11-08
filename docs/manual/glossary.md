@@ -38,6 +38,8 @@ APPLY: the `F7` key on Config. On a USB row, the first press says what will happ
 
 USB AUDIO: the Config row that shows an audio device to the computer. Off gives STANDARD; On is the default.
 
+MTC (MIDI Time Code): a clock that counts hours, minutes, seconds and frames, for programs that follow time code and not MIDI clock. The unit sends it when **MTC OUT** on the Config MIDI page is on. It has no tempo.
+
 STANDARD: the USB mode of the unit with MIDI and serial only, and no audio device.
 
 USB return: the stereo stream that the computer sends to the unit over USB audio. The USB RETURN row of Config turns it on or off.
@@ -59,6 +61,8 @@ Step FX: an effect written on one step, in one of its two Fx cells. The info lin
 FX 2: the second FX column of a step. A Micro-move is written there.
 
 Micro-move: a command in FX 2 that records how late a live note was played inside its step. The grid shows it as m02.
+
+tracker-ce: the open-source firmware that Polyend published for the Tracker. A project folder it saved opens on the File screen; see [File](file.md).
 
 Sample: a recording of sound, read from a file on the card and loaded into an instrument.
 
@@ -154,7 +158,7 @@ Detune: a small shift of an FM operator's pitch from its ratio, in cents.
 
 App: a module you run from the Modules screen, for example MIDI Monitor or Tuner. Apps are experimental.
 
-Navigator: the list of screens that opens with `Shift` + `Pattern`. Turn the encoder to a screen and press `F8` (**GO**).
+Navigator: the list of screens that opens when you press `Song` and `Pattern` together (or `Master` and `Song`). Turn the encoder to a screen and press `F8` (**GO**).
 
 TOOLS: the `F7` key on Pattern. It opens a list of tools, among them EXPORT PATTERN and the apps that edit the project or write files.
 

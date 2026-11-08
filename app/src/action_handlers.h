@@ -5,9 +5,15 @@
 // user. Each returns true if something visible changed.
 
 #include <o3os/app/actions.h>
+#include <o3os/app/pattern_tools_view.h>
 #include <o3os/app/save_service.h>  // (save_report names SaveService::Start)
 
 namespace o3os::app {
+
+// The one say() of the action files (OS-FLASHDIET T2): the anonymous copies that all did
+// `return ctx.view.notify.post(severity, text, tag, ViewState::kMessageMs);` are one-line calls of this now
+// (actions.cpp). `tag` names the strip entry ("edit", "song", ...).
+bool say_tag(ActionContext& ctx, core::Severity severity, const char* text, const char* tag) noexcept;
 
 // nav_actions.cpp: moving the cursor of whatever owns the input: the pattern grid, the song list, or the Navigator's
 // grid while it is up (OS-002b). Lists have one axis: left / right and the track actions do nothing on the song list.
@@ -29,7 +35,7 @@ bool nav_peek(ActionContext& ctx, core::ActionArg arg) noexcept;         // OS-S
 bool nav_peek_end(ActionContext& ctx, core::ActionArg arg) noexcept;     // OS-SONGPEEK, the HoldEnd: back to the screen the peek came from, if the peek's screen is still in view
 bool view_mode(ActionContext& ctx, core::ActionArg arg) noexcept;        // arg = mode index of the screen in view
 bool view_mode_next(ActionContext& ctx, core::ActionArg arg) noexcept;   // the next mode, wrapping
-bool navigator_open(ActionContext& ctx, core::ActionArg arg) noexcept;   // Shift + Pattern (OS-NAV2: it stays open)
+bool navigator_open(ActionContext& ctx, core::ActionArg arg) noexcept;   // Master + Song or Song + Pattern (OS-APPSNAV; OS-NAV2: it stays open)
 bool navigator_accept(ActionContext& ctx, core::ActionArg arg) noexcept; // GO (F8, F1): open the chosen screen, close the Navigator
 bool ui_back(ActionContext& ctx, core::ActionArg arg) noexcept;          // close the overlay in view
 bool input_test_reset(ActionContext& ctx, core::ActionArg arg) noexcept; // the INPUT TEST screen's counts back to zero (OS-007d)
@@ -83,6 +89,7 @@ bool transport_play_cursor(ActionContext& ctx, core::ActionArg arg) noexcept;  /
 bool transport_available(const ActionContext& ctx) noexcept;                // a transport is attached (the device); none in the simulator
 bool select_extend(ActionContext& ctx, core::ActionArg arg) noexcept;       // arg = 10 * dx + dy: the block grows (Shift + arrows)
 bool select_column_all(ActionContext& ctx, core::ActionArg arg) noexcept;   // the cursor's column, again every track
+bool select_jump(ActionContext& ctx, core::ActionArg arg) noexcept;         // arg 0..3: the quarter jump, in Edit selecting the rows it crossed (OS-SELSHIFT)
 bool select_clear(ActionContext& ctx, core::ActionArg arg) noexcept;        // back to the cursor step
 
 // step_actions.cpp: the edit core of the pattern (OS-009 P1a.1). Each is one undo unit, enabled in Edit and Select, and works on the
@@ -97,11 +104,14 @@ bool fill_move(ActionContext& ctx, core::ActionArg arg) noexcept;               
 bool fill_delta(ActionContext& ctx, core::ActionArg arg) noexcept;              // arg = detents: the row's value (Left / Right, the encoder)
 bool fill_coarse(ActionContext& ctx, core::ActionArg arg) noexcept;             // arg = detents, each the row's coarse step (Shift + encoder; OS-SHIFTENC)
 bool fill_apply(ActionContext& ctx, core::ActionArg arg) noexcept;              // F1: fills with the dialog's rows and closes it
+bool fill_vary(ActionContext& ctx, core::ActionArg arg) noexcept;               // F2 VARY (a random fill; OS-PTOOLS2 S1): takes back the last fill of the dialog if nothing touched its pattern since, then fills again
+bool tools_repeat(ActionContext& ctx, core::ActionArg arg) noexcept;           // OS-PTOOLS2 S3: REPEAT on F6 (RE <VERB>), the last tool verb with its settings on the current target (the last verb is FILL until the verb menu)
 bool pattern_fill(ActionContext& ctx, core::ActionArg arg) noexcept;            // no key since OS-QJUMP (was Shift + Fx): repeats the last fill; before one, the OS-CFGWIRE fill (the current note on every Nth step, N = the edit step) of the block or the track
 // song_actions.cpp: the Song screen's editing (OS-SONG1). The edits are undo units; the range, the tempo field and the clipboard are view state (song_view.h).
 bool song_enabled(const ActionContext& ctx) noexcept;                       // the Song screen is in view
 bool song_play_enabled(const ActionContext& ctx) noexcept;                  // ... and a transport is attached
 bool song_add_slot(ActionContext& ctx, core::ActionArg arg) noexcept;       // F3 / Insert: a slot after the cursor's with its pattern; arg 1 (Shift + F3): with a copy of it as a new pattern
+bool song_add_empty(ActionContext& ctx, core::ActionArg arg) noexcept;      // Copy held + F3 (OS-SONG3 S5): a slot after the cursor's on the first free pattern (ADD EMPTY)
 bool song_delete_slot(ActionContext& ctx, core::ActionArg arg) noexcept;    // F4 / Delete: the cursor's slot or the selected range
 bool song_pattern_delta(ActionContext& ctx, core::ActionArg arg) noexcept;  // F5 / F6: arg = +-1, the cursor slot's pattern number
 bool song_turn(ActionContext& ctx, core::ActionArg arg) noexcept;           // the encoder: arg = detents; the slot's pattern, or the tempo (F7)
@@ -111,10 +121,20 @@ bool song_select(ActionContext& ctx, core::ActionArg arg) noexcept;         // S
 bool song_copy(ActionContext& ctx, core::ActionArg arg) noexcept;           // Copy: the range (or the slot) into the clipboard
 bool song_name(ActionContext& ctx, core::ActionArg arg) noexcept;           // Shift + F6 NAME (OS-NAMES): the keyboard on the name of the pattern in the slot under the cursor
 bool song_paste(ActionContext& ctx, core::ActionArg arg) noexcept;          // Shift + Copy: the clipboard's slots inserted at the cursor
-bool song_play_pattern(ActionContext& ctx, core::ActionArg arg) noexcept;   // F1: the cursor slot's pattern plays, or the transport stops
+bool song_play_pattern(ActionContext& ctx, core::ActionArg arg) noexcept;   // F1: the cursor slot's pattern plays, or the transport stops; in a TIMELINE lane: PREVIEW (OS-SONG3 S4)
+// OS-SONG3 S4 (PREVIEW, the audition's solo wiring, song_preview.h): the solo set in force now, as a bit mask (bit n = track n's solo flag); `mask` applied as the tracks' solo flags through
+// `edit` (Editor::set_track_flags_plain: no undo record, no generation moved, so no history reset and no unsaved work) with the strips' Solo ParamChanges pushed to `ring` (a full ring sets
+// view.song.preview_resync, re-sent on the next main-loop pass by song_solo_resync); and the end of the audition in `view.song.preview`, which restores the saved solo set exactly once
+// (a second call is a no-op). True when an audition ended.
+std::uint16_t song_solo_now(const model::Project& project) noexcept;
+void song_solo_set(ViewState& view, model::Editor* edit, core::ParamRing* ring, std::uint16_t mask) noexcept;
+bool song_solo_resync(const model::Project& project, core::ParamRing* ring) noexcept;
+bool song_preview_end(model::Editor* edit, ViewState& view, core::ParamRing* ring) noexcept;
 bool song_queue_jump(ActionContext& ctx, core::ActionArg arg) noexcept;     // Rec, while playing: the cursor's slot plays next, at the end of the pattern (again: cancels)
+bool song_loop(ActionContext& ctx, core::ActionArg arg) noexcept;           // F2 held (OS-SONG3 S7): the selected slots loop; the same range again takes the loop back
 bool song_clear(ActionContext& ctx, core::ActionArg arg) noexcept;         // Delete: the cells of the map's rectangle (in the map), else the slot or range (as F4)
 bool song_move(ActionContext& ctx, core::ActionArg arg) noexcept;          // Copy held + Up / Down (OS-SONGSHARE S3): arg = -1 up, +1 down, the range of slots moves one position
+bool song_move_along(ActionContext& ctx, core::ActionArg arg) noexcept;    // Copy held + Left / Right (OS-SONG3 S2): the same move on TIMELINE, whose Left / Right are the slots
 bool song_next_use(ActionContext& ctx, core::ActionArg arg) noexcept;      // Note / Shift + Note (OS-SONGSHARE S4): arg = +1 next, -1 previous slot that holds the cursor's pattern, wrapping
 bool song_cut(ActionContext& ctx, core::ActionArg arg) noexcept;           // Shift + Delete (OS-SONGSHARE S2): CUT, the slots into the slot clipboard and out of the list (in the map: the cells, as song_cells_cut)
 bool song_pads(ActionContext& ctx, core::ActionArg arg) noexcept;           // Shift + F7 PADS (OS-SONGPADS): the pads switch between TRACKS and SLOTS
@@ -133,6 +153,7 @@ bool songtools_move(ActionContext& ctx, core::ActionArg arg) noexcept;      // t
 bool songtools_delta(ActionContext& ctx, core::ActionArg arg) noexcept;     // ... Left / Right / the encoder change its value
 bool songtools_coarse(ActionContext& ctx, core::ActionArg arg) noexcept;    // ... Shift + encoder: the row's coarse step
 bool songtools_apply(ActionContext& ctx, core::ActionArg arg) noexcept;     // ... F1: close and make the edit (one undo unit)
+bool pattools_apply(ActionContext& ctx) noexcept;                           // ... F1 of the dialog opened from the Pattern's TOOLS list (OS-PTOOLS2 S2): songtools_apply hands the edit to it
 void song_question_drop(ViewState& view) noexcept;                          // takes the question and its strip text back
 bool song_question_sync(ViewState& view, const Model& model) noexcept;      // once a pass: a question that no longer holds goes
 bool song_question_taken_back(const ViewState& view, const core::InputEvent& event) noexcept;  // does this input take the question back?
@@ -158,6 +179,9 @@ bool rec_counting_in(const ActionContext& ctx) noexcept;  // OS-METRO: Edit is a
 bool rec_note(ActionContext& ctx, unsigned note, unsigned velocity) noexcept;
 bool rec_pad(ActionContext& ctx, unsigned pad) noexcept;
 bool rec_note_off(ActionContext& ctx, core::ActionArg arg) noexcept;
+// OS-FXREC S2 (rec_actions.cpp): a mapped parameter move of a LIVE take writes its step FX at the play line of the cursor's track (spec 3.2 / 3.3 / 3.5); apply_cc calls it after the parameter
+// write changed. `name` is the parameter's caption, for the strip's "REC FX: <PARAMETER>".
+bool rec_fx_write(ActionContext& ctx, core::ParamId id, const char* name, bool enc = false) noexcept;
 // The take (OS-LIVEREC, maintainer decision: the whole take): one undo unit for everything recorded from the moment the Pattern screen records (Edit while it plays, follow or free) until it stops
 // (Rec off, Stop, another screen). rec_take_sync opens the undo group when recording starts and closes it when it ends (App calls it after every pass and every action); rec_take_end closes it
 // at once (an edit of another kind, Undo and Redo, a macro, a new document). A take with nothing recorded leaves no entry (the journal writes a unit's header with its first record).
@@ -239,11 +263,18 @@ bool config_page_default(ActionContext& ctx, core::ActionArg arg) noexcept;  // 
 bool param_apply(ActionContext& ctx, core::ActionArg arg) noexcept;     // F7 of Config: the pending values (kParamApply rows) are written, on the second press (OS-USBAUDIO)
 bool learn_clear(ActionContext& ctx, core::ActionArg arg) noexcept;     // unbind the Learn target (F1 in the Learn overlay)
 bool learn_mode(ActionContext& ctx, core::ActionArg arg) noexcept;      // the target's binding: pickup, jump, relative, pickup (F2)
+bool learn_follow(ActionContext& ctx, core::ActionArg arg) noexcept;    // the target's binding follows the selected instrument, or is pinned back to it (F5; OS-LEARNFOLLOW)
 bool learn_delete(ActionContext& ctx, core::ActionArg arg) noexcept;    // delete the binding the list cursor is on (F3; OS-013a)
 bool learn_clear_all(ActionContext& ctx, core::ActionArg arg) noexcept; // clear both stores: the first press arms, the second clears (F4; OS-013a)
 // A control change message: arg = (channel << 16) | (cc << 8) | value, channel 1..16 (0: unknown), cc and value 0..127. With the Learn
 // overlay up it binds the controller to the target; otherwise it moves what it is bound to. MIDI input enqueues it, it never runs in an ISR.
 bool midi_cc(ActionContext& ctx, core::ActionArg arg) noexcept;
+// OS-ENCLEARN (param_actions.cpp): Instr + FX2 picks the encoder's target (the Learn row); enc.turn moves it (arg = detents, App::run_once).
+bool enc_assign(ActionContext& ctx, core::ActionArg arg) noexcept;
+bool enc_turn(ActionContext& ctx, core::ActionArg arg) noexcept;
+
+// cc_map.cpp: OS-MIDICCMAP S2, one message of the fixed CC map (app/cc_map.h) — called by midi_cc after both Learn stores, when CC MAP is On and no binding listens.
+bool cc_map_apply(ActionContext& ctx, unsigned cc, unsigned value) noexcept;
 
 // file_actions.cpp: the File screen (OS-010a).
 bool file_open(ActionContext& ctx, core::ActionArg arg) noexcept;              // F1: load the project folder under the cursor (ProjectSink)
@@ -322,6 +353,9 @@ bool sedit_amp(ActionContext& ctx, core::ActionArg arg) noexcept;          // ar
 bool sedit_run(ActionContext& ctx, core::ActionArg arg) noexcept;          // arg = EditOp: ask for the effect (the App runs the job)
 bool sedit_fx(ActionContext& ctx, core::ActionArg arg) noexcept;           // OS-AUDIT-15: the FX page's encoder, arg = clicks: the row's value
 bool sedit_fx_coarse(ActionContext& ctx, core::ActionArg arg) noexcept;    // the same with Shift: the coarse step
+bool sedit_plug(ActionContext& ctx, core::ActionArg arg) noexcept;         // OS-CEPTFX S4a: the PLUGINS page's encoder, arg = clicks: the plugin (list in focus) or the value of the row
+bool sedit_plug_coarse(ActionContext& ctx, core::ActionArg arg) noexcept;  // the same with Shift: x10
+bool sedit_plug_do(ActionContext& ctx, core::ActionArg arg) noexcept;      // arg 0 the row's default (Delete), 1 APPLY (S4b), 2 RESCAN, 3 DEFAULTS (every value)
 bool sedit_amiga(ActionContext& ctx, core::ActionArg arg) noexcept;     // Shift + F1 / F2: the AMIGA conversion, arg 0: 8,287 Hz, 1: 16,574 Hz (OS-AMG1)
 bool sedit_q8(ActionContext& ctx, core::ActionArg arg) noexcept;          // Shift + F3: its 8-bit option
 bool sedit_instrument(ActionContext& ctx, core::ActionArg arg) noexcept;  // Shift + F5: the next instrument, 1..64 round (OS-QAFIX-27, OS-SLD-RANGE-ALL; a pad picks one of 1..48 too)
@@ -329,9 +363,19 @@ bool sample_commit(ActionContext& ctx, core::ActionArg arg) noexcept;      // th
 bool sedit_undo(ActionContext& ctx, core::ActionArg arg) noexcept;         // the sample's own history, one step back
 bool sedit_redo(ActionContext& ctx, core::ActionArg arg) noexcept;
 
+// preset_actions.cpp: the F5 PRESET list of a module's parameter page (OS-INSFX-ABI2 A9). preset_open is called by instrument_page (F5); preset.load is the list's F1.
+bool preset_open(ActionContext& ctx) noexcept;                            // F5 on a module's page: opens the list over it (a page with no bound module says so)
+bool preset_load(ActionContext& ctx, core::ActionArg arg) noexcept;       // the list's F1: the chosen preset into every parameter (an instrument: one undo unit; an insert: none)
+bool preset_save(ActionContext& ctx, core::ActionArg arg) noexcept;      // OS-MODPRESET P4: the list's Shift + F5: the keyboard for a preset's name (save_actions.cpp's preset_name_open)
+// save_actions.cpp (OS-MODPRESET P4): Shift + F5 on a bound module's parameter page (instrument_save) or in the list (preset_save) opens the keyboard for a preset's name.
+bool preset_name_open(ActionContext& ctx) noexcept;                       // Target::Preset, the FileName filter, the instrument's name or the effect's display name suggested
+
 // module_actions.cpp: the SD modules (OS-012b). The picker, the MODULES screen and an app's page are view state and the module system's; the pick is an undo unit.
 bool module_engine(ActionContext& ctx, core::ActionArg arg) noexcept;    // F1 on the Instrument page: opens the engine picker
-bool module_pick(ActionContext& ctx, core::ActionArg arg) noexcept;      // F1 in the picker: binds the chosen module to the instrument (undoable)
+bool module_pick(ActionContext& ctx, core::ActionArg arg) noexcept;      // F1 in the picker: binds the chosen module to the instrument (undoable); in the apps list (OS-APPSNAV) it launches the app
+bool apps_open(ActionContext& ctx, core::ActionArg arg) noexcept;        // OS-APPSNAV: Shift + Pattern, the list of the installed apps that are not tools
+bool apps_close(ActionContext& ctx, core::ActionArg arg) noexcept;       // OS-APPSNAV: Pattern in that list closes it (false in the other pickers)
+bool module_picker_f8(ActionContext& ctx, core::ActionArg arg) noexcept; // OS-APPSNAV: F8 of the picker: launch in the apps list, ui.back in the others
 bool module_rescan(ActionContext& ctx, core::ActionArg arg) noexcept;    // MODULES F2: reads modules/apps again
 bool module_launch(ActionContext& ctx, core::ActionArg arg) noexcept;    // MODULES F1: launches the app under the cursor
 bool module_exit(ActionContext& ctx, core::ActionArg arg) noexcept;      // an app page's exit chord (F7 + F8)
@@ -339,9 +383,54 @@ bool module_app_edit(ActionContext& ctx, core::ActionArg arg) noexcept;  // Shif
 bool module_app_reset(ActionContext& ctx, core::ActionArg arg) noexcept; // Shift + Delete: the default
 bool module_app_tempo(ActionContext& ctx, core::ActionArg arg) noexcept; // OS-H1: an app's queued set_tempo (BPM x 100), one undo unit; App::poll_modules runs it
 bool module_app_group(ActionContext& ctx, core::ActionArg arg) noexcept;  // OS-H3A: an app's closed edit group (edit_begin .. edit_end), one undo unit named by the app; the sink App::attach_modules gives ModuleUi runs it
-bool tools_open(ActionContext& ctx, core::ActionArg arg) noexcept;        // OS-H3A, Pattern F7: the TOOLS list (refused silently while the view follows the play line)
-bool tools_run(ActionContext& ctx, core::ActionArg arg) noexcept;         // F1 in the list: launches the app under the cursor with the Pattern's block as its context
+bool tools_open(ActionContext& ctx, core::ActionArg arg) noexcept;        // OS-H3A, Pattern F7 opened the TOOLS list; since OS-PTOOLS2 S3 the verb menu's APPS > row runs it (refused silently while the view follows the play line)
+bool tools_run(ActionContext& ctx, core::ActionArg arg) noexcept;         // not an action since OS-PTOOLS2 S6b: verb_run calls it for F1 on the verb menu's APPS page: launches the app under the cursor with the Pattern's block as its context
+
+// verb_actions.cpp: the F7 verb menu of the Pattern screen (OS-PTOOLS2 S3, app/verb_menu.h: the 2x8 table of verbs).
+bool verb_open(ActionContext& ctx, core::ActionArg arg) noexcept;   // F7: the menu opens over the screen (it remembers its last verb); the TOOLS list's refusals apply
+bool verb_pick(ActionContext& ctx, core::ActionArg arg) noexcept;    // a pad 1-16 in the menu, arg = the pad's index 0..15: pick the verb and run it
+bool verb_run(ActionContext& ctx, core::ActionArg arg) noexcept;     // F1 in the menu: run the verb under the cursor
+bool verb_events(ActionContext& ctx, core::ActionArg arg) noexcept;  // F6 in the menu (grid or APPS page): close it and open the EVENTS list (OS-TOOLSDEDUP)
+bool verb_transpose(ActionContext& ctx, core::ActionArg arg) noexcept;   // the menu's pad 1, one undo unit: the block's note delta, multi-cell rule (no note inserted on an empty step)
+bool verb_instrument(ActionContext& ctx, core::ActionArg arg) noexcept;   // the menu's pad 2, one undo unit: the block's instrument delta, multi-cell rule
+bool verb_interpolate(ActionContext& ctx, core::ActionArg arg) noexcept;  // OS-PTOOLS2 S3b, the menu's pad 4: model::verbs::apply_block over the block, one undo unit
+bool verb_randomise(ActionContext& ctx, core::ActionArg arg) noexcept;    // pad 5: same, fixed default AMOUNT/CHANCE/SEED (no dialog in this slice)
+bool verb_humanise(ActionContext& ctx, core::ActionArg arg) noexcept;     // pad 6: same, fixed default TIME/VOL/SEED
+bool verb_rotate_up(ActionContext& ctx, core::ActionArg arg) noexcept;    // pad 7: the block's steps one row up, wrapping inside the block, one undo unit
+bool verb_rotate_down(ActionContext& ctx, core::ActionArg arg) noexcept;  // pad 8: one row down
+bool verb_hold(ActionContext& ctx, core::ActionArg arg) noexcept;          // OS-PTOOLS2 S3b: F7 held; opens nothing, refuses like verb.open (LIVE, no project), the pads under it run verbs
+bool verb_hold_pad(ActionContext& ctx, core::ActionArg arg) noexcept;      // OS-PTOOLS2 S3b: F7 held + pad 1-16, arg = the pad's index 0..15: run the verb without the menu
+bool verb_hold_end(ActionContext& ctx, core::ActionArg arg) noexcept;      // OS-PTOOLS2 S3b: the release of a held F7 after its Hold: ends the hold, clears the pad mark
+
+// pattern_tools_actions.cpp: the Pattern screen's TOOLS dialog (OS-PTOOLS2 S2, pattern_tools_view.h: the OP row, the AMOUNT / TO / WHAT row, the footer over the block).
+bool ptool_open(ActionContext& ctx, core::ActionArg arg) noexcept;    // the menu's TRANSPOSE / INSTRUMENT rows, arg = the OP it opens with: the dialog over the selection
+bool ptool_move(ActionContext& ctx, core::ActionArg arg) noexcept;     // Up / Down: the row
+bool ptool_delta(ActionContext& ctx, core::ActionArg arg) noexcept;    // Left / Right, the encoder: the row's value
+bool ptool_coarse(ActionContext& ctx, core::ActionArg arg) noexcept;   // Shift + encoder: the row's coarse step (AMOUNT an octave)
+bool ptool_apply(ActionContext& ctx, core::ActionArg arg) noexcept;    // F1 APPLY: the tool over the block as ONE undo unit (pe::edit_selection), F8 BACK left it untouched
+// The tool itself, run over the selection's block as the caller's one undo unit (ptool.apply's or tools.repeat's): the Song rules (multi-cell, cut / fade / off untouched).
+// `record` keeps it as what F6 REPEAT runs with the same amount.
+bool pattern_tools_run(ActionContext& ctx, PTool tool, int amount, unsigned instrument, SongWhat what, bool record) noexcept;
 ScreenId app_exit_screen(ViewState& view) noexcept;                       // OS-H3A: where an app's page returns to (Pattern when it was opened from TOOLS, else MODULES); clears the mark
+
+// events_actions.cpp: the EVENTS overlay of the Pattern screen (OS-MIDIREC S1b/S2b, docs/specs/OS-MIDIREC.md section 3). S1 was
+// read-only; S2b wires the encoder, Shift + encoder and the pads to the model's planners (events::plan) as dispatched edits.
+// verb_events (F6 in the verb menu) calls events_open.
+bool events_open(ActionContext& ctx, core::ActionArg arg) noexcept;   // the TOOLS entry EVENTS: opens the list over the grid pane (A13's refusals)
+bool events_move(ActionContext& ctx, core::ActionArg arg) noexcept;    // arg = rows, + down: Up / Down
+bool events_page(ActionContext& ctx, core::ActionArg arg) noexcept;   // arg = pages, + down: Shift + Up / Down (OS-NAV3)
+bool events_field(ActionContext& ctx, core::ActionArg arg) noexcept;  // arg = +-1: Left / Right, the field of the cursor row
+bool events_back(ActionContext& ctx, core::ActionArg arg) noexcept;    // F8: closes the list, the grid cursor lands on the row's step, track and column
+bool events_filter(ActionContext& ctx, core::ActionArg arg) noexcept;  // F1 FILTER (S1c)
+bool events_quant(ActionContext& ctx, core::ActionArg arg) noexcept;   // F2 QUANT the row (arg 0) / Shift + F2 every NOTE and end row the filter shows (arg 1) (S3)
+bool events_preview(ActionContext& ctx, core::ActionArg arg) noexcept;  // F5 PREVIEW (S1c)
+bool events_edit(ActionContext& ctx, core::ActionArg arg) noexcept;    // S2b: the encoder on the cursor row's field, one detent (one dispatched edit)
+bool events_coarse(ActionContext& ctx, core::ActionArg arg) noexcept;  // S2b: Shift + encoder, the coarse step (OS-SHIFTENC)
+bool events_insert(ActionContext& ctx, core::ActionArg arg) noexcept;  // S2c: Insert (arg 0) / Shift + Insert (arg 1), A9
+bool events_delete(ActionContext& ctx, core::ActionArg arg) noexcept;  // S2c: Delete, A10
+bool events_undo(ActionContext& ctx, core::ActionArg arg) noexcept;    // S2c: F7 inside the list (A12): the grid's undo, then the list projects again
+bool events_redo(ActionContext& ctx, core::ActionArg arg) noexcept;    // S2c: Shift + F7
+bool events_pad(ActionContext& ctx, core::ActionArg arg) noexcept;     // S2b: a pad — DATA of a NOTE row the pad's note, VAL the ramp, else the row's step sounds (A14)
 
 // job_actions.cpp: the job runner.
 bool job_cancel(ActionContext& ctx, core::ActionArg arg) noexcept;      // cancel every running job
@@ -352,6 +441,7 @@ bool mixer_coarse(ActionContext& ctx, core::ActionArg arg) noexcept;  // Shift +
 bool mixer_master_vol(ActionContext& ctx, core::ActionArg arg) noexcept;  // OS-MASTERVOL, Master held + the encoder, on any screen: arg = detents of the master VOLUME; the strip says the value
 bool mixer_reset(ActionContext& ctx, core::ActionArg arg) noexcept;   // Delete: the default (the engine's for a routing value); STEMS: arg 0 clears the cursor's source, arg 1 (Shift) the factory map
 bool mixer_stem_set(ActionContext& ctx, core::ActionArg arg) noexcept;  // Insert on STEMS: the cursor's source joins the slot
+bool mixer_params(ActionContext& ctx, core::ActionArg arg) noexcept;     // OS-INSFX S5, Params (Enter) on INSERTS: a bound cell opens the insert's parameter page
 bool mixer_mute(ActionContext& ctx, core::ActionArg arg) noexcept;    // F7: the track's mute (SND A / SND B: the effect's)
 bool mixer_solo(ActionContext& ctx, core::ActionArg arg) noexcept;    // F8: the track's solo
 bool mixer_name(ActionContext& ctx, core::ActionArg arg) noexcept;      // Shift + F1 NAME (OS-NAMES): the keyboard on the name of the track under the cursor (TRACKS ONLY elsewhere)
@@ -362,6 +452,7 @@ bool mixer_apply(ActionContext& ctx, core::ActionArg arg) noexcept;   // F6 APPL
 bool mixer_cue(ActionContext& ctx, core::ActionArg arg) noexcept;     // F5 CUE LVL: the MASTER FX page on the CUE level
 
 // perform_actions.cpp: the Perform screen (OS-011b), on the slot bank of seq/perform.h.
+bool on_perform(const ActionContext& ctx) noexcept;                     // the Perform screen's slot page is in view (not the DJ page); the mapped Perform CCs act here only (OS-MIDICCMAP Q5 a)
 bool perform_pad(ActionContext& ctx, core::ActionArg arg) noexcept;      // arg = pad 0..47: its slot's row is selected and held
 bool perform_pad_up(ActionContext& ctx, core::ActionArg arg) noexcept;   // arg = pad: the release (the App sends it)
 bool perform_turn(ActionContext& ctx, core::ActionArg arg) noexcept;     // arg = detents: the live value of the held slots

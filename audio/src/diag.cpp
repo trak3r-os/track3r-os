@@ -116,6 +116,12 @@ std::size_t format_shed(std::uint32_t blocks, std::uint32_t late, std::uint32_t 
   return t.size();
 }
 
+std::size_t format_wt_bake(std::uint32_t used, std::uint32_t capacity, std::uint32_t refused, char* out, std::size_t cap) noexcept {
+  Text t(out, cap);
+  t.str("wtbake  used ").dec(used).chr('/').dec(capacity).str("  refused ").dec(refused).str(" calls");
+  return t.size();
+}
+
 std::size_t format_voices(std::uint32_t in_use, std::uint32_t pool, std::uint32_t peak, std::uint32_t steals, std::uint32_t advanced, char* out, std::size_t cap) noexcept {
   Text t(out, cap);
   t.str("voices  in use ").dec(in_use).chr('/').dec(pool).str("  peak ").dec(peak).str("  steals ").dec(steals).str("  advanced ").dec(advanced).nl();

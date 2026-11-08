@@ -299,7 +299,7 @@ void fill_persist2(Project& p) {
   NoteState n;
   init_note_state(n);
   n.root = 7;    // G
-  n.scale = 9;   // Blues
+  n.scale = 15;  // Blues, the official index (OS-SCALES28); the NOTE 1.0 byte is still its pad - 1 = 9, so the file is the one it always was
   n.octave = 5;
   n.lock = 1;
   n.jump = 4;
@@ -339,6 +339,13 @@ void fill_persist2(Project& p) {
   const std::uint16_t values[kSendFxCount] = {1, 1, 18, 3500, 70, 0, 1, 100, 0, 77, 15, 1};
   std::memcpy(f.value, values, sizeof f.value);
   ok(p.set_send_fx(f));
+}
+
+void fill_scales(Project& p) {
+  fill_persist2(p);
+  NoteState n = p.note();
+  n.scale = 26;  // Hirajoshi, the official index (OS-SCALES28): outside the panel's twelve, so the NOTE chunk is 1.1; the lock is already on
+  ok(p.set_note(n));
 }
 
 void fill_inserts(Project& p) {

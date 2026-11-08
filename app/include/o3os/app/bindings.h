@@ -6,6 +6,7 @@
 
 #include <o3os/app/buttons.h>
 #include <o3os/core/binding.h>
+#include <o3os/core/inflate.h>
 #include <o3os/core/keymap.h>
 
 #include <cstddef>
@@ -54,17 +55,23 @@ enum class Context : std::uint8_t {
   WaveWt = 34,         // OS-INSTUI S4: the Wave screen of a WAVETABLE instrument (the screen's field level: its rows are the window's position and size)
   WaveGran = 35,       // OS-INSTUI S4: the Wave screen of a GRANULAR instrument (position, length, shape, loop)
   PlayModePicker = 36, // OS-INSTUI S4: the play mode list over the Wave screen (captures)
-  ToolsList = 38,      // OS-H3A: the Pattern screen's F7 TOOLS list over the screen (captures)
   SongAsk = 39,        // OS-SONGMAP: the Song screen's question of 1.6 is up: the screen's field level, F1 ALL and F2 UNIQUE answer it (it captures nothing else: another key takes the question back and acts)
   SongTools = 40,      // OS-SONGMAP: the Song screen's F6 TOOLS dialog (captures)
+  Events = 41,         // OS-MIDIREC S1b: the EVENTS overlay over the Pattern screen (captures)
   InstrumentEmpty = 37, // OS-INSTUI S5: the Instrument screen on an empty slot (the screen's field level: F1..F5 are the type chooser)
   FileExport = 44,     // OS-WAVEXP: the File screen's EXPORT page (the screen's field level: F1 starts, F6 IMPORT, F7 PROJECTS, the encoder picks the pattern; 44 and 45 leave the numbers between to the branches that add contexts)
   ExportProgress = 45, // OS-WAVEXP: the progress of a running export (captures: F8 CANCEL is the one key)
   FirmwareUpdate = 48, // OS-FWCONFIG: the firmware update dialog (captures: F1 and F8 answer, Up / Down / the encoder choose; any other key takes a question back)
   PerformDj = 46,      // OS-DJ A1: the Perform screen's DJ page (the screen's field level: the crossfader on the encoder and the pads' row 4, F3 CURVE, F8 RESET; the slots' keys are inert there)
   MixerStems = 49,     // OS-USBOUTS: the Mixer screen's STEMS page (the screen's field level: F6 APPLY the pending OUTPUTS value; the other Mixer keys are the screen's)
+  MixerInserts = 55,   // OS-INSKEYS: the Mixer screen's INSERTS page (the screen's field level: F6 PARAMS, as the Params button; the other Mixer keys are the screen's)
+  InsertParams = 56,   // OS-INSKEYS: the Instrument screen's page of an insert (view.params.insert set; the screen's field level: F6 BACK to the Mixer's INSERTS page, F7 and Shift + F6 / F7 do nothing)
+  VerbMenu = 50,      // OS-PTOOLS2 S3: the Pattern screen's F7 verb menu over the screen (captures; the pads 1-16 pick a verb, F1 opens the one under the cursor, F8 BACK)
   SampleEditFx = 43,  // OS-AUDIT-15: the Sample edit screen's FX page (the screen's field level: F1 FILTER, F2 COMPRESSOR, the encoder changes the row's value)
+  SampleEditPlug = 54, // OS-CEPTFX S4a: the Sample edit screen's PLUGINS page (the screen's field level: the encoder picks the plugin or changes the value, Delete the default, F2 RESCAN, F3 DEFAULTS)
   RecordRadio = 33,   // OS-SHIFTROW: the Record screen's RADIO page (the screen's field level: Shift + F5 / F6 tune ten channels there only)
+  Preset = 52,         // OS-INSFX-ABI2 A9: the F5 PRESET list over a module's parameter page (captures; 50 is OS-PTOOLS2 S3's VerbMenu, 51 was OS-PERFREMIX R3's PerformRemix, removed by OS-NOREMIX: the number is not reused)
+  PatternTools = 53,   // OS-PTOOLS2 S2: the Pattern screen's TOOLS dialog over the block (pattern_tools_view.h; captures; F1 APPLY, F8 BACK)
   Help = 47,           // OS-HELP: the help overlay (captures: the arrows and the encoder scroll, F8 and every other key close it)
   None = 0xFF,         // no context: a screen without a field level
 };
@@ -94,8 +101,27 @@ inline constexpr std::uint64_t kRepeatButtons = (std::uint64_t{1} << static_cast
 inline constexpr std::size_t kUserBindings = 32;
 inline constexpr std::size_t kPresetBindings = 64;
 
-// The built-in layer: a constexpr table, free of conflicts (static_assert in bindings.cpp).
+// The built-in layer: a constexpr table, free of conflicts (static_assert in bindings.cpp). On the MK66 image the constexpr table is not in the image (OS-FLASHDIET P6):
+// it is a deflate blob (kBuiltinBindingsZ, generated at build time from the cross-compiled table) that the platform unpacks once at boot, in the main loop before
+// the first lookup, into a table in SDRAM and attaches with builtin_bindings_use; until then (and when the unpack failed) the view is empty. The host, the
+// simulator and QEMU keep the constexpr table (builtin_bindings_use(nullptr, 0) returns to it).
 core::BindingView builtin_bindings() noexcept;
+
+// Room of the platform's table for the unpacked built-in layer, in bindings (768 x 16 B). A static_assert in bindings.cpp keeps the real count under it.
+inline constexpr std::size_t kBuiltinBindingsCapacity = 768;
+
+// The packed table: the deflate stream and its sizes (generated into builtin_bindings_blob.cpp by tools/bindings_pack.py).
+extern const std::uint8_t* const kBuiltinBindingsZ;
+extern const std::size_t kBuiltinBindingsZSize;
+extern const std::size_t kBuiltinBindingsRawSize;
+
+// Inflates the blob into `table` (room for `capacity` bindings) through the shared decoder. Returns the number of bindings, or 0 when the blob is not a whole
+// number of bindings, does not fit, or the stream is short or damaged (the table is then not to be used). Main loop only.
+std::size_t builtin_bindings_unpack(core::Inflater& inflater, core::Binding* table, std::size_t capacity) noexcept;
+
+// Makes builtin_bindings() return `table[0..count)` (the unpacked layer); nullptr returns it to the constexpr table. Single writer: the main loop at boot, before
+// the first binding lookup; read-only afterwards, so plain variables.
+void builtin_bindings_use(const core::Binding* table, std::size_t count) noexcept;
 
 // Context, button and action names for core::parse_keymap.
 const core::KeymapNames& keymap_names() noexcept;

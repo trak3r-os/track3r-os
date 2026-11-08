@@ -3,11 +3,11 @@
 # twin:     OS-BUG-ADDSLICE (an operation on a selection acts outside it)
 # expected: A3
 # effect:   An edit of a block of steps (clear, note, transpose) also writes the row after the block
-diff --git a/app/src/pattern_edit_util.h b/app/src/pattern_edit_util.h
-index e77bbccc..065b8d53 100644
---- a/app/src/pattern_edit_util.h
-+++ b/app/src/pattern_edit_util.h
-@@ -77,3 +77,4 @@ Edited edit_selection(ActionContext& ctx, Fn fn) noexcept {
+diff --git a/app/src/pattern_edit_util.cpp b/app/src/pattern_edit_util.cpp
+index 8552728..56d7db4 100644
+--- a/app/src/pattern_edit_util.cpp
++++ b/app/src/pattern_edit_util.cpp
+@@ -20,3 +20,4 @@ Edited edit_selection(ActionContext& ctx, EditFn fn, void* fn_ctx) noexcept {
    for (int t = b.track0; t <= b.track1 && t < tracks; ++t) {
 -    const int r1 = b.row1 < src.track_length(t) - 1 ? b.row1 : src.track_length(t) - 1;
 +    const int reach = b.row1 > b.row0 ? b.row1 + 1 : b.row1;

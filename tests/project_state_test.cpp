@@ -958,7 +958,7 @@ TEST_CASE("project state: an older file (no state chunks, INST 1.1) reads as the
   CHECK(q.instrument(1)->sample_rate == 8287u);
 }
 
-TEST_CASE("project state: INST 1.2 is exact: an engine above the table reads as automatic, a short or long chunk is refused, 1.4 is a newer minor") {
+TEST_CASE("project state: INST 1.2 is exact: an engine above the table reads as automatic, a short or long chunk is refused, 1.7 is a newer minor") {
   const Bytes file = state_file();
   const std::vector<RawChunk> cs = test::split_chunks(file);
   Report rep;
@@ -1003,16 +1003,22 @@ TEST_CASE("project state: INST 1.2 is exact: an engine above the table reads as 
   }
   CHECK(test::load(test::arena(1), build(edit), &rep) == Progress::Failed);
   CHECK(rep.error == Error::Malformed);
-  // 1.4 (1.3 is the MIDI fields since OS-INSTUI S8b, inst_midi_format_test.cpp): read as far as 1.3, here the twelve bytes of the defaults beside the engine, the appended field skipped, the report says so
+  // 1.9 (1.8 is OS-MODRATE S3's module RATE byte; 1.3 is the MIDI fields since OS-INSTUI S8b, inst_midi_format_test.cpp; 1.4 is OS-LFOSINE's, no field; 1.5 is OS-STEREO's flag; 1.6 is OS-CEWTENV W1's twelve WT bytes; 1.7 is OS-CEPLAYTHRU P1's play-thru flag): read as far as 1.8,
+  // here the twelve bytes of the defaults beside the engine, the WT bytes zero, the flag off, the appended field skipped, the report says so
   edit = cs;
   for (RawChunk& c : edit) {
     if (c.id == kChunkInst && c.payload[1] == 2) {
-      c.payload[1] = 6;  // (1.4 is OS-LFOSINE's, with no field of its own; 1.5 is OS-STEREO's flag, so the next minor is 1.6)
+      c.payload[1] = 9;
       const std::uint8_t twelve[12] = {127, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 100};
       for (const std::uint8_t b : twelve) {
         c.payload.push_back(b);
       }
       c.payload.push_back(0);  // the stereo flag of 1.5: mono
+      for (unsigned i = 0; i < 12; ++i) {
+        c.payload.push_back(0);  // the twelve WT bytes of 1.6: none
+      }
+      c.payload.push_back(0);  // the play-thru flag of 1.7: off
+      c.payload.push_back(0);  // the module RATE of 1.8: FULL
       c.payload.push_back(0xEE);
       c.payload.push_back(0xFF);
       break;
@@ -1135,7 +1141,7 @@ TEST_CASE("project state: a state chunk is strict: values out of range, wrong co
       std::vector<RawChunk> next = cs;
       for (RawChunk& c : next) {
         if (c.id == id) {
-          c.payload[1] = (id == kChunkPerf || id == kChunkAppm) ? 2 : 1;  // (PERF is at 1.1 since OS-PERFFX P1 and APPM since OS-APPUX S3: their newer minor is 1.2)
+          c.payload[1] = id == kChunkPerf ? 3 : (id == kChunkAppm ? 2 : 1);  // (PERF is at 1.2 since OS-PERFMODES M3, APPM at 1.1 since OS-APPUX S3: their newer minors are 1.3 and 1.2)
           c.payload.insert(c.payload.end(), tail, 0xAB);
         }
       }

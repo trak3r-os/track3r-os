@@ -7,6 +7,10 @@
 //     Projects/OG Demo/patterns/pattern_01.mtp     12 tracks, 16 steps; track 1 holds the notes below, every other track is empty
 //     Projects/OG Demo/instruments/01 Sine.pti     slot 0, a loop of 200 frames: two periods of a 441 Hz sine (100 frames a period at 44,100 Hz), plain: a sample, not a wavetable; no envelope, filter or send; volume 40 and panning 60 (not the defaults), so that the journey's probes can catch a dropped field
 //
+//   o3og_fixture OUT ce   writes a tracker-ce-style v6 project instead (the card ce_v6, sim/scenarios/qa/qa_file_ce.txt, OS-CEPAT S2):
+//     Projects/CE Demo/project.mt                  version 16, "CE Demo", 200 BPM, playlist 1, pattern length 16
+//     Projects/CE Demo/patterns/pattern_01.mtp     pattern structure v6, 16 tracks of 16 steps; track 1 holds the steps below, every other track is empty
+//
 // The notes of track 1 (OG note byte 60 is C-5, the pitch the sample was made at): step 1 C-5, step 3 G-5, step 5 C-5, step 7 note off. Step 9 is empty: the journey edits it.
 // The folder is generated, never committed (a binary file does not belong in git): sim/CMakeLists.txt, target e2e_og_fixture, runs this into <build>/sim/cards/e2e_og/ on every build;
 // tests/e2e_og_fixture_test.py (ctest e2e_fixture_fresh) holds the folder to what this tool writes. Deterministic: integer arithmetic only.
@@ -15,6 +19,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -74,6 +79,29 @@ og::Bytes sine_pti() {
   return b;
 }
 
+// OS-CEPAT S2: the v6 project of the card ce_v6 (sim/scenarios/qa/qa_file_ce.txt): a project.mt and one pattern file of structure v6, 16 tracks, built from
+// the same byte map. Track 1's steps pin what the v6 reader maps (OS-CEPAT 3.3 and 3.1): a volume column value (step 1), a micromove into a free FX column
+// (step 2), a micromove with no free column (step 3, dropped and counted), an OG FX id 75 cleared and 43 mapped to 96 (step 4), a volume above 100 (step 5),
+// and the boundaries OG 74 -> 127 and 128 verbatim (step 6).
+og::Bytes ce_pattern() {
+  og::PatternSpec6 p = og::empty_pattern6(16, 6);
+  for (unsigned t = 0; t < 16; ++t) p.length[t] = 15;  // 16 steps
+  auto set = [&p](unsigned s, std::uint8_t note, std::uint8_t instr, std::uint8_t t0, std::uint8_t v0, std::uint8_t t1, std::uint8_t v1,
+                  std::int8_t vol, std::int8_t m) {
+    std::uint8_t* e = p.step[0][s];
+    e[0] = note; e[1] = instr;
+    e[2] = t0; e[3] = v0; e[4] = t1; e[5] = v1;
+    e[6] = static_cast<std::uint8_t>(vol); e[7] = static_cast<std::uint8_t>(m);
+  };
+  set(1, 60, 0, 0, 0, 0, 0, 50, -1);        // step 1: C-5, volume 50 -> vol 63
+  set(2, 62, 0, 0, 0, 0, 0, -1, 50);        // D-5, micromove 50 -> FX 2 value 50 in the first free column
+  set(3, 60, 0, 4, 50, 5, 60, -1, 100);     // both columns taken: the micromove is dropped and counted
+  set(4, 60, 0, 75, 10, 43, 11, -1, -1);    // OG 75 cleared, OG 43 -> model 96
+  set(5, 60, 0, 0, 0, 0, 0, 101, -1);       // volume above 100: full volume, counted
+  set(6, 60, 0, 74, 9, 128, 200, -1, -1);   // the boundaries: 74 -> 127, 128 verbatim, neither counted
+  return og::pattern6_bytes(p);
+}
+
 bool put(const std::filesystem::path& root, const std::string& rel, const og::Bytes& bytes) {
   const std::filesystem::path path = root / rel;
   std::error_code ec;
@@ -86,14 +114,30 @@ bool put(const std::filesystem::path& root, const std::string& rel, const og::By
 }  // namespace
 
 int main(int argc, char** argv) {
-  if (argc != 2) {
-    std::fprintf(stderr, "usage: o3og_fixture OUT   (the directory must exist)\n");
+  const bool ce = argc == 3 && std::strcmp(argv[2], "ce") == 0;
+  if (argc != 2 && !ce) {
+    std::fprintf(stderr, "usage: o3og_fixture OUT [ce]   (the directory must exist; 'ce' writes the tracker-ce v6 project instead)\n");
     return 2;
   }
   const std::filesystem::path root(argv[1]);
   if (!std::filesystem::is_directory(root)) {
     std::fprintf(stderr, "o3og_fixture: %s is not a directory\n", argv[1]);
     return 2;
+  }
+  if (ce) {
+    og::ProjectSpec ps;
+    ps.name = "CE Demo";
+    ps.tempo = 200.0f;
+    ps.pattern_length = 16;
+    ps.playlist = {1};
+    ps.bitmask[0] = 1;  // pattern 1 is in the song
+    const std::string folder = "Projects/CE Demo/";
+    const bool ok = put(root, folder + "project.mt", og::project_bytes(ps)) && put(root, folder + "patterns/pattern_01.mtp", ce_pattern());
+    if (!ok) {
+      std::fprintf(stderr, "o3og_fixture: cannot write under %s\n", argv[1]);
+      return 1;
+    }
+    return 0;
   }
   og::ProjectSpec ps;
   ps.name = "OG Demo";

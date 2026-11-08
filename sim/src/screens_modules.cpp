@@ -177,7 +177,7 @@ const o3m_module kNamed = {O3M_ABI_MAJOR, 8, O3M_KIND_INSTRUMENT, O3M_MODULE_SIZ
 const o3m_module kStress = {O3M_ABI_MAJOR, O3M_ABI_MINOR, O3M_KIND_INSTRUMENT, sizeof(o3m_module), "Stress", 64, 12, kDemoParams,
                             nop_init, nop_render, nop_set_param, nop_note_on, nop_note_off, nop_shutdown, &kStressUi, 2};
 // The gallery's app is an ABI 1.9 app that declares two rows: its page is the OS parameter column (an app of 1.10 draws its own rows: OS-APPUX S3), so the pictures stay what they were.
-const o3m_module kScope = {O3M_ABI_MAJOR, 9, O3M_KIND_APP, sizeof(o3m_module), "Scope", sizeof(ScopeState), 2, kScopeParams,
+const o3m_module kScope = {O3M_ABI_MAJOR, 9, O3M_KIND_APP, O3M_MODULE_SIZE(9), "Scope", sizeof(ScopeState), 2, kScopeParams,
                            nop_init, nullptr, nullptr, nullptr, nullptr, nop_shutdown, &kScopeUi, 1};
 
 // ---- the world of a state ---------------------------------------------------------------------------------------------------------------------------

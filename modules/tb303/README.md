@@ -68,3 +68,5 @@ itself idle).
 
 Open303, Copyright (c) 2009 Robin Schmidt (www.rs-met.com), MIT licence: `LICENSE-Open303.txt`, THIRD_PARTY.md. This port: MIT (SPDX in the sources), the same
 terms. Upstream: github.com/maddanio/open303 commit 52f8614966cd.
+
+RATE (OS-MODRATE, ABI 1.13): this module declares `O3M_FX_RATE` (`"rate": true` in `module.json`), so the MIX page offers FULL, 1/2 and 1/4: it is called for half or a quarter of the frames at 22050 or 11025 Hz and the OS holds each sample. Every rate is derived from `host->sample_rate` at `init`.

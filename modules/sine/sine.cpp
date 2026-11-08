@@ -110,4 +110,6 @@ O3M_HOT uint32_t render(void* raw, const float* in, float* out, uint32_t frames)
 extern "C" O3M_EXPORT const o3m_module o3m_entry __attribute__((section(".o3m_entry"))) = {
     O3M_ABI_MAJOR, O3M_ABI_MINOR, O3M_KIND_INSTRUMENT, O3M_MODULE_SIZE(O3M_ABI_MINOR), "Sine", sizeof(State), kParamCount, kParams,
     init, render, set_param, note_on, note_off, shutdown, nullptr, 0,
+    // ABI 1.8 to 1.12 members (pitch, pages, page_count, labels, importer, render_st), then fx_flags: it renders correctly at the half and quarter rate (OS-MODRATE).
+    nullptr, nullptr, 0, nullptr, nullptr, nullptr, O3M_FX_RATE,
 };

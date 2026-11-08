@@ -8,7 +8,7 @@
 // are not undo units (navigation, selection, modes and choosers are view state, only the edits of the project are the journal's).
 //
 // The selection is a rectangle of
-// steps x tracks from a start to an end corner, `active` once a range was started, `extending` while Shift is still moving its end, `column` for the whole-column step of Shift + Up at step 0. With no range, every edit works on
+// steps x tracks from a start to an end corner, `active` once a range was started, `extending` while Shift is still moving its end, `column` for the column steps of Shift + Up at step 0 (OS-SELCOL: the cursor's column, the track, every track). With no range, every edit works on
 // the cursor step. OS-AUDIT-56 (new Community OS behaviour, column-level block): inside one track the block also has a column range, from the start column to the end column (Column values: Note, Instr, Vol, Fx1, Fx2, the cursor's
 // columns); a block that spans tracks, and the whole-column block, is whole steps (every column).
 
@@ -36,12 +36,16 @@ struct Selection {
   bool extending = false;  // the end follows the cursor
   bool column = false;     // the whole-column step of Shift + Up at step 0
   bool follow = false;     // made while the cursor rides the playhead (OS-BUG-WATCHSEL): the arrows set the end row, the cursor does not, and the follow keeps the block
+  bool end_lags = false;   // a downward quarter jump (OS-SELSHIFT) left the end one row above the cursor; Shift + Down keeps that lag (main loop only, no ISR)
   std::int16_t start_row = 0;
   std::int16_t end_row = 0;
   std::int8_t start_track = 0;
   std::int8_t end_track = 0;
   std::int8_t start_col = 0;  // the cursor's column where the block began and where its end is; they count only while both corners are in one track
   std::int8_t end_col = 0;
+
+  // OS-SELCOL: the first press of Shift + Up at step 0 on the Instr, Vol, Fx1 or Fx2 column selects that one column of the track (`column` stays set while Shift is held, so the next press goes on to the whole track).
+  bool column_only() const noexcept { return column && (start_col != 0 || end_col != kLastColumn); }
 
   // The block, normalised (first <= last on every axis). With no range it is the cursor step (every column: the edits then read the cursor's column themselves).
   Block block(int cursor_row, int cursor_track) const noexcept {
@@ -50,7 +54,7 @@ struct Selection {
     }
     Block b{start_row < end_row ? start_row : end_row, start_row < end_row ? end_row : start_row,
             start_track < end_track ? start_track : end_track, start_track < end_track ? end_track : start_track};
-    if (!column && start_track == end_track) {
+    if (start_track == end_track && (!column || column_only())) {
       b.col0 = start_col < end_col ? start_col : end_col;
       b.col1 = start_col < end_col ? end_col : start_col;
     }
@@ -61,6 +65,7 @@ struct Selection {
     extending = false;
     column = false;
     follow = false;
+    end_lags = false;
   }
 };
 
@@ -88,6 +93,14 @@ struct PatternEdit {
   bool take_open = false;
   bool take_wrote = false;  // ... and holds at least one record: the info line counts it as an undo level (it is one the moment Undo is pressed)
   bool take_noticed = false;  // a take that grew too long was split, and the user was told (once for a recording)
+  // OS-FXREC S2 (spec 3.5): the strip of a take that recorded an FX. The take's first recorded FX posted "REC FX: <PARAMETER>" once, and a write dropped for want of a free column posted
+  // "REC FX: NO FREE FX COLUMN" once (a knob sends up to about 100 messages a second). Cleared when the take ends.
+  bool rec_fx_said = false;
+  bool rec_fx_full = false;
+  // OS-ENCLEARN (main loop only): the hold of Instr + FX1 with the encoder turned in STEP (Edit free) keeps one undo group open, as a take does (rec_take_sync), until a key is let go; `enc_said` is the
+  // gesture's "REC FX: <PARAMETER> HAS NO FX" strip line, once. Both clear when either key is released (App::run_once).
+  bool enc_take = false;
+  bool enc_said = false;
   // The tracks whose recorded note is still held (bit n = track n), the note each holds (0..127), the step it was written to and the playhead's step when it was played (the release's OFF
   // needs both). Main loop only. Cleared when the sequencer stops.
   std::uint16_t rec_open = 0;
@@ -108,14 +121,22 @@ struct PatternEdit {
   Selection selection;
 
   // The NOTES board follows the settings: the scale only with SCALE LOCK on (off, every pad plays its chromatic note and the scale only lights PIANO / ISO / the info line).
-  void apply_entry() noexcept { pads.set(entry.lock != 0u ? entry.og_scale() : std::uint8_t{1}, pads.offset(), static_cast<std::uint8_t>(entry.board_root())); }
+  void apply_entry() noexcept { pads.set(entry.lock != 0u ? entry.core_scale() : std::uint8_t{1}, pads.offset(), static_cast<std::uint8_t>(entry.board_root())); }
   // The panel's pad (held Note): row 1 ROOT, row 2 SCALE, row 3 JUMP 0..11, row 4 OCTAVE 0..9 and the last two pads SCALE LOCK off / on. True when a setting changed.
   bool entry_pad(unsigned pad) noexcept {
     const unsigned col = pad % 12u;
+    if (pad / 12u == 1u) {  // row 2 SCALE: the same twelve pads, through the model's map (model::kNotePanelScales: the pad -> the official scale index, OS-SCALES28)
+      const std::uint8_t value = model::kNotePanelScales[col];
+      if (entry.scale == value) {
+        return false;
+      }
+      entry.scale = value;
+      apply_entry();
+      return true;
+    }
     std::uint8_t* to = nullptr;
     switch (pad / 12u) {
       case 0: to = &entry.root; break;
-      case 1: to = &entry.scale; break;
       case 2: to = &edit_step; break;
       case 3: to = col < 10u ? &entry.octave : &entry.lock; break;
       default: return false;

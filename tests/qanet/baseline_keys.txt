@@ -8,3 +8,8 @@
 #   * the placeholder soft key (ui.softkey) that reads "-" and does nothing; any other silent key under a blank label is a finding or an allow line with its reason;
 #   * a key that acts while it is held (HALF and DOUBLE of Perform): tried again pressed and held when the tap is silent and the key has no other gesture.
 # allow_rules.txt: decisions and screens that are one-axis (a reason each). gaps_keys.txt: what the states do not reach (the net's holes, not findings).
+R2 | F7 hold (verb.hold 0) | * | bound key changes nothing and says nothing | new
+R2 | F2 (sedit.plug_do 2) | SAMPLE_EDIT_page_2 | bound key changes nothing and says nothing | new
+R2 | F3 (sedit.plug_do 3) | SAMPLE_EDIT_page_2 | bound key changes nothing and says nothing | new
+R2 | F2 (sedit.plug_do 2) | SampleEditPlug | bound key changes nothing and says nothing | new
+R2 | F3 (sedit.plug_do 3) | SampleEditPlug | bound key changes nothing and says nothing | new

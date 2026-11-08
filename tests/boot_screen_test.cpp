@@ -70,10 +70,21 @@ Glyphs glyphs_of(const std::vector<std::uint32_t>& words, unsigned handle, unsig
   return g;
 }
 
-// The nibble of pixel (x, y) of the logo (L4, the first pixel of a byte in the high nibble).
-unsigned logo_level(const ui::BootLogo& logo, unsigned x, unsigned y) {
-  const std::uint8_t b = logo.bytes[y * ui::kBootLogoStride + x / 2];
+// The nibble of pixel (x, y) of the logo's raw bitmap (L4, the first pixel of a byte in the high nibble).
+unsigned logo_level(const std::uint8_t* px, unsigned x, unsigned y) {
+  const std::uint8_t b = px[y * ui::kBootLogoStride + x / 2];
   return (x % 2 == 0) ? b >> 4 : b & 0xFu;
+}
+
+// FNV-1a, 64-bit: a digest of the inflated bitmap this file can check on the target too (the host's sha256 lives in
+// a host-only library, and this test also builds for QEMU).
+std::uint64_t fnv1a64(const std::uint8_t* data, std::size_t n) {
+  std::uint64_t h = 0xcbf29ce484222325ULL;
+  for (std::size_t i = 0; i < n; ++i) {
+    h ^= data[i];
+    h *= 0x100000001b3ULL;
+  }
+  return h;
 }
 
 }  // namespace
@@ -144,23 +155,29 @@ TEST_CASE("boot hold: boot work that outlasts the minimum adds no delay: the fir
 
 // ---- The bitmap and its flash budget ---------------------------------------------------------------------------------------
 
-TEST_CASE("boot logo: 124 x 124 L4, 7,688 bytes of flash (target 8 KB), word aligned, and it is the picture") {
+TEST_CASE("boot logo: 124 x 124 L4, 7,688 raw bytes (target 8 KB), stored as a deflate stream, word aligned, and it is the picture") {
   const ui::BootLogo logo = ui::boot_logo();
   CHECK(logo.size == ui::kBootLogoBytes);
   CHECK(ui::kBootLogoBytes == 7688);
   CHECK(ui::kBootLogoBytes <= 8192);  // the spec's budget for an uncompressed bitmap
+  CHECK(logo.z_size < logo.size);      // OS-FLASHDIET A5: in flash it is the stream, not the raw bitmap
   CHECK(ui::kBootLogoW == 124);
   CHECK(ui::kBootLogoH == 124);
   CHECK(ui::kBootLogoFormat == eve::BitmapFormat::L4);
   CHECK(ui::kBootLogoStride * ui::kBootLogoH == ui::kBootLogoBytes);
-  CHECK(reinterpret_cast<std::uintptr_t>(logo.bytes) % 4 == 0);  // declared alignas(4) in the generated file, ADR 0011
+  CHECK(reinterpret_cast<std::uintptr_t>(logo.z) % 4 == 0);  // declared alignas(4) in the generated file, ADR 0011
+  // OS-FLASHDIET A5: the stream inflates to exactly the raw bitmap the generated file held before it was compressed
+  // (FNV-1a-64 of those 7,688 bytes: 0x45A265B9DBAC0886), through the one shared decoder.
+  std::uint8_t px[ui::kBootLogoBytes];
+  CHECK(ui::boot_logo_bitmap(px, sizeof px));
+  CHECK(fnv1a64(px, sizeof px) == 0x45A265B9DBAC0886ULL);
   // The picture: a floppy with the Tracker on it, a dither of every level. Black corners (the floppy's), a tight crop (picture
   // reaches all four edges), the levels all in use, about a fifth black and a quarter near white.
   unsigned hist[16] = {};
   unsigned top = 0, bottom = 0, left = 0, right = 0;
   for (unsigned y = 0; y < ui::kBootLogoH; ++y) {
     for (unsigned x = 0; x < ui::kBootLogoW; ++x) {
-      const unsigned v = logo_level(logo, x, y);
+      const unsigned v = logo_level(px, x, y);
       ++hist[v];
       if (v > 1) {
         top += y == 0 ? 1 : 0;
@@ -170,10 +187,10 @@ TEST_CASE("boot logo: 124 x 124 L4, 7,688 bytes of flash (target 8 KB), word ali
       }
     }
   }
-  CHECK(logo_level(logo, 0, 0) == 0);
-  CHECK(logo_level(logo, ui::kBootLogoW - 1, 0) == 0);
-  CHECK(logo_level(logo, 0, ui::kBootLogoH - 1) == 0);
-  CHECK(logo_level(logo, ui::kBootLogoW - 1, ui::kBootLogoH - 1) == 0);
+  CHECK(logo_level(px, 0, 0) == 0);
+  CHECK(logo_level(px, ui::kBootLogoW - 1, 0) == 0);
+  CHECK(logo_level(px, 0, ui::kBootLogoH - 1) == 0);
+  CHECK(logo_level(px, ui::kBootLogoW - 1, ui::kBootLogoH - 1) == 0);
   CHECK(top >= 50);
   CHECK(bottom >= 50);
   CHECK(left >= 50);
@@ -189,11 +206,10 @@ TEST_CASE("boot logo: 124 x 124 L4, 7,688 bytes of flash (target 8 KB), word ali
   CHECK(hist[13] + hist[14] + hist[15] >= total / 5);
 }
 
-TEST_CASE("boot logo: upload_assets() puts it in its own region of the RAM_G map, in chunks of at most 4 KB") {
+TEST_CASE("boot logo: upload_assets() inflates it into its own region of the RAM_G map, in chunks of at most 4 KB") {
   platform::host::FakeDisplay sink;
   sink.record_uploads(512 * 1024);
   CHECK(ui::upload_assets(sink) == hal::UploadResult::Ok);
-  const ui::BootLogo logo = ui::boot_logo();
   std::vector<std::uint8_t> region;
   std::size_t chunks = 0;
   for (const auto& u : sink.uploads()) {
@@ -206,9 +222,12 @@ TEST_CASE("boot logo: upload_assets() puts it in its own region of the RAM_G map
       CHECK_MESSAGE(u.addr + u.bytes.size() <= ui::plot::kRamGBootLogo, "an asset upload at 0x" << std::hex << u.addr << " lands in or behind the logo's region");
     }
   }
-  CHECK(chunks == 2);
+  CHECK(chunks == 5);  // OS-FLASHDIET A5: inflated through the 1,920 B staging chunk: 4 x 1,920 + 8, all below the 4 KB cap
   CHECK(region.size() == ui::kBootLogoBytes);
-  CHECK(std::memcmp(region.data(), logo.bytes, ui::kBootLogoBytes) == 0);
+  // OS-FLASHDIET A5: what went up is the inflated bitmap, byte for byte the raw bytes the stream holds.
+  std::uint8_t px[ui::kBootLogoBytes];
+  CHECK(ui::boot_logo_bitmap(px, sizeof px));
+  CHECK(std::memcmp(region.data(), px, ui::kBootLogoBytes) == 0);
   CHECK(ui::plot::kRamGBootLogo + region.size() <= ui::plot::kRamGSpare);
   CHECK(sink.last_upload_result() == hal::UploadResult::Ok);
 }

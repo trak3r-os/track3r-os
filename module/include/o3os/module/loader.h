@@ -7,11 +7,13 @@
 //
 //   modules/instruments/<stem>.tmod      then
 //   modules/effects/<stem>.tmod          the file of the module a project names (model::ModuleRef::name is the stem), then
-//   modules/apps/<stem>.tmod             an app (OS-012b: ABI 1.1, header kind 4, launched from the MODULES screen). The first directory that has the stem wins, so a
-//                                        stem is one module on a card. modules/importers/ is the card's layout for a kind this OS does not load (header kind 3 is refused).
+//   modules/apps/<stem>.tmod             an app (OS-012b: ABI 1.1, header kind 4, launched from the MODULES screen), then
+//   modules/importers/<stem>.tmod        an importer (OS-FLASHDIET I1: ABI 1.11, header kind 3, word 44 the layout tag). The first directory that has the stem wins, so a
+//                                        stem is one module on a card. An importer is held apart from the playable modules (below): it never binds to a track and does not count against kMaxModules.
 //
 // BUILT-IN MODULES (OS-012d, new OS behaviour; builtin.h): the set may hold a table of .tmod files that live in flash. A stem in it is loaded exactly like a card file (the
-// same loader, checks, relocation and arenas), read from flash instead of the card. The card is tried first; its copy is used when it is valid and prefers_card() (the same kind
+// same loader, checks, relocation and arenas), read from flash instead of the card. OS-FLASHDIET A3: the table's file is stored compressed -- the 64-byte header raw, the rest a
+// raw-deflate stream that this loader inflates through its own core::Inflater as it reads (read_some), so every check runs on the inflated bytes. The card is tried first; its copy is used when it is valid and prefers_card() (the same kind
 // and ABI major, a module version above the built-in one's: OS-MODVER). Otherwise (no card, not mounted, no such file, a card error, a file that fails any check, one that is not
 // newer) the loader starts over from the built-in copy, the card's file is not quarantined (the module works) and LoadedModule::card_status says why the card's copy was passed over.
 // A stem with no built-in copy behaves as before.
@@ -32,6 +34,7 @@
 // No heap; the loader keeps a 256-byte buffer of relocation offsets and the header, so it is a static of its owner (SDRAM on the MK66:
 // the SRAM_U budget has nothing left for it).
 
+#include <o3os/core/inflate.h>
 #include <o3os/hal/storage.h>
 #include <o3os/module/arena.h>
 #include <o3os/module/builtin.h>
@@ -49,9 +52,12 @@ struct LoadedModule {
   o3m_file_header header{};
   Desc32 desc{};
   DescExt32 ext{};  // ABI 1.8: the members past byte 64 of the descriptor (zeros below that minor; for a native entry, see entry)
+  DescImp32 imp{};  // ABI 1.11 (OS-FLASHDIET I1): the member past byte 80, the importer's table (kind 3 only; zero otherwise)
   Placement place{};
   bool hot_in_sdram = false;  // the hot part is in the cold arena (the slab had no room)
   bool builtin = false;       // OS-012d: read from the firmware image (module/builtin.h), not from the card
+  bool native_entry = false;  // OS-FLASHDIET I2: registered by add_native (no arenas of its own; drop_importer does not roll the arenas back for it)
+  std::uint32_t hot_mark = 0; // OS-FLASHDIET I2: the hot arena's mark before this module was placed (drop_importer rolls back to it); 0 for a native entry
   Status card_status = Status::Ok;  // OS-012d: with `builtin`, why the card's copy was not used: NotFound (none, or no card), Older, or the refusal that its file earned; Ok when it was not tried
   std::uint32_t card_version = 0;   // OS-MODVER: with card_status == Older, the module version (O3M_VERSION; 0 unversioned) of the card's copy that was passed over; the built-in's is header.module_version
   // The descriptor as a native object: set when this process can call the module (a 32-bit target whose addresses are its pointers,
@@ -87,8 +93,19 @@ class ModuleSet {
 
   unsigned count() const noexcept { return count_; }
   const LoadedModule* at(unsigned i) const noexcept { return i < count_ ? &mods_[i] : nullptr; }
-  // The index of the module with that name (case-sensitive), or -1.
+  // The index of the module with that name (case-sensitive), or -1. Importers are not in this table (see below), so a project's module ref never resolves to one: an importer never binds to a track.
   int find(const char* name) const noexcept;
+
+  // OS-FLASHDIET I1: the importers (header kind 3, ABI 1.11) the set holds, apart from the playable modules: an importer does not count against kMaxModules, so a full set of
+  // instruments still takes one, and find() above never returns it.
+  static constexpr unsigned kMaxImporters = 4;
+  unsigned importer_count() const noexcept { return importer_count_; }
+  const LoadedModule* importer_at(unsigned i) const noexcept { return i < importer_count_ ? &importers_[i] : nullptr; }
+  // The index of the importer with that name (case-sensitive), or -1.
+  int find_importer(const char* name) const noexcept;
+  // OS-FLASHDIET I2: forgets an importer (kind 3) by name: removed from the importer table and, when it was loaded from a file, its hot part's arena rolled back to the
+  // mark the load began from (the cold part and the state block go back through the caller's state_rollback of the mark it took before the load). False when there is none.
+  bool drop_importer(const char* name) noexcept;
 
   // ---- quarantine: stems refused for the rest of this boot (survives clear(): only a reset empties it). Names beyond kMaxQuarantined are
   // dropped (the oldest stay): a card with that many broken files has other problems.
@@ -119,15 +136,17 @@ class ModuleSet {
   // The built-in module with that stem (case-sensitive, like find()), or nullptr.
   const BuiltinModule* builtin(const char* stem) const noexcept;
 
-  // Records a loaded module; false when the set is full or the name is taken.
+  // Records a loaded module; false when the set is full or the name is taken. A kind 3 module (an importer, OS-FLASHDIET I1) goes to the importer table instead (kMaxImporters of them).
   bool add(const LoadedModule& m) noexcept;
   // A module that is compiled into this process (the host's shared objects, the built-in ones the OS may one day carry): no image, no
   // arenas, `entry` called directly. State blocks still come from the cold arena. `caps` (OS-H1) is the capability mask the module's file would carry (O3M_CAP_*; an app of ABI 1.3 only, else false).
+  // A kind 3 entry (OS-FLASHDIET I1) needs ABI 1.11 and a non-NULL `importer` table, has no parameters and no views, and is recorded in the importer table, not in the module slots.
   bool add_native(const char* name, const o3m_module& entry, std::uint32_t caps = 0) noexcept;
 
   // Forgets every module and gives both arenas back. The caller has retired every instance first (audio/module_voices.h).
   void clear() noexcept {
     count_ = 0;
+    importer_count_ = 0;
     view_blocked_ = 0;
     hot_.reset();
     cold_.reset();
@@ -141,6 +160,8 @@ class ModuleSet {
   };
   LoadedModule mods_[kMaxModules];
   unsigned count_ = 0;
+  LoadedModule importers_[kMaxImporters];  // OS-FLASHDIET I1: the kind 3 modules, apart from mods_ (an importer does not count against kMaxModules)
+  unsigned importer_count_ = 0;
   std::uint16_t view_blocked_ = 0;  // bit i: module i's views are blocked
   Quarantine q_[kMaxQuarantined] = {};
   unsigned qcount_ = 0;
@@ -167,7 +188,9 @@ class ModuleLoader {
 
   // Starts loading `stem` from the mounted card into `set`. False (state unchanged) when a load is running or the stem is not a stem
   // (status() says which, Busy or BadName). A file that is not there is not a refusal here: step() reports NotFound.
-  bool begin(hal::storage::Storage& storage, ModuleSet& set, const char* stem, SyncFn sync) noexcept;
+  // `importer` (OS-FLASHDIET I1/I2): the caller is the importer scan, so the stem is looked for in modules/importers/ only; without it the playable
+  // directories are searched and modules/importers/ is skipped, so a project that names an importer's stem never loads the importer as a module.
+  bool begin(hal::storage::Storage& storage, ModuleSet& set, const char* stem, SyncFn sync, bool importer = false) noexcept;
   // One slice, about `budget` bytes of file (at least 1). Returns the state after it.
   State step(std::size_t budget) noexcept;
   // Gives up a running load (the file is closed, the arenas rolled back).
@@ -197,6 +220,7 @@ class ModuleLoader {
   hal::storage::Storage* storage_ = nullptr;
   ModuleSet* set_ = nullptr;
   SyncFn sync_ = nullptr;
+  bool want_importer_ = false;  // OS-FLASHDIET I1/I2: the caller is the importer scan (begin's `importer`): only modules/importers/ is searched
   hal::storage::FileHandle file_{};
   const BuiltinModule* builtin_ = nullptr;  // the built-in copy of this stem, if there is one
   bool from_flash_ = false;                 // the bytes come from builtin_, not the card
@@ -216,6 +240,9 @@ class ModuleLoader {
   std::uint32_t cold_mark_ = 0;
   std::uint32_t offsets_[64] = {};
   Relocator reloc_{};
+  // OS-FLASHDIET A3: the decoder of a built-in module's compressed rest (builtin.h z / z_size). One per loader: a load is stepped across passes, so it
+  // cannot share another decoder. It lives here, in the module system's record on the MK66 (app_main.cpp's 64 KiB static_assert says whether it fits).
+  core::Inflater inflater_;
 };
 
 }  // namespace o3os::module

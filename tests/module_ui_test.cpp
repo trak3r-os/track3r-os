@@ -11,11 +11,13 @@
 #include <o3os/app/chrome.h>
 #include <o3os/app/frame.h>
 #include <o3os/app/module_ui.h>
+#include <o3os/app/preset_list.h>
 #include <o3os/app/screens/modules_screen.h>
 #include <o3os/app/screens/overlay.h>
 #include <o3os/app/screens/params_screen.h>
 #include <o3os/app/screens/scene.h>
 #include <o3os/app/screens/screen.h>
+#include <o3os/app/save_service.h>
 #include <o3os/app/state_line.h>
 #include <o3os/audio/module_voices.h>
 #include <o3os/core/input_event.h>
@@ -37,10 +39,13 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "support/key_row.h"
+#include "support/mem_card.h"
 #include "support/need.h"
 
 // The built-in modules' generated tables (tools/o3m_gen.py): the descriptors the loader takes, as the params page would describe them.
@@ -152,9 +157,9 @@ const o3m_module kPlain = {O3M_ABI_MAJOR, O3M_ABI_MINOR, O3M_KIND_INSTRUMENT, si
 const o3m_param kAppParams[2] = {{"Speed", 0.0f, 100.0f, 10.0f, O3M_PARAM_INT | O3M_PARAM_WITH_UNIT(O3M_UNIT_PERCENT)}, {"Tone", 1.0f, 100.0f, 10.0f, O3M_PARAM_LOG}};
 const o3m_ui kAppUi = {sizeof(o3m_ui), app_enter, app_input, app_draw, app_exit, nullptr};
 // "Tool" is an app of ABI 1.9 that declares two rows: the OS parameter column is its page (it was built before ABI 1.10, whose apps draw their own rows: OS-APPUX S3).
-const o3m_module kTool = {O3M_ABI_MAJOR, 9, O3M_KIND_APP, sizeof(o3m_module), "Tool", sizeof(VState), 2, kAppParams,
+const o3m_module kTool = {O3M_ABI_MAJOR, 9, O3M_KIND_APP, O3M_MODULE_SIZE(9), "Tool", sizeof(VState), 2, kAppParams,
                           v_init, nullptr, v_set_param, nullptr, nullptr, v_shutdown, &kAppUi, 1};
-const o3m_module kTool10 = {O3M_ABI_MAJOR, 10, O3M_KIND_APP, sizeof(o3m_module), "Tool10", sizeof(VState), 2, kAppParams,
+const o3m_module kTool10 = {O3M_ABI_MAJOR, 10, O3M_KIND_APP, O3M_MODULE_SIZE(10), "Tool10", sizeof(VState), 2, kAppParams,
                             v_init, nullptr, v_set_param, nullptr, nullptr, v_shutdown, &kAppUi, 1};
 
 std::uint32_t test_clock(void*) { return g_clock_us; }
@@ -294,6 +299,10 @@ struct Rig {
     const core::NotifyQueue& q = app->state().notify;
     return q.empty() ? std::string() : std::string(q.at(q.size() - 1).text.c_str());
   }
+  std::string head_note() const {  // what the strip shows: the oldest live entry (a save's toast stays ahead of the job's progress)
+    const core::NotifyQueue& q = app->state().notify;
+    return q.empty() ? std::string() : std::string(q.head().text.c_str());
+  }
   void goto_instrument(unsigned slot) {
     tap(Button::Params);
     (void)invoke("instrument.select", static_cast<ActionArg>(slot + 1u));  // (a pad plays the instrument now; Shift + pad would select it: OS-INSTUI O3)
@@ -344,7 +353,7 @@ TEST_CASE("module ui: every parameter of the built-in modules is described, labe
     return named;
   };
   CHECK(walk(tb303_params, nullptr, TB303_PARAM_COUNT) == 0u);
-  CHECK(walk(chip_params, chip_labels, CHIP_PARAM_COUNT) == 2u);  // Wave, Duty
+  CHECK(walk(chip_params, chip_labels, CHIP_PARAM_COUNT) == 3u);  // Wave, Duty, Chord (OS-CECHIP C2)
   CHECK(walk(fm_params, fm_labels, FM_PARAM_COUNT) == 1u);        // Algorithm: 1..8
   CHECK(fm_params[FM_PARAM_ALGORITHM].min == 1.0f);
 }
@@ -551,7 +560,7 @@ TEST_CASE("module ui: the key row shows a key for each page the module has and b
         CHECK(std::string(row.label[k]) == (c.pages != 0u ? kNamed[k] : kNumbered[k]));
         CHECK(((row.dim >> k) & 1u) == 0u);  // a page: a lit key
       } else {
-        CHECK(std::string(row.label[k]).empty());  // the keys past the pages, and F5 (not bound for a module), are blank
+        CHECK(std::string(row.label[k]) == (k == 4u ? "PRESET" : ""));  // the keys past the pages are blank; F5 is PRESET (OS-INSFX-ABI2 A9)
         CHECK(((row.dim >> k) & 1u) == 0u);        // blank, not dimmed (no greyed "17-24")
       }
     }
@@ -593,6 +602,8 @@ TEST_CASE("module ui: a module with no parameters has no page key at all, F1 doe
   v.page[page_index] = 2u;
   CHECK(rig.invoke("instrument.page", ActionArg(0)) == app::DispatchResult::Unchanged);  // the dispatch reports no change
   CHECK(v.page[page_index] == 2u);                                                       // the page is unchanged
+  CHECK(rig.invoke("instrument.page", ActionArg(4)) == app::DispatchResult::Unchanged);  // F5 is blank too: a module with no parameters has nothing a preset could set (OS-INSFX-ABI2 A9)
+  CHECK(v.overlay == app::OverlayId::None);
   // the info line says why the parameter area is empty: its band holds exactly the pixels of the line drawn with that text
   rig.pass(2500);  // let the last notice run out (it shares the info line)
   const ui::Theme& theme = ui::theme(ui::theme_id_at(0));
@@ -1197,6 +1208,147 @@ TEST_CASE("module ui: INIT puts a module's blob back to the module's defaults, k
   CHECK(rig.value(mp(40, 0)) == 0.25f);
 }
 
+// ---- RATE (OS-MODRATE S2): the MIX page's row of a module that declares O3M_FX_RATE, a session value ------------------------------------------------------
+
+TEST_CASE("module ui: RATE is a MIX row only for a module that declares O3M_FX_RATE; the encoder re-inits the instance with the blob, nothing is undoable or saved") {
+  static const o3m_module kRatable = {O3M_ABI_MAJOR, O3M_ABI_MINOR, O3M_KIND_INSTRUMENT, sizeof(o3m_module), "Ratable", sizeof(VState), 3, kViewerParams,
+                                      v_init, v_render, v_set_param, v_note_on, v_note_off, v_shutdown, nullptr, 0,
+                                      nullptr, nullptr, 0, nullptr, nullptr, nullptr, O3M_FX_RATE};
+  Rig rig;
+  model::Project& p = rig.project();
+  CHECK(rig.mods->set.add_native("Ratable", kRatable));
+  NEED(p.add_module("Ratable", 7, O3M_ABI_MAJOR, O3M_ABI_MINOR) == model::Status::Ok);  // table entry 3
+  constexpr unsigned kSlot = 42;
+  model::Instrument in;
+  model::init_instrument(in, model::InstrumentKind::Module);
+  in.module_index = 3;
+  std::strcpy(in.name, "RATABLE");
+  const float blob[3] = {0.25f, 3.0f, 1.0f};
+  std::memcpy(in.params, blob, sizeof blob);
+  in.param_len = sizeof blob;
+  NEED(p.set_instrument(kSlot, in) == model::Status::Ok);
+  const int idx = rig.mods->set.find("Ratable");
+  NEED(idx >= 0);
+  const o3m_module& mod = *rig.mods->set.at(static_cast<unsigned>(idx))->entry;
+  std::uint8_t* mem = nullptr;
+  std::uint32_t addr = 0;
+  NEED(rig.mods->set.cold().take(mod.state_bytes, 16, mem, addr));
+  std::memset(mem, 0, mod.state_bytes);
+  NEED(rig.voices().bind(kSlot, mod, module::fault_id("Ratable"), mem, p.instrument(kSlot)->params, p.instrument(kSlot)->param_len) == audio::ModuleVoices::Bind::Ok);
+  app::ModuleUi& ui = rig.mods->ui;
+
+  // capable: the flagged module only (Viewer, slot 40, is ABI 1.13 without the bit)
+  CHECK(ui.rate_capable(p, kSlot));
+  CHECK_FALSE(ui.rate_capable(p, 40));
+  CHECK_FALSE(ui.rate_capable(p, 1));  // no module there
+  CHECK(p.instrument(40)->rate == 0u);
+  CHECK(p.instrument(kSlot)->rate == 0u);
+  CHECK(app::is_module_rate_param(core::param_id(ParamKind::Instrument, kSlot, ip::ModuleRate)));
+  CHECK_FALSE(app::is_module_rate_param(core::param_id(ParamKind::Instrument, kSlot, ip::PlayThru)));
+
+  const auto settle = [&rig]() {
+    for (unsigned i = 0; i < 12 && rig.voices().rate_busy(kSlot); ++i) {
+      rig.block();
+      rig.pass(1);
+    }
+    CHECK_FALSE(rig.voices().rate_busy(kSlot));
+  };
+
+  // the encoder on the MIX page: PANNING, DELAY SEND, REVERB SEND, then RATE
+  rig.goto_instrument(kSlot);
+  rig.press(Button::Shift);
+  rig.pass(1);
+  rig.tap(Button::F2);
+  rig.release(Button::Shift);
+  rig.pass(1);
+  NEED(rig.app->state().page[app::screen_index(app::ScreenId::Instrument)] == app::ParamsScreen::kMixPage);
+  const std::size_t depth = rig.editor->journal().depth();
+  rig.tap(Button::Down);
+  rig.tap(Button::Down);
+  rig.tap(Button::Down);
+  rig.turn(1);
+  CHECK(p.instrument(kSlot)->rate == 1u);  // the instrument's own byte: saved with the project
+  settle();
+  CHECK(rig.voices().rate(kSlot) == 1u);
+  CHECK(rig.voices().host_at(1).sample_rate == 22050.0f);
+  VState* st = rig.state_of(kSlot);
+  NEED(st != nullptr);
+  CHECK(st->values[0] == 0.25f);  // the blob is applied again at the restart
+  CHECK(st->values[1] == 3.0f);
+  CHECK(rig.editor->journal().depth() == depth + 1u);  // one undo record
+
+  rig.turn(1);
+  CHECK(p.instrument(kSlot)->rate == 2u);
+  settle();
+  CHECK(rig.voices().rate(kSlot) == 2u);
+  CHECK(rig.editor->journal().depth() == depth + 2u);
+  rig.turn(5);  // a choice stops at its last entry
+  CHECK(p.instrument(kSlot)->rate == 2u);
+  CHECK(rig.editor->journal().depth() == depth + 2u);
+
+  // undo and redo put the stored RATE back on the voices
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  CHECK(p.instrument(kSlot)->rate == 1u);
+  settle();
+  CHECK(rig.voices().rate(kSlot) == 1u);
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  CHECK(p.instrument(kSlot)->rate == 0u);
+  settle();
+  CHECK(rig.voices().rate(kSlot) == 0u);
+  CHECK(rig.invoke("edit.redo") == DispatchResult::Changed);
+  CHECK(rig.invoke("edit.redo") == DispatchResult::Changed);
+  CHECK(p.instrument(kSlot)->rate == 2u);
+  settle();
+  CHECK(rig.voices().rate(kSlot) == 2u);
+
+  // the slot's module replaced (the picker, the project binder and the simulator all end in ModuleVoices::bind): the new instance starts at FULL and the
+  // main loop applies the stored RATE again
+  rig.voices().retire_all();
+  rig.block();
+  rig.block();
+  rig.voices().release_all();
+  std::memset(mem, 0, mod.state_bytes);
+  NEED(rig.voices().bind(kSlot, mod, module::fault_id("Ratable"), mem, p.instrument(kSlot)->params, p.instrument(kSlot)->param_len) == audio::ModuleVoices::Bind::Ok);
+  CHECK(rig.voices().rate(kSlot) == 0u);  // a bind is FULL
+  rig.pass(1);
+  settle();
+  CHECK(p.instrument(kSlot)->rate == 2u);
+  CHECK(rig.voices().rate(kSlot) == 2u);
+
+  // save, load, apply: the byte comes back with the project and the main loop applies it (the voices were put at 1/2 meanwhile)
+  std::vector<std::uint8_t> bytes;
+  NEED(test::save(p, bytes) == formats::native::Progress::Done);
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  CHECK(p.instrument(kSlot)->rate == 1u);
+  settle();
+  CHECK(rig.voices().rate(kSlot) == 1u);
+  NEED(test::load(test::arena(1), bytes) == formats::native::Progress::Done);
+  CHECK(p.instrument(kSlot)->rate == 2u);
+  rig.pass(1);
+  settle();
+  CHECK(rig.voices().rate(kSlot) == 2u);
+
+  // a stored RATE on a module that cannot restart (the Viewer, slot 40: no O3M_FX_RATE): it plays FULL and the stored byte stays (the retire above
+  // unbound every slot: the Viewer is bound again, without a journal entry)
+  rig.install(p, 40, 0, true);
+  model::Instrument stored = *p.instrument(40);
+  stored.rate = 1;
+  NEED(p.set_instrument(40, stored) == model::Status::Ok);
+  rig.pass(1);
+  rig.pass(1);
+  CHECK(rig.voices().bound(40));
+  CHECK(rig.voices().rate(40) == 0u);
+  CHECK_FALSE(rig.voices().rate_busy(40));
+  CHECK(p.instrument(40)->rate == 1u);
+
+  // a non-Module kind keeps rate 0, whatever the caller left in the byte
+  model::Instrument smp;
+  model::init_instrument(smp, model::InstrumentKind::Sample);
+  smp.rate = 2;
+  NEED(p.set_instrument(5, smp) == model::Status::Ok);
+  CHECK(p.instrument(5)->rate == 0u);
+}
+
 // ---- the MODULES screen and an app's page ---------------------------------------------------------------------------------------------------------------
 
 TEST_CASE("module ui: MODULES is a cell of the Navigator with no button of its own") {
@@ -1526,9 +1678,9 @@ const o3m_keys* keyed_keys(void*) {
   return g_keys_answer;
 }
 const o3m_ui kKeyedUi = {sizeof(o3m_ui), app_enter, app_input, app_draw, app_exit, keyed_keys};
-const o3m_module kKeyed = {O3M_ABI_MAJOR, 9, O3M_KIND_APP, sizeof(o3m_module), "Keyed", sizeof(VState), 2, kAppParams, v_init, nullptr, v_set_param, nullptr, nullptr, v_shutdown, &kKeyedUi, 1};
+const o3m_module kKeyed = {O3M_ABI_MAJOR, 9, O3M_KIND_APP, O3M_MODULE_SIZE(9), "Keyed", sizeof(VState), 2, kAppParams, v_init, nullptr, v_set_param, nullptr, nullptr, v_shutdown, &kKeyedUi, 1};
 // the same table declared as 1.8: the keys member is not read (its size says 24 on the host, but the module says 1.8)
-const o3m_module kKeyed18 = {O3M_ABI_MAJOR, 8, O3M_KIND_APP, sizeof(o3m_module), "Keyed18", sizeof(VState), 2, kAppParams, v_init, nullptr, v_set_param, nullptr, nullptr, v_shutdown, &kKeyedUi, 1};
+const o3m_module kKeyed18 = {O3M_ABI_MAJOR, 8, O3M_KIND_APP, O3M_MODULE_SIZE(8), "Keyed18", sizeof(VState), 2, kAppParams, v_init, nullptr, v_set_param, nullptr, nullptr, v_shutdown, &kKeyedUi, 1};
 
 unsigned launch_native(Rig& rig, const char* stem) {
   rig.card.touch((std::string("modules/apps/") + stem + ".tmod").c_str());
@@ -1638,7 +1790,7 @@ std::uint16_t stamp_hook(std::uint16_t id) {
   return 0;
 }
 const o3m_ui kLiveUi = {sizeof(o3m_ui), app_enter, app_input, app_draw, app_exit, live_keys};
-const o3m_module kLive = {O3M_ABI_MAJOR, 9, O3M_KIND_APP, sizeof(o3m_module), "Live", sizeof(VState), 2, kAppParams, v_init, nullptr, v_set_param, nullptr, nullptr, v_shutdown, &kLiveUi, 1};
+const o3m_module kLive = {O3M_ABI_MAJOR, 9, O3M_KIND_APP, O3M_MODULE_SIZE(9), "Live", sizeof(VState), 2, kAppParams, v_init, nullptr, v_set_param, nullptr, nullptr, v_shutdown, &kLiveUi, 1};
 }  // namespace
 
 TEST_CASE("module ui: keys() labels are read while the app's crash stamp is still on: nothing the app's pointers hold after the call is used (ABI 1.9)") {
@@ -1866,4 +2018,542 @@ TEST_CASE("module ui: a screen button on an app's page leaves the app for its sc
   rig.release(Button::Shift);
   rig.pass(1);
   CHECK(rig.app->state().screen == app::ScreenId::Song);  // (a held Shift falls back to the plain key, as everywhere: it leaves too)
+}
+
+// ---- OS-INSFX-ABI2 A8: factory presets on an instrument (docs/specs/OS-INSFX-ABI2.md section 3.6) ------------------------------------------------------------------
+
+namespace {
+
+// An instrument module of 20 parameters (more than the editor's applied list of 16, which is the case undo must get right): Amount 0..1 (0.5), Whole Steps INT 0..10 (5), Switch BOOL (1), 17 more 0..1 (0.5).
+struct PState {
+  float values[32];
+  std::uint32_t calls;
+};
+int p_init(void* s, const o3m_host*) {
+  std::memset(s, 0, sizeof(PState));
+  return 0;
+}
+void p_set_param(void* s, std::uint32_t id, float v) {
+  PState* p = static_cast<PState*>(s);
+  ++p->calls;
+  if (id < 32u) {
+    p->values[id] = v;
+  }
+}
+#define PRESETTER_ROW(n) {"P" #n, 0.0f, 1.0f, 0.5f, 0}
+const o3m_param kPresetParams[20] = {{"Amount", 0.0f, 1.0f, 0.5f, 0},
+                                     {"Whole Steps", 0.0f, 10.0f, 5.0f, O3M_PARAM_INT},
+                                     {"Switch", 0.0f, 1.0f, 1.0f, O3M_PARAM_BOOL},
+                                     PRESETTER_ROW(03), PRESETTER_ROW(04), PRESETTER_ROW(05), PRESETTER_ROW(06), PRESETTER_ROW(07), PRESETTER_ROW(08), PRESETTER_ROW(09),
+                                     PRESETTER_ROW(10), PRESETTER_ROW(11), PRESETTER_ROW(12), PRESETTER_ROW(13), PRESETTER_ROW(14), PRESETTER_ROW(15), PRESETTER_ROW(16),
+                                     PRESETTER_ROW(17), PRESETTER_ROW(18), PRESETTER_ROW(19)};
+const float kBright[20] = {0.9f, 8.0f, 0.0f, 0.1f, 0.14f, 0.18f, 0.22f, 0.26f, 0.3f, 0.34f, 0.38f, 0.42f, 0.46f, 0.5f, 0.54f, 0.58f, 0.62f, 0.66f, 0.7f, 0.74f};
+const float kShort[3] = {0.2f, 7.4f, 0.0f};  // three values: the other seventeen parameters take their defaults
+const o3m_preset kPresetTable[3] = {{"Bright", kBright, 20}, {"Short", kShort, 3}, {"FIFTEEN CHARS 1", kBright, 20}};
+const o3m_module kPresetter = {O3M_ABI_MAJOR, O3M_ABI_MINOR, O3M_KIND_INSTRUMENT, sizeof(o3m_module), "Presetter", sizeof(PState), 20, kPresetParams,
+                               p_init, v_render, p_set_param, v_note_on, v_note_off, v_shutdown, nullptr, 0,
+                               nullptr, nullptr, 0, nullptr, nullptr, nullptr, 0, kPresetTable, 3};
+// A module that declares 1.11: its descriptor is 84 bytes, and what a 1.12 descriptor holds past them is not read (here the members are set anyway, as a damaged native entry would have them).
+o3m_module g_old_minor = {O3M_ABI_MAJOR, 11, O3M_KIND_INSTRUMENT, O3M_MODULE_SIZE(11), "Oldie", sizeof(PState), 20, kPresetParams, p_init, v_render, p_set_param, v_note_on, v_note_off, v_shutdown, nullptr, 0};
+
+// A Module instrument of `name` in `slot` with `values` as its blob (param_len = 4 * count), an instance bound to it. The history is cleared (the project was written behind the editor).
+void install_module_instrument(Rig& rig, unsigned slot, const char* name, const o3m_module& entry, const float* values, unsigned count) {
+  model::Project& p = rig.project();
+  CHECK(rig.mods->set.add_native(name, entry));
+  CHECK(p.add_module(name, static_cast<std::uint32_t>(std::strlen(name)), O3M_ABI_MAJOR, O3M_ABI_MINOR) == model::Status::Ok);
+  model::Instrument in;
+  model::init_instrument(in, model::InstrumentKind::Module);
+  in.module_index = static_cast<std::uint8_t>(p.module_count() - 1u);
+  std::strcpy(in.name, "PRESETTER");
+  std::memcpy(in.params, values, count * sizeof(float));
+  in.param_len = static_cast<std::uint16_t>(count * sizeof(float));
+  CHECK(p.set_instrument(slot, in) == model::Status::Ok);
+  const int idx = rig.mods->set.find(name);
+  NEED(idx >= 0);
+  const o3m_module& mod = *rig.mods->set.at(static_cast<unsigned>(idx))->entry;
+  std::uint8_t* mem = nullptr;
+  std::uint32_t addr = 0;
+  NEED(rig.mods->set.cold().take(mod.state_bytes, 16, mem, addr));
+  std::memset(mem, 0, mod.state_bytes);
+  CHECK(rig.mods->voices.bind(slot, mod, module::fault_id(name), mem, p.instrument(slot)->params, p.instrument(slot)->param_len) == audio::ModuleVoices::Bind::Ok);
+  rig.editor->history_reset();
+}
+
+PState* presetter_state(Rig& rig, unsigned slot) { return static_cast<PState*>(rig.mods->voices.state_of(slot)); }
+
+}  // namespace
+
+TEST_CASE("factory presets: a module's table is read as ParamSets (name, the values it gives, a factory source); a module with none, of 1.11 or a free slot has none") {
+  Rig rig;
+  float installed[20];
+  for (float& f : installed) {
+    f = 0.33f;
+  }
+  install_module_instrument(rig, 42, "Presetter", kPresetter, installed, 20);
+  const model::Project& p = rig.project();
+  CHECK(rig.mods->ui.preset_count(p, 42) == 3u);
+  app::ParamSet sets[4];
+  CHECK(rig.mods->ui.factory_presets(p, 42, sets, 4) == 3u);
+  CHECK(std::strcmp(sets[0].name, "Bright") == 0);
+  CHECK(sets[0].source == app::ParamSet::Source::Factory);
+  CHECK(sets[0].given() == 20u);
+  CHECK(sets[0].values[0] == 0.9f);
+  CHECK(sets[0].values[19] == 0.74f);
+  CHECK(std::strcmp(sets[1].name, "Short") == 0);
+  CHECK(sets[1].given() == 3u);
+  CHECK(sets[1].mask == 7u);
+  CHECK(sets[1].values[1] == 7.4f);  // as the module wrote it: held to the descriptor only when it is applied
+  CHECK(std::strcmp(sets[2].name, "FIFTEEN CHARS 1") == 0);
+  // a smaller `cap` fills fewer; one preset by its number; a number past the table is none
+  CHECK(rig.mods->ui.factory_presets(p, 42, sets, 2) == 2u);
+  CHECK(rig.mods->ui.factory_presets(p, 42, sets, 0) == 0u);
+  app::ParamSet one;
+  CHECK(rig.mods->ui.factory_preset(p, 42, 2, one));
+  CHECK(std::strcmp(one.name, "FIFTEEN CHARS 1") == 0);
+  CHECK(!rig.mods->ui.factory_preset(p, 42, 3, one));
+  // the Viewer (slot 40) lists none; a free slot, no module
+  CHECK(rig.mods->ui.preset_count(p, 40) == 0u);
+  CHECK(rig.mods->ui.factory_presets(p, 40, sets, 4) == 0u);
+  CHECK(!rig.mods->ui.factory_preset(p, 40, 0, one));
+  CHECK(rig.mods->ui.preset_count(p, 7) == 0u);
+  // a module that says 1.11 has no presets whatever its descriptor holds past the 84 bytes
+  static const o3m_preset kStray[1] = {{"Stray", kBright, 20}};
+  g_old_minor.presets = kStray;
+  g_old_minor.preset_count = 1;
+  install_module_instrument(rig, 43, "Oldie", g_old_minor, installed, 20);
+  CHECK(rig.mods->ui.preset_count(p, 43) == 0u);
+}
+
+TEST_CASE("factory presets: applying one to an instrument writes every parameter in one undo unit, the instance hears all 20, undo and redo put every value back") {
+  Rig rig;
+  float installed[20];
+  for (float& f : installed) {
+    f = 0.33f;
+  }
+  installed[1] = 3.0f;
+  installed[2] = 1.0f;
+  install_module_instrument(rig, 42, "Presetter", kPresetter, installed, 20);
+  rig.goto_instrument(42);  // the Instrument page: the SOUND ring is the one Undo takes
+  model::Project& p = rig.project();
+  const std::size_t depth = rig.editor->journal(model::UndoArea::Sound).depth();
+  app::ParamSet bright;
+  NEED(rig.mods->ui.factory_preset(p, 42, 0, bright));
+  unsigned dropped = 99;
+  rig.block();
+  const std::uint32_t calls0 = presetter_state(rig, 42)->calls;  // (the bind told the instance the blob)
+  CHECK(rig.mods->ui.apply_preset(*rig.editor, 42, bright, &dropped) == app::ModuleUi::PresetResult::Ok);
+  CHECK(dropped == 0u);
+  for (unsigned i = 0; i < 20; ++i) {
+    CHECK(p.get_param(mp(42, i)) == kBright[i]);
+  }
+  CHECK(rig.editor->journal(model::UndoArea::Sound).depth() == depth + 1u);  // one unit, not twenty
+  rig.block();
+  for (unsigned i = 0; i < 20; ++i) {
+    CHECK(presetter_state(rig, 42)->values[i] == kBright[i]);
+  }
+  CHECK(presetter_state(rig, 42)->calls == calls0 + 20u);  // twenty values moved, twenty told
+  // applying it again changes nothing: no unit, and the instance is told nothing (the page's write sends nothing for an unchanged value either)
+  CHECK(rig.mods->ui.apply_preset(*rig.editor, 42, bright, &dropped) == app::ModuleUi::PresetResult::Ok);
+  CHECK(dropped == 0u);
+  CHECK(rig.editor->journal(model::UndoArea::Sound).depth() == depth + 1u);
+  rig.block();
+  CHECK(presetter_state(rig, 42)->calls == calls0 + 20u);
+  // undo: all twenty are what they were (the editor's list of applied values holds 16: the instance is told the rest by the re-read of the blob), in the project and in the instance
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  CHECK(rig.editor->journal(model::UndoArea::Sound).depth() == depth);
+  for (unsigned i = 0; i < 20; ++i) {
+    CHECK(p.get_param(mp(42, i)) == installed[i]);
+  }
+  rig.block();
+  rig.block();  // (a render drains 32 commands a block: the 16 applied values and the re-read of the blob take two)
+  for (unsigned i = 0; i < 20; ++i) {
+    CHECK(presetter_state(rig, 42)->values[i] == installed[i]);
+  }
+  CHECK(rig.invoke("edit.redo") == DispatchResult::Changed);
+  rig.block();
+  rig.block();
+  for (unsigned i = 0; i < 20; ++i) {
+    CHECK(p.get_param(mp(42, i)) == kBright[i]);
+    CHECK(presetter_state(rig, 42)->values[i] == kBright[i]);
+  }
+}
+
+TEST_CASE("factory presets: a preset that gives three values sets the other seventeen to their defaults; a whole-number value is rounded") {
+  Rig rig;
+  float installed[20];
+  for (float& f : installed) {
+    f = 0.33f;
+  }
+  install_module_instrument(rig, 42, "Presetter", kPresetter, installed, 20);
+  model::Project& p = rig.project();
+  app::ParamSet shortset;
+  NEED(rig.mods->ui.factory_preset(p, 42, 1, shortset));
+  CHECK(rig.mods->ui.apply_preset(*rig.editor, 42, shortset) == app::ModuleUi::PresetResult::Ok);
+  CHECK(p.get_param(mp(42, 0)) == 0.2f);
+  CHECK(p.get_param(mp(42, 1)) == 7.0f);  // 7.4 on a whole-number parameter
+  CHECK(p.get_param(mp(42, 2)) == 0.0f);
+  for (unsigned i = 3; i < 20; ++i) {
+    CHECK(p.get_param(mp(42, i)) == 0.5f);  // the module's default, not the 0.33 that was there
+  }
+  rig.block();
+  CHECK(presetter_state(rig, 42)->values[1] == 7.0f);
+  CHECK(presetter_state(rig, 42)->values[19] == 0.5f);
+}
+
+TEST_CASE("factory presets: a value outside the parameter's range is held to it (clamped, a whole number rounded, a NaN the default), as the page holds an edit") {
+  Rig rig;
+  float installed[20];
+  for (float& f : installed) {
+    f = 0.33f;
+  }
+  install_module_instrument(rig, 42, "Presetter", kPresetter, installed, 20);
+  model::Project& p = rig.project();
+  app::ParamSet card;  // what OS-MODPRESET's file would read: nothing checks a card's number before it is applied
+  card.source = app::ParamSet::Source::Card;
+  card.set_name("From a card");
+  CHECK(card.set_value(0, 7.5f));                                         // Amount 0..1: 1
+  CHECK(card.set_value(1, 99.0f));                                        // Whole Steps 0..10: 10
+  CHECK(card.set_value(2, 0.6f));                                         // Switch BOOL: 1
+  CHECK(card.set_value(3, -4.0f));                                        // 0
+  CHECK(card.set_value(4, std::numeric_limits<float>::quiet_NaN()));      // the default, 0.5
+  CHECK(card.set_value(5, std::numeric_limits<float>::infinity()));       // 1
+  CHECK(card.set_value(6, -std::numeric_limits<float>::infinity()));      // 0
+  CHECK(rig.mods->ui.apply_preset(*rig.editor, 42, card) == app::ModuleUi::PresetResult::Ok);
+  CHECK(p.get_param(mp(42, 0)) == 1.0f);
+  CHECK(p.get_param(mp(42, 1)) == 10.0f);
+  CHECK(p.get_param(mp(42, 2)) == 1.0f);
+  CHECK(p.get_param(mp(42, 3)) == 0.0f);
+  CHECK(p.get_param(mp(42, 4)) == 0.5f);
+  CHECK(p.get_param(mp(42, 5)) == 1.0f);
+  CHECK(p.get_param(mp(42, 6)) == 0.0f);
+  for (unsigned i = 7; i < 20; ++i) {
+    CHECK(p.get_param(mp(42, i)) == 0.5f);
+  }
+  rig.block();
+  CHECK(presetter_state(rig, 42)->values[1] == 10.0f);  // what the instance heard is what the project holds: no value past a range reaches the module
+}
+
+TEST_CASE("factory presets: a short blob is extended to the whole of it by the preset, in the same undo unit") {
+  Rig rig;
+  const float two[2] = {0.25f, 3.0f};
+  install_module_instrument(rig, 42, "Presetter", kPresetter, two, 2);
+  rig.goto_instrument(42);
+  model::Project& p = rig.project();
+  CHECK(p.instrument(42)->param_len == 8u);
+  app::ParamSet bright;
+  NEED(rig.mods->ui.factory_preset(p, 42, 0, bright));
+  CHECK(rig.mods->ui.apply_preset(*rig.editor, 42, bright) == app::ModuleUi::PresetResult::Ok);
+  CHECK(p.instrument(42)->param_len == 80u);
+  for (unsigned i = 0; i < 20; ++i) {
+    CHECK(p.get_param(mp(42, i)) == kBright[i]);
+  }
+  CHECK(rig.editor->journal(model::UndoArea::Sound).depth() == 1u);
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  CHECK(p.instrument(42)->param_len == 8u);
+  CHECK(p.get_param(mp(42, 0)) == 0.25f);
+  CHECK(p.get_param(mp(42, 1)) == 3.0f);
+  CHECK(!p.has_param(mp(42, 2)));
+}
+
+TEST_CASE("factory presets: nothing is written where there is no bound module: a free slot, a sample instrument, an insert cell with no record") {
+  Rig rig;
+  model::Project& p = rig.project();
+  app::ParamSet set;
+  CHECK(set.set_value(0, 0.5f));
+  const std::size_t depth = rig.editor->journal(model::UndoArea::Sound).depth();
+  unsigned dropped = 99;
+  CHECK(rig.mods->ui.apply_preset(*rig.editor, 60, set, &dropped) == app::ModuleUi::PresetResult::NoModule);  // a free slot
+  CHECK(dropped == 0u);
+  CHECK(rig.mods->ui.apply_preset(*rig.editor, 0, set) == app::ModuleUi::PresetResult::NoModule);              // a sample instrument of the demo project
+  CHECK(rig.mods->ui.apply_preset(*rig.editor, app::ParamTarget::of_insert(4), set) == app::ModuleUi::PresetResult::NoModule);
+  CHECK(rig.editor->journal(model::UndoArea::Sound).depth() == depth);
+  CHECK(std::strcmp(app::ModuleUi::preset_text(app::ModuleUi::PresetResult::NoModule), "NO MODULE HERE") == 0);
+  CHECK(std::strcmp(app::ModuleUi::preset_text(app::ModuleUi::PresetResult::Ok), "PRESET LOADED") == 0);
+  CHECK(std::strcmp(app::ModuleUi::preset_text(app::ModuleUi::PresetResult::Rejected), "PRESET REFUSED") == 0);
+  (void)p;
+}
+
+// ---- OS-INSFX-ABI2 A9: the F5 PRESET list on an instrument module's page (docs/specs/OS-INSFX-ABI2.md section 3.6) --------------------------------------------------------------
+
+TEST_CASE("preset list: F5 on a module instrument's page opens its presets, F1 loads the chosen one in one undo unit, the strip says its name, F8 UNDO puts every value back") {
+  Rig rig;
+  float installed[20];
+  for (float& f : installed) {
+    f = 0.33f;
+  }
+  installed[1] = 3.0f;
+  installed[2] = 1.0f;
+  install_module_instrument(rig, 42, "Presetter", kPresetter, installed, 20);
+  rig.goto_instrument(42);
+  const app::ViewState& v = rig.app->state();
+  const app::Model& m = rig.app->model();
+  model::Project& p = rig.project();
+  app::ParamsKeyRow row{};
+  app::params_key_row(m, v, row);
+  CHECK(std::strcmp(row.label[4], "PRESET") == 0);  // twenty parameters: pages F1..F3, F4 blank, F5 the list
+  CHECK(std::strcmp(row.label[3], "") == 0);
+  CHECK(app::preset_list_count(m, v) == 3u);
+  const std::size_t depth = rig.editor->journal(model::UndoArea::Sound).depth();
+  rig.tap(Button::F5);
+  CHECK(v.overlay == app::OverlayId::Preset);
+  CHECK(v.modules.preset == 0u);
+  {
+    const test::RowRead keys = test::read_owner_row(m, v);
+    CHECK(keys.label[0] == "LOAD");
+    CHECK(keys.label[7] == "BACK");
+  }
+  rig.tap(Button::Down);
+  rig.tap(Button::F1);  // "Short": gives three values, the other seventeen take their defaults
+  CHECK(v.overlay == app::OverlayId::None);
+  CHECK(rig.last_note() == "PRESET SHORT LOADED");
+  CHECK(p.get_param(mp(42, 0)) == 0.2f);
+  CHECK(p.get_param(mp(42, 1)) == 7.0f);
+  CHECK(p.get_param(mp(42, 2)) == 0.0f);
+  CHECK(p.get_param(mp(42, 19)) == 0.5f);
+  CHECK(rig.editor->journal(model::UndoArea::Sound).depth() == depth + 1u);  // one unit
+  rig.block();
+  CHECK(presetter_state(rig, 42)->values[0] == 0.2f);
+  CHECK(presetter_state(rig, 42)->values[19] == 0.5f);
+  rig.tap(Button::F8);  // UNDO on the page
+  CHECK(rig.editor->journal(model::UndoArea::Sound).depth() == depth);
+  for (unsigned i = 0; i < 20; ++i) {
+    CHECK(p.get_param(mp(42, i)) == installed[i]);
+  }
+  // the third preset has the longest name the descriptor allows: the strip says all of it, in capitals
+  rig.tap(Button::F5);
+  rig.tap(Button::Down);
+  rig.tap(Button::Down);
+  rig.tap(Button::F1);
+  CHECK(rig.last_note() == "PRESET FIFTEEN CHARS 1 LOADED");
+  // F8 closes the list and loads nothing
+  rig.tap(Button::F5);
+  rig.tap(Button::F8);
+  CHECK(v.overlay == app::OverlayId::None);
+  CHECK(p.get_param(mp(42, 0)) == 0.9f);
+}
+
+TEST_CASE("preset list: a module with no presets says so (the list opens empty), a sample instrument's F5 is still its SENDS page, an unbound module's blank F5 does nothing") {
+  Rig rig;
+  const app::ViewState& v = rig.app->state();
+  const app::Model& m = rig.app->model();
+  // the Viewer (slot 40) is a bound module with no presets
+  rig.goto_instrument(40);
+  CHECK(app::preset_list_count(m, v) == 0u);
+  app::ParamsKeyRow row{};
+  app::params_key_row(m, v, row);
+  CHECK(std::strcmp(row.label[4], "PRESET") == 0);
+  rig.tap(Button::F5);
+  CHECK(v.overlay == app::OverlayId::Preset);
+  CHECK(test::read_owner_row(m, v).label[0].empty());  // nothing to LOAD
+  rig.tap(Button::F1);
+  CHECK(v.overlay == app::OverlayId::Preset);
+  rig.tap(Button::F8);
+  CHECK(v.overlay == app::OverlayId::None);
+  // a sample instrument: F5 is the fifth group's key, as before
+  rig.goto_instrument(0);
+  app::params_key_row(m, v, row);
+  CHECK(std::strcmp(row.label[4], "SENDS") == 0);
+  rig.tap(Button::F5);
+  CHECK(v.overlay == app::OverlayId::None);
+  // a module instrument whose module has no instance (a record the card lacks): the F5 cap is blank and the key does nothing (no list, nothing on the strip)
+  rig.install(rig.project(), 43, 0, false);
+  rig.goto_instrument(43);
+  app::params_key_row(m, v, row);
+  CHECK(row.label[4][0] == '\0');  // the F5 cap is blank
+  const std::string note = rig.last_note();
+  rig.tap(Button::F5);
+  CHECK(v.overlay == app::OverlayId::None);
+  CHECK(rig.last_note() == note);
+}
+
+TEST_CASE("preset list: a load whose ParamChanges do not fit the instance's command ring says the load was partial (the project still got every value)") {
+  Rig rig;
+  float installed[20];
+  for (float& f : installed) {
+    f = 0.33f;
+  }
+  install_module_instrument(rig, 42, "Presetter", kPresetter, installed, 20);
+  rig.goto_instrument(42);
+  const app::ViewState& v = rig.app->state();
+  // the instance's ring full (the render drains it only at block(), which is not called here)
+  for (unsigned i = 0; i < audio::ModuleVoices::kCommandRing; ++i) {
+    CHECK(rig.mods->voices.set_param(42, i, 1.0f));
+  }
+  CHECK(!rig.mods->voices.set_param(42, 0, 1.0f));  // full
+  rig.tap(Button::F5);
+  NEED(v.overlay == app::OverlayId::Preset);
+  rig.tap(Button::F1);  // "Bright": all twenty values move, none fits the ring
+  CHECK(v.overlay == app::OverlayId::None);
+  CHECK(rig.last_note() == "PRESET BRIGHT PARTIAL (20 DROPPED)");
+  for (unsigned i = 0; i < 20; ++i) {
+    CHECK(rig.project().get_param(mp(42, i)) == kBright[i]);  // the write is not the ring: the project got every value
+  }
+}
+
+// ---- OS-MODPRESET P4: the card presets in the F5 PRESET list, and Shift + F5 SAVE on a module instrument's page (docs/specs/OS-MODPRESET.md section 4) -----------
+
+namespace {
+
+formats::preset::Preset make_card_preset(const char* module, std::uint8_t kind, const std::pair<const char*, float>* ents, unsigned n) {
+  formats::preset::Preset p{};
+  std::strcpy(p.module, module);
+  p.kind = kind;
+  p.count = static_cast<std::uint8_t>(n);
+  for (unsigned i = 0; i < n; ++i) {
+    std::strcpy(p.entries[i].name, ents[i].first);
+    p.entries[i].value = ents[i].second;
+  }
+  return p;
+}
+
+// Writes a preset file into the rig's card under modules/presets/<stem>/<name>.o3mp (`damaged` flips a byte of a good file, so its CRC fails).
+void write_card_preset(Rig& rig, const char* stem, const char* name, const formats::preset::Preset& p, bool damaged = false) {
+  std::uint8_t buf[formats::preset::kMaxFileBytes];
+  const std::size_t n = formats::preset::write(p, buf, sizeof buf);
+  NEED(n != 0u);
+  if (damaged) {
+    buf[n / 2u] ^= 0xFF;
+  }
+  const std::string rel = std::string("modules/presets/") + stem + "/" + name + ".o3mp";
+  std::filesystem::create_directories(rig.card.root / std::filesystem::path(rel).parent_path());
+  std::ofstream f(rig.card.root / rel, std::ios::binary);
+  f.write(reinterpret_cast<const char*>(buf), static_cast<std::streamsize>(n));
+  CHECK(f.good());
+}
+
+const auto shift_tap = [](Rig& rig, Button b) {
+  rig.press(Button::Shift);
+  rig.pass(1);
+  rig.tap(b);
+  rig.release(Button::Shift);
+  rig.pass(1);
+};
+
+}  // namespace
+
+TEST_CASE("OS-MODPRESET P4: the F5 list of a module instrument has the CARD section after the factory presets; F1 loads a card preset (one undo unit, skipped names counted), a damaged file and a file of another module are refused with their messages") {
+  Rig rig;
+  float installed[20];
+  for (float& f : installed) {
+    f = 0.33f;
+  }
+  install_module_instrument(rig, 42, "Presetter", kPresetter, installed, 20);
+  // The card's presets of the module: one good (with a name no parameter has), one damaged, one of another module; sorted: Card A, Damaged, Other.
+  const std::pair<const char*, float> card_a[] = {{"Amount", 0.8f}, {"Whole Steps", 9.0f}, {"Renamed", 1.0f}};
+  const std::pair<const char*, float> other[] = {{"Amount", 1.0f}};
+  write_card_preset(rig, "Presetter", "Card A", make_card_preset("Presetter", O3M_KIND_INSTRUMENT, card_a, 3));
+  write_card_preset(rig, "Presetter", "Damaged", make_card_preset("Presetter", O3M_KIND_INSTRUMENT, other, 1), true);
+  write_card_preset(rig, "Presetter", "Other", make_card_preset("Viewer", O3M_KIND_INSTRUMENT, other, 1));
+  rig.goto_instrument(42);
+  const app::ViewState& v = rig.app->state();
+  const app::Model& m = rig.app->model();
+  model::Project& p = rig.project();
+  CHECK(app::preset_list_count(m, v) == 3u);  // only the factory ones until the list opens (the scan runs on open)
+  rig.tap(Button::F5);
+  NEED(v.overlay == app::OverlayId::Preset);
+  CHECK(app::preset_list_count(m, v) == 6u);  // 3 factory + 3 card
+  {
+    const test::RowRead keys = test::read_owner_row(m, v);
+    CHECK(keys.label[0] == "LOAD");
+    CHECK(keys.label[7] == "BACK");
+    const test::RowRead shifted = test::read_owner_row(m, v, true);
+    CHECK(shifted.label[4] == "SAVE");  // Shift + F5
+  }
+  // F1 on a card preset (index 3): the values it names, the rest the defaults, one undo unit, the strip counts the skipped name.
+  const std::size_t depth = rig.editor->journal(model::UndoArea::Sound).depth();
+  rig.tap(Button::Down);
+  rig.tap(Button::Down);
+  rig.tap(Button::Down);
+  rig.tap(Button::F1);
+  CHECK(v.overlay == app::OverlayId::None);
+  CHECK(rig.last_note() == "PRESET CARD A LOADED, 1 SKIPPED");
+  CHECK(p.get_param(mp(42, 0)) == 0.8f);
+  CHECK(p.get_param(mp(42, 1)) == 9.0f);
+  CHECK(p.get_param(mp(42, 2)) == 1.0f);   // Switch, not named: its default
+  CHECK(p.get_param(mp(42, 3)) == 0.5f);   // P03, not named: its default
+  CHECK(rig.editor->journal(model::UndoArea::Sound).depth() == depth + 1u);
+  rig.tap(Button::F8);  // UNDO puts every value back
+  CHECK(p.get_param(mp(42, 0)) == 0.33f);
+  // A damaged file: refused, nothing written.
+  rig.tap(Button::F5);
+  rig.tap(Button::Down);
+  rig.tap(Button::Down);
+  rig.tap(Button::Down);
+  rig.tap(Button::Down);
+  rig.tap(Button::F1);
+  CHECK(v.overlay == app::OverlayId::None);
+  CHECK(rig.last_note() == "PRESET DAMAGED");
+  CHECK(p.get_param(mp(42, 0)) == 0.33f);
+  // A file of another module: PRESET OF <STEM>.
+  rig.tap(Button::F5);
+  for (unsigned i = 0; i < 5u; ++i) {
+    rig.tap(Button::Down);
+  }
+  rig.tap(Button::F1);
+  CHECK(v.overlay == app::OverlayId::None);
+  CHECK(rig.last_note() == "PRESET OF VIEWER");
+  CHECK(p.get_param(mp(42, 0)) == 0.33f);
+}
+
+TEST_CASE("OS-MODPRESET P4: Shift + F5 on a module instrument's page opens the PRESET NAME keyboard with the instrument's name; F8 saves the values in force as a NewOnly .o3mp and says PRESET SAVED: <NAME>; a taken name gets <name> 2; a sample instrument still saves its .pti") {
+  Rig rig;
+  float installed[20];
+  for (float& f : installed) {
+    f = 0.33f;
+  }
+  install_module_instrument(rig, 42, "Presetter", kPresetter, installed, 20);
+  rig.goto_instrument(42);
+  const app::ViewState& v = rig.app->state();
+  test::MemCard mem;
+  app::SaveService saves;
+  saves.attach(mem, mem);
+  rig.app->attach_saves(&saves);
+  // Shift + F5 on the page: the keyboard, Target::Preset, the instrument's name suggested and selected, the FileName filter.
+  shift_tap(rig, Button::F5);
+  NEED(v.overlay == app::OverlayId::TextEntry);
+  CHECK(v.text.target == app::TextEntryView::Target::Preset);
+  CHECK(std::string(v.text.entry.text()) == "PRESETTER");
+  CHECK(v.text.entry.selected());
+  // F8 accepts: the save starts and the strip names the file.
+  rig.tap(Button::F8);
+  CHECK(v.overlay == app::OverlayId::None);
+  CHECK(v.text.target == app::TextEntryView::Target::None);
+  CHECK(rig.head_note() == "PRESET SAVED: PRESETTER");
+  for (unsigned i = 0; i < 400u && saves.gate() == hal::storage::WriteStatus::Ok && !mem.has("modules/presets/Presetter/PRESETTER.o3mp"); ++i) {
+    rig.pass(20);
+  }
+  const test::MemCard::Bytes* got = mem.get("modules/presets/Presetter/PRESETTER.o3mp");
+  NEED(got != nullptr);
+  formats::preset::Preset back;
+  formats::preset::Report rep;
+  CHECK(formats::preset::read(got->data(), got->size(), back, rep) == formats::preset::Error::None);
+  CHECK(std::strcmp(back.module, "Presetter") == 0);
+  CHECK(back.kind == O3M_KIND_INSTRUMENT);
+  CHECK(back.count == 20u);
+  CHECK(std::strcmp(back.entries[0].name, "Amount") == 0);
+  CHECK(back.entries[0].value == 0.33f);
+  // The same name again: the next free one, said on the strip.
+  shift_tap(rig, Button::F5);
+  NEED(v.overlay == app::OverlayId::TextEntry);
+  rig.tap(Button::F8);
+  CHECK(rig.head_note() == "PRESET SAVED: PRESETTER 2");
+  for (unsigned i = 0; i < 400u && !mem.has("modules/presets/Presetter/PRESETTER 2.o3mp"); ++i) {
+    rig.pass(20);
+  }
+  CHECK(mem.has("modules/presets/Presetter/PRESETTER 2.o3mp"));
+  CHECK(mem.has("modules/presets/Presetter/PRESETTER.o3mp"));  // never replaced
+  // An empty name stays in the keyboard with the reason.
+  shift_tap(rig, Button::F5);
+  NEED(v.overlay == app::OverlayId::TextEntry);
+  rig.tap(Button::Delete);  // the keyboard's backspace clears the selected name
+  rig.tap(Button::F8);
+  CHECK(v.overlay == app::OverlayId::TextEntry);
+  CHECK(std::string(v.text.message) == "TYPE A NAME");
+  rig.tap(Button::F7);  // cancel
+  CHECK(v.overlay == app::OverlayId::None);
+  // A sample instrument's Shift + F5 is still the .pti save (the keyboard does not open; this rig has no sample bank, so it says so).
+  rig.goto_instrument(0);
+  shift_tap(rig, Button::F5);
+  CHECK(v.overlay != app::OverlayId::TextEntry);
+  CHECK((rig.head_note() == "NO CARD WRITE LAYER"));  // the strip's head: the save refusal replaced the finished job's line
 }

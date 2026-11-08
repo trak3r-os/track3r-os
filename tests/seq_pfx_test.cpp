@@ -263,7 +263,7 @@ TEST_CASE("seq pfx: Chord shares its step with Gate, Velocity, Tune, Roll and Ch
   NEED(notes_at(EventKind::MidiNoteOn, 0, at_us(0, 0), n) == 3u);
   CHECK(n[1] == 63);
   CHECK(n[2] == 67);
-  // Chance 0 cancels the note (a chance of 0 plays only on a draw of 0, which this seed does not give), and with it the chord
+  // Chance 0 cancels the note (OS-CECHANCE C1, Q1 a: 0 never plays), and with it the chord
   one_note(60, kMidiInstr, fx::kChord, 5, fx::kChance, 0);
   CHECK(g_col.count(EventKind::MidiNoteOn) % 3u == 0u);  // never a partial chord
   // Roll: every repeat sends the whole chord again, and every note that came on goes off
@@ -914,6 +914,88 @@ TEST_CASE("seq ifx: Glide, Overdrive and Bit depth go to the voices as modulatio
   const Rec* end = find_at(EventKind::ModEnd, 0, at_us(2, 0));
   NEED(end != nullptr);
   CHECK(end->ev.flags == audio::kModGroupBitDepth);
+}
+
+TEST_CASE("seq pfx: the step FX w and y (model ids 96, 97; OS-CEWTENV W6a) reach the voices as ModSet of their groups with the whole byte, and end at the first row without them") {
+  pattern16();
+  model::Project& p = seq_project();
+  CHECK(p.set_step(1, 0, 0, make_step(60, 1, fx::kAmpEnvFx, 0x9A, fx::kFilterEnvFx, 0xFF)) == model::Status::Ok);
+  CHECK(p.set_step(1, 0, 1, make_step(60, 1, fx::kAmpEnvFx, 0x00)) == model::Status::Ok);
+  CHECK(p.set_step(1, 0, 2, make_step(62, 1)) == model::Status::Ok);
+  seq::Sequencer& s = make();
+  s.play_pattern(1);
+  g_col.run(s, 0, at_us(4, 0), 64);
+  bool amp0 = false, cut0 = false;
+  for (std::uint32_t i = 0; i < g_col.n; ++i) {
+    const audio::SeqEvent& e = g_col.rec[i].ev;
+    if (e.kind != EventKind::ModSet || e.track != 0 || g_col.rec[i].t != at_us(0, 0)) {
+      continue;
+    }
+    if (e.flags == audio::kModGroupAmpEnv) {
+      amp0 = true;
+      CHECK(e.a == audio::kFxAmpEnv);
+      CHECK(e.b == 0x9A);
+    } else if (e.flags == audio::kModGroupFilterEnv) {
+      cut0 = true;
+      CHECK(e.a == audio::kFxFilterEnv);
+      CHECK(e.b == 0xFF);
+    }
+  }
+  CHECK(amp0);
+  CHECK(cut0);
+  // step 1: the y column is gone (its ModEnd), the w value changes (a new ModSet)
+  bool amp1 = false, cut_end = false;
+  for (std::uint32_t i = 0; i < g_col.n; ++i) {
+    const audio::SeqEvent& e = g_col.rec[i].ev;
+    if (e.track != 0 || g_col.rec[i].t != at_us(1, 0)) {
+      continue;
+    }
+    if (e.kind == EventKind::ModSet && e.flags == audio::kModGroupAmpEnv) {
+      amp1 = true;
+      CHECK(e.b == 0x00);
+    }
+    cut_end = cut_end || (e.kind == EventKind::ModEnd && e.flags == audio::kModGroupFilterEnv);
+  }
+  CHECK(amp1);
+  CHECK(cut_end);
+  // step 2: a plain note ends the w
+  const Rec* end = find_at(EventKind::ModEnd, 0, at_us(2, 0));
+  NEED(end != nullptr);
+  CHECK(end->ev.flags == audio::kModGroupAmpEnv);
+}
+
+TEST_CASE("seq pfx: the step FX z (model id 98; OS-CEWTENV W6b) reaches the voices as ModSet of its group, fx[0] wins over a second z, and it ends at the first row without it") {
+  pattern16();
+  model::Project& p = seq_project();
+  CHECK(p.set_step(1, 0, 0, make_step(60, 1, fx::kGranLenFx, 30, fx::kGranLenFx, 80)) == model::Status::Ok);
+  CHECK(p.set_step(1, 0, 1, make_step(60, 1, 0, 0, fx::kGranLenFx, 70)) == model::Status::Ok);
+  CHECK(p.set_step(1, 0, 2, make_step(62, 1)) == model::Status::Ok);
+  seq::Sequencer& s = make();
+  s.play_pattern(1);
+  g_col.run(s, 0, at_us(4, 0), 64);
+  unsigned sets0 = 0;
+  for (std::uint32_t i = 0; i < g_col.n; ++i) {
+    const audio::SeqEvent& e = g_col.rec[i].ev;
+    if (e.kind == EventKind::ModSet && e.track == 0 && e.flags == audio::kModGroupGranLen && g_col.rec[i].t == at_us(0, 0)) {
+      ++sets0;
+      CHECK(e.a == audio::kFxGranLen);
+      CHECK(e.b == 30);  // fx[0] wins over the second column's 80
+    }
+  }
+  CHECK(sets0 == 1u);
+  // step 1: the second column alone still holds it
+  bool set1 = false;
+  for (std::uint32_t i = 0; i < g_col.n; ++i) {
+    const audio::SeqEvent& e = g_col.rec[i].ev;
+    if (e.kind == EventKind::ModSet && e.track == 0 && e.flags == audio::kModGroupGranLen && g_col.rec[i].t == at_us(1, 0)) {
+      set1 = true;
+      CHECK(e.b == 70);
+    }
+  }
+  CHECK(set1);
+  const Rec* end = find_at(EventKind::ModEnd, 0, at_us(2, 0));
+  NEED(end != nullptr);
+  CHECK(end->ev.flags == audio::kModGroupGranLen);
 }
 
 TEST_CASE("seq pfx: the same pattern gives the same events over any block size, random arps and chords included") {

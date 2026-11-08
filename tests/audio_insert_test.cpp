@@ -7,7 +7,13 @@
 //     a full parameter ring and a full command ring lose nothing, a slot on a strip that never runs is retired at the boundary all the same;
 //   * both nets (per instance, aggregate), the forced bypass and its clear; admission of a re-bind; the bind refusals;
 //   * the state reset at un-bypass and at the start of an export (two exports give the same bits; the nets are off in an export);
-//   * the Engine's side: attach_inserts needs the modules, the block boundary drives the host, ParamKind::Insert reaches it.
+//   * the Engine's side: attach_inserts needs the modules, the block boundary drives the host, ParamKind::Insert reaches it;
+//   * OS-INSFX S6, the master insert (`master insert:` cases at the end): two instances (L and R) in the master chain between Bass and Limiter, the chain order, the identity through the float planes bit for bit
+//     with L and R independent, a NaN or infinite effect cannot reach the limiter or the converter, an export gives equal bits, two instances count 2 of the cap, and the pair's lifecycle (ramps, bypass, forced
+//     bypass, unbind, reset, parameters to both);
+//   * OS-INSFX-ABI2 A7 (`master stereo:` cases at the end): a stereo effect (render_st) on the master is ONE instance, render_st(l, r, l, r, n) in place with the S6 scrub after it, counting 1 of the cap.
+// OS-INSFX-ABI2 A4 (docs/specs/OS-INSFX-ABI2.md 3.2): the stereo track adapter, "stereo:" cases at the end, with native stereo effects: `st_identity` (capable), `st_widen` (WIDENS, S = M / 2), `st_flip` (capable,
+// S' = -S), idle variants, an S-only tail and a stateful WIDENS low-pass.
 #include <doctest/doctest.h>
 
 #include "support/static_slot.h"
@@ -105,6 +111,9 @@ struct InsertHostTest {
     h.in_[i].deact_pushed = true;
   }
   static void set_gen(InsertHost& h, unsigned i, std::uint16_t g) { h.in_[i].gen = g; }
+  // OS-INSFX-ABI2 A4: the shared S block, and the tracks that were handed it in the block that just ran.
+  static const std::int16_t* sblk(const InsertHost& h) { return h.sblk_; }
+  static std::uint16_t s_used(const InsertHost& h) { return h.s_used_; }
   // What the nets and admit() judge as the render's other work, and an insert made to look as if it had been measured (its previous block's cost and an estimate).
   static std::uint32_t others(const InsertHost& h) { return h.others_pub_.load(std::memory_order_relaxed); }
   static void measured(InsertHost& h, unsigned i, std::uint32_t cost) {
@@ -920,7 +929,7 @@ TEST_CASE("insert host: a re-bind of a module that measured over the threshold i
   g_step = 0;
   r.blocks(8);
   // refusals
-  CHECK(r.bind(32, kGain, 1) == InsertHost::Bind::BadWhere);
+  CHECK(r.bind(InsertHost::kWhere, kGain, 1) == InsertHost::Bind::BadWhere);
   CHECK(r.bind(0, kInstrument, 1) == InsertHost::Bind::BadModule);
   CHECK(r.h->bind(0, kLp, 1, nullptr, nullptr, 0, false) == InsertHost::Bind::NeedState);  // no free record that held the lp
   CHECK(r.h->bind(0, kLp, 1, reinterpret_cast<std::uint8_t*>(r.st) + 4, nullptr, 0, false) == InsertHost::Bind::BadState);
@@ -1240,6 +1249,7 @@ struct EngineRig {
   alignas(8) std::int16_t in[kBS] = {};
   alignas(8) std::int16_t out[kBS] = {};
   alignas(8) std::int16_t feed[6][kB] = {};
+  audio::VoicePool* pool = nullptr;
   ha::BlockReport report{};
   void block() {
     report = ha::BlockReport{};
@@ -1264,6 +1274,7 @@ void make_engine(EngineRig& r, bool with_host) {
   r.e = &eslot.make(&graph_clock, taps);
   audio::VoicePool& pool = pslot.make();
   ModuleVoices& mv = mslot.make();
+  r.pool = &pool;
   r.e->attach_voices(&pool);
   r.e->attach_modules(&mv);
   r.src.step = &quiet_events;
@@ -1973,4 +1984,1960 @@ TEST_CASE("insert host: tail: a bypass or an unbind in the middle of a tail ends
   CHECK(g_calls == calls2);
   CHECK(!r.h->bound(0));
   CHECK(peak_of(r) == 0);
+}
+
+// ============================================================================================================================================
+// OS-INSFX S6: the master insert (spec section 2 and 5): two instances of one effect module, L and R, the Graph's MasterStage::Insert between Bass and Limiter.
+// ============================================================================================================================================
+namespace {
+
+constexpr unsigned kMaster = InsertHost::kMasterWhere;  // the key of the master insert (its left instance); the right one is kMaster + 1
+
+std::uint32_t inf_render(void*, const float* in, float* out, std::uint32_t n) {
+  for (std::uint32_t i = 0; i < n; ++i) {
+    out[i] = (i & 1u) != 0u ? -HUGE_VALF : HUGE_VALF + in[i] * 0.0f;
+  }
+  return 1;
+}
+std::uint32_t mixed_bad_render(void*, const float* in, float* out, std::uint32_t n) {  // finite samples with a NaN and an infinity among them: only the bad ones may go
+  for (std::uint32_t i = 0; i < n; ++i) {
+    out[i] = in[i];
+  }
+  out[3] = std::nanf("");
+  out[17] = HUGE_VALF;
+  out[40] = -HUGE_VALF;
+  return 1;
+}
+const o3m_module kInf = FX_MODULE("inf", O3M_KIND_EFFECT, inf_render);
+const o3m_module kMixedBad = FX_MODULE("mixedbad", O3M_KIND_EFFECT, mixed_bad_render);
+
+// The order the master chain runs in, as seen from a stage and from an effect.
+std::vector<int> g_seq;
+void stage_note(void* tag, float*, float*, std::uint32_t) noexcept { g_seq.push_back(*static_cast<int*>(tag)); }
+void stage_pass(void*, float*, float*, std::uint32_t) noexcept {}
+std::uint32_t seq_render(void*, const float* in, float* out, std::uint32_t n) {
+  g_seq.push_back(2);
+  for (std::uint32_t i = 0; i < n; ++i) {
+    out[i] = in[i];
+  }
+  return 1;
+}
+const o3m_module kSeq = FX_MODULE("seq", O3M_KIND_EFFECT, seq_render);
+
+// A master pair bound with its two state blocks (st[l], st[r]).
+InsertHost::Bind bind_master(Rig& r, const o3m_module& m, unsigned l, unsigned rr, const float* params = nullptr, unsigned count = 0, bool force = false) {
+  return r.h->bind(kMaster, m, 0x8001, &r.st[l], reinterpret_cast<const std::uint8_t*>(params), count * 4u, force, &r.st[rr]);
+}
+
+// A track panned hard to one side, fed a block of `v` (a constant): its content is only in that side's plane.
+void side_track(Rig& r, unsigned t, float pan, std::int16_t v) {
+  CHECK(r.g->params().push(core::ParamChange{audio::strip_param(t, gps::Pan), pan, 1}));
+  r.dc(t, v);
+}
+std::int16_t rch(const Rig& r, unsigned i) { return r.out[2u * i + 1u]; }
+
+bool all_zero(const Rig& r, bool right) {
+  for (std::uint32_t i = 0; i < kB; ++i) {
+    if ((right ? rch(r, i) : r.l(i)) != 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Two tracks of different content, hard left and hard right (so the two planes differ), a no-op stage in the chain so that both runs go through the float planes. `with_insert` binds an identity effect
+// on the master. The output of `blocks` blocks is recorded whole (the ramp-in blocks too).
+constexpr unsigned kIdBlocks = 12;
+void identity_run(bool with_insert, std::int16_t (&rec)[kIdBlocks][kBS]) {
+  Rig r;
+  r.g->install_master_stage(audio::MasterStage::Headroom, &stage_pass, nullptr);
+  r.g->set_master_bypass(audio::MasterStage::Headroom, false);
+  // varying content (the feed is re-filled every block): a ramp up on the left track, a down-going saw on the right one
+  CHECK(r.g->params().push(core::ParamChange{audio::strip_param(0, gps::Pan), 0.0f, 1}));
+  CHECK(r.g->params().push(core::ParamChange{audio::strip_param(1, gps::Pan), 100.0f, 1}));
+  CHECK(r.g->params().push(core::ParamChange{audio::strip_param(0, gps::Source), 3.0f, 1}));
+  CHECK(r.g->params().push(core::ParamChange{audio::strip_param(1, gps::Source), 3.0f, 1}));
+  if (with_insert) {
+    NEED(bind_master(r, kGain, 0, 1) == InsertHost::Bind::Ok);
+  }
+  for (unsigned b = 0; b < kIdBlocks; ++b) {
+    for (std::uint32_t i = 0; i < kB; ++i) {
+      r.feed[0][i] = static_cast<std::int16_t>(((i + b * 7u) * 37u) % 9000u);
+      r.feed[1][i] = static_cast<std::int16_t>(-static_cast<int>(((i + b * 5u) * 53u) % 11000u));
+    }
+    r.g->feed(0, r.feed[0]);
+    r.g->feed(1, r.feed[1]);
+    r.block();
+    std::memcpy(rec[b], r.out, sizeof rec[b]);
+  }
+}
+
+}  // namespace
+
+TEST_CASE("master insert: the chain order: Headroom, Saturation, Eq, Bass, INSERT, Limiter, Space, BitDepth, and the effect runs between Bass and the Limiter") {
+  CHECK(audio::kMasterStages == 8u);
+  CHECK(audio::kMasterChain[3].id == audio::MasterStage::Bass);
+  CHECK(audio::kMasterChain[4].id == audio::MasterStage::Insert);
+  CHECK(audio::kMasterChain[5].id == audio::MasterStage::Limiter);
+  Rig r;
+  int bass = 1;
+  int limiter = 3;
+  g_seq.clear();
+  r.g->install_master_stage(audio::MasterStage::Limiter, &stage_note, &limiter);  // installed in the wrong order on purpose: the table decides
+  r.g->install_master_stage(audio::MasterStage::Bass, &stage_note, &bass);
+  r.g->set_master_bypass(audio::MasterStage::Limiter, false);
+  r.g->set_master_bypass(audio::MasterStage::Bass, false);
+  r.dc(0, 8000);
+  NEED(bind_master(r, kSeq, 0, 1) == InsertHost::Bind::Ok);
+  r.blocks(4);
+  // one block: Bass (1), the effect for the left plane (2), the effect for the right plane (2), the Limiter (3)
+  g_seq.clear();
+  r.block();
+  const std::vector<int> want = {1, 2, 2, 3};
+  CHECK(g_seq == want);
+  // bypassed: the effect leaves the chain (its stage is out), the others stay in order
+  CHECK(r.h->set_bypass(kMaster, true) == InsertHost::Toggle::Done);
+  r.blocks(4);
+  g_seq.clear();
+  r.block();
+  const std::vector<int> without = {1, 3};
+  CHECK(g_seq == without);
+}
+
+TEST_CASE("master insert: an identity effect through the float planes is bit for bit what the chain gives without it, L and R independent") {
+  static std::int16_t ref[kIdBlocks][kBS];
+  static std::int16_t got[kIdBlocks][kBS];
+  identity_run(false, ref);
+  identity_run(true, got);
+  CHECK(std::memcmp(ref, got, sizeof ref) == 0);  // every block, the ramp-in blocks included
+  bool left = false;
+  bool right = false;
+  for (std::uint32_t i = 0; i < kBS; i += 2) {
+    left = left || got[kIdBlocks - 1][i] != 0;
+    right = right || got[kIdBlocks - 1][i + 1] != 0;
+  }
+  CHECK(left);   // (the two planes did carry sound: the test is not an empty one)
+  CHECK(right);
+}
+
+TEST_CASE("master insert: the two instances are independent: a stateful effect on a left-only mix leaves the right plane exactly silent, and each instance has its own state") {
+  Rig r;
+  r.g->install_master_stage(audio::MasterStage::Headroom, &stage_pass, nullptr);
+  r.g->set_master_bypass(audio::MasterStage::Headroom, false);
+  side_track(r, 0, 0.0f, 8000);  // hard to one side
+  NEED(bind_master(r, kLp, 0, 1) == InsertHost::Bind::Ok);
+  r.blocks(12);
+  const bool left_side = !all_zero(r, false);
+  const bool right_side = !all_zero(r, true);
+  CHECK(left_side != right_side);  // the track is in one plane only
+  CHECK(r.st[0].renders == r.st[1].renders);
+  CHECK(r.st[0].renders >= 10u);
+  // the instance of the silent side saw nothing: its one-pole state is exactly 0, the other's is not
+  const FxState& live = left_side ? r.st[0] : r.st[1];
+  const FxState& quiet = left_side ? r.st[1] : r.st[0];
+  CHECK(live.y > 0.0f);
+  CHECK(quiet.y == 0.0f);
+  CHECK(all_zero(r, left_side));  // (the other side of the output: no crosstalk, no DC)
+  // and the state blocks are two (the host keeps a block per instance)
+  InsertHost::Info a{};
+  InsertHost::Info b{};
+  unsigned seen = 0;
+  const void* states[2] = {nullptr, nullptr};
+  for (unsigned i = 0; i < InsertHost::kInstances; ++i) {
+    if (r.h->info(i, a) && (a.where == kMaster || a.where == kMaster + 1u)) {
+      states[seen++ & 1u] = a.state;
+    }
+  }
+  CHECK(seen == 2u);
+  CHECK(states[0] != states[1]);
+  (void)b;
+}
+
+TEST_CASE("master insert: a gain effect fades in over one block on both planes and fades out when unbound; the parameter reaches both instances") {
+  Rig r;
+  r.g->install_master_stage(audio::MasterStage::Headroom, &stage_pass, nullptr);
+  r.g->set_master_bypass(audio::MasterStage::Headroom, false);
+  r.dc(0, 8000);
+  const int base = r.level_after_warmup();
+  NEED(base > 100);
+  CHECK(std::abs(rch(r, kB - 1) - base) <= 2);  // (centred: both planes)
+  const float half = 0.5f;
+  NEED(bind_master(r, kGain, 0, 1, &half, 1) == InsertHost::Bind::Ok);
+  CHECK(g_init == 2);
+  CHECK(g_params == 2);  // the stored blob, to each instance, by the main loop
+  CHECK(r.h->bound(kMaster));
+  CHECK_FALSE(r.h->bound(kMaster + 1u));
+  r.block();  // the boundary applies the pair's Activate
+  CHECK(r.phase(0) != InsertHost::Phase::Off);
+  CHECK(r.h->stats().activations == 1);  // one binding: the pair
+  r.block();  // the ramp block: dry at the start, wet at the end, never a step, both planes
+  CHECK(r.l(0) > base - base / 8);
+  CHECK(rch(r, 0) > base - base / 8);
+  CHECK(std::abs(r.l(kB - 1) - base / 2) <= 3);
+  CHECK(std::abs(rch(r, kB - 1) - base / 2) <= 3);
+  for (std::uint32_t i = 1; i < kB; ++i) {
+    CHECK(r.l(i) <= r.l(i - 1) + 1);
+    CHECK(rch(r, i) <= rch(r, i - 1) + 1);
+  }
+  r.block();
+  CHECK(r.steady_near(base / 2, 3));
+  // a parameter to the master goes to both instances (one ParamChange, the key 32, applied to both at the block start)
+  NEED(r.h->set_param(kMaster, 0, 0.25f));
+  r.blocks(3);
+  CHECK(r.steady_near(base / 4, 3));
+  CHECK(r.st[0].gain == 0.25f);
+  CHECK(r.st[1].gain == 0.25f);
+  CHECK(r.h->stats().params == 2);
+  CHECK(r.h->stats().stale == 0);
+  CHECK_FALSE(r.h->set_param(kMaster + 1u, 0, 0.9f));  // the right instance is the pair's: never addressed alone
+  // unbind: the pair ramps out together, the module of each instance is shut down after the render is clear of both
+  CHECK(r.h->unbind(kMaster));
+  CHECK_FALSE(r.h->unbind(kMaster));
+  CHECK_FALSE(r.h->unbind(kMaster + 1u));
+  r.block();
+  r.block();
+  CHECK(r.l(0) < base / 4 + base / 8);
+  CHECK(std::abs(r.l(kB - 1) - base) <= 3);
+  CHECK(std::abs(rch(r, kB - 1) - base) <= 3);
+  CHECK(g_shut == 0);
+  r.blocks(3);
+  CHECK(g_shut == 2);
+  CHECK_FALSE(r.h->bound(kMaster));
+  CHECK(r.h->stats().retired == 2);
+  CHECK(r.h->settled());
+  CHECK_FALSE(r.g->master_stage_active(audio::MasterStage::Insert));  // the stage is out of the chain
+  CHECK(r.steady_near(base, 3));
+}
+
+TEST_CASE("master insert: a NaN or an infinite effect cannot reach the limiter or the converter: the planes are scrubbed, finite samples are untouched") {
+  for (const o3m_module* m : {&kNan, &kInf}) {
+    CAPTURE(m->name);
+    Rig r;
+    static test::StaticSlot<audio::MasterLimiter> lslot;
+    audio::MasterLimiter& lim = lslot.make();
+    r.g->install_master_limiter(lim);
+    r.dc(0, 8000);
+    r.blocks(6);
+    NEED(bind_master(r, *m, 0, 1) == InsertHost::Bind::Ok);
+    for (unsigned b = 0; b < 40; ++b) {
+      r.block();
+      CHECK(lim.finite());  // the limiter's delay line and followers hold no NaN or infinity, at any block
+    }
+    // the output is silence (the effect's output is 0 once scrubbed: not the +32767 rail the float converter gives a NaN, not -32768 for an infinity)
+    CHECK(all_zero(r, false));
+    CHECK(all_zero(r, true));
+    CHECK(r.h->stats().scrubbed >= 2u * kB * 30u);
+    // and the converter's own rail rule is what the scrub protects from: the float -> Q15 kernel maps a NaN to +32767
+    float bad[4] = {std::nanf(""), 0.0f, 0.0f, 0.0f};
+    std::int16_t q[4];
+    audio::kernel::float_to_q15(q, bad, 4);
+    CHECK(q[0] == 32767);
+  }
+  // one NaN and two infinities in a block of finite samples: only those samples go, the rest is the input exactly
+  Rig r;
+  r.g->install_master_stage(audio::MasterStage::Headroom, &stage_pass, nullptr);
+  r.g->set_master_bypass(audio::MasterStage::Headroom, false);
+  r.dc(0, 8000);
+  r.blocks(6);
+  const std::uint32_t before = r.h->stats().scrubbed;
+  NEED(bind_master(r, kMixedBad, 0, 1) == InsertHost::Bind::Ok);
+  r.blocks(4);
+  const std::int16_t keep = r.l(10);
+  CHECK(r.l(3) == 0);
+  CHECK(r.l(17) == 0);
+  CHECK(r.l(40) == 0);
+  CHECK(r.l(11) == keep);
+  CHECK(rch(r, 3) == 0);
+  CHECK(rch(r, 40) == 0);
+  CHECK(r.h->stats().scrubbed - before >= 2u * 3u);
+}
+
+TEST_CASE("master insert: two instances count 2 of the cap of four instances, in either order, and the free list gives a pair back") {
+  Rig r;
+  r.dc(0, 8000);
+  r.blocks(4);
+  NEED(bind_master(r, kGain, 0, 1) == InsertHost::Bind::Ok);
+  NEED(r.bind(0, kGain, 2) == InsertHost::Bind::Ok);
+  NEED(r.bind(1, kGain, 3) == InsertHost::Bind::Ok);
+  CHECK(r.bind(2, kGain, 4) == InsertHost::Bind::NoInstance);  // the master is two of the four
+  CHECK(bind_master(r, kGain, 0, 1) == InsertHost::Bind::WhereTaken);
+  r.blocks(4);
+  // the master leaves: its two records are free, a track insert fits again, and a master bind again reuses the pair's state blocks
+  CHECK(r.h->unbind(kMaster));
+  r.blocks(6);
+  CHECK(r.h->bind(0, kGain, 0x8001, &r.st[4], nullptr, 0, true) == InsertHost::Bind::WhereTaken);
+  // the former pair's two records hold the module and their state blocks: two track inserts take them with no new memory (the free list)
+  NEED(r.h->bind(2, kGain, 0x8001, nullptr, nullptr, 0, true) == InsertHost::Bind::Ok);
+  NEED(r.h->bind(3, kGain, 0x8001, nullptr, nullptr, 0, true) == InsertHost::Bind::Ok);
+  CHECK(r.h->bind(4, kGain, 0x8001, nullptr, nullptr, 0, true) == InsertHost::Bind::NoInstance);  // four tracks fill it
+  // the other way round: with one record free (three track inserts) the master has no room for its second instance
+  CHECK(r.h->unbind(2));
+  r.blocks(6);
+  CHECK(r.h->bind(kMaster, kGain, 0x8001, nullptr, nullptr, 0, true) == InsertHost::Bind::NoInstance);
+  CHECK(r.h->unbind(3));
+  r.blocks(6);
+  // two free records that hold the module and a state block: the master finds them with no new memory
+  CHECK(r.h->bind(kMaster, kGain, 0x8001, nullptr, nullptr, 0, true) == InsertHost::Bind::Ok);
+  CHECK(r.h->bound(kMaster));
+  CHECK(r.h->unbind(1));
+  CHECK(r.h->unbind(0));
+  // refusals: the right instance is no `where` of its own; a three-track project leaves no master
+  CHECK(r.h->bind(kMaster + 1u, kGain, 0x8001, &r.st[0], nullptr, 0, true) == InsertHost::Bind::BadWhere);
+  CHECK(r.h->bind(kMaster + 2u, kGain, 0x8001, &r.st[0], nullptr, 0, true) == InsertHost::Bind::BadWhere);
+  CHECK(r.h->set_bypass(kMaster + 1u, true) == InsertHost::Toggle::NotBound);
+  r.blocks(4);
+  CHECK(r.h->settled() == false);  // (bound)
+  r.h->retire_all();
+  for (int i = 0; i < 10 && !r.h->settled(); ++i) {
+    r.block();
+  }
+  CHECK(r.h->settled());
+}
+
+TEST_CASE("master insert: three track inserts leave the master no room: NoInstance, and nothing of it is left half bound") {
+  Rig r;
+  r.dc(0, 8000);
+  NEED(r.bind(0, kGain, 0) == InsertHost::Bind::Ok);
+  NEED(r.bind(1, kGain, 1) == InsertHost::Bind::Ok);
+  NEED(r.bind(2, kGain, 2) == InsertHost::Bind::Ok);
+  const int inits = g_init;
+  CHECK(bind_master(r, kGain, 3, 4) == InsertHost::Bind::NoInstance);
+  CHECK(g_init == inits);  // nothing was initialised for a bind that could not hold both
+  CHECK_FALSE(r.h->bound(kMaster));
+  // the fourth record is still free for a track
+  NEED(r.bind(3, kGain, 3) == InsertHost::Bind::Ok);
+}
+
+TEST_CASE("master insert: a master pair whose second init fails takes the first one down again and binds nothing") {
+  Rig r;
+  r.dc(0, 8000);
+  // the first init passes, the second refuses: fx_init refuses while g_fail_init is set, so count calls through a wrapper state: the first instance is made, then the flag is raised
+  NEED(r.bind(0, kGain, 0) == InsertHost::Bind::Ok);
+  CHECK(r.h->unbind(0));
+  r.blocks(6);
+  g_fail_init = 1;
+  CHECK(bind_master(r, kGain, 1, 2) == InsertHost::Bind::InitFailed);
+  g_fail_init = 0;
+  CHECK_FALSE(r.h->bound(kMaster));
+  const int shut = g_shut;
+  r.blocks(2);
+  CHECK(g_shut == shut);
+  NEED(bind_master(r, kGain, 1, 2) == InsertHost::Bind::Ok);  // and the records are as free as before
+}
+
+TEST_CASE("master insert: bypass is a ramp to dry on both planes together, un-bypass is a reset of both instances") {
+  Rig r;
+  r.g->install_master_stage(audio::MasterStage::Headroom, &stage_pass, nullptr);
+  r.g->set_master_bypass(audio::MasterStage::Headroom, false);
+  r.dc(0, 8000);
+  const int base = r.level_after_warmup();
+  const float half = 0.5f;
+  NEED(bind_master(r, kLp, 0, 1, &half, 1) == InsertHost::Bind::Ok);
+  r.blocks(12);
+  CHECK(r.st[0].y > 0.0f);
+  CHECK(r.st[1].y > 0.0f);
+  CHECK(r.h->set_bypass(kMaster, true) == InsertHost::Toggle::Done);
+  r.block();  // the Bypass applied at its boundary
+  r.block();  // the ramp out
+  CHECK(std::abs(r.l(kB - 1) - base) <= 3);
+  CHECK(std::abs(rch(r, kB - 1) - base) <= 3);
+  r.blocks(2);
+  for (unsigned i = 0; i < InsertHost::kInstances; ++i) {
+    InsertHost::Info info{};
+    if (r.h->info(i, info) && (info.where == kMaster || info.where == kMaster + 1u)) {
+      CHECK(info.phase == InsertHost::Phase::Bypassed);
+      CHECK(info.user_bypass);
+    }
+  }
+  CHECK_FALSE(r.g->master_stage_active(audio::MasterStage::Insert));  // out of the chain: nothing runs, nothing costs
+  const int calls = g_calls;
+  r.blocks(3);
+  CHECK(g_calls == calls);
+  // off: a reset of the pair: shutdown and init of each instance, the stored parameter again
+  const int shut = g_shut;
+  const int inits = g_init;
+  CHECK(r.h->set_bypass(kMaster, false) == InsertHost::Toggle::Done);
+  r.blocks(10);
+  CHECK(g_shut == shut + 2);
+  CHECK(g_init == inits + 2);
+  CHECK(r.st[0].gain == 0.5f);
+  CHECK(r.st[1].gain == 0.5f);
+  CHECK(r.h->bound(kMaster));
+  CHECK(r.g->master_stage_active(audio::MasterStage::Insert));
+  for (unsigned i = 0; i < InsertHost::kInstances; ++i) {
+    InsertHost::Info info{};
+    if (r.h->info(i, info) && (info.where == kMaster || info.where == kMaster + 1u)) {
+      CHECK((info.phase == InsertHost::Phase::On || info.phase == InsertHost::Phase::In));
+      CHECK_FALSE(info.user_bypass);
+    }
+  }
+}
+
+TEST_CASE("master insert: the nets force the pair to dry together, never one channel; an un-bypass is admitted as a pair") {
+  Rig r;
+  r.g->install_master_stage(audio::MasterStage::Headroom, &stage_pass, nullptr);
+  r.g->set_master_bypass(audio::MasterStage::Headroom, false);
+  r.dc(0, 8000);
+  const int base = r.level_after_warmup();
+  g_step = 150000;  // each instance's run is over the instance budget (50 % of the block)
+  const float half = 0.5f;
+  NEED(bind_master(r, kGain, 0, 1, &half, 1, true) == InsertHost::Bind::Ok);
+  r.blocks(8);
+  CHECK(r.h->stats().forced_instance >= 1);
+  for (unsigned i = 0; i < InsertHost::kInstances; ++i) {
+    InsertHost::Info info{};
+    if (r.h->info(i, info) && (info.where == kMaster || info.where == kMaster + 1u)) {
+      CHECK(info.forced);  // both, or neither
+      CHECK(info.phase == InsertHost::Phase::Bypassed);
+    }
+  }
+  CHECK(r.steady_near(base, 3));  // dry, not silent
+  CHECK(std::abs(rch(r, kB - 1) - base) <= 3);
+  CHECK(r.h->set_bypass(kMaster, false) == InsertHost::Toggle::NoCpu);  // two instances at the measured cost: the net would force them again
+  CHECK(r.h->set_bypass(kMaster, false, true) == InsertHost::Toggle::Done);
+  g_step = 0;
+  r.blocks(14);
+  CHECK(r.h->bound(kMaster));
+  InsertHost::Info info{};
+  unsigned live = 0;
+  for (unsigned i = 0; i < InsertHost::kInstances; ++i) {
+    if (r.h->info(i, info) && (info.where == kMaster || info.where == kMaster + 1u) && !info.forced) {
+      ++live;
+    }
+  }
+  CHECK(live == 2u);
+}
+
+TEST_CASE("master insert: the aggregate net takes the pair as one candidate, at twice the cost of an instance") {
+  Rig r;
+  r.dc(0, 8000);
+  r.blocks(4);
+  // master (two instances of cost A) and a track insert of cost B: each instance fits, the three together do not. The pair is the most expensive candidate (2 * A against B) and is forced as a unit.
+  g_cost_a = 70000;  // each master instance
+  g_cost_b = 60000;  // the track insert
+  NEED(bind_master(r, kCostA, 0, 1, nullptr, 0, true) == InsertHost::Bind::Ok);
+  NEED(r.h->bind(0, kCostB, 0x8002, &r.st[2], nullptr, 0, true) == InsertHost::Bind::Ok);
+  r.gblocks(40, 0);
+  CHECK(r.h->stats().forced_aggregate >= 1);
+  CHECK(r.h->stats().forced_instance == 0);
+  unsigned forced_master = 0;
+  bool track_forced = false;
+  for (unsigned i = 0; i < InsertHost::kInstances; ++i) {
+    InsertHost::Info info{};
+    if (!r.h->info(i, info)) {
+      continue;
+    }
+    if (info.where == kMaster || info.where == kMaster + 1u) {
+      forced_master += info.forced ? 1u : 0u;
+    } else if (info.where == 0u) {
+      track_forced = info.forced;
+    }
+  }
+  CHECK((forced_master == 0u || forced_master == 2u));  // never one channel of the pair
+  CHECK(forced_master == 2u);
+  CHECK_FALSE(track_forced);
+}
+
+TEST_CASE("master insert: an idle effect on a silent plane is not called; the effect on one plane does not wake the other") {
+  Rig r;
+  r.g->install_master_stage(audio::MasterStage::Headroom, &stage_pass, nullptr);
+  r.g->set_master_bypass(audio::MasterStage::Headroom, false);
+  NEED(bind_master(r, kIdle, 0, 1) == InsertHost::Bind::Ok);
+  r.blocks(6);  // silent planes
+  const int calls = g_calls;
+  r.blocks(6);
+  CHECK(g_calls <= calls + 2);  // (the first render said idle on silence: not called again)
+  side_track(r, 0, 0.0f, 8000);
+  r.blocks(4);
+  CHECK(g_calls > calls + 2);  // the sound wakes the effect of the plane that has it
+  const int busy = g_calls;
+  r.block();
+  CHECK(g_calls - busy == 1);  // one plane has sound: one instance is called (the other plane is silent and its effect said idle)
+}
+
+TEST_CASE("master insert: project load: retire_all, settled, release_all clear the pair; a release with the render still holding it clears the stage") {
+  Rig r;
+  r.dc(0, 8000);
+  r.blocks(4);
+  NEED(bind_master(r, kGain, 0, 1) == InsertHost::Bind::Ok);
+  r.blocks(4);
+  CHECK(r.g->master_stage_active(audio::MasterStage::Insert));
+  r.h->retire_all();
+  CHECK_FALSE(r.h->settled());
+  for (int i = 0; i < 10 && !r.h->settled(); ++i) {
+    r.block();
+  }
+  CHECK(r.h->settled());
+  r.blocks(3);
+  r.h->release_all();
+  CHECK(g_shut == 2);
+  CHECK_FALSE(r.h->bound(kMaster));
+  CHECK_FALSE(r.g->master_stage_active(audio::MasterStage::Insert));
+  // the render still holds a pair, released at once (the timeout of a project load): the stage must not outlive the modules
+  NEED(bind_master(r, kGain, 0, 1) == InsertHost::Bind::Ok);
+  r.blocks(4);
+  CHECK(r.g->master_stage_active(audio::MasterStage::Insert));
+  r.h->release_all();
+  CHECK(g_shut == 4);
+  CHECK_FALSE(r.g->master_stage_active(audio::MasterStage::Insert));
+  const int calls = g_calls;
+  r.blocks(2);
+  CHECK(g_calls == calls);  // nothing calls the modules that are gone
+}
+
+TEST_CASE("master insert: the state is reset at the start of an export (two exports give the same bits), both instances") {
+  Rig r;
+  r.g->install_master_stage(audio::MasterStage::Headroom, &stage_pass, nullptr);
+  r.g->set_master_bypass(audio::MasterStage::Headroom, false);
+  side_track(r, 0, 0.0f, 8000);
+  side_track(r, 1, 100.0f, 6000);
+  r.blocks(4);
+  NEED(bind_master(r, kLp, 0, 1) == InsertHost::Bind::Ok);
+  CHECK(r.h->set_param(kMaster, 0, 0.5f));
+  r.blocks(10);
+  CHECK(r.st[0].y > 0.0f);
+  CHECK(r.st[1].y > 0.0f);
+  CHECK(g_init == 2);
+  static std::int16_t a[10][kBS];
+  static std::int16_t b[10][kBS];
+  CHECK(r.h->prepare_export());
+  CHECK(g_shut == 2);
+  CHECK(g_init == 4);
+  CHECK(r.st[0].y == 0.0f);
+  CHECK(r.st[1].y == 0.0f);
+  CHECK(r.st[0].gain == 0.5f);  // the stored parameter again, on both
+  CHECK(r.st[1].gain == 0.5f);
+  for (unsigned i = 0; i < 10; ++i) {
+    r.block();
+    std::memcpy(a[i], r.out, sizeof a[i]);
+  }
+  r.h->export_end();
+  r.blocks(5);  // live again: the states move on
+  CHECK(r.st[0].y > 0.0f);
+  CHECK(r.st[1].y > 0.0f);
+  CHECK(r.h->prepare_export());
+  CHECK(r.st[0].y == 0.0f);
+  CHECK(r.st[1].y == 0.0f);
+  for (unsigned i = 0; i < 10; ++i) {
+    r.block();
+    std::memcpy(b[i], r.out, sizeof b[i]);
+  }
+  CHECK(std::memcmp(a, b, sizeof a) == 0);  // equal bits
+  bool any = false;
+  for (std::uint32_t i = 0; i < kBS; ++i) {
+    any = any || a[9][i] != 0;
+  }
+  CHECK(any);
+  r.h->export_end();
+}
+
+TEST_CASE("master insert: an export whose restart fails refuses the export and the pair leaves together") {
+  Rig r;
+  r.dc(0, 8000);
+  r.blocks(4);
+  NEED(bind_master(r, kLp, 0, 1) == InsertHost::Bind::Ok);
+  r.blocks(10);
+  g_fail_init = 1;  // the first instance's init() refuses on the restart
+  CHECK_FALSE(r.h->prepare_export());
+  g_fail_init = 0;
+  CHECK(r.h->stats().export_unsettled == 1);
+  r.blocks(12);  // the live render goes on; the pair left together
+  CHECK_FALSE(r.h->bound(kMaster));
+  CHECK_FALSE(r.g->master_stage_active(audio::MasterStage::Insert));
+  CHECK(r.h->settled());
+}
+
+TEST_CASE("master insert: the render path allocates nothing with the pair running, ramping, bypassed, forced and retiring") {
+  Rig r;
+  r.g->install_master_stage(audio::MasterStage::Headroom, &stage_pass, nullptr);
+  r.g->set_master_bypass(audio::MasterStage::Headroom, false);
+  side_track(r, 0, 0.0f, 8000);
+  side_track(r, 1, 100.0f, 6000);
+  insert_alloc::count = 0;
+  NEED(bind_master(r, kLp, 0, 1) == InsertHost::Bind::Ok);
+  r.blocks(8);
+  CHECK(r.h->set_bypass(kMaster, true) == InsertHost::Toggle::Done);
+  r.blocks(6);
+  CHECK(r.h->set_bypass(kMaster, false) == InsertHost::Toggle::Done);
+  r.blocks(12);
+  CHECK(r.h->unbind(kMaster));
+  r.blocks(8);
+  CHECK(insert_alloc::count == 0u);
+}
+
+TEST_CASE("master insert: with no master insert the engine's chain is bit for bit what it was (the stage slot is empty and out of the chain)") {
+  Rig r;
+  CHECK_FALSE(r.g->master_stage_active(audio::MasterStage::Insert));
+  side_track(r, 0, 0.0f, 8000);
+  r.blocks(4);
+  CHECK_FALSE(r.g->master_stage_active(audio::MasterStage::Insert));
+  CHECK(r.h->stats().scrubbed == 0u);
+}
+
+TEST_CASE("master insert: a ParamChange{Insert, key 32} from outside the host (a MIDI Learn binding) reaches both instances; the internal key 33 and a stale generation are dropped") {
+  Rig r;
+  r.dc(0, 8000);
+  r.blocks(4);
+  NEED(bind_master(r, kGain, 0, 1) == InsertHost::Bind::Ok);
+  r.blocks(4);
+  InsertHost::Info left{};
+  bool found = false;
+  for (unsigned i = 0; i < InsertHost::kInstances && !found; ++i) {
+    found = r.h->info(i, left) && left.where == kMaster;
+  }
+  NEED(found);
+  const std::uint32_t params = r.h->stats().params;
+  CHECK(r.g->params().push(core::ParamChange{core::param_id(core::ParamKind::Insert, kMaster, 0), 0.75f, left.gen}));
+  r.blocks(2);
+  CHECK(r.st[0].gain == 0.75f);
+  CHECK(r.st[1].gain == 0.75f);
+  CHECK(r.h->stats().params == params + 2u);
+  const std::uint32_t stale = r.h->stats().stale;
+  CHECK(r.g->params().push(core::ParamChange{core::param_id(core::ParamKind::Insert, kMaster + 1u, 0), 0.1f, left.gen}));  // the right instance is never addressed alone
+  CHECK(r.g->params().push(core::ParamChange{core::param_id(core::ParamKind::Insert, kMaster, 0), 0.2f, static_cast<std::uint16_t>(left.gen + 7u)}));  // another generation
+  r.blocks(2);
+  CHECK(r.st[0].gain == 0.75f);
+  CHECK(r.st[1].gain == 0.75f);
+  CHECK(r.h->stats().stale == stale + 2u);
+}
+
+// ---- OS-INSFX-ABI2 A4: the stereo track adapter -------------------------------------------------------------------------------------------
+namespace {
+int g_st_calls = 0;  // render_st() calls (g_calls counts the mono render() of the effects above, which a stereo effect keeps for its mono blocks)
+
+std::uint32_t st_id_render(void*, const float* il, const float* ir, float* ol, float* orr, std::uint32_t n) {  // identity, in == out or not (the master's transition renders out of place)
+  ++g_st_calls;
+  for (std::uint32_t i = 0; i < n; ++i) {
+    ol[i] = il[i];
+    orr[i] = ir[i];
+  }
+  return 1;
+}
+std::uint32_t st_widen_render(void*, const float* il, const float* ir, float* ol, float* orr, std::uint32_t n) {  // M kept, S' = M / 2: L' = 1.5 M, R' = 0.5 M
+  ++g_st_calls;
+  for (std::uint32_t i = 0; i < n; ++i) {
+    const float m = (il[i] + ir[i]) * 0.5f;
+    const float sd = m * 0.5f;
+    ol[i] = m + sd;
+    orr[i] = m - sd;
+  }
+  return 1;
+}
+std::uint32_t st_flip_render(void*, const float* il, const float* ir, float* ol, float* orr, std::uint32_t n) {  // S' = -S
+  ++g_st_calls;
+  for (std::uint32_t i = 0; i < n; ++i) {
+    const float l = il[i];
+    const float r = ir[i];
+    ol[i] = r;
+    orr[i] = l;
+  }
+  return 1;
+}
+std::uint32_t st_idle_render(void*, const float* il, const float* ir, float* ol, float* orr, std::uint32_t n) {  // identity; 0 when both inputs are silent
+  ++g_st_calls;
+  float any = 0.0f;
+  for (std::uint32_t i = 0; i < n; ++i) {
+    any += (il[i] != 0.0f || ir[i] != 0.0f) ? 1.0f : 0.0f;
+    ol[i] = il[i];
+    orr[i] = ir[i];
+  }
+  return any != 0.0f ? 1u : 0u;
+}
+std::uint32_t st_stail_render(void*, const float* il, const float* ir, float* ol, float* orr, std::uint32_t n) {  // M kept, a constant S' of 0.001 (32 LSB) whatever the input: only S rings, M' is silent on a silent source
+  ++g_st_calls;
+  for (std::uint32_t i = 0; i < n; ++i) {
+    const float m = (il[i] + ir[i]) * 0.5f;
+    ol[i] = m + 0.001f;
+    orr[i] = m - 0.001f;
+  }
+  return 1;
+}
+std::uint32_t st_wlp_render(void* s, const float* il, const float* ir, float* ol, float* orr, std::uint32_t n) {  // WIDENS with state: a one-pole on M, S' = M / 2
+  FxState* d = static_cast<FxState*>(s);
+  ++g_st_calls;
+  for (std::uint32_t i = 0; i < n; ++i) {
+    const float m = (il[i] + ir[i]) * 0.5f;
+    d->y += (m - d->y) * 0.1f;
+    ol[i] = d->y * 1.5f;
+    orr[i] = d->y * 0.5f;
+  }
+  return 1;
+}
+// A 1.12 descriptor: the mono render (valid, as the ABI asks), render_st and fx_flags after `importer`.
+#define FX_ST_MODULE(name, render_st, flags)                                                                                                                                                           \
+  o3m_module { O3M_ABI_MAJOR, O3M_ABI_MINOR, O3M_KIND_EFFECT, sizeof(o3m_module), name, sizeof(FxState), 1, kFxParams, fx_init, gain_render, fx_set_param, nullptr, nullptr, fx_shutdown, nullptr, 0, nullptr, nullptr, 0, nullptr, nullptr, render_st, flags }
+const o3m_module kStId = FX_ST_MODULE("st_identity", st_id_render, 0u);
+const o3m_module kStWiden = FX_ST_MODULE("st_widen", st_widen_render, O3M_FX_WIDENS);
+const o3m_module kStFlip = FX_ST_MODULE("st_flip", st_flip_render, 0u);
+const o3m_module kStIdleC = FX_ST_MODULE("st_idle_c", st_idle_render, 0u);
+const o3m_module kStIdleW = FX_ST_MODULE("st_idle_w", st_idle_render, O3M_FX_WIDENS);
+const o3m_module kStTail = FX_ST_MODULE("st_tail", st_stail_render, O3M_FX_WIDENS);
+const o3m_module kStWlp = FX_ST_MODULE("st_wlp", st_wlp_render, O3M_FX_WIDENS);
+
+// One scene: track 0 fed noise (M) and, with `voice_s`, noise S (the voice's, re-fed every block as the Engine does: the host nulls the pointers that hold its own block); `a` in slot 0 from block 3 and `b` in slot 1.
+// Returns the output of every block (L, R interleaved); `calls` the running count of render_st calls after each block.
+std::vector<std::int16_t> st_scene(const o3m_module* a, const o3m_module* b, bool voice_s, unsigned blocks, std::vector<int>* calls = nullptr) {
+  Rig r;
+  g_st_calls = 0;
+  r.dc(0, 0);
+  Lcg rm{11u};
+  Lcg rs{77u};
+  std::vector<std::int16_t> rec;
+  for (unsigned i = 0; i < blocks; ++i) {
+    if (i == 3u) {
+      if (a != nullptr) {
+        CHECK(r.bind(0, *a, 0) == InsertHost::Bind::Ok);
+      }
+      if (b != nullptr) {
+        CHECK(r.bind(1, *b, 1) == InsertHost::Bind::Ok);
+      }
+    }
+    noise(rm, r.feed[0], kB, 6000);
+    if (voice_s) {
+      noise(rs, r.side, kB, 4000);
+      r.g->feed_side(0, r.side);
+    }
+    r.block();
+    rec.insert(rec.end(), r.out, r.out + kBS);
+    if (calls != nullptr) {
+      calls->push_back(g_st_calls);
+    }
+  }
+  return rec;
+}
+// The last block of a scene's record.
+const std::int16_t* last_block(const std::vector<std::int16_t>& v) { return v.data() + v.size() - kBS; }
+int max_lr(const std::int16_t* blk) {  // the largest |L - R|
+  int worst = 0;
+  for (std::uint32_t i = 0; i < kB; ++i) {
+    worst = std::max(worst, std::abs(static_cast<int>(blk[2u * i]) - static_cast<int>(blk[2u * i + 1u])));
+  }
+  return worst;
+}
+int s_of_out(const Rig& r, std::uint32_t i) { return (static_cast<int>(r.out[2u * i]) - static_cast<int>(r.out[2u * i + 1u])) / 2; }
+int m_of_out(const Rig& r, std::uint32_t i) { return (static_cast<int>(r.out[2u * i]) + static_cast<int>(r.out[2u * i + 1u])) / 2; }
+// A one-block ramp from `from` to `to`: monotone, no step, about 58 of its samples strictly between 5 % and 95 % of the span.
+bool ramp_ok(const std::vector<int>& seq, int from, int to) {
+  const int span = std::abs(to - from);
+  if (span < 100 || seq.size() < 2u) {
+    return false;
+  }
+  const int lo = std::min(from, to);
+  const int hi = std::max(from, to);
+  const int max_step = span / 40 + 2;
+  int steps_over = 0;
+  int mid = 0;
+  int direction = 0;
+  int turns = 0;
+  for (std::size_t i = 1; i < seq.size(); ++i) {
+    const int d = seq[i] - seq[i - 1];
+    steps_over += std::abs(d) > max_step ? 1 : 0;
+    mid += (seq[i] > lo + span / 20 && seq[i] < hi - span / 20) ? 1 : 0;
+    if (d != 0) {
+      const int dir = d > 0 ? 1 : -1;
+      turns += (direction != 0 && dir != direction) ? 1 : 0;
+      direction = dir;
+    }
+  }
+  return steps_over == 0 && mid >= 56 && mid <= 64 && turns == 0 && std::abs(seq.front() - from) <= 2 && std::abs(seq.back() - to) <= 2;
+}
+}  // namespace
+
+TEST_CASE("insert host: stereo: the shape of a module: mono, stereo-capable or WIDENS; a module of 1.11 or below, or an instrument, is mono whatever its tail says") {
+  CHECK(InsertHost::shape_of(kGain) == InsertHost::Shape::Mono);
+  CHECK(InsertHost::shape_of(kStId) == InsertHost::Shape::Capable);
+  CHECK(InsertHost::shape_of(kStWiden) == InsertHost::Shape::Widens);
+  o3m_module old = kStWiden;
+  old.abi_minor = 11;  // the members past 84 are not read for a module that declares 1.11
+  CHECK(InsertHost::shape_of(old) == InsertHost::Shape::Mono);
+  o3m_module inst = kStWiden;
+  inst.kind = O3M_KIND_INSTRUMENT;
+  CHECK(InsertHost::shape_of(inst) == InsertHost::Shape::Mono);
+}
+
+TEST_CASE("insert host: stereo: an identity stereo effect on a stereo voice keeps M and S bit for bit, and does run stereo") {
+  const std::vector<std::int16_t> ref = st_scene(nullptr, nullptr, true, 24);
+  const std::vector<std::int16_t> got = st_scene(&kStId, nullptr, true, 24);
+  CHECK(g_st_calls > 10);
+  CHECK(ref.size() == got.size());
+  CHECK(ref == got);
+  CHECK(max_lr(last_block(got)) > 500);  // the S really is there
+}
+
+TEST_CASE("insert host: stereo: an identity stereo-capable effect on a mono track adds no S, runs its mono render and is bit for bit the track without it") {
+  const std::vector<std::int16_t> ref = st_scene(nullptr, nullptr, false, 24);
+  const std::vector<std::int16_t> got = st_scene(&kStId, nullptr, false, 24);
+  CHECK(g_st_calls == 0);
+  CHECK(g_calls > 10);
+  CHECK(ref == got);
+  CHECK(max_lr(last_block(got)) <= 1);
+}
+
+TEST_CASE("insert host: stereo: a WIDENS effect on a mono track gives L = M + S and R = M - S at MAIN (here S = M / 2: 1.5 and 0.5 of the dry track)") {
+  const std::vector<std::int16_t> ref = st_scene(nullptr, nullptr, false, 24);
+  const std::vector<std::int16_t> got = st_scene(&kStWiden, nullptr, false, 24);
+  CHECK(g_st_calls > 10);
+  const std::int16_t* a = last_block(ref);
+  const std::int16_t* b = last_block(got);
+  int worst = 0;
+  int big = 0;
+  for (std::uint32_t i = 0; i < kB; ++i) {
+    const int m = a[2u * i];
+    worst = std::max(worst, std::abs(static_cast<int>(b[2u * i]) - (m * 3) / 2));
+    worst = std::max(worst, std::abs(static_cast<int>(b[2u * i + 1u]) - m / 2));
+    big = std::max(big, std::abs(m));
+  }
+  CHECK(big > 1000);
+  CHECK(worst <= 4);
+}
+
+TEST_CASE("insert host: stereo: a mono insert before or after a stereo one: the mono one drops the S that reaches it (D6), both ways; a WIDENS after a mono one makes its own S") {
+  const std::vector<std::int16_t> dry = st_scene(nullptr, nullptr, false, 24);
+  const auto m_ok = [&](const std::int16_t* blk) {  // M is the track's, whatever happens to S
+    int worst = 0;
+    for (std::uint32_t i = 0; i < kB; ++i) {
+      worst = std::max(worst, std::abs((blk[2u * i] + blk[2u * i + 1u]) / 2 - (last_block(dry)[2u * i] + last_block(dry)[2u * i + 1u]) / 2));
+    }
+    return worst <= 2;
+  };
+  {  // stereo first, mono (a gain of 1) second: S is gone after it
+    const std::vector<std::int16_t> v = st_scene(&kStId, &kGain, true, 24);
+    CHECK(max_lr(last_block(v)) <= 1);
+    CHECK(m_ok(last_block(v)));
+  }
+  {  // mono first, a stereo-capable one second: S never reaches it, so it runs its mono render again once the S ramp of the first is over
+    std::vector<int> calls;
+    const std::vector<std::int16_t> v = st_scene(&kGain, &kStId, true, 24, &calls);
+    CHECK(max_lr(last_block(v)) <= 1);
+    CHECK(m_ok(last_block(v)));
+    CHECK(calls.back() == calls[calls.size() - 8]);  // no render_st in the last seven blocks
+  }
+  {  // mono first, WIDENS second: the voice's S is dropped, the effect's own S is made from M: the same as on a track with no voice S, bit for bit
+    const std::vector<std::int16_t> with_s = st_scene(&kGain, &kStWiden, true, 24);
+    const std::vector<std::int16_t> no_s = st_scene(&kGain, &kStWiden, false, 24);
+    CHECK(std::memcmp(last_block(with_s), last_block(no_s), kBS * 2u) == 0);
+    CHECK(max_lr(last_block(with_s)) > 500);
+  }
+  {  // WIDENS first, mono second: the S the widener made is dropped by the gain
+    const std::vector<std::int16_t> v = st_scene(&kStWiden, &kGain, false, 24);
+    CHECK(max_lr(last_block(v)) <= 1);
+    CHECK(m_ok(last_block(v)));
+  }
+}
+
+TEST_CASE("insert host: stereo: a mono insert bound in the path of a stereo one takes S away over one block, never as a step (after it and before it)") {
+  for (unsigned order = 0; order < 2u; ++order) {  // 0: the mono one is bound after the stereo one (slot 1), 1: before it (slot 0, the stereo one in slot 1)
+    Rig r;
+    g_st_calls = 0;
+    r.dc(0, 8000);
+    float one = 1.0f;
+    NEED(r.bind(order == 0u ? 0u : 1u, kStId, 0) == InsertHost::Bind::Ok);
+    for (unsigned i = 0; i < 10; ++i) {
+      r.dc_side(0, 6000);
+      r.block();
+    }
+    const int s_full = s_of_out(r, kB - 1);
+    NEED(s_full > 1000);
+    NEED(r.bind(order == 0u ? 1u : 0u, kGain, 1, &one, 1) == InsertHost::Bind::Ok);
+    std::vector<int> seq;
+    int worst_m = 0;
+    const int m_full = m_of_out(r, kB - 1);
+    for (unsigned i = 0; i < 4; ++i) {
+      r.dc_side(0, 6000);
+      r.block();
+      for (std::uint32_t k = 0; k < kB; ++k) {
+        seq.push_back(s_of_out(r, k));
+        worst_m = std::max(worst_m, std::abs(m_of_out(r, k) - m_full));
+      }
+    }
+    INFO("order " << order);
+    CHECK(ramp_ok(seq, s_full, 0));
+    CHECK(worst_m <= 2);
+  }
+}
+
+TEST_CASE("insert host: stereo: bind, bypass on and off and unbind of a WIDENS effect on a mono track: S comes and goes over one block each, monotone, and M never moves; no side pointer outlives its block") {
+  Rig r;
+  g_st_calls = 0;
+  r.dc(0, 8000);
+  r.blocks(10);
+  const int m_full = m_of_out(r, kB - 1);
+  NEED(std::abs(s_of_out(r, kB - 1)) <= 1);
+  int worst_m = 0;
+  const auto take = [&](unsigned blocks, std::vector<int>& seq) {
+    seq.clear();
+    for (unsigned b = 0; b < blocks; ++b) {
+      r.block();
+      CHECK(r.g->side(0) == nullptr);  // the boundary took the host's block off the strip
+      CHECK(InsertHostTest::s_used(*r.h) == 0u);
+      for (std::uint32_t i = 0; i < kB; ++i) {
+        seq.push_back(s_of_out(r, i));
+        worst_m = std::max(worst_m, std::abs(m_of_out(r, i) - m_full));
+      }
+    }
+  };
+  std::vector<int> bind_seq, byp_seq, unbyp_seq, unbind_seq;
+  NEED(r.bind(0, kStWiden, 0) == InsertHost::Bind::Ok);
+  take(4, bind_seq);
+  const int s_full = bind_seq.back();
+  NEED(s_full > 1000);
+  CHECK(ramp_ok(bind_seq, 0, s_full));
+  CHECK(r.h->set_bypass(0, true) == InsertHost::Toggle::Done);
+  take(4, byp_seq);
+  CHECK(ramp_ok(byp_seq, s_full, 0));
+  CHECK(r.h->set_bypass(0, false) == InsertHost::Toggle::Done);  // a reset, then the activation again
+  take(8, unbyp_seq);
+  CHECK(ramp_ok(unbyp_seq, 0, s_full));
+  CHECK(r.h->unbind(0));
+  take(8, unbind_seq);
+  CHECK(ramp_ok(unbind_seq, s_full, 0));
+  CHECK(!r.h->bound(0));
+  CHECK(r.g->insert_stereo_mask() == 0u);  // the slot's mark went with it
+  CHECK(worst_m <= 3);
+}
+
+TEST_CASE("insert host: stereo: two stereo inserts on one track: S goes from the first to the second through the shared block; a flip in the second flips the image") {
+  const std::vector<std::int16_t> dry = st_scene(nullptr, nullptr, false, 24);
+  const std::vector<std::int16_t> one = st_scene(&kStWiden, nullptr, false, 24);
+  {  // the second is an identity: the same output as the first alone, bit for bit (the voice's S is replaced by the widener's, so it makes no difference)
+    const std::vector<std::int16_t> two = st_scene(&kStWiden, &kStId, false, 24);
+    CHECK(std::memcmp(last_block(one), last_block(two), kBS * 2u) == 0);
+    const std::vector<std::int16_t> two_s = st_scene(&kStWiden, &kStId, true, 24);
+    CHECK(std::memcmp(last_block(one), last_block(two_s), kBS * 2u) == 0);
+  }
+  {  // WIDENS then flip: L = 0.5 M, R = 1.5 M
+    const std::vector<std::int16_t> v = st_scene(&kStWiden, &kStFlip, false, 24);
+    int worst = 0;
+    for (std::uint32_t i = 0; i < kB; ++i) {
+      const int m = last_block(dry)[2u * i];
+      worst = std::max(worst, std::abs(static_cast<int>(last_block(v)[2u * i]) - m / 2));
+      worst = std::max(worst, std::abs(static_cast<int>(last_block(v)[2u * i + 1u]) - (m * 3) / 2));
+    }
+    CHECK(worst <= 4);
+  }
+  {  // a flip alone on a stereo voice swaps the sides of S and nothing else: L and R of a pan-centred strip trade places by S -> -S
+    const std::vector<std::int16_t> ref = st_scene(nullptr, nullptr, true, 24);
+    const std::vector<std::int16_t> v = st_scene(&kStFlip, nullptr, true, 24);
+    int worst = 0;
+    for (std::uint32_t i = 0; i < kB; ++i) {
+      const int m_ref = (last_block(ref)[2u * i] + last_block(ref)[2u * i + 1u]) / 2;
+      const int m_got = (last_block(v)[2u * i] + last_block(v)[2u * i + 1u]) / 2;
+      const int s_ref = (last_block(ref)[2u * i] - last_block(ref)[2u * i + 1u]) / 2;
+      const int s_got = (last_block(v)[2u * i] - last_block(v)[2u * i + 1u]) / 2;
+      worst = std::max(worst, std::max(std::abs(m_ref - m_got), std::abs(s_ref + s_got)));
+    }
+    CHECK(worst <= 3);
+  }
+}
+
+TEST_CASE("insert host: stereo: two tracks with a stereo insert in one block: each track's S is consumed before the other's insert overwrites the shared block (the sum of the two alone)") {
+  const auto scene = [](bool t0, bool t1) {
+    Rig r;
+    g_st_calls = 0;
+    r.dc(0, 0);
+    r.dc(1, 0);
+    Lcg a{5u};
+    Lcg b{9u};
+    CHECK(r.bind(0, kStWiden, 0) == InsertHost::Bind::Ok);
+    CHECK(r.bind(2, kStWiden, 1) == InsertHost::Bind::Ok);
+    std::vector<std::int16_t> rec;
+    for (unsigned i = 0; i < 16; ++i) {
+      std::memset(r.feed[0], 0, sizeof r.feed[0]);
+      std::memset(r.feed[1], 0, sizeof r.feed[1]);
+      if (t0) {
+        noise(a, r.feed[0], kB, 5000);
+      }
+      if (t1) {
+        noise(b, r.feed[1], kB, 2500);
+      }
+      r.block();
+      rec.insert(rec.end(), r.out, r.out + kBS);
+    }
+    return rec;
+  };
+  const std::vector<std::int16_t> only0 = scene(true, false);
+  const std::vector<std::int16_t> only1 = scene(false, true);
+  const std::vector<std::int16_t> both = scene(true, true);
+  int worst = 0;
+  int big = 0;
+  for (std::size_t i = both.size() - kBS; i < both.size(); ++i) {
+    worst = std::max(worst, std::abs(static_cast<int>(both[i]) - (static_cast<int>(only0[i]) + static_cast<int>(only1[i]))));
+    big = std::max(big, std::abs(static_cast<int>(both[i])));
+  }
+  CHECK(big > 1000);
+  CHECK(worst <= 3);
+}
+
+TEST_CASE("insert host: stereo: no stale S: after an unbind and on an idle strip the strip's side pointer is never left at the host's block, and the output has no S once the insert is gone") {
+  Rig r;
+  g_st_calls = 0;
+  r.dc(0, 8000);
+  NEED(r.bind(0, kStIdleW, 0) == InsertHost::Bind::Ok);
+  const auto step = [&]() {
+    r.block();
+    CHECK(r.g->side(0) != InsertHostTest::sblk(*r.h));
+    CHECK(r.g->side(0) == nullptr);
+  };
+  for (int i = 0; i < 8; ++i) {
+    step();
+  }
+  CHECK(g_st_calls > 0);
+  r.fill(0, 0);  // the source goes silent: the effect says idle, then is not called
+  for (int i = 0; i < 8; ++i) {
+    step();
+  }
+  const int calls = g_st_calls;
+  for (int i = 0; i < 8; ++i) {
+    step();
+  }
+  CHECK(g_st_calls == calls);  // idle: not called
+  CHECK(max_lr(r.out) == 0);
+  r.fill(0, 8000);
+  for (int i = 0; i < 6; ++i) {
+    step();
+  }
+  CHECK(g_st_calls > calls);  // the signal returned: called again
+  CHECK(r.h->unbind(0));
+  for (int i = 0; i < 8; ++i) {
+    step();
+  }
+  CHECK(!r.h->bound(0));
+  CHECK(max_lr(r.out) <= 1);  // no S left on MAIN
+  CHECK(r.g->insert_stereo_mask() == 0u);
+}
+
+TEST_CASE("insert host: stereo: no stale S on a voice's track: the voice's S is fed every block, and the host's block is never what is left at a block's end") {
+  Rig v;
+  g_st_calls = 0;
+  v.dc(0, 0);
+  NEED(v.bind(0, kStId, 0) == InsertHost::Bind::Ok);
+  Lcg rng{3u};
+  for (int i = 0; i < 12; ++i) {
+    noise(rng, v.feed[0], kB, 6000);
+    noise(rng, v.side, kB, 4000);
+    v.g->feed_side(0, v.side);
+    v.block();
+    CHECK(v.g->side(0) != InsertHostTest::sblk(*v.h));
+    if (i >= 4) {  // the insert is in the path from the block after the bind's boundary; before it the voice's own pointer is what is there
+      CHECK(v.g->side(0) == nullptr);
+    }
+  }
+  CHECK(g_st_calls > 0);
+}
+
+TEST_CASE("insert host: stereo: the idle skip needs M and S both silent: S alone wakes a stereo effect, silence puts it to sleep again") {
+  for (unsigned shape = 0; shape < 2u; ++shape) {  // 0: stereo-capable, 1: WIDENS
+    Rig r;
+    g_st_calls = 0;
+    r.dc(0, 0);  // M silent throughout
+    NEED(r.bind(0, shape == 0u ? kStIdleC : kStIdleW, 0) == InsertHost::Bind::Ok);
+    const auto go = [&](std::int16_t s, unsigned n) {
+      for (unsigned i = 0; i < n; ++i) {
+        r.dc_side(0, s);
+        r.block();
+      }
+    };
+    INFO("shape " << shape);
+    go(3000, 6);
+    const int awake = g_st_calls;
+    CHECK(awake >= 4);  // S is not silence, so the effect runs although M is
+    CHECK(max_lr(r.out) > 100);
+    go(0, 4);  // both silent: the effect says 0 once, then is skipped
+    const int asleep = g_st_calls;
+    go(0, 6);
+    CHECK(g_st_calls == asleep);
+    go(3000, 3);
+    CHECK(g_st_calls > asleep);  // S came back
+  }
+}
+
+TEST_CASE("insert host: stereo: the tail of a stereo effect counts M' and S' both: an S-only ring outlives the 2 s of zero output") {
+  InsertHost::Info info{};
+  Rig r;
+  g_st_calls = 0;
+  r.dc(0, 8000);
+  NEED(r.bind(0, kStTail, 0) == InsertHost::Bind::Ok);
+  r.blocks(8);
+  r.fill(0, 0);
+  constexpr unsigned kPast = InsertHost::kTailZeroBlocks + 140u;
+  for (unsigned i = 0; i < kPast; ++i) {
+    r.block();
+  }
+  NEED(r.h->info(0, info));
+  CHECK(info.tail);  // M' has been exact zero for over 2 s, S' has not
+  const int calls = g_st_calls;
+  r.block();
+  CHECK(g_st_calls == calls + 1);
+  CHECK(max_lr(r.out) > 10);  // and the S' of the ring reaches MAIN
+  CHECK(r.g->side(0) == nullptr);
+  CHECK(r.h->unbind(0));
+  r.blocks(8);
+  CHECK(!r.h->bound(0));
+}
+
+TEST_CASE("insert host: stereo: a stereo effect that goes quiet with its source: the tail ends after 2 s of exact zero M' and S'") {
+  InsertHost::Info info{};
+  Rig q;
+  g_st_calls = 0;
+  q.dc(0, 8000);
+  NEED(q.bind(0, kStWiden, 0) == InsertHost::Bind::Ok);
+  q.blocks(8);
+  q.fill(0, 0);
+  for (unsigned i = 0; i < 100; ++i) {
+    q.block();
+  }
+  NEED(q.h->info(0, info));
+  CHECK(info.tail);  // under 2 s: still ringing as far as it can tell
+  for (unsigned i = 0; i < InsertHost::kTailZeroBlocks; ++i) {
+    q.block();
+  }
+  NEED(q.h->info(0, info));
+  CHECK(!info.tail);
+  const int c2 = g_st_calls;
+  q.blocks(4);
+  CHECK(g_st_calls == c2);
+}
+
+TEST_CASE("insert host: stereo: the render path allocates nothing with stereo inserts bound, running, ramping, bypassed and retiring") {
+  Rig r;
+  g_st_calls = 0;
+  r.dc(0, 8000);
+  r.dc(1, 6000);
+  insert_alloc::count = 0;
+  NEED(r.bind(0, kStWiden, 0) == InsertHost::Bind::Ok);
+  NEED(r.bind(1, kStFlip, 1) == InsertHost::Bind::Ok);
+  NEED(r.bind(2, kStId, 2) == InsertHost::Bind::Ok);
+  r.blocks(6);
+  CHECK(r.h->set_bypass(0, true) == InsertHost::Toggle::Done);
+  r.blocks(4);
+  CHECK(r.h->set_bypass(0, false) == InsertHost::Toggle::Done);
+  r.blocks(8);
+  CHECK(r.h->unbind(1));
+  CHECK(r.h->unbind(2));
+  r.blocks(8);
+  CHECK(r.h->unbind(0));
+  r.blocks(8);
+  CHECK(g_st_calls > 10);
+  CHECK(r.h->settled());
+  CHECK(insert_alloc::count == 0u);
+}
+
+TEST_CASE("insert host: stereo: two exports of a song with a stateful WIDENS effect give the same bits, S included") {
+  Rig r;
+  g_st_calls = 0;
+  r.dc(0, 8000);
+  r.blocks(4);
+  NEED(r.bind(0, kStWlp, 0) == InsertHost::Bind::Ok);
+  r.blocks(10);
+  CHECK(r.st[0].y > 0.0f);
+  std::int16_t a[10][kBS];
+  std::int16_t b[10][kBS];
+  CHECK(r.h->prepare_export());
+  CHECK(r.st[0].y == 0.0f);
+  for (unsigned i = 0; i < 10; ++i) {
+    r.block();
+    std::memcpy(a[i], r.out, sizeof a[i]);
+  }
+  r.h->export_end();
+  r.blocks(5);
+  CHECK(r.st[0].y > 0.0f);
+  CHECK(r.h->prepare_export());
+  for (unsigned i = 0; i < 10; ++i) {
+    r.block();
+    std::memcpy(b[i], r.out, sizeof b[i]);
+  }
+  CHECK(std::memcmp(a, b, sizeof a) == 0);
+  CHECK(max_lr(a[9]) > 500);  // the S is in the bits
+  r.h->export_end();
+}
+
+const o3m_module kStTailC = FX_ST_MODULE("st_tail_c", st_stail_render, 0u);
+
+TEST_CASE("insert host: stereo: a stereo-capable effect whose tail rings in S stays stereo after the voice's S ends: the S part of the tail is not cut to the mono render") {
+  Rig r;
+  g_st_calls = 0;
+  r.dc(0, 8000);
+  NEED(r.bind(0, kStTailC, 0) == InsertHost::Bind::Ok);
+  for (int i = 0; i < 10; ++i) {  // a stereo voice: S is fed every block
+    r.dc_side(0, 3000);
+    r.block();
+  }
+  const int calls = g_st_calls;
+  CHECK(calls >= 6);
+  r.fill(0, 0);  // the sample ends: M silent and no S any more
+  for (int i = 0; i < 100; ++i) {
+    r.block();
+    CHECK(r.g->side(0) == nullptr);
+  }
+  CHECK(g_st_calls == calls + 100);  // render_st every block, never the mono render
+  CHECK(max_lr(r.out) > 10);         // and the ring's S reaches MAIN
+}
+
+TEST_CASE("insert host: stereo: a bypass or an unbind in the middle of an S tail with S live: the effect's S hands over to the dry S over one block, M never moves, and nothing is left ringing or pointed at") {
+  Rig r;
+  g_st_calls = 0;
+  r.dc(0, 8000);
+  int s_dry = 0;
+  int m_dry = 0;
+  for (int i = 0; i < 10; ++i) {  // the dry reference: no insert bound, the voice's S alone at MAIN
+    r.dc_side(0, 3000);
+    r.block();
+  }
+  s_dry = s_of_out(r, kB - 1);
+  m_dry = m_of_out(r, kB - 1);
+  NEED(s_dry > 1000);
+  NEED(r.bind(0, kStTail, 0) == InsertHost::Bind::Ok);
+  const auto s_live = [&](unsigned blocks, std::vector<int>& seq) {  // the voice's S stays live throughout
+    seq.clear();
+    for (unsigned b = 0; b < blocks; ++b) {
+      r.dc_side(0, 3000);
+      r.block();
+      CHECK(r.g->side(0) != InsertHostTest::sblk(*r.h));  // never the host's block at a block's end
+      for (std::uint32_t i = 0; i < kB; ++i) {
+        seq.push_back(s_of_out(r, i));
+        CHECK(std::abs(m_of_out(r, i) - m_dry) <= 3);  // M never moves
+      }
+    }
+  };
+  std::vector<int> seq;
+  s_live(8, seq);
+  InsertHost::Info info{};
+  NEED(r.h->info(0, info));
+  CHECK(info.tail);  // the S tail is ringing (kStTail keeps S' at 0.001 whatever the input)
+  const int s_full = seq.back();
+  NEED(std::abs(s_full) > 10);
+  CHECK(r.g->insert_stereo_mask() != 0u);
+  CHECK(r.h->set_bypass(0, true) == InsertHost::Toggle::Done);  // a bypass in the middle of the tail
+  s_live(4, seq);
+  CHECK(ramp_ok(seq, s_full, s_dry));  // one block, monotone, no step: the effect's S hands over to the dry S
+  const int calls = g_st_calls;
+  s_live(4, seq);
+  CHECK(g_st_calls == calls);  // bypassed: not called
+  CHECK(r.g->insert_stereo_mask() == 0u);
+  CHECK(r.h->set_bypass(0, false) == InsertHost::Toggle::Done);
+  s_live(8, seq);
+  CHECK(ramp_ok(seq, s_dry, s_full));  // the un-bypass ramps back in over one block
+  CHECK(r.h->unbind(0));  // an unbind in the middle of the tail
+  s_live(4, seq);
+  CHECK(ramp_ok(seq, s_full, s_dry));
+  CHECK(!r.h->bound(0));
+  CHECK(r.g->insert_stereo_mask() == 0u);
+  const int calls2 = g_st_calls;
+  s_live(4, seq);
+  CHECK(g_st_calls == calls2);  // gone: not called
+}
+
+TEST_CASE("insert host: stereo: a stereo-capable effect whose S tail rings drops to the mono render when M is live again with S still null: today the S tail is cut in one block (known limitation, OS-INSFX-ABI2 3.2)") {
+  Rig r;
+  g_st_calls = 0;
+  r.dc(0, 8000);
+  NEED(r.bind(0, kStTailC, 0) == InsertHost::Bind::Ok);
+  for (int i = 0; i < 10; ++i) {  // a stereo voice: S fed every block, the effect runs stereo
+    r.dc_side(0, 3000);
+    r.block();
+  }
+  const int m_live = m_of_out(r, kB - 1);
+  r.fill(0, 0);  // the sample ends: M silent and no S any more: the S tail rings and the effect stays stereo (the case above)
+  for (int i = 0; i < 20; ++i) {
+    r.block();
+    CHECK(r.g->side(0) == nullptr);
+  }
+  InsertHost::Info info{};
+  NEED(r.h->info(0, info));
+  CHECK(info.tail);                        // the S tail is ringing
+  CHECK(r.g->insert_stereo_mask() != 0u);  // still stereo through the tail
+  const int calls = g_st_calls;
+  CHECK(calls >= 25);       // render_st every block, never the mono render
+  CHECK(max_lr(r.out) > 10);  // the ring's S is on MAIN
+  NEED(std::abs(m_of_out(r, kB - 1)) <= 1);
+  const int mono_calls = g_calls;
+  r.fill(0, 8000);  // M live again, S still null
+  r.block();
+  CHECK(r.g->insert_stereo_mask() == 0u);  // the drop to the mono render happens in this one block
+  CHECK(max_lr(r.out) == 0);               // the S tail is cut in one block (today's behaviour, recorded)
+  CHECK(g_st_calls == calls);              // no render_st any more
+  for (int i = 0; i < 6; ++i) {
+    r.block();
+    CHECK(r.g->side(0) == nullptr);
+    CHECK(max_lr(r.out) == 0);
+  }
+  CHECK(g_st_calls == calls);    // still the mono render
+  CHECK(g_calls > mono_calls);   // render() runs instead
+  CHECK(std::abs(m_of_out(r, kB - 1) - m_live) <= 3);  // and M passes through unchanged
+}
+
+namespace {
+alignas(8) std::int16_t g_stwave[2u * 3000u];  // M, then S at 3000
+// A stereo sample note on track 0 through the Engine, an identity stereo-capable effect bound or not; the output of every block.
+std::vector<std::int16_t> engine_voice_scene(bool with_insert, bool& side_clean) {
+  for (std::uint32_t i = 0; i < 3000u; ++i) {
+    g_stwave[i] = static_cast<std::int16_t>(std::lround(12000.0 * std::sin(6.283185307 * 7.0 * static_cast<double>(i) / 3000.0)));
+    g_stwave[3000u + i] = static_cast<std::int16_t>(std::lround(9000.0 * std::sin(6.283185307 * 11.0 * static_cast<double>(i) / 3000.0 + 1.0)));
+  }
+  reset_counters();
+  EngineRig er;
+  make_engine<4>(er, with_insert);
+  g_st_calls = 0;
+  audio::SampleDesc d{g_stwave, 3000, 0, 0, 65536};
+  d.st_off = 3000;
+  er.pool->set_sample(0, d);
+  alignas(16) static FxState state;
+  std::memset(&state, 0, sizeof state);
+  if (with_insert) {
+    CHECK(er.h->bind(0, kStId, 0x8001, &state, nullptr, 0, false) == InsertHost::Bind::Ok);
+  }
+  CHECK(er.pool->note_on(0, 60, 0, 127));
+  std::vector<std::int16_t> rec;
+  side_clean = true;
+  for (unsigned b = 0; b < 20; ++b) {
+    if (b == 12u) {
+      er.pool->cut(0);  // the note ends
+    }
+    er.block();
+    rec.insert(rec.end(), er.out, er.out + kBS);
+    if (with_insert) {
+      const std::int16_t* sd = er.e->graph().side(0);
+      side_clean = side_clean && sd != InsertHostTest::sblk(*er.h) && (b < 14u || sd == nullptr);
+    }
+  }
+  return rec;
+}
+}  // namespace
+
+TEST_CASE("insert host: stereo: through the Engine: an identity stereo-capable effect on a stereo voice is the voice without it, bit for bit, and no side pointer is left at the host's block after the note ends") {
+  bool clean_a = true;
+  bool clean_b = true;
+  const std::vector<std::int16_t> ref = engine_voice_scene(false, clean_a);
+  const std::vector<std::int16_t> got = engine_voice_scene(true, clean_b);
+  CHECK(g_st_calls > 5);  // the voice made S, so the effect ran stereo
+  int worst = 0;
+  for (std::size_t i = 0; i < kBS * 12u; ++i) {
+    worst = std::max(worst, std::abs(static_cast<int>(ref[i])));
+  }
+  CHECK(worst > 500);  // the note sounds
+  CHECK(max_lr(ref.data() + kBS * 8u) > 100);  // with its S
+  CHECK(ref == got);
+  CHECK(clean_b);
+}
+
+// ---- OS-INSFX-ABI2 A5: the cap (the stereo reservation, spec 3.2) --------------------------------------------------------------------
+namespace {
+alignas(8) std::int16_t g_capwave[2u * 3000u];  // M, then S at 3000
+
+// One rig with the VoicePool attached to the host (as Engine::attach_inserts does) and one stereo sample on slot 0.
+struct CapRig {
+  Graph* g = nullptr;
+  ModuleVoices* mv = nullptr;
+  InsertHost* h = nullptr;
+  audio::VoicePool* pool = nullptr;
+  alignas(16) FxState st[InsertHost::kInstances + 2];
+  InsertHost::Blobs blobs;
+  alignas(8) std::int16_t in[kBS] = {};
+  alignas(8) std::int16_t out[kBS] = {};
+  ha::BlockReport report{};
+  CapRig() {
+    static test::StaticSlot<Graph> gslot;
+    static test::StaticSlot<ModuleVoices> mslot;
+    static test::StaticSlot<InsertHost> hslot;
+    static test::StaticSlot<audio::VoicePool> pslot;
+    static audio::TapMem taps;
+    reset_counters();
+    for (std::uint32_t i = 0; i < 3000u; ++i) {
+      g_capwave[i] = static_cast<std::int16_t>(std::lround(12000.0 * std::sin(6.283185307 * 7.0 * static_cast<double>(i) / 3000.0)));
+      g_capwave[3000u + i] = static_cast<std::int16_t>(std::lround(9000.0 * std::sin(6.283185307 * 11.0 * static_cast<double>(i) / 3000.0 + 1.0)));
+    }
+    audio::SampleDesc d{g_capwave, 3000, 0, 0, 65536};
+    d.st_off = 3000;
+    g = &gslot.make(&graph_clock, taps);
+    mv = &mslot.make();
+    h = &hslot.make();
+    pool = &pslot.make();
+    pool->set_sample(0, d);
+    std::memset(st, 0, sizeof st);
+    std::memset(blobs, 0, sizeof blobs);
+    h->attach(*g, *mv, &blobs, pool);  // A5: the pool, as the engine attaches it
+    h->set_cycles(&ins_clock);
+    g->set_param_hook(&route_insert, h);
+  }
+  // One block as the Engine does: the graph, then the pool's block (a note event when `note_track` >= 0), then the host's boundary, then the tick.
+  void block(int note_track = -1) {
+    report = ha::BlockReport{};
+    const ha::BlockIo io{in, out, 0, &report};
+    g->render(io);
+    pool->set_gate(0);
+    pool->begin_block();
+    if (note_track >= 0) {
+      CHECK(pool->note_on(static_cast<unsigned>(note_track), 60, 0, audio::kVelocityDefault));
+    }
+    pool->render(0, kB);
+    pool->end_block();
+    h->begin_block();
+    h->service();
+  }
+  void blocks(unsigned n) {
+    for (unsigned i = 0; i < n; ++i) {
+      block();
+    }
+  }
+  unsigned st_next = 0;
+  InsertHost::Bind bind_track(unsigned where, const o3m_module& m) {
+    const unsigned i = st_next++;
+    return h->bind(where, m, 0x8001, &st[i], nullptr, 0, false);
+  }
+};
+}  // namespace
+
+TEST_CASE("insert host: cap: two WIDENS inserts reserve two side blocks; with four stereo notes only two voices play S, the third and fourth play M") {
+  CapRig r;
+  r.blocks(2);
+  NEED(r.bind_track(0, kStWiden) == InsertHost::Bind::Ok);  // track 0, slot 0
+  NEED(r.bind_track(2, kStWiden) == InsertHost::Bind::Ok);  // track 1, slot 0
+  r.blocks(2);                                              // the activates apply, then the count runs and lands in the pool
+  CHECK(r.pool->st_reserved() == 2u);
+  for (unsigned t = 0; t < 4u; ++t) {
+    r.block(static_cast<int>(t));  // a stereo note on each of tracks 0..3
+  }
+  CHECK(r.pool->stereo_voices() == 2u);  // kStMax 4 less the 2 reserved
+  r.block();
+  CHECK(r.pool->feed_side(0) != nullptr);
+  CHECK(r.pool->feed_side(1) != nullptr);
+  CHECK(r.pool->feed_side(2) == nullptr);  // the third note plays M
+  CHECK(r.pool->feed_side(3) == nullptr);  // so does the fourth
+}
+
+TEST_CASE("insert host: cap: two WIDENS inserts on one track cost two side blocks (the count is of inserts, not tracks)") {
+  CapRig r;
+  r.blocks(2);
+  NEED(r.bind_track(0, kStWiden) == InsertHost::Bind::Ok);  // track 0, slot 0
+  NEED(r.bind_track(1, kStWiden) == InsertHost::Bind::Ok);  // track 0, slot 1
+  r.blocks(2);
+  CHECK(r.pool->st_reserved() == 2u);
+  for (unsigned t = 0; t < 4u; ++t) {
+    r.block(static_cast<int>(t));
+  }
+  CHECK(r.pool->stereo_voices() == 2u);
+  r.block();
+  CHECK(r.pool->feed_side(2) == nullptr);
+  CHECK(r.pool->feed_side(3) == nullptr);
+}
+
+TEST_CASE("insert host: cap: a note that holds a block keeps it when the reservation grows (nothing is taken from a sounding voice)") {
+  CapRig r;
+  r.blocks(2);
+  NEED(r.bind_track(0, kStWiden) == InsertHost::Bind::Ok);
+  NEED(r.bind_track(2, kStWiden) == InsertHost::Bind::Ok);
+  r.blocks(2);
+  CHECK(r.pool->st_reserved() == 2u);
+  r.block(0);  // the two notes that take the free blocks
+  r.block(1);
+  CHECK(r.pool->stereo_voices() == 2u);
+  NEED(r.bind_track(4, kStWiden) == InsertHost::Bind::Ok);  // a third WIDENS, on track 2
+  r.blocks(2);
+  CHECK(r.pool->st_reserved() == 3u);
+  CHECK(r.pool->stereo_voices() == 2u);  // the held blocks survived the bigger reservation
+  r.block();
+  CHECK(r.pool->feed_side(0) != nullptr);
+  CHECK(r.pool->feed_side(1) != nullptr);
+  r.block(3);  // a new note now: 2 held + 3 reserved is past the cap, it plays M
+  CHECK(r.pool->stereo_voices() == 2u);
+  CHECK(r.pool->feed_side(3) == nullptr);
+}
+
+TEST_CASE("insert host: cap: the one-block lag: a note that starts in the block after an Activate can still take the last free block and keeps it to the end of the note") {
+  CapRig r;
+  r.blocks(2);
+  for (unsigned t = 0; t < 3u; ++t) {
+    r.block(static_cast<int>(t));  // three notes hold three of the four blocks
+  }
+  CHECK(r.pool->stereo_voices() == 3u);
+  CHECK(r.pool->st_reserved() == 0u);
+  NEED(r.bind_track(0, kStWiden) == InsertHost::Bind::Ok);
+  r.block();       // the Activate applies at this boundary, after the count ran: the reservation is still 0 for the next block's notes
+  r.block(3);      // the note that starts in the block after the Activate takes the last free block
+  CHECK(r.pool->stereo_voices() == 4u);
+  r.blocks(2);     // now the count has landed
+  CHECK(r.pool->st_reserved() == 1u);
+  CHECK(r.pool->stereo_voices() == 4u);  // nothing was taken from the sounding voices
+  r.block();
+  CHECK(r.pool->feed_side(3) != nullptr);  // the lagging note keeps its block
+  r.block(4);                              // a fifth note is refused
+  CHECK(r.pool->stereo_voices() == 4u);
+  CHECK(r.pool->feed_side(4) == nullptr);
+}
+
+TEST_CASE("insert host: cap: bypass returns the slot: a bypassed WIDENS insert stops reserving and the next note takes the block") {
+  CapRig r;
+  r.blocks(2);
+  NEED(r.bind_track(0, kStWiden) == InsertHost::Bind::Ok);
+  NEED(r.bind_track(2, kStWiden) == InsertHost::Bind::Ok);
+  r.blocks(2);
+  CHECK(r.pool->st_reserved() == 2u);
+  CHECK(r.h->set_bypass(0, true) == InsertHost::Toggle::Done);
+  r.blocks(3);  // the ramp out still counts, then Bypassed does not
+  CHECK(r.pool->st_reserved() == 1u);
+  for (unsigned t = 0; t < 3u; ++t) {
+    r.block(static_cast<int>(t));
+  }
+  CHECK(r.pool->stereo_voices() == 3u);  // the freed block went to a new note
+  r.block();
+  CHECK(r.pool->feed_side(0) != nullptr);
+  CHECK(r.pool->feed_side(1) != nullptr);
+  CHECK(r.pool->feed_side(2) != nullptr);
+  CHECK(r.pool->feed_side(3) == nullptr);
+}
+
+TEST_CASE("insert host: cap: a stereo-capable insert reserves none: four notes play S with it bound") {
+  CapRig r;
+  r.blocks(2);
+  NEED(r.bind_track(0, kStId) == InsertHost::Bind::Ok);
+  r.blocks(2);
+  CHECK(r.pool->st_reserved() == 0u);
+  for (unsigned t = 0; t < 4u; ++t) {
+    r.block(static_cast<int>(t));
+  }
+  CHECK(r.pool->stereo_voices() == 4u);
+  r.block();
+  for (unsigned t = 0; t < 4u; ++t) {
+    CHECK(r.pool->feed_side(t) != nullptr);
+  }
+}
+
+TEST_CASE("insert host: cap: the master insert reserves none") {
+  CapRig r;
+  r.blocks(2);
+  NEED(r.h->bind(InsertHost::kMasterWhere, kStWiden, 0x8001, &r.st[0], nullptr, 0, false, &r.st[1]) == InsertHost::Bind::Ok);
+  r.blocks(2);
+  CHECK(r.h->bound(InsertHost::kMasterWhere));
+  CHECK(r.pool->st_reserved() == 0u);  // a WIDENS on the master still keeps all four side blocks for the voices
+  for (unsigned t = 0; t < 4u; ++t) {
+    r.block(static_cast<int>(t));
+  }
+  CHECK(r.pool->stereo_voices() == 4u);
+}
+
+TEST_CASE("insert host: cap: attach re-syncs the reservation to the pool (st_res_ = 0xFF), also to a second pool") {
+  CapRig r;
+  r.blocks(2);
+  r.pool->set_st_reserved(2u);  // a pool that comes in already reserved (another engine's host had it)
+  r.h->attach(*r.g, *r.mv, &r.blobs, r.pool);  // st_res_ = 0xFF: the next boundary pushes the count even when it would match
+  r.block();
+  CHECK(r.pool->st_reserved() == 0u);  // no WIDENS bound: the stale reservation was cleared at the boundary
+  // a second pool: the count lands on the new one, not the old
+  static test::StaticSlot<audio::VoicePool> p2slot;
+  audio::VoicePool& p2 = p2slot.make();
+  NEED(r.bind_track(0, kStWiden) == InsertHost::Bind::Ok);
+  r.blocks(2);
+  CHECK(r.pool->st_reserved() == 1u);
+  r.h->attach_pool(&p2);  // st_res_ = 0xFF again
+  r.blocks(2);
+  CHECK(p2.st_reserved() == 1u);  // the WIDENS count was pushed to the new pool
+}
+
+TEST_CASE("insert host: cap: unbind returns the slot (the ramp out still counts, the retired instance does not)") {
+  CapRig r;
+  r.blocks(2);
+  NEED(r.bind_track(0, kStWiden) == InsertHost::Bind::Ok);
+  r.blocks(2);
+  CHECK(r.pool->st_reserved() == 1u);
+  r.block(0);  // a note takes a block while the insert runs
+  CHECK(r.pool->stereo_voices() == 1u);
+  CHECK(r.h->unbind(0));
+  r.blocks(2);  // OutLeave is still counted, then the instance retires and the count drops
+  CHECK(r.pool->st_reserved() == 0u);
+  for (unsigned t = 1; t < 4u; ++t) {
+    r.block(static_cast<int>(t));  // the slot is back: three more notes play S (1 held + 3 = the cap 4)
+  }
+  CHECK(r.pool->stereo_voices() == 4u);
+  r.block();
+  CHECK(r.pool->feed_side(3) != nullptr);
+}
+
+TEST_CASE("insert host: cap: release_all returns the slot at the next boundary") {
+  CapRig r;
+  r.blocks(2);
+  NEED(r.bind_track(0, kStWiden) == InsertHost::Bind::Ok);
+  r.blocks(2);
+  CHECK(r.pool->st_reserved() == 1u);
+  r.h->release_all();  // main loop, no render: the instances go Off at once
+  CHECK_FALSE(r.h->bound(0));
+  r.block();
+  CHECK(r.pool->st_reserved() == 0u);
+}
+
+TEST_CASE("insert host: cap: a forced bypass (OVER BUDGET) returns the slot") {
+  CapRig r;
+  alignas(8) static std::int16_t blk[kB];
+  for (std::int16_t& s : blk) {
+    s = 8000;
+  }
+  CHECK(r.g->params().push(core::ParamChange{audio::strip_param(0, gps::Source), 3.0f, 1}));
+  r.g->feed(0, blk);  // a sounding strip, so the insert runs and is measured
+  g_step = 150000;    // over the instance budget (50 % of the block): the per-instance net forces it dry
+  r.blocks(2);
+  NEED(r.bind_track(0, kStWiden) == InsertHost::Bind::Ok);
+  r.blocks(3);
+  CHECK(r.pool->st_reserved() == 1u);
+  CHECK(r.h->stats().forced_instance == 0u);
+  r.blocks(5);
+  CHECK(r.h->stats().forced_instance == 1u);
+  r.blocks(2);  // the ramp to bypassed is counted, then Bypassed is not
+  CHECK(r.pool->st_reserved() == 0u);
+}
+
+// ---- OS-INSFX-ABI2 A7: the master stereo insert, ONE instance (docs/specs/OS-INSFX-ABI2.md 3.3) --------------------------------------------------
+namespace {
+
+std::uint32_t st_nan_render(void*, const float*, const float*, float* ol, float* orr, std::uint32_t n) {  // NaN on both planes
+  ++g_st_calls;
+  for (std::uint32_t i = 0; i < n; ++i) {
+    ol[i] = std::nanf("");
+    orr[i] = std::nanf("");
+  }
+  return 1;
+}
+std::uint32_t st_mixedbad_render(void*, const float* il, const float* ir, float* ol, float* orr, std::uint32_t n) {  // finite samples with a NaN and two infinities among them
+  ++g_st_calls;
+  for (std::uint32_t i = 0; i < n; ++i) {
+    ol[i] = il[i];
+    orr[i] = ir[i];
+  }
+  ol[3] = orr[3] = std::nanf("");
+  ol[17] = orr[17] = HUGE_VALF;
+  ol[40] = orr[40] = -HUGE_VALF;
+  return 1;
+}
+const o3m_module kStNan = FX_ST_MODULE("st_nan", st_nan_render, 0u);
+const o3m_module kStMixedBad = FX_ST_MODULE("st_mixedbad", st_mixedbad_render, 0u);
+
+// A master bind of a stereo module: ONE state block is taken (A7); `state_r` is passed too, so the S6 pair would bind with it before the fix.
+InsertHost::Bind bind_master_st(Rig& r, const o3m_module& m, unsigned s, const float* params = nullptr, unsigned count = 0, bool force = false) {
+  return r.h->bind(kMaster, m, 0x8001, &r.st[s], reinterpret_cast<const std::uint8_t*>(params), count * 4u, force, &r.st[s + 1u]);
+}
+// How many records the host holds on the master's keys (kMaster, kMaster + 1).
+unsigned master_records(const Rig& r) {
+  unsigned n = 0;
+  InsertHost::Info in{};
+  for (unsigned i = 0; i < InsertHost::kInstances; ++i) {
+    if (r.h->info(i, in) && (in.where == kMaster || in.where == kMaster + 1u) && !in.leaving) {
+      ++n;
+    }
+  }
+  return n;
+}
+
+}  // namespace
+
+TEST_CASE("master stereo: an identity stereo effect on the master is bit for bit L and R, one instance, render_st in place [OS-INSFX-ABI2 A7]") {
+  static std::int16_t ref[kIdBlocks][kBS];
+  static std::int16_t got[kIdBlocks][kBS];
+  identity_run(false, ref);
+  {
+    Rig r;
+    r.g->install_master_stage(audio::MasterStage::Headroom, &stage_pass, nullptr);
+    r.g->set_master_bypass(audio::MasterStage::Headroom, false);
+    CHECK(r.g->params().push(core::ParamChange{audio::strip_param(0, gps::Pan), 0.0f, 1}));
+    CHECK(r.g->params().push(core::ParamChange{audio::strip_param(1, gps::Pan), 100.0f, 1}));
+    CHECK(r.g->params().push(core::ParamChange{audio::strip_param(0, gps::Source), 3.0f, 1}));
+    CHECK(r.g->params().push(core::ParamChange{audio::strip_param(1, gps::Source), 3.0f, 1}));
+    // the gain parameter 0.5: the S6 dual-mono pair would run the mono render and halve both planes; the stereo instance ignores it and passes L and R through
+    const float half = 0.5f;
+    NEED(bind_master_st(r, kStId, 0, &half, 1) == InsertHost::Bind::Ok);
+    CHECK(r.h->bound(kMaster));
+    CHECK_FALSE(r.h->bound(kMaster + 1u));
+    CHECK(master_records(r) == 1u);  // ONE record of the four
+    g_st_calls = 0;
+    for (unsigned b = 0; b < kIdBlocks; ++b) {
+      for (std::uint32_t i = 0; i < kB; ++i) {
+        r.feed[0][i] = static_cast<std::int16_t>(((i + b * 7u) * 37u) % 9000u);
+        r.feed[1][i] = static_cast<std::int16_t>(-static_cast<int>(((i + b * 5u) * 53u) % 11000u));
+      }
+      r.g->feed(0, r.feed[0]);
+      r.g->feed(1, r.feed[1]);
+      r.block();
+      std::memcpy(got[b], r.out, sizeof got[b]);
+    }
+    CHECK(g_st_calls >= kIdBlocks - 2u);  // render_st ran (the pair would have called the mono render instead)
+  }
+  CHECK(std::memcmp(ref, got, sizeof ref) == 0);  // every block, the ramp-in blocks included, L and R bit for bit
+  bool left = false;
+  bool right = false;
+  for (std::uint32_t i = 0; i < kBS; i += 2) {
+    left = left || got[kIdBlocks - 1][i] != 0;
+    right = right || got[kIdBlocks - 1][i + 1] != 0;
+  }
+  CHECK(left);   // (the two planes did carry different sound: L and R independent)
+  CHECK(right);
+}
+
+TEST_CASE("master stereo: a NaN or an infinity from render_st never reaches the limiter or the converter [OS-INSFX-ABI2 A7]") {
+  {
+    Rig r;
+    static test::StaticSlot<audio::MasterLimiter> lslot;
+    audio::MasterLimiter& lim = lslot.make();
+    r.g->install_master_limiter(lim);
+    r.dc(0, 8000);
+    r.blocks(6);
+    NEED(bind_master_st(r, kStNan, 0) == InsertHost::Bind::Ok);
+    CHECK(master_records(r) == 1u);
+    for (unsigned b = 0; b < 40; ++b) {
+      r.block();
+      CHECK(lim.finite());  // the limiter's delay line and followers hold no NaN or infinity, at any block
+    }
+    CHECK(all_zero(r, false));  // the scrubbed output is silence, not the +32767 rail the converter gives a NaN
+    CHECK(all_zero(r, true));
+    CHECK(r.h->stats().scrubbed >= 2u * kB * 30u);
+  }
+  {  // one NaN and two infinities in a block of finite samples: only those samples go, the rest is the input exactly
+    Rig r;
+    r.g->install_master_stage(audio::MasterStage::Headroom, &stage_pass, nullptr);
+    r.g->set_master_bypass(audio::MasterStage::Headroom, false);
+    r.dc(0, 8000);
+    r.blocks(6);
+    const std::uint32_t before = r.h->stats().scrubbed;
+    NEED(bind_master_st(r, kStMixedBad, 1) == InsertHost::Bind::Ok);
+    CHECK(master_records(r) == 1u);
+    r.blocks(4);
+    const std::int16_t keep = r.l(10);
+    CHECK(r.l(3) == 0);
+    CHECK(r.l(17) == 0);
+    CHECK(r.l(40) == 0);
+    CHECK(r.l(11) == keep);
+    CHECK(rch(r, 3) == 0);
+    CHECK(rch(r, 17) == 0);
+    CHECK(rch(r, 40) == 0);
+    CHECK(rch(r, 11) == keep);
+    CHECK(r.h->stats().scrubbed - before >= 2u * 3u);  // both planes, three bad samples each
+  }
+}
+
+TEST_CASE("master stereo: one instance counts 1 of the cap of four, a mono effect on the master still 2 [OS-INSFX-ABI2 A7]") {
+  Rig r;
+  r.dc(0, 8000);
+  r.blocks(4);
+  NEED(r.bind(0, kGain, 0) == InsertHost::Bind::Ok);
+  NEED(r.bind(1, kGain, 1) == InsertHost::Bind::Ok);
+  NEED(r.bind(2, kGain, 2) == InsertHost::Bind::Ok);
+  // three track inserts leave ONE record free: the stereo master fits (A7), a mono one does not (S6)
+  NEED(bind_master_st(r, kStWiden, 3) == InsertHost::Bind::Ok);
+  CHECK(r.h->bound(kMaster));
+  CHECK_FALSE(r.h->bound(kMaster + 1u));
+  CHECK(master_records(r) == 1u);
+  CHECK(r.bind(3, kGain, 3) == InsertHost::Bind::NoInstance);  // the four records are taken
+  g_st_calls = 0;
+  r.blocks(4);
+  CHECK(g_st_calls >= 3u);  // the stage ran render_st on the pair
+  CHECK(r.g->master_stage_active(audio::MasterStage::Insert));
+  // the master leaves: its one record is free, a track insert fits again
+  CHECK(r.h->unbind(kMaster));
+  r.blocks(6);
+  CHECK(master_records(r) == 0u);
+  NEED(r.bind(3, kGain, 3) == InsertHost::Bind::Ok);
+  // with one record free (three tracks in) a MONO master still needs two and is refused, nothing half bound
+  CHECK(r.h->unbind(3));
+  r.blocks(6);
+  CHECK(bind_master_st(r, kGain, 0) == InsertHost::Bind::NoInstance);
+  CHECK(master_records(r) == 0u);
+  CHECK(r.h->bind(kMaster + 1u, kGain, 0x8001, &r.st[0], nullptr, 0, true) == InsertHost::Bind::BadWhere);
+}
+
+// ---- OS-INSFX-ABI2 A7 fold: the stereo master's transitions ramp like the pair's, and its lifecycle as ONE instance ----------------
+namespace {
+std::uint32_t st_gain_render(void* s, const float* il, const float* ir, float* ol, float* orr, std::uint32_t n) {  // a stereo gain: both planes by d->gain
+  FxState* d = static_cast<FxState*>(s);
+  ++g_st_calls;
+  for (std::uint32_t i = 0; i < n; ++i) {
+    ol[i] = il[i] * d->gain;
+    orr[i] = ir[i] * d->gain;
+  }
+  return 1;
+}
+const o3m_module kStGain = FX_ST_MODULE("st_gain", st_gain_render, 0u);
+}  // namespace
+
+TEST_CASE("master stereo: a block straddling bind and one straddling bypass are ramped, never a step [OS-INSFX-ABI2 A7]") {
+  Rig r;
+  r.g->install_master_stage(audio::MasterStage::Headroom, &stage_pass, nullptr);
+  r.g->set_master_bypass(audio::MasterStage::Headroom, false);
+  r.dc(0, 8000);
+  const int base = r.level_after_warmup();
+  NEED(base > 100);
+  const float half = 0.5f;
+  NEED(bind_master_st(r, kStGain, 0, &half, 1) == InsertHost::Bind::Ok);
+  CHECK(master_records(r) == 1u);
+  const int step = base / static_cast<int>(kB) + 2;  // the ramp's largest per-sample move against dry
+  r.block();                                        // the boundary applies the Activate (the render of this block was dry)
+  CHECK(r.phase(0) == InsertHost::Phase::In);
+  r.block();  // the ramp-in block: dry at the first sample, wet (half) at the last, both planes
+  CHECK(r.l(0) > base - base / 8);
+  CHECK(rch(r, 0) > base - base / 8);
+  CHECK(std::abs(r.l(kB - 1) - base / 2) <= 3);
+  CHECK(std::abs(rch(r, kB - 1) - base / 2) <= 3);
+  for (std::uint32_t i = 1; i < kB; ++i) {
+    CHECK(std::abs(static_cast<int>(r.l(i)) - static_cast<int>(r.l(i - 1))) <= step);
+    CHECK(std::abs(static_cast<int>(rch(r, i)) - static_cast<int>(rch(r, i - 1))) <= step);
+  }
+  r.block();
+  CHECK(r.steady_near(base / 2, 3));  // steady: full wet, no copy, both planes
+  CHECK(r.phase(0) == InsertHost::Phase::On);
+  // bypass on: the OutBypass block ramps from wet back to dry over one block, no step
+  CHECK(r.h->set_bypass(kMaster, true) == InsertHost::Toggle::Done);
+  r.block();  // the Bypass applied at its boundary (this block's render was steady wet)
+  r.block();  // the ramp-out block
+  CHECK(std::abs(r.l(0) - base / 2) <= base / 8);  // starts wet
+  CHECK(std::abs(r.l(kB - 1) - base) <= 3);        // ends dry
+  CHECK(std::abs(rch(r, kB - 1) - base) <= 3);
+  for (std::uint32_t i = 1; i < kB; ++i) {
+    CHECK(std::abs(static_cast<int>(r.l(i)) - static_cast<int>(r.l(i - 1))) <= step);
+    CHECK(std::abs(static_cast<int>(rch(r, i)) - static_cast<int>(rch(r, i - 1))) <= step);
+  }
+  r.blocks(2);
+  CHECK(r.phase(0) == InsertHost::Phase::Bypassed);
+  CHECK(r.steady_near(base, 3));
+  CHECK_FALSE(r.g->master_stage_active(audio::MasterStage::Insert));
+}
+
+TEST_CASE("master stereo: the one instance's lifecycle: set_param and a ParamChange reach it, bypass, forced bypass, reset, export, unbind [OS-INSFX-ABI2 A7]") {
+  Rig r;
+  r.g->install_master_stage(audio::MasterStage::Headroom, &stage_pass, nullptr);
+  r.g->set_master_bypass(audio::MasterStage::Headroom, false);
+  r.dc(0, 8000);
+  r.blocks(6);
+  NEED(bind_master_st(r, kStGain, 0) == InsertHost::Bind::Ok);
+  r.blocks(6);
+  CHECK(master_records(r) == 1u);
+  CHECK(r.h->bound(kMaster));
+  CHECK_FALSE(r.h->bound(kMaster + 1u));
+  // set_param (key 32) reaches the ONE record and returns true only with the wh_[where + 1] == kNone guard (without it, set_param_at(33) fails)
+  NEED(r.h->set_param(kMaster, 0, 0.25f));
+  r.blocks(3);
+  CHECK(r.st[0].gain == 0.25f);
+  CHECK(r.h->stats().params == 1u);  // one ParamChange applied, one instance
+  CHECK(r.h->stats().stale == 0);
+  CHECK_FALSE(r.h->set_param(kMaster + 1u, 0, 0.9f));
+  // a ParamChange through the graph's ring (the key 32) reaches the one record too
+  InsertHost::Info inf{};
+  NEED(r.h->info(0, inf));
+  CHECK(inf.where == kMaster);
+  CHECK(r.g->params().push(core::ParamChange{core::param_id(core::ParamKind::Insert, kMaster, 0), 0.5f, inf.gen}));
+  r.block();
+  CHECK(r.st[0].gain == 0.5f);
+  NEED(r.h->set_param(kMaster, 0, 0.5f));  // and the stored copy (the blob) takes it too, so a reset applies 0.5
+  r.blocks(3);
+  CHECK(r.st[0].gain == 0.5f);
+  // bypass on: dry, the stage out; off: a reset of the ONE instance (shutdown + init once), the stored parameter again
+  CHECK(r.h->set_bypass(kMaster, true) == InsertHost::Toggle::Done);
+  r.blocks(4);
+  CHECK(r.phase(0) == InsertHost::Phase::Bypassed);
+  CHECK_FALSE(r.g->master_stage_active(audio::MasterStage::Insert));
+  const int shut = g_shut;
+  const int inits = g_init;
+  CHECK(r.h->set_bypass(kMaster, false, true) == InsertHost::Toggle::Done);
+  r.blocks(10);
+  CHECK(g_shut == shut + 1);
+  CHECK(g_init == inits + 1);
+  CHECK(r.st[0].gain == 0.5f);
+  CHECK(master_records(r) == 1u);
+  CHECK(r.g->master_stage_active(audio::MasterStage::Insert));
+  // a net's forced bypass takes the one instance to dry together
+  g_step = 150000;  // each render is over the instance budget (50 % of the block)
+  r.blocks(8);
+  CHECK(r.h->stats().forced_instance >= 1u);
+  NEED(r.h->info(0, inf));
+  CHECK(inf.where == kMaster);
+  CHECK(inf.forced);
+  CHECK(inf.phase == InsertHost::Phase::Bypassed);
+  CHECK(r.h->set_bypass(kMaster, false) == InsertHost::Toggle::NoCpu);  // one instance at the measured cost: the net would force it again
+  CHECK(r.h->set_bypass(kMaster, false, true) == InsertHost::Toggle::Done);
+  g_step = 0;
+  r.blocks(14);
+  CHECK(r.h->bound(kMaster));
+  // export: the one instance's state is reset (one shutdown + init), two exports give the same bits
+  static std::int16_t a[8][kBS];
+  static std::int16_t b[8][kBS];
+  const int shut2 = g_shut;
+  const int inits2 = g_init;
+  CHECK(r.h->prepare_export());
+  CHECK(g_shut == shut2 + 1);
+  CHECK(g_init == inits2 + 1);
+  CHECK(r.st[0].gain == 0.5f);
+  for (unsigned i = 0; i < 8; ++i) {
+    r.block();
+    std::memcpy(a[i], r.out, sizeof a[i]);
+  }
+  r.h->export_end();
+  r.blocks(5);
+  CHECK(r.h->prepare_export());
+  for (unsigned i = 0; i < 8; ++i) {
+    r.block();
+    std::memcpy(b[i], r.out, sizeof b[i]);
+  }
+  CHECK(std::memcmp(a, b, sizeof a) == 0);
+  bool any = false;
+  for (std::uint32_t i = 0; i < kBS; ++i) {
+    any = any || a[7][i] != 0;
+  }
+  CHECK(any);
+  r.h->export_end();
+  // unbind: the stage leaves, the one record is freed
+  CHECK(r.h->unbind(kMaster));
+  r.blocks(8);
+  CHECK_FALSE(r.h->bound(kMaster));
+  CHECK(master_records(r) == 0u);
+  CHECK_FALSE(r.g->master_stage_active(audio::MasterStage::Insert));
+  CHECK(r.h->settled());
+}
+
+// ---- OS-INSFX-ABI2 A7 fold 2: a transition block must leave the chain-wet planes (the CUE accumulator) zero ----------------
+namespace {
+// OUT MODE MainLCueR (the right jack carries CUE), track 0 to MAIN, track 1 to CUE when `cue` is set (else to MAIN, CUE silent); the stereo master binds at block 6
+// when `with_insert` (block 7 is then the transition block). Returns the right jack (CUE's mono sum) of every block.
+std::vector<std::int16_t> cue_scene(bool with_insert, bool cue) {
+  Rig r;
+  r.g->install_master_stage(audio::MasterStage::Headroom, &stage_pass, nullptr);
+  r.g->set_master_bypass(audio::MasterStage::Headroom, false);
+  CHECK(r.g->params().push(core::ParamChange{audio::master_param(gpm::OutMode), 1.0f, 1}));  // MainLCueR
+  CHECK(r.g->params().push(core::ParamChange{audio::strip_param(0, gps::Source), 3.0f, 1}));
+  CHECK(r.g->params().push(core::ParamChange{audio::strip_param(0, gps::Route), static_cast<float>(audio::route::kMain), 1}));
+  CHECK(r.g->params().push(core::ParamChange{audio::strip_param(1, gps::Source), 3.0f, 1}));
+  CHECK(r.g->params().push(core::ParamChange{audio::strip_param(1, gps::Route),
+                                               static_cast<float>(cue ? audio::route::kCue : audio::route::kMain), 1}));
+  CHECK(r.g->params().push(core::ParamChange{audio::strip_param(1, gps::Pan), 100.0f, 1}));
+  std::vector<std::int16_t> out_cue;
+  for (unsigned b = 0; b < 16; ++b) {
+    if (with_insert && b == 6u) {
+      const float one = 1.0f;
+      CHECK(bind_master_st(r, kStGain, 0, &one, 1) == InsertHost::Bind::Ok);
+    }
+    for (std::uint32_t i = 0; i < kB; ++i) {
+      r.feed[0][i] = static_cast<std::int16_t>(((i * 37u + b * 11u) % 9000u) - 4000);
+      r.feed[1][i] = static_cast<std::int16_t>(-static_cast<int>(((i * 53u + b * 7u) % 11000u) - 5000));
+    }
+    r.g->feed(0, r.feed[0]);
+    r.g->feed(1, r.feed[1]);
+    r.block();
+    for (std::uint32_t i = 0; i < kB; ++i) {
+      out_cue.push_back(rch(r, i));
+    }
+  }
+  return out_cue;
+}
+}  // namespace
+
+TEST_CASE("master stereo: a transition block leaves the CUE accumulator zero: the next blocks' CUE output is the run without the insert [OS-INSFX-ABI2 A7]") {
+  const std::vector<std::int16_t> ref = cue_scene(false, true);  // CUE carries track 1
+  const std::vector<std::int16_t> got = cue_scene(true, true);   // the stereo master binds at block 6, block 7 is the transition
+  NEED(ref.size() == got.size());
+  CHECK(ref == got);  // every block, the transition block's successors included: the chain-wet planes are zeroed again after the blend
+  bool any = false;
+  for (std::int16_t s : ref) {
+    any = any || s != 0;
+  }
+  CHECK(any);  // (CUE really carried signal)
+  // CUE silent: after the transition block the accumulator is all zero, so the CUE jack stays silent
+  const std::vector<std::int16_t> silent = cue_scene(true, false);
+  for (unsigned b = 8u; b < 16u; ++b) {  // the blocks after the transition
+    for (std::uint32_t i = 0; i < kB; ++i) {
+      CHECK(silent[b * kB + i] == 0);
+    }
+  }
 }

@@ -71,7 +71,7 @@ class PatternView {
     bool shift = false;                   // Shift is held: the header marks are drawn bold
     std::uint32_t soft_dim = 0;           // key row: bit n = F(n+1)'s label is drawn dim (a reserved key of the Shift picker)
     std::uint32_t soft_hot = 0;           // key row: bit n = F(n+1) is the key in force (the Shift picker's mode): an inverted label
-    const char* pads = "";                // the pads' mode when it is not NOTES (info line: "pads TRACKS"); "" says nothing
+    const char* pads = "";                // the pads' mode (info line: "pads TRACKS", "pads NOTES" too since OS-INFOLINE); "" says nothing
     bool playing = false;                 // the transport runs: the strip's badge says PLAY (OS-005d)
     bool metro = false;                   // OS-METRO: the metronome is on (the device setting METRO is not Off): a METRO chip beside the mode chip in the info line
     bool rec = false;                     // the pattern can be edited (OS-RECSIGN: Edit, STEP and LIVE): the Rec frame round the grid and the REC badge in the strip
@@ -82,6 +82,7 @@ class PatternView {
     bool blink = false;                   // the phase of the MUTE tag of a track whose quantised mute is pending: lit or not (OS-MUTEVIS; ViewState::mute_blink)
     std::uint8_t numbering = static_cast<std::uint8_t>(Numbering::From1);  // the device setting NUMBERING: how the rows are numbered (OS-CFGWIRE; this OS's default counts from 1)
     std::int8_t octave_shift = 0;         // the device setting MIDDLE C as an octave shift of the note names (OS-CFGWIRE; 0 = the default names)
+    const char* hint = "";                // OS-PTOOLS2 S1: while a block is active, what its keys do ("BLOCK 16 STEPS  ENC: TRANSPOSE  F7: TOOLS  PAD: SET  DEL: CLEAR"): parts separated by two spaces; draw_info drops the last parts until it fits, and it replaces fx_read. "" says nothing. Owned by the caller for the call of draw()
     const char* fx_read = "";             // the FX under the cursor in words (OS-PFX, app/fx_text.h: Chord, Arp, Tune, Slide); "" says nothing. Owned by the caller for the call of draw()
   };
 
@@ -130,18 +131,21 @@ class PatternView {
 
   // Appends the whole screen to the frame in progress. `covered` is the overlay's rectangle (OS-002b): a row, a field or
   // a component that lies entirely inside it is not drawn, the overlay paints over it (an empty rectangle skips nothing).
+  // `pane_w` is the width the grid is drawn in: the full screen by default, kRightPanelX while the right-hand panel is up
+  // (OS-PTOOLS2 S3p): the grid narrows to the left of the panel and shows the tracks that fit (pattern_tracks_fit), with the
+  // window scrolled to keep the cursor in view.
   void draw(ui::Renderer& r, const PatternSource& src, const Status& status,
-            ui::Rect covered = ui::Rect{0, 0, 0, 0}) const noexcept;
+            ui::Rect covered = ui::Rect{0, 0, 0, 0}, int pane_w = ui::kScreenW) const noexcept;
   // The demo alone: the OS-001b entry the tests and the simulator's sweeps use.
   void draw(ui::Renderer& r, const PatternData& data, const Status& status,
-            ui::Rect covered = ui::Rect{0, 0, 0, 0}) const noexcept {
-    draw(r, PatternSource(data), status, covered);
+            ui::Rect covered = ui::Rect{0, 0, 0, 0}, int pane_w = ui::kScreenW) const noexcept {
+    draw(r, PatternSource(data), status, covered, pane_w);
   }
 
  private:
   void follow(const Dims& d) noexcept;  // moves the window to where the cursor puts it (window_top) and the track window so the cursor's track is inside it
 
-  void draw_headers(ui::Renderer& r, const PatternLayout& l, const PatternSource& src, const Status& status, int shown) const noexcept;
+  void draw_headers(ui::Renderer& r, const PatternLayout& l, const PatternSource& src, const Status& status, int shown, int left) const noexcept;
   void draw_strip(ui::Renderer& r, const PatternSource& src, const Status& status) const noexcept;
   void draw_info(ui::Renderer& r, const Status& status) const noexcept;
 

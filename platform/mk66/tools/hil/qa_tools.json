@@ -45,7 +45,7 @@
    ],
    "gap": 0.3,
    "if_state": {
-    "overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|FILL|PLAY_MODE|TOOLS)$"
+    "overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|FILL|PLAY_MODE|TOOLS|VERB_MENU)$"
    },
    "note": "(a leftover overlay is put away: F8 is Back)"
   },
@@ -106,9 +106,21 @@
   },
   {
    "state": {
-    "overlay": "TOOLS"
+    "overlay": "VERB_MENU"
    },
    "within": 3
+  },
+  {
+   "pad": 15,
+   "note": "pad 16 (APPS >): the verb menu's APPS page"
+  },
+  {
+   "keys": [
+    "up"
+   ],
+   "gap": 0.1,
+   "repeat": 20,
+   "note": "the cursor to the top (the list remembers the row it was left on)"
   },
   {
    "shot": "qa_pat_160_tools",
@@ -128,24 +140,8 @@
    "keys": [
     "f1"
    ],
-   "gap": 0.6,
-   "note": "QA-PAT-162: the first launch of an app that edits the project asks first (after a fresh reset)"
-  },
-  {
-   "shot": "qa_pat_162_confirm",
-   "non_blank": true,
-   "soft": true,
-   "note": "QA-PAT-162: the list says EDITS THE PROJECT (UNDOABLE): F1 AGAIN (on a boot where RHYTHMGEN was already confirmed this step shows the app page instead)"
-  },
-  {
-   "keys": [
-    "f1"
-   ],
    "gap": 0.8,
-   "if_state": {
-    "screen": "PATTERN"
-   },
-   "note": "F1 again: the app starts"
+   "note": "QA-PAT-162: F1 starts RHYTHMGEN at once: a project edit is not confirmed from TOOLS (OS-PTOOLS2 Q9b)"
   },
   {
    "state": {
@@ -153,6 +149,12 @@
     "overlay": "NONE"
    },
    "within": 4
+  },
+  {
+   "shot": "qa_pat_162_starts",
+   "non_blank": true,
+   "soft": true,
+   "note": "QA-PAT-162: RHYTHM GEN's page, no question asked first (the first F1 after a boot)"
   },
   {
    "wait": 0.5
@@ -345,9 +347,9 @@
    ],
    "gap": 0.3,
    "if_state": {
-    "overlay": "TOOLS"
+    "overlay": "VERB_MENU"
    },
-   "note": "(the list is put away if a manual step left it up)"
+   "note": "(the menu is put away if a manual step left it up)"
   },
   {
    "say": "OS-H3B rows QA-MOD-080..089 and QA-PAT-210..213 (ADR 0014 slice H3b: ABI 1.6, CHORDS, HUMANIZE, MUTATE, MORPH; new Community OS behaviour). Precondition: a TEST card with chords.tmod, humanize.tmod, morph.tmod, mutate.tmod and rhythmgen.tmod in /modules/apps (the packed files of o3m_*_tmod: build-os-*/modules/*.tmod), a project whose pattern 1 has at least 16 rows on tracks 1 to 3 and is EMPTY on them, the transport STOPPED. The CURRENT instrument (the one in the Pattern's instrument field) must be a SAMPLE instrument (any sample, even a short one) for MUTATE and MORPH, and a SECOND sample instrument with the same play engine (INST page: PLAY ENGINE, the default AUTO is fine) must exist for MORPH to have a SOURCE; if the current instrument is a MIDI instrument CHORDS starts in CHORD FX mode, on a sample instrument in SPREAD (the steps below set CHORD FX by hand either way). Every editing app asks once per boot on its first launch (F1 again): the steps press F1 twice and the second press is ignored when it is not needed. The list is EXPORT PATTERN, EXPORT SELECTION (with a block), a rule, then CHORDS, HUMANIZE, MORPH, MUTATE, RHYTHMGEN by name: the Down counts below assume exactly those and a block that stays selected while the Params page is looked at (if the block was lost, F7 has no EXPORT SELECTION and every count is one too many: check the cursor in the shot of the list before F1). The project is changed by the apps and put back by UNDO; nothing is written to the card"
@@ -379,7 +381,7 @@
    ],
    "gap": 0.3,
    "if_state": {
-    "overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|FILL|PLAY_MODE|TOOLS)$"
+    "overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|FILL|PLAY_MODE|TOOLS|VERB_MENU)$"
    },
    "note": "(a leftover overlay is put away)"
   },
@@ -426,9 +428,21 @@
   },
   {
    "state": {
-    "overlay": "TOOLS"
+    "overlay": "VERB_MENU"
    },
    "within": 4
+  },
+  {
+   "pad": 15,
+   "note": "pad 16 (APPS >): the verb menu's APPS page"
+  },
+  {
+   "keys": [
+    "up"
+   ],
+   "gap": 0.1,
+   "repeat": 20,
+   "note": "the cursor to the top (the list remembers the row it was left on)"
   },
   {
    "shot": "qa_pat_210_tools",
@@ -448,18 +462,8 @@
    "keys": [
     "f1"
    ],
-   "gap": 0.6,
-   "note": "the first launch asks"
-  },
-  {
-   "keys": [
-    "f1"
-   ],
    "gap": 0.8,
-   "if_state": {
-    "screen": "PATTERN"
-   },
-   "note": "F1 again: CHORDS starts"
+   "note": "F1 starts the app at once (a project edit is not confirmed from TOOLS)"
   },
   {
    "state": {
@@ -543,9 +547,21 @@
   },
   {
    "state": {
-    "overlay": "TOOLS"
+    "overlay": "VERB_MENU"
    },
    "within": 4
+  },
+  {
+   "pad": 15,
+   "note": "pad 16 (APPS >): the verb menu's APPS page"
+  },
+  {
+   "keys": [
+    "up"
+   ],
+   "gap": 0.1,
+   "repeat": 20,
+   "note": "the cursor to the top (the list remembers the row it was left on)"
   },
   {
    "keys": [
@@ -559,18 +575,8 @@
    "keys": [
     "f1"
    ],
-   "gap": 0.6,
-   "note": "the first launch asks"
-  },
-  {
-   "keys": [
-    "f1"
-   ],
    "gap": 0.8,
-   "if_state": {
-    "screen": "PATTERN"
-   },
-   "note": "F1 again: HUMANIZE starts"
+   "note": "F1 starts the app at once (a project edit is not confirmed from TOOLS)"
   },
   {
    "state": {
@@ -586,7 +592,7 @@
    "shot": "qa_mod_080_page",
    "non_blank": true,
    "soft": true,
-   "note": "QA-MOD-080: HUMANIZE, BLOCK TRACK 1-3 ROWS 1-16, TIME 20, VOL +/- 8, SEED 0000"
+   "note": "QA-MOD-080: HUMANIZE in the TOOLS panel beside the narrowed block (OS-PTOOLS2 S6): TIME 20, VOL +/- 8, SEED 0000, then the block footer"
   },
   {
    "keys": [
@@ -599,7 +605,7 @@
    "shot": "qa_mod_080_applied",
    "non_blank": true,
    "soft": true,
-   "note": "QA-MOD-080: 4 STEPS HUMANIZED (the steps with a note: the four chord roots)"
+   "note": "QA-MOD-080: the panel's answer line: 4 STEPS HUMANIZED (UNDO TO TAKE BACK) (the steps with a note: the four chord roots)"
   },
   {
    "keys": [
@@ -685,9 +691,21 @@
   },
   {
    "state": {
-    "overlay": "TOOLS"
+    "overlay": "VERB_MENU"
    },
    "within": 4
+  },
+  {
+   "pad": 15,
+   "note": "pad 16 (APPS >): the verb menu's APPS page"
+  },
+  {
+   "keys": [
+    "up"
+   ],
+   "gap": 0.1,
+   "repeat": 20,
+   "note": "the cursor to the top (the list remembers the row it was left on)"
   },
   {
    "keys": [
@@ -701,18 +719,8 @@
    "keys": [
     "f1"
    ],
-   "gap": 0.6,
-   "note": "the first launch asks"
-  },
-  {
-   "keys": [
-    "f1"
-   ],
    "gap": 0.8,
-   "if_state": {
-    "screen": "PATTERN"
-   },
-   "note": "F1 again: MUTATE starts"
+   "note": "F1 starts the app at once (a project edit is not confirmed from TOOLS)"
   },
   {
    "state": {
@@ -832,9 +840,21 @@
   },
   {
    "state": {
-    "overlay": "TOOLS"
+    "overlay": "VERB_MENU"
    },
    "within": 4
+  },
+  {
+   "pad": 15,
+   "note": "pad 16 (APPS >): the verb menu's APPS page"
+  },
+  {
+   "keys": [
+    "up"
+   ],
+   "gap": 0.1,
+   "repeat": 20,
+   "note": "the cursor to the top (the list remembers the row it was left on)"
   },
   {
    "keys": [
@@ -848,18 +868,8 @@
    "keys": [
     "f1"
    ],
-   "gap": 0.6,
-   "note": "the first launch asks"
-  },
-  {
-   "keys": [
-    "f1"
-   ],
    "gap": 0.8,
-   "if_state": {
-    "screen": "PATTERN"
-   },
-   "note": "F1 again: MORPH starts"
+   "note": "F1 starts the app at once (a project edit is not confirmed from TOOLS)"
   },
   {
    "state": {
@@ -963,9 +973,9 @@
    ],
    "gap": 0.3,
    "if_state": {
-    "overlay": "TOOLS"
+    "overlay": "VERB_MENU"
    },
-   "note": "(the list is put away if a manual step left it up)"
+   "note": "(the menu is put away if a manual step left it up)"
   }
  ],
  "finally": [

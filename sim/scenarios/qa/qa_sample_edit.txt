@@ -58,7 +58,7 @@ tap f8
 wait 300
 
 # QA-SED-019 (OS-AUDIT-15): the Sample edit button again opens the FX page (FILTER, COMPRESSOR and the nine rows); QA-SED-020: F1 FILTER at its defaults (low pass, 1000 Hz, Q 0.7) is one undo step;
-# QA-SED-021: Down x3 picks THRESHOLD, the encoder raises it six steps (-18 -> -12 DB), F2 COMPRESSOR runs; the button again goes back to the edit page.
+# QA-SED-021: Down x3 picks THRESHOLD, the encoder raises it six steps (-18 -> -12 DB), F2 COMPRESSOR runs; the button twice (FX -> PLUGINS -> edit) goes back to the edit page.
 tap sampleedit
 snap qa_sed_019
 tap f1
@@ -75,6 +75,7 @@ wait 500
 snap qa_sed_021
 tap f8
 wait 300
+tap sampleedit
 tap sampleedit
 
 # QA-SED-011: Shift + Up twice raises the AMP percentage by 20 (200 -> 220).
@@ -97,3 +98,60 @@ press shift
 tap f5
 release shift
 snap qa_sed_017
+
+# OS-CEPTFX S4a, the PLUGINS page. `card ptfx` writes seven synthetic header-only plugins into the card's Effects/ (six listed, one name too long and skipped). The button twice (edit -> FX -> PLUGINS) opens the page; it had found no folder when it was passed through before the plugins were written, so F2 RESCAN lists them again.
+# QA-SED-030: the list (PLUGINS 6 (1 SKIPPED), rows with their tags) and the picked plugin's parameters (Chorus: RATE, DEPTH, VOICES, SHAPE with values and units, the author and the scratch).
+card ptfx
+tap sampleedit
+tap sampleedit
+tap f2
+wait 800
+snap qa_sed_030
+
+# QA-SED-031: Down picks the refused row (Future Plugin, a version this OS does not read): grey, with the short reason in place of the parameters.
+tap down
+snap qa_sed_031
+
+# QA-SED-032: back on Chorus, Right focuses the parameters, Down picks DEPTH and the encoder raises it five steps (40 -> 45 %); Delete would bring the default back.
+tap up
+tap right
+tap down
+encoder 5
+snap qa_sed_032
+tap sampleedit
+
+# OS-CEPTFX S4b, F1 APPLY. The simulator has a host stand-in for the Mono Tool only (AMOUNT is a gain in percent); every other plugin says PLUGINS RUN ON THE TRACKER there.
+# QA-SED-033: with a selection (the edit page: the START edge 40 frames in, the END edge 40 back) the Mono Tool at 50 % runs on the selection: DONE and UNDO 1; F8 UNDO takes it back.
+pad 0
+wait 300
+tap left
+encoder 40
+tap right
+encoder -40
+tap sampleedit
+tap sampleedit
+tap left
+tap down
+tap down
+tap right
+encoder -50
+tap f1
+wait 800
+snap qa_sed_033
+tap f8
+wait 300
+
+# QA-SED-034: with no selection (Delete on the edit page clears it) APPLY acts on all of the sample.
+tap sampleedit
+tap delete
+tap sampleedit
+tap sampleedit
+tap f1
+wait 800
+snap qa_sed_034
+tap f8
+wait 300
+
+# QA-SED-042: F3 DEFAULTS brings the plugin's values back (AMOUNT 100 %).
+tap f3
+snap qa_sed_042

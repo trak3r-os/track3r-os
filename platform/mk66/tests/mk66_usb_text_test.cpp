@@ -9,6 +9,8 @@
 #include <o3os/platform/mk66/usb/diag_text.h>
 #include <o3os/usb/diag_shell.h>
 
+#include "mk66_text_pools.h"
+
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -242,13 +244,31 @@ TEST_CASE("mk66 diag text: log, input, version") {
   CHECK(std::strcmp(buf, "Track3r o3os, build abc123-dirty\nusb 16D0:0E9F rev 0001 serial 9CC819A7AD93F175\n") == 0);
 }
 
+// ---- diag ptfx (OS-CEPTFX S2c): the lines; the command itself (cmd_ptfx in console.cpp) is target-only, no host harness runs it -----------
+TEST_CASE("mk66 diag text: ptfx quarantine lines (OS-CEPTFX S2c)") {
+  char buf[160];
+  // The set: one line per id, then the closing line with the count and the full flag (refused ids after the 16th).
+  console::format_ptfx_quarantine(0, 2, 0x8ABC, "timeout", 0, buf, sizeof buf);
+  CHECK(std::strcmp(buf, "ptfx q 1 id 0x8ABC timeout\n") == 0);
+  console::format_ptfx_quarantine(1, 2, 0x8001, "stack", 0, buf, sizeof buf);
+  CHECK(std::strcmp(buf, "ptfx q 2 id 0x8001 stack\n") == 0);
+  console::format_ptfx_quarantine(2, 2, 0, "", 0, buf, sizeof buf);
+  CHECK(std::strcmp(buf, "ptfx quarantine 2/16, full no, refused 0\n") == 0);
+  console::format_ptfx_quarantine(16, 16, 0, "", 3, buf, sizeof buf);
+  CHECK(std::strcmp(buf, "ptfx quarantine 16/16, full yes, refused 3\n") == 0);
+  // A short buffer is cut and terminated, never overrun.
+  char small[8];
+  console::format_ptfx_quarantine(0, 2, 0x8ABC, "timeout", 0, small, sizeof small);
+  CHECK(std::strlen(small) < sizeof small);
+}
+
 // ---- the command table ---------------------------------------------------------------------------------------------------------
 TEST_CASE("mk66 diag commands: the table is the documented set, every command an action, nothing maintainer-gated") {
   const char* const expected[] = {"help", "version", "stage", "cpu", "mem",  "crash", "usb", "log", "input", "mix",
                                   "mon",  "peek",    "poke",  "audio", "rot", "sd",    "ls",  "load", "inst", "mod", "reset", "fw", "radio", "voices",
-                                  "key",  "pad",     "enc",   "state", "shot", "leds", "bench", "cache", "ogexp", "power", "disk", "guard", "ins", "status"};
+                                  "key",  "pad",     "enc",   "state", "shot", "leds", "bench", "cache", "ogexp", "power", "disk", "guard", "ins", "status", "trans", "mtc", "ptfx", "scratch"};
   constexpr std::size_t kCount = static_cast<std::size_t>(console::Cmd::Count);
-  CHECK(kCount == 38u);  // (OS-USBDISK U2a: disk; OS-MAINGUARD: guard; OS-INSFX S1: ins; OS-STATUSLED: status)
+  CHECK(kCount == 42u);  // (OS-USBDISK U2a: disk; OS-MAINGUARD: guard; OS-INSFX S1: ins; OS-STATUSLED: status; OS-BUG-PLAYSTOP: trans; OS-MTC A3: mtc; OS-CEPTFX S2c: ptfx; OS-BUG-SCRATCH: scratch)
   for (std::size_t i = 0; i < kCount; ++i) {
     const console::CommandInfo& c = console::kCommandInfo[i];
     INFO(c.name);
@@ -260,8 +280,13 @@ TEST_CASE("mk66 diag commands: the table is the documented set, every command an
     for (std::size_t k = 0; k < n; ++k) {
       CHECK((c.name[k] >= 'a' && c.name[k] <= 'z'));
     }
-    CHECK(std::strlen(c.help) <= 70u);
-    CHECK(std::strchr(c.help, '\n') == nullptr);
+    const char* help = testing::console_text(c.help);
+    CHECK(help != nullptr);
+    if (help == nullptr) {
+      continue;
+    }
+    CHECK(std::strlen(help) <= 70u);
+    CHECK(std::strchr(help, '\n') == nullptr);
     // The command is the action diag.<name>, with the id every other action has.
     char action[16] = "diag.";
     std::strcat(action, c.name);
@@ -280,7 +305,7 @@ TEST_CASE("mk66 diag commands: the table is the documented set, every command an
       CHECK(std::strstr(c.name, bad) == nullptr);
     }
   }
-  CHECK(std::strstr(console::info(console::Cmd::Reset).help, "mute the outputs, then restart") != nullptr);
+  CHECK(std::strstr(testing::console_text(console::info(console::Cmd::Reset).help), "mute the outputs, then restart") != nullptr);
 }
 
 TEST_CASE("mk66 diag commands: after the power-off commit only the nine reads run (OS-POWER P1 D2), every other command is refused") {

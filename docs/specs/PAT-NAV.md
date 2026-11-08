@@ -13,7 +13,7 @@ Make Pattern navigable on a 12-track project without leaving the grid. Note acts
 | Where bound | `kPattern` and `kStepPopupCtx`, with the same Note-modified taps in both. A Note tap with no second key behaves as today. |
 | Track move | Note+Left/Right calls the existing `cursor.track` (+/-1) and keeps the column. |
 | Left/Right | In Pattern they step over visible fields only. Hidden fields stay editable through the hold popups. |
-| QJUMP | `cursor.jump_fraction` 0..3 on Shift+Note, Shift+Instr, Shift+Vol, Shift+Fx, bound in `kPattern`. Shift+Insert stays. The Shift+Fx FILL binding is dropped and F4 keeps Fill. |
+| QJUMP | `cursor.jump_fraction` 0..3 on Shift+Note, Shift+Instr, Shift+Vol, Shift+Fx, bound in `kPattern` (OS-SELSHIFT: now `select.jump`, the same jump plus, in Edit, the selection of the rows crossed). Shift+Insert stays. The Shift+Fx FILL binding is dropped and F4 keeps Fill. |
 | Persistence | The zoom level is RAM-only (orchestrator default). It resets to 5 at boot and survives project loads. No project, settings or SD format is touched. |
 | Free keys | Note+Vol and Note+Fx stay unbound. |
 

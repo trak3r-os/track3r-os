@@ -842,7 +842,7 @@
    "say": "QA-INS-042: on the source page put a short sample (about 1500 frames) in WAVETABLE with WT SIZE 2048 (a size the sample cannot hold): the page says NOT PLAYABLE and no window is drawn; the instrument is silent; WT SIZE one step down (1024) draws the window and sounds"
   },
   {
-   "say": "QA-INS-043: on a sample instrument (the header reads 05 KICK) press Shift+F2 (COPY): the strip says INS 05 COPIED. On a MIDI instrument the same; on a module instrument it says A MODULE INSTRUMENT CANNOT BE COPIED, on an empty slot NOTHING TO COPY"
+   "say": "QA-INS-043: on a sample instrument (the header reads 05 KICK) press Shift+F2 (COPY): the strip says INS 05 COPIED. On a MIDI instrument the same; on a module instrument Shift+F2 is MIX (QA-INS-307, nothing is copied), on an empty slot NOTHING TO COPY"
   },
   {
    "say": "QA-INS-044: go to a free slot (F7 until an empty one: the type chooser) and press Shift+F3 (PASTE; also the chooser's F3, dim before something is copied): INS nn PASTED - F8 UNDO, the header and the pages are the copy's (name, play mode, points, envelopes), the SOURCE page's picture is the same sample, and the Sample load screen's ARENA readout does not move (the audio is shared, not copied). Hold a pad: it sounds like the source"
@@ -997,6 +997,21 @@
   },
   {
    "say": "QA-INS-082 (VEL>): a sample instrument, Params F2 VOICE: the last row is VEL> (default 100 %); Down to it, turn -30 (70 %), F8 undoes. From the PC `amidi -p hw:1,0,0 -S \"90 3C 40\"` (velocity 64) plays at 64/127 at VEL> 100 (as the keyboard always did), as velocity 127 at 0 %, as 96/127 at 50 %; a pad is always at full level; a MIDI instrument has no VEL> row"
+  },
+  {
+   "say": "QA-INS-307: on a module instrument (TB-303 in a slot) press Shift+F2: the header reads MIX, the page shows PANNING (50), DELAY SEND (0) and REVERB SEND (0) and the Shift row's second key reads MIX; a page key or Left / Right goes back to the module's own pages"
+  },
+  {
+   "say": "QA-INS-308: on the MIX page turn PANNING to 20 and REVERB SEND to 40: the values show; F8 twice gives back 50 and 0, Shift+F8 once restores one of them"
+  },
+  {
+   "say": "QA-INS-309: TB-303 on track 1, pad held, REVERB SEND 40 and DELAY SEND 30: the reverb and delay returns are audible at the note's start and the dry note is quiet in the meter of the returns when both sends are 0"
+  },
+  {
+   "say": "QA-INS-310: hold a TB-303 note, turn PANNING from 50 to 0 then 100 while it rings: the sound follows to the left then the right at once; a Panning step FX 31 on a later note still moves it from the instrument's pan"
+  },
+  {
+   "say": "QA-INS-311: save the project with PANNING 20, DELAY SEND 30 and REVERB SEND 40 on a module instrument, reload it: the MIX page shows 20 / 30 / 40 again; load a project saved before this version: 50 / 0 / 0 and the sound is as it was"
   }
  ],
  "finally": [

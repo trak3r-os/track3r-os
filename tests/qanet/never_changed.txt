@@ -1,47 +1,9 @@
 # OS-QANET A1: actions that no run of the walk saw act (the document changed, or for an action that does not edit it, the dispatcher answered Changed): the table has no state where they have something
 # to do, or the context that binds them is not reached. Each is a hole in the net (rule 1 is never asked of it), not a finding. The test fails when this list grows and when an action on it starts
 # to act (delete its line). Written by QANET_WRITE_GAPS.
-count: 72
-chooser.coarse
-chooser.defined
-chooser.delta
-chooser.pad
-dj.pad
-export.coarse
-export.value
-file.report
-input_test.reset
-instrument.pad
-instrument.select
-learn.clear
-learn.clear_all
-learn.mode
-mixer.apply
-mixer.solo_none
-mixer.stem_set
-module.app_edit
-module.app_reset
-module.pick
-nav.peek_end
-pad.audition
-pad.preview
-pads.play
-pattern.clip_paste
-pattern.rec_free
-perform.copy
-perform.edit
-perform.fx
-perform.key
-perform.move
-perform.pad
-perform.paste
-perform.swap
-perform.turn
-popup.delta
-popup.move
-popup.pad
-popup.page
-popup.release
+# What is left: none of these has a state that a scenario can put the simulator in (the reasons, by group).
+count: 20
+# The recorder is not wired in the simulator (sim/include/o3os/sim/sim_audio.h: "the recorder and the capture hardware"): Recorder::ready() is false, so every Record key is a no-op there.
 record.coarse
 record.crop
 record.discard
@@ -53,24 +15,17 @@ record.reset
 record.save
 record.seek
 record.toggle
-sedit.all
-sedit.redo
-sedit.undo
-song.move
-song.pad
-song.play_pattern
-song.queue_jump
-song.select_tracks
-song.tempo
-step.fx_pad
-step.fx_type_delta
-step.fx_value_coarse
-step.fx_value_delta
-text.auto
-track.mute_mode
-transport.play
-transport.play_cursor
-wave.mode_pick
-wave.pad
-wave.pad_select
-wave.zoom
+# Their handlers return false whatever the state (the sound is the engine's: nothing on the screen changes), so neither the document nor the dispatcher's answer can show them acting.
+instrument.pad
+pad.preview
+# Changes only the stem map or opens a picker, never the document, and the action is flagged undoable-if-open: with no stem map in the simulator it cannot act at all.
+mixer.stem_set
+# The simulator's card has no engine module to pick (the picker lists none: NO SUCH ENGINE), and the shipped apps are all ABI 1.10, which has no OS parameter column (module_app_edit / module_app_reset).
+module.pick
+module.app_edit
+module.app_reset
+# OS-APPSNAV: the apps list's Pattern close acts only with the list open, which no state of the walk has (the doctests of module_edit_test carry it).
+apps.close
+# The F5 PRESET list opens only over the page of a bound module (an instrument module or an insert), which the walk's documents never have (qa_presets.txt and the doctests of module_ui_test / mixer_inserts_test carry it).
+preset.load
+preset.save

@@ -8,8 +8,8 @@
 #define CHIP_NAME "Chip"
 #define CHIP_KIND O3M_KIND_INSTRUMENT
 /* The ABI minor this module needs: 0 for an instrument or effect with no views (it loads on an OS of ABI 1.0 too), 1 for views or an app, 2 when the manifest declares abi 1.2 (a module shipped with a version, o3m_pack.py --version). */
-#define CHIP_ABI_MINOR 8
-#define CHIP_STATE_BYTES 208 /* what the manifest says init() is given: the source's State must fit (static_assert it) */
+#define CHIP_ABI_MINOR 13
+#define CHIP_STATE_BYTES 336 /* what the manifest says init() is given: the source's State must fit (static_assert it) */
 
 /* Parameter ids: set_param(state, CHIP_PARAM_x, value), canvas->params[CHIP_PARAM_x]. */
 enum {
@@ -33,11 +33,21 @@ enum {
   CHIP_PARAM_ARP_1 = 17,
   CHIP_PARAM_ARP_2 = 18,
   CHIP_PARAM_ARP_SPEED = 19,
-  CHIP_PARAM_COUNT = 20
+  CHIP_PARAM_SHAPE = 20,
+  CHIP_PARAM_SUB_OSC = 21,
+  CHIP_PARAM_CUTOFF = 22,
+  CHIP_PARAM_RESONANCE = 23,
+  CHIP_PARAM_BITCRUSH = 24,
+  CHIP_PARAM_PWM_DEPTH = 25,
+  CHIP_PARAM_PWM_RATE = 26,
+  CHIP_PARAM_ENV_AMT = 27,
+  CHIP_PARAM_DECIMATE = 28,
+  CHIP_PARAM_CHORD = 29,
+  CHIP_PARAM_COUNT = 30
 };
 
 static const o3m_param chip_params[CHIP_PARAM_COUNT] = {
-  {"Wave", 0.0f, 3.0f, 0.0f, O3M_PARAM_INT},
+  {"Wave", 0.0f, 11.0f, 0.0f, O3M_PARAM_INT},
   {"Duty", 0.0f, 3.0f, 1.0f, O3M_PARAM_INT},
   {"Raw Edges", 0.0f, 1.0f, 0.0f, O3M_PARAM_BOOL},
   {"Vol Steps", 0.0f, 1.0f, 0.0f, O3M_PARAM_BOOL},
@@ -57,13 +67,24 @@ static const o3m_param chip_params[CHIP_PARAM_COUNT] = {
   {"Arp 1", -24.0f, 24.0f, 0.0f, O3M_PARAM_INT | O3M_PARAM_WITH_UNIT(O3M_UNIT_SEMITONES)},
   {"Arp 2", -24.0f, 24.0f, 0.0f, O3M_PARAM_INT | O3M_PARAM_WITH_UNIT(O3M_UNIT_SEMITONES)},
   {"Arp Speed", 1.0f, 120.0f, 50.0f, O3M_PARAM_LOG | O3M_PARAM_WITH_UNIT(O3M_UNIT_HZ)},
+  {"Shape", 0.0f, 100.0f, 35.0f, O3M_PARAM_MOD | O3M_PARAM_WITH_UNIT(O3M_UNIT_PERCENT)},
+  {"Sub Osc", 0.0f, 100.0f, 0.0f, O3M_PARAM_MOD | O3M_PARAM_WITH_UNIT(O3M_UNIT_PERCENT)},
+  {"Cutoff", 80.0f, 18000.0f, 18000.0f, O3M_PARAM_LOG | O3M_PARAM_MOD | O3M_PARAM_WITH_UNIT(O3M_UNIT_HZ)},
+  {"Resonance", 0.0f, 100.0f, 0.0f, O3M_PARAM_MOD | O3M_PARAM_WITH_UNIT(O3M_UNIT_PERCENT)},
+  {"Bitcrush", 2.0f, 16.0f, 16.0f, O3M_PARAM_MOD},
+  {"PWM Depth", 0.0f, 100.0f, 20.0f, O3M_PARAM_MOD | O3M_PARAM_WITH_UNIT(O3M_UNIT_PERCENT)},
+  {"PWM Rate", 0.100000001f, 40.0f, 2.5f, O3M_PARAM_LOG | O3M_PARAM_WITH_UNIT(O3M_UNIT_HZ)},
+  {"Env Amt", -100.0f, 100.0f, 0.0f, O3M_PARAM_MOD | O3M_PARAM_WITH_UNIT(O3M_UNIT_PERCENT)},
+  {"Decimate", 1.0f, 32.0f, 1.0f, O3M_PARAM_INT},
+  {"Chord", 0.0f, 7.0f, 0.0f, O3M_PARAM_INT},
 };
 
 /* ABI 1.8, the params screen: page names and the text of int values (o3module.h PAGES AND LABELS). */
-static const char* const chip_labels_wave[4] = {"PULSE", "TRIANGLE", "NOISE LONG", "NOISE SHORT"};
+static const char* const chip_labels_wave[12] = {"PULSE", "TRIANGLE", "NOISE LONG", "NOISE SHORT", "2A03 PULSE", "SID SAW/TRI", "NOISE/LFSR", "FM BELL", "SUPER SQR", "ZAP/LASER", "ARP CHORD", "CHIP DRUM"};
 static const char* const chip_labels_duty[4] = {"12.5%", "25%", "50%", "75%"};
+static const char* const chip_labels_chord[8] = {"OFF", "OCTAVE", "FIFTH", "MAJOR", "MINOR", "SUS4", "MAJ7", "MIN7"};
 static const o3m_labels chip_labels[CHIP_PARAM_COUNT] = {
-  {chip_labels_wave, 4},
+  {chip_labels_wave, 12},
   {chip_labels_duty, 4},
   {0, 0},
   {0, 0},
@@ -83,12 +104,22 @@ static const o3m_labels chip_labels[CHIP_PARAM_COUNT] = {
   {0, 0},
   {0, 0},
   {0, 0},
+  {0, 0},
+  {0, 0},
+  {0, 0},
+  {0, 0},
+  {0, 0},
+  {0, 0},
+  {0, 0},
+  {0, 0},
+  {0, 0},
+  {chip_labels_chord, 8},
 };
 static const o3m_page chip_pages[4] = {
   {"TONE", 0},
   {"ENV", 8},
-  {"PITCH", 12},
-  {"ARP", 17},
+  {"PITCH", 14},
+  {"OSC/FX", 22},
 };
 
 /* View indices: view_draw(state, CHIP_VIEW_x, canvas). */
@@ -114,11 +145,13 @@ enum {
 #define CHIP_SDRAM_BYTES_ADVICE 0
 
 /* The descriptor, in the order of o3m_module:
- *   o3m_entry = { CHIP_ENTRY_HEAD, sizeof(State), CHIP_ENTRY_PARAMS, init, render, set_param, note_on, note_off, shutdown, CHIP_ENTRY_VIEWS(&ui_table), CHIP_ENTRY_TAIL(pitch) };
- * (an app passes NULL for render, note_on and note_off and set_param if it has none; a module without views passes NULL for the table). */
+ *   o3m_entry = { CHIP_ENTRY_HEAD, sizeof(State), CHIP_ENTRY_PARAMS, init, render, set_param, note_on, note_off, shutdown, CHIP_ENTRY_VIEWS(&ui_table), CHIP_ENTRY_TAIL(pitch), CHIP_ENTRY_FX };
+ * (an app passes NULL for render, note_on and note_off and set_param if it has none; a module without views passes NULL for the table; an importer (kind 3, ABI 1.11) adds its table with ENTRY_IMP and has no parameters, no views and no sound entries). */
 #define CHIP_ENTRY_HEAD O3M_ABI_MAJOR, CHIP_ABI_MINOR, CHIP_KIND, O3M_MODULE_SIZE(CHIP_ABI_MINOR), CHIP_NAME
 #define CHIP_ENTRY_PARAMS CHIP_PARAM_COUNT, chip_params
 #define CHIP_ENTRY_VIEWS(ui) (ui), CHIP_VIEW_COUNT
+/* ABI 1.12 (OS-INSFX-ABI2), after CHIP_ENTRY_TAIL: `importer`, render_st (an instrument has none: NULL, NULL), fx_flags (O3M_FX_RATE, OS-MODRATE), then presets and preset_count. */
+#define CHIP_ENTRY_FX 0, 0, O3M_FX_RATE, 0, 0
 /* ABI 1.8, after the views: the pitch call (NULL for none) and the manifest's page and label tables. */
 #define CHIP_ENTRY_TAIL(pitch_fn) (pitch_fn), chip_pages, 4, chip_labels
 #define CHIP_HAS_PITCH 1 /* module.json: "pitch": true: pass your pitch function to CHIP_ENTRY_TAIL */

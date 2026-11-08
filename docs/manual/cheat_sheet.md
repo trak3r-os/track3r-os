@@ -11,7 +11,8 @@ The keys on one page. Each table names the chapter it comes from.
 | `Play` | starts or stops the pattern, from any screen |
 | `Rec` | on Pattern, turns STEP on or off; on Record, starts or stops the take |
 | `Shift` + `Rec` | on Pattern, turns LIVE on or off |
-| `Shift` + `Pattern` | opens the Navigator. `F8` (**GO**) opens the chosen screen; `F7` (**CLOSE**) leaves it |
+| `Song` + `Pattern`, or `Master` + `Song` | opens the Navigator. `F8` (**GO**) opens the chosen screen; `Pattern` leaves it |
+| `Shift` + `Pattern` | lists the module apps that are not tools. `F1` (**LAUNCH**) starts one; `Pattern` leaves it |
 | `Shift` + `Config` | opens the help page of the screen you are on. `Left` and `Right` turn the pages, `Up`, `Down` and the encoder scroll, any other key closes it |
 | `Shift` + `Master` | steps to the next colour theme: Amiga, Black, White. <!-- QA-GLB-157 --> |
 | `Shift` + `Power` | saves a screenshot to the card. `Power` held 2 seconds turns the unit off. <!-- QA-GLB-130 --> |
@@ -19,7 +20,8 @@ The keys on one page. Each table names the chapter it comes from.
 | `Pattern` held, then the encoder or a pad | the encoder changes the tempo, from any screen (a BPM a click, a tenth with `Shift` held first); pad taps tap the tempo. Letting go of `Pattern` after that opens nothing. <!-- QA-GLB-153, QA-GLB-154 --> |
 | `Song` held | shows Song until you let go, then goes back to the screen you came from |
 | `Vol` and `Fx` together | opens Learn |
-| a screen button again | opens the next page of that screen: the FX page of Sample edit, the DJ page of Perform |
+| `Instr` and `Fx` together | makes the row under the cursor the encoder's target; `Instr` and `Vol` held, then the encoder, moves it (see "Put one parameter on the encoder" in the panel chapter) |
+| a screen button again | opens the next page of that screen: the FX and PLUGINS pages of Sample edit, the DJ page of Perform |
 | a soft key again | steps that key's windows, such as the six MOD destinations on Instrument |
 
 <!-- manual-tables: cheat buttons -->
@@ -53,6 +55,7 @@ Held at power-on, until the strip shows the mode:
 |---|---|
 | `Up`, `Down`, `Left`, `Right` | move the cursor. `Up` on step 1 goes to the last step |
 | pad | in STEP, writes a note at the cursor; in WATCH, plays the sound |
+| MIDI CC bound by Learn | in LIVE, a knob bound to CUTOFF, PANNING, a send, OVERDRIVE or BIT DEPTH also writes its move as a step FX on the play line (QA-PAT-324) |
 | `Delete` | clears the cursor's entry, or the highlighted columns of the block |
 | `Shift` + `Delete` | pulls the steps below up, to close a gap |
 | `Insert` | inserts an empty step at the cursor; the steps below move down |
@@ -62,8 +65,8 @@ Held at power-on, until the strip shows the mode:
 | `Shift` + `Left` or `Right` | grows the block one column; past the last column it takes the next track whole, then a track at a time |
 | `F4` (**FILL**) | opens the Fill dialog |
 | `F5` (**PREVIEW**) | sounds the note under the cursor while held |
-| `F6` (**INVERT**) | reverses the steps of the block, track by track |
-| `F7` (**TOOLS**) | opens the TOOLS list: DUPLICATE, EXPAND, SHRINK, export and the tool apps |
+| `F6` (**RE FILL**) | repeats the last fill of the `F4` dialog or the last APPLY of the TOOLS dialog (the key then reads **REPEAT**) |
+| `F7` (**TOOLS**) | opens the verb menu: pads 1-16 pick a verb (INVERT is pad 9), `F6` opens EVENTS, **APPS >** (pad 16) lists the tool apps; DUPLICATE, EXPAND, SHRINK and the exports are pads 10 to 12, 14 and 15 |
 | `F8` (**UNDO**), `Shift` + `F8` (**REDO**) | take back and redo a pattern change |
 | `Note`, `Instr`, `Vol`, `Fx` | select the column; hold to open its popup |
 | `Note` + `Instr` | cycles the zoom: 5, 8 or 12 tracks |
@@ -123,7 +126,7 @@ The soft keys `F1` to `F8`, left to right, as the key row shows them.
 <!-- manual-tables: cheat screens screens=pattern,instrument,sample_load,sample_edit,record,mixer,file -->
 | Screen | Button | F1 to F8 |
 |---|---|---|
-| [Pattern](pattern.md) | `Pattern` | **PATTERN**, **LENGTH**, **JUMP**, **FILL**, **PREVIEW**, **INVERT**, **TOOLS**, **UNDO** |
+| [Pattern](pattern.md) | `Pattern` | **PATTERN**, **LENGTH**, **JUMP**, **FILL**, **PREVIEW**, **RE FILL**, **TOOLS**, **UNDO** |
 | [Instrument](instrument.md) | `Params` | **SAMPLE**, **VOICE**, **FILTER**, **MOD**, **SENDS**, **<INS**, **INS>**, **UNDO** |
 | [Sample load](sample_load.md) | `Sample Loader` | **LOAD**, **UP**, **ENTER**, **ADD**, **PLAY**, **RESCAN**, **WT AUTO**, **CH MIX** |
 | [Sample edit](sample_edit.md) | `Sample Editor` | **CROP**, **NORM**, **REVERSE**, **FADE IN**, **FADE OUT**, **AMP**, **PREVIEW**, **UNDO** |
@@ -138,4 +141,5 @@ The soft keys `F1` to `F8`, left to right, as the key row shows them.
 | Instrument | `F1` reads SAMPLE, SLICE, WT or GRAIN; `F6` and `F7` show the neighbours, such as `<06` and `08>` |
 | Sample edit, FX page (`Sample Editor` again) | `F1` **FILTER**, `F2` **COMPRESS** |
 | Record, loop review | `F1` **OVERDUB**, `F5` **UNDO LYR**, `F8` **LOOP ON** or **MUTED**; `F6` does nothing |
+| Perform, slot page, `Shift` held | `Shift` + `F4` **PICK -**, `F5` **PICK +**, `F6` **TRK PAT**, `F7` **TRK NEXT**, `F8` **TRK SONG**: another pattern on the tracks that are ON, at each track's loop end (see [Perform](perform.md)) |
 | Perform, DJ page | `F5` **SCR** (the encoder is the platter), `F6` **LATCH**, `F8` **RESET**; `Shift` + `F1` to `F8` do nothing |

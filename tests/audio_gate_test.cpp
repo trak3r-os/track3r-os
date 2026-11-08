@@ -595,9 +595,9 @@ TEST_CASE("voice gate: an export is byte for byte what it is without the gate (t
   CHECK(peak_of(with_gate, 2u * haudio::kBlockSamples) > 1000);
 }
 
-// OS-ODD11 slice 2, the accepted corner (QA-MIX-024): an export that starts while a MUTED track's plain voice sounds. Engine::offline_quiet() cuts the voice; a rendered voice leaves its last sample as a
-// residual that fades inside the stem's first block, the voice that was advanced in closed form put nothing out and leaves none. Everything after that first block is the baseline's. Not changed here: a
-// possible separate item, "offline_quiet drops residuals" (a live voice's tail does not belong in the stem). tests/audio_advance_test.cpp pins the same on a pool.
+// OS-ODD11 slice 2 (QA-MIX-024): an export that starts while a MUTED track's plain voice sounds. Engine::offline_quiet() cuts the voice; a rendered voice leaves its last sample as a residual, the voice
+// that was advanced in closed form put nothing out and leaves none. STATUS latent (aa): Engine::offline_enter drops that tail (VoicePool::drop_tails), so a live voice's tail is in no stem and the two
+// stems are the same from the first sample. (tests/audio_advance_test.cpp pins the pool's own cut: the residual is there until the engine drops it.)
 namespace {
 
 std::vector<std::int16_t> export_over_sounding_voice(bool gate_off, bool& was_sounding, std::uint32_t& advanced) {
@@ -630,7 +630,7 @@ std::vector<std::int16_t> export_over_sounding_voice(bool gate_off, bool& was_so
 
 }  // namespace
 
-TEST_CASE("voice gate: an export that starts over a sounding muted voice has no fade-out of it in the stem's first block (accepted, slice 2); the rest is the baseline's") {
+TEST_CASE("voice gate: an export that starts over a sounding muted voice has no fade-out of it in the stem's first block, gated or not (OS-ODD11 slice 2, latent aa)") {
   bool sounding_on = false;
   bool sounding_off = false;
   std::uint32_t advanced_on = 0;
@@ -642,10 +642,7 @@ TEST_CASE("voice gate: an export that starts over a sounding muted voice has no 
   CHECK(advanced_on > 0u);  // the muted voice was advanced in closed form on the live side ...
   CHECK(advanced_off == 0u);  // ... and never in the baseline
   NEED(with_gate.size() == baseline.size());
-  const std::size_t first = haudio::kBlockSamples;  // the stem's first block
-  CHECK_MESSAGE(peak_of(baseline) > 0, "the baseline's stem holds the cut voice's fade-out");
-  std::vector<std::int16_t> head(baseline.begin(), baseline.begin() + static_cast<std::ptrdiff_t>(first));
-  CHECK_MESSAGE(peak_of(head) > 0, "the fade-out is in the baseline's first block");
-  CHECK_MESSAGE(peak_of(std::vector<std::int16_t>(with_gate.begin(), with_gate.begin() + static_cast<std::ptrdiff_t>(first))) == 0, "the advanced voice leaves no fade-out");
-  CHECK(std::memcmp(with_gate.data() + first, baseline.data() + first, (with_gate.size() - first) * sizeof(std::int16_t)) == 0);
+  CHECK_MESSAGE(peak_of(baseline) == 0, "the baseline's stem holds no fade-out of the cut voice");
+  CHECK_MESSAGE(peak_of(with_gate) == 0, "the advanced voice leaves none either");
+  CHECK(std::memcmp(with_gate.data(), baseline.data(), with_gate.size() * sizeof(std::int16_t)) == 0);
 }

@@ -1,0 +1,72 @@
+{
+ "module": "sid",
+ "kind": "instrument",
+ "presets": [
+  {
+   "name": "Saw Lead",
+   "values": {
+    "Wave": 0,
+    "Attack": 1,
+    "Decay": 9,
+    "Sustain": 12,
+    "Release": 6,
+    "Mode": 1,
+    "Cutoff": 70,
+    "Resonance": 4
+   }
+  },
+  {
+   "name": "Pulse Bass",
+   "values": {
+    "Wave": 2,
+    "Pulse Width": 30,
+    "PWM Depth": 40,
+    "PWM Rate": 1.5,
+    "Attack": 0,
+    "Decay": 7,
+    "Sustain": 8,
+    "Release": 4,
+    "Transpose": -12
+   }
+  },
+  {
+   "name": "Noise Drum",
+   "values": {
+    "Wave": 3,
+    "Attack": 0,
+    "Decay": 5,
+    "Sustain": 0,
+    "Release": 3,
+    "Sweep": -24,
+    "Sweep Time": 80
+   }
+  },
+  {
+   "name": "Tri Arp",
+   "values": {
+    "Wave": 1,
+    "Attack": 0,
+    "Decay": 8,
+    "Sustain": 10,
+    "Release": 5,
+    "Arp 1": 4,
+    "Arp 2": 7,
+    "Arp Speed": 40
+   }
+  },
+  {
+   "name": "Filter Sweep",
+   "values": {
+    "Wave": 0,
+    "Attack": 3,
+    "Decay": 11,
+    "Sustain": 14,
+    "Release": 10,
+    "Mode": 1,
+    "Cutoff": 25,
+    "Resonance": 12,
+    "Env Amount": 70
+   }
+  }
+ ]
+}

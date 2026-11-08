@@ -25,12 +25,16 @@ struct PendingParam {
 // the page without applying discards them). The pending values are view state: nothing here is saved, and the setting is what the unit does until the second press.
 struct ParamView {
   static constexpr int kMaxRows = 8;  // the most rows a page can have (the PATTERN page has all eight since OS-PADOFFSET)
-  // E-CFG-03: the Config pages (device settings, screens/config_screen.cpp) hold nine rows, for the MIDI page's TRANSPORT IN / OUT (and the PATTERN page's row 58). The data pane is 16 rows of 24 px high. The
-  // generated parameter pages keep kMaxRows: it is also the size of a module's numbered page (1-8, 9-16 ...) and of an instrument page.
-  static constexpr int kConfigRows = 9;
+  // E-CFG-03: the Config pages (device settings, screens/config_screen.cpp) held nine rows, for the MIDI page's TRANSPORT IN / OUT (and the PATTERN page's row 58); OS-MIDICCMAP S1's CC MAP made the MIDI page's ten and OS-MTC A3's MTC OUT and MTC START its twelve, OS-MTC B3's MTC IN its thirteen. The data pane is 16 rows of
+  // 24 px high. The generated parameter pages keep kMaxRows: it is also the size of a module's numbered page (1-8, 9-16 ...) and of an instrument page.
+  static constexpr int kConfigRows = 13;
   static constexpr unsigned kMaxPending = 4;
   int row = 0;
   int env = 0;
+  // OS-INSFX S5: the target of the generated parameter page when it is an insert (the Mixer INSERTS page's Enter on a bound cell): the insert host's `where` (track * 2 + slot, 0..31), or kNoInsert for the
+  // instrument in view (ViewState::instrument). Set by the Enter action, cleared when the page is left, an instrument is chosen, or the document is replaced (App::attach_document).
+  static constexpr std::uint8_t kNoInsert = 0xFF;
+  std::uint8_t insert = kNoInsert;
   PendingParam pending[kMaxPending] = {};
   std::uint8_t pending_n = 0;
   bool armed = false;

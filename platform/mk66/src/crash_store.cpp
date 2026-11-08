@@ -7,6 +7,7 @@
 #include "internal.h"
 #include "regs.h"
 
+#include <o3os/hal/code_gate.h>
 #include <o3os/platform/mk66/crash_record.h>
 #include <o3os/platform/mk66/mem_map.h>
 #include <o3os/platform/mk66/platform.h>
@@ -137,6 +138,15 @@ void set_module(std::uint16_t module) noexcept {
   g_block.context_inverse = ~next;
 }
 
+}  // namespace o3os::platform::mk66
+
+// OS-CEPTFX S2b: the call gate (hal/code_gate.h) stamps the running plugin's id through this strong definition of
+// the weak hook in hal/src/code_gate_m4.cpp, so a crash record names the plugin; the gate stamps 0 on the way out.
+extern "C" void o3os_hal_gate_stamp_module(std::uint16_t module) noexcept {
+  o3os::platform::mk66::set_module(module);
+}
+
+namespace o3os::platform::mk66 {
 namespace {
 
 // Collects what a handler can read of the core's state into a snapshot, writes the record and resets. `frame` is the

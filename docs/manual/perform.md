@@ -4,14 +4,14 @@
 
 Status: draft
 
-Perform works on the whole pattern at once and live: nothing you do here is written into the steps. Twelve slots each hold one effect, and a pad press punches it in on the tracks you chose. You choose the tracks by holding `Shift` and using the top row of pads, not with screen keys. Three scenes, **HALF** and **DOUBLE** time, **NEXT PAT**, a pattern of its own for single tracks and **RESET** are new in track3r-os, and so is switching **LATCH** off. `Perform` pressed again opens the DJ page, which has [its own chapter](perform_dj.md). <!-- og: map 6.7 --> <!-- og: new -->
+Perform works on the whole pattern at once and live: nothing you do here is written into the steps. Twelve slots each hold one effect, and a pad press punches it in on the tracks you chose. You choose the tracks by holding `Shift` and using the top row of pads, not with screen keys. Three scenes, **HALF** and **DOUBLE** time, **NEXT PAT**, a pattern of its own for single tracks and **RESET** are new in track3r-os, and so is switching **LATCH** off. `Perform` pressed again opens the DJ page, which has [its own chapter](perform_dj.md). Single tracks can play another pattern with the Shift keys (see [Give single tracks another pattern](#give-single-tracks-another-pattern)). <!-- og: map 6.7 --> <!-- og: new -->
 
 ## What it is for
 
-Use Perform to change how the pattern sounds while it plays, with your hands, and to put it back by letting go. Press `Perform` to open it. Perform opens on the page you left it on: **SLOTS** the first time, or the [DJ page](perform_dj.md) if you left it there. Press `Perform` again to turn to the other page.
+Use Perform to change how the pattern sounds while it plays, with your hands, and to put it back by letting go. Press `Perform` to open it. Perform opens on the page you left it on: **SLOTS** the first time, or the [DJ page](perform_dj.md) if you left it there. Press `Perform` again to turn to the next page: SLOTS, DJ, then SLOTS again.
 
 ## How it works
-<!-- sync: src=seq/include/o3os/seq/perform.h,seq/src/perform.cpp,app/src/perform_actions.cpp spec=docs/specs/OS-PERFFX.md qa=QA-PRF-002,QA-PRF-003,QA-PRF-010,QA-PRF-011,QA-PRF-016,QA-PRF-025,QA-PRF-031 -->
+<!-- sync: src=seq/include/o3os/seq/perform.h,seq/src/perform.cpp,app/src/perform_actions.cpp spec=docs/specs/OS-PERFFX.md qa=QA-PRF-002,QA-PRF-003,QA-PRF-004,QA-PRF-010,QA-PRF-011,QA-PRF-016,QA-PRF-025,QA-PRF-031,QA-PRF-215 -->
 
 ### Live, not written
 
@@ -59,10 +59,10 @@ Up and Down in EDIT choose a slot's effect from a list of 21. All of them act. T
 | **LOWPASS**, **HIPASS**, **BANDPASS** | the three filters. |
 | **VOL LFO**, **PAN LFO**, **TUNE LFO**, **FLT LFO**, **POS LFO** | change how fast the track's LFO runs for the volume (tremolo), the pan (auto-pan), the pitch (vibrato), the filter cutoff and the wavetable window or granular position. The value moves the speed up (+) or down (-) the instrument's speed list, from -23 to +23 for VOL LFO and -28 to +28 for the others. If the instrument already has an LFO there, its shape and amount stay and only the speed moves. If it does not (that target is Off or an envelope), the effect runs an LFO for the track at 1 step plus the value, with the shape and amount stored on the instrument's LFO rows (a new instrument: triangle, 50 %; a stored amount under 5 %, as older projects and imported instruments often have, runs as a triangle at 50 %); at 50 % VOL LFO swings the volume between silence and half, a peak of -6 dB, so raise the amount for more. FLT LFO needs a filter that is on (the instrument's own, or a held LOWPASS, HIPASS or BANDPASS), POS LFO only moves wavetable and granular instruments. The LFOs follow the tempo and keep running when the song is stopped. A step with the Filter LFO FX (35) on the same track gives way to FLT LFO while it is held. Sampler instruments only. |
 | **DELAY**, **REVERB** | open or close the track's send, -100 to +100. |
-| **STUTTER**, **PLAYMODE**, **PAT LEN** | repeat steps, play forward, back, ping-pong or random, and force a pattern length. |
+| **STUTTER**, **PLAYMODE**, **PAT LEN** | repeat steps, play the steps forward, back, ping-pong, at random or in one of the twenty custom orders **C1** to **C20**, and force a pattern length. |
 | **BITDEPTH**, **OVERDRV** | crush or distort the notes. 0 is clean. |
 
-A new slot of the five LFO speeds reads -8, -3 and +3: slow, medium and fast. The way **VOLUME**, **PANNING**, **TUNE**, the five LFO speeds, **DELAY**, **REVERB**, **PLAYBACK**, **BITDEPTH** and **OVERDRV** act, and the four names of **PLAYMODE**, are new in track3r-os. The names **STUTTER** and **PAT LEN** follow the official manual. Not checked against the original firmware: what the effects do there. <!-- og: open -->
+A new slot of the five LFO speeds reads -8, -3 and +3: slow, medium and fast. The way **VOLUME**, **PANNING**, **TUNE**, the five LFO speeds, **DELAY**, **REVERB**, **PLAYBACK**, **BITDEPTH** and **OVERDRV** act, and the names of **PLAYMODE** (**FWD**, **BACK**, **PING**, **RND**, then **C1** to **C20**), are new in track3r-os. The names **STUTTER** and **PAT LEN** follow the official manual. Not checked against the original firmware: what the effects do there. <!-- og: open -->
 
 ### Scenes
 
@@ -71,7 +71,7 @@ A scene is a snapshot of the twelve slots: the effect, the chosen row and the th
 ## Try it
 <!-- sync: src=seq/include/o3os/seq/perform.h,app/src/screens/perform_screen.cpp qa=QA-PRF-002,QA-PRF-003,QA-PRF-025 -->
 
-1. Press `Perform`. If the strip says **PAGE DJ**, press `Perform` once more. All 12 slots read **OFF** and no track is on.
+1. Press `Perform`. If the strip says **PAGE DJ**, press `Perform` again until the slots come up (their strip shows **TRACKS**, not a page). All 12 slots read **OFF** and no track is on.
 2. Hold `Shift` and press pad 1 and pad 2. Release `Shift`. **T1** and **T2** read **ON**.
 
    ![Perform, SLOTS page: T1 and T2 are ON; the track boxes at the bottom show it.](img/perform_walk_2.png)
@@ -137,6 +137,17 @@ Start on the Perform screen.
 
 Use `Shift` + `Left` or `Right` to swap the slot with its neighbor. `Copy` copies the slot and `Shift` + `Copy` pastes it onto the picked slot.
 
+### Shuffle a track's steps
+<!-- sync: src=seq/include/o3os/seq/perform.h,seq/src/perform.cpp qa=QA-PRF-215,QA-PRF-004 -->
+
+Start on the Perform screen with a track on (hold `Shift` and use the top row of pads) and the pattern playing.
+
+1. Press `Rec` (**EDIT**), `Left` or `Right` to pick the slot, and `Up` or `Down` until the slot reads **PLAYMODE**. Press `Rec` again.
+2. Hold the second or third pad of the slot and turn the encoder right: the cell reads **FWD**, **BACK**, **PING**, **RND**, then **C1** up to **C20**. Let go: with **LATCH** on the row stays on.
+3. The tracks that are on now play their steps in the order the C order shuffles them to, looped over the track's length, instead of forward. The top pad of the slot ends it: the tracks play forward again.
+
+The twenty orders **C1** to **C20** are the official firmware's built-in shuffles (verified parity, F1-F11 of `docs/specs/OS-PERFMODES.md`): each step of the pattern is played in the order the list says, and some of them repeat steps on purpose (their rolls). The value is stored with the project. <!-- QA-PRF-215 -->
+
 ### Play at half or double time
 
 Start on the Perform screen with the pattern playing.
@@ -156,15 +167,21 @@ Start on the Perform screen with the song playing.
 At the last pattern it goes back to the first. If it cannot queue, the strip says **NOT PLAYING**, **SONG IS EMPTY** or **PATTERN IS NOT IN THE SONG**.
 
 ### Give single tracks another pattern
-<!-- sync: src=app/src/perform_actions.cpp,seq/include/o3os/seq/sequencer.h qa=QA-PRF-147,QA-PRF-148,QA-PRF-149 -->
+<!-- sync: src=app/src/perform_actions.cpp,app/src/cc_map.cpp,seq/include/o3os/seq/sequencer.h,app/src/app.cpp qa=QA-PRF-147,QA-PRF-148,QA-PRF-149,QA-PRF-208,QA-PRF-225,QA-PRF-227 -->
 
-Start on the Perform screen with the song playing and the tracks you want to change switched on (hold `Shift` and use the top row of pads).
+Any of the tracks that are on can play another pattern's track while the rest go on. Do it from the SLOTS page, with the Shift keys.
+
+**With the Shift keys on the SLOTS page.** Start with the song playing. The tracks that are on (hold `Shift` and use the top row of pads) change pattern with the keys below.
 
 1. Press `Shift` + `F7` (**TRK NEXT**) to send the tracks that are on to the next pattern of the song order. Or press `Shift` + `F4` or `F5` (**PICK -** or **PICK +**) until the strip shows the pattern you want, then press `Shift` + `F6` (**TRK PAT**).
 2. Watch the track boxes. A box that waits shows **>07** and blinks. Each track changes at the end of its own loop, so tracks of different lengths change at different times.
 3. Press `Shift` + `F8` (**TRK SONG**) to send the tracks that are on back to the pattern of the song.
 
-A track that is off is not touched and shows **OFF**, not a pattern number. The same press again takes a waiting change back. Queueing the pattern a track already plays pins it at once, so it keeps that pattern when the song goes on. A track that has changed keeps its pattern when the song goes on, until you press **TRK SONG**, stop, or restart the transport (`Play` while it plays, or resume). A random track has no loop end, and a track longer than its pattern is restarted when the pattern ends. Both change at the end of the song's pattern. A pick that is no longer a pattern of the project says **PATTERN IS GONE: PICK ANOTHER** and queues nothing. Nothing is saved in the project. With the song stopped the strip says **NOT PLAYING**; with no track on, **NO TRACK IS ON: HOLD SHIFT + TOP PADS**.
+In Song mode a track you changed stays on its pattern when the song goes to the next slot; the others follow the song. <!-- QA-PRF-225 --> `Stop` ends it. Leaving Perform for any screen except Master and Song sends every track that is not on the song back at once; Master and Song keep it. Nothing is saved in the project. <!-- QA-PRF-227 --> These keys, and the rules for Song, Stop and leaving, are new in track3r-os. Not yet checked on the unit.
+
+A track that is off is not touched and shows **OFF**, not a pattern number. The same press again takes a waiting change back. Queueing the pattern a track already plays pins it at once, so it keeps that pattern when the song goes on. A track that has changed keeps its pattern when the song goes on, until you press **TRK SONG** or **SONG**, stop, restart the transport (`Play` while it plays, or resume), or leave Perform for any screen but Master and Song: then every track on another pattern goes back to the song at once. A random track has no loop end, and a track longer than its pattern is restarted when the pattern ends. Both change at the end of the song's pattern. A pick that is no longer a pattern of the project says **PATTERN IS GONE: PICK ANOTHER** and queues nothing. Nothing is saved in the project. With the song stopped the strip says **NOT PLAYING**; with no track on, **NO TRACK IS ON: HOLD SHIFT + TOP PADS**.
+
+With **CC MAP** on (Config > MIDI), a control change **41 to 48** on the slot page does the same for one track: the track's number is the CC's (CC 41 is track 1) and the pattern is `cc + 1`, whatever tracks are on, loaded at that track's loop end. The same value again does not take a waiting queue back; after `Stop` and `Play` it is sent again; a pattern the project does not have says **CC 4x: NO PAT nnn** on the strip. See [Config: control the unit with the official CC numbers](config.md#control-the-unit-with-the-official-cc-numbers). <!-- QA-PRF-208 -->
 
 New in track3r-os. Not yet checked on the unit; how the original firmware does it is an open research question. <!-- QA-PRF-147, QA-PRF-148, QA-PRF-149 -->
 
@@ -193,7 +210,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 
 | Key | What it does | Ref |
 |---|---|---|
-| `Perform` | opens Perform; again, the DJ page | - |
+| `Perform` | opens Perform; again, the DJ page; again, the slots | QA-PRF-100 |
 | `F1` (**SCENE 1**), `F2`, `F3` | a tap recalls the scene; holding for about one second stores it | QA-PRF-003 |
 | `Shift` + `F1` (**STORE 1**), `F2`, `F3` | stores the scene at once; the release recalls nothing | QA-PRF-002 |
 | `Shift` + `F4` (**PICK -**), `F5` (**PICK +**) | pick the previous or next pattern of the project for **TRK PAT** | QA-PRF-147 |
@@ -222,6 +239,7 @@ The DJ page has its own key row: `F1` **BANK -**, `F2` **BANK +**, `F3` **CURVE*
 - **TUNE** adds to the instrument's tune and fine tune, and a sounding note follows at once. Amiga-engine instruments and modules do not follow it. <!-- QA-PRF-031 -->
 - An effect that is on stays on through `Play`, `Stop`, the Mixer and Song, and an export is the same with and without it. When a held **VOLUME** -100 or a closed send ends, the sound is back within a few milliseconds, with no click. <!-- QA-PRF-011 --> <!-- QA-PRF-016 --> <!-- QA-PRF-023 --> <!-- QA-PRF-024 --> <!-- QA-PRF-029 -->
 - **PLAYMODE** **PING** bounces over the track: 0 1 2 3 2 1 0 on four steps, so the end steps play once per pass. A different pattern, a pattern switch or a jump starts it again, and so does resuming after a pause. Not yet checked on the unit. <!-- QA-PRF-004 -->
+- **PLAYMODE** **C1** to **C20** shuffle the track's steps (see [Shuffle a track's steps](#shuffle-a-tracks-steps)); like **PING**, an order walks the track's own length, and **PAT LEN** can shorten it. <!-- QA-PRF-215 -->
 - A pad you hold while you go to the Mixer (`Master`) or Song is let go when you lift it there, so its value does not stay on. <!-- QA-PRF-143 -->
 - A project that uses **BITDEPTH** or **OVERDRV** shows those two slots empty in an older build. <!-- QA-PRF-018 -->
 - Not yet checked on the unit. Not checked against the original firmware, except where a line above says otherwise. <!-- og: open -->

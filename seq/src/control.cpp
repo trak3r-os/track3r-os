@@ -5,6 +5,14 @@
 
 namespace o3os::seq {
 
+void ControlTable::attach_perf(PerfStore& store) noexcept {
+  store = PerfStore{};
+  perf_ = &store;
+  for (std::uint32_t t = 0; t < kTracks; ++t) {
+    perf_on_[t] = 0;
+  }
+}
+
 void ControlTable::reset() noexcept {
   for (std::uint32_t t = 0; t < kTracks; ++t) {
     for (std::uint32_t c = 0; c < kColumns; ++c) {
@@ -12,8 +20,10 @@ void ControlTable::reset() noexcept {
       value_[t][c] = 0;
     }
     perf_on_[t] = 0;
-    for (std::uint32_t g = 0; g < kFxGroupCount; ++g) {
-      perf_val_[t][g] = 0;
+    if (perf_ != nullptr) {
+      for (std::uint32_t g = 0; g < kFxGroupCount; ++g) {
+        perf_->val[t][g] = 0;
+      }
     }
   }
 }
@@ -46,7 +56,7 @@ ModState ControlTable::resolve(std::uint8_t track, FxGroup g) const noexcept {
   if ((perf_on_[track] >> static_cast<std::uint32_t>(g)) & 1u) {
     s.active = true;
     s.layer = audio::kLayerPerf;
-    s.perf = perf_val_[track][static_cast<std::uint32_t>(g)];
+    s.perf = perf_ != nullptr ? perf_->val[track][static_cast<std::uint32_t>(g)] : std::int16_t{0};
   }
   return s;
 }
@@ -136,12 +146,12 @@ std::uint32_t ControlTable::set_columns(std::uint8_t track, std::uint8_t mask, c
 }
 
 std::uint32_t ControlTable::set_perf(std::uint8_t track, FxGroup g, std::int16_t value, ModChange out[1]) noexcept {
-  if (track >= kTracks || g == FxGroup::None || g >= FxGroup::kCount) {
+  if (track >= kTracks || g == FxGroup::None || g >= FxGroup::kCount || perf_ == nullptr) {
     return 0;
   }
   const ModState before = resolve(track, g);
   perf_on_[track] |= 1u << static_cast<std::uint32_t>(g);
-  perf_val_[track][static_cast<std::uint32_t>(g)] = value;
+  perf_->val[track][static_cast<std::uint32_t>(g)] = value;
   const ModState after = resolve(track, g);
   if (after != before) {
     out[0] = ModChange{track, g, after};
@@ -151,12 +161,12 @@ std::uint32_t ControlTable::set_perf(std::uint8_t track, FxGroup g, std::int16_t
 }
 
 std::uint32_t ControlTable::end_perf(std::uint8_t track, FxGroup g, ModChange out[1]) noexcept {
-  if (track >= kTracks || g == FxGroup::None || g >= FxGroup::kCount) {
+  if (track >= kTracks || g == FxGroup::None || g >= FxGroup::kCount || perf_ == nullptr) {
     return 0;
   }
   const ModState before = resolve(track, g);
   perf_on_[track] &= ~(1u << static_cast<std::uint32_t>(g));
-  perf_val_[track][static_cast<std::uint32_t>(g)] = 0;
+  perf_->val[track][static_cast<std::uint32_t>(g)] = 0;
   const ModState after = resolve(track, g);
   if (after != before) {
     out[0] = ModChange{track, g, after};
@@ -174,8 +184,10 @@ void ControlTable::clear_track(std::uint8_t track) noexcept {
     value_[track][c] = 0;
   }
   perf_on_[track] = 0;
-  for (std::uint32_t g = 0; g < kFxGroupCount; ++g) {
-    perf_val_[track][g] = 0;
+  if (perf_ != nullptr) {
+    for (std::uint32_t g = 0; g < kFxGroupCount; ++g) {
+      perf_->val[track][g] = 0;
+    }
   }
 }
 

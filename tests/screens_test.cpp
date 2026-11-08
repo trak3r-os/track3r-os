@@ -70,16 +70,22 @@ struct Rig {
     release(Button::Shift);
     pass(1);
   }
-  // OS-NAV2: a tap of Shift + Pattern opens the Navigator and it stays open after both keys are let go.
-  void open_navigator() { shift_tap(Button::Pattern); }
-  // The same by holding the two keys down for as long as the old hold took: it opens at the press, and Pattern and Shift stay down.
+  // OS-APPSNAV: the Navigator opens with the chord Song + Pattern (the other order and Master + Song are tested apart), and it stays open after both keys are let go.
+  void open_navigator() {
+    press(Button::Song);
+    pass(1);
+    press(Button::Pattern);
+    pass(1);
+    release(Button::Pattern);
+    release(Button::Song);
+    pass(1);
+  }
+  // The same with the two keys held down for as long as the old hold took: it opens at the second press, and Song and Pattern stay down.
   void open_navigator_held() {
-    press(Button::Shift);
+    press(Button::Song);
     pass(1);
     press(Button::Pattern);
     pass(core::kGestureTimings.hold_ms + 1);
-    release(Button::Pattern);  // OS-PATTEMPO: Pattern waits for a turn or a pad, so the Navigator opens at its release, Shift still down
-    pass(1);
   }
   const app::ViewState& state() const { return app->state(); }
   ScreenId screen() const { return app->state().screen; }
@@ -346,9 +352,7 @@ TEST_CASE("screens: the Song screen redraws on a step only on TIMELINE and while
   };
   go_to(app::SongPage::Timeline);
   steps_redraw(1u);
-  go_to(app::SongPage::Order);
-  steps_redraw(0u);
-  go_to(app::SongPage::Arrangement);
+  go_to(app::SongPage::List);
   steps_redraw(0u);
   CHECK(rig.app->failed_frames() == 0u);
 }
@@ -362,11 +366,9 @@ TEST_CASE("screens: the screen buttons take the base screen from Pattern to Song
   CHECK(rig.app->frames() == frames + 1u);
   CHECK(rig.state().page[app::screen_index(ScreenId::Song)] == 0);
   rig.tap(Button::Song);
-  CHECK(rig.state().page[app::screen_index(ScreenId::Song)] == 1);
+  CHECK(rig.state().page[app::screen_index(ScreenId::Song)] == 1);  // OS-SONG-TIMELINE: the second page
   rig.tap(Button::Song);
-  CHECK(rig.state().page[app::screen_index(ScreenId::Song)] == 2);  // OS-SONG-TIMELINE: the third page
-  rig.tap(Button::Song);
-  CHECK(rig.state().page[app::screen_index(ScreenId::Song)] == 0);  // OS-SONG-VIEW2: three pages, wrapping (STAGE is gone)
+  CHECK(rig.state().page[app::screen_index(ScreenId::Song)] == 0);  // OS-SONG3 S1: LIST and TIMELINE, wrapping (ARRANGEMENT is folded into LIST)
   rig.tap(Button::Pattern);
   CHECK(rig.screen() == ScreenId::Pattern);
   const std::uint32_t frames_back = rig.app->frames();
@@ -502,9 +504,9 @@ TEST_CASE("overlay: a notification does not capture: the screen's keys work unde
 
 // ---- the Navigator --------------------------------------------------------------------------------------------------------
 
-TEST_CASE("navigator: Shift + Pattern tapped opens it on the current screen and it stays open after the keys are let go (OS-NAV2)") {
+TEST_CASE("navigator: the chord Song + Pattern opens it on the current screen and it stays open after the keys are let go (OS-NAV2, OS-APPSNAV)") {
   Rig rig;
-  rig.open_navigator();  // Shift down, Pattern tapped, Shift up
+  rig.open_navigator();  // Song down, Pattern down, both up
   CHECK(rig.state().overlay == OverlayId::Navigator);
   CHECK(rig.state().navigator == 0);  // Pattern's own cell
   const std::uint32_t frames = rig.app->frames();
@@ -530,30 +532,33 @@ TEST_CASE("navigator: Shift + Pattern tapped opens it on the current screen and 
   CHECK(rig.state().overlay == OverlayId::None);
 }
 
-TEST_CASE("navigator: Shift + Pattern held opens it too, and letting go of Pattern or of Shift, in either order, does nothing (no accept on a release)") {
+TEST_CASE("navigator: the chord Song + Pattern held opens it too, and letting go of Pattern or of Song, in either order, does nothing (no accept on a release)") {
   Rig rig;
   rig.open_navigator_held();
   CHECK(rig.state().overlay == OverlayId::Navigator);
   CHECK(rig.state().navigator == 0);
-  rig.tap(Button::Right);             // Shift is still down
+  rig.tap(Button::Right);             // the two keys are still down
   CHECK(rig.state().navigator == 1);  // Song
   const std::uint32_t frames = rig.app->frames();
   rig.pass(5000);                     // still held: nothing fires again
   CHECK(rig.state().overlay == OverlayId::Navigator);
   CHECK(rig.app->frames() == frames);
-  rig.release(Button::Shift);
+  rig.release(Button::Song);
+  rig.pass(1);
+  rig.release(Button::Pattern);
   rig.pass(1);
   CHECK(rig.screen() == ScreenId::Pattern);
   CHECK(rig.state().overlay == OverlayId::Navigator);
   CHECK(rig.app->failed_frames() == 0u);
 
-  // Shift first this time, then Pattern, after a long hold.
+  // The other release order, after a long hold.
   rig.tap(Button::F7);  // CLOSE
   CHECK(rig.state().overlay == OverlayId::None);
   rig.open_navigator_held();
   rig.tap(Button::Right);
-  rig.release(Button::Shift);
+  rig.release(Button::Pattern);
   rig.pass(1);
+  rig.release(Button::Song);
   rig.pass(2000);
   CHECK(rig.screen() == ScreenId::Pattern);
   CHECK(rig.state().overlay == OverlayId::Navigator);
@@ -832,13 +837,16 @@ TEST_CASE("navigator: no quarter jumps inside it (OS-SHIFTROW): Shift + F1..F5 d
     CHECK(rig.state().overlay == OverlayId::Navigator);
     CHECK(rig.screen() == ScreenId::Pattern);
   }
-  // The same with Shift still held from the opening (Shift + Pattern held, the jump with the other hand).
+  // The same with Shift held over the chord's keys (Song + Pattern still down, the jump with the other hand).
   rig.tap(Button::F7);
   rig.open_navigator_held();
+  rig.press(Button::Shift);
+  rig.pass(1);
   rig.tap(Button::F5);  // Shift is down, so this is Shift + F5: nothing
   CHECK(rig.state().navigator == at);
   CHECK(rig.state().overlay == OverlayId::Navigator);
   rig.release(Button::Pattern);
+  rig.release(Button::Song);
   rig.release(Button::Shift);
   rig.pass(1);
   CHECK(rig.state().overlay == OverlayId::Navigator);
@@ -846,9 +854,9 @@ TEST_CASE("navigator: no quarter jumps inside it (OS-SHIFTROW): Shift + F1..F5 d
 
 TEST_CASE("navigator: while it is up everything else is swallowed, and CLOSE with the opening buttons still down is harmless") {
   Rig rig;
-  rig.open_navigator_held();  // Shift and Pattern both still down
-  rig.release(Button::Shift);
-  rig.pass(1);  // (the release of Shift redraws the Navigator's key row: the layer goes)
+  rig.open_navigator_held();  // Song and Pattern both still down
+  rig.release(Button::Song);
+  rig.pass(1);
   const std::uint32_t frames = rig.app->frames();
   rig.input.push(core::make_pad_event(rig.clock.now(), 3, 100));
   rig.pass(1);
@@ -876,7 +884,6 @@ TEST_CASE("navigator: while it is up everything else is swallowed, and CLOSE wit
   rig.tap(Button::F7);  // CLOSE, with Pattern still down
   CHECK(rig.state().overlay == OverlayId::None);
   rig.release(Button::Pattern);  // the release of the opening button now belongs to the screen: nobody binds it
-  rig.release(Button::Shift);
   rig.pass(1);
   CHECK(rig.state().overlay == OverlayId::None);
   CHECK(rig.screen() == ScreenId::Pattern);
@@ -1120,12 +1127,16 @@ TEST_CASE("shift: a Shift held down survives a mode change, a screen change and 
   rig.tap(Button::F4);
   CHECK(rig.state().song.pos() == 18);
   CHECK(rig.state().notify.empty());
-  rig.tap(Button::Pattern);  // Shift + Pattern is the Navigator (OS-NAV2), opened on Song's cell; Shift stays held through its opening
-  CHECK(rig.state().overlay == OverlayId::Navigator);
-  rig.tap(Button::Left);
-  CHECK(rig.state().navigator == 0);
-  rig.tap(Button::F8);  // GO, with Shift still held (F8 has no Shift binding there: the plain one runs)
+  rig.tap(Button::Pattern);  // Shift + Pattern is the list of the apps (OS-APPSNAV); Shift stays held through its opening
+  CHECK(rig.state().overlay == OverlayId::ModulePicker);
+  rig.tap(Button::Pattern);  // Shift + Pattern again closes it (the list's context has no Shift binding there: the plain Pattern runs)
   CHECK(rig.state().overlay == OverlayId::None);
+  CHECK(rig.screen() == ScreenId::Song);
+  rig.release(Button::Shift);  // (on to the Pattern screen with the plain key, then Shift down again)
+  rig.pass(1);
+  rig.tap(Button::Pattern);
+  rig.press(Button::Shift);
+  rig.pass(1);
   CHECK(rig.screen() == ScreenId::Pattern);
   rig.tap(Button::F5);  // on Pattern Shift + F5 is the TRACKS pads' mode key (OS-PADS-A, OS-PADOCT)
   CHECK(rig.state().padmode.fixed() == app::PadMode::Tracks);
@@ -1151,13 +1162,12 @@ TEST_CASE("shift: a Shift held down survives a mode change, a screen change and 
   rig.tap(Button::F3);
   CHECK(rig.state().padmode.fixed() == app::PadMode::Piano);  // Shift is still held after Learn came and went
 
-  // The Navigator: the tap of Pattern opens it, Shift still modifies inside it (Shift + F2 jumps the grid), CLOSE (F7 has no Shift binding there:
-  // the plain one runs) closes it, and Shift still modifies afterwards.
+  // The apps list: the tap of Pattern opens it, Shift + F2 inside it is nothing, Pattern closes it, and Shift still modifies afterwards.
   rig.tap(Button::Pattern);
-  CHECK(rig.state().overlay == OverlayId::Navigator);
+  CHECK(rig.state().overlay == OverlayId::ModulePicker);
   rig.tap(Button::F2);
-  CHECK(rig.state().navigator == 0);  // (OS-SHIFTROW: Shift + F2 is nothing there; no jump)
-  rig.tap(Button::F7);
+  CHECK(rig.state().overlay == OverlayId::ModulePicker);
+  rig.tap(Button::Pattern);
   CHECK(rig.state().overlay == OverlayId::None);
   CHECK(rig.screen() == ScreenId::Pattern);
   rig.tap(Button::F2);  // (OS-PADOCT: Shift + F2 is NOTES; Shift + F1 is the octave)
@@ -1414,7 +1424,7 @@ struct Walk {
 // overlay or the queue outside what they can hold (the sanitisers watch the rest: the display lists, the tables).
 void check_invariants(const app::App& a) {
   const app::ViewState& v = a.state();
-  CHECK((v.overlay == OverlayId::None || v.overlay == OverlayId::Learn || v.overlay == OverlayId::Navigator || v.overlay == OverlayId::StepPopup || v.overlay == OverlayId::Help));  // (a held Instr, Fx or Note: OS-FU3; Shift + Config: OS-HELP)
+  CHECK((v.overlay == OverlayId::None || v.overlay == OverlayId::Learn || v.overlay == OverlayId::Navigator || v.overlay == OverlayId::StepPopup || v.overlay == OverlayId::Help || v.overlay == OverlayId::ModulePicker));  // (a held Instr, Fx or Note: OS-FU3; Shift + Config: OS-HELP; Shift + Pattern: the apps list, OS-APPSNAV)
   CHECK(v.help.page < app::kHelpPages);
   for (unsigned p = 0; p < app::kHelpPages; ++p) {  // a scroll never leaves its page: the last line stays in the body
     CHECK((v.help.scroll[p] == 0 || v.help.scroll[p] + app::kHelpRows <= app::help_page(p).count));

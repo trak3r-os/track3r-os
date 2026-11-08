@@ -101,3 +101,23 @@ press vol
 press fx
 release fx
 release vol
+
+# OS-LEARNFOLLOW S2: with the overlay up on a bound instrument parameter, the key row names F5 FOLLOW; F5 makes the binding follow the selected instrument (the
+# target line reads INS * and the binding text ends FOLLOW, the strip says FOLLOWS), F5 again pins it back to the target's instrument (INS 03, PINNED).
+press vol
+press fx
+release fx
+release vol
+midicc 1 23 64
+snap learn_follow_bound
+assert state overlay=LEARN keys=~F5:FOLLOW
+tap f5
+snap learn_follow
+assert state overlay=LEARN keys=~F5:FOLLOW msg=~FOLLOWS
+tap f5
+snap learn_follow_pinned
+assert state overlay=LEARN keys=~F5:FOLLOW msg=~PINNED
+press vol
+press fx
+release fx
+release vol

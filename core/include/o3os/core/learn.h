@@ -6,7 +6,7 @@
 //
 // The store is a fixed array of bindings (a slot is empty when `param` is None). There are two stores, as the maintainer decided
 // (decision 8, "two stores: device and project"): the DEVICE store holds what is about the controller and the mixer (the
-// parameters of kind Track, Master and Device), the PROJECT store what is about the music (Instrument and Project): the store
+// parameters of kind Track, Master and Device), the PROJECT store what is about the music (Instrument, Project and, OS-INSFX S7, Insert): the store
 // of a parameter is given by its kind (learn_scope). A third idea, "follow the selected instrument", is a flag of a binding, not
 // a store: a follow binding names an instrument parameter by its field and acts on whichever instrument the UI has selected.
 //
@@ -55,7 +55,9 @@ constexpr LearnScope learn_scope(ParamKind kind) noexcept {
 }
 
 // An empty slot is all zero; a used one has a parameter of a kind that can be bound, a controller 0..127, a channel 0..16, a
-// known mode and no unknown flag; a follow binding names an indexed kind (Instrument) with index 0.
+// known mode and no unknown flag; a follow binding names an indexed kind (Instrument) with index 0. An Insert binding (OS-INSFX S7)
+// names an id this version has (insert_param_valid: index 0..32, field 0..31) and never follows: the project file's LRNB reader of an
+// older version does not know the kind, so it skips such an entry and counts it (this rule), and drops it on its next save.
 bool learn_valid(const LearnBinding& b) noexcept;
 
 // Does the binding act on `id`: the same parameter, or (follow) the same field of the same kind whatever the index.

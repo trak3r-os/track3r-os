@@ -13,19 +13,16 @@
 // VARIANTS (`bench <kernel> [blocks] alias|direct|sram`, the A/B of the placement work, bench_report.h Variant): the same kernel with its data read through the cached ICode alias of the SDRAM,
 // through the uncached 0x7000_0000 address, or (the TB-303) with a copy of its state in SRAM_U. The result line then names the kernel `delay+alias`.
 // WHAT IT TOUCHES. The send effects and the limiter run on PRIVATE instances built on the stack for the run (the live ones are the project's), with a ring/memory taken from the unused
-// `ui_cache` SDRAM region (512 KiB, nothing else uses it); the same code, the same SRAM_U/SDRAM placement of the state as the live objects. The sampler voice runs on the LIVE pool
+// `ui_cache` SDRAM region (448 KiB after OS-CEPTFX S2a took its first 64 KiB for the `ptfx` region, nothing else uses it); the same code, the same SRAM_U/SDRAM placement of the state as the live objects. The sampler voice runs on the LIVE pool
 // (there is no second copy): it takes TRACK 16 for the run and cuts it at the end, and REFUSES while something is playing (a voice sounding or fading in the pool): stop the transport
 // first. The TB-303 runs on a private instance, init()ed afresh for each run (a fixed note from a fixed state: the peak is the same run after run; the live instance is not touched). With the
 // transport stopped nothing of the project's sound or state changes. `strips` and `stages` only read the render's own stage figures, and measure whatever is playing.
 #include "internal.h"
 #include "regs.h"
 
-#include <o3os/audio/bench_stereo.h>
 #include <o3os/audio/graph.h>
 #include <o3os/audio/insert_host.h>
 #include <o3os/audio/kernels.h>
-#include <o3os/audio/loop_mix.h>
-#include <o3os/audio/loop_overdub.h>
 #include <o3os/audio/master_dj_filter.h>
 #include <o3os/audio/master_kill_eq.h>
 #include <o3os/audio/master_limiter.h>
@@ -33,21 +30,29 @@
 #include <o3os/audio/send_delay.h>
 #include <o3os/audio/send_reverb.h>
 #include <o3os/audio/simd.h>
-#include <o3os/audio/svf.h>
 #include <o3os/audio/voices.h>
+#include <o3os/audio/wt_contour.h>
 #include <o3os/hal/irq.h>
 #include <o3os/platform/mk66/audio.h>
-#include <o3os/platform/mk66/bench_disk.h>
 #include <o3os/platform/mk66/cache_check.h>
 #include <o3os/platform/mk66/mem_map.h>
 #include <o3os/platform/mk66/sdram_view.h>
 #include <o3os/platform/mk66/sdramc_config.h>
 #include <o3os/platform/mk66/platform.h>
-#include <o3os/platform/mk66/save/bench_scratch.h>
-#include <o3os/platform/mk66/sections.h>
 #include <o3os/platform/mk66/storage/device.h>
 #include <o3os/platform/mk66/usb/usb0.h>
 
+// OS-FLASHDIET B1: only the archived benches use these (voice_st, cpuopt, looper, disk); without O3OS_BENCH_ARCHIVE they are compiled out with their groups below.
+#if O3OS_BENCH_ARCHIVE
+#include <o3os/audio/bench_stereo.h>
+#include <o3os/audio/loop_mix.h>
+#include <o3os/audio/loop_overdub.h>
+#include <o3os/audio/svf.h>
+#include <o3os/platform/mk66/bench_disk.h>
+#include <o3os/platform/mk66/save/bench_scratch.h>
+#endif
+
+#include <cstddef>
 #include <cstring>
 #include <new>
 
@@ -61,6 +66,7 @@ struct InsertHostBench {
     InsertHost::Inst& in = h.in_[0];
     in.mod = &mod;
     in.state = state;
+    in.track = 0xFF;  // no strip: the graph's S pointers, tail bytes and stereo marks of the real slots are never touched by a timed run (OS-INSFX-ABI2 A4)
     in.phase = InsertHost::Phase::On;
     in.mix = 1.0f;
     in.target = 1.0f;
@@ -72,6 +78,11 @@ struct InsertHostBench {
     in.target = 1.0f;
   }
   static void run(InsertHost::Inst& in, std::int16_t* io, std::uint32_t n) noexcept { InsertHost::run(&in, io, n); }
+  // OS-INSFX-ABI2 A4: the stereo adapter past the Graph lookups (the S pointer, the S gain and the mark: `sin` and `g0`..`g1` are given), as a WIDENS effect runs it: the part of run() that costs.
+  static void stereo(InsertHost::Inst& in, std::int16_t* io, std::uint32_t n, const std::int16_t* sin, std::uint32_t g0, std::uint32_t g1) noexcept {
+    in.shape = static_cast<std::uint8_t>(InsertHost::Shape::Widens);
+    InsertHost::process(in, io, n, true, sin, g0, g1);
+  }
 };
 }  // namespace o3os::audio
 
@@ -191,7 +202,7 @@ bool alias_enabled() noexcept { return (regs::at<std::uint32_t>(sdram::kCm0Addre
 // The SDRAM the effects' private memory comes from: the unused `ui_cache` region, at its system-bus address or (variant alias) through the cached ICode alias.
 constexpr std::uint32_t kBenchDelayFrames = 65536u;  // 256 KB of the region
 constexpr std::uint32_t kBenchReverbOffset = 256u * mem::kKiB;
-constexpr std::uint32_t kBenchStateOffset = 400u * mem::kKiB;  // a copy of an instance's state
+constexpr std::uint32_t kBenchStateOffset = 320u * mem::kKiB;  // a copy of an instance's state (OS-CEPTFX S2a: below the cache check's scratch in the kept 448 KiB)
 std::uintptr_t scratch_base(const Out& out) noexcept { return out.alias() ? mem::sdram_alias(mem::kUiCacheBase) : mem::kUiCacheBase; }
 std::uint32_t* scratch_ring(const Out& out) noexcept { return reinterpret_cast<std::uint32_t*>(scratch_base(out)); }
 std::int16_t* scratch_reverb(const Out& out) noexcept { return reinterpret_cast<std::int16_t*>(scratch_base(out) + kBenchReverbOffset); }
@@ -475,6 +486,8 @@ void run_voice(const Out& out, std::uint32_t blocks, VoiceMode mode) noexcept {
   out.stat_checked(name, st, note, peak, "a silent sample, or a dead voice path");
 }
 
+// OS-FLASHDIET B1: the retired one-off A/B benches are compiled only with -DO3OS_BENCH_ARCHIVE=ON.
+#if O3OS_BENCH_ARCHIVE
 // `voice_st` (OS-STEREO step 1): what a stereo voice's sample loop costs against a mono one, kernel against kernel. Not the pool: the two loops of audio/bench_stereo.h run on their own, on
 // planar int16 blocks of the `ui_cache` SDRAM (read as the sample arena is: through the alias, as production does, or the variant's address), one position, the plain voice's interpolation
 // (VoicePool::fast_body) and a constant amplitude. A block is 64 frames, the step 1.07 (a fractional step, so that the interpolation works), the position moving on from block to block through
@@ -563,6 +576,7 @@ void run(const Out& out, std::uint32_t blocks) noexcept {
 }
 
 }  // namespace voice_st
+#endif  // O3OS_BENCH_ARCHIVE
 
 // `burst` (OS-ODD11 UTAIL): the cost of a pattern step in the scene of the over-budget tail (cpu_mute_ab: 12 voices on the instrument filter, nothing muted), split in four lines on the LIVE pool
 // (it REFUSES while something sounds: stop the transport; nothing muted, so that no gate is engaged). The code under test is the one a step runs, not a kernel:
@@ -836,6 +850,157 @@ void run_insert(const Out& out, std::uint32_t blocks) noexcept {
   out.stat_checked("insert", run, label, peak, "a silent effect, or a dead adapter");
 }
 
+// OS-INSFX-ABI2 A4: the stereo track adapter (docs/specs/OS-INSFX-ABI2.md 3.2), after the mono rows of `bench insert`, on a private record like them. The effect is the loaded one when it is stereo (the effect_stereo
+// template: `mod load example_stereo`), else a built-in identity render_st, so `insert_st` minus `insert_st_effect` is the adapter around an identity (Q7's gate: 6k cycles a block with the S pass of
+// about 1.0k [est] on top, `side_pass` being the Graph's). The Graph lookups of run() (the side pointer, the S gain, the stereo mark: about 0.1k) are not in these rows. M is noise at half scale, S at a quarter.
+//   insert_st_effect  render_st() alone on the two float planes
+//   insert_st_ramp    the adapter in a transition block (the per-sample dry pair and the blend on top)
+//   insert_st         the adapter in a steady block; its note gives the adapter: insert_st minus insert_st_effect, in cycles and tenths of a percent of the block
+std::uint32_t bench_st_identity(void*, const float*, const float*, float*, float*, std::uint32_t) noexcept { return 1u; }
+const o3m_module kBenchStIdentity{O3M_ABI_MAJOR, O3M_ABI_MINOR, O3M_KIND_EFFECT, sizeof(o3m_module), "identity", 0, 0, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, 0,
+                                  nullptr, nullptr, 0, nullptr, nullptr, &bench_st_identity, O3M_FX_WIDENS};
+
+void run_insert_st(const Out& out, std::uint32_t blocks) noexcept {
+  audio::ModuleVoices* mv = appimg::module_voices();
+  if (mv == nullptr) {
+    out.na("insert_st", "this image has no sound");
+    return;
+  }
+  alignas(16) unsigned char state[512];
+  const o3m_module* mod = appimg::insert_bench_module(true);  // the first loaded effect whose shape is not mono
+  bool loaded = mod != nullptr && audio::InsertHost::shape_of(*mod) != audio::InsertHost::Shape::Mono && mod->state_bytes <= sizeof state && mod->init != nullptr && mod->shutdown != nullptr;
+  if (!loaded) {
+    mod = &kBenchStIdentity;
+  }
+  if (!stack_room(static_cast<std::uint32_t>(sizeof(audio::InsertHost)))) {
+    out.na("insert_st", "not enough stack for the private host");
+    return;
+  }
+  std::memset(state, 0, sizeof state);
+  if (loaded && mod->init(state, &mv->host()) != 0) {
+    out.na("insert_st", "init() refused");
+    return;
+  }
+  audio::InsertHost host;
+  auto& in = audio::InsertHostBench::prepare(host, audio_engine().graph(), *mv, *mod, state, []() noexcept { return dwt(); });
+  alignas(8) std::int16_t src[kBlock];
+  alignas(8) std::int16_t sin[kBlock];
+  alignas(8) std::int16_t io[kBlock];
+  alignas(8) float pl[kBlock];
+  alignas(8) float pr[kBlock];
+  Noise n;
+  for (std::uint32_t i = 0; i < kBlock; ++i) {
+    src[i] = static_cast<std::int16_t>(n.next() / 2);
+    sin[i] = static_cast<std::int16_t>(n.next() / 4);
+  }
+  const auto nop = [] {};
+  const auto refill = [&] { std::memcpy(io, src, sizeof io); };
+  Peak peak;
+  const Stat effect = measure(
+      blocks, [&] { audio::kernel::q15_to_float(pl, src, kBlock); audio::kernel::q15_to_float(pr, sin, kBlock); }, [&] { (void)mod->render_st(state, pl, pr, pl, pr, kBlock); }, nop);
+  const Stat ramp = measure(
+      blocks, [&] { refill(); audio::InsertHostBench::ramp(in, true); }, [&] { audio::InsertHostBench::stereo(in, io, kBlock, sin, 255u, 255u); }, nop);
+  const Stat run = measure(
+      blocks, [&] { refill(); audio::InsertHostBench::ramp(in, false); }, [&] { audio::InsertHostBench::stereo(in, io, kBlock, sin, 255u, 255u); }, [&] { peak.add_q15(io, kBlock); });
+  if (loaded) {
+    mod->shutdown(state);
+  }
+  const std::uint32_t adapter = run.min() > effect.min() ? run.min() - effect.min() : 0u;
+  const std::uint32_t tenths = audio::gov::tenths_of_block(adapter);
+  char label[64];
+  audio::diag::Text lt(label, sizeof label);
+  lt.str(mod->name != nullptr ? mod->name : "?").str(", adapter ").dec(adapter).str(" cycles (").dec(tenths / 10u).chr('.').dec(tenths % 10u).str("%)");
+  out.stat("insert_st_effect", effect, "render_st() alone");
+  out.stat("insert_st_ramp", ramp, "transition block");
+  out.stat_checked("insert_st", run, label, peak, "a silent effect, or a dead adapter");
+}
+
+// ---- OS-CEWTENV W3a (`diag bench wt`): the contour bank's own lines, for the 3.10 unit measurements ------------------------------------------
+// The render's own call, one per timed block: wt_eval_shape (the bound bank of the fixed `wt_contour` SDRAM region, read through the core's view,
+// the made-mask, then wt_eval), with no warp and with both warps, warm (the contour's cache lines are filled by the warm-up) and cold (the lines are
+// invalidated before every timed call, so the contour's reads miss to SDRAM). Then wt_make: one contour per call, and all 256 in one call (the main
+// loop's cost when a project first names every shape; the sum is above Stat's clamp, so that run is timed here and printed in the same line shape).
+// Last the sample arena's free bytes before and after the whole bank is made: the bank is a fixed region (mem_map.h kWtContourBase), so making all
+// 256 contours costs the arena nothing (the -64 KiB of SDRAM is static, in the region table).
+void run_wt(const Out& out, std::uint32_t blocks) noexcept {
+  if (out.variant != Variant::Normal) {
+    out.na("wt", "no variants: the bank is the fixed wt_contour region");
+    return;
+  }
+  audio::WtBank& bank = *reinterpret_cast<audio::WtBank*>(static_cast<std::uintptr_t>(mem::core_view(mem::kWtContourBase)));
+  audio::WtMadeMask made{};  // a private mask for the wt_make lines: the render's own made-mask is only touched by wt_make_bound below
+  constexpr unsigned kShape = 37u;
+  constexpr std::uint8_t kBendNone = 0x00u;
+  constexpr std::uint8_t kBendBoth = 0x77u;  // warp X +7 and warp Y +7: both divisions of the warp law run
+  const auto arena_line = [&](const char* note) {  // not through Stat: the arena's free bytes are above Stat's kMaxCycles clamp
+    const std::uint32_t b = appimg::sample_arena_free_bytes();
+    char buf[140];
+    audio::diag::Text t(buf, sizeof buf);
+    t.str("BENCH wt_arena ").dec(b).str(" 1 avg ").dec(b).str(" max ").dec(b).str(" (").str(note).chr(')').nl();
+    out.line(buf, t.size());
+  };
+  arena_line("sample arena free bytes, before the bank");
+  audio::wt_make(bank, kShape, made);  // untimed: the contour the eval and wt_make_1 lines use
+  audio::wt_make_bound(kShape);        // the render's path (wt_eval_shape) reads the bound bank: make the shape there too (main loop, as a load does)
+  const std::int16_t* contour = audio::wt_contour(bank, kShape);
+  const std::uint32_t contour_addr = static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(contour));
+  float phase = 0.0f;
+  float acc = 0.0f;
+  const auto step = [&] {
+    phase += 0.0137f;
+    if (phase >= 1.0f) {
+      phase -= 1.0f;
+    }
+  };
+  const auto use = [&] { asm volatile("" : : "r"(acc) : "memory"); };
+  const auto cold = [&] { (void)cache::invalidate_range(contour_addr, audio::kWtContourLen * 2u); };
+  const auto nop = [] {};
+  const auto eval_none = [&] { acc += audio::wt_eval_shape(kShape, phase, kBendNone); };
+  const auto eval_both = [&] { acc += audio::wt_eval_shape(kShape, phase, kBendBoth); };
+  out.stat("wt_eval", measure(blocks, step, eval_none, use), "one call, no warp, warm");
+  out.stat("wt_eval_cold", measure(blocks, [&] { cold(); step(); }, eval_none, use), "one call, no warp, contour lines invalidated first");
+  out.stat("wt_eval_warp", measure(blocks, step, eval_both, use), "one call, both warps +7/+7, warm");
+  out.stat("wt_eval_warp_cold", measure(blocks, [&] { cold(); step(); }, eval_both, use), "one call, both warps, contour lines invalidated first");
+  // OS-CEWTENV W3c: the render's path since the warps are baked (the contour of both warps made once, the slot evaluated with no warp): wt_eval_slot with the bake id, warm and cold
+  // (the baked contour's lines invalidated first). The baked entry's own 256 bytes are in the bake pool (mem_map.h kWtBakeBase).
+  const unsigned bake_id = audio::wt_bake(kShape, kBendBoth);
+  if (bake_id != 0u) {
+    const std::uint32_t bake_addr = mem::core_view(mem::kWtBakeBase) + static_cast<std::uint32_t>(offsetof(audio::WtBakeBank, contour)) + (bake_id - 1u) * audio::kWtContourLen * 2u;
+    const auto eval_baked = [&] { acc += audio::wt_eval_slot(kShape, bake_id, kBendBoth, phase); };
+    out.stat("wt_eval_baked", measure(blocks, step, eval_baked, use), "one call, both warps baked (the render's path), warm");
+    out.stat("wt_eval_baked_cold", measure(blocks, [&] { (void)cache::invalidate_range(bake_addr, audio::kWtContourLen * 2u); step(); }, eval_baked, use), "one call, both warps baked, the baked contour's lines invalidated first");
+  } else {
+    out.na("wt_eval_baked", "no bake pool bound or full");
+  }
+  out.stat("wt_make_1", measure(blocks, nop, [&] { audio::wt_make(bank, kShape, made); }, nop), "one contour (37)");
+  {  // all 256 contours in one call, timed here (the sum is above Stat::kMaxCycles)
+    std::uint32_t mn = 0xFFFFFFFFu, mx = 0u, sum = 0u, n = 0u;
+    std::uint32_t renders = audio_status().snapshot().renders;
+    for (std::uint32_t i = 0; i < blocks + kWarmup; ++i) {
+      wait_render(renders);
+      HoldRender hold;
+      const std::uint32_t t0 = dwt();
+      for (unsigned s = 0; s < audio::kWtContourCount; ++s) {
+        audio::wt_make(bank, s, made);
+      }
+      const std::uint32_t dt = dwt() - t0;
+      if (i >= kWarmup) {
+        mn = dt < mn ? dt : mn;
+        mx = dt > mx ? dt : mx;
+        sum += dt;
+        ++n;
+      }
+    }
+    char buf[160];
+    audio::diag::Text t(buf, sizeof buf);
+    t.str("BENCH wt_make_all ").dec(mn).chr(' ').dec(n).str(" avg ").dec(n != 0u ? (sum + n / 2u) / n : 0u).str(" max ").dec(mx);
+    t.str(" (all 256 contours, ").dec(n != 0u ? mn / audio::kWtContourCount : 0u).str(" cycles a contour)");
+    t.nl();
+    out.line(buf, t.size());
+  }
+  arena_line("sample arena free bytes, after all 256 contours are made");
+}
+
 // ---- in situ: the render's own stage figures -------------------------------------------------------------------------------------------
 void run_stages(const Out& out, std::uint32_t blocks, bool only_strips) noexcept {
   Stat total;
@@ -917,6 +1082,7 @@ void run_kernels(const Out& out, std::uint32_t blocks) noexcept {
 // ---- OS-CPUOPT1: the loop player and the SVF, old reference against production ----------------------------------------------------------------
 // `ref_*` are the implementations of dev 604d721 copied as they were (the lambda and all): the A of the A/B. The B is the production code of this image, where the commit that changed it adds
 // a line. Each pair also runs on the same random input and compares the output: `BENCH cpuopt_eq_<name> OK` or `FAIL ...` (the host cannot prove the SVF: it has no VMLA to fuse).
+#if O3OS_BENCH_ARCHIVE
 namespace cpuopt {
 
 // The loop player's block as it was: LoopPlayer::run, loop_player.cpp (the take, then the held last frame, then silence), g in Q16 moving by `step` for `ramp` frames, then constant.
@@ -1139,12 +1305,14 @@ void run(const Out& out, std::uint32_t blocks) noexcept {
 }
 
 }  // namespace cpuopt
+#endif  // O3OS_BENCH_ARCHIVE
 
 // ---- OS-LOOPER L2b: the overdub kernels (audio/loop_overdub.h) on SDRAM buffers the size of a long take, cache-cold ---------------------------------------------------------------------
 // The loop, its undo buffer and the bitmap lie in the unused ui_cache region (96 K frames each: a take of about 2.2 s), and every measured block steps 64 frames on, as `loop_new` does, so no block
 // is read twice in a row. rmw_fb100 is the FB = 100 case without multiplies, rmw_fb50 the general one; `_odd` starts the loop at an odd frame (a leading halfword, then the input is read as two
 // halfwords). cow_copy is the first-write copy of one 64-frame block, restore_step one dirty block put back (one copy, a few bitmap reads). `looper_eq_*` lines compare the production code with the
 // scalar definition on the unit (the M4's QADD16 / SMLAWB path, which the host test only models).
+#if O3OS_BENCH_ARCHIVE
 namespace looper {
 
 constexpr std::uint32_t kFrames = 96u * 1024u;
@@ -1254,6 +1422,7 @@ void run(const Out& out, std::uint32_t blocks) noexcept {
 }
 
 }  // namespace looper
+#endif  // O3OS_BENCH_ARCHIVE
 
 // ---- the slowest render ----------------------------------------------------------------------------------------------------------------------
 void run_worst(const Out& out) noexcept {
@@ -1264,9 +1433,12 @@ void run_worst(const Out& out) noexcept {
 }
 
 // ---- memory characterisation -------------------------------------------------------------------------------------------------------------
-// A pass of n 32-bit loads, `stride` bytes apart, timed with the cycle counter. In SRAM_L so that the loop's own fetches cost the same in every row (no flash, no cache, zero wait).
+// A pass of n 32-bit loads, `stride` bytes apart, timed with the cycle counter. In flash (OS-CEWTENV W3a: the bench image's
+// .ramfunc_l has no room for it — SRAM_L's hot budget is 27 KiB and W3a's WT cutoff work took the last of the bench's margin): the loop is a
+// handful of instructions and should stay in the code cache, but a flash row reads through the same controller and cache, so a large stride may
+// cost it fetches: flash rows are not comparable with reports made before W3a until `diag bench mem` is measured on both placements.
 // The loop overhead (a load, an add, a counter and a branch) is in every figure; the SRAM_U row is the floor.
-O3OS_RAMFUNC_L std::uint32_t load_pass(const volatile std::uint32_t* p, std::uint32_t stride_words, std::uint32_t n) noexcept {
+__attribute__((noinline)) std::uint32_t load_pass(const volatile std::uint32_t* p, std::uint32_t stride_words, std::uint32_t n) noexcept {
   const std::uint32_t t0 = regs::dwt_cyccnt();
   std::uint32_t acc = 0;
   for (std::uint32_t i = 0; i < n; ++i) {
@@ -1317,8 +1489,8 @@ void run_mem(const Out& out) noexcept {
 
 // ---- coherence of the cached alias (the single-alias rule on the unit) --------------------------------------------------------------------
 // `diag cache check`: main loop only, bounded (a few thousand accesses to a 64 KB scratch stretch and one pass over the loaded PCM), the lines and verdicts are cache_check.h's. The
-// scratch is the last 64 KB of the ui_cache region, which nothing else uses; every step puts back what it changed.
-constexpr std::uint32_t kCheckOffset = 448u * mem::kKiB;  // the last 64 KB of the ui_cache region
+// scratch is the last 64 KB of the ui_cache region's kept 448 KiB (OS-CEPTFX S2a took the first 64 KiB), which nothing else uses; every step puts back what it changed.
+constexpr std::uint32_t kCheckOffset = 384u * mem::kKiB;  // the last 64 KB of the ui_cache region's kept 448 KiB
 constexpr std::uint32_t kCheckWords = 16384u;
 constexpr std::uint32_t kControlWords = 256u;             // 16 lines of 16 B... x4: 1 KB, resident in the 8 KiB cache once read
 static_assert(kCheckOffset + kCheckWords * 4u <= mem::kUiCacheSize && kCheckOffset >= kBenchStateOffset + 1024u, "the check's scratch is clear of the bench's");
@@ -1535,6 +1707,7 @@ void check_coherence(Emit emit, void* ctx) noexcept {
 }
 
 // ---- `bench disk` (OS-USBDISK U1d; bench_disk.h has the lines and what each number is for) --------------------------------------------------------------
+#if O3OS_BENCH_ARCHIVE
 // The card READS (single block as the MSC engine does it, then 8 and 32 blocks as CMD18), the WRITE arm, the window of the USB interrupt and the window of the pump's passes. The reads are raw blocks from
 // the start of the card, with the OS's own mount untouched (a read is not a FatFs call; the main loop is the only SD user). They run only while the card is the Tracker's, started and idle: under a computer
 // (owner Host) the pump owns the bus, and the window lines are what to read then. The render is not held off: the figures are the wall time a copy would see, the max carries the interrupts.
@@ -1720,10 +1893,19 @@ void disk_clean(Emit emit, void* ctx) noexcept {
   const save::BenchResult r = sc->clean(storage::device::owner(), storage::device::card_busy());
   out.line(buf, disk::format_clean(save::kBenchScratchPath, r == save::BenchResult::Ok ? nullptr : save::bench_result_name(r), buf, sizeof buf));
 }
+#endif  // O3OS_BENCH_ARCHIVE
 
 void run(Kernel kernel, std::uint32_t blocks, Variant variant, Emit emit, void* ctx) noexcept {
   const Out out{emit, ctx, variant == Variant::Count ? Variant::Normal : variant};
   blocks = blocks == 0u ? kDefaultBlocks : (blocks > kMaxBlocks ? kMaxBlocks : blocks);
+#if !O3OS_BENCH_ARCHIVE
+  // OS-FLASHDIET B1: the retired one-off A/B benches are not in this image; the console still lists them and answers here.
+  if (archived(kernel)) {
+    char buf[80];
+    out.line(buf, format_archived(kKernelInfo[static_cast<std::size_t>(kernel)].name, buf, sizeof buf));
+    return;
+  }
+#endif
   switch (kernel) {
     case Kernel::Voice: run_voice(out, blocks, VoiceMode::Plain); break;
     case Kernel::VoiceFilter: run_voice(out, blocks, VoiceMode::Filter); break;
@@ -1732,7 +1914,11 @@ void run(Kernel kernel, std::uint32_t blocks, Variant variant, Emit emit, void* 
     case Kernel::VoiceBoth: run_voice(out, blocks, VoiceMode::Both); break;
     case Kernel::VoiceRev: run_voice(out, blocks, VoiceMode::Rev); break;
     case Kernel::VoicePan: run_voice(out, blocks, VoiceMode::Pan); break;
-    case Kernel::VoiceSt: voice_st::run(out, blocks); break;
+    case Kernel::VoiceSt:
+#if O3OS_BENCH_ARCHIVE
+      voice_st::run(out, blocks);
+#endif
+      break;
     case Kernel::Tb303: run_tb303(out, blocks, kBlock); break;
     case Kernel::Tb303x128: run_tb303(out, blocks, 2u * kBlock); break;
     case Kernel::Delay: run_delay(out, blocks); break;
@@ -1745,12 +1931,28 @@ void run(Kernel kernel, std::uint32_t blocks, Variant variant, Emit emit, void* 
     case Kernel::Mem: run_mem(out); break;
     case Kernel::Worst: run_worst(out); break;
     case Kernel::Kernels: run_kernels(out, blocks); break;
-    case Kernel::Cpuopt: cpuopt::run(out, blocks); break;
-    case Kernel::Looper: looper::run(out, blocks); break;
-    case Kernel::Disk: diskbench::run(out, blocks); break;
+    case Kernel::Cpuopt:
+#if O3OS_BENCH_ARCHIVE
+      cpuopt::run(out, blocks);
+#endif
+      break;
+    case Kernel::Looper:
+#if O3OS_BENCH_ARCHIVE
+      looper::run(out, blocks);
+#endif
+      break;
+    case Kernel::Disk:
+#if O3OS_BENCH_ARCHIVE
+      diskbench::run(out, blocks);
+#endif
+      break;
     case Kernel::Burst: run_burst(out, blocks); break;
     case Kernel::DjMaster: run_dj(out, blocks); break;
-    case Kernel::Insert: run_insert(out, blocks); break;
+    case Kernel::Insert:
+      run_insert(out, blocks);
+      run_insert_st(out, blocks);
+      break;
+    case Kernel::Wt: run_wt(out, blocks); break;
     case Kernel::Count: break;
   }
 }

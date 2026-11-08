@@ -1,8 +1,8 @@
-# OS-MANUAL2 C3: the walk-through of the Song chapter's "Try it" (docs/manual/song.md): copy a slot, share a pattern, make it your own, look at the arrangement, undo.
+# OS-MANUAL2 C3: the walk-through of the Song chapter's "Try it" (docs/manual/song.md): copy a slot, share a pattern, make it your own, look at the timeline, undo.
 # Each `snap walk_<n>` is the picture of step n, `song_walk_<n>.png` in docs/manual/img/ (manifest: docs/manual/images.txt). A changed step is a changed picture: edit both together.
 # `document` opens the demo project (one slot, pattern 1).
 
-# Step 1. Press `Song`. The ORDER page lists the slots; the cursor is on the first.
+# Step 1. Press `Song`. The LIST page lists the slots; the cursor is on the first.
 document
 wait 30
 tap song
@@ -27,10 +27,12 @@ tap f5
 wait 20
 snap walk_4
 
-# Step 5. Press `Song` again: the ARRANGEMENT page lists the same slots with START, BARS and a LENGTH bar.
+# Step 5. Press `Song` again: the TIMELINE page draws the same slots as blocks as wide as they have bars. Press `Song` once more to come back to the list.
 tap song
 wait 20
 snap walk_5
+tap song
+wait 20
 
 # Step 6. Press `F8` (UNDO): the slot points at the shared pattern again.
 tap f8

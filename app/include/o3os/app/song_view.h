@@ -3,6 +3,7 @@
 
 #include <o3os/app/song_edit.h>
 #include <o3os/app/song_map.h>
+#include <o3os/app/song_preview.h>
 #include <o3os/core/tick.h>
 
 #include <cstdint>
@@ -38,6 +39,7 @@ class SongView {
   static constexpr int kVisibleRows = 16;
   static constexpr int kMaxStep = 1 << 16;  // larger moves are clamped to this before they are added
   static constexpr int kClipMax = 255;      // slots the clipboard holds: the longest order list (model::kMaxSongPositions; song_actions.cpp checks)
+  static constexpr int kLanes = 12;         // OS-SONG3 Q8: the lanes (track cells) drawn at once on either page; a list with more active tracks scrolls them with the track cursor
   static constexpr int kPadSlots = 48;      // OS-SONGPADS: the SLOTS pads are a page of 48 slots (pad_lights.h kPadCount; song_screen.cpp checks)
 
   int pos() const noexcept { return pos_; }
@@ -54,12 +56,13 @@ class SongView {
   // ---- the track column (OS-SONGMAP) -----------------------------------------------------------------------------------------------------
   // `cells` is how many cells of the map are drawn (song_map_cells, song_screen.h; 0: no map). col 0 is PAT, 1..cells the track col - 1. Left / Right walk it without wrapping; Up / Down keep it.
   int col() const noexcept { return col_; }
-  bool in_map() const noexcept { return col_ > 0; }
+  bool in_map() const noexcept { return col_ > 0; }  // the cursor is in a track cell (on TIMELINE: a lane; col 0 is then the block row, the whole slot)
   int track() const noexcept { return col_ - 1; }  // the cursor's track, -1 on PAT
   bool step_col(int delta, int cells) noexcept;    // Left / Right: the selection collapses, the column moves one (clamped), true if either changed
   bool set_track(int track, int cells) noexcept;   // the pads' row 1: the cursor to that track of the map; false with no such cell
   bool extend_tracks(int delta, int cells) noexcept;  // Shift + Left / Right, in the map only: the tracks of the rectangle grow from where Shift was first used
   bool fit_cols(int cells) noexcept;               // after the map changed (a page, a project, an undo): the column and the track range inside it
+  int tbase() const noexcept { return tbase_; }    // OS-SONG3 Q8: the first track drawn: the window of kLanes tracks follows the cursor's, and is 0 while the cursor is on PAT or the block row
   bool track_selecting() const noexcept { return tanchor_ >= 0; }
   int tfirst() const noexcept { return tanchor_ >= 0 && tanchor_ < col_ - 1 ? tanchor_ : col_ - 1; }  // the tracks of the rectangle (0-based), the cursor's alone with no range
   int tlast() const noexcept { return tanchor_ >= 0 && tanchor_ > col_ - 1 ? tanchor_ : col_ - 1; }
@@ -103,12 +106,20 @@ class SongView {
   // ---- the question (OS-SONGMAP 1.6) --------------------------------------------------------------------------------------------------------
   SongAsk ask;
 
+  // ---- the PREVIEW audition (OS-SONG3 S4, song_preview.h) -------------------------------------------------------------------------------------
+  // F1 in a lane of the TIMELINE page: the audition's state (the saved solo set and the rectangle's mask). View state: not saved, not an undo unit; F1 again, Stop and leaving
+  // the screen end it (song_preview_end), a project load drops it (App::attach_document), so no solo is ever left stuck.
+  SongPreview preview;
+  bool preview_resync = false;  // a Solo push found the ring full: the next main-loop pass re-sends every strip's mute / solo (song_solo_resync, App::run_once)
+
  private:
   int pos_ = 0;
   int top_ = 0;
   int anchor_ = -1;  // -1: no range
   int col_ = 0;      // OS-SONGMAP: 0 = PAT, n = track n - 1 of the map
   int tanchor_ = -1; // the far end of the range of tracks (0-based), -1: none
+  int tbase_ = 0;    // the first track of the kLanes window (follow_track)
+  void follow_track(int cells) noexcept;  // the window on the cursor's track after the column moved, inside 0..cells - kLanes
   bool tempo_focus_ = false;
 };
 

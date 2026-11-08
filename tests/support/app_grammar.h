@@ -212,7 +212,9 @@ struct AppRig {
   bool launch_from_tools(const std::string& stem) {
     sim.action(core::action_id("nav.screen"), static_cast<core::ActionArg>(app::ScreenId::Pattern));
     sim.wait_ms(20);
-    sim.tap(app::Button::F7);
+    sim.tap(app::Button::F7);  // the verb menu
+    sim.wait_ms(20);
+    sim.pad(15);  // APPS > (pad 16) opens the TOOLS list
     sim.wait_ms(20);
     unsigned at = ui->tool_count();
     for (unsigned i = 0; i < ui->tool_count(); ++i) {
@@ -223,7 +225,10 @@ struct AppRig {
     if (at == ui->tool_count()) {
       return false;
     }
-    for (unsigned i = 0; i < app::tools_fixed(false) + at; ++i) {
+    for (unsigned i = 0; i < ui->tool_count(); ++i) {
+      sim.tap(app::Button::Up);  // the list opens on the row it was left on (OS-PTOOLS2 S1): from the top
+    }
+    for (unsigned i = 0; i < at; ++i) {
       sim.tap(app::Button::Down);
     }
     return launched(stem);
@@ -269,7 +274,10 @@ inline void check_grammar(AppRig& rig, const Spec& spec) {
   const Page start = rig.page();
   NEED(start.rows.size() >= 1u);
   NEED(start.selected == 0);
-  const unsigned rows = static_cast<unsigned>(start.rows.size());
+  // OS-PTOOLS2 S6: in the TOOLS panel the cursor stays inside the declared rows (the target rows and INSTRUMENT are not shown there)
+  const bool panel = rig.sim.app().state().modules.panel;
+  const unsigned shown = static_cast<unsigned>(start.rows.size());
+  const unsigned rows = panel && spec.declared < shown ? spec.declared : shown;
 
   // no line of keys: the key row names them (a hint line would still say F8 or ENCODER)
   for (const std::string& t : start.texts) {
@@ -325,7 +333,7 @@ inline void check_grammar(AppRig& rig, const Spec& spec) {
       rig.key(app::Button::Right);
     }
     const Page base = rig.page();
-    const unsigned n = static_cast<unsigned>(base.rows.size());
+    const unsigned n = panel && spec.declared < base.rows.size() ? spec.declared : static_cast<unsigned>(base.rows.size());
     for (unsigned r = 0; r < n; ++r) {
       rig.select(r);
       const unsigned bit = (p == 0u ? 1u : 0x100u) << r;  // (the bits of a second page are the high byte)

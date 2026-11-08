@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <o3os/app/screens/pattern_screen.h>
 
+#include <o3os/app/frame.h>
 #include <o3os/app/fx_text.h>
 #include <o3os/app/pattern_source.h>
+#include <o3os/app/text_format.h>
 #include <o3os/core/fixed_string.h>
 #include <o3os/core/scales.h>
+#include <o3os/model/event_list.h>
 #include <o3os/model/params.h>
 
 namespace o3os::app {
@@ -58,6 +61,10 @@ constexpr OctaveRows kOctaveRows = make_octave_rows();
 }  // namespace
 
 ModeTable PatternScreen::modes() const noexcept { return ModeTable{kModes, kPatternModes}; }
+
+const char* const* pattern_soft_keys(const ViewState& view) noexcept {
+  return view.verb_menu.last_verb == VerbMenuView::LastVerb::Tool ? kPatternRepeatRow : kPatternSoftKeys;
+}
 
 const char* const* PatternScreen::shift_row(const ViewState& view) const noexcept {
   const unsigned o = view.edit.entry.octave;
@@ -132,7 +139,7 @@ void PatternScreen::render(const Model& model, const ViewState& view, ui::Render
   const PatternSource src(model, view.edit.pattern);
   const unsigned mode = mode_of(view);
   const bool shift = view.shift && view.overlay == OverlayId::None;  // under an overlay the keys are the overlay's, not the layer's
-  PatternView::Status status{view.instrument, view.overlay_keys() ? nullptr : (shift ? shift_row(view) : kPatternSoftKeys)};  // no labels: the Navigator's row is the one drawn (OS-SMALL2)
+  PatternView::Status status{view.instrument, view.overlay_keys() ? nullptr : (shift ? shift_row(view) : pattern_soft_keys(view))};  // no labels: the Navigator's row is the one drawn (OS-SMALL2)
   const bool edit = mode == static_cast<unsigned>(PatternMode::Edit);
   status.chip = edit && view.edit.rec_free ? kChipFree : kChips[mode];
   status.chip_tone = !edit ? PatternView::Status::kToneNone : (view.edit.rec_free ? PatternView::Status::kToneStep : PatternView::Status::kToneLive);
@@ -156,9 +163,7 @@ void PatternScreen::render(const Model& model, const ViewState& view, ui::Render
     const int key = kPadModeKey[static_cast<unsigned>(view.padmode.fixed())];  // (STEP has no key)
     status.soft_hot = key >= 0 ? 1u << static_cast<unsigned>(key) : 0u;
   }
-  if (view.padmode.fixed() != PadMode::Notes) {
-    status.pads = view.padmode.name();
-  }
+  status.pads = view.padmode.name();  // OS-INFOLINE: every mode is named on the info line, NOTES too
   status.playing = view.playing;
   // OS-RECSIGN (new Community OS behaviour): the REC signs (the strip badge and the Rec frame) show whenever the pattern can be edited (pattern_editable, the edit actions' predicate), STEP included, with a
   // document to write into. The Rec playhead bar stays for the take itself, as rec_active() (rec_actions.cpp): LIVE (OS-RECMODE2: Edit following, not STEP) with the sequencer playing (OS-METRO: not red until the count-in is over).
@@ -169,13 +174,68 @@ void PatternScreen::render(const Model& model, const ViewState& view, ui::Render
   status.blink = view.mute_blink;
   status.numbering = static_cast<std::uint8_t>(pattern_numbering(model));
   status.octave_shift = static_cast<std::int8_t>(pattern_octave_shift(model));
+  const Column column = view.pattern.column();
+  // OS-PTOOLS2 S1 (spec 3.1 item 7): in Edit, while a block is active, the info line says what it is and what the keys do to it, so the encoder's transpose is no longer hidden: the encoder acts on the
+  // cursor's column (TRANSPOSE on Note, INSTRUMENT, VOLUME, FX VALUE; Shift: the coarse step, OCTAVE on Note). The parts the line has no room for go from the end, so F7 comes before PAD and DEL.
+  // Outside Edit (Browse / WATCH, where S1 lets F7 open with a block) the hint is not shown: ENC, PAD and DEL all need Edit, so the line would advertise keys that say TURN EDIT ON.
+  core::FixedString<96> hint;
+  if (!src.is_demo() && view.overlay == OverlayId::None && pattern_editable(view) && view.edit.selection.active) {
+    const Selection::Block b = view.edit.selection.block(view.pattern.row(), view.pattern.track());
+    hint.assign("BLOCK ");
+    append_uint(hint, static_cast<unsigned>(b.row1 - b.row0 + 1));
+    hint.append(b.row1 == b.row0 ? " STEP" : " STEPS");
+    if (b.track1 > b.track0) {
+      hint.append(", ");
+      append_uint(hint, static_cast<unsigned>(b.track1 - b.track0 + 1));
+      hint.append(" TRACKS");
+    }
+    hint.append("  ENC: ");
+    switch (column) {
+      case Column::Note: hint.append(shift ? "OCTAVE" : "TRANSPOSE"); break;
+      case Column::Instr: hint.append(shift ? "INSTR x8" : "INSTRUMENT"); break;
+      case Column::Vol: hint.append("VOLUME"); break;
+      case Column::Fx1:
+      case Column::Fx2: hint.append("FX VALUE"); break;
+    }
+    hint.append("  F7: TOOLS  PAD: SET  DEL: CLEAR");
+    status.hint = hint.c_str();
+  }
   // OS-PFX: the FX under the cursor in words (Chord, Arp, Tune, Slide), on the info line.
   core::FixedString<24> fx_read;
-  const Column column = view.pattern.column();
   if (column == Column::Fx1 || column == Column::Fx2) {
     const model::StepFx& f = src.step(view.pattern.track(), view.pattern.row()).fx[column == Column::Fx1 ? 0 : 1];
     if (append_fx_value(fx_read, f.type, f.value)) {
       status.fx_read = fx_read.c_str();
+    }
+  }
+  // OS-MIDIREC S1c (QA-PAT-406): under the EVENTS list the info line names the cursor row's other FX — "ALSO: CHORD 57B": every FX
+  // on its step that the row does not show by itself (not a CC, which has its own row; not the Micro-move, which is the row's
+  // TIME; the Gate is the G flag and has no words).
+  core::FixedString<48> events_also;
+  if (view.overlay == OverlayId::Events && model.project != nullptr) {
+    model::events::Row row;
+    if (events_cursor_row(*model.project, view.edit.pattern, view.events, row)) {
+      const model::Pattern* pat = model.project->pattern(view.edit.pattern);
+      if (pat != nullptr) {
+        const model::Step& st = pat->steps[row.key.track][row.key.step];
+        events_also.assign("ALSO:");
+        bool any = false;
+        for (unsigned c = 0; c < 2u; ++c) {
+          const model::StepFx& f = st.fx[c];
+          if (f.type == model::kFxNone || model::events::is_cc_type(f.type) || f.type == model::events::kFxMicroMove) {
+            continue;
+          }
+          core::FixedString<40> word;
+          if (append_fx_value(word, f.type, f.value)) {
+            events_also.append(any ? ", " : " ");
+            events_also.append(word.c_str());
+            any = true;
+          }
+        }
+        if (any) {
+          status.fx_read = events_also.c_str();
+        }
+      }
     }
   }
   // The sequencer's position, for the pattern that plays only (the demo has no sequencer); the BPM is the one it uses while it plays, the project's
@@ -184,11 +244,20 @@ void PatternScreen::render(const Model& model, const ViewState& view, ui::Render
     status.play_row = play_row(view.play, src.id());
     status.tempo_x100 = view.play.playing && view.play.tempo_x100 != 0u ? view.play.tempo_x100 : src.project()->tempo_x100();
   }
-  view.pattern.draw(r, src, status, covered);
+  // OS-PTOOLS2 S3p: while the right-hand panel is up (the F7 verb menu, the TOOLS dialog) the grid is drawn in the 500 px left of it, so
+  // three tracks stay visible at the 5-track zoom and the block and the cursor stay in view while the panel is open.
+  const bool panel = view.overlay == OverlayId::VerbMenu || view.overlay == OverlayId::PatternTools || (view.screen == ScreenId::ModuleApp && view.modules.panel);  // (S6: a small app in the panel)
+  view.pattern.draw(r, src, status, covered, panel ? kRightPanelX : ui::kScreenW);
 }
 
 bool pattern_follow_play(const Model& model, ViewState& view) noexcept {
   if (view.screen != ScreenId::Pattern || !pattern_cursor_follows(view) || model.project == nullptr || !view.play.playing) {
+    return false;
+  }
+  if (view.overlay == OverlayId::Fill) {
+    // OS-PTOOLS2 S3c (review): with the Fill dialog open the target is the selection as it was when the dialog opened. The playhead neither moves the cursor nor
+    // switches the pattern under it — this function is the only runtime path that changes the pattern in view while the dialog is up (the chooser, the pads and the
+    // screen keys are captured by the modal; App::open_pattern runs at boot only), so the fill's target cannot change behind the dialog.
     return false;
   }
   if (view.edit.queued_pattern != 0u && view.edit.chooser_held && view.overlay == OverlayId::PatternChooser) {

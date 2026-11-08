@@ -1,0 +1,66 @@
+{
+ "module": "tb303",
+ "kind": "instrument",
+ "presets": [
+  {
+   "name": "Acid Bass",
+   "values": {
+    "Waveform": 0,
+    "Cutoff": 600,
+    "Resonance": 75,
+    "Env Mod": 60,
+    "Decay": 400,
+    "Accent": 70,
+    "Slide": 60
+   }
+  },
+  {
+   "name": "Squelch",
+   "values": {
+    "Waveform": 1,
+    "Cutoff": 900,
+    "Resonance": 92,
+    "Env Mod": 85,
+    "Decay": 250,
+    "Accent": 90,
+    "Slide": 30
+   }
+  },
+  {
+   "name": "Deep Sub",
+   "values": {
+    "Waveform": 0,
+    "Cutoff": 350,
+    "Resonance": 20,
+    "Env Mod": 15,
+    "Decay": 1200,
+    "Accent": 30,
+    "Transpose": -12
+   }
+  },
+  {
+   "name": "Slide Bass",
+   "values": {
+    "Waveform": 0,
+    "Cutoff": 750,
+    "Resonance": 60,
+    "Env Mod": 40,
+    "Decay": 800,
+    "Slide": 180,
+    "Legato Slide": 1
+   }
+  },
+  {
+   "name": "Zap Lead",
+   "values": {
+    "Waveform": 1,
+    "Cutoff": 1800,
+    "Resonance": 65,
+    "Env Mod": 90,
+    "Decay": 300,
+    "Accent": 80,
+    "Transpose": 12
+   }
+  }
+ ]
+}

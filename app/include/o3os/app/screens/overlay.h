@@ -9,7 +9,7 @@
 //                one, F3 deletes it, F4 clears all: OS-013a), the keys.
 //                Opened and closed by the FX1 + FX2 chord (learn.toggle); F8 (ui.back) closes it too.
 //   Navigator    modal, a dialog with a grid of every registered screen (name, icon, screen button; the ones not
-//                implemented yet disabled): Shift + Pattern (tapped or held) opens it and it stays open (OS-NAV2); choose with the
+//                implemented yet disabled): the chords Master + Song and Song + Pattern open it and it stays open (OS-APPSNAV, OS-NAV2); choose with the
 //                arrows or the encoder, F8 (or F1) GO to the screen, F7 or Pattern again CLOSE it without changing the view.
 //   Notify       not modal: the head of the notification queue as a strip exactly over the info line, with a severity
 //                tile. Shown while no modal overlay is up; the queue waits behind one.
@@ -24,6 +24,7 @@
 #include <o3os/app/model.h>
 #include <o3os/app/screens/cursor.h>
 #include <o3os/app/screens/ids.h>
+#include <o3os/app/verb_menu.h>
 #include <o3os/app/view_state.h>
 #include <o3os/core/fixed_string.h>
 #include <o3os/ui/renderer.h>
@@ -75,7 +76,7 @@ extern const LearnOverlay kLearnOverlay;
 
 // The Navigator's own F-key row (OS-NAV2, OS-KEYROWDLG). While the grid is up its F8 is GO, not the screen's own F8 (UNDO, ...; Back in the other overlays), so the row is the dialog's prompt
 // (key_prompt.cpp, painted by render_scene; the screen under it draws none: ViewState::overlay_keys): F1 GO, F7 CLOSE, F8 GO, the rest blank. While Shift is held the row shows its layer, the one Shift layer a
-// dialog declares (OS-SHIFTROW: no quarter jumps; Shift + F7 and F8 are CLOSE and GO, bound, as Shift is usually still down from the Shift + Pattern that opened it; Shift + F1..F6 are bound to nothing and read "-").
+// dialog declares (OS-SHIFTROW: no quarter jumps; Shift + F7 and F8 are CLOSE and GO, bound, as Shift may still be down from the chord that opened it; Shift + F1..F6 are bound to nothing and read "-").
 
 class NavigatorOverlay final : public Overlay {
  public:
@@ -130,23 +131,66 @@ class ModulePickerOverlay final : public Overlay {
 };
 extern const ModulePickerOverlay kModulePickerOverlay;
 
-// The TOOLS list of the Pattern screen's F7 (OS-H3A): a list overlay with the engine picker's grammar. Up / Down and the encoder choose, F1 runs the entry (an app is launched with the Pattern's block as
-// its context), F8 closes. The items come from app/tools_list.h (the fixed entries first, a divider, then the tool apps). Modal, context `tools`.
-inline constexpr int kToolsRows = 10;  // entries on screen at a time (also the page of cursor.page, OS-NAV3)
+// The F5 PRESET list of a module's parameter page (OS-INSFX-ABI2 A9): the presets of the instrument module or the insert in view (app/preset_list.h says where they come from: the module's factory table now). Up / Down and
+// the encoder choose, F1 LOAD writes the chosen one into every parameter of the module (preset.load), F8 closes. Modal, context `preset`.
+inline constexpr int kPresetRows = 10;  // entries on screen at a time; a module has at most O3M_PRESETS_MAX (32) factory presets (also the page of cursor.page, OS-NAV3)
 
-class ToolsOverlay final : public Overlay {
+class PresetOverlay final : public Overlay {
  public:
-  constexpr ToolsOverlay() noexcept = default;
+  constexpr PresetOverlay() noexcept = default;
   ui::Rect rect(const ui::Theme& theme) const noexcept override;
   void render(const Model& model, const ViewState& view, ui::Renderer& r) const noexcept override;
   bool modal() const noexcept override { return true; }
-  Context context() const noexcept override { return Context::ToolsList; }
+  Context context() const noexcept override { return Context::Preset; }
   int count(const Model& model, const ViewState& view) const noexcept override;
-  int position(const ViewState& view) const noexcept override { return view.modules.tools; }
-  int page() const noexcept override { return kToolsRows; }
+  int position(const ViewState& view) const noexcept override { return view.modules.preset; }
+  int page() const noexcept override { return kPresetRows; }
+  bool accelerates() const noexcept override { return true; }
   bool set_position(const Model& model, ViewState& view, int position) const noexcept override;
 };
-extern const ToolsOverlay kToolsOverlay;
+extern const PresetOverlay kPresetOverlay;
+
+// The APPS page of the verb menu (OS-H3A's TOOLS list, since OS-PTOOLS2 S6b a page of the menu below, ViewState::verb_menu.apps): a list with the engine picker's grammar. Up / Down and the encoder choose, F1 runs the entry
+// (an app is launched with the Pattern's block as its context), F8 closes the menu. The items come from app/tools_list.h (the fixed entries first, a divider, then the tool apps).
+inline constexpr int kToolsRows = 8;  // entries on screen at a time in the panel (the page of cursor.page, OS-NAV3: the same as the grid's 8 rows, verb_menu.h kVerbRows)
+
+// The verb menu of the Pattern screen's F7 (OS-PTOOLS2 S3, docs/specs/OS-PTOOLS2.md section 3.2 mock-up A; S3p: the right-hand panel, x 500..800,
+// beside the narrowed grid): two columns of eight rows in the panel, pads 1-16 pick a verb directly (pad n = entry n-1), the arrows and the
+// encoder move a cursor in the 2x8 grid, F1 runs the verb under the cursor, F8 BACK closes. The rows come from
+// app/verb_menu.h (a verb not built yet is drawn dim and runs nothing). The menu remembers its last verb (view.verb_menu). Modal, context `verbmenu`.
+// The menu's APPS > row (pad 16) turns it into the APPS page (view.verb_menu.apps, kToolsRows entries): the same overlay and context, the cursor methods below follow the page.
+class VerbMenuOverlay final : public Overlay {
+ public:
+  constexpr VerbMenuOverlay() noexcept = default;
+  ui::Rect rect(const ui::Theme& theme) const noexcept override;
+  void render(const Model& model, const ViewState& view, ui::Renderer& r) const noexcept override;
+  bool modal() const noexcept override { return true; }
+  Context context() const noexcept override { return Context::VerbMenu; }
+  // The 2x8 grid of verbs: the cells are read row by row (pad 1..8 the left column, 9..16 the right one); left / right a column, up / down a row.
+  int count(const Model& model, const ViewState& view) const noexcept override;
+  int position(const ViewState& view) const noexcept override { return view.verb_menu.apps ? view.modules.tools : view.verb_menu.cursor; }
+  int page() const noexcept override { return static_cast<int>(kVerbRows); }  // (kToolsRows == kVerbRows: the APPS page pages like the grid)
+  bool set_position(const Model& model, ViewState& view, int position) const noexcept override;
+  bool step(const Model& model, ViewState& view, int dx, int dy) const noexcept override;
+};
+extern const VerbMenuOverlay kVerbMenuOverlay;
+
+// The EVENTS list of the Pattern screen (OS-MIDIREC S1b, docs/specs/OS-MIDIREC.md section 3): the TOOLS entry EVENTS opens it
+// over the grid pane (the strip, the info line and the key row stay). The rows are projected from the steps on every redraw
+// (model/event_list.h), the cursor and the window are positions in the projected list (events_view.h). Up / Down and the encoder
+// move the row, Shift + Up / Down a page, Left / Right the field, F8 BACK lands the grid cursor on the row's step, track and
+// column. Modal, context `events`.
+inline constexpr int kEventsRows = 15;  // event rows in view: the cover is the header band plus the 16 grid rows, two of which the list's own header and captions take
+
+class EventsOverlay final : public Overlay {
+ public:
+  constexpr EventsOverlay() noexcept = default;
+  ui::Rect rect(const ui::Theme& theme) const noexcept override;
+  void render(const Model& model, const ViewState& view, ui::Renderer& r) const noexcept override;
+  bool modal() const noexcept override { return true; }
+  Context context() const noexcept override { return Context::Events; }
+};
+extern const EventsOverlay kEventsOverlay;
 
 // The play mode list of the Wave screen (OS-INSTUI S4, Shift + F1 MODE): the eight play modes (play_mode.h) with the instrument's own marked. Up / Down and the encoder choose, F1 sets the chosen one through
 // the validating action (project_state.cpp play_mode_set: a refusal says why on the strip), F8 closes. Modal, context `playmode`.
@@ -220,6 +264,23 @@ class SongToolsOverlay final : public Overlay {
   Context context() const noexcept override { return Context::SongTools; }
 };
 extern const SongToolsOverlay kSongToolsOverlay;
+
+// The Pattern screen's TOOLS dialog (OS-PTOOLS2 S2, pattern_tools_view.h; S3p: the right-hand panel, x 500..800, beside the narrowed grid so the
+// block stays visible while the dialog is open): the OP row (TRANSPOSE, INSTRUMENT, CLEAR), the OP's value row (AMOUNT / TO / WHAT), the footer naming
+// the target and counting its steps and notes, the keys. Modal, context `patterntools`. It owns the F-key row (F1 APPLY, F8 BACK: its prompt in key_prompt.cpp), the screen under it
+// drawing none (ViewState::overlay_keys).
+class PatternToolsOverlay final : public Overlay {
+ public:
+  constexpr PatternToolsOverlay() noexcept = default;
+  ui::Rect rect(const ui::Theme& theme) const noexcept override;
+  void render(const Model& model, const ViewState& view, ui::Renderer& r) const noexcept override;
+  bool modal() const noexcept override { return true; }
+  Context context() const noexcept override { return Context::PatternTools; }
+};
+extern const PatternToolsOverlay kPatternToolsOverlay;
+// OS-PTOOLS2 S6: a small app opened from TOOLS (ViewState::modules.panel) in the same panel: its declared rows (the host draws them from the descriptors, the app keeps the input), the footer naming
+// the target block and the count, and a line of hints. Drawn by ModuleAppScreen::render over the Pattern screen's narrowed grid; the F-key row is the app's own (that screen paints it).
+void draw_tools_app_panel(const Model& model, const ViewState& view, ui::Renderer& r) noexcept;
 
 // The progress of a running WAV export (OS-WAVEXP, export_view.h): the file being made, the pass, a bar of the export source's own account and F8 CANCEL. Modal, context `exportprogress`: every
 // other key, the pads and the transport are swallowed (the export renders the live model, so nothing may change under it). Its F-key row is the dialog's own (F8 CANCEL, its prompt in key_prompt.cpp).

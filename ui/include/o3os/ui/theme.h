@@ -140,6 +140,11 @@ inline constexpr ContrastPair kContrastPairs[] = {
     {Color::Rec, Color::Pane, PairRole::Large},
     {Color::Rec, Color::Chrome, PairRole::Large},
     {Color::SelText, Color::Rec, PairRole::Text},
+
+    // A multi-track block (OS-SELTINT): the tracks other than the cursor's are tinted SelDim, a little duller than Sel (a desaturated blue, not a darker one, so that it still holds
+    // 3:1 against the pane in every theme); the text of those tracks is SelText.
+    {Color::SelDim, Color::Pane, PairRole::Large},
+    {Color::SelText, Color::SelDim, PairRole::Text},
 };
 inline constexpr unsigned kContrastPairCount = sizeof(kContrastPairs) / sizeof(kContrastPairs[0]);
 

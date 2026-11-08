@@ -48,6 +48,14 @@ struct Expect {
   };
   std::vector<Page> pages;
   std::vector<std::pair<unsigned, std::string>> labels;
+  // ABI 1.12 (OS-INSFX-ABI2 A2): the lines "stereo none|capable|widens" and "preset K COUNT v0 .. vN NAME"
+  std::string stereo = "none";
+  bool rate = false;  // ABI 1.13 (OS-MODRATE S2): the line "rate 0|1": an instrument that renders at the half and quarter rate (fx_flags O3M_FX_RATE)
+  struct Preset {
+    std::string name;
+    std::vector<float> values;
+  };
+  std::vector<Preset> presets;
   bool ok = false;
 };
 
@@ -70,6 +78,23 @@ Expect read_expect(const std::string& path) {
       e.views = static_cast<unsigned>(std::atoi(line.c_str() + 6));
     } else if (line.rfind("pitch ", 0) == 0) {
       e.pitch = std::atoi(line.c_str() + 6) != 0;
+    } else if (line.rfind("rate ", 0) == 0) {
+      e.rate = std::atoi(line.c_str() + 5) != 0;
+    } else if (line.rfind("stereo ", 0) == 0) {
+      e.stereo = line.substr(7);
+    } else if (line.rfind("preset ", 0) == 0) {
+      std::istringstream ss(line.substr(7));
+      unsigned k = 0, count = 0;
+      ss >> k >> count;
+      Expect::Preset pr;
+      for (unsigned i = 0; i < count; ++i) {
+        std::string v;
+        ss >> v;
+        pr.values.push_back(std::strtof(v.c_str(), nullptr));
+      }
+      ss >> std::ws;
+      std::getline(ss, pr.name);
+      e.presets.push_back(pr);
     } else if (line.rfind("page ", 0) == 0) {
       std::istringstream ss(line.substr(5));
       unsigned k = 0, first = 0;
@@ -211,6 +236,38 @@ void round_trip(const char* stem, const char* sub, unsigned header_kind) {
   } else {
     CHECK((m->ext.pitch == 0u && m->ext.pages == 0u && m->ext.page_count == 0u && m->ext.labels == 0u));
   }
+  // ABI 1.12: the fourth tail as read_desc reads it (the loader does not keep it): the stereo render, fx_flags and the factory presets against the generator's lines
+  if (e.abi_minor >= static_cast<unsigned>(kStereoAbiMinor)) {
+    Desc32 d;
+    DescExt32 ext;
+    DescImp32 imp;
+    DescFx32 fx;
+    NEED(read_desc(m->header, m->place, d, &ext, &imp, &fx) == Status::Ok);
+    CHECK((fx.render_st != 0u) == (e.stereo != "none"));
+    CHECK(fx.fx_flags == ((e.stereo == "widens" ? static_cast<std::uint32_t>(O3M_FX_WIDENS) : 0u) | (e.rate ? static_cast<std::uint32_t>(O3M_FX_RATE) : 0u)));
+    CHECK(fx.preset_count == e.presets.size());
+    const std::uint8_t* table = fx.preset_count != 0u ? resolve(m->header, m->place, fx.presets, fx.preset_count * static_cast<std::uint32_t>(sizeof(Preset32))) : nullptr;
+    for (std::size_t k = 0; k < e.presets.size() && table != nullptr; ++k) {
+      Preset32 pr;
+      std::memcpy(&pr, table + k * sizeof pr, sizeof pr);
+      CAPTURE(k);
+      const std::uint8_t* pname = resolve(m->header, m->place, pr.name, 1);
+      NEED(pname != nullptr);
+      CHECK(e.presets[k].name == reinterpret_cast<const char*>(pname));
+      CHECK(pr.count == e.presets[k].values.size());
+      const std::uint8_t* values = resolve(m->header, m->place, pr.values, pr.count * 4u);
+      NEED(values != nullptr);
+      for (std::uint32_t i = 0; i < pr.count && i < e.presets[k].values.size(); ++i) {
+        float v;
+        std::memcpy(&v, values + 4u * i, sizeof v);
+        CHECK(v == e.presets[k].values[i]);
+      }
+    }
+  } else {
+    CHECK(e.stereo == "none");
+    CHECK_FALSE(e.rate);
+    CHECK(e.presets.empty());
+  }
   fs::remove_all(root);
 }
 
@@ -220,7 +277,7 @@ TEST_CASE("sdk round trip: the TB-303, the worked example: its manifest is what 
 
 TEST_CASE("sdk round trip: the Chip and the FM (ABI 1.8): pitch, pages and labels as the generator says they are") {
   round_trip("chip", "instruments", O3M_KIND_INSTRUMENT);
-  round_trip("fm", "instruments", O3M_KIND_INSTRUMENT);
+  round_trip("fm", "instruments", O3M_KIND_INSTRUMENT);  // (FM is also ABI 1.13 with the RATE flag: the generator's "rate 1" line)
 }
 
 TEST_CASE("sdk round trip: the instrument template") { round_trip("example_instrument", "instruments", O3M_KIND_INSTRUMENT); }
@@ -228,3 +285,11 @@ TEST_CASE("sdk round trip: the instrument template") { round_trip("example_instr
 TEST_CASE("sdk round trip: the effect template") { round_trip("example_effect", "effects", O3M_KIND_EFFECT); }
 
 TEST_CASE("sdk round trip: the app template") { round_trip("example_app", "apps", O3M_KIND_APP); }
+
+TEST_CASE("sdk round trip: the stereo effect template (ABI 1.12): render_st, WIDENS, two factory presets and the parameters as the generator says they are") {
+  round_trip("example_stereo", "effects", O3M_KIND_EFFECT);
+}
+
+TEST_CASE("sdk round trip: the sidechain effect template (ABI 1.12): stereo-capable, a key parameter and the parameters as the generator says they are") {
+  round_trip("example_key", "effects", O3M_KIND_EFFECT);
+}

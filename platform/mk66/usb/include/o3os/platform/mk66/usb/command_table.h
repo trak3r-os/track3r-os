@@ -8,57 +8,63 @@
 // `flash`, `boot` or `write` is added. `ogexp` (OS-FILES-C C2a) makes files on the card too, but only through the save layer: the card guard's rows for Export/<name> OG (hal/save_guard.h),
 // the card gate and the atomic save, one new folder per export, nothing ever replaced or removed; it never reaches the bootloader.
 
+#include <o3os/platform/mk66/console_text_ids.h>
+
 #include <cstddef>
 #include <cstdint>
 
 namespace o3os::platform::mk66::console {
 
-enum class Cmd : unsigned { Help, Version, Stage, Cpu, Mem, Crash, Usb, Log, Input, Mix, Mon, Peek, Poke, Audio, Rot, Sd, Ls, Load, Inst, Mod, Reset, Fw, Radio, Voices, Key, Pad, Enc, State, Shot, Leds, Bench, Cache, Ogexp, Power, Disk, Guard, Ins, Status, Count };
+enum class Cmd : unsigned { Help, Version, Stage, Cpu, Mem, Crash, Usb, Log, Input, Mix, Mon, Peek, Poke, Audio, Rot, Sd, Ls, Load, Inst, Mod, Reset, Fw, Radio, Voices, Key, Pad, Enc, State, Shot, Leds, Bench, Cache, Ogexp, Power, Disk, Guard, Ins, Status, Trans, Mtc, Ptfx, Scratch, Count };
 
 struct CommandInfo {
   const char* name;
-  const char* help;  // one line, at most 70 characters
+  std::uint16_t help;  // the id of the one-line help (txt::help_<name>, text/console_text.txt; text(help) is the text), at most 70 characters
 };
 
 inline constexpr CommandInfo kCommandInfo[] = {
-    {"help", "list the commands"},
-    {"version", "build identity and USB identity"},
-    {"stage", "boot/run stage, uptime, why the chip reset"},
-    {"cpu", "cpu [reset|perf off]: audio load: cycles per stage, underruns, jitter"},
-    {"mem", "memory map, SRAM budgets, free SRAM"},
-    {"crash", "the crash record the previous run left"},
-    {"usb", "usb [audio|mode|profile|map ..]: counters, AUDIO mode, stem map"},
-    {"log", "log [count]: the last lines boot code and drivers wrote"},
-    {"input", "input [stats]: live input events (any key stops)"},
-    {"mix", "audio meters (dBFS) and limiter gain reduction; MAIN is pre-limiter"},
-    {"mon", "mon [off|on|0..100]: line-in monitor level (0 = off, on = 70)"},
-    {"peek", "peek <hexaddr> [1..16]: read 32-bit words (clocked modules only)"},
-    {"poke", "poke <hexaddr> <hexvalue>: write one word, I2S0 registers only"},
-    {"audio", "audio start: retry the audio bring-up after a boot failure"},
-    {"rot", "rot <0..7>: set REG_ROTATE now (display orientation, not saved)"},
-    {"sd", "sd [mount]: the SD card (slot, mount, identity, speed, counters)"},
-    {"ls", "ls [path]: list a directory of the card (read only)"},
-    {"load", "load [folder]: read an OG project folder (default Workspace)"},
-    {"inst", "inst <1..64>: what instrument n plays (start, len, loop, root, vol)"},
-    {"mod", "mod [load|bind|note|off|set|gov|notice ..]: SD and built-in modules"},
-    {"reset", "mute the outputs, then restart the unit"},
-    {"fw", "fw [put|rm|arm|update ..]: firmware files on the SD card (OS-006c)"},
-    {"radio", "radio [retry]: FM radio state, last failure, registers, pins"},
-    {"voices", "sampler voices: in use, peak, steals, advanced spans (OS-VOX)"},
-    {"key", "key <button> [tap|down|up|hold <ms>]: inject a button press"},
-    {"pad", "pad <0..47> [tap|down|up] [vel]: inject a pad press"},
-    {"enc", "enc <n> | accel [off|t1 t2 [ms]]: n detents; list acceleration"},
-    {"state", "app state as one key=value line (screen, cursor, play, ...)"},
-    {"shot", "shot [565|8888 [w]] [pclk0]: the screen as framed base64 (o3console)"},
-    {"leds", "leds: pad LED levels as the driver holds them, one line"},
-    {"bench", "bench <kernel|all|disk reset> [blocks]: cycles/block (bench image)"},
-    {"cache", "cache [on|off|inv|check]: the code cache (LMEM): state, switch, check"},
-    {"ogexp", "ogexp [status|cancel]: the project as an OG folder in Export/<name> OG"},
-    {"power", "power [press|release|pin|off [dry]]: the Power switch and the shutdown"},
-    {"disk", "disk [share [ro]|eject]: give the card to the computer, take it back"},
-    {"guard", "guard [n <1..255>]: the main-loop guard's window (OS-MAINGUARD)"},
-    {"ins", "ins [list|bind t s mod|unbind t s|bypass t s on|off] (bind loads mod)"},
-    {"status", "status [blink|off]: the status LED heartbeat (not saved)"},
+    {"help", txt::help_help},
+    {"version", txt::help_version},
+    {"stage", txt::help_stage},
+    {"cpu", txt::help_cpu},
+    {"mem", txt::help_mem},
+    {"crash", txt::help_crash},
+    {"usb", txt::help_usb},
+    {"log", txt::help_log},
+    {"input", txt::help_input},
+    {"mix", txt::help_mix},
+    {"mon", txt::help_mon},
+    {"peek", txt::help_peek},
+    {"poke", txt::help_poke},
+    {"audio", txt::help_audio},
+    {"rot", txt::help_rot},
+    {"sd", txt::help_sd},
+    {"ls", txt::help_ls},
+    {"load", txt::help_load},
+    {"inst", txt::help_inst},
+    {"mod", txt::help_mod},
+    {"reset", txt::help_reset},
+    {"fw", txt::help_fw},
+    {"radio", txt::help_radio},
+    {"voices", txt::help_voices},
+    {"key", txt::help_key},
+    {"pad", txt::help_pad},
+    {"enc", txt::help_enc},
+    {"state", txt::help_state},
+    {"shot", txt::help_shot},
+    {"leds", txt::help_leds},
+    {"bench", txt::help_bench},
+    {"cache", txt::help_cache},
+    {"ogexp", txt::help_ogexp},
+    {"power", txt::help_power},
+    {"disk", txt::help_disk},
+    {"guard", txt::help_guard},
+    {"ins", txt::help_ins},
+    {"status", txt::help_status},
+    {"trans", txt::help_trans},
+    {"mtc", txt::help_mtc},
+    {"ptfx", txt::help_ptfx},
+    {"scratch", txt::help_scratch},
 };
 static_assert(sizeof(kCommandInfo) / sizeof(kCommandInfo[0]) == static_cast<std::size_t>(Cmd::Count), "one row per Cmd");
 

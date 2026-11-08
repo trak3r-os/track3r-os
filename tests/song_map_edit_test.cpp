@@ -255,13 +255,13 @@ TEST_CASE("song map: every active track has a cell while the cursor is in the ma
     CHECK(browse == 0u);
     rig.enter_map(shape.tracks - 1);  // the last track
     CHECK(rig.song().track() == static_cast<int>(shape.tracks) - 1);
-    // in the map each empty cell of the 3 rows is a 10 x 2 tick, but the cursor's own (the last track of slot 0) is its box
+    // in the map each empty cell of the 3 rows is a 20 x 2 tick (OS-SONG3 Q1b: a cell is two characters wide), but the cursor's own (the last track of slot 0) is its box
     const unsigned empties = (shape.tracks - shape.used) * 3u - 1u;
-    CHECK(pixels_at_right(rig, ui::Color::Empty) == empties * 10u * 2u);
+    CHECK(pixels_at_right(rig, ui::Color::Empty) == empties * 20u * 2u);
     // a selected cell is on the band: the rectangle of the last two tracks over all 3 slots has no tick of its own
     rig.shift_tap(Button::Left);
     rig.shift_tap(Button::Down, 2);
-    CHECK(pixels_at_right(rig, ui::Color::Empty) == ((shape.tracks - shape.used) * 3u - 6u) * 10u * 2u);
+    CHECK(pixels_at_right(rig, ui::Color::Empty) == ((shape.tracks - shape.used) * 3u - 6u) * 20u * 2u);
   }
 }
 
@@ -1497,4 +1497,62 @@ TEST_CASE("song move: a move takes a question that is up back, and the move is m
   CHECK_FALSE(rig.state().song.ask.live);
   CHECK(rig.order() == Order{2, 1, 1});
   CHECK(rig.step(1, 0).note == note_of(1, 0));  // nothing was cleared
+}
+
+// OS-SONG3 S3: a muted track's map cell is dim, the same rule as TIMELINE's lanes: the track's own mute flag (kTrackMute) only, never a solo silences anything here.
+TEST_CASE("song map: a muted track's cells are TextDim, the unmuted tracks' stay Instr, a soloed track's stay Instr (OS-SONG3 S3)") {
+  Rig rig({1, 2, 3});
+  const unsigned instr = pixels_at_right(rig, ui::Color::Instr);
+  const unsigned dim = pixels_at_right(rig, ui::Color::TextDim);
+  CHECK(instr > 0u);  // every track holds a note on step 0: every cell is a Note cell in Instr
+  model::TrackSlot ts = *rig.project().track(1);
+  ts.flags |= model::kTrackMute;  // track 2 of 4 is muted
+  (void)rig.project().set_track(1, ts);
+  CHECK(pixels_at_right(rig, ui::Color::Instr) < instr);  // the muted track's cells went dim
+  CHECK(pixels_at_right(rig, ui::Color::TextDim) > dim);
+  ts.flags = model::kTrackSolo;  // a solo, no mute: the rule reads kTrackMute only
+  (void)rig.project().set_track(1, ts);
+  CHECK(pixels_at_right(rig, ui::Color::Instr) == instr);  // nothing dimmed
+  CHECK(pixels_at_right(rig, ui::Color::TextDim) == dim);
+}
+
+// OS-SONG3 S3 (spec line 179): while the song plays, a thin Play line under the PAT tile of the playing row runs with the playhead through the slot's pattern, exactly as wide as the step it is on; stopped, there is none.
+TEST_CASE("song list: the playing row's progress line under the PAT tile is exactly as wide as the step it is on, only while playing (OS-SONG3 S3)") {
+  Rig rig({1, 2, 3});
+  const ui::Theme& theme = ui::theme(rig.state().theme);
+  const int hex_w = 2 * theme.geometry(ui::Face::Data).cell_w;  // the PAT tile's width
+  const auto play_pixels = [&] {
+    sim::EveRaster raster;
+    sim::RasterDisplay display{raster};
+    CHECK(sim::load_assets(display) == hal::UploadResult::Ok);
+    eve::DisplayListBuffer storage;
+    eve::DisplayListBuilder builder(display, storage.words, eve::kMaxDisplayListWords);
+    ui::Renderer r(builder, theme);
+    CHECK(r.begin(ui::Color::Pane));
+    app::kSongScreen.render(rig.app->model(), rig.state(), r, ui::Rect{0, 0, 0, 0});
+    CHECK(r.end());
+    const ui::Rgb& want = theme.rgb(ui::Color::Play);
+    unsigned n = 0;
+    for (int y = 0; y < 480; ++y) {
+      for (int x = 40; x < 200; ++x) {  // the PAT column (the play marker's icon and the transport badge are outside or baseline)
+        const std::uint8_t* p = raster.rgba() + (static_cast<std::size_t>(y) * 800 + static_cast<std::size_t>(x)) * 4;
+        n += p[0] == want.r && p[1] == want.g && p[2] == want.b ? 1u : 0u;
+      }
+    }
+    return n;
+  };
+  CHECK(play_pixels() == 0u);  // stopped: no line
+  rig.position.publish(true, 2, 0, 12000, 1, 0);  // slot 1 plays pattern 2, step 0 of 16: the line is empty, the rest of the frame is the baseline
+  rig.pass();
+  const unsigned at0 = play_pixels();
+  rig.position.publish(true, 2, 8, 12000, 1, 0);  // step 8 of 16: halfway
+  rig.pass();
+  const unsigned half = play_pixels();
+  CHECK(half - at0 == static_cast<unsigned>(2 * (hex_w * 8 / 16)));  // exactly half the tile wide, two pixels high
+  rig.position.publish(true, 2, 15, 12000, 1, 0);  // step 15 of 16: nearly the whole tile
+  rig.pass();
+  CHECK(play_pixels() - at0 == static_cast<unsigned>(2 * (hex_w * 15 / 16)));
+  rig.position.publish(false, 2, 8, 12000, 1, 0);
+  rig.pass();
+  CHECK(play_pixels() == 0u);  // stopped: the line is gone
 }

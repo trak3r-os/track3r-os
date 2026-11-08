@@ -544,3 +544,51 @@ TEST_CASE("song_time oracle: the map equals the offline sequencer's step samples
     oracle_song(p, seq::PlayMode::Pattern, 1, exact_sample(48u * 40u, 20000), 40u);
   }
 }
+
+// OS-MTC B3 (the chase starts a run AT a step): the state before the step's own FX, the swing pair's parity, and the walk that does not loop (a time past the song's end is `past_end`, Q9 a).
+TEST_CASE("song_time: tempo_in, swing_in and the pair's parity are the state before the step's FX; loop = false ends the walk at the end of the order list") {
+  model::Project& p = proj(12000);
+  CHECK(p.create_pattern(1, 16) == model::Status::Ok);
+  CHECK(p.create_pattern(2, 16) == model::Status::Ok);
+  CHECK(p.set_step(1, 0, 3, fx_step(fx::kTempo, 70)) == model::Status::Ok);   // 140 BPM from step 3
+  CHECK(p.set_step(1, 0, 5, fx_step(fx::kSwing, 60)) == model::Status::Ok);   // swing 60 from step 5
+  CHECK(p.append_order(1) == model::Status::Ok);
+  CHECK(p.append_order(2) == model::Status::Ok);
+  const seq::SongPoint s2 = seq::song_time_at(p, seq::PlayMode::Song, 0, 2);
+  CHECK(s2.tempo_x100 == 12000u);
+  CHECK(s2.tempo_in_x100 == 12000u);
+  const seq::SongPoint s3 = seq::song_time_at(p, seq::PlayMode::Song, 0, 3);
+  CHECK(s3.tempo_x100 == 14000u);     // after its row: the step that holds the FX already plays at it
+  CHECK(s3.tempo_in_x100 == 12000u);  // before it: what a run that starts here must be given, its own row sets 140 again
+  const seq::SongPoint s4 = seq::song_time_at(p, seq::PlayMode::Song, 0, 4);
+  CHECK(s4.tempo_in_x100 == 14000u);
+  const seq::SongPoint s5 = seq::song_time_at(p, seq::PlayMode::Song, 0, 5);
+  CHECK(s5.swing == 60u);
+  CHECK(s5.swing_in == 50u);
+  CHECK(seq::song_time_at(p, seq::PlayMode::Song, 0, 6).swing_in == 60u);
+  // the pair's parity counts steps from the run start
+  for (std::uint32_t n = 0; n < 16; ++n) {
+    CHECK_MESSAGE(seq::song_time_at(p, seq::PlayMode::Song, 0, n).odd == ((n % 2u) == 1u), n);
+  }
+  CHECK(seq::song_time_at(p, seq::PlayMode::Song, 1, 0).odd == false);  // 16 steps before it: even
+  CHECK(seq::song_time_at(p, seq::PlayMode::Song, 1, 3).odd == true);
+  // loop = false: a time inside the song is the same answer, a time past its end is past_end
+  const core::Q32 end = seq::song_time_at(p, seq::PlayMode::Song, 1, 15).time;
+  const seq::SongPoint in = seq::song_position_at(p, seq::PlayMode::Song, 0, end, false);
+  CHECK_FALSE(in.past_end);
+  CHECK(in.order == 1u);
+  CHECK(in.step == 15u);
+  const seq::SongPoint within_last = seq::song_position_at(p, seq::PlayMode::Song, 0, end + 1u, false);  // inside the last step, after its start: no step starts after it
+  CHECK(within_last.past_end);
+  const seq::SongPoint way_past = seq::song_position_at(p, seq::PlayMode::Song, 0, end * 3u, false);
+  CHECK(way_past.past_end);
+  CHECK_FALSE(way_past.capped);
+  // loop = true (the default) is A1's walk: the song's loop, the same step as the first slot's
+  const seq::SongPoint looped = seq::song_position_at(p, seq::PlayMode::Song, 0, end * 3u);
+  CHECK_FALSE(looped.past_end);
+  CHECK_FALSE(looped.capped);
+  // Pattern mode loops the pattern whatever `loop` says (Q10)
+  const seq::SongPoint pat = seq::song_position_at(p, seq::PlayMode::Pattern, 2, end * 3u, false);
+  CHECK_FALSE(pat.past_end);
+  CHECK_FALSE(pat.capped);
+}

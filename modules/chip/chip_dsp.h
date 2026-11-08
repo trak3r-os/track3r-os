@@ -6,6 +6,9 @@
 // Block based and float only. The oscillators run per sample; everything that needs an exp2 (the pitch) runs every kControl samples ("control rate", 1378 Hz at 44.1 kHz).
 // The pulse is band-limited with PolyBLEP unless "Raw Edges" is on (the naive pulse of a real chip, aliasing included). Noise is a sample-and-hold of the LFSR, clocked at
 // 16 x the note's frequency (never faster than the sample rate). All state is in Voice (the instance block); there are no globals and no statics.
+//
+// Waves 4..11 (OS-CECHIP) are a port of tracker-ce's CHIP engine, in chip_ce.h (MIT, with the notice of LICENSE-tracker-ce.txt); they run on a cold path outside the loops below, which are
+// those of waves 0..3, unchanged.
 #pragma once
 
 #include <o3module.h>
@@ -48,6 +51,20 @@ inline float blep(float t, float dt, float inv) {
   return 0.0f;
 }
 
+// The post chain's state (OS-CECHIP C3, chip_ce.h): the sub oscillator's phase, the decimator's counter and held sample, the state-variable lowpass.
+struct Post {
+  float sub_ph, held, low, band;
+  uint32_t cnt;
+};
+
+// The engine's models' own state (OS-CECHIP C4, C5): the original's oscillator phases beyond the main one, the noise clock and its register, the drum's pitch decay.
+struct Osc {
+  float p2, p3;          // Super Square's second and third pulse; FM BELL's modulator and CHIP DRUM's body (the original shares osc2Phase between them)
+  float lfsr_ph;         // NOISE/LFSR: the phase of the register's clock
+  uint32_t lfsr;         // the original's 15-bit register (NOISE/LFSR and the drum's noise), reseeded to 0x7FFF at a note
+  float drum_d, drum_k;  // CHIP DRUM: the pitch decay exp(-age / (0.08 sr)) (policy Fast: from the host's exp2 at each control point, then the recurrence d *= k, k = exp(-1 / (0.08 sr)))
+};
+
 // What an instance holds (the manifest's state_bytes is the room: static_assert in chip.cpp).
 struct Voice {
   const o3m_host* host;
@@ -73,6 +90,20 @@ struct Voice {
   float sweep, sweep_ms, sweep_cur, sweep_dec;
   float vib_depth, vib_step, vib_ph, vib_amp, vib_ramp;
   uint32_t ctl;  // samples until the next control update
+  // OS-CECHIP: waves 4..11 and the parameters 20..29. path: the wave for 0..3 (today's loops), 4 for the engine's waves (chip_ce.h).
+  uint32_t path, age;           // age: samples since the note started (Zap's drop)
+  float inv_sr;                 // 1 / sample rate
+  float ce_shape;               // Shape / 100: the original's Shape (duty base, Zap's depth)
+  float pwm_base, pwm_k, pwm_step, pwm_ph;  // PWM: 0.125 + 0.75 shape, 0.38 depth, rate / sample rate, the LFO's phase
+  float pwm_depth;              // PWM Depth / 100: the original's value (the noise's clock and the FM index read it)
+  float sub, cutoff, resonance, env_amt;  // the post chain's parameters (Sub Osc / 100, Cutoff in Hz, Resonance / 100, Env Amt / 100; Bitcrush and Decimate are crush_scale and dec_n below)
+  Post post;                    // its state
+  float svf_f, svf_q;           // the lowpass's coefficient at the last control point (0: the filter is skipped, as the original skips it) and its damping
+  float crush_scale, inv_crush;  // 2^(bits - 1) and its inverse when Bitcrush is below 15.5 bits
+  uint32_t crush_on, dec_n;     // Bitcrush below 15.5 bits; the decimation factor 1..32
+  uint32_t chord;               // Chord 0..7
+  float arp_off[4];             // the arpeggio's offsets from the note: 0, Arp 1, Arp 2, 0 or a chord's four steps
+  Osc osc;                      // the engine's models' own state
 };
 
 namespace detail {
@@ -134,8 +165,8 @@ inline void advance(Voice& v) {
 }
 
 // ---- control rate -------------------------------------------------------------------------------------------------------------------------------------
-// The pitch: note + tune + arpeggio + sweep + vibrato, at control rate. The host's exp2 is the only call out.
-inline void control(Voice& v) {
+// The pitch: note + tune + arpeggio (or chord) + sweep + vibrato, at control rate: the sum in semitones, advancing the arpeggio, the sweep and the vibrato. The host's exp2 is the caller's.
+inline float pitch_semitones(Voice& v) {
   float off = 0.0f;
   if (v.arp_len > 1u) {
     v.arp_acc += v.arp_step;  // at most 120 steps a second at 32-sample ticks: never two steps in one tick
@@ -143,7 +174,7 @@ inline void control(Voice& v) {
       v.arp_acc -= 1.0f;
       v.arp_idx = v.arp_idx + 1u >= v.arp_len ? 0u : v.arp_idx + 1u;
     }
-    off = v.arp_idx == 0u ? 0.0f : (v.arp_idx == 1u ? v.arp1 : v.arp2);
+    off = v.arp_off[v.arp_idx];  // [0] is 0, [1] Arp 1, [2] Arp 2 (a chord: its four steps)
   }
   float sw = v.sweep_cur;
   if (sw > v.sweep_dec) {
@@ -163,7 +194,13 @@ inline void control(Voice& v) {
   const float vib = (4.0f * a - 1.0f) * v.vib_depth * v.vib_amp;  // a triangle, -1..1, zero at phase 0.25
   const float host = v.host_off;  // the host's ramp (ABI 1.8): the offset now, then the next period's
   v.host_off = host + v.host_slope;
-  float inc = v.inc_unit * v.host->exp2_f((v.note + v.transpose + v.fine + off + sw + vib + host) * (1.0f / 12.0f));
+  return v.note + v.transpose + v.fine + off + sw + vib + host;
+}
+
+// The control update of waves 0..3, at the control rate: the pitch sum through the host's exp2. Out of line, as the compiler had it before OS-CECHIP (inlined into render() it would add 670 B to the
+// hot part). The engine's waves have chip_ce.h's.
+__attribute__((noinline)) inline void control(Voice& v) {
+  float inc = v.inc_unit * v.host->exp2_f(pitch_semitones(v) * (1.0f / 12.0f));
   inc = inc > 0.45f ? 0.45f : inc;  // below Nyquist whatever the transposition
   v.inc = inc;
   v.inv_inc = 1.0f / inc;
@@ -171,9 +208,49 @@ inline void control(Voice& v) {
   v.nclk = nclk > 1.0f ? 1.0f : nclk;
 }
 
+}  // namespace chip
+
+#include "chip_ce.h"  // OS-CECHIP: waves 4..11 and the post chain (the engine's port); needs Voice, advance(), pitch_semitones() and control() above
+
+namespace chip {
+
+// The control update of the wave's path (a note's start; a sliding note).
+inline void control_any(Voice& v) {
+  if (v.path < 4u) {
+    control(v);
+  } else {
+    ce::control(v);
+  }
+}
+
 // ---- parameters ---------------------------------------------------------------------------------------------------------------------------------------
+// The two noise waves (and no other: the engine's waves 4..11 have their own level) take the noise gain.
 inline void derive_gain(Voice& v) {
-  v.gain = v.volume * (1.0f - v.vel_sens * (1.0f - v.velocity)) * (v.wave >= kNoiseLong ? kNoiseGain : 1.0f);
+  v.gain = v.volume * (1.0f - v.vel_sens * (1.0f - v.velocity)) * (v.wave == kNoiseLong || v.wave == kNoiseShort ? kNoiseGain : 1.0f);
+}
+
+// The path: the wave for 0..3 (today's loops) while the post chain is off and the wave is 0..3, else 4 (chip_ce.h). The post chain is off at the defaults: Sub Osc 0, Cutoff 18000 with Resonance 0 and
+// Env Amt 0 (the original skips its filter then), Bitcrush 16, Decimate 1. A filter whose cutoff the envelope moves (Env Amt not 0) is on.
+inline void refresh_path(Voice& v) {
+  const bool post = v.sub > 0.001f || v.crush_on != 0u || v.dec_n > 1u || v.env_amt != 0.0f || v.resonance > 0.02f || v.cutoff < 17500.0f;
+  v.path = (v.wave >= 4u || post) ? 4u : v.wave;
+}
+
+// The arpeggio's offsets and length: a chord's four steps when Chord is not Off or the wave is ARP CHORD (which plays Major while Chord is Off), else Arp 1 and Arp 2 as before.
+inline void refresh_arp(Voice& v) {
+  const uint32_t c = v.chord != 0u ? v.chord : (v.wave == ce::kArpChord ? ce::kChordMajor : 0u);
+  if (c != 0u) {
+    for (uint32_t k = 0; k < 4u; ++k) {
+      v.arp_off[k] = static_cast<float>(ce::kChords[c][k]);
+    }
+    v.arp_len = 4u;
+  } else {
+    v.arp_off[0] = 0.0f;
+    v.arp_off[1] = v.arp1;
+    v.arp_off[2] = v.arp2;
+    v.arp_off[3] = 0.0f;
+    v.arp_len = v.arp2 != 0.0f ? 3u : (v.arp1 != 0.0f ? 2u : 1u);
+  }
 }
 
 // The OS does not clamp: every value is held to the manifest's range here (a stored blob can hold anything, NaN included), and the whole-number ones rounded.
@@ -190,7 +267,9 @@ inline void voice_set_param(Voice& v, uint32_t id, float value) {
   switch (id) {
     case CHIP_PARAM_WAVE:
       v.wave = static_cast<uint32_t>(value);
+      refresh_path(v);
       derive_gain(v);
+      refresh_arp(v);
       break;
     case CHIP_PARAM_DUTY: {
       const uint32_t i = static_cast<uint32_t>(value);
@@ -231,9 +310,51 @@ inline void voice_set_param(Voice& v, uint32_t id, float value) {
       } else {
         v.arp2 = value;
       }
-      v.arp_len = v.arp2 != 0.0f ? 3u : (v.arp1 != 0.0f ? 2u : 1u);
+      refresh_arp(v);
       break;
     case CHIP_PARAM_ARP_SPEED: v.arp_step = value * static_cast<float>(kControl) * 0.001f / rate_ms; break;
+    // OS-CECHIP: the original's parameters, in the original's units (the manifest's percent is /100). Shape, PWM and Chord shape the new waves (Chord every wave); the post chain's
+    // parameters (Sub Osc, Cutoff, Resonance, Bitcrush, Env Amt, Decimate) are held here for slice C3.
+    case CHIP_PARAM_SHAPE:
+      v.ce_shape = value * 0.01f;
+      v.pwm_base = 0.125f + 0.75f * v.ce_shape;
+      break;
+    case CHIP_PARAM_SUB_OSC:
+      v.sub = value * 0.01f;
+      refresh_path(v);
+      break;
+    case CHIP_PARAM_CUTOFF:
+      v.cutoff = value;
+      refresh_path(v);
+      break;
+    case CHIP_PARAM_RESONANCE:
+      v.resonance = value * 0.01f;
+      v.svf_q = detail::clampf(1.0f - 0.85f * v.resonance, 0.12f, 1.0f);
+      refresh_path(v);
+      break;
+    case CHIP_PARAM_BITCRUSH:
+      v.crush_on = value < 15.5f ? 1u : 0u;
+      v.crush_scale = v.crush_on != 0u ? v.host->exp2_f(value - 1.0f) : 32768.0f;
+      v.inv_crush = 1.0f / v.crush_scale;
+      refresh_path(v);
+      break;
+    case CHIP_PARAM_PWM_DEPTH:
+      v.pwm_depth = value * 0.01f;
+      v.pwm_k = 0.38f * v.pwm_depth;
+      break;
+    case CHIP_PARAM_PWM_RATE: v.pwm_step = value * v.inv_sr; break;
+    case CHIP_PARAM_ENV_AMT:
+      v.env_amt = value * 0.01f;
+      refresh_path(v);
+      break;
+    case CHIP_PARAM_DECIMATE:
+      v.dec_n = static_cast<uint32_t>(value);  // a whole number 1..32 (the manifest's INT range)
+      refresh_path(v);
+      break;
+    case CHIP_PARAM_CHORD:
+      v.chord = static_cast<uint32_t>(value);
+      refresh_arp(v);
+      break;
     default: break;
   }
 }
@@ -242,8 +363,12 @@ inline void voice_init(Voice& v, const o3m_host* host) {
   v.host = host;
   const float rate = host->sample_rate;
   v.rate_ms = rate * 0.001f;
+  v.inv_sr = 1.0f / rate;
   v.inc_unit = 440.0f / rate * host->exp2_f(-69.0f / 12.0f);
   v.lfsr = 1u;
+  v.osc.lfsr = ce::kLfsrSeed;
+  v.osc.drum_d = 1.0f;
+  v.osc.drum_k = host->exp2_f(-1.442695041f / (ce::kDrumTau * rate));  // exp(-1 / (0.08 sr)) = 2^(-log2(e) / (0.08 sr))
   v.nval = 1.0f;
   v.note = 69.0f;
   v.velocity = 1.0f;
@@ -261,7 +386,7 @@ inline void voice_note_on(Voice& v, uint32_t note, uint32_t velocity, bool slide
   v.host_slope = 0.0f;
   if (slide && v.stage != kOff) {
     v.note = static_cast<float>(note > 127u ? 127u : note);
-    control(v);
+    control_any(v);
     v.ctl = kControl;
     return;
   }
@@ -275,13 +400,21 @@ inline void voice_note_on(Voice& v, uint32_t note, uint32_t velocity, bool slide
   v.sweep_dec = v.sweep_ms > 0.0f ? sw * static_cast<float>(kControl) / (v.sweep_ms * v.rate_ms) : 0.0f;
   v.vib_ph = 0.25f;
   v.vib_amp = v.vib_ramp >= 1.0f ? 1.0f : 0.0f;
+  v.age = 0u;
+  v.osc.lfsr = ce::kLfsrSeed;  // the original reseeds its register at every note that is not a legato step (a slide returned above)
+  v.osc.drum_d = 1.0f;
   if (v.stage == kOff) {
     v.env = 0.0f;
     v.phase = 0.0f;
     v.nphase = 0.0f;
+    v.pwm_ph = 0.0f;
+    v.osc.p2 = 0.0f;
+    v.osc.p3 = 0.0f;
+    v.osc.lfsr_ph = 0.0f;
+    v.post = Post{};  // new Community OS behaviour: a fresh note starts the post chain clean (sub phase, decimator, held sample, lowpass); the original's onNoteOn never resets them
   }
   enter_attack(v);
-  control(v);
+  control_any(v);
   v.ctl = kControl;
 }
 
@@ -360,13 +493,17 @@ CHIP_INLINE void run(Voice& v, float* out, uint32_t n) {
   v.env = e;
 }
 
-// Fills `frames` samples; returns 1 while the voice may still sound.
+// Fills `frames` samples; returns 1 while the voice may still sound. The engine's waves (path 4) are one cold call, ce::render; below that the loop is waves 0..3's exactly as it was, and
+// the dispatch's last branch (NOISE SHORT) is reached by wave 3 alone.
 CHIP_INLINE uint32_t voice_render(Voice& v, float* out, uint32_t frames) {
   if (v.stage == kOff) {
     for (uint32_t i = 0; i < frames; ++i) {
       out[i] = 0.0f;
     }
     return 0;
+  }
+  if (v.path >= 4u) {
+    return ce::render(v, out, frames);
   }
   uint32_t done = 0;
   while (done < frames) {

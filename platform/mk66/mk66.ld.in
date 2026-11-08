@@ -89,7 +89,7 @@ SECTIONS
   {
     __ramfunc_l_start = .;
     *(EXCLUDE_FILE(*/src/bench.cpp.obj) .ramfunc_l EXCLUDE_FILE(*/src/bench.cpp.obj) .ramfunc_l.*)
-    */src/bench.cpp.obj(.ramfunc_l .ramfunc_l.*)   /* OS-CPULAYOUT F0: the bench's 36 B kernel after the others */
+    */src/bench.cpp.obj(.ramfunc_l .ramfunc_l.*)   /* OS-CPULAYOUT F0: kept so a bench kernel, if one is ever hot again, still lands after the others; since OS-CEWTENV W3a the bench carries no .ramfunc_l (its load kernel runs from flash) */
     . = ALIGN(4);
     __ramfunc_l_end = .;
   } > SRAM_L AT > FLASH :ramfunc

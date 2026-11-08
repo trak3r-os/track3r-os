@@ -6,6 +6,7 @@
 #include <doctest/doctest.h>
 
 #include "support/need.h"
+#include "support/static_slot.h"
 
 #include <o3os/app/actions.h>
 #include <o3os/app/app.h>
@@ -14,6 +15,7 @@
 #include <o3os/app/sample_bank.h>
 #include <o3os/audio/smoothing.h>
 #include <o3os/audio/voices.h>
+#include <o3os/audio/wt_contour.h>  // OS-CEWTENV W3a
 #include <o3os/core/action.h>
 #include <o3os/core/input_event.h>
 #include <o3os/core/param.h>
@@ -21,6 +23,7 @@
 #include <o3os/model/params.h>
 #include <o3os/platform/host/fakes.h>
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -582,4 +585,271 @@ TEST_CASE("live params: the LFO fields applied live to a descriptor are the rebu
     compared += why[0] == '\0' ? 1u : 0u;
   }
   CHECK(compared == 300u);
+}
+
+// OS-CEWTENV W3a (app): make_sample_desc maps a WT loop (exactly 2 or 3) on the cutoff slot to the WT kinds, with the contour, the warps and the sustain, and makes the
+// contour into the bound bank before the descriptor is staged; loop 0, 1 or a garbage byte never maps to a WT kind. W3b: the pan, the finetune and the position slots map the same way; the amp slot follows in W4.
+TEST_CASE("OS-CEWTENV W3a (app): make_sample_desc maps a WT loop on the cutoff to the WT kinds and makes the contour; loop 0, 1 or a garbage byte does not") {
+  static std::int16_t pcm[4000];
+  for (std::uint32_t i = 0; i < 4000; ++i) {
+    pcm[i] = static_cast<std::int16_t>((i % 128u) * 200 - 12800);
+  }
+  static audio::WtBank bank;  // .bss: 64 KiB never on a stack
+  audio::wt_bind(bank);
+  model::Instrument in;
+  model::init_instrument(in, model::InstrumentKind::Sample);
+  in.sampler.filter_enable = 1;
+  in.sampler.filter_type = 0;  // low-pass
+  in.sampler.cutoff = 0.5f;
+  in.sampler.resonance = 0.0f;
+  // slot 2 (the cutoff): loop 2 (WT Env), contour 37, bend 0x9C, sust 40, decay 500 ms, release 100 ms
+  in.sampler.envelope[2].loop = 2;
+  in.sampler.envelope[2].enable = 1;
+  in.sampler.envelope[2].decay = 500;
+  in.sampler.envelope[2].release = 100;
+  in.sampler.lfo[2].shape = 37;
+  in.sampler.lfo[2].speed = 9;
+  in.sampler.lfo[2].amount = 0.5f;
+  in.sampler.lfo[2].wt_bend = 0x9C;
+  in.sampler.lfo[2].wt_sust = 40;
+  // slot 1 (the pan): loop 3, a contour of 200 — W3b: the pan slot maps to the WT LFO with the contour, the warps and the sustain
+  in.sampler.envelope[1].loop = 3;
+  in.sampler.envelope[1].enable = 1;
+  in.sampler.lfo[1].shape = 200;
+  in.sampler.lfo[1].speed = 5;
+  in.sampler.lfo[1].amount = 0.3f;
+  in.sampler.lfo[1].wt_bend = 0x17;
+  in.sampler.lfo[1].wt_sust = 99;
+  // slot 5 (the finetune): loop 0 with junk WT bytes
+  in.sampler.envelope[5].loop = 0;
+  in.sampler.envelope[5].enable = 1;
+  in.sampler.lfo[5].wt_bend = 0xFF;
+  in.sampler.lfo[5].wt_sust = 200;
+  // slot 0 (the amp): a garbage loop byte 200 is not a WT slot
+  in.sampler.envelope[0].loop = 200;
+  in.sampler.envelope[0].enable = 1;
+  in.sampler.lfo[0].shape = 3;
+  in.sampler.lfo[0].speed = 4;
+  in.sampler.lfo[0].amount = 0.25f;
+
+  const audio::SampleDesc d = app::make_sample_desc(in, pcm, 4000, nullptr, nullptr, audio::LevelLaw::Og12);
+  static o3os::test::StaticSlot<audio::VoicePool> vslot;  // set_sample sanitizes: the checks on the other slots read the pool's copy
+  audio::VoicePool& vp = vslot.make();
+  vp.set_sample(0, d);
+  const audio::SampleDesc& sd = vp.sample(0);
+  CHECK(d.filter.mod.kind == audio::kFmodWtEnv);
+  CHECK(d.filter.mod.shape == 37);
+  CHECK(d.filter.mod.wt_bend == 0x9C);
+  CHECK(d.filter.mod.wt_sust == 40);
+  CHECK(d.filter.mod.rate == 9);
+  CHECK(d.filter.mod.decay == 500);
+  CHECK(d.filter.mod.release == 100);
+  CHECK(d.filter.mod.amount == 0.5f);
+  CHECK(audio::wt_eval_shape(37, 0.0f, 0.0f) == audio::wt_eval(audio::wt_contour(bank, 37), 0.0f, 0.0f));  // the contour was made into the bound bank
+  CHECK(sd.pan_mod.kind == audio::kFmodWtLfo);  // loop 3 on the pan (W3b): the WT LFO, the contour verbatim, the warps and the sustain kept by the sanitizing
+  CHECK(sd.pan_mod.shape == 200);
+  CHECK(sd.pan_mod.wt_bend == 0x17u);
+  CHECK(sd.pan_mod.wt_sust == 99u);
+  CHECK(sd.tune_mod.kind == audio::kFmodEnv);
+  CHECK(sd.tune_mod.wt_bend == 0u);
+  CHECK(sd.tune_mod.wt_sust == 0u);
+  CHECK(sd.amp_mod.kind == audio::kFmodLfo);  // loop 200: loop != 0, the amp slot is a tremolo as before
+  CHECK(sd.filter.mod.kind == audio::kFmodWtEnv);  // and the cutoff's WT kind, contour, warps and sustain survive the sanitizing
+  CHECK(sd.filter.mod.shape == 37);
+  CHECK(sd.filter.mod.wt_bend == 0x9C);
+  CHECK(sd.filter.mod.wt_sust == 40);
+  // loop 3 on the cutoff: the WT LFO kind
+  in.sampler.envelope[2].loop = 3;
+  const audio::SampleDesc d3 = app::make_sample_desc(in, pcm, 4000, nullptr, nullptr, audio::LevelLaw::Og12);
+  CHECK(d3.filter.mod.kind == audio::kFmodWtLfo);
+  CHECK(d3.filter.mod.shape == 37);
+  CHECK(d3.filter.mod.wt_bend == 0x9C);
+  CHECK(d3.filter.mod.wt_sust == 40);
+  // loop 0 on the cutoff with junk WT bytes: an ADSR, the bytes dropped
+  in.sampler.envelope[2].loop = 0;
+  in.sampler.lfo[2].wt_bend = 0xFF;
+  in.sampler.lfo[2].wt_sust = 200;
+  const audio::SampleDesc d0 = app::make_sample_desc(in, pcm, 4000, nullptr, nullptr, audio::LevelLaw::Og12);
+  CHECK(d0.filter.mod.kind == audio::kFmodEnv);
+  CHECK(d0.filter.mod.wt_bend == 0u);
+  CHECK(d0.filter.mod.wt_sust == 0u);
+  // a garbage loop byte on the cutoff: not a WT slot, an LFO as before
+  in.sampler.envelope[2].loop = 200;
+  const audio::SampleDesc d200 = app::make_sample_desc(in, pcm, 4000, nullptr, nullptr, audio::LevelLaw::Og12);
+  CHECK(d200.filter.mod.kind == audio::kFmodLfo);
+  CHECK(d200.filter.mod.wt_bend == 0u);
+  CHECK(d200.filter.mod.wt_sust == 0u);
+
+  // OS-CEWTENV W4: the amp slot. Loop 2 (WT Env): the kind, the contour (the slot's lfo[0] shape), the warps, the sustain, the duration and the release in ms; no ADSR.
+  in.sampler.envelope[0].loop = 2;
+  in.sampler.envelope[0].enable = 1;
+  in.sampler.envelope[0].decay = 300;
+  in.sampler.envelope[0].release = 120;
+  in.sampler.lfo[0].shape = 61;
+  in.sampler.lfo[0].speed = 7;
+  in.sampler.lfo[0].amount = 0.8f;
+  in.sampler.lfo[0].wt_bend = 0x23;
+  in.sampler.lfo[0].wt_sust = 0;
+  const audio::SampleDesc a2 = app::make_sample_desc(in, pcm, 4000, nullptr, nullptr, audio::LevelLaw::Og12);
+  CHECK(a2.amp_mod.kind == audio::kFmodWtEnv);
+  CHECK(a2.amp_mod.shape == 61);
+  CHECK(a2.amp_mod.wt_bend == 0x23);
+  CHECK(a2.amp_mod.wt_sust == 0);
+  CHECK(a2.amp_mod.decay == 300);
+  CHECK(a2.amp_mod.release == 120);
+  CHECK_FALSE(a2.env.enable);
+  CHECK(audio::wt_eval_shape(61, 0.5f, 0.0f) == audio::wt_eval(audio::wt_contour(bank, 61), 0.5f, 0.0f));  // the contour was made into the bound bank
+  vp.set_sample(0, a2);
+  CHECK(vp.sample(0).amp_mod.kind == audio::kFmodWtEnv);  // the pool keeps the amp slot's WT kind, the contour, the warps and the times
+  CHECK(vp.sample(0).amp_mod.shape == 61);
+  CHECK(vp.sample(0).amp_mod.wt_bend == 0x23);
+  CHECK(vp.sample(0).amp_mod.decay == 300);
+  // a live edit of the amp slot's decay or release moves a WT slot's duration and release (the rebuild equals the live edit); an ADSR slot's FilterMod times stay as they were
+  audio::SampleDesc live = a2;
+  (void)audio::apply_instrument_param(live, audio::inst_param::envelope(0, audio::inst_param::EnvDecay), 450.0f, audio::LevelLaw::Og12);
+  (void)audio::apply_instrument_param(live, audio::inst_param::envelope(0, audio::inst_param::EnvRelease), 90.0f, audio::LevelLaw::Og12);
+  CHECK(live.amp_mod.decay == 450);
+  CHECK(live.amp_mod.release == 90);
+  // loop 3 (WT LFO): the kind, the rate, the depth (the slot's LFO amount)
+  in.sampler.envelope[0].loop = 3;
+  const audio::SampleDesc a3 = app::make_sample_desc(in, pcm, 4000, nullptr, nullptr, audio::LevelLaw::Og12);
+  CHECK(a3.amp_mod.kind == audio::kFmodWtLfo);
+  CHECK(a3.amp_mod.rate == 7);
+  CHECK(a3.amp_mod.amount == 0.8f);
+  CHECK(a3.amp_mod.shape == 61);
+  CHECK_FALSE(a3.env.enable);
+  // the slot off with a WT loop byte: nothing runs
+  in.sampler.envelope[0].enable = 0;
+  const audio::SampleDesc a_off = app::make_sample_desc(in, pcm, 4000, nullptr, nullptr, audio::LevelLaw::Og12);
+  CHECK(a_off.amp_mod.kind == audio::kFmodNone);
+  // loop 0 with junk WT bytes: the amp ADSR, the bytes dropped; an ADSR instrument's descriptor is what it was
+  in.sampler.envelope[0].enable = 1;
+  in.sampler.envelope[0].loop = 0;
+  in.sampler.lfo[0].wt_bend = 0xFF;
+  in.sampler.lfo[0].wt_sust = 200;
+  const audio::SampleDesc a0 = app::make_sample_desc(in, pcm, 4000, nullptr, nullptr, audio::LevelLaw::Og12);
+  CHECK(a0.env.enable);
+  CHECK(a0.amp_mod.kind == audio::kFmodNone);
+  CHECK(a0.amp_mod.wt_bend == 0u);
+  CHECK(a0.amp_mod.wt_sust == 0u);
+  CHECK(a0.amp_mod.decay == 0u);
+}
+
+// OS-CEWTENV W3b (app): slot 3's enable byte is a bit mask (spec F2, A8): 0x01 is the wavetable position, 0x02 the granular length (W5), so 0x02 alone is no position modulation (F16's second case); the
+// rebuild and the live edit (apply_instrument_param) agree on every byte. A non-wavetable instrument never has slot 3's modulator; the WT kinds map on the finetune and on the granular position too.
+TEST_CASE("OS-CEWTENV W3b (app): slot 3 honours bit 0x01 for the wavetable position; a non-wavetable instrument never runs it; the finetune and the granular position map the WT kinds") {
+  static std::int16_t pcm[4000];
+  for (std::uint32_t i = 0; i < 4000; ++i) {
+    pcm[i] = static_cast<std::int16_t>((i % 128u) * 200 - 12800);
+  }
+  static audio::WtBank bank;  // .bss: 64 KiB never on a stack
+  audio::wt_bind(bank);
+  model::Instrument in;
+  model::init_instrument(in, model::InstrumentKind::Sample);
+  in.sampler.play_mode = 6;  // wavetable
+  in.sampler.wavetable_window_size = 256;
+  in.sampler.wavetable_window = 2;
+  const auto slot = [&](unsigned e, std::uint8_t enable, std::uint8_t loop) {
+    in.sampler.envelope[e].enable = enable;
+    in.sampler.envelope[e].loop = loop;
+    in.sampler.envelope[e].decay = 500;
+    in.sampler.envelope[e].release = 100;
+    in.sampler.lfo[e].shape = 37;
+    in.sampler.lfo[e].speed = 9;
+    in.sampler.lfo[e].amount = 0.5f;
+    in.sampler.lfo[e].wt_bend = 0x34;
+    in.sampler.lfo[e].wt_sust = 40;
+  };
+  const auto build = [&] { return app::make_sample_desc(in, pcm, 4000, nullptr, nullptr, audio::LevelLaw::Og12); };
+  slot(3, 0x02, 0);
+  CHECK(build().wt_windows > 1u);
+  CHECK(build().pos_mod.kind == audio::kFmodNone);  // 0x02 alone: the granular length's bit, no position modulation
+  slot(3, 0x02, 2);
+  CHECK(build().pos_mod.kind == audio::kFmodNone);
+  slot(3, 0x01, 2);
+  const audio::SampleDesc w1 = build();
+  CHECK(w1.pos_mod.kind == audio::kFmodWtEnv);
+  CHECK(w1.pos_mod.shape == 37);
+  CHECK(w1.pos_mod.wt_bend == 0x34);
+  CHECK(w1.pos_mod.wt_sust == 40);
+  CHECK(w1.pos_mod.decay == 500);
+  slot(3, 0x03, 3);
+  CHECK(build().pos_mod.kind == audio::kFmodWtLfo);  // both bits: the position is on
+  slot(3, 0x01, 0);
+  CHECK(build().pos_mod.kind == audio::kFmodEnv);    // the ADSR as before
+  slot(3, 0x00, 2);
+  CHECK(build().pos_mod.kind == audio::kFmodNone);
+  // the live edit of the enable byte and the rebuild agree on every byte of slot 3
+  for (unsigned raw = 0; raw < 8u; ++raw) {
+    slot(3, 0x01, 2);
+    audio::SampleDesc live = build();
+    slot(3, static_cast<std::uint8_t>(raw), 2);
+    const audio::SampleDesc built = build();
+    (void)audio::apply_instrument_param(live, audio::inst_param::envelope(3, audio::inst_param::EnvEnable), static_cast<float>(raw), audio::LevelLaw::Og12);
+    // (on or off: the live edit keeps the slot's ADSR / LFO kind, the WT kind is the rebuild's, which the platform runs at the next quiet moment, spec A6)
+    CHECK_MESSAGE((live.pos_mod.kind != audio::kFmodNone) == (built.pos_mod.kind != audio::kFmodNone), "enable byte " << raw);
+    CHECK_MESSAGE((live.pos_mod.kind != audio::kFmodNone) == ((raw & 1u) != 0u), "enable byte " << raw);
+  }
+  // a non-wavetable instrument never runs slot 3 (a sample, a one window wavetable is not made here)
+  in.sampler.play_mode = 0;
+  slot(3, 0x01, 2);
+  CHECK(build().pos_mod.kind == audio::kFmodNone);
+  // the granular position (slot 4) maps the WT kinds as well; slot 3 is not its slot
+  in.sampler.play_mode = 7;
+  slot(3, 0x01, 2);
+  slot(4, 0x00, 0);
+  CHECK(build().pos_mod.kind == audio::kFmodNone);
+  slot(4, 0x01, 3);
+  const audio::SampleDesc g = build();
+  CHECK(g.pos_mod.kind == audio::kFmodWtLfo);
+  CHECK(g.pos_mod.shape == 37);
+  CHECK(g.pos_mod.wt_bend == 0x34);
+  // the finetune (slot 5) maps them too, and so does the amp slot (0, W4)
+  in.sampler.play_mode = 0;
+  slot(5, 0x01, 2);
+  slot(0, 0x01, 3);
+  const audio::SampleDesc f = build();
+  CHECK(f.tune_mod.kind == audio::kFmodWtEnv);
+  CHECK(f.tune_mod.wt_sust == 40);
+  CHECK(f.amp_mod.kind == audio::kFmodWtLfo);  // loop 3 on the amp: the WT LFO (W4)
+}
+
+// OS-CEWTENV W3c (app): make_sample_desc bakes a WT slot's warps (audio::wt_bake) and keeps the id in the slot's `delay`; a slot with no warp, or a pool that is full, keeps 0 (the
+// render applies the warps live). The same warp of two instruments shares one baked contour.
+TEST_CASE("OS-CEWTENV W3c (app): make_sample_desc bakes the warps of a WT slot into the pool and keeps the id; no warp, no id") {
+  static std::int16_t pcm[4000];
+  for (std::uint32_t i = 0; i < 4000; ++i) {
+    pcm[i] = static_cast<std::int16_t>((i % 128u) * 200 - 12800);
+  }
+  static audio::WtBank bank;
+  static audio::WtBakeBank pool;
+  audio::wt_bind(bank);
+  audio::wt_bake_bind(pool);
+  model::Instrument in;
+  model::init_instrument(in, model::InstrumentKind::Sample);
+  const auto slot = [&](unsigned e, std::uint8_t loop, std::uint8_t shape, std::uint8_t bend) {
+    in.sampler.envelope[e].enable = 1;
+    in.sampler.envelope[e].loop = loop;
+    in.sampler.lfo[e].shape = shape;
+    in.sampler.lfo[e].amount = 0.5f;
+    in.sampler.lfo[e].wt_bend = bend;
+  };
+  slot(2, 2, 37, 0x9C);  // the cutoff: a warp
+  slot(1, 3, 37, 0x9C);  // the pan: the same shape and warp
+  slot(5, 2, 40, 0x00);  // the finetune: no warp
+  const audio::SampleDesc d = app::make_sample_desc(in, pcm, 4000, nullptr, nullptr, audio::LevelLaw::Og12);
+  CHECK(d.filter.mod.kind == audio::kFmodWtEnv);
+  CHECK(d.filter.mod.delay == 1u);
+  CHECK(d.pan_mod.delay == 1u);  // one baked contour for the same shape and warp
+  CHECK(d.tune_mod.kind == audio::kFmodWtEnv);
+  CHECK(d.tune_mod.delay == 0u);  // no warp: the bank's contour as it is
+  CHECK(audio::wt_bake_used() == 1u);
+  // the baked contour is the live evaluation, resampled
+  CHECK(std::fabs(audio::wt_eval_slot(37, d.filter.mod.delay, 0x9C, 0.5f) - audio::wt_eval_shape(37, 0.5f, 0x9C)) < 0.05f);
+  // an ADSR slot (loop 0) keeps its own delay and no id
+  in.sampler.envelope[2].loop = 0;
+  in.sampler.envelope[2].delay = 250;
+  const audio::SampleDesc a = app::make_sample_desc(in, pcm, 4000, nullptr, nullptr, audio::LevelLaw::Og12);
+  CHECK(a.filter.mod.kind == audio::kFmodEnv);
+  CHECK(a.filter.mod.delay == 250u);
 }

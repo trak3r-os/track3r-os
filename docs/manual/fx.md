@@ -102,11 +102,26 @@ These effects read their value in words on the info line.
 | Glide | Slides from the last note on the track to this one. Value 0 is off. | `GLIDE 240 MS` for value 12 <!-- QA-PAT-025, QA-PAT-028 --> |
 | Overdrive | Drives the sound. Value 0 is clean. | `DRIVE 40 %` for value 40 <!-- QA-PAT-022, QA-PAT-026 --> |
 | Bit Depth | Lowers the bit depth. The range is 1 to 16, and 16 is off. | `BITS 8` for value 8 <!-- QA-PAT-023, QA-PAT-027 --> |
+| Chance | Decides per pass whether the step plays. 0..100 is a probability, 101..174 a condition (below). | `CHANCE 50 %` for value 50 <!-- QA-PAT-330..334 --> |
 | Panning | Pans the note. Value 100 is hard right. It ends with its step. | <!-- QA-PAT-117 --> |
 | Volume LFO, Panning LFO, Finetune LFO, Position LFO | Start the track's LFO for the volume (tremolo), the pan (auto-pan), the pitch (vibrato) or the wavetable window or granular position, on a sampler instrument. These four did nothing before; they act now, as Filter LFO does. The value is the LFO's speed in the same list as the instrument's own LFO speed, from the slowest at 0: 0 to 23 for Volume LFO, 0 to 28 for the others. The shape and amount are the instrument's LFO for that target (an instrument with none: triangle, 50 %). Position LFO moves only a wavetable or granular instrument and does nothing on a plain sample. While a Perform LFO row is held on the track its speed wins, and the FX comes back when the row ends or is at 0. Panning LFO and Panning (31) on one track: while the LFO runs it wins, because it sets the pan every block (a Panning step after it is overridden too); when the LFO ends the instrument's pan is back, and Panning acts again at its next step. The LFO stops at the next transport start. Stop does not end it: a pad note played after Stop still gets the LFO until the next Play. | <!-- QA-PRF-180..189 --> |
 
 <!-- TODO: ask: the info line text for Panning. The catalogue gives only the behaviour. -->
 <!-- TODO: ask: the core effects with no row here: Gate Length, Low-pass and MIDI Chord. -->
+
+### Chance: what plays and what does not
+
+**Chance** on a step decides, once per pass of the pattern, whether that step plays at all. The value is a probability or a condition. <!-- QA-PAT-330..334 -->
+
+| Value | What it means | Info line, with an example value |
+|---|---|---|
+| 0..100 | The step plays with that probability: 0 never, 50 half the passes, 100 always. | `CHANCE 50 %` for value 50 |
+| 101 | Plays when the track's last Chance condition fired. | `CHANCE WITH LAST` |
+| 102 | Plays when it did not. | `CHANCE NOT LAST` |
+| 103..138 | Play N passes, then skip M (N and M 1..6, counted in passes of the pattern). 103 is Play 1 / Skip 1: the step plays on every other pass. | `CHANCE PLAY 2 SKIP 3` for value 111 |
+| 139..174 | Skip N passes, then play M. | `CHANCE SKIP 6 PLAY 6` for value 174 |
+
+The encoder walks every value from 0 to 174. `Shift` + encoder walks 0..100, then 101, 102, 103, then by 6. The pads and a **Fill** with MODE RANDOM write 0..100 only; a Fill with CONSTANT or FROM..TO reaches 174. Fill RANDOM on Chance with FROM above 100 draws 100. A step whose Chance does not fire plays nothing of its own: no note, no effect of the step. New in track3r-os. Not yet checked on the unit. <!-- QA-PAT-330..334 -->
 
 ### Look up a tracker effect
 
@@ -131,6 +146,18 @@ The tracker effects are at the end of the list, after Bit Depth. Each has a mark
 | Global Volume | `(` | 30 | `GVOL 48`. 64 is full. <!-- QA-PAT-142 --> |
 | Global Vol Slide | `)` | 40 | `GVSL +4` <!-- QA-PAT-143 --> |
 | Panbrello | `{` | 3A | `PANBR SPD 3 DEP 10` <!-- QA-PAT-144 --> |
+
+### Shape the envelopes and the grain length: w, y and z
+
+New in track3r-os, from the tracker-ce step effects `w`, `y` and `z`. They sit after the core effects in the list (96, 97, 98). Each acts on the instrument's own settings for this note and ends at the first row that does not hold it. <!-- QA-PAT-340..344 -->
+
+| Effect | Mark | Value | What it does | Info line, with an example value |
+|---|---|---|---|---|
+| Amp Envelope | `w` | 88 | The high digit scales the amp envelope's duration, the low digit warps it (8 is none, 0 to 15). On an amp ADSR the digits are the attack and the decay. | `AMP ENV x8 WARP +0` for 88 |
+| Filter Envelope | `y` | 24 | The cutoff envelope's attack (high digit x 8 ms, at least 1) and decay (low digit x 8 ms). | `FLT ENV 16/32 MS` for 24 |
+| Grain Length | `z` | 32 | The grain length of a granular instrument, 0 to 100 (hex 00 to 64): 0 is 44 samples, 50 is 100 ms, 100 is 1 s, never longer than the sample. It acts when the next grain starts. FX1 wins over FX2 when both hold a z. The value is hex: 32 is 50. | `GRAIN 100 MS` for 32 (the start value) |
+
+`z` does nothing on an instrument that is not granular. Not yet checked on the unit. <!-- QA-PAT-340..344 -->
 
 ## Keys on this screen
 

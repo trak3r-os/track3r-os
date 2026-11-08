@@ -27,10 +27,11 @@ power up
 wait 100
 snap qa_glb_100_released
 
-# QA-GLB-100 (D4): the line and the strip are drawn over a modal overlay too (the Navigator is open: Shift + Pattern).
-press shift
-tap pattern
-release shift
+# QA-GLB-100 (D4): the line and the strip are drawn over a modal overlay too (the Navigator is open: Song + Pattern).
+press song
+press pattern
+release pattern
+release song
 wait 100
 power down
 wait 500

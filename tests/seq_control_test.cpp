@@ -56,6 +56,8 @@ std::uint8_t pick_type(Rng& rng) {
 
 TEST_CASE("control layers: hand-written cases") {
   seq::ControlTable ct;
+  seq::ControlTable::PerfStore ct_perf;
+  ct.attach_perf(ct_perf);
   ct.reset();
   seq::ModChange ch[2];
   // Panning in the second column: it controls the parameter.
@@ -86,6 +88,8 @@ TEST_CASE("control layers: hand-written cases") {
 
 TEST_CASE("control layers: performance over the sequencer layers, which stay underneath") {
   seq::ControlTable ct;
+  seq::ControlTable::PerfStore ct_perf;
+  ct.attach_perf(ct_perf);
   ct.reset();
   seq::ModChange ch[2];
   CHECK(ct.set_column(3, 0, seq::fx::kLowPass, 40, ch) == 1u);
@@ -119,6 +123,8 @@ TEST_CASE("control layers: performance over the sequencer layers, which stay und
 // underneath (the voices keep the layer's value and tell the step layer what is under it); when the layer ends, the winner is the step FX again, or nothing.
 TEST_CASE("control layers: the Overdrive and Bit depth groups - the Perform layer over a step FX, and its end sends the step FX again") {
   seq::ControlTable ct;
+  seq::ControlTable::PerfStore ct_perf;
+  ct.attach_perf(ct_perf);
   ct.reset();
   seq::ModChange ch[2];
   struct Case {
@@ -171,6 +177,8 @@ TEST_CASE("control layers: the Overdrive and Bit depth groups - the Perform laye
 
 TEST_CASE("control layers: a new FX in a column replaces the old one and may move the column to another group; engine FX do not compete") {
   seq::ControlTable ct;
+  seq::ControlTable::PerfStore ct_perf;
+  ct.attach_perf(ct_perf);
   ct.reset();
   seq::ModChange ch[2];
   CHECK(ct.set_column(1, 0, seq::fx::kPanning, 50, ch) == 1u);
@@ -207,6 +215,8 @@ TEST_CASE("control layers: a new FX in a column replaces the old one and may mov
 
 TEST_CASE("control layers: random operations against a brute-force arbitration, and every reported change is exactly a change of the winner") {
   seq::ControlTable ct;
+  seq::ControlTable::PerfStore ct_perf;
+  ct.attach_perf(ct_perf);
   ct.reset();
   Model m;
   Rng rng(17);
@@ -271,6 +281,8 @@ TEST_CASE("control layers: random operations against a brute-force arbitration, 
 
 TEST_CASE("control layers: both columns at once give the net changes, with no transient state") {
   seq::ControlTable ct;
+  seq::ControlTable::PerfStore ct_perf;
+  ct.attach_perf(ct_perf);
   ct.reset();
   seq::ModChange ch[4];
   const std::uint8_t t0[2] = {seq::fx::kLowPass, seq::fx::kHighPass};
@@ -303,6 +315,8 @@ TEST_CASE("control layers: both columns at once give the net changes, with no tr
 
 TEST_CASE("control: reset_columns ends the two sequencer columns of every track and leaves the performance layer's values") {
   seq::ControlTable ct;
+  seq::ControlTable::PerfStore ct_perf;
+  ct.attach_perf(ct_perf);
   ct.reset();
   seq::ModChange out[4];
   (void)ct.set_column(0, 0, 27, 40, out);
@@ -320,4 +334,29 @@ TEST_CASE("control: reset_columns ends the two sequencer columns of every track 
   CHECK((s.active && s.layer == audio::kLayerPerf && s.perf == 0x0105 && s.fx_type == 0));  // the layer alone: no FX underneath any more
   ct.reset();
   CHECK_FALSE(ct.perf_holds(0, FxGroup::Filter));
+}
+
+// The performance values are the caller's store (SRAM_U recovery: SDRAM on the target): a table without one has no performance layer, and a store attached later starts empty.
+TEST_CASE("control layers: the performance store is attached, not owned") {
+  seq::ControlTable ct;  // no store
+  seq::ModChange ch[2];
+  CHECK(ct.set_perf(1, FxGroup::Filter, 77, ch) == 0u);
+  CHECK_FALSE(ct.perf_holds(1, FxGroup::Filter));
+  CHECK_FALSE(ct.resolve(1, FxGroup::Filter).active);
+  CHECK(ct.end_perf(1, FxGroup::Filter, ch) == 0u);
+  ct.clear_track(1);
+  ct.reset();
+  seq::ControlTable::PerfStore store;
+  for (auto& row : store.val) {
+    for (auto& v : row) {
+      v = 0x5a5a;
+    }
+  }
+  ct.attach_perf(store);  // zeroed, and no group held
+  CHECK_FALSE(ct.perf_holds(1, FxGroup::Filter));
+  CHECK(ct.set_perf(1, FxGroup::Filter, 77, ch) == 1u);
+  CHECK(ct.resolve(1, FxGroup::Filter).perf == 77);
+  CHECK(store.val[1][static_cast<std::uint32_t>(FxGroup::Filter)] == 77);
+  ct.clear_track(1);
+  CHECK(store.val[1][static_cast<std::uint32_t>(FxGroup::Filter)] == 0);
 }

@@ -5,6 +5,7 @@
 // .data from its load image, zero .bss, paint the thread stack (for the high-water mark), arm the stack guard, move
 // the program onto the thread stack (PSP; MSP stays for exceptions), run the static constructors, call main, and
 // leave through exit() so the static destructors and stdio flush run.
+#include <o3os/hal/code_gate.h>
 #include <o3os/platform/qemu/runtime.h>
 #include <o3os/platform/qemu/semihost.h>
 
@@ -31,6 +32,7 @@ extern void (*__init_array_end[])();
 void Reset_Handler();
 void Default_Handler();
 void SysTick_Handler();  // clock.cpp
+void SVC_Handler();      // hal/src/code_gate_m4.cpp: the OS-CEPTFX call gate's return
 // Replaceable by a strong definition (the fake I2S of the audio suite, src/fake_i2s.cpp): the render line and the block clock.
 void PendSV_Handler();
 void TIMER0_IRQHandler();
@@ -156,15 +158,28 @@ extern "C" void target_run() {
 
 // ---- Faults ---------------------------------------------------------------------------------------------------
 
-// Any exception without its own handler (all of them but SysTick, Reset and the weak ones below) ends here. The hardware pushed the
-// frame on the stack in use; pass it to the reporter. Naked: nothing may touch the stack before r0 is read.
+// Any exception without its own handler (all of them but SysTick, SVCall, Reset and the weak ones below) ends here. The hardware
+// pushed the frame on the stack in use; pass it to the reporter. Naked: nothing may touch the stack before r0 is read.
+//
+// OS-CEPTFX S2b first: while a .ptfx call runs, a fault from thread mode on PSP whose frame lies in the plugin stack (or below
+// it, or a stacking error) is contained instead — o3os_hal_gate_fault_contain records the fault fields, clears CFSR/HFSR, forges
+// a fresh basic frame at the plugin stack top (PC = the gate's abort stub) and sets PSP to it, and this stub returns to thread
+// mode on PSP (0xFFFFFFFD) so the abort stub runs. Every other fault goes to the reporter unchanged.
 extern "C" [[gnu::naked]] void Default_Handler() {
   asm volatile(
       "tst lr, #4\n\t"
       "ite eq\n\t"
       "mrseq r0, msp\n\t"
       "mrsne r0, psp\n\t"
-      "b fault_report");
+      "mov r1, lr\n\t"
+      "push {r0, r1}\n\t"
+      "bl o3os_hal_gate_fault_contain\n\t"
+      "cmp r0, #0\n\t"
+      "pop {r0, r1}\n\t"
+      "beq fault_report\n\t"
+      "ldr r0, =0xFFFFFFFD\n\t"  // contained: thread mode, PSP: pop the forged frame at the plugin stack top
+      "bx r0\n\t"
+      ".ltorg");
 }
 
 // PendSV and the first timer's interrupt (IRQ 8) are weak aliases of the default handler: a suite that links src/fake_i2s.cpp
@@ -225,7 +240,7 @@ using Handler = void (*)();
     nullptr,
     nullptr,
     nullptr,
-    Default_Handler,  // SVCall
+    SVC_Handler,      // SVCall: the OS-CEPTFX call gate's return (hal/src/code_gate_m4.cpp)
     Default_Handler,  // DebugMonitor
     nullptr,          // reserved
     PendSV_Handler,

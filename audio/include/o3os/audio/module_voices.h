@@ -97,13 +97,36 @@ class ModuleVoices {
 
   // The service table modules are given (for tests).
   const o3m_host& host() const noexcept { return host_; }
+  // OS-MODRATE: the table an instance of RATE `shift` (0 FULL, 1 half, 2 quarter) is given: the same services, `sample_rate` divided by 2^shift. Three tables with stable addresses (modules keep the pointer
+  // they got at init()), shared by the instances of a rate: a module only reads them.
+  const o3m_host& host_at(unsigned shift) const noexcept { return shift == 0u || shift > kMaxRateShift ? host_ : host_rate_[shift - 1u]; }
+  static constexpr unsigned kMaxRateShift = 2;
 
   // ---- main loop --------------------------------------------------------------------------------------------------------------------
   // `mem` (at least kScratchBytes, 16-byte aligned) is the scratch and the instances' blocks. False when it is too small or not aligned.
   bool attach_scratch(void* mem, std::uint32_t bytes) noexcept;
   void set_hooks(const Hooks& hooks) noexcept;
   const Hooks& hooks() const noexcept { return hooks_; }  // OS-INSFX: the effect inserts run their module code under the same platform stamps
-  void set_sample_rate(float hz) noexcept { host_.sample_rate = hz; }
+  void set_sample_rate(float hz) noexcept {
+    host_.sample_rate = hz;
+    refresh_host();
+  }
+
+  // OS-MODRATE (docs/specs/OS-MODRATE.md, NEW COMMUNITY OS BEHAVIOUR): the per-instrument RATE of an instrument module. `shift` 0 is FULL (today's path, bit-exact), 1 and 2 make the render call the module for frames/2^shift
+  // at `host_at(shift).sample_rate` and hold each sample 2^shift times (zero-order hold, no filter). Only a module that declares O3M_FX_RATE (rate_capable) takes a shift above 0.
+  static bool rate_capable(const o3m_module& mod) noexcept { return mod.abi_minor >= 13u && (mod.fx_flags & O3M_FX_RATE) != 0u; }
+  // The shift in force on the instance bound to `slot` (0 when none is).
+  unsigned rate(unsigned slot) const noexcept;
+  // Whether a set_rate on `slot` is under way (waiting for the instance to go idle, or withdrawn from the binding for a few blocks: bound(slot) is false then). Main loop.
+  bool rate_busy(unsigned slot) const noexcept { return rating_index(slot) != kMaxModuleInstances; }
+  enum class Rate : std::uint8_t { Done, Busy, Failed };
+  // Main loop only, never in the render. Changes the slot's rate, never in the middle of a note: a request waits (Busy) while the instance sounds (`active`: a note or its tail) and the note plays out at
+  // the old rate. Once it is idle the gate closes, one block start later a note that slipped in sends it back to waiting, else the Release is queued and one block start after that the instance is withdrawn;
+  // two block starts later (the retire discipline) its module is shut down, its state zeroed, init() is called with the new rate's table and the stored parameter blob (`params`, `param_len`: bind()'s)
+  // is applied again, then it is published and the gate returns to what the UI last asked. (A note asked for during the closing blocks, a few ms, is dropped; a gate left open keeps a pending change waiting
+  // while notes keep following each other.) Call it again until it says Done (Busy: waiting for the render or for the idle); Failed: the slot is unbound, the module is not rate-capable, or its init()
+  // refused (the instance is gone). `render_off`: no render is running (a host test, a boot): every wait is skipped.
+  Rate set_rate(unsigned slot, unsigned shift, const std::uint8_t* params, std::uint32_t param_len, bool render_off = false) noexcept;
   // The cycle counter the governor measures with (the engine's: Engine::attach_modules). Before the audio starts. Null: no measure, no governor.
   void set_cycles(gov::Clock clock) noexcept {
     cycles_ = clock != nullptr ? clock : &no_clock;  // (the render reads it without a test)
@@ -234,6 +257,9 @@ class ModuleVoices {
     return i != kNone && in_[i].track == track && (in_[i].held | in_[i].active) != 0u;
   }
 
+  // OS-MODSENDS, render context, in flash (a live edit of the slot's PANNING or a send): the tracks whose module note of this slot is held or sounding, one bit a track (0: none).
+  O3OS_AUDIO_COLD std::uint16_t slot_tracks(unsigned slot) const noexcept;
+
   // The track's block of this block (kBlock samples, 4-byte aligned), valid until the next begin_block(); null when no instance sounded on the track.
   O3OS_AUDIO_INLINE const std::int16_t* feed(unsigned track) const noexcept {
     if (track >= kModuleTracks) {
@@ -253,6 +279,12 @@ class ModuleVoices {
 
  private:
   static constexpr std::uint8_t kNone = 0xFF;
+  // OS-MODRATE: Instance::rating. Pending: asked, waiting for the instance to go idle (gate untouched, the instance still bound); Closing: idle, gate shut, one block start to see whether a note slipped in; Releasing:
+  // Release queued, one block start; Withdrawn: out of the binding, two block starts, then the restart.
+  static constexpr std::uint8_t kRatePending = 1;
+  static constexpr std::uint8_t kRateClosing = 2;
+  static constexpr std::uint8_t kRateReleasing = 3;
+  static constexpr std::uint8_t kRateWithdrawn = 4;
   enum class Cmd : std::uint8_t { SetParam, NoteOn, NoteOff, Release };
   struct Command {
     Cmd kind;
@@ -304,6 +336,16 @@ class ModuleVoices {
     std::uint32_t acc_out = 0;
     std::uint32_t acc_zero = 0;
     PerfCell perf;
+    // OS-MODRATE. `shift` is the RATE the render reads (0 FULL), written only while the instance is withdrawn. Render only: `ph` is how many times `hold`, the module's last sample, has gone out (0: the
+    // next output frame takes a new module sample; reset by a note), `hold` that sample. Main loop only: `rating` (0 none, else kRate*),
+    // `want` the shift being set, `regate` the gate to restore (1 open), `at` the block count of the last step.
+    std::uint8_t shift = 0;
+    std::uint8_t ph = 0;
+    std::uint8_t rating = 0;
+    std::uint8_t want = 0;
+    std::uint8_t regate = 0;
+    float hold = 0.0f;
+    std::uint32_t at = 0;
   };
 
   // OS-MODPITCH: ramp_on. Walk: the ramp is moving, and the next block start calls pitch() with the next stretch. Settle: it has landed, the next block start calls pitch(target, 0) once (the module
@@ -318,6 +360,13 @@ class ModuleVoices {
   O3OS_AUDIO_COLD void ramp_call(Instance& in, std::uint32_t ahead) noexcept;
   O3OS_AUDIO_COLD void ramp_snap(Instance& in) noexcept;                   // the offset back to 0 with one call (the FX ended, or a reset)
   O3OS_AUDIO_COLD void pitch_call(Instance& in, float semitones, float per_frame) noexcept;
+
+  // OS-MODRATE, render(): a segment of `n` output frames of an instance whose RATE is not FULL: the module renders ceil(rest/2^shift) frames (at most 32 of a segment of at most 64) into the front of the scratch, which are held in place from the
+  // back (the read index is never above the write index); the first frames finish the sample held from the last segment. Returns the module's `more`. Per segment of a rated instance, in flash (an exception
+  // to the per-block rule: hot.h); a FULL instance never calls it.
+  O3OS_AUDIO_COLD std::uint32_t render_rated(Instance& in, std::uint32_t n) noexcept;
+  O3OS_AUDIO_COLD void refresh_host() noexcept;  // host_at(1..2) from host_ (a hook or the rate changed)
+  O3OS_AUDIO_COLD unsigned rating_index(unsigned slot) const noexcept;  // the instance whose set_rate is under way on `slot` (kMaxModuleInstances: none)
 
   O3OS_AUDIO_HOT void apply(const Command& c) noexcept;
   O3OS_AUDIO_COLD void audition_note(unsigned i, const Command& c) noexcept;  // OS-GOV: a `diag mod note` (a ring command) starts like any note: judged first (per note, in flash)
@@ -362,6 +411,7 @@ class ModuleVoices {
   bool pending_ = false;  // retire_all() withdrew instances that release_all() has not yet shut down
   Hooks hooks_;
   o3m_host host_{};
+  o3m_host host_rate_[kMaxRateShift] = {};  // OS-MODRATE: host_ with the half and the quarter rate (refresh_host)
   Stats stats_;
   static std::uint32_t no_clock() noexcept { return 0u; }
   gov::Clock cycles_ = &no_clock;  // OS-GOV: set before the audio starts, read by the render (never null)

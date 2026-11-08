@@ -75,6 +75,11 @@ inline constexpr std::uint8_t kLfoShapeCount = 6;
 struct Lfo {
   std::uint8_t shape;
   std::uint8_t speed;
+  // OS-CEWTENV W1: the two former padding bytes, now fields (the size and the offsets stay: sizeof 8, amount at 4). For a slot with loop 2 or 3 (WT Env / WT LFO), `shape` is the contour index 0..255 and these
+  // are the warp and sustain bytes of the OG's LFO entry, verbatim (verified parity, tracker-ce@7fd6c2c:core/source/mtStructs.h:629-637): wt_bend = warp X in the high nibble, warp Y in the low one; wt_sust = 0 one-shot,
+  // 1..99 the freeze percentage. For a slot with loop 0 or 1 they are 0 (the OG reader drops the file's bytes there).
+  std::uint8_t wt_bend;
+  std::uint8_t wt_sust;
   float amount;
 };
 
@@ -134,9 +139,17 @@ struct Instrument {
   // OS-STEREO step 2 (INST 1.5, NEW COMMUNITY OS BEHAVIOUR): 1 = the instrument is a stereo sample (kInstStereoMax); a Sample instrument's only, 0 for every other kind. It is the instrument's wish: the sample
   // plays stereo only while the bank also holds its side signal (decision S4 of docs/specs/OS-STEREO.md), which a stereo load (slice (b)) provides. One byte after VEL>: the struct grows to 720 B.
   std::uint8_t stereo;
-  // The three bytes that would be tail padding, made explicit so a whole-instrument memcmp (Editor::set_instrument, PASTE, the instrument-file load) compares defined bytes. Always 0: init_instrument zeroes them
-  // and Project::set_instrument stores them zero (the canonical form); the file has no field for them.
-  std::uint8_t reserved[3];
+  // OS-CEPLAYTHRU P1 (NEW COMMUNITY OS BEHAVIOUR for the field; the OG byte is verified parity, tracker-ce@7fd6c2c:core/source/mtStructs.h:653-654): 0 = a slice stops at the next slice point, 1 = it plays on to the
+  // sample end (Slice and Beat Slice; a Sample instrument's only — Project::set_instrument's canonical form clears it on any other kind — kept for any play mode, ignored outside the two slice modes). It is OG instrument byte 279, the padding the official layout had between the delay send and the slice
+  // table, and it was the first of the reserved bytes: the struct stays 720 B.
+  std::uint8_t slice_thru;
+  // The byte that would be padding, made explicit so a whole-instrument memcmp (Editor::set_instrument, PASTE, the instrument-file load) compares defined bytes. Always 0: init_instrument zeroes it
+  // and Project::set_instrument stores it zero (the canonical form); the file has no field for it. It stays where the two reserved bytes began, so offsetof(reserved) and the importer layout tag
+  // (import_layout.h) do not move: an importer module built before OS-MODRATE S3 still loads and leaves `rate` at 0.
+  std::uint8_t reserved[1];
+  // OS-MODRATE S3 (INST 1.8, NEW COMMUNITY OS BEHAVIOUR): the render rate of an instrument module, 0 FULL, 1 = 1/2 of the engine rate, 2 = 1/4 (kInstRateMax); a Module instrument's only (Project::set_instrument's
+  // canonical form clears it on any other kind). The second of the two bytes that were reserved: the struct stays 720 B with no tail padding. Saved only when non-zero (the writer then writes INST 1.8).
+  std::uint8_t rate;
 };
 
 // True when every INST 1.3 field has the value init_instrument gives it (the writer then writes the chunk as the older minor).
@@ -145,8 +158,21 @@ bool inst_v13_default(const Instrument& in) noexcept;
 // OS-STEREO step 2: the largest value of Instrument::stereo (0 mono, 1 stereo); a file's byte above it reads 0 (as an engine byte above kInstEngineMax reads automatic).
 inline constexpr std::uint8_t kInstStereoMax = 1;
 
+// OS-CEPLAYTHRU P1: the largest value of Instrument::slice_thru (0 a slice stops at the next slice point, 1 it plays to the sample end); a native file's byte above it reads 0 (as the stereo byte does), an OG byte above 0 reads 1 (tracker-ce's rule).
+inline constexpr std::uint8_t kInstSliceThruMax = 1;
+// OS-MODRATE S3: the largest value of Instrument::rate (0 FULL, 1 = 1/2, 2 = 1/4 of the engine rate); a native file's byte above it reads 0.
+inline constexpr std::uint8_t kInstRateMax = 2;
+
 // OS-LFOSINE: true when one of the six LFOs is the Sine shape (the writer then writes INST 1.4, which only says that a shape of 5 is Sine).
 bool inst_uses_sine(const Instrument& in) noexcept;
+
+// OS-CEWTENV W1: true when one of the six slots has a loop of 2 or more (the writer's gate, as pinned by the maximal fixture) or carries a non-zero WT byte; the
+// writer then writes INST 1.6, which appends the twelve wt_bend / wt_sust bytes.
+bool inst_uses_wt(const Instrument& in) noexcept;
+
+// OS-CEWTENV (W1 review, folded in W3a): whether an envelope loop byte is a WT slot, on READ. Only 2 (WT Env) and 3 (WT LFO) exist, so the test is exact: a garbage
+// loop byte (anything else) is NOT a WT slot — it keeps the loop 0/1 rule (shape clamped, WT bytes dropped, played as an LFO). Said in docs/formats/og.md section 5.
+inline constexpr bool is_wt_loop(std::uint8_t loop) noexcept { return loop == 2u || loop == 3u; }
 
 // The layout is declared, not left to the compiler (ADR 0011): 4-byte alignment because of the floats, and
 // the same size on the 64-bit host and on the MK66, which the arena size relies on.

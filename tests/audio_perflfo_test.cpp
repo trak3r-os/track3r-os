@@ -165,6 +165,31 @@ TEST_CASE("perform lfo: a slot that stores no audible amount (an old project, an
   }
 }
 
+TEST_CASE("perform lfo: over a WT slot (pan, finetune, position; OS-CEWTENV W3b) the layer plays the triangle at 50 %, not the contour index as a random shape, and the descriptor is left as it was") {
+  for (const Dest d : {kPan, kTune, kWt, kGran}) {
+    for (const std::uint8_t kind : {audio::kFmodWtEnv, audio::kFmodWtLfo}) {
+      audio::FilterMod wt;
+      wt.kind = kind;
+      wt.shape = 200;  // a contour index: the plain LFO would read it as the random shape
+      wt.rate = 3;
+      wt.amount = 0.9f;
+      wt.lfo_amount = 0.9f;
+      wt.lfo = true;
+      wt.wt_bend = 0x12;
+      for (const int o : {-8, 3}) {
+        const std::vector<double> ref = run(d, desc_for(d, lfo_at(d, 2, expect_index(d, 14, o), 0.5f)), 0, kRun);
+        const SampleDesc desc = desc_for(d, wt);
+        const std::vector<double> got = run(d, desc, o, kRun);
+        REQ(ref.size() == kRun && got.size() == kRun);
+        CHECK_MESSAGE(got == ref, "dest " << static_cast<unsigned>(d) << " kind " << static_cast<unsigned>(kind) << " offset " << o);
+        const audio::FilterMod& m = d == kPan ? desc.pan_mod : (d == kTune ? desc.tune_mod : desc.pos_mod);
+        CHECK(m.shape == 200);
+        CHECK(m.lfo_amount == 0.9f);
+      }
+    }
+  }
+}
+
 TEST_CASE("perform lfo: over an LFO slot the shape and amount stay and only the speed index moves, held to the table") {
   for (const Dest d : kAll) {
     const unsigned lo = d == kAmp ? audio::kAmpRateBase : 0u;

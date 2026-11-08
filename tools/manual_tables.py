@@ -61,7 +61,7 @@ SCREENS = {
                  keys=[("WAVE", "kWaveSoftKeys"), ("CHOP", "kChopSoftKeys"), ("WAVETABLE", "kWtSoftKeys"), ("GRANULAR", "kGranSoftKeys")],
                  shift=[("All views", "kWaveShiftKeys")]),
     "sample_edit": dict(title="Sample edit", chapter="sample_edit.md", sid="SampleEdit", button="SampleEdit",
-                        keys=[("Sample edit", "kSampleEditSoftKeys"), ("FX page", "kSampleEditFxSoftKeys")], shift=[("Sample edit", "kSampleEditShiftKeys")]),
+                        keys=[("Sample edit", "kSampleEditSoftKeys"), ("FX page", "kSampleEditFxSoftKeys"), ("PLUGINS page", "kSampleEditPlugSoftKeys")], shift=[("Sample edit", "kSampleEditShiftKeys")]),
     "sample_load": dict(title="Sample load", chapter="sample_load.md", sid="SampleLoad", button="SampleLoad",
                         keys=[("Sample load", "kSampleLoadSoftKeys")], shift=[("Sample load", "kSampleLoadShiftKeys")]),
     "record": dict(title="Record", chapter="record.md", sid="Record", button="SampleRec",
@@ -84,7 +84,7 @@ SCREENS = {
 # Key-row tables of the firmware that the manual does not show: the input test (a diagnostic), a running app's page (its labels are the app's),
 # the default rows that screen.h hands to every screen with nothing of its own, and the INFO page's row of Config (OS-FWCONFIG: kConfigSoftKeys with F8 UPDATE, which config.md says in words).
 # kPerformDj*: the DJ page of Perform (OS-DJ A1, A2) is a hand-written section of perform.md ("Use the DJ page"); its two key rows are described there.
-UNDOCUMENTED = {"kInputTestSoftKeys", "kModuleAppSoftKeys", "kJumpShiftKeys", "kConfigInfoSoftKeys", "kPerformDjSoftKeys", "kPerformDjShiftKeys", "kSampleEditBusySoftKeys", "kSampleEditFxBusySoftKeys", "kMixerStemKeys", "kMixerInsertKeys"}  # (the last three: the Sample edit rows while a job runs, F8 CANCEL, and the Mixer rows on the STEMS page, F6 APPLY (OS-USBOUTS), and on the INSERTS page, F7 BYPASS (OS-INSFX S4); the chapters say so in words)
+UNDOCUMENTED = {"kInputTestSoftKeys", "kModuleAppSoftKeys", "kJumpShiftKeys", "kConfigInfoSoftKeys", "kPerformDjSoftKeys", "kPerformDjShiftKeys", "kSampleEditBusySoftKeys", "kSampleEditFxBusySoftKeys", "kSampleEditPlugBusySoftKeys", "kMixerStemKeys", "kMixerInsertKeys", "kSongLaneSoftKeys"}  # (the Sample edit rows while a job runs, F8 CANCEL, and the Mixer rows on the STEMS page, F6 APPLY (OS-USBOUTS), and on the INSERTS page, F7 BYPASS (OS-INSFX S4); kSongLaneSoftKeys: OS-SONG3 S4, the Song row while the cursor is in a lane of TIMELINE, F1 PREVIEW; the chapters say so in words)
 
 # What the front panel prints on a screen button, by Button enum name (the drawing docs/manual/img/panel.svg and the manual say it this way).
 BUTTON_PRINTED = {"Params": "Params", "Performance": "Perform", "File": "File", "Config": "Config", "Master": "Master",

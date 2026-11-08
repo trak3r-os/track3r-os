@@ -1,0 +1,19 @@
+{
+  "name": "Crush",
+  "id": "crush",
+  "kind": "effect",
+  "abi": "1.2",
+  "description": "A bit-depth and sample-rate reduction insert for a track: a dead-zone quantiser of 1 to 16 bits, a sample-and-hold of a fractional factor from 1 to 64, a dry/wet mix and an output level, with a view of the quantiser's staircase. One mono instance.",
+  "state_bytes": 96,
+  "params": [
+    {"name": "Rate", "min": 1, "max": 64, "default": 1, "curve": "log", "mod": true},
+    {"name": "Bits", "min": 1, "max": 16, "default": 8, "type": "int", "mod": true},
+    {"name": "Mix", "min": 0, "max": 100, "default": 100, "unit": "percent", "mod": true},
+    {"name": "Output", "min": -24, "max": 6, "default": 0, "unit": "db", "mod": true}
+  ],
+  "views": [
+    {"name": "Curve", "min_size": [120, 80], "preferred_size": [380, 140]}
+  ],
+  "voices": 1,
+  "memory": {"hot_bytes": 768, "sdram_bytes": 0}
+}

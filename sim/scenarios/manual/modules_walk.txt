@@ -1,7 +1,7 @@
 # OS-MANUAL2 C2: the walk-through of the Modules chapter's "Try it" (docs/manual/modules.md). Each `snap walk_<n>` is the picture of step n, `modules_walk_<n>.png` in docs/manual/img/.
 # Edit the chapter's step and this line together.
 #
-# The Navigator route the chapter writes (hold `Shift` and press `Pattern`, encoder to MODULES, `F8` GO) ends in the action the scenario runs (`nav.screen 12`, as qa_modules does).
+# The Navigator route the chapter writes (press `Song` and `Pattern` together, encoder to MODULES, `F8` GO) ends in the action the scenario runs (`nav.screen 12`, as qa_modules does).
 # `card e2e_card` and `apps on` give the simulated card the shipped apps (sim/include/o3os/sim/sim_apps.h). Nothing is played.
 action nav.screen 12
 document

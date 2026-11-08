@@ -122,11 +122,11 @@ def memory_regions(script):
     return regions
 
 
-# The SDRAM map of ADR 0013 D7, region constants in order (mem_map.h): base name, size name.
+# The SDRAM map of ADR 0013 D7, region constants in order (mem_map.h): base name, size name. OS-CEPTFX S2a merged file_job and lut into the ptfx region.
 SDRAM_REGION_NAMES = [
     ("kSampleArenaBase", "kSampleArenaSize"), ("kDelayBase", "kDelaySize"), ("kReverbBase", "kReverbSize"),
-    ("kModuleRegionBase", "kModuleRegionSize"), ("kProjectBase", "kProjectSize"), ("kUndoBase", "kUndoSize"),
-    ("kFileJobBase", "kFileJobSize"), ("kLutBase", "kLutSize"), ("kUiCacheBase", "kUiCacheSize"),
+    ("kWtContourBase", "kWtContourSize"), ("kModuleRegionBase", "kModuleRegionSize"), ("kProjectBase", "kProjectSize"), ("kUndoBase", "kUndoSize"),
+    ("kPtfxBase", "kPtfxSize"), ("kUiCacheBase", "kUiCacheSize"),
     ("kDiagLogBase", "kDiagLogSize"), ("kSdramSlackBase", "kSdramSlackSize"),
 ]
 
@@ -268,13 +268,13 @@ def self_test():
     broken["kDelayBase"] += 32
     expect("moved SDRAM region is caught", any("kDelayBase" in p for p in verify(broken, script)))
     broken = dict(constants)
-    broken["kLutSize"] += 32
+    broken["kPtfxSize"] += 32
     expect("a grown region is caught at the next base", any("kUiCacheBase" in p for p in verify(broken, script)))
     broken = dict(constants)
     broken["kSdramSlackSize"] += 32
     expect("SDRAM sum is caught", any("end of SDRAM" in p for p in verify(broken, script)))
     broken = dict(constants)
-    broken["kLutSize"] += 16
+    broken["kPtfxSize"] += 16
     expect("an unaligned size is caught", any("multiple of 32" in p for p in verify(broken, script)))
     broken = dict(constants)
     broken["kFlashSize"] = 2 << 20

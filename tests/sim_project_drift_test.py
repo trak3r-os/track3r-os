@@ -34,6 +34,7 @@ NOT_SIMULATED = {
     "storage": "the unit's card: SimProject is handed its own",
     "audio_voices": "the unit's voice pool: SimProject is handed its own",
     "sample_arena": "the unit's sample memory: SimProject is handed its own",
+    "wt_user_reload": "SimProject::reload_envelopes runs the same app::wt_user_load on the simulator's card (OS-CEWTENV W8), called from begin_samples",
     "clear_sample_table": "SimProject empties the voices' table inline in begin_samples (a `set_sample` loop)",
     # a module file import (File > IMPORT) is simulated since E2E-9 (SimProject::import_module: ModuleImport, its sample feed, close): `module_load()` is the platform's accessor of the active import,
     # SimProject asks its own ModuleImport (`module_->active()`). The SD modules and their binder are E2E-7

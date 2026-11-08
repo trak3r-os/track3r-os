@@ -17,6 +17,12 @@ Approved: every recommendation of this note, with these answers.
 | Q7 | The section label replaces the number on the blocks after SLOTDATA. |
 | Q8 | 12 visible lanes, **also on LIST** (maintainer). Tracks 13-16 stay reachable: the 12-lane window scrolls when the cursor goes past track 12 (orchestrator's proposal, to confirm in the spec). |
 
+**Implementation record, S1 and S2 (2026-11-07, branch feat/OS-SONG3-S1; new Community OS behaviour, no format change).**
+
+- S1: the page cycle is LIST 1/2, TIMELINE 2/2 (`SongPage { List, Timeline }`); LIST is POS, PAT, NAME, BAR, BARS, the shared mark and the map (cell = two Data characters, pitch cell + gap: Q1b); LEN and the LENGTH graphic are gone; the info line is `list   slot 03 of 12   46 bars in all   pattern 03 in 3 slots` (or `SHIFT+INS DUP`). QA-SNG-050..052 and 087 rewritten; the gallery states `arrangement` and `document_arrangement` are gone.
+- Q8 as built: the map draws at most `SongView::kLanes` = 12 cells; on LIST the window (`SongView::tbase`) follows the track cursor one track at a time (the cursor reaches all 16 tracks; the TRACKS caption says `TRACKS 5-16` when it has scrolled), and is back at 0 on PAT. **TIMELINE has 12 lanes and no scroll**: its note-map picture holds 12 tracks (`SongNoteMap::kTracks`, OS-SONG-VIEW2 V4), so the cursor reaches lanes 1-12 only and tracks 13-16 are edited on LIST (section 3.3's "Limits to state"); a LIST cursor on track 13-16 goes to lane 12 when the page turns. Scrolling TIMELINE's lanes needs a 16-track picture (RAM_G +32 KiB, `kNoteMapRows`, tests and the V4 numbers): **open, maintainer's call**.
+- S2: `SongScreen::step` maps dx to the slot axis and dy to the column axis on TIMELINE; `song.select` (Shift + Up / Down) extends tracks and `song.select_tracks` (Shift + Left / Right) slots there; Copy + Left / Right is `song.move_along` (same move; Copy + Up / Down do nothing on TIMELINE, Copy + Left / Right nothing on LIST). Draw: a faint rule at every slot boundary through the lanes, the cursor cell (Accent box, AccentText outline), an Accent band for a rectangle with the slots' ticks drawn again in AccentText under a scissor, the cursor's lane number bright, a one-pixel frame on the cursor's block while it is in a lane. Every action is the list's (they never look at the page).
+
 Copying a whole pattern already exists (PAT-OPS-B: F1 held on Pattern, then Copy / Shift + Copy; Song: Copy / Shift + Copy of slots; Shift + F3 / Shift + Insert adds a slot with a copy as a new pattern). It is hidden; OS-PTOOLS2 S3 makes COPY PATTERN / PASTE PATTERN visible verbs of the F7 menu.
 
 
@@ -191,6 +197,10 @@ Each slice is one branch, one review; no format change until S6. Sizes in the ba
 
 Order: S1 → S2 (→ S3 inside it) → S4 → S5 → S6 → S8; S7 wherever the maintainer puts it. S1 and S2 can be one batch branch (two commits); S4 is the first "fun" the tester will hear, so it goes before SLOTDATA.
 
+S3 note: the dimmed lane (and the list's map cell) reads the track's own mute flag (`kTrackMute`) only — what a solo silences is not dimmed (new Community OS behaviour).
+
+S3 budget note (review fold, measured on the simulator's budget table): the timeline sweeps now measure `timeline_worst` 1080 translate / 1153 vtx2f and `timeline_edit_worst_dim` 1755 translate / under 1792 vtx2f (its marks variant truncates the song to 32 slots so the 22 px blocks wear the `*`; a block of the full 34-slot window, 21 px, goes without, as a three-digit number does). The combined sweep `timeline_edit_worst_all` — the full-window selection, alternating mutes and the shared marks together — measures 1913 translate / 1978 vtx2f at its worst variant: above the 1792 standard, under the chip's 2048-word list, and kept there without trimming a feature; it is registered as a non-worst-case state, so the budget harness holds it to 2048 and the table reports it.
+
 Budget notes: S1-S5 are main-loop and display-list only; flash a few KiB in all (S2 reuses every action; the draw grows by a cursor and a band), SRAM 0 (the view already holds the column). S4's audition state is a few bytes in the view. S6's costs are in its own row.
 
 ## 5. Open questions for the maintainer
@@ -203,7 +213,7 @@ Budget notes: S1-S5 are main-loop and display-list only; flash a few KiB in all 
 | Q3 | The key row, now that tracker-ce settles SONG-UX Q1 (official: F3 Undo, F4 Add, F5 Delete, F6/F7 Pattern -/+, F8 Tempo) | a) realign: F1 PLAY PAT/PREVIEW · F2 PLAY SNG · F3 UNDO · F4 ADD SLOT · F5 DEL SLOT · F6 UNIQUE · F7 TOOLS · F8 TEMPO (6 of 8 as the official; UNIQUE and TOOLS sit where PAT-/+ were, which the encoder does); REDO to Shift + F3 · b) keep today's row | a, in S5 while the manual moves anyway; the rule of 2026-10-18 makes this his call |
 | Q4 | PREVIEW mechanism | a) the existing solo path from the main loop, state saved and restored, not journaled · b) a sequencer-side audition mask (Level C) · c) skip PREVIEW | a |
 | Q5 | Loop a range of slots while editing (dropped 2026-10-18 as OS-SONGLOOP) | a) stays dropped · b) back as S7: hold F2 with a range (or F1 with a range) loops it | b; it is the arranger gesture the grid now invites |
-| Q6 | Where ADD EMPTY lives | a) Shift + F3, replacing the 2/4 jump (0/4 and END stay; 1/4 and 3/4 go too, the 48 SLOTS pads jump better) · b) a TOOLS OP · c) Shift + F4 as the official (then the 3/4 jump goes) | c if Q3 is a (the official place), else a |
+| Q6 | Where ADD EMPTY lives | a) Shift + F3, replacing the 2/4 jump (0/4 and END stay; 1/4 and 3/4 go too, the 48 SLOTS pads jump better) · b) a TOOLS OP · c) Shift + F4 as the official (then the 3/4 jump goes) · **d) Copy held + F3 (decided in S5, new Community OS behaviour)**: Shift + F3 / Shift + F4 stay the 2/4 and 3/4 jumps (OS-QJUMP), and Song's Copy-held row is free next to F3 ADD SLOT (build-map/keys.md: only the arrows take Copy); the key row is unchanged (Q3 no), and the gesture does not make F3's tap wait | d: Copy held + F3 on LIST (Q3 is no, so not the official place; the label is ADD EMPTY, 9 characters, so a key-cap would shorten it — the row is not touched) |
 | Q7 | After SLOTDATA, the block's text | a) the section label when set, else the pattern number · b) always the number, label on the strip | a |
 | Q8 | Tracks 13-16 on TIMELINE | a) accept 12 lanes, edit them on LIST · b) a lane scroll | a (D11) |
 | Q9 | Name of the fourth value: none. The STAGE countdown stays on TIMELINE's info line | — | keep |

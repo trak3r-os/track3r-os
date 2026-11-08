@@ -51,11 +51,14 @@ enum class OverlayId : std::uint8_t {
   StepPopup = 9,     // OS-FU3: the instrument / FX / note list a held Instr, Fx or Note button opens (the step popups): view_state.h StepPopupView
   Fill = 10,         // OS-PTOOLS: the Pattern screen's F4 FILL dialog (fill_view.h)
   PlayMode = 11,     // OS-INSTUI S4: the Wave screen's list of the eight play modes (Shift + F1)
-  Tools = 12,        // OS-H3A: the Pattern screen's F7 TOOLS list (the tool apps that edit the project; OS-WAVEXP adds EXPORT above them)
   SongTools = 13,    // OS-SONGMAP: the Song screen's F6 TOOLS dialog over the map's rectangle (song_tools_view.h)
   FirmwareUpdate = 14,  // OS-FWCONFIG: the firmware update dialog of Config's INFO page (F8 UPDATE): the list, two questions, the check, the hand-over (firmware_view.h)
+  Events = 15,          // OS-MIDIREC S1b: the EVENTS list over the Pattern screen's grid pane (events_view.h), opened from the TOOLS list
+  VerbMenu = 16,        // OS-PTOOLS2 S3: the Pattern screen's F7 verb menu (verb_menu.h), two columns of eight rows; the TOOLS list (12) stays reachable from its APPS > row
+  Preset = 17,          // OS-INSFX-ABI2 A9: the F5 PRESET list of a module's parameter page, an instrument's or an insert's (preset_list.h)
   Help = 21,            // OS-HELP: the help page of the screen in view, Shift + Config (help_text.h); modal, any key but the arrows, the encoder and Shift closes it
   ExportProgress = 20,  // OS-WAVEXP: the modal progress of a running WAV export, F8 CANCEL (export_view.h); 20 leaves the numbers between to the branches that add overlays
+  PatternTools = 22,    // OS-PTOOLS2 S2: the Pattern screen's TOOLS dialog over the block (pattern_tools_view.h), opened from the verb menu's TRANSPOSE / INSTRUMENT rows
 };
 
 constexpr bool is_chooser(OverlayId id) noexcept {

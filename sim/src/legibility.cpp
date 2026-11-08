@@ -30,7 +30,7 @@ constexpr const char* kCoveredInPart = "covered in part: a later opaque panel hi
 
 constexpr const char* kTokenNames[] = {"Chrome", "ChromeText", "ChromeDim", "Pane",   "Text",       "TextDim",
                                                       "Empty",  "Instr",      "Vol",       "Fx",     "Sel",        "SelText",
-                                                      "Accent", "AccentText", "Play",      "PlayText", "Rec"};
+                                                      "Accent", "AccentText", "Play",      "PlayText", "Rec", "SelDim"};
 
 constexpr const char* kIconNames[] = {"Play", "Stop", "Record", "Loop", "Mute", "Solo", "Lock", "Folder", "Module", "Midi", "Warning"};
 // (unsized, so that a token or an icon added to ui/ without its name here fails the build instead of printing a null name)

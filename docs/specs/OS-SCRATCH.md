@@ -19,6 +19,8 @@ The brief suggested timestamps from the main loop passed to the render through t
 
 ## 3. The change
 
+> Superseded in part by section 8 (OS-BUG-SCRATCH): the inertia, the gate slope, the ahead and the history there are the current values.
+
 All of it only in the Platter phase (and the Spin and Release that follow a Platter); TAPE STOP (modes 2 and 3) keeps its code path and its output bit for bit.
 
 - **Velocity from timing.** The last 4 count events (a block with `hand != 0`: its block index and its count) are kept. `v = (counts of the 3 newer events) / (block index of the newest - block index of the oldest)` counts per block, about one detent of history, so the snap of a detent does not show. One event alone (a start, or the first after a reversal) counts as 1 count per 8 blocks. A reversal clears the history and the position debt (below): the head follows the new direction at once, not after the hand has travelled back over the old direction's unplayed counts (a clamped flick leaves up to 8). The estimate is capped at `1 / age` counts per block while `age` blocks have passed since the newest event (no event for a long while means slowing), and it is 0 after 96 blocks (139 ms) without an event.
@@ -29,11 +31,15 @@ All of it only in the Platter phase (and the Spin and Release that follow a Plat
 
 ## 4. Rules kept
 
+> Superseded in part by section 8 (OS-BUG-SCRATCH): the inertia, the gate slope, the ahead and the history there are the current values.
+
 No heap, no libm, no `double`; one loop of exactly 64 frames; one division and a few flops a block more. The code stays in flash (`O3OS_AUDIO_COLD`, -O3); `.ramfunc_l` is not touched. New state is render-only (set_mode, process: the ParamChange drain and the chain are one context, as before): about 48 bytes in `Graph::scratch_stage_`. No persistent format. Normal playback never reaches the stage (bypassed).
 
 Tests (`tests/audio_scratch_test.cpp`): a rate curve for a synthetic count script (step response within a tolerance of the 25 ms constant, steady slow turn smooth, stop and start), a direction change without a click (bounded sample-to-sample delta on a sine), Hermite exact on a cubic and a constant, the position kept to one count, TAPE STOP identical to a linear-read reference.
 
 ## 5. As built
+
+> Superseded in part by section 8 (OS-BUG-SCRATCH): the inertia, the gate slope, the ahead and the history there are the current values.
 
 Files: `audio/include/o3os/audio/master_scratch.h` (constants `kInertia`, `kHist`, `kFirstSpan`, `kStopBlocks`, `kPull`, `kPullMax`, `kAhead`, `kDebtMax`; render-only members; public static `hermite4`), `audio/src/master_scratch.cpp` (`platter_target`, `next_rate`, the Hermite read), `tests/audio_scratch_test.cpp` (10 new cases). The app and the platform are untouched.
 
@@ -67,3 +73,18 @@ Changes, both bit-exact and `new Community OS behaviour` free (the sound, the ri
 - `still_lag`: the 63 frames after frame 0 in closed form. The loop is `L <- min(L, m_i) + 1`, `m_i` the read limit, non-decreasing by at most 1 a frame, so `m_i - i` never rises: the loop clamps at some frame iff it clamps at the last, and the lag after the block is `min(L1 + 63, m_63 + 1)`, the fraction 0 iff a clamp happened.
 
 Tests (`tests/audio_scratch_test.cpp`, suite `audio_limiter`): the closed form against the per-sample loop on 900,000 random ring states (six ring sizes, lag around the limit, fractions on and off the 2^-23 grid); the ring against the old conversion over a sweep of the whole float bit space, the rounding ties, the clamp edges and the specials, at either alignment, across the ring's end. On the target (`__arm__`, the QEMU run) both sweeps are thinned to fit its heap and time: 6,000 ring states per ring size, and every 65,537th bit pattern; the tie, clamp-edge and special lists run in full. The golden hashes of section 6 are unchanged. Expected saving about 4,000 cycles a block (1.5 points) [est], to be measured on the unit (QA-PRF-150, Dense8 with SCR on and the hand still); flash +256 B on the release image (925,092 to 925,348 B).
+
+## 8. The feel, second pass (OS-BUG-SCRATCH), as built
+
+Level C (audio path). Maintainer, 2026-11-08: "the scratch sounds quite bad, it does odd things". Four causes found by reading the code against the count timing (a detent is 827 frames, about 13 blocks at 44.1 kHz, so a hand at normal speed makes one count every 13 blocks), `new Community OS behaviour`, host-proved, by ear still open:
+
+1. **Stop-start.** `kAhead` was 0.25 count: the target was clamped to what the hand had already paid, so between two counts the head ran out and the rate fell to 0, at the count rate. Now `kAhead` = 1.0 count for two events or more (a lone count keeps `kLoneAhead` = 0.25: a click is a nudge); the velocity estimate is held for 1.5 times the last inter-event time (`kHold`: with no count for `age` blocks the estimate is capped at 1.5 / age counts a block) and then decays.
+2. **Buzz.** The gate `g = min(8 |rate|, 1)` turned every dip of the rate into an amplitude change. A Platter run (also its Spin and Release) now has slope 32 (`kPlatterGate`: silent only under 1/32 of real speed); the TAPE STOP keeps 8 and its output is unchanged.
+3. **Flutter.** The 25 ms inertia was shorter than the gap between detents, so the detent rate was audible. Now 70 ms (`kInertia = kBlockMs / (70 + kBlockMs)`; `kHist` 4 to 8 events, two detents of history). A reversal still drops the old direction's debt and the history at once, so the head follows the new direction from the first count back; a held hand still runs to exactly 0 (silence; about 340 blocks, 495 ms, from a rate of 1, and the entry run-down is longer than in section 5: its figures there are for 25 ms).
+4. **Aliasing above rate 1.** A Platter run at |rate| > 1 reads through a one-pole low-pass per channel with the coefficient min(1, `kAaCut` / |rate|), `kAaCut` = 1.2, of the block's larger end rate. The state follows the read while the filter is bypassed, so at |rate| <= 1 the output is bit for bit the old read and the filter engages without a step; the state is zeroed in `set_mode`. TAPE STOP has none.
+
+**Run-time tuning** (`MasterScratch::set_tuning(inertia_ms, ahead, gate_slope, aa)`, getters `inertia_ms()`, `ahead()`, `gate_slope()`, `aa()`; console `diag scratch` prints, `diag scratch <inertia_ms> <ahead_counts> <gate_slope> <aa 0|1>` sets; session only, never stored). Ranges 5..500 ms, 0..4 counts, 1..64, a flag; outside values and NaN are clamped. Protocol: the main loop is the only writer, the render reads each field once a block into a local; every field is a relaxed `std::atomic` (a plain aligned 32-bit load or store on the M4, 8-bit for the flag), so a block sees an old or a new value, never a torn one, and may mix fields (each is valid alone). No lock, no allocation.
+
+Size: SRAM_L 0 B (the stage is in flash, `.ramfunc_l` untouched); new state in SRAM_U (four tuning words, two AA states). The idle path (a still hand with no AA) is untouched, bit-exact: the `audio_scratch_test` idle tests and the ring tests pass unchanged. Flash and SRAM_U deltas: see the commit message.
+
+Tests (`tests/audio_scratch_test.cpp`): a steady slow hand (one count every 14 blocks) has no silent block and no stopped rate between counts after the second count; a hand at 1x stays within 15 % of rate 1 and a held hand ends in exact silence; a reversal of a steady hand falls from the first count back and ends below -0.7; the AA is bit-exact against aa off at |rate| <= 1 and takes a 15 kHz tone at rate above 3 below half its level; `set_tuning` defaults, clamps and NaN. The mirror of TAPE STOP and the A/B scenarios were retuned (settle lengths for 70 ms, the 32 gate) and the goldens re-pinned. CPU: not measured (host only); the check is on the unit, QA-PRF-150 with SCR on, a fast turn (the AA runs one pole a frame) and still.

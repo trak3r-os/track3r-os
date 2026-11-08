@@ -39,12 +39,25 @@ bool SongView::fit(int count) noexcept {
 
 // ---- the track column (OS-SONGMAP) ------------------------------------------------------------------------------------------
 
+void SongView::follow_track(int cells) noexcept {
+  const int most = cells > kLanes ? cells - kLanes : 0;
+  if (col_ <= 0) {
+    tbase_ = 0;  // on PAT (or the block row) the window is back at the first track
+  } else if (col_ - 1 < tbase_) {
+    tbase_ = col_ - 1;
+  } else if (col_ - 1 >= tbase_ + kLanes) {
+    tbase_ = col_ - kLanes;
+  }
+  tbase_ = tbase_ > most ? most : tbase_;
+}
+
 bool SongView::step_col(int delta, int cells) noexcept {
   const bool had = leave_edit();
   const int before = col_;
   const int top = cells > 0 ? cells : 0;
   const int d = delta < -1 ? -1 : (delta > 1 ? 1 : delta);  // one cell a press
   col_ = col_ + d < 0 ? 0 : (col_ + d > top ? top : col_ + d);
+  follow_track(cells);
   return col_ != before || had;
 }
 
@@ -55,6 +68,7 @@ bool SongView::set_track(int track, int cells) noexcept {
   const bool had = leave_edit();
   const int before = col_;
   col_ = track + 1;
+  follow_track(cells);
   return col_ != before || had;
 }
 
@@ -70,6 +84,7 @@ bool SongView::extend_tracks(int delta, int cells) noexcept {
   const int before = col_;
   col_ = col_ + d < 1 ? 1 : (col_ + d > cells ? cells : col_ + d);
   tempo_focus_ = false;
+  follow_track(cells);
   return col_ != before || started;
 }
 
@@ -81,7 +96,9 @@ bool SongView::fit_cols(int cells) noexcept {
   if (gone || col_ == 0) {
     tanchor_ = -1;
   }
-  return moved || gone;
+  const int window = tbase_;
+  follow_track(cells);
+  return moved || gone || tbase_ != window;
 }
 
 bool SongView::shift_range(int delta, int count) noexcept {

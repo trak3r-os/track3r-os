@@ -28,6 +28,18 @@ struct PerformBoard {
   seq::CommandSink* out = nullptr;  // nullptr: the screen works and tells no engine (the simulator, a bare test)
   std::uint8_t pick = 0;            // E-PERF-07: the pattern Shift + F4 / F5 picked for Shift + F6 (TRK PAT); 0: none yet (the pattern that plays). Live state, not stored
   std::uint64_t pads = 0;          // OS-QAFIX-E-PERF-08: the pads whose press went to the bank (perform.pad) and are still down (bit n = pad n); main loop only. Their release on Master / Song is forwarded, no other's
+  // OS-MIDICCMAP S4 (CC 41..48): the last pattern the fixed CC map queued on each of tracks 1..8 (cc_pattern[t] = pattern id 1..255, 0: none sent yet), so a value the map already sent is not
+  // sent again and a fader resending it never takes the queue back (F12). Cleared when the run stops (clear_cc_pattern, called from App::poll_play_position). Runtime only, not stored
+  std::uint8_t cc_pattern[8] = {};
+  // Q5 a (kept from OS-PERFREMIX R2, OS-NOREMIX 2026-11-08): the tracks that play another pattern (TRK PAT, E-PERF-07, the CC map) when Perform was left, marked to go back to the song at the next
+  // pass (App::poll_perform sends one SetTrackPattern 0 for the mask; a ring that refuses is retried; a Stop drops it). Main loop only. Live state, not stored
+  std::uint16_t back = 0;
+
+  void clear_cc_pattern() noexcept {
+    for (unsigned t = 0; t < 8u; ++t) {
+      cc_pattern[t] = 0;
+    }
+  }
 
   // The sink the bank is applied to: the engine's, or one that takes everything and keeps nothing.
   seq::CommandSink& sink() noexcept {

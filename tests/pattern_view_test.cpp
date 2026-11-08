@@ -77,7 +77,8 @@ struct Shot {
   sim::EveRaster raster;
   sim::RasterDisplay display{raster};
   ui::Theme theme;
-  explicit Shot(const PatternView& view, unsigned theme_index = 0, bool translate = true)
+  explicit Shot(const PatternView& view, unsigned theme_index = 0, bool translate = true, const app::Selection* selection = nullptr,
+       void (*tweak)(PatternView::Status&) = nullptr)
       : theme(built_in(theme_index)) {
     CHECK(sim::load_assets(display) == hal::UploadResult::Ok);
     auto data = std::make_unique<PatternData>();
@@ -87,7 +88,14 @@ struct Shot {
     ui::Renderer r(builder, theme);
     r.use_translate(translate);
     CHECK(r.begin(Color::Pane));
-    view.draw(r, *data, PatternView::Status{1, app::App::kSoftKeyLabels});
+    PatternView::Status status{1, app::App::kSoftKeyLabels};
+    if (selection != nullptr) {
+      status.selection = *selection;
+    }
+    if (tweak != nullptr) {
+      tweak(status);
+    }
+    view.draw(r, *data, status);
     CHECK(r.end());
     CHECK(display.render_failures() == 0u);
   }
@@ -215,6 +223,65 @@ TEST_CASE("pattern view: the selected row is the one strong highlight, the curso
   CHECK(s.count(Color::SelText, l.index_x, sel_y, 20, l.row_pitch) > 20);
 }
 
+// OS-SELTINT: over several tracks the cursor's track keeps the Sel blue and the other tracks of the block are SelDim; one track, or a column block, is Sel throughout. The sample is
+// the right-hand pad of a track cell, where no glyph is drawn.
+TEST_CASE("pattern view: a block over several tracks tints the tracks other than the cursor's SelDim") {
+  const auto block = [](int row0, int row1, int track0, int track1, bool column) {
+    app::Selection sel;
+    sel.active = true;
+    sel.start_row = static_cast<std::int16_t>(row0);
+    sel.end_row = static_cast<std::int16_t>(row1);
+    sel.start_track = static_cast<std::int8_t>(track0);
+    sel.end_track = static_cast<std::int8_t>(track1);
+    sel.column = column;
+    return sel;
+  };
+  PatternView view;
+  view.scroll_rows(5);
+  for (int i = 0; i < 5; ++i) {
+    view.move_right();  // track 1, the middle of the block
+  }
+  const int cs = PatternView::kCentreRow;
+  const auto probe = [](const Shot& s, const PatternLayout& l, int track, int slot) {
+    return s.pixel(l.track_x(track) + l.track_w - 3, l.row_y(slot) + l.row_pitch / 2);
+  };
+  for (unsigned theme_index = 0; theme_index < 3; ++theme_index) {
+    const app::Selection sel = block(3, 8, 0, 2, false);
+    const Shot s(view, theme_index, true, &sel);
+    const PatternLayout l = app::make_pattern_layout(s.theme, 16, 5);
+    for (const int slot : {cs - 1, cs + 1, cs + 3}) {
+      CHECK(probe(s, l, 0, slot) == s.rgb(Color::SelDim));
+      CHECK(probe(s, l, 1, slot) == s.rgb(Color::Sel));  // the cursor's track
+      CHECK(probe(s, l, 2, slot) == s.rgb(Color::SelDim));
+      CHECK(probe(s, l, 3, slot) == s.rgb(Color::Pane));  // outside the block
+    }
+    CHECK(probe(s, l, 0, cs - 3) == s.rgb(Color::Pane));  // above the block (row 2)
+    // The cursor's own row: its bar is Sel across the pane, and the block's other tracks are SelDim over it.
+    CHECK(probe(s, l, 0, cs) == s.rgb(Color::SelDim));
+    CHECK(probe(s, l, 1, cs) == s.rgb(Color::Sel));
+    CHECK(probe(s, l, 2, cs) == s.rgb(Color::SelDim));
+    CHECK(probe(s, l, 3, cs) == s.rgb(Color::Sel));  // the bar, outside the block
+  }
+  {  // the cursor at the block's first track: the rest are dimmed, the left of it is not drawn
+    PatternView first;
+    first.scroll_rows(5);
+    const app::Selection sel = block(3, 8, 0, 2, false);
+    const Shot s(first, 0, true, &sel);
+    const PatternLayout l = app::make_pattern_layout(s.theme, 16, 5);
+    CHECK(probe(s, l, 0, cs + 1) == s.rgb(Color::Sel));
+    CHECK(probe(s, l, 1, cs + 1) == s.rgb(Color::SelDim));
+    CHECK(probe(s, l, 2, cs + 1) == s.rgb(Color::SelDim));
+  }
+  {  // one track: Sel, no SelDim anywhere
+    app::Selection one = block(3, 8, 1, 1, false);
+    one.end_col = static_cast<std::int8_t>(app::Selection::kLastColumn);  // a block inside one track is whole steps only with every column
+    const Shot s(view, 0, true, &one);
+    const PatternLayout l = app::make_pattern_layout(s.theme, 16, 5);
+    CHECK(probe(s, l, 1, cs + 1) == s.rgb(Color::Sel));
+    CHECK(s.count(Color::SelDim, 0, 0, 800, 480) == 0);
+  }
+}
+
 TEST_CASE("pattern view: a bar is a one-pixel rule every 16 steps, empty fields are quiet dashes") {
   PatternView view;
   view.scroll_rows(43);  // the cursor on the centre slot (7) of the window of steps 36..51 (OS-CENTER): step 48 starts a bar, slot 12
@@ -288,6 +355,94 @@ TEST_CASE("pattern view: the strip shows the pattern and the tempo in the Displa
   }
 }
 
+// OS-SELTINT review: a block wider than the window (the cursor's track is the window's last or first, or not in the block at all) draws its runs inside the grid and fails nothing.
+TEST_CASE("pattern view: a block wider than the window draws its Sel and SelDim runs inside the grid, whichever side the cursor's track is on (OS-SELTINT)") {
+  const auto block = [](int track0, int track1) {
+    app::Selection sel;
+    sel.active = true;
+    sel.start_row = 3;
+    sel.end_row = 8;
+    sel.start_track = static_cast<std::int8_t>(track0);
+    sel.end_track = static_cast<std::int8_t>(track1);
+    sel.column = false;
+    return sel;
+  };
+  const int cs = PatternView::kCentreRow;
+  const auto probe = [](const Shot& s, const PatternLayout& l, int track, int slot) {
+    return s.pixel(l.track_x(track) + l.track_w - 3, l.row_y(slot) + l.row_pitch / 2);
+  };
+  struct Case {
+    int cursor_track;  // where the cursor stands (the window follows it)
+    int track0;
+    int track1;
+  };
+  // 5 tracks are in the window. {9, 0, 9}: the cursor at the right end, the window scrolled to tracks 5..9 (the block starts left of it); {0, 0, 9}: the cursor at the left end, the block runs on to the right
+  // of the window; {4, 6, 9}: the cursor left of the block (window 0..4, the block starts past it); {9, 0, 3}: the cursor right of the block (window 5..9, the block is past the left edge).
+  for (const Case c : {Case{9, 0, 9}, Case{0, 0, 9}, Case{4, 6, 9}, Case{9, 0, 3}, Case{7, 2, 12}}) {
+    PatternView view;
+    view.scroll_rows(5);
+    view.move_track(c.cursor_track);
+    const app::Selection sel = block(c.track0, c.track1);
+    const Shot s(view, 0, true, &sel);  // (Shot checks the list ends and no render failure)
+    const PatternLayout l = app::make_pattern_layout(s.theme, 16, 5);
+    const int left = c.cursor_track >= 5 ? c.cursor_track - 4 : 0;
+    for (int slot = 0; slot < 5; ++slot) {
+      const int track = left + slot;
+      const bool in_block = track >= c.track0 && track <= c.track1;
+      const std::uint32_t want = !in_block ? s.rgb(Color::Pane) : (track == c.cursor_track ? s.rgb(Color::Sel) : s.rgb(Color::SelDim));
+      CHECK(probe(s, l, slot, cs + 1) == want);
+    }
+    // Nothing is painted right of the grid's last track or left of its first.
+    CHECK(s.count(Color::SelDim, 0, 0, l.track_x(0), 480) == 0);
+    CHECK(s.count(Color::SelDim, l.track_x(4) + l.track_w, 0, 800 - (l.track_x(4) + l.track_w), 480) == 0);
+  }
+}
+
+// OS-INFOLINE review: the worst line the info text can be (the longest scale name, track 16, a 3-digit named pattern at the name's full room, pads TRACKS, METRO): it ends before the undo depth.
+TEST_CASE("pattern view: the info text, at its worst-case width with METRO on, stays clear of the undo depth (OS-INFOLINE)") {
+  PatternView view;
+  view.move_track(15);
+  const Shot plain(view, 0, true, nullptr, [](PatternView::Status& s) { s.undo = 0; });
+  const PatternLayout l = app::make_pattern_layout(plain.theme, 16, 5);
+  const int pad = plain.theme.metrics.pad;
+  const int y0 = l.info.y + 1;
+  const int h = l.info.h - 1;
+  const std::uint32_t bg = plain.pixel(0, l.info.y + 1);
+  // The undo depth's left edge on the plain line: the first column from the right half that has ink (the left text ends well before it).
+  int undo_left = -1;
+  for (int x = 400; x < 800 && undo_left < 0; ++x) {
+    for (int y = y0; y < y0 + h; ++y) {
+      if (plain.pixel(x, y) != bg) {
+        undo_left = x;
+        break;
+      }
+    }
+  }
+  CHECK(undo_left > 400);
+  const Shot worst(view, 0, true, nullptr, [](PatternView::Status& s) {
+    s.undo = 0;
+    s.scale = "Hung. minor";  // the longest of core/scales.h (kScaleNameChars = 11)
+    s.root = 49;              // a sharp: the widest note name
+    s.pattern = 100;          // three digits
+    s.pattern_name = "WWWWWWWWWWWWWWWW";  // the widest letters, more than kInfoNameChars: cut to 14
+    s.pads = "TRACKS";
+    s.metro = true;
+  });
+  // No ink in the pad before the undo text, and the undo text itself is the plain line's.
+  for (int x = undo_left - pad; x < undo_left; ++x) {
+    for (int y = y0; y < y0 + h; ++y) {
+      CHECK(worst.pixel(x, y) == bg);
+    }
+  }
+  bool same = true;
+  for (int x = undo_left; x < 800 && same; ++x) {
+    for (int y = y0; y < y0 + h && same; ++y) {
+      same = worst.pixel(x, y) == plain.pixel(x, y);
+    }
+  }
+  CHECK(same);
+}
+
 TEST_CASE("pattern view: the info line is the hint at full contrast, with the mode, and the undo depth at the right") {
   const PatternView view;
   const Shot hint(view);
@@ -296,6 +451,41 @@ TEST_CASE("pattern view: the info line is the hint at full contrast, with the mo
   CHECK(hint.count(Color::ChromeDim, 0, l.info.y + 1, 800, l.info.h - 1) == 0);    // nothing dim on the line
   CHECK(hint.count(Color::ChromeText, 700, l.info.y + 1, 100, l.info.h - 1) > 30); // the undo depth at the right edge
   CHECK(hint.count(Color::Chrome, 4, l.info.y + 1, 400, l.info.h - 1) > 1000);     // no chip: the line is bare chrome
+}
+
+// OS-INFOLINE: the mode chip stands first, at x = 2 * pad, whatever the text after it says; the text, METRO and the hint follow it and nothing overlaps the undo depth, even at the longest text.
+TEST_CASE("pattern view: the mode chip is first on the info line at the left edge, and the longest line (named pattern, pads TRACKS, METRO, hint) keeps clear of the undo depth (OS-INFOLINE)") {
+  const PatternView view;
+  const Shot plain(view);
+  const PatternLayout l = app::make_pattern_layout(plain.theme, 16, 5);
+  const int pad = plain.theme.metrics.pad;
+  const int chip_x = 2 * pad;
+  const int y_mid = l.info.y + l.info.h / 2;
+  // Left of the chip is bare chrome; the chip's own left edge is the ChromeText fill.
+  CHECK(plain.pixel(chip_x - 1, y_mid) == plain.pixel(0, y_mid));
+  CHECK(plain.pixel(chip_x, y_mid) != plain.pixel(0, y_mid));
+  CHECK(plain.pixel(chip_x + 1, y_mid) != plain.pixel(0, y_mid));
+  // The first ChromeText fill column from the left is the chip, nothing of the text sits left of it.
+  CHECK(plain.count(Color::ChromeText, 0, l.info.y + 1, chip_x, l.info.h - 1) == 0);
+
+  const Shot longest(view, 0, true, nullptr, [](PatternView::Status& s) {
+    s.pattern_name = "ABCDEFGHIJKLMNOP";
+    s.pads = "TRACKS";
+    s.metro = true;
+    s.hint = "BLOCK 16 STEPS  ENC: TRANSPOSE  F7: TOOLS  PAD: SET  DEL: CLEAR";
+  });
+  CHECK(longest.count(Color::ChromeText, 0, l.info.y + 1, chip_x, l.info.h - 1) == 0);
+  // The undo depth at the right edge is intact: the same pixels as on the plain line, so nothing was drawn over it.
+  bool same = true;
+  for (int x = 700; x < 800 && same; ++x) {
+    for (int y = l.info.y + 1; y < l.info.y + l.info.h && same; ++y) {
+      same = longest.pixel(x, y) == plain.pixel(x, y);
+    }
+  }
+  CHECK(same);
+  // A NOTES pad mode is named too: the line with "pads NOTES" has more ink than the one with no pads text.
+  const Shot notes(view, 0, true, nullptr, [](PatternView::Status& s) { s.pads = "NOTES"; });
+  CHECK(notes.count(Color::ChromeText, 0, l.info.y + 1, 700, l.info.h - 1) > plain.count(Color::ChromeText, 0, l.info.y + 1, 700, l.info.h - 1));
 }
 
 // Plan B for the one thing the guide does not say (does VERTEX_TRANSLATE_X move VERTEX2II?): the renderer can reach x >= 512
@@ -354,6 +544,10 @@ Pair pair_of(Color a, Color b) {
 //                                        (Pane on Text) are the table's pair
 //   ChromeDim, Sel beside Rec            Rec mode: the three-pixel Rec frame and the Rec playhead bar run into the rule at the edge of a chrome band and into the
 //                                        selected row's bar (the cursor on the first or last row, or the row next to the playhead); each is read against the pane
+//   Text beside Accent                   OS-SONG3 S2: the TIMELINE's selection band and cursor cell are Accent; a tick of the note map (Text) in the next slot, and the playhead's two-pixel line where it crosses the
+//                                        band, lie beside it. The ticks inside the band are AccentText (the table's pair); the line is a marker, read against the pane like the Rec playhead
+//   Sel beside SelDim                    OS-SELTINT: the cursor's track and the other tracks of a block lie side by side, a tint a step apart on purpose (the text is SelText on both)
+//   Rec beside SelDim                    OS-SELTINT: as Sel beside Rec, for the other tracks of a block (the Rec frame and the Rec playhead bar run into their tint)
 //   Text, TextDim beside Rec             OS-RECSIGN: the Rec frame round the grid is drawn in every Edit picture now (STEP too), so it runs beside a note at the
 //                                        grid's edge and a bar rule; the frame is a sign, read against the pane like the rest. (Accent and AccentText, the cursor block, no longer touch it:
 //                                        since OS-PATCENTER the cursor is always on the centre slot, never at the grid's top or bottom edge.)
@@ -362,7 +556,8 @@ const Pair kDecorations[] = {
     pair_of(Color::Empty, Color::Sel),      pair_of(Color::Empty, Color::TextDim), pair_of(Color::TextDim, Color::Sel),
     pair_of(Color::ChromeDim, Color::Text), pair_of(Color::ChromeDim, Color::Play),
     pair_of(Color::ChromeDim, Color::Rec),  pair_of(Color::Sel, Color::Rec),  pair_of(Color::Text, Color::Sel),
-    pair_of(Color::Text, Color::Rec),       pair_of(Color::TextDim, Color::Rec),
+    pair_of(Color::Text, Color::Rec),       pair_of(Color::TextDim, Color::Rec),     pair_of(Color::Text, Color::Accent),
+    pair_of(Color::Sel, Color::SelDim),     pair_of(Color::Rec, Color::SelDim),
 };
 
 struct Picture {
@@ -552,7 +747,7 @@ TEST_CASE("theme contrast: the table lists exactly the token pairs that touch in
   const auto name = [](Pair p) {
     static const char* const names[] = {"Chrome", "ChromeText", "ChromeDim", "Pane",    "Text",   "TextDim",
                                         "Empty",  "Instr",      "Vol",       "Fx",      "Sel",    "SelText",
-                                        "Accent", "AccentText", "Play",      "PlayText", "Rec"};
+                                        "Accent", "AccentText", "Play",      "PlayText", "Rec",    "SelDim"};
     return std::string(names[p >> 5]) + " / " + names[p & 31];
   };
   const auto is_empty_frame = [](Pair p) {

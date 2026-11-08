@@ -1174,3 +1174,474 @@ TEST_CASE("module drive: the export puts the layer away and brings it back (OS-B
   CHECK(f[4] == shaped(ref, 60u, 0u));
   CHECK(f[5] == shaped(ref, 60u, 0u));
 }
+
+namespace {
+audio::SampleDesc mix_desc(std::uint8_t pan, std::uint8_t delay, std::uint8_t reverb) {
+  audio::SampleDesc d{};  // no PCM: an SD module's instrument
+  d.pan = pan;
+  d.delay_send = delay;
+  d.reverb_send = reverb;
+  return d;
+}
+void push_inst(Rig& r, unsigned slot, unsigned field, float v) {
+  const bool ok = r.engine->params().push(core::ParamChange{core::param_id(core::ParamKind::Instrument, slot, field), v, 0u});
+  CHECK(ok);
+}
+}  // namespace
+
+TEST_CASE("module mix: the slot's PANNING and sends reach the strip at the note and on a live edit (OS-MODSENDS)") {
+  Rig r;
+  NEED(r.mv->bind(3, kRamp, 0x8003, &r.dc[0], nullptr, 0) == ModuleVoices::Bind::Ok);
+  r.pool->set_sample(3, mix_desc(20, 30, 40));
+  cue(0, event(0, EventKind::NoteOn, 2, 60, 3, 127));
+  r.block();
+  CHECK(r.engine->graph().inst_send(2, 0) == 30);
+  CHECK(r.engine->graph().inst_send(2, 1) == 40);
+  CHECK(r.engine->graph().voice_pan_offset(2) == -30.0f);
+  // a live edit reaches the track the module holds
+  push_inst(r, 3, audio::inst_param::ReverbSend, 70.0f);
+  push_inst(r, 3, audio::inst_param::DelaySend, 10.0f);
+  push_inst(r, 3, audio::inst_param::Panning, 80.0f);
+  r.block();
+  CHECK(r.engine->graph().inst_send(2, 0) == 10);
+  CHECK(r.engine->graph().inst_send(2, 1) == 70);
+  CHECK(r.engine->graph().voice_pan_offset(2) == 30.0f);
+  CHECK(r.pool->sample(3).pan == 80);
+  // a track the slot does not hold is left alone
+  CHECK(r.engine->graph().inst_send(5, 1) == 0);
+  // the next note of the slot starts from the edited values
+  cue(2, event(0, EventKind::NoteOn, 4, 62, 3, 127));
+  r.block();
+  CHECK(r.engine->graph().inst_send(4, 1) == 70);
+  CHECK(r.engine->graph().voice_pan_offset(4) == 30.0f);
+  r.mv->retire_all();
+  r.block();
+  r.block();
+  r.mv->release_all();
+}
+
+TEST_CASE("module mix: a module slot with the default descriptor plays at the centre with no send, as before (OS-MODSENDS)") {
+  Rig r;
+  NEED(r.mv->bind(3, kRamp, 0x8003, &r.dc[0], nullptr, 0) == ModuleVoices::Bind::Ok);
+  r.pool->set_sample(3, audio::SampleDesc{});
+  CHECK(r.pool->sample(3).pan == 50);
+  cue(0, event(0, EventKind::NoteOn, 1, 60, 3, 127));
+  r.block();
+  CHECK(r.engine->graph().inst_send(1, 0) == 0);
+  CHECK(r.engine->graph().inst_send(1, 1) == 0);
+  CHECK(r.engine->graph().voice_pan_offset(1) == 0.0f);
+  r.mv->retire_all();
+  r.block();
+  r.block();
+  r.mv->release_all();
+}
+
+// ---- OS-MODRATE: the per-instrument RATE (docs/specs/OS-MODRATE.md) ---------------------------------------------------------------------
+namespace {
+// A module whose sample c (c = 1, 2, ...) is c / 256 from its note on, so a held output shows which module sample each frame took. It records what the rate machinery did to it.
+struct alignas(16) RateState {
+  std::uint32_t counter, gate, inits, last_n, calls;
+  float rate_seen, param0;
+};
+alignas(16) RateState g_rate_state[2];
+std::uint32_t g_rate_shutdowns = 0;
+bool g_rate_init_fails = false;  // a module that refuses its restart
+
+int rate_init(void* s, const o3m_host* host) {
+  if (g_rate_init_fails) {
+    return 1;
+  }
+  RateState* d = static_cast<RateState*>(s);
+  ++d->inits;  // (the host zeroes the block before a restart, so this counts from the last one)
+  d->rate_seen = host->sample_rate;
+  return 0;
+}
+std::uint32_t rate_render(void* s, const float*, float* out, std::uint32_t n) {
+  RateState* d = static_cast<RateState*>(s);
+  ++d->calls;
+  d->last_n = n;
+  for (std::uint32_t i = 0; i < n; ++i) {
+    out[i] = d->gate != 0u ? static_cast<float>(++d->counter) * (1.0f / 256.0f) : 0.0f;
+  }
+  return d->gate != 0u ? 1u : 0u;
+}
+void rate_set_param(void* s, std::uint32_t id, float v) {
+  if (id == 0u) {
+    static_cast<RateState*>(s)->param0 = v;
+  }
+}
+void rate_note_on(void* s, std::uint32_t, std::uint32_t, std::uint32_t) {
+  RateState* d = static_cast<RateState*>(s);
+  d->gate = 1;
+  d->counter = 0;
+}
+void rate_note_off(void* s, std::uint32_t) { static_cast<RateState*>(s)->gate = 0; }
+void rate_shutdown(void*) { ++g_rate_shutdowns; }
+
+const o3m_param kRateParams[1] = {{"P", 0.0f, 100.0f, 1.0f, 0}};
+// The same module declared with the flag (ABI 1.13) and without it (ABI 1.12: the flag bit is not read).
+const o3m_module kRated = {O3M_ABI_MAJOR, 13, O3M_KIND_INSTRUMENT, sizeof(o3m_module), "rated", sizeof(RateState), 1, kRateParams,
+                           rate_init, rate_render, rate_set_param, rate_note_on, rate_note_off, rate_shutdown, nullptr, 0,
+                           nullptr, nullptr, 0, nullptr, nullptr, nullptr, O3M_FX_RATE};
+const o3m_module kPlainRate = {O3M_ABI_MAJOR, 12, O3M_KIND_INSTRUMENT, sizeof(o3m_module), "plain", sizeof(RateState), 1, kRateParams,
+                               rate_init, rate_render, rate_set_param, rate_note_on, rate_note_off, rate_shutdown, nullptr, 0,
+                               nullptr, nullptr, 0, nullptr, nullptr, nullptr, 0};
+
+// `blocks` blocks of the module on slot 3, track 0, played from sample `at` of block 0 (a NoteOff of a track that holds nothing at 21 splits the block into segments); returns the feed (zeros where there is none).
+std::vector<std::int16_t> run_rated(const o3m_module& mod, unsigned shift, std::uint16_t at, unsigned blocks, RateState* seen = nullptr) {
+  Rig r;
+  std::memset(g_rate_state, 0, sizeof g_rate_state);
+  r.mv->set_sample_rate(44100.0f);
+  std::vector<std::int16_t> all;
+  if (r.mv->bind(3, mod, 0x8003, &g_rate_state[0], nullptr, 0) != ModuleVoices::Bind::Ok) {
+    return all;
+  }
+  if (shift != 0u && r.mv->set_rate(3, shift, nullptr, 0, true) != ModuleVoices::Rate::Done) {
+    return all;
+  }
+  cue(0, event(at, EventKind::NoteOn, 0, 60, 3, 127));
+  cue(0, event(21, EventKind::NoteOff, 5));
+  for (unsigned b = 0; b < blocks; ++b) {
+    r.block();
+    std::vector<std::int16_t> f = r.feed(0);
+    f.resize(kBlk, 0);
+    all.insert(all.end(), f.begin(), f.end());
+  }
+  if (seen != nullptr) {
+    *seen = g_rate_state[0];
+  }
+  r.mv->retire_all();
+  r.block();
+  r.block();
+  r.mv->release_all();
+  return all;
+}
+}  // namespace
+
+TEST_CASE("module rate: the half and quarter rate hold each module sample 2 and 4 times, across segments and blocks, and call the module for the reduced frames at the reduced rate") {
+  for (const std::uint16_t at : {std::uint16_t{0}, std::uint16_t{5}, std::uint16_t{22}}) {
+    const std::vector<std::int16_t> full = run_rated(kRated, 0, at, 3);
+    NEED(full.size() == 3 * kBlk);
+    for (unsigned shift = 1; shift <= 2; ++shift) {
+      RateState seen{};
+      const std::vector<std::int16_t> held = run_rated(kRated, shift, at, 3, &seen);
+      NEED(held.size() == 3 * kBlk);
+      for (std::uint32_t i = 0; i < 3 * kBlk; ++i) {
+        // FULL played from the same sample puts module sample j (from 0) at frame at + j; the rated one holds it: frame i takes module sample (i - at) >> shift
+        const std::int16_t want = i < at ? std::int16_t{0} : full[at + ((i - at) >> shift)];
+        CHECK(held[i] == want);
+      }
+      const std::uint32_t frames = 3 * kBlk - at;
+      CHECK(seen.counter == ((frames + (1u << shift) - 1u) >> shift));  // the module rendered exactly the samples that start inside the played frames
+      CHECK(seen.rate_seen == 44100.0f / static_cast<float>(1u << shift));
+    }
+  }
+  Rig r;
+  const float fs = r.mv->host().sample_rate;
+  CHECK(r.mv->host_at(0).sample_rate == fs);
+  CHECK(r.mv->host_at(1).sample_rate == fs * 0.5f);
+  CHECK(r.mv->host_at(2).sample_rate == fs * 0.25f);
+  const o3m_host* h1 = &r.mv->host_at(1);
+  const o3m_host* h2 = &r.mv->host_at(2);
+  CHECK(h1 != h2);
+  CHECK(h1 != &r.mv->host_at(0));
+  r.mv->set_sample_rate(44100.0f);
+  CHECK(&r.mv->host_at(1) == h1);  // stable addresses: a module keeps the pointer it got at init()
+  CHECK(r.mv->host_at(1).sample_rate == 22050.0f);
+  CHECK(r.mv->host_at(2).sample_rate == 11025.0f);
+  CHECK(r.mv->host_at(1).exp2_f == r.mv->host().exp2_f);  // the same services
+  CHECK(r.mv->host_at(1).size == r.mv->host().size);
+}
+
+TEST_CASE("module rate: FULL is bit-exact with a module that does not declare the flag, and a module without it takes no rate") {
+  const std::vector<std::int16_t> a = run_rated(kRated, 0, 7, 3);
+  const std::vector<std::int16_t> b = run_rated(kPlainRate, 0, 7, 3);
+  NEED(a.size() == 3 * kBlk);
+  CHECK(a == b);
+  CHECK(ModuleVoices::rate_capable(kRated));
+  CHECK(!ModuleVoices::rate_capable(kPlainRate));
+  CHECK(!ModuleVoices::rate_capable(kDc));
+  Rig r;
+  NEED(r.mv->bind(3, kPlainRate, 0x8003, &g_rate_state[0], nullptr, 0) == ModuleVoices::Bind::Ok);
+  CHECK(r.mv->set_rate(3, 1, nullptr, 0, true) == ModuleVoices::Rate::Failed);
+  CHECK(r.mv->rate(3) == 0);
+  CHECK(r.mv->bound(3));
+  CHECK(r.mv->set_rate(3, 0, nullptr, 0, true) == ModuleVoices::Rate::Done);  // FULL on FULL is nothing to do
+  CHECK(r.mv->set_rate(3, 3, nullptr, 0, true) == ModuleVoices::Rate::Failed);
+  CHECK(r.mv->set_rate(9, 1, nullptr, 0, true) == ModuleVoices::Rate::Failed);  // not bound
+  CHECK(r.mv->rate(9) == 0);
+  r.mv->retire_all();
+  r.block();
+  r.block();
+  r.mv->release_all();
+}
+
+TEST_CASE("module rate: a change shuts the module down, restarts it with the new rate's table and the stored blob, never inside a render, and puts the gate back") {
+  Rig r;
+  std::memset(g_rate_state, 0, sizeof g_rate_state);
+  g_rate_shutdowns = 0;
+  unsigned nb = 0;  // the blocks the engine has rendered (the scripted events are cued by block)
+  const float blob[1] = {42.0f};
+  const std::uint8_t* bytes = reinterpret_cast<const std::uint8_t*>(blob);
+  NEED(r.mv->bind(3, kRated, 0x8003, &g_rate_state[0], bytes, sizeof blob) == ModuleVoices::Bind::Ok);
+  CHECK(g_rate_state[0].inits == 1);
+  CHECK(g_rate_state[0].param0 == 42.0f);
+  cue(0, event(0, EventKind::NoteOn, 0, 60, 3, 127));
+  r.block();
+  ++nb;
+  CHECK(g_rate_state[0].gate == 1);
+  // MAJOR2: a sounding note is never cut. The change waits (pending) while the note plays at the old rate; only after its end is the module restarted.
+  ModuleVoices::Rate st = r.mv->set_rate(3, 2, bytes, sizeof blob);
+  for (unsigned i = 0; i < 4; ++i) {
+    CHECK(st == ModuleVoices::Rate::Busy);
+    CHECK(r.mv->rate_busy(3));
+    CHECK(r.mv->bound(3));
+    CHECK(r.mv->routed(3));  // the gate stays open while it waits
+    CHECK(r.mv->rate(3) == 0);
+    CHECK(g_rate_shutdowns == 0);
+    r.block();
+    ++nb;
+    CHECK(g_rate_state[0].gate == 1);
+    CHECK(g_rate_state[0].last_n == kBlk);  // still the full rate
+    CHECK(g_rate_state[0].rate_seen == r.mv->host().sample_rate);
+    st = r.mv->set_rate(3, 2, bytes, sizeof blob);
+  }
+  cue(nb, event(0, EventKind::NoteOff, 0));
+  r.block();
+  ++nb;
+  CHECK(g_rate_state[0].gate == 0);  // the note ended on its own
+  unsigned blocks_waited = 0;
+  bool withdrawn = false;
+  st = r.mv->set_rate(3, 2, bytes, sizeof blob);
+  while (st == ModuleVoices::Rate::Busy && blocks_waited < 8) {
+    withdrawn = withdrawn || !r.mv->bound(3);
+    CHECK(r.mv->rate_busy(3));
+    CHECK(g_rate_shutdowns == 0);  // nothing is restarted while the render may still be in the module
+    r.block();
+    ++nb;
+    ++blocks_waited;
+    st = r.mv->set_rate(3, 2, bytes, sizeof blob);
+  }
+  CHECK(st == ModuleVoices::Rate::Done);
+  CHECK(withdrawn);
+  CHECK(blocks_waited >= 2);  // the retire discipline: two block starts after the withdrawal
+  CHECK(!r.mv->rate_busy(3));
+  CHECK(r.mv->bound(3));
+  CHECK(r.mv->rate(3) == 2);
+  CHECK(g_rate_shutdowns == 1);
+  CHECK(g_rate_state[0].inits == 1);  // (the block was zeroed, then init ran again)
+  CHECK(g_rate_state[0].rate_seen == r.mv->host_at(2).sample_rate);
+  CHECK(g_rate_state[0].param0 == 42.0f);  // the blob again
+  CHECK(g_rate_state[0].gate == 0);        // the note did not survive the restart
+  CHECK(r.mv->routed(3));                  // the gate is back as it was
+  // back to FULL
+  CHECK(r.mv->set_rate(3, 0, bytes, sizeof blob, true) == ModuleVoices::Rate::Done);
+  CHECK(r.mv->rate(3) == 0);
+  CHECK(g_rate_state[0].rate_seen == r.mv->host().sample_rate);
+  CHECK(g_rate_shutdowns == 2);
+  // a gate the UI closed stays closed
+  r.mv->set_gate(3, false);
+  CHECK(r.mv->set_rate(3, 1, bytes, sizeof blob, true) == ModuleVoices::Rate::Done);
+  CHECK(!r.mv->routed(3));
+  CHECK(r.mv->bound(3));
+  // a note after the change starts a fresh hold, the module called for half the frames
+  r.mv->set_gate(3, true);
+  g_cue_count = 0;
+  cue(nb, event(0, EventKind::NoteOn, 1, 60, 3, 127));
+  r.block();
+  CHECK(g_rate_state[0].gate == 1);
+  CHECK(g_rate_state[0].last_n == kBlk / 2);
+  r.mv->retire_all();
+  r.block();
+  r.block();
+  r.mv->release_all();
+}
+
+TEST_CASE("module rate: a pending change waits through a note, asking FULL again cancels it, and a note asked for while the gate is shut is not started") {
+  Rig r;
+  std::memset(g_rate_state, 0, sizeof g_rate_state);
+  unsigned nb = 0;
+  NEED(r.mv->bind(3, kRated, 0x8003, &g_rate_state[0], nullptr, 0) == ModuleVoices::Bind::Ok);
+  cue(0, event(0, EventKind::NoteOn, 0, 60, 3, 127));
+  r.block();
+  ++nb;
+  CHECK(r.mv->set_rate(3, 1, nullptr, 0) == ModuleVoices::Rate::Busy);
+  CHECK(r.mv->rate_busy(3));
+  CHECK(r.mv->routed(3));
+  // asked back to what it is: nothing was started, so there is nothing to undo
+  CHECK(r.mv->set_rate(3, 0, nullptr, 0) == ModuleVoices::Rate::Done);
+  CHECK(!r.mv->rate_busy(3));
+  CHECK(r.mv->rate(3) == 0);
+  CHECK(r.mv->routed(3));
+  // the latest ask wins while it waits
+  CHECK(r.mv->set_rate(3, 1, nullptr, 0) == ModuleVoices::Rate::Busy);
+  CHECK(r.mv->set_rate(3, 2, nullptr, 0) == ModuleVoices::Rate::Busy);
+  cue(nb, event(0, EventKind::NoteOff, 0));
+  r.block();
+  ++nb;
+  CHECK(g_rate_state[0].gate == 0);
+  // idle: the first call after the end shuts the gate (the closing window)
+  CHECK(r.mv->set_rate(3, 2, nullptr, 0) == ModuleVoices::Rate::Busy);
+  CHECK(!r.mv->routed(3));
+  CHECK(r.mv->rate_busy(3));
+  cue(nb, event(0, EventKind::NoteOn, 0, 60, 3, 127));
+  r.block();
+  ++nb;
+  CHECK(g_rate_state[0].gate == 0);  // dropped: the instance is being restarted
+  unsigned waited = 0;
+  ModuleVoices::Rate st = r.mv->set_rate(3, 2, nullptr, 0);
+  while (st == ModuleVoices::Rate::Busy && waited < 8) {
+    r.block();
+    ++nb;
+    ++waited;
+    st = r.mv->set_rate(3, 2, nullptr, 0);
+  }
+  CHECK(st == ModuleVoices::Rate::Done);
+  CHECK(r.mv->rate(3) == 2);
+  CHECK(r.mv->routed(3));
+  CHECK(!r.mv->rate_busy(3));
+  r.mv->retire_all();
+  r.block();
+  r.block();
+  r.mv->release_all();
+}
+
+TEST_CASE("module rate: a module that refuses its restart is gone, its gate stays closed and nothing renders") {
+  Rig r;
+  std::memset(g_rate_state, 0, sizeof g_rate_state);
+  g_rate_shutdowns = 0;
+  NEED(r.mv->bind(3, kRated, 0x8003, &g_rate_state[0], nullptr, 0) == ModuleVoices::Bind::Ok);
+  CHECK(r.mv->routed(3));
+  g_rate_init_fails = true;
+  const ModuleVoices::Rate st = r.mv->set_rate(3, 1, nullptr, 0, true);
+  g_rate_init_fails = false;
+  CHECK(st == ModuleVoices::Rate::Failed);
+  CHECK(!r.mv->routed(3));  // the gate stays closed
+  CHECK(!r.mv->bound(3));
+  CHECK(!r.mv->rate_busy(3));
+  CHECK(r.mv->rate(3) == 0);
+  CHECK(r.mv->instances() == 0);
+  CHECK(g_rate_shutdowns == 1);
+  cue(0, event(0, EventKind::NoteOn, 0, 60, 3, 127));
+  r.block();
+  r.block();
+  CHECK(g_rate_state[0].calls == 0);  // never rendered
+  for (const std::int16_t v : r.feed(0)) {
+    CHECK(v == 0);
+  }
+  CHECK(r.mv->set_rate(3, 0, nullptr, 0, true) == ModuleVoices::Rate::Failed);  // nothing is bound there any more
+  r.mv->retire_all();
+  r.block();
+  r.block();
+  r.mv->release_all();
+  CHECK(g_rate_shutdowns == 1);  // no second shutdown of a state that was already shut down
+}
+
+TEST_CASE("module rate: a bind is FULL (the instrument's RATE is set after it)") {
+  Rig r;
+  std::memset(g_rate_state, 0, sizeof g_rate_state);
+  CHECK(r.mv->bind(64, kRated, 1, &g_rate_state[0], nullptr, 0) == ModuleVoices::Bind::BadSlot);
+  NEED(r.mv->bind(3, kRated, 0x8003, &g_rate_state[0], nullptr, 0) == ModuleVoices::Bind::Ok);
+  NEED(r.mv->bind(5, kRated, 0x8005, &g_rate_state[1], nullptr, 0) == ModuleVoices::Bind::Ok);
+  CHECK(r.mv->rate(3) == 0);
+  CHECK(r.mv->rate(5) == 0);
+  CHECK(r.mv->set_rate(3, 1, nullptr, 0, true) == ModuleVoices::Rate::Done);
+  CHECK(r.mv->rate(3) == 1);
+  r.mv->retire_all();
+  r.block();
+  r.block();
+  r.mv->release_all();
+}
+
+namespace {
+
+// One note of a built-in instrument module (host shared object) at RATE `shift`, played from sample `at` of block 0; a NoteOff of a track that holds nothing at 21 splits the block into the segments the
+// rated render walks (and k = 2 or 4 does not divide them: the pair (20, 21) and the quad (18..21) straddle the split). Returns the track's feed over `blocks` blocks (zeros where there is none).
+struct RatedRun {
+  std::vector<std::int16_t> feed;
+  std::uint32_t saturated = 0;
+  unsigned rate = 99;
+};
+RatedRun run_builtin_rated(const char* path, unsigned note, unsigned shift, std::uint16_t at, unsigned blocks) {
+  RatedRun out;
+  Rig r;
+  So so(path);
+  if (so.entry == nullptr || sizeof(r.tb_state) < so.entry->state_bytes || !ModuleVoices::rate_capable(*so.entry)) {
+    FAIL("the module did not load, does not fit the rig or does not declare O3M_FX_RATE");
+    return out;
+  }
+  std::memset(r.tb_state, 0, sizeof r.tb_state);
+  r.mv->set_sample_rate(44100.0f);
+  if (r.mv->bind(10, *so.entry, 9, r.tb_state, nullptr, 0) != ModuleVoices::Bind::Ok) {
+    FAIL("the module did not bind");
+    return out;
+  }
+  if (shift != 0u && r.mv->set_rate(10, shift, nullptr, 0, true) != ModuleVoices::Rate::Done) {
+    FAIL("set_rate did not complete");
+    return out;
+  }
+  out.rate = r.mv->rate(10);
+  cue(0, event(at, EventKind::NoteOn, 0, static_cast<std::uint8_t>(note), 10, 100));
+  cue(0, event(21, EventKind::NoteOff, 5));
+  for (unsigned b = 0; b < blocks; ++b) {
+    r.block();
+    std::vector<std::int16_t> f = r.feed(0);
+    f.resize(kBlk, 0);
+    out.feed.insert(out.feed.end(), f.begin(), f.end());
+  }
+  out.saturated = r.mv->stats().saturated;
+  r.mv->retire_all();
+  r.block();
+  r.block();
+  r.mv->release_all();
+  return out;
+}
+}  // namespace
+
+TEST_CASE("module rate: the sine, FM, TB-303 and SID at 1/2 and 1/4 sound, fill every block and hold each module sample 2 and 4 frames, across the segment and block edges") {
+  struct Mod {
+    const char* name;
+    const char* path;
+    unsigned note;
+  };
+  const Mod mods[] = {{"sine", O3M_SINE_HOST_SO, 69}, {"fm", O3M_FM_HOST_SO, 57}, {"tb303", O3M_TB303_HOST_SO, 36}, {"sid", O3M_SID_HOST_SO, 60}};
+  constexpr unsigned kBlocks = 12;
+  for (const Mod& m : mods) {
+    CAPTURE(m.name);
+    for (const std::uint16_t at : {std::uint16_t{0}, std::uint16_t{6}}) {
+      CAPTURE(at);
+      const RatedRun full = run_builtin_rated(m.path, m.note, 0, at, kBlocks);
+      NEED(full.feed.size() == kBlocks * kBlk);
+      for (unsigned shift = 1; shift <= 2; ++shift) {
+        CAPTURE(shift);
+        const RatedRun run = run_builtin_rated(m.path, m.note, shift, at, kBlocks);
+        NEED(run.feed.size() == kBlocks * kBlk);  // every block has its whole length
+        CHECK(run.rate == shift);
+        CHECK(run.saturated <= 8u);  // finite and in range (a NaN would be silence, which the next checks catch)
+        const unsigned g = 1u << shift;
+        unsigned changes = 0;
+        std::int16_t peak = 0;
+        for (std::uint32_t i = 0; i < run.feed.size(); ++i) {
+          if (i < at) {
+            CHECK(run.feed[i] == 0);
+            continue;
+          }
+          const std::uint32_t head = at + ((i - at) & ~(g - 1u));  // the first frame of the hold this one belongs to
+          CHECK(run.feed[i] == run.feed[head]);
+          if (i == head && head > at && run.feed[head] != run.feed[head - 1]) {
+            ++changes;
+          }
+          peak = static_cast<std::int16_t>(std::max<int>(peak, std::abs(static_cast<int>(run.feed[i]))));
+        }
+        CHECK(changes >= 8u);  // a signal, not a constant
+        CHECK(peak > 100);
+        // the same instrument at FULL moves on every frame (the hold is the rate's doing)
+        unsigned full_changes = 0;
+        for (std::uint32_t i = at + 1; i < full.feed.size(); ++i) {
+          full_changes += full.feed[i] != full.feed[i - 1] ? 1u : 0u;
+        }
+        CHECK(full_changes > changes);
+      }
+    }
+  }
+}

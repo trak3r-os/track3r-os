@@ -60,7 +60,7 @@ bool format_field(const Step& step, Column column, char (&out)[4]) noexcept;
 // Fills `data` with the demo pattern (deterministic; the whole 12 x 64 grid, some tracks note-less).
 void fill_demo(PatternData& data) noexcept;
 
-// The character of an FX type: the base-36 id for OG types 0..35, "!#$%&*+" for 36..42, a lower-case letter for
+// The character of an FX type: the base-36 id for OG types 0..35, "!#$%&*+" for 36..42, the core FX 46..62, 'w' 'y' 'z' for 96..98 (OS-CEWTENV W6b), a lower-case letter for
 // engine-declared types 128.. and '?' for anything else. What the FX column shows in front of the value.
 char fx_type_char(std::uint8_t type) noexcept;
 

@@ -92,30 +92,63 @@ inline constexpr std::uint32_t kSampleArenaSize = 10816u * kKiB;
 inline constexpr std::uint32_t kDelayBase = kSampleArenaBase + kSampleArenaSize;
 inline constexpr std::uint32_t kDelaySize = 768u * kKiB;
 inline constexpr std::uint32_t kReverbBase = kDelayBase + kDelaySize;
-inline constexpr std::uint32_t kReverbSize = 256u * kKiB;
+inline constexpr std::uint32_t kReverbSize = 192u * kKiB;
 // OS-SENDFX (ADR 0013 amendment 3): what the send effects use of their two regions. The platform layer may not include the audio library, so the figures are mirrored here and
 // tests/audio_send_fx_test.cpp (the host) and audio.cpp (the image) check the mirrors against audio::SendDelay::kRingBytes and audio::SendReverb::kMemBytes.
 //   delay: the stereo ring, 176,468 frames of one 32-bit word = 4.0 s at 44,117 Hz = 705,872 B, at the start of the region; the rest of the 768 KiB (80,560 B) is spare.
-//   reverb: the plate's 13 int16 lines (the FULL layout, HALF uses less), 26,632 samples = 53,264 B, at the start of the region; the rest of the 256 KiB (208,880 B) is spare.
+//   reverb: the plate's 13 int16 lines (the FULL layout, HALF uses less), 26,632 samples = 53,264 B, at the start of the region; the rest of the region (143,344 B) is spare.
 inline constexpr std::uint32_t kDelayRingBytes = 705872u;
 inline constexpr std::uint32_t kReverbMemBytes = 53264u;
-inline constexpr std::uint32_t kModuleRegionBase = kReverbBase + kReverbSize;
+// OS-CEWTENV W2: the wavetable contour bank (audio/wt_contour.h), 256 contours x 128 int16 = 64 KiB, carved out of the reverb region's
+// spare tail (the region was 256 KiB with 208,880 B spare; the plate's lines stay at its start). Every base after it is unchanged, so the
+// slack below still sits at the top of SDRAM. The bank object itself is placed by a later slice (the audio library takes caller-provided
+// storage); until then the region is reserved here so nothing else claims it.
+inline constexpr std::uint32_t kWtContourBase = kReverbBase + kReverbSize;
+inline constexpr std::uint32_t kWtContourSize = 64u * kKiB;
+// OS-CEWTENV W3c (Q3 a): the baked warps (audio/wt_contour.h WtBakeBank: 128 keys + a count + 128 contours of 128 int16 = 33,028 B) are NOT a region of their own: they sit in the reverb
+// region's spare tail, 64 KiB from its start (the plate's lines end at kReverbMemBytes = 53,264 B, so the two never meet). The platform layer may not include the audio library, so the size
+// is mirrored and the audio test (audio_wt_contour_test) checks it against sizeof(WtBakeBank).
+inline constexpr std::uint32_t kWtBakeBase = kReverbBase + 64u * kKiB;
+inline constexpr std::uint32_t kWtBakeBytes = 33028u;
+// OS-CEWTENV W8: the user contours (app/wt_user.h WtUserMem = audio::WtUserBank 33,296 B + the loader's 24,576-frame PCM scratch 49,152 B = 82,448 B) follow the bake pool in the same spare tail
+// (ends at 181,012 B of the region's 196,608): SDRAM, so SRAM_U does not grow. Mirrored here for the same reason; app_main.cpp static_asserts it against sizeof(app::WtUserMem).
+inline constexpr std::uint32_t kWtUserBase = kWtBakeBase + kWtBakeBytes;
+inline constexpr std::uint32_t kWtUserBytes = 82448u;
+inline constexpr std::uint32_t kModuleRegionBase = kWtContourBase + kWtContourSize;
 inline constexpr std::uint32_t kModuleRegionSize = 768u * kKiB;
 // Project model arena: 1,920 KiB. ADR 0013 D7 budgeted 1,280 KiB; the OS-004a model's worst case, everything full, is
-// o3os::model::kModelArenaBytes = 1,934,312 B (1,888.9 KiB; OS-INSFX S3a added the insert state, 4 x 136 + 4 B, 552 B with its padding, before that 1,933,760 B; OS-STEREO step 2 added the stereo byte to each of the 64 instruments, 256 B, before that 1,933,504 B; E-SONG-07 added the order list edit journal, 80 B; E-CFG-03 widened the settings block to 26 fields, 8 B; before that 1,933,416 B: OS-APPUX S3 raised the app parameter sets from six to twelve, 984 B; before that 1,932,432 B: OS-INSTUI S8b + S9 added the twelve bytes of INST 1.3 to each of the 64 instruments (768 B) and their twelve parameter slots (3,072 B); before that OS-002c added the instrument sample rate, OS-002d the parameters' generations and the settings block: 13,248 B, OS-004d the project-level state: 1,144 B, OS-FU5 the PLAY ENGINE parameter slot of the 64 instruments: 256 B, OS-PERSIST2 the session state: 344 B, OS-006e the settings blocks' room for 24 fields: 40 B, OS-INSTUI S3 the nine source-page parameter slots of the 64 instruments: 2,304 B, OS-INSTUI S6 the 24 MOD-page slots (SOURCE and the LFO of six destinations): 6,144 B; model/include/o3os/model/limits.h and project.h, static-asserted
+// o3os::model::kModelArenaBytes = 1,934,344 B (1,888.9 KiB; OS-MIDICCMAP S1 widened the settings block to 32 fields, +32 B, before that 1,934,312 B; OS-INSFX S3a added the insert state, 4 x 136 + 4 B, 552 B with its padding, before that 1,933,760 B; OS-STEREO step 2 added the stereo byte to each of the 64 instruments, 256 B, before that 1,933,504 B; E-SONG-07 added the order list edit journal, 80 B; E-CFG-03 widened the settings block to 26 fields, 8 B; before that 1,933,416 B: OS-APPUX S3 raised the app parameter sets from six to twelve, 984 B; before that 1,932,432 B: OS-INSTUI S8b + S9 added the twelve bytes of INST 1.3 to each of the 64 instruments (768 B) and their twelve parameter slots (3,072 B); before that OS-002c added the instrument sample rate, OS-002d the parameters' generations and the settings block: 13,248 B, OS-004d the project-level state: 1,144 B, OS-FU5 the PLAY ENGINE parameter slot of the 64 instruments: 256 B, OS-PERSIST2 the session state: 344 B, OS-006e the settings blocks' room for 24 fields: 40 B, OS-INSTUI S3 the nine source-page parameter slots of the 64 instruments: 2,304 B, OS-INSTUI S6 the 24 MOD-page slots (SOURCE and the LFO of six destinations): 6,144 B; model/include/o3os/model/limits.h and project.h, static-asserted
 // there). The platform layer may not include the model, so the figure is mirrored below and tests/mem_map_model_test.cpp
 // checks the mirror against the real constant on the host; the static_assert below keeps the region at least that big.
 inline constexpr std::uint32_t kProjectBase = kModuleRegionBase + kModuleRegionSize;
 inline constexpr std::uint32_t kProjectSize = 1920u * kKiB;
-inline constexpr std::uint32_t kModelArenaWorstCaseBytes = 1934312u;  // mirrors o3os::model::kModelArenaBytes
+inline constexpr std::uint32_t kModelArenaWorstCaseBytes = 1934344u;  // mirrors o3os::model::kModelArenaBytes
 inline constexpr std::uint32_t kUndoBase = kProjectBase + kProjectSize;
 inline constexpr std::uint32_t kUndoSize = 384u * kKiB;
-inline constexpr std::uint32_t kFileJobBase = kUndoBase + kUndoSize;
-inline constexpr std::uint32_t kFileJobSize = 512u * kKiB;
-inline constexpr std::uint32_t kLutBase = kFileJobBase + kFileJobSize;
-inline constexpr std::uint32_t kLutSize = 192u * kKiB;
-inline constexpr std::uint32_t kUiCacheBase = kLutBase + kLutSize;
-inline constexpr std::uint32_t kUiCacheSize = 512u * kKiB;
+// OS-CEPTFX S2a (A3, docs/specs/OS-CEPTFX.md 3.2): the `ptfx` region, 768 KiB, carved from the unused `file_job` (512 KiB)
+// and `lut` (192 KiB) regions plus the first 64 KiB of `ui_cache`, which keeps its last 448 KiB (still holding the bench's
+// scratch). It is the workspace of a `.ptfx` Sample Editor plugin: every core access goes through core_view() (sdram_view.h),
+// so the plugin's code runs cached through the ICode alias. The sub-areas below are the spec's 3.2 table, as offsets from
+// kPtfxBase; they tile the region (static_asserts below).
+inline constexpr std::uint32_t kPtfxBase = kUndoBase + kUndoSize;
+inline constexpr std::uint32_t kPtfxSize = 768u * kKiB;
+inline constexpr std::uint32_t kPtfxImageOff = 0u;                                              // the code image: the payload, then the zeroed tail to align4(code_size) + bss_size
+inline constexpr std::uint32_t kPtfxImageSize = 32u * kKiB;                                      // the MK66 limit: align4(code_size) + bss_size <= 32 KiB
+inline constexpr std::uint32_t kPtfxGuardOff = kPtfxImageOff + kPtfxImageSize;                   // the 4 KiB stack guard, painted and checked around every call
+inline constexpr std::uint32_t kPtfxGuardSize = 4u * kKiB;
+inline constexpr std::uint32_t kPtfxStackOff = kPtfxGuardOff + kPtfxGuardSize;                   // the plugin's stack (PSP)
+inline constexpr std::uint32_t kPtfxStackSize = 12u * kKiB;
+inline constexpr std::uint32_t kPtfxStackTopOff = kPtfxStackOff + kPtfxStackSize;                // the PSP starts here: 48 KiB, 8-byte aligned
+inline constexpr std::uint32_t kPtfxStereoOff = kPtfxStackTopOff;                                // stereo input staging: L and R, 8,192 frames each
+inline constexpr std::uint32_t kPtfxStereoSize = 32u * kKiB;
+inline constexpr std::uint32_t kPtfxScratchOff = kPtfxStereoOff + kPtfxStereoSize;               // the plugin's scratch, zeroed before every init
+inline constexpr std::uint32_t kPtfxScratchSize = 640u * kKiB;                                   // 655,360 B: tracker-ce's maximum
+inline constexpr std::uint32_t kPtfxMetaOff = kPtfxScratchOff + kPtfxScratchSize;                // the catalogue (11 KiB), the selected plugin's parameter info and list strings, the host table, the run job's state
+inline constexpr std::uint32_t kPtfxMetaSize = 16u * kKiB;
+inline constexpr std::uint32_t kPtfxSpareOff = kPtfxMetaOff + kPtfxMetaSize;
+inline constexpr std::uint32_t kPtfxSpareSize = 32u * kKiB;
+inline constexpr std::uint32_t kUiCacheBase = kPtfxBase + kPtfxSize;
+inline constexpr std::uint32_t kUiCacheSize = 448u * kKiB;
 inline constexpr std::uint32_t kDiagLogBase = kUiCacheBase + kUiCacheSize;
 inline constexpr std::uint32_t kDiagLogSize = 64u * kKiB;
 // The last 192 KiB is the table's slack (1.2 %). Objects the linker places in SDRAM (`.noinit_sdram`, attribute
@@ -137,11 +170,11 @@ inline constexpr Region kSdramRegions[] = {
     {"sample_arena", kSampleArenaBase, kSampleArenaSize},
     {"delay", kDelayBase, kDelaySize},
     {"reverb", kReverbBase, kReverbSize},
+    {"wt_contour", kWtContourBase, kWtContourSize},
     {"module_region", kModuleRegionBase, kModuleRegionSize},
     {"project", kProjectBase, kProjectSize},
     {"undo", kUndoBase, kUndoSize},
-    {"file_job", kFileJobBase, kFileJobSize},
-    {"lut", kLutBase, kLutSize},
+    {"ptfx", kPtfxBase, kPtfxSize},
     {"ui_cache", kUiCacheBase, kUiCacheSize},
     {"diag_log", kDiagLogBase, kDiagLogSize},
     {"slack", kSdramSlackBase, kSdramSlackSize},
@@ -208,7 +241,7 @@ inline constexpr Budget kSramUBudget[] = {
     // OS-STEREO (c): +832 B (28 KiB + 64 B -> 28 KiB + 896 B, from the same slack: the rows still leave 9 KiB over the 32 KiB floor) for the stereo voice: 4 side blocks (512 B), their state, 65 descriptors' st_off (260 B), the tracks' side map.
     {"voice_state", 28u * kKiB + 896u},  // OS-PERF-LFO: PerfSlots 90 -> 180 B (+90 B, five LFO slots); g_voices 23,192 B + g_amiga 5,376 B = 28,568 B of the 28,736 B, 168 B of slack left (nm on the mk66 image, 2026-10-25). OS-PERFFX P5: +64 B from the ADR slack (9.3 KiB are still over the 32 KiB floor) for the third PerfSlots slot (TUNE, +18 B; P0 left 4 B). OS-VOX: 16 sampler voices (11,536 B) + the Amiga voices (5,632 B) = 17,168 B; was 16 KiB for 8 voices (the 2 KiB come from the budget's slack, the real floor is the linker's 32 KiB). OS-MOD: 12 voices and 65 descriptors with the pan, finetune and amp modulators (3 x FilterMod a slot, 3 more generators a voice) + the Amiga voices = 23.3 KB, 6 KiB more from the same slack. OS-GRAN: the granular voice's state (12 x 48 B), the wavetable window and the granular fields a descriptor (65 x 20 B), the position modulator (a FilterMod a descriptor, one more generator a voice) = ~27 KB, 4 KiB more from the same slack
     {"module_hot_state", 16u * kKiB},
-    {"sequencer", 8u * kKiB + 64u},      // +64 B for OS-PERF-SMP: the control table's per-group Perform values grow by one group (FxGroup::SampleEnd, +32 B; the image holds 8,856 B). app_main.cpp allows 640 B above it (OS-INSTUI S8b: the MIDI instrument's output state, 72 B); the image held 8,704 B (E-SONG-07: +24 B and the song list's copy, 656 B, is in SDRAM: g_seq_order)
+    {"sequencer", 8u * kKiB + 160u},     // +64 B for OS-PERF-SMP: the control table's per-group Perform values grow by one group (FxGroup::SampleEnd, +32 B; the image holds 8,856 B). app_main.cpp allows 640 B above it (OS-INSTUI S8b: the MIDI instrument's output state, 72 B); the image held 8,704 B (E-SONG-07: +24 B and the song list's copy, 656 B, is in SDRAM: g_seq_order). OS-CECHANCE C1: +96 B for the Chance conditions' per-track state (6 B x 16 tracks in TrackState; the image holds 8,952 B)
     {"rings", 16u * kKiB},                // MIDI, ParamChange, events, StemRing 10 x 5 blocks, USB return and packets; OS-USBDISK U1c: and the Mass Storage link (MscLink, 1,104 B, two rings of eight 64-byte packets) inside the same 16 KiB; its engine with the two block buffers is in the SDRAM slack window
     {"sd_ft812_staging", 24u * kKiB},     // SD sector buffers, FT812 display-list staging
     {"ui_app_bss", 18u * kKiB},           // ADR: about 40 KiB; OS-MEM1: the App (28 KB) and the project and sample loaders (10.5 KB) moved to the SDRAM slack window (SdramBox, sdram_box.h); OS-SRAMU: and the plots' CurveScratch (4,480 B)
@@ -254,15 +287,35 @@ static_assert(kFlashConfigOffset == 0x400u && kFlashConfigSize == 16u, "the fiel
 static_assert(kStackSize + kFaultStackSize + kCrashBlockSize < kSramUSize / 2u, "stacks and the crash block are a minor part of SRAM_U");
 static_assert(kCrashBlockSize % 8u == 0u && kFaultStackSize % 8u == 0u && kStackSize % 8u == 0u, "AAPCS: 8-byte aligned stacks");
 
-static_assert(kSdramRegionCount == 11u, "ADR 0013 D7 lists ten regions and the slack");
+static_assert(kSdramRegionCount == 11u, "ADR 0013 D7's eleven rows (file_job and lut merged into OS-CEPTFX's ptfx) plus the slack");
 static_assert(sdram_regions_contiguous(), "SDRAM regions follow one another from the base of SDRAM, none empty");
 static_assert(sdram_regions_aligned(32u), "every SDRAM region base and size is 32-byte aligned (ADR 0013 D7)");
 static_assert(sdram_regions_total() == kSdramSize, "ADR 0013 D7: the regions and the slack sum to exactly 16 MiB");
 static_assert(end_of(kSdramRegions[kSdramRegionCount - 1]) == kSdramBase + kSdramSize, "the slack ends at the end of SDRAM");
 static_assert(kSdramSlackBase == 0x70FD0000u && kSdramSlackSize == 192u * kKiB, "ADR 0013 D7 slack: 192 KiB at the top");
+// OS-CEPTFX S2a: the ptfx region and its 3.2 sub-areas.
+static_assert(kPtfxSize == (512u + 192u + 64u) * kKiB, "A3: the ptfx region is file_job (512) + lut (192) + the first 64 KiB of ui_cache");
+static_assert(kPtfxBase == 0x70E90000u && kPtfxBase + kPtfxSize == 0x70F50000u, "the ptfx region sits where file_job started");
+static_assert(kPtfxImageOff == 0u && kPtfxGuardOff == 32u * kKiB && kPtfxStackOff == 36u * kKiB && kPtfxStackTopOff == 48u * kKiB &&
+                  kPtfxStereoOff == 48u * kKiB && kPtfxScratchOff == 80u * kKiB && kPtfxMetaOff == 720u * kKiB && kPtfxSpareOff == 736u * kKiB,
+              "the 3.2 table's offsets from kPtfxBase");
+static_assert(kPtfxImageSize == 32u * kKiB && kPtfxGuardSize == 4u * kKiB && kPtfxStackSize == 12u * kKiB && kPtfxStereoSize == 32u * kKiB &&
+                  kPtfxScratchSize == 640u * kKiB && kPtfxMetaSize == 16u * kKiB && kPtfxSpareSize == 32u * kKiB,
+              "the 3.2 table's sizes");
+static_assert(kPtfxSpareOff + kPtfxSpareSize == kPtfxSize, "the 3.2 sub-areas tile the ptfx region, none overlapping");
+static_assert((kPtfxBase + kPtfxStackTopOff) % 8u == 0u, "the plugin's stack top (PSP) at 48 KiB is 8-byte aligned (AAPCS)");
+static_assert(kPtfxImageSize % 4u == 0u && kPtfxGuardOff % 4u == 0u && kPtfxStackTopOff % 8u == 0u, "the image, guard and stack top are aligned");
+static_assert(kUiCacheBase == kPtfxBase + kPtfxSize && kUiCacheSize == 448u * kKiB && kUiCacheBase + kUiCacheSize == kDiagLogBase,
+              "OS-CEPTFX A3: ui_cache keeps its last 448 KiB after the ptfx region took its first 64 KiB; diag_log is unchanged");
 static_assert(kSampleArenaSize == 10816u * kKiB, "sample arena: 10,816 KiB (ADR 0013 D7's 11,456 minus the 640 KiB the model arena needed)");
 static_assert(kDelayRingBytes <= kDelaySize && kDelayBase % 4u == 0u && kDelayRingBytes % 4u == 0u, "the delay's ring (OS-SENDFX) fits the delay region, word aligned");
 static_assert(kReverbMemBytes <= kReverbSize && kReverbBase % 4u == 0u, "the reverb's lines (OS-SENDFX) fit the reverb region");
+static_assert(kWtContourSize == 64u * kKiB && kWtContourBase % 32u == 0u && kWtContourBase == kReverbBase + kReverbSize,
+              "OS-CEWTENV W2: the contour bank is 64 KiB at the end of the reverb region's former spare");
+static_assert(kWtBakeBase >= kReverbBase + kReverbMemBytes && kWtBakeBase + kWtBakeBytes <= kReverbBase + kReverbSize && kWtBakeBase % 4u == 0u,
+              "OS-CEWTENV W3c: the baked warps fit the reverb region's spare tail, beyond the plate's lines");
+static_assert(kWtUserBase >= kWtBakeBase + kWtBakeBytes && kWtUserBase + kWtUserBytes <= kReverbBase + kReverbSize && kWtUserBase % 4u == 0u,
+              "OS-CEWTENV W8: the user contours fit the reverb region's spare tail, after the bake pool");
 static_assert(kProjectSize >= kModelArenaWorstCaseBytes, "the project region must hold the model's worst-case arena (model limits.h)");
 static_assert(kProjectSize == 1920u * kKiB && kSampleArenaSize + kProjectSize == (11456u + 1280u) * kKiB,
               "the project region took exactly what the sample arena gave up: ADR 0013 D7's two rows still sum to 12,736 KiB");

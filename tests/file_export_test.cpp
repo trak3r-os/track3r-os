@@ -437,29 +437,19 @@ TEST_CASE("export: F1 on PATTERN exports the pattern of the page, and export.pat
   CHECK(rig.message() == "SAVED EXPORT/UNTITLED/UNTITLED_P1_0001.WAV");
 }
 
-TEST_CASE("export: Pattern F7 TOOLS lists EXPORT PATTERN with no module system, and F1 on it closes the list and starts the export of the pattern in view") {
+TEST_CASE("export: Pattern F7 TOOLS pad 15 EXPORT PAT closes the menu and starts the export of the pattern in view; the APPS page holds no export row (OS-TOOLSDEDUP)") {
   Rig rig;  // (a bare App: no module system, so no tool apps)
   NEED(rig.app->model().modules == nullptr);
   rig.go(ScreenId::Pattern);
   rig.press(Button::F7);
-  CHECK(rig.view().overlay == app::OverlayId::Tools);
-  CHECK(app::tools_count(rig.app->model()) == app::kToolsFixed);
-  app::ToolItem item;
-  NEED(app::tools_item(rig.app->model(), 0, item));
-  CHECK(item.kind == app::ToolItem::Kind::ExportPattern);
-  CHECK(std::string(item.label) == "EXPORT PATTERN");
-  CHECK_FALSE(item.divider_above);
-  CHECK_FALSE(app::tools_item(rig.app->model(), app::kToolsFixed, item));  // (no block, no tool app: the four fixed entries are all)
-  for (unsigned k = 0; k < app::kToolsFixed + 2u; ++k) {
-    rig.press(Button::Down);
-  }
-  CHECK(rig.view().modules.tools == static_cast<std::uint8_t>(app::kToolsFixed - 1u));  // (nothing below SHRINK /2)
-  for (unsigned k = 0; k < app::kToolsFixed; ++k) {
-    rig.press(Button::Up);
-  }
-  CHECK(rig.view().modules.tools == 0);
-  rig.press(Button::F1);
-  CHECK(rig.view().overlay == app::OverlayId::ExportProgress);  // the list closed, the progress overlay is up
+  rig.pad(15);  // the verb menu's APPS > row (pad 16): the page lists only tool apps, none here
+  CHECK(rig.view().overlay == app::OverlayId::VerbMenu);
+  CHECK(app::tools_count(rig.app->model()) == 0u);
+  rig.press(Button::F8);
+  CHECK(rig.view().overlay == app::OverlayId::None);
+  rig.press(Button::F7);
+  rig.pad(14);  // EXPORT PAT (pad 15)
+  CHECK(rig.view().overlay == app::OverlayId::ExportProgress);  // the menu closed, the progress overlay is up
   rig.until_progress(10);
   CHECK(rig.renderer.request.what == audio::OfflineRequest::What::Pattern);
   CHECK(rig.renderer.request.pattern == static_cast<std::uint16_t>(rig.view().edit.pattern));
@@ -469,12 +459,12 @@ TEST_CASE("export: Pattern F7 TOOLS lists EXPORT PATTERN with no module system, 
   CHECK(rig.view().overlay == app::OverlayId::None);
 }
 
-TEST_CASE("export: F1 on EXPORT PATTERN of a build with no export closes the list and says so on the strip") {
+TEST_CASE("export: EXPORT PAT of a build with no export closes the menu and says so on the strip") {
   Rig rig(true, false);
   rig.go(ScreenId::Pattern);
   rig.press(Button::F7);
-  NEED(rig.view().overlay == app::OverlayId::Tools);
-  rig.press(Button::F1);
+  NEED(rig.view().overlay == app::OverlayId::VerbMenu);
+  rig.pad(14);  // EXPORT PAT
   CHECK(rig.view().overlay == app::OverlayId::None);
   CHECK(rig.message() == "NO EXPORT ON THIS BUILD");
   CHECK_FALSE(rig.view().xport.running);
@@ -1112,36 +1102,25 @@ void select_block(Rig& rig, unsigned down, unsigned right) {
 
 }  // namespace
 
-TEST_CASE("selection: EXPORT SELECTION is in the TOOLS list while a block is active and not otherwise; F1 on it exports the block's tracks and rows") {
+TEST_CASE("selection: EXPORT SELECTION is a TOOLS pad (14) that exports the block's tracks and rows") {
   Rig rig;
   make_stem_project();
   rig.go(ScreenId::Pattern);
   rig.press(Button::F7);
-  NEED(rig.view().overlay == app::OverlayId::Tools);
-  CHECK(app::tools_count(rig.app->model()) == app::kToolsFixed);  // no block: the fixed entries (EXPORT PATTERN, DUPLICATE, EXPAND, SHRINK)
-  CHECK(app::tools_count(rig.app->model(), true) == app::kToolsFixed + 1u);
-  rig.press(Button::F8);
+  rig.pad(13);  // EXPORT SEL (pad 14) with no block: refused on the strip, no export starts
   CHECK(rig.view().overlay == app::OverlayId::None);
+  CHECK(rig.message() == "NO BLOCK TO EXPORT");
+  CHECK_FALSE(rig.view().xport.running);
+  rig.pass(2500);  // (the refusal's notice runs out, so the export's own SAVED notice is the one on the strip below)
   // a block of 3 rows and 2 tracks, from the cursor (row 0, track 1)
   select_block(rig, 2, 1);
   NEED(rig.view().edit.selection.active);
   const app::Selection::Block b = rig.view().edit.selection.block(rig.view().pattern.row(), rig.view().pattern.track());
   CHECK((b.row0 == 0 && b.row1 == 2 && b.track0 == 0 && b.track1 == 1));
   rig.press(Button::F7);
-  NEED(rig.view().overlay == app::OverlayId::Tools);
-  app::ToolItem item;
-  NEED(app::tools_item(rig.app->model(), app::kToolsFixed, item, true));  // (EXPORT SELECTION is the one a block adds, below the fixed four)
-  CHECK(item.kind == app::ToolItem::Kind::ExportSelection);
-  CHECK(std::string(item.label) == "EXPORT SELECTION");
-  CHECK_FALSE(item.divider_above);
+  NEED(rig.view().overlay == app::OverlayId::VerbMenu);
   CHECK(rig.app->model().modules == nullptr);
-  for (unsigned k = 0; k < app::kToolsFixed; ++k) {
-    rig.press(Button::Down);
-  }
-  CHECK(rig.view().modules.tools == static_cast<std::uint8_t>(app::kToolsFixed));
-  rig.press(Button::Down);
-  CHECK(rig.view().modules.tools == static_cast<std::uint8_t>(app::kToolsFixed));  // (nothing below it: no tool apps in this rig)
-  rig.press(Button::F1);
+  rig.pad(13);  // EXPORT SEL (pad 14)
   CHECK(rig.view().overlay == app::OverlayId::ExportProgress);
   CHECK(rig.view().xport.kind == app::ExportView::Selection);
   rig.until_progress(10);
@@ -1155,24 +1134,18 @@ TEST_CASE("selection: EXPORT SELECTION is in the TOOLS list while a block is act
   rig.settle();
   CHECK(rig.card.has("Export/Untitled/Untitled_SEL0001.wav"));
   CHECK(rig.message() == "SAVED EXPORT/UNTITLED/UNTITLED_SEL0001.WAV");
-  // the block goes (Delete ends it): the entry is gone from the list
+  // the block goes (Delete ends it): the pad refuses again
   (void)rig.app->invoke(core::action_id("select.clear"), 0);
   CHECK_FALSE(rig.view().edit.selection.active);
+  rig.pass(4500);  // (the export's SAVED notice, a job notice of 4 s, runs out first)
   rig.press(Button::F7);
-  NEED(rig.view().overlay == app::OverlayId::Tools);
-  for (unsigned k = 0; k < app::kToolsFixed + 1u; ++k) {
-    rig.press(Button::Down);
-  }
-  CHECK(rig.view().modules.tools == static_cast<std::uint8_t>(app::kToolsFixed - 1u));  // (nothing below SHRINK /2)
-  rig.press(Button::F8);
+  rig.pad(13);
+  CHECK(rig.message() == "NO BLOCK TO EXPORT");
   // and the next selection is numbered after it
   select_block(rig, 1, 0);
   NEED(rig.view().edit.selection.active);
   rig.press(Button::F7);
-  for (unsigned k = 0; k < app::kToolsFixed; ++k) {
-    rig.press(Button::Down);  // (EXPORT SELECTION is the entry a block adds, below the fixed four)
-  }
-  rig.press(Button::F1);
+  rig.pad(13);  // EXPORT SEL
   rig.settle();
   CHECK(rig.card.has("Export/Untitled/Untitled_SEL0002.wav"));
   CHECK(rig.card.has("Export/Untitled/Untitled_SEL0001.wav"));
@@ -1185,10 +1158,7 @@ TEST_CASE("selection: a block over all 16 tracks asks for the mask 0xFFFF, a cho
   select_block(rig, 1, 15);  // tracks 1 to 16
   NEED(rig.view().edit.selection.active);
   rig.press(Button::F7);
-  for (unsigned k = 0; k < app::kToolsFixed; ++k) {
-    rig.press(Button::Down);  // (EXPORT SELECTION is the entry a block adds, below the fixed four: PAT-OPS-A)
-  }
-  rig.press(Button::F1);
+  rig.pad(13);  // EXPORT SEL
   rig.until_progress(10);
   CHECK(rig.renderer.request.track_mask == 0xFFFF);
   CHECK(rig.renderer.request.track_mask != audio::OfflineRequest::kAllTracks);
@@ -1204,10 +1174,7 @@ TEST_CASE("selection: the rows of a block that runs past the pattern are cut to 
   select_block(rig, 20, 0);  // pattern 1 is 16 rows
   NEED(rig.view().edit.selection.active);
   rig.press(Button::F7);
-  for (unsigned k = 0; k < app::kToolsFixed; ++k) {
-    rig.press(Button::Down);  // (EXPORT SELECTION, below the fixed four)
-  }
-  rig.press(Button::F1);
+  rig.pad(13);  // EXPORT SEL
   rig.until_progress(10);
   CHECK(rig.renderer.request.row_first == 0u);
   CHECK(rig.renderer.request.row_last == 15u);  // cut to the pattern

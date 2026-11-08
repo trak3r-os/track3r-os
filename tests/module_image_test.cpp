@@ -51,14 +51,25 @@ TEST_CASE("module image: the SDK's layout is what the format says") {
   CHECK(sizeof(Desc32) == 64);  // ABI 1.0..1.7
   CHECK(sizeof(DescExt32) == 16);  // ABI 1.8 appends four words
   CHECK(sizeof(Param32) == 20);
-  CHECK((desc_size(0) == 64 && desc_size(7) == 64 && desc_size(8) == 80));  // the descriptor's size is per declared minor (OS-MODPITCH)
+  CHECK((desc_size(0) == 64 && desc_size(7) == 64 && desc_size(8) == 80 && desc_size(10) == 80 && desc_size(11) == 84 && desc_size(12) == 100));  // the descriptor's size is per declared minor (OS-MODPITCH, 1.11, 1.12)
+  CHECK((sizeof(DescFx32) == 16 && sizeof(Preset32) == 12));  // ABI 1.12 (OS-INSFX-ABI2 A1): four words appended, a preset is three
   CHECK((sizeof(Page32) == 8 && sizeof(Labels32) == 8));
-  CHECK((O3M_MODULE_SIZE(7) == offsetof(o3m_module, pitch) && O3M_MODULE_SIZE(0) == offsetof(o3m_module, pitch) && O3M_MODULE_SIZE(8) == sizeof(o3m_module)));
+  CHECK((O3M_MODULE_SIZE(7) == offsetof(o3m_module, pitch) && O3M_MODULE_SIZE(0) == offsetof(o3m_module, pitch) && O3M_MODULE_SIZE(8) == offsetof(o3m_module, importer) &&
+         O3M_MODULE_SIZE(11) == offsetof(o3m_module, render_st) && O3M_MODULE_SIZE(12) == sizeof(o3m_module) && O3M_MODULE_SIZE(13) == sizeof(o3m_module)));  // (the descriptor is 84 bytes from 1.11, 100 from 1.12)
   if (sizeof(void*) == 4) {
-    CHECK(sizeof(o3m_module) == sizeof(Desc32) + sizeof(DescExt32));  // 80 bytes from 1.8
+    CHECK(sizeof(o3m_module) == sizeof(Desc32) + sizeof(DescExt32) + sizeof(DescImp32) + sizeof(DescFx32));  // 100 bytes from 1.12
+    CHECK(O3M_MODULE_SIZE(12) == 100u);
+    CHECK((offsetof(o3m_module, render_st) == 84 && offsetof(o3m_module, fx_flags) == 88 && offsetof(o3m_module, presets) == 92 && offsetof(o3m_module, preset_count) == 96));
+    CHECK((offsetof(o3m_module, render_st) == sizeof(Desc32) + sizeof(DescExt32) + sizeof(DescImp32) + offsetof(DescFx32, render_st) &&
+           offsetof(o3m_module, presets) == sizeof(Desc32) + sizeof(DescExt32) + sizeof(DescImp32) + offsetof(DescFx32, presets) &&
+           offsetof(o3m_module, preset_count) == sizeof(Desc32) + sizeof(DescExt32) + sizeof(DescImp32) + offsetof(DescFx32, preset_count)));
+    CHECK((sizeof(o3m_host) == 60 && offsetof(o3m_host, get_clock) == 52 && offsetof(o3m_host, track_level) == 56));
+    CHECK((sizeof(o3m_preset) == sizeof(Preset32) && sizeof(o3m_clock) == 16));
     CHECK(offsetof(o3m_module, pitch) == sizeof(Desc32));              // and the 64 before it are Desc32 (1.0..1.7)
     CHECK(O3M_MODULE_SIZE(7) == 64u);
     CHECK(O3M_MODULE_SIZE(8) == 80u);
+    CHECK(O3M_MODULE_SIZE(11) == 84u);
+    CHECK(offsetof(o3m_module, importer) == 80);
     CHECK(offsetof(o3m_module, init) == offsetof(Desc32, init));
     CHECK(offsetof(o3m_module, ui) == offsetof(Desc32, ui));  // the UI table reserved for kind app (OS-012b)
     CHECK(offsetof(o3m_module, view_count) == offsetof(Desc32, view_count));
@@ -413,12 +424,17 @@ TEST_CASE("module image: every header field is held to its range") {
       {"header size", [](o3m_file_header& h) { h.header_size = 60; }, Status::BadHeaderSize},
       {"target", [](o3m_file_header& h) { h.target = 2; }, Status::BadTarget},
       {"kind 0", [](o3m_file_header& h) { h.kind = 0; }, Status::BadKind},
-      {"kind importer", [](o3m_file_header& h) { h.kind = O3M_KIND_IMPORTER; }, Status::BadKind},
+      {"kind importer", [](o3m_file_header& h) { h.kind = O3M_KIND_IMPORTER; }, Status::BadKind},  // (at the blob's ABI 1.7: the kind is published at 1.11, OS-FLASHDIET I1)
+      {"kind importer at ABI 1.11 with the layout tag", [](o3m_file_header& h) { h.kind = O3M_KIND_IMPORTER; h.abi_minor = 11; h.reserved2[1] = o3os::model::kImportLayoutTag; }, Status::Ok},
+      {"kind importer at ABI 1.11 with a wrong tag", [](o3m_file_header& h) { h.kind = O3M_KIND_IMPORTER; h.abi_minor = 11; h.reserved2[1] = o3os::model::kImportLayoutTag ^ 1u; }, Status::LayoutMismatch},
       {"kind app of ABI 1.0 (the app kind is 1.1)", [](o3m_file_header& h) { h.kind = O3M_KIND_APP; h.abi_minor = 0; }, Status::BadKind},
       {"kind app of ABI 1.1", [](o3m_file_header& h) { h.kind = O3M_KIND_APP; }, Status::Ok},
       {"abi major", [](o3m_file_header& h) { h.abi_major = 2; }, Status::AbiMajor},
       {"abi major 0", [](o3m_file_header& h) { h.abi_major = 0; }, Status::AbiMajor},
       {"abi minor", [](o3m_file_header& h) { h.abi_minor = static_cast<std::uint8_t>(kOsAbiMinor + 1); }, Status::AbiMinor},
+      // OS-MODRATE: a module built against ABI 1.13 (O3M_FX_RATE) is accepted by this OS and refused by one that stops at 1.12 (the rule is `abi_minor > kOsAbiMinor`, as the row above pins for any OS)
+      {"abi minor 13 (O3M_FX_RATE), this OS", [](o3m_file_header& h) { h.abi_minor = 13; }, Status::Ok},
+      {"abi minor 255", [](o3m_file_header& h) { h.abi_minor = 255; }, Status::AbiMinor},
       {"flags", [](o3m_file_header& h) { h.flags = 1; }, Status::BadReserved},
       {"view count past the limit", [](o3m_file_header& h) { h.view_count = kMaxViews + 1; }, Status::BadSize},
       {"reserved2[0]", [](o3m_file_header& h) { h.reserved2[0] = 1; }, Status::BadReserved},
@@ -715,4 +731,397 @@ TEST_CASE("module image: a module may declare views (reserved for OS-012b): the 
     Desc32 d{};
     CHECK(read_desc(b.h, mem.place(), d) == Status::BadDescriptor);
   }
+}
+
+// ---- ABI 1.12 (OS-INSFX-ABI2 A1, Level C: published module ABI): the descriptor's fourth tail ------------------------------------------------------------
+
+namespace {
+
+using L12 = LayoutFx;
+
+// Relocates `b` and reads its descriptor with every tail; `fx` is pre-filled with junk so that a tail that was not read shows.
+Status verdict12(const Blob& b, DescFx32* fx = nullptr, DescImp32* imp = nullptr) {
+  Mem mem;
+  if (relocate(b, mem) != Status::Ok) {
+    return Status::BadRelocValue;
+  }
+  Desc32 d{};
+  DescExt32 ext{};
+  DescImp32 i{};
+  DescFx32 f{0xDEADBEEFu, 0xDEADBEEFu, 0xDEADBEEFu, 0xDEADBEEFu};
+  const Status st = read_desc(b.h, mem.place(), d, &ext, &i, &f);
+  if (fx != nullptr) {
+    *fx = f;
+  }
+  if (imp != nullptr) {
+    *imp = i;
+  }
+  return st;
+}
+
+void put_f(Blob& b, std::uint32_t at, float v) { std::memcpy(b.image.data() + at, &v, 4); }
+void kind_to(Blob& b, std::uint32_t kind) {
+  b.h.kind = static_cast<std::uint8_t>(kind);
+  b.put(L12::desc + 8, kind);
+}
+// The blob with the word at `at` set to `v` and its relocation dropped (a zero or a wild value that the relocator must not move).
+Blob raw_word(Blob b, std::uint32_t at, std::uint32_t v) {
+  b = unrelocated(b, at);
+  b.put(at, v);
+  return b;
+}
+constexpr std::uint32_t kFxTail = L12::desc + 84;  // render_st; fx_flags +4, presets +8, preset_count +12
+
+}  // namespace
+
+TEST_CASE("module image: ABI 1.12 round trip: the 100-byte descriptor, render_st, WIDENS, two presets and a KEY are read where the layout puts them") {
+  Blob b = blob_fx12();
+  CHECK(header_status(b) == Status::Ok);
+  Mem mem;
+  NEED(relocate(b, mem) == Status::Ok);
+  Desc32 d{};
+  DescExt32 ext{};
+  DescImp32 imp{};
+  DescFx32 fx{};
+  CHECK(read_desc(b.h, mem.place(), d, &ext, &imp, &fx) == Status::Ok);
+  CHECK((d.struct_size == 100 && d.abi_minor == 12 && d.kind == O3M_KIND_EFFECT && d.param_count == 3));
+  CHECK((ext.pitch == 0 && ext.pages == 0 && ext.page_count == 0 && ext.labels == 0 && imp.importer == 0));
+  CHECK(fx.render_st == moved(L12::render_st));
+  CHECK(fx.fx_flags == O3M_FX_WIDENS);
+  CHECK(fx.presets == moved(L12::presets));
+  CHECK(fx.preset_count == 2);
+  // the presets are readable through the placement as the OS will read them
+  const std::uint8_t* at = resolve(b.h, mem.place(), fx.presets, 2 * sizeof(Preset32));
+  NEED(at != nullptr);
+  Preset32 p0, p1;
+  std::memcpy(&p0, at, sizeof p0);
+  std::memcpy(&p1, at + sizeof p0, sizeof p1);
+  CHECK((p0.count == 3 && p1.count == 2));
+  const std::uint8_t* v0 = resolve(b.h, mem.place(), p0.values, 12);
+  NEED(v0 != nullptr);
+  float f[3];
+  std::memcpy(f, v0, sizeof f);
+  CHECK((f[0] == 0.25f && f[1] == 3.0f && f[2] == -2.0f));
+  const std::uint8_t* name1 = resolve(b.h, mem.place(), p1.name, 5);
+  NEED(name1 != nullptr);
+  CHECK(std::string(reinterpret_cast<const char*>(name1)) == "Wide");
+  // the descriptor's size is per minor: the 1.12 blob with a 1.11 size, and with minor 11 and the 1.12 size, are refused
+  CHECK(verdict12([] { Blob x = blob_fx12(); x.put(L12::desc + 12, 84); return x; }()) == Status::BadDescriptor);
+  CHECK(verdict12([] { Blob x = blob_fx12(); x.h.abi_minor = 11; x.put(L12::desc + 4, 11); x.seal(); return x; }()) == Status::BadDescriptor);
+}
+
+TEST_CASE("module image: ABI 1.12 shapes that are accepted: stereo-capable, a mono effect with no tail, presets on an instrument, two KEYs, a 15-character preset name") {
+  DescFx32 fx{};
+  {  // stereo-capable: render_st, no WIDENS
+    Blob b = blob_fx12();
+    b.put(kFxTail + 4, 0);
+    CHECK(verdict12(b, &fx) == Status::Ok);
+    CHECK((fx.render_st != 0 && fx.fx_flags == 0));
+  }
+  {  // no presets, no render_st: a plain mono effect at 1.12 (a KEY parameter may still be there)
+    Blob b = raw_word(raw_word(blob_fx12(), kFxTail, 0), kFxTail + 8, 0);
+    b.put(kFxTail + 4, 0);
+    b.put(kFxTail + 12, 0);
+    CHECK(verdict12(b, &fx) == Status::Ok);
+    CHECK((fx.render_st == 0 && fx.presets == 0 && fx.preset_count == 0));
+  }
+  {  // an instrument with presets, no render_st, no KEY
+    Blob b = raw_word(blob_fx12(), kFxTail, 0);
+    b.put(kFxTail + 4, 0);
+    kind_to(b, O3M_KIND_INSTRUMENT);
+    b.put(L12::params + 20 + 16, O3M_PARAM_INT);
+    CHECK(verdict12(b, &fx) == Status::Ok);
+    CHECK(fx.preset_count == 2);
+  }
+  {  // two KEY parameters (the limit)
+    Blob b = blob_fx12();
+    put_f(b, L12::params + 8, 16.0f);
+    b.put(L12::params + 16, O3M_PARAM_INT | O3M_PARAM_KEY);
+    CHECK(verdict12(b) == Status::Ok);
+  }
+  {  // a preset name of 15 characters, the longest
+    Blob b = blob_fx12();
+    std::memset(b.image.data() + L12::strings + 16, 'A', 15);
+    b.image[L12::strings + 16 + 15] = 0;
+    CHECK(verdict12(b) == Status::Ok);
+  }
+  {  // a preset with one value, the first parameter alone; the rest take their defaults
+    Blob b = blob_fx12();
+    b.put(L12::presets + 8, 1);
+    CHECK(verdict12(b) == Status::Ok);
+  }
+  {  // a preset that gives every parameter its range's end
+    Blob b = blob_fx12();
+    put_f(b, L12::values0, 1.0f);
+    put_f(b, L12::values0 + 4, 16.0f);
+    put_f(b, L12::values0 + 8, -10.0f);
+    CHECK(verdict12(b) == Status::Ok);
+  }
+}
+
+// ABI 1.13 (OS-MODRATE S2, Level C: published module ABI): the RATE bit of fx_flags is an instrument's, from minor 13; the descriptor stays 100 bytes.
+TEST_CASE("module image: ABI 1.13: O3M_FX_RATE is accepted on an instrument of 1.13 and refused on an effect, below 1.13 and with WIDENS") {
+  const auto instrument = [](std::uint8_t minor, std::uint32_t flags) {
+    Blob b = raw_word(blob_fx12(), kFxTail, 0);  // no render_st
+    kind_to(b, O3M_KIND_INSTRUMENT);
+    b.put(L12::params + 20 + 16, O3M_PARAM_INT);  // no KEY (an effect's)
+    b.put(kFxTail + 4, flags);
+    b.h.abi_minor = minor;
+    b.put(L12::desc + 4, minor);
+    b.seal();
+    return b;
+  };
+  DescFx32 fx{};
+  CHECK(verdict12(instrument(13, 0), &fx) == Status::Ok);
+  CHECK(fx.fx_flags == 0u);
+  CHECK(verdict12(instrument(13, O3M_FX_RATE), &fx) == Status::Ok);
+  CHECK(fx.fx_flags == static_cast<std::uint32_t>(O3M_FX_RATE));
+  CHECK(verdict12(instrument(12, O3M_FX_RATE)) == Status::BadDescriptor);  // the bit did not exist at 1.12
+  CHECK(verdict12(instrument(13, O3M_FX_WIDENS)) == Status::BadDescriptor);  // WIDENS is an effect's (and needs render_st)
+  CHECK(verdict12(instrument(13, O3M_FX_RATE | O3M_FX_WIDENS)) == Status::BadDescriptor);
+  CHECK(verdict12(instrument(13, 4u)) == Status::BadDescriptor);  // every other bit stays 0
+  {  // an effect of 1.13 with RATE
+    Blob b = blob_fx12();
+    b.h.abi_minor = 13;
+    b.put(L12::desc + 4, 13);
+    b.put(kFxTail + 4, O3M_FX_RATE);
+    b.seal();
+    CHECK(verdict12(b) == Status::BadDescriptor);
+    b.put(kFxTail + 4, O3M_FX_WIDENS);
+    b.seal();
+    CHECK(verdict12(b) == Status::Ok);  // WIDENS is still an effect's, at 1.13 too
+  }
+  CHECK(fx_flags_allowed(O3M_KIND_EFFECT, 12) == static_cast<std::uint32_t>(O3M_FX_WIDENS));
+  CHECK(fx_flags_allowed(O3M_KIND_INSTRUMENT, 12) == 0u);
+  CHECK(fx_flags_allowed(O3M_KIND_INSTRUMENT, 13) == static_cast<std::uint32_t>(O3M_FX_RATE));
+  CHECK(fx_flags_allowed(O3M_KIND_APP, 13) == 0u);
+}
+
+TEST_CASE("module image: ABI 1.12 refusals: each bad field of the tail is BadDescriptor") {
+  struct Case {
+    const char* what;
+    Blob blob;
+  };
+  std::vector<Case> bad;
+  const auto add = [&bad](const char* what, Blob b) { bad.push_back({what, std::move(b)}); };
+  const Blob base = blob_fx12();
+  {
+    Blob b = base;
+    b.put(kFxTail, 12);  // even: not Thumb
+    add("render_st not a Thumb address", b);
+  }
+  add("render_st outside the image", raw_word(base, kFxTail, 0x7000u | 1u));
+  {
+    Blob b = base;
+    kind_to(b, O3M_KIND_INSTRUMENT);
+    add("render_st on an instrument", b);
+  }
+  {
+    Blob b = base;
+    b.put(kFxTail + 4, 2);
+    add("an unknown fx_flags bit (2)", b);
+  }
+  {
+    Blob b = base;
+    b.put(kFxTail + 4, 0x80000001u);
+    add("an unknown fx_flags bit (the top one)", b);
+  }
+  {
+    Blob b = raw_word(base, kFxTail, 0);
+    add("WIDENS without render_st", b);
+  }
+  {
+    Blob b = base;
+    put_f(b, L12::params + 20 + 8, 8.0f);
+    add("a KEY of 0..8", b);
+  }
+  {
+    Blob b = base;
+    put_f(b, L12::params + 20 + 4, 1.0f);
+    put_f(b, L12::params + 20 + 12, 1.0f);
+    add("a KEY of 1..16", b);
+  }
+  {
+    Blob b = base;
+    b.put(L12::params + 20 + 16, O3M_PARAM_KEY);
+    add("a KEY that is not INT", b);
+  }
+  {
+    Blob b = raw_word(base, kFxTail, 0);
+    b.put(kFxTail + 4, 0);
+    kind_to(b, O3M_KIND_INSTRUMENT);
+    add("a KEY on an instrument", b);
+  }
+  {
+    Blob b = base;
+    for (const std::uint32_t at : {L12::params, L12::params + 40}) {
+      put_f(b, at + 4, 0.0f);
+      put_f(b, at + 8, 16.0f);
+      put_f(b, at + 12, 0.0f);
+      b.put(at + 16, O3M_PARAM_INT | O3M_PARAM_KEY);
+    }
+    add("three KEYs", b);
+  }
+  add("presets NULL with a count", raw_word(base, kFxTail + 8, 0));
+  {
+    Blob b = base;
+    b.put(kFxTail + 12, 0);
+    add("a table with a count of 0", b);
+  }
+  {
+    Blob b = base;
+    b.put(kFxTail + 12, O3M_PRESETS_MAX + 1);
+    add("33 presets", b);
+  }
+  {
+    Blob b = base;
+    b.put(kFxTail + 8, L12::presets + 2);
+    add("the preset table unaligned", b);
+  }
+  {
+    Blob b = base;
+    b.put(kFxTail + 8, L12::kImageFx - 8);
+    add("the preset table past the image", b);
+  }
+  {
+    Blob b = base;
+    b.put(L12::presets + 8, 0);
+    add("a preset with no values", b);
+  }
+  {
+    Blob b = base;
+    b.put(L12::presets + 8, 4);
+    add("a preset with more values than parameters", b);
+  }
+  {
+    Blob b = base;
+    b.put(L12::presets + 4, L12::values0 + 1);
+    add("a value table unaligned", b);
+  }
+  {
+    Blob b = base;
+    b.put(L12::presets + 4, L12::kImageFx - 4);
+    add("a value table past the image", b);
+  }
+  {
+    Blob b = base;
+    put_f(b, L12::values0, 1.5f);
+    add("a value above its range", b);
+  }
+  {
+    Blob b = base;
+    put_f(b, L12::values0 + 8, -10.5f);
+    add("a value below its range", b);
+  }
+  {
+    Blob b = base;
+    put_f(b, L12::values0 + 4, std::numeric_limits<float>::quiet_NaN());
+    add("a NaN value", b);
+  }
+  {
+    Blob b = base;
+    put_f(b, L12::values1 + 4, std::numeric_limits<float>::infinity());
+    add("an infinite value", b);
+  }
+  {
+    Blob b = base;
+    put_f(b, L12::values1 + 4, 17.0f);
+    add("a KEY value past 16", b);
+  }
+  {
+    Blob b = base;
+    b.image[L12::strings + 16] = 0;
+    add("an empty preset name", b);
+  }
+  {
+    Blob b = base;
+    b.image[L12::strings + 16] = 0x01;
+    add("a preset name with a control character", b);
+  }
+  {
+    Blob b = base;
+    std::memset(b.image.data() + L12::strings + 16, 'A', 16);
+    add("a preset name of 16 characters", b);
+  }
+  add("a preset name outside the image", raw_word(base, L12::presets, 0x7000u));
+  {
+    Blob b = raw_word(base, L12::desc + 28, 0);  // no parameter table ...
+    b.put(L12::desc + 24, 0);                    // ... and no parameters: presets have nothing to set
+    b.h.param_count = 0;
+    b.seal();
+    add("presets for a module with no parameters", b);
+  }
+  for (const Case& c : bad) {
+    CAPTURE(std::string(c.what));
+    CHECK(verdict12(c.blob) == Status::BadDescriptor);
+  }
+}
+
+TEST_CASE("module image: ABI 1.12: an app and an importer carry the four new members zero (presets are an instrument's and an effect's)") {
+  for (const std::uint32_t kind : {O3M_KIND_APP, O3M_KIND_IMPORTER}) {
+    const auto make = [kind]() { return kind == O3M_KIND_APP ? blob_app(1, 12) : blob_importer(12); };
+    const std::uint32_t tail = (kind == O3M_KIND_APP ? kDesc : LayoutImp::desc) + 84;
+    DescFx32 fx{};
+    DescImp32 imp{};
+    CAPTURE(static_cast<unsigned>(kind));
+    CHECK(header_status(make()) == Status::Ok);
+    CHECK(verdict12(make(), &fx, &imp) == Status::Ok);  // the tail zero: loads
+    CHECK((fx.render_st == 0 && fx.fx_flags == 0 && fx.presets == 0 && fx.preset_count == 0));
+    for (unsigned w = 0; w < 4; ++w) {  // any one of the four words set: refused
+      Blob b = make();
+      b.put(tail + 4u * w, w == 0 ? 9u : w == 1 ? O3M_FX_WIDENS : w == 2 ? 200u : 1u);
+      CAPTURE(w);
+      CHECK(verdict12(b) == Status::BadDescriptor);
+    }
+  }
+}
+
+TEST_CASE("module image: every module of 1.0 to 1.11 still reads exactly as before: the 1.12 tail is not read below 1.12, whatever bytes follow the descriptor") {
+  struct Case {
+    const char* what;
+    Blob blob;
+    std::uint32_t size, minor, kind;
+    std::uint32_t junk_at;  // the image offset just past the descriptor's last member, where a 1.12 tail would be
+  };
+  Blob b0 = blob_minor(0);
+  Blob b10 = blob18();
+  b10.h.abi_minor = 10;
+  b10.put(Layout18::desc + 4, 10);
+  b10.seal();
+  Blob app11 = blob_app(1, 11);
+  Blob imp11 = blob_importer();
+  const Case cases[] = {{"1.0", b0, 64, 0, O3M_KIND_INSTRUMENT, kDesc + 64},
+                        {"1.7", good_blob(), 64, 7, O3M_KIND_INSTRUMENT, kDesc + 64},
+                        {"1.8", blob18(), 80, 8, O3M_KIND_INSTRUMENT, Layout18::desc + 80},
+                        {"1.10", b10, 80, 10, O3M_KIND_INSTRUMENT, Layout18::desc + 80},
+                        {"1.11 app", app11, 84, 11, O3M_KIND_APP, kDesc + 84},
+                        {"1.11 importer", imp11, 84, 11, O3M_KIND_IMPORTER, LayoutImp::desc + 84}};
+  for (const Case& c : cases) {
+    CAPTURE(std::string(c.what));
+    Blob b = c.blob;
+    CHECK(header_status(b) == Status::Ok);
+    CHECK((b.get(c.junk_at - c.size + 12) == c.size && b.get(c.junk_at - c.size + 4) == c.minor));  // the descriptor's struct_size and minor, as published
+    DescFx32 fx{};
+    DescImp32 imp{};
+    CHECK(verdict12(b, &fx, &imp) == Status::Ok);
+    CHECK((fx.render_st == 0 && fx.fx_flags == 0 && fx.presets == 0 && fx.preset_count == 0));  // (the junk the verdict pre-fills is overwritten with zero, not with what follows)
+    // below 1.11 what follows the descriptor is the module's parameter table (non-zero words that, taken for a 1.12 tail, would be refused); a 1.11 file has cold padding there: fill it with junk,
+    // which must not matter (the 1.11 importer's table starts 12 bytes past its descriptor, so only those 12 bytes are padding)
+    if (c.minor >= 11u) {
+      std::memset(b.image.data() + c.junk_at, 0xA5, c.kind == O3M_KIND_IMPORTER ? 12u : 16u);
+      b.seal();
+      DescFx32 fx2{};
+      CHECK(verdict12(b, &fx2) == Status::Ok);
+      CHECK((fx2.render_st == 0 && fx2.fx_flags == 0 && fx2.presets == 0 && fx2.preset_count == 0));
+    }
+  }
+  // a 1.11 or older module's KEY bit (32) in a parameter's flags is not honoured and not refused: an instrument of 1.7 with it loads
+  Blob key17 = good_blob();
+  key17.put(116 + 16, O3M_PARAM_KEY);  // the second parameter's flags
+  key17.seal();
+  CHECK(verdict12(key17) == Status::Ok);
+  Blob key17_int = good_blob();
+  key17_int.put(116 + 16, O3M_PARAM_KEY | O3M_PARAM_INT);
+  key17_int.seal();
+  CHECK(verdict12(key17_int) == Status::Ok);
 }

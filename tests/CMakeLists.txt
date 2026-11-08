@@ -20,15 +20,18 @@ if(O3OS_PLATFORM STREQUAL "qemu")
   # importer, truncation at every offset and a damage fuzz, no heap. model_undo: the journal, the Editor and its property test
   # against full snapshots (a 1.9 MB project in .bss: QEMU loads code + data + .bss into 4 MiB, so it is a suite of its own).
   o3os_target_suite(jobs DEPENDS core SOURCES job_test.cpp)
+  o3os_target_suite(ptfx_host_math DEPENDS core SOURCES ptfx_host_math_test.cpp)
   o3os_target_suite(wav DEPENDS formats_wav SOURCES wav_test.cpp)
   # wav_sample: the importer as a registered format (the registry, the instrument a WAV makes, hostile files through the reader); one
   # project in .bss, like model_undo.
-  o3os_target_suite(wav_sample DEPENDS formats SOURCES wav_sample_test.cpp)
+  o3os_target_suite(wav_sample DEPENDS formats formats_builtin SOURCES wav_sample_test.cpp)  # formats_builtin: the registry's strategies (OS-FLASHDIET I3)
   # OS-GRAN: wavetable formats on import: Serum's 'clm ' chunk, the frame rule, Surge's .wt (crafted files, truncation at every offset); one project in .bss, like wav_sample.
-  o3os_target_suite(wavetable_import DEPENDS formats SOURCES wavetable_import_test.cpp)
+  o3os_target_suite(wavetable_import DEPENDS formats formats_builtin SOURCES wavetable_import_test.cpp)
   # OS-SAMPFMT: AIFF / AIFF-C and IFF 8SVX as a registered sample format (the 80-bit rate, every layout, refusals, truncation at every offset, a damage fuzz); one project in .bss, like wav_sample.
-  o3os_target_suite(iff_sample DEPENDS formats SOURCES iff_sample_test.cpp)
+  o3os_target_suite(iff_sample DEPENDS formats formats_builtin SOURCES iff_sample_test.cpp)
   o3os_target_suite(model_undo DEPENDS model SOURCES undo_test.cpp TIMEOUT 300)
+  # OS-PTOOLS2 S4: INTERPOLATE, RANDOMISE, ROTATE and HUMANISE over a block (model/pattern_verbs.h), one undo unit each; a project in .bss, so a suite of its own like model_undo.
+  o3os_target_suite(pattern_verbs DEPENDS model SOURCES pattern_verbs_test.cpp TIMEOUT 300)
   o3os_target_suite(eve DEPENDS eve qemu_host_fakes SOURCES dl_test.cpp display_list_builder_test.cpp)
   # usb: the descriptor, class-request, ring, kernel and stream tests, including the M4 PKHBT/PKHTB/QADD16 paths, a
   # CCR.UNALIGN_TRP run of the kernels and a 40,000-SOF closed-loop run at both reference clocks. Left out:
@@ -55,7 +58,7 @@ if(O3OS_PLATFORM STREQUAL "qemu")
   o3os_target_suite(audio_voices DEPENDS audio usb SOURCES audio_voices_test.cpp audio_voices_dir_test.cpp TIMEOUT 120)
   # OS-WAVEXP: the engine's offline render (render_offline against render_block, bit for bit; the park, the lease, what is put away and restored) with a scripted event source. The
   # sequencer's side (seq_offline_test.cpp: a project of 1.9 MB) and the file's (export_wav_test.cpp: an in-memory card) are host only.
-  o3os_target_suite(audio_offline DEPENDS audio usb SOURCES audio_offline_test.cpp TIMEOUT 120)
+  o3os_target_suite(audio_offline DEPENDS audio usb SOURCES audio_offline_test.cpp audio_clock_test.cpp TIMEOUT 120)
   # OS-ODD11: the voice gate (a voice on an inaudible strip skips its post stages; the quiet mask, the re-entry ramp, the export untouched).
   o3os_target_suite(audio_gate DEPENDS audio usb SOURCES audio_gate_test.cpp TIMEOUT 120)
   # OS-STEREO (c): the stereo voice and the mix: M against the mono voice bit for bit, S against the mono render of the S wave (stops, retriggers, steals, envelope), the cap of four, the effect that drops S, the side kernel and the graph's L / R.
@@ -88,6 +91,8 @@ if(O3OS_PLATFORM STREQUAL "qemu")
   o3os_target_suite(audio_granular DEPENDS audio usb SOURCES audio_granular_test.cpp TIMEOUT 600)  # ~137 s of wall time on an idle host (the 1,080-run guard test)
   # OS-GRAN: the wavetable's windows (the live window, no crossfade), the live granular position, and (item 3) the WT POS and GRAN POS modulators.
   o3os_target_suite(audio_wavetable DEPENDS audio usb SOURCES audio_wavetable_test.cpp TIMEOUT 180)
+  # OS-CEWTENV W2: audio_wt_contour_test.cpp is host only (not in a qemu suite): its golden tests/data/wt_contour_golden.h was made
+  # once with the host's libm, whose float results the test compares bit-exactly; QEMU's newlib may differ in the last ulp.
   # OS-005b: the fixed graph on the Cortex-M4F. audio_kernels: every sample kernel against its scalar reference and against the model of the
   # instructions (SMLAWB, SMLALD, SSUB16 + SEL, SHADD16, PKHBT, SSAT: the real ones run here), with CCR.UNALIGN_TRP set. audio_graph: the routing
   # truth table, the pan law and level curve, ramps, the reserved points, OUT MODE, the input strip and its latency, the meters and the taps.
@@ -138,30 +143,46 @@ if(O3OS_PLATFORM STREQUAL "qemu")
   # (3.8 MB of the 4 MiB of RAM) and cut their loops by stride on the target. What is left is about 230 KB of heap
   # for everything else, so the files are grouped three ways to keep the statics of each suite (a PAMD reader holds
   # 12.8 KB) and the peak of the heaviest test (the round trip of a whole folder) inside it.
-  o3os_target_suite(formats_og_files DEPENDS formats
+  o3os_target_suite(formats_og_files DEPENDS formats seq
     SOURCES og_pattern_test.cpp og_instrument_test.cpp og_project_test.cpp og_settings_test.cpp)
   o3os_target_suite(formats_og_hostile DEPENDS formats TIMEOUT 300 SOURCES og_pamd_test.cpp og_hostile_test.cpp)
-  o3os_target_suite(formats_og_registry DEPENDS formats SOURCES og_roundtrip_test.cpp format_registry_test.cpp)
+  o3os_target_suite(formats_og_registry DEPENDS formats formats_builtin SOURCES og_roundtrip_test.cpp format_registry_test.cpp)  # format_registry_test registers the built-ins (formats_builtin)
   # OS-004c: project v17 (official 1.9.2) and the Export target; project files only, so it is a small suite of its own.
   o3os_target_suite(formats_og_v17 DEPENDS formats SOURCES og_v17_test.cpp)
   # OS-008a: the MED reader, the tempo conversion, the flow linearisation and their hostile-input loops (thinned by 40 on the
   # target). No model arena: a few KB of statics. Left out: med_oversize_test.cpp (a sample of 5.5 million frames, host only).
-  o3os_target_suite(formats_med DEPENDS formats TIMEOUT 600
+  o3os_target_suite(formats_med DEPENDS formats formats_tracker TIMEOUT 600  # OS-FLASHDIET I3: the MED reader is formats_tracker's now
     SOURCES med_reader_test.cpp med_tempo_test.cpp med_flow_test.cpp med_hostile_test.cpp)
   # OS-008b: the M2 mapping (notes, volumes, the command table row by row, tracks, instruments) and the importer (golden songs, the PCM,
   # refuse / structural / truncate, every truncation and a mutation fuzz thinned for the target, the registered format). One project in
   # .bss, like wav_sample. Left out: med_import_big_test.cpp (megabytes of module: host only).
-  o3os_target_suite(formats_med_import DEPENDS formats TIMEOUT 900
+  o3os_target_suite(formats_med_import DEPENDS formats formats_tracker formats_builtin TIMEOUT 900  # I3: the reader and the registered format
     SOURCES med_map_test.cpp med_import_test.cpp)
   # OS-MODIMP: the MOD / S3M reader (every layout, refusals, truncation at every offset and a mutation fuzz, thinned for the target) and the importer (golden songs, flow, tracks, instruments,
   # the three ways to end for lack of room, the registered formats); one project in .bss, like med_import. The fixture (support/modimp_fixture.h) is std::vector and std::map.
-  o3os_target_suite(formats_modimp DEPENDS formats TIMEOUT 600 SOURCES modimp_reader_test.cpp)
-  o3os_target_suite(formats_modimp_import DEPENDS formats TIMEOUT 900 SOURCES modimp_import_test.cpp)
+  o3os_target_suite(formats_modimp DEPENDS formats formats_tracker TIMEOUT 600 SOURCES modimp_reader_test.cpp)  # I3: the MOD / S3M reader is formats_tracker's
+  o3os_target_suite(formats_modimp_import DEPENDS formats formats_tracker formats_builtin TIMEOUT 900 SOURCES modimp_import_test.cpp)
+  # OS-FLASHDIET I2: the import through the importer module on the Cortex-M4F: the packed tracker.tmod (embedded raw in the guest) is loaded by the
+  # real loader into RAM the core executes, the import runs in it, and the project it writes is hashed against the linked importer's (one arena, two
+  # passes). module_import_run_test.cpp also drives the linked reader over the same fixture.
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)  # (this branch returns before the host's find_package below; the blob's command needs the interpreter)
+  file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/gen")  # (the host branch creates it for inflate_fixtures.h; raw2c.py does not mkdir)
+  set(tracker_tmod "${PROJECT_BINARY_DIR}/modules/tracker.tmod")
+  set(tracker_blob "${CMAKE_CURRENT_BINARY_DIR}/gen/tracker_tmod_blob.cpp")
+  add_custom_command(OUTPUT ${tracker_blob}
+    COMMAND ${Python3_EXECUTABLE} -I ${PROJECT_SOURCE_DIR}/tools/raw2c.py --name tracker_tmod --out ${tracker_blob} ${tracker_tmod}
+    DEPENDS ${tracker_tmod} ${PROJECT_SOURCE_DIR}/tools/raw2c.py COMMENT "embedding tracker.tmod for module_import_run" VERBATIM)
+  o3os_target_suite(module_import_run DEPENDS app module formats formats_tracker model core hal  # I3: the linked reader of the comparison is formats_tracker's
+    SOURCES module_import_run_test.cpp TIMEOUT 600)
+  # the blob of the packed tracker.tmod's bytes is generated at build time (from the .tmod the packer builds), so it is attached to the suite's
+  # target directly: o3os_target_suite globs its SOURCES at configure time, when the file does not exist yet on a fresh build tree.
+  target_sources(module_import_run_suite PRIVATE ${tracker_blob})
+  add_dependencies(module_import_run_suite o3m_tracker_tmod)
 
   # OS-002d: parameters. params: the ids, the descriptor maths (curves, steps, display text and parsing it back), every row of the model's
   # tables, the settings block, the MIDI Learn rules, the ParamChange ring under load and the device settings file (no project). params_model:
   # the Project's parameters, a generation for each, undo and redo of them and the SETS / LRNB chunks of the native format: one project in
-  # .bss (QEMU's 4 MiB hold code, data and .bss), like model_undo. Left out: params_app_test.cpp (the app, the simulator and the host fakes).
+  # .bss (QEMU's 4 MiB hold code, data and .bss), like model_undo. Left out: params_app_test.cpp and learn_follow_test.cpp (the app, the simulator and the host fakes).
   o3os_target_suite(params DEPENDS formats SOURCES param_test.cpp settings_format_test.cpp TIMEOUT 300)
   o3os_target_suite(params_model DEPENDS formats SOURCES param_model_test.cpp TIMEOUT 600)
   # OS-USBRET: the device setting USB RETURN against the USB driver's flag (app/usb_return.h, a header): the decision of the main loop, against a fake driver and the real settings block.
@@ -171,7 +192,7 @@ if(O3OS_PLATFORM STREQUAL "qemu")
 
   # OS-009 P1a.1: the edit rules of one step against the reference vectors (data/pattern_edit_vectors.h), the FX table, the scales
   # and the pad board. Pure: the model's rules and one small file of the app (the pad board), no project in .bss.
-  o3os_target_suite(pattern_rules DEPENDS model app SOURCES pattern_edit_rules_test.cpp pad_board_test.cpp pattern_fill_test.cpp pattern_ops_test.cpp TIMEOUT 300)
+  o3os_target_suite(pattern_rules DEPENDS model app SOURCES pattern_edit_rules_test.cpp pad_board_test.cpp pattern_fill_test.cpp pattern_ops_test.cpp event_list_test.cpp TIMEOUT 300)
   # OS-010a: the folder browser's listing (sorted, fixed capacity, letter groups, hostile names). Pure, no storage: the scan over a fake card (dir_scan_test.cpp)
   # and the File screen on the App (file_screen_test.cpp) are host only (the fake keeps std::string).
   # OS-FILES part B: the RECENT list and its file (app/recent_list.h): pure too, the round trip and a sweep of damage over the loader.
@@ -182,11 +203,11 @@ if(O3OS_PLATFORM STREQUAL "qemu")
   # everything that reads a project (one in .bss, shared by the files through tests/support/seq_fixture.h): rows with the generation check, the sequencer's behaviour, the
   # reference-vector oracle, determinism over block sizes with the golden dumps, and the sequencer following an external clock. Left out: nothing; the loops are thinned for the target.
   o3os_target_suite(midi DEPENDS midi core
-    SOURCES qtime_test.cpp midi_core_test.cpp midi_din_test.cpp midi_usb_test.cpp midi_router_test.cpp midi_in_test.cpp midi_cc_in_test.cpp midi_clock_dll_test.cpp midi_io_test.cpp
+    SOURCES qtime_test.cpp midi_core_test.cpp midi_din_test.cpp midi_usb_test.cpp midi_router_test.cpp midi_mtc_test.cpp midi_mtc_in_test.cpp midi_in_test.cpp midi_cc_in_test.cpp midi_clock_dll_test.cpp midi_io_test.cpp
     TIMEOUT 600)
-  o3os_target_suite(seq DEPENDS seq midi core SOURCES seq_fx_test.cpp seq_control_test.cpp TIMEOUT 300)
-  o3os_target_suite(seq_model DEPENDS seq midi model
-    SOURCES seq_rows_test.cpp seq_sequencer_test.cpp seq_follow_test.cpp seq_oracle_test.cpp seq_determinism_test.cpp seq_midi_link_test.cpp seq_pfx_test.cpp seq_metro_test.cpp seq_corefx_test.cpp seq_patswitch_test.cpp seq_song_time_test.cpp
+  o3os_target_suite(seq DEPENDS seq midi core SOURCES seq_fx_test.cpp seq_control_test.cpp seq_play_orders_test.cpp TIMEOUT 300)
+  o3os_target_suite(seq_model DEPENDS seq midi model app  # app: app/mtc_sync.h, the main loop's answer to the chase's question (seq_mtc_chase_test.cpp)
+    SOURCES seq_rows_test.cpp seq_sequencer_test.cpp seq_playorder_test.cpp seq_follow_test.cpp seq_oracle_test.cpp seq_determinism_test.cpp seq_midi_link_test.cpp seq_pfx_test.cpp seq_metro_test.cpp seq_corefx_test.cpp seq_patswitch_test.cpp seq_song_time_test.cpp seq_mtc_test.cpp seq_mtc_chase_test.cpp seq_chance_test.cpp seq_clock_test.cpp
     TIMEOUT 1800)
 
   o3os_label_tests()
@@ -197,7 +218,24 @@ endif()
 # need no change here because their libraries are linked when the targets exist.
 find_package(Threads REQUIRED)
 
+# OS-FLASHDIET A1: the core::Inflater fixtures are generated at configure time by tests/inflate_fixtures.py
+# (zlib's deflate bytes differ between zlib library versions, so they are never committed): it writes
+# gen/inflate_fixtures.h with every good stream (zlib.compress wbits=-12, the 4 KiB window) next to its raw
+# bytes, and the malformed streams the host tests expect to end failed().
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+set(_inflate_fixtures_h "${CMAKE_CURRENT_BINARY_DIR}/gen/inflate_fixtures.h")
+execute_process(
+  COMMAND ${Python3_EXECUTABLE} -I "${CMAKE_CURRENT_SOURCE_DIR}/inflate_fixtures.py"
+          --root "${PROJECT_SOURCE_DIR}" --out "${_inflate_fixtures_h}"
+  RESULT_VARIABLE _inflate_fixtures_rc)
+if(NOT _inflate_fixtures_rc EQUAL 0)
+  message(FATAL_ERROR "tests/inflate_fixtures.py failed (exit ${_inflate_fixtures_rc})")
+endif()
+
 file(GLOB test_sources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
+# OS-FLASHDIET I2: module_import_run_test.cpp belongs to the QEMU suite only (module_import_run, below): the packed tracker.tmod's code runs on the
+# target, so the host unit binary does not build it (the blob of its bytes is generated in the qemu section).
+list(REMOVE_ITEM test_sources ${CMAKE_CURRENT_SOURCE_DIR}/module_import_run_test.cpp)
 # Fixtures, fakes and chunk helpers shared with the round-trip tool below (support/ is not globbed).
 set(support_sources ${CMAKE_CURRENT_SOURCE_DIR}/support/project_fixture.cpp)
 # The Open303 oracle (OS-012a) only in the test binary, which links open303_oracle; o3pj_tool shares support_sources and does not.
@@ -209,8 +247,9 @@ list(APPEND test_sources ${mk66_test_sources})
 set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/support/open303_ref.cpp PROPERTIES COMPILE_FLAGS "-w")
 add_executable(o3os_tests ${test_sources} ${support_sources} ${oracle_sources})
 target_include_directories(o3os_tests SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/third_party)  # <doctest/doctest.h>
+target_include_directories(o3os_tests PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/gen")  # OS-FLASHDIET A1: inflate_fixtures.h
 target_link_libraries(o3os_tests PRIVATE
-  core usb hal eve model formats platform_host midi seq module o3m_builtin
+  core usb hal eve model formats formats_builtin formats_tracker platform_host midi seq module o3m_builtin  # I3: the registry's strategies and the importers' readers
   $<$<TARGET_EXISTS:ui>:ui>
   $<$<TARGET_EXISTS:app>:app>
   $<$<TARGET_EXISTS:sim>:sim>
@@ -220,17 +259,36 @@ target_link_libraries(o3os_tests PRIVATE
 o3os_strict_warnings(o3os_tests)
 target_link_libraries(o3os_tests PRIVATE formats_wav)  # OS-002c: the WAV importer
 # OS-012a: the modules the tests load. The packer's files (module_fixture_test.cpp) exist when the cross compiler was found; the host shared objects always.
-add_dependencies(o3os_tests o3m_sine_host o3m_tb303_host o3m_fm_host o3m_pads_host o3m_rhythmgen_host o3m_chords_host o3m_humanize_host o3m_mutate_host o3m_morph_host o3m_smfexport_host)
-target_compile_definitions(o3os_tests PRIVATE O3M_SINE_HOST_SO="$<TARGET_FILE:o3m_sine_host>" O3M_TB303_HOST_SO="$<TARGET_FILE:o3m_tb303_host>" O3M_FM_HOST_SO="$<TARGET_FILE:o3m_fm_host>"
+add_dependencies(o3os_tests o3m_sine_host o3m_tb303_host o3m_fm_host o3m_sid_host o3m_pads_host o3m_rhythmgen_host o3m_chords_host o3m_humanize_host o3m_mutate_host o3m_morph_host o3m_smfexport_host)
+target_compile_definitions(o3os_tests PRIVATE O3M_SINE_HOST_SO="$<TARGET_FILE:o3m_sine_host>" O3M_TB303_HOST_SO="$<TARGET_FILE:o3m_tb303_host>" O3M_FM_HOST_SO="$<TARGET_FILE:o3m_fm_host>" O3M_SID_HOST_SO="$<TARGET_FILE:o3m_sid_host>"
                            O3M_PADS_HOST_SO="$<TARGET_FILE:o3m_pads_host>" O3M_RHYTHMGEN_HOST_SO="$<TARGET_FILE:o3m_rhythmgen_host>"
                            O3M_CHORDS_HOST_SO="$<TARGET_FILE:o3m_chords_host>" O3M_HUMANIZE_HOST_SO="$<TARGET_FILE:o3m_humanize_host>"
                            O3M_MUTATE_HOST_SO="$<TARGET_FILE:o3m_mutate_host>" O3M_MORPH_HOST_SO="$<TARGET_FILE:o3m_morph_host>"
                            O3M_SMFEXPORT_HOST_SO="$<TARGET_FILE:o3m_smfexport_host>"
-                           O3M_TB303_DIR="${PROJECT_SOURCE_DIR}/modules/tb303")
+                           O3M_TB303_DIR="${PROJECT_SOURCE_DIR}/modules/tb303" O3_MODULES_DIR="${PROJECT_SOURCE_DIR}/modules")
 target_link_libraries(o3os_tests PRIVATE open303_oracle pt2_paula_oracle)
+# OS-CECHIP C1: tracker-ce's CHIP engine, the oracle of Chip's new waves (third_party/tracker-ce-chip; host only). The test files do not let the compiler fuse
+# multiplications and additions (-ffp-contract=off), so that a comparison against the original's expressions is not about the host's rounding.
+target_link_libraries(o3os_tests PRIVATE cechip_oracle)
+set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/cechip_oracle_smoke_test.cpp ${CMAKE_CURRENT_SOURCE_DIR}/cechip_oracle_test.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
+# OS-MODPRESET P1: the reference preset as hex text, shared with tools/o3preset.py (preset_python): both hold their bytes equal to it.
+target_compile_definitions(o3os_tests PRIVATE O3_PRESET_BASIC_HEX="${CMAKE_CURRENT_SOURCE_DIR}/data/preset_basic.hex")
+# and the corpus of good and damaged files that preset_python writes (with the outcome tools/o3preset.py gave) and preset_format_test reads: the ctest fixture preset_corpus.
+target_compile_definitions(o3os_tests PRIVATE O3_PRESET_CORPUS="${CMAKE_CURRENT_BINARY_DIR}/preset_corpus/corpus.txt")
 target_compile_definitions(o3os_tests PRIVATE O3_MED_TICK_GOLDEN="${CMAKE_CURRENT_SOURCE_DIR}/data/med_tick_golden.txt")
+# OS-FLASHDIET A7: the golden of the old help table (made once from the old app/src/help_text.cpp), read by help_blob_test.cpp.
+target_compile_definitions(o3os_tests PRIVATE O3_HELP_OLD_PAGES="${CMAKE_CURRENT_SOURCE_DIR}/data/help_old_pages.txt")
+# OS-FLASHDIET P3: the golden of the old FX picker table (made once from the old kFx in step_popup_overlay.cpp: "name<TAB>description" per entry), read by fx_text_blob_test.cpp.
+# OS-FLASHDIET P4: seq_play_orders_blob_test.cpp includes the committed play-order table to hold the deflate blob to it.
+target_compile_definitions(o3os_tests PRIVATE O3_PLAY_ORDERS_INC="${PROJECT_SOURCE_DIR}/seq/src/play_orders_data.inc")
+target_compile_definitions(o3os_tests PRIVATE O3_FX_PICKER_TEXT="${CMAKE_CURRENT_SOURCE_DIR}/data/fx_picker_text.txt" O3_FX_PICKER_SOURCE="${PROJECT_SOURCE_DIR}/app/fx/fx_text.txt")
+# OS-FLASHDIET I2: the importer module as a native entry (the module path of app::ModuleImport in module_import_test) — the host shared object always
+# builds; and the fetched test data for the equality sweep, when present.
+add_dependencies(o3os_tests o3m_tracker_host)
+target_compile_definitions(o3os_tests PRIVATE O3M_TRACKER_HOST_SO="$<TARGET_FILE:o3m_tracker_host>" O3_BUILD_FIXTURES_DIR="${PROJECT_SOURCE_DIR}/build-fixtures")
 if(TARGET o3m_sine_tmod)
-  add_dependencies(o3os_tests o3m_sine_tmod o3m_sine_raw o3m_tb303_tmod o3m_tb303_raw o3m_pads_tmod o3m_example_instrument_tmod o3m_example_effect_tmod o3m_example_app_tmod o3m_tb303_gen o3m_example_instrument_gen o3m_example_effect_gen o3m_example_app_gen)
+  # OS-FLASHDIET A3: the byte-for-byte comparison in module_builtin_test.cpp reads every built-in's .tmod, so all four tmod targets must be built before the tests run.
+  add_dependencies(o3os_tests o3m_sine_tmod o3m_sine_raw o3m_tb303_tmod o3m_tb303_raw o3m_chip_tmod o3m_fm_tmod o3m_sid_tmod o3m_pads_tmod o3m_example_instrument_tmod o3m_example_effect_tmod o3m_example_stereo_tmod o3m_example_key_tmod o3m_example_app_tmod o3m_tb303_gen o3m_example_instrument_gen o3m_example_effect_gen o3m_example_stereo_gen o3m_example_key_gen o3m_example_app_gen)
   target_compile_definitions(o3os_tests PRIVATE O3M_FIXTURE_DIR="${PROJECT_BINARY_DIR}/modules" O3M_GEN_OUT_DIR="${PROJECT_BINARY_DIR}/modules/gen")
 else()
   # No cross compiler, no fixtures: these files compile their no-fixture path (they skip, or fail under O3_CI=1), whose helpers are then unused.
@@ -262,15 +320,15 @@ endif()
 set(o3os_unit_groups fuzz usb model formats plot audio seq ui apps)
 set(o3os_unit_fuzz */native_fuzz_test.cpp)
 set(o3os_unit_usb */usb_*_test.cpp)
-set(o3os_unit_model */undo_test.cpp */undo_area_test.cpp */model_test.cpp */param*_test.cpp */settings_format_test.cpp)
-set(o3os_unit_formats */native_format_test.cpp */og_*_test.cpp */med_*_test.cpp */modimp_*_test.cpp */wav*_test.cpp */iff_sample_test.cpp */format_registry_test.cpp
-                      */import_job_test.cpp */project_state_test.cpp */persist2_format_test.cpp */law_format_test.cpp */insx_format_test.cpp */appm_format_test.cpp */lfosine_format_test.cpp)
+set(o3os_unit_model */undo_test.cpp */undo_area_test.cpp */model_test.cpp */param*_test.cpp */learn_follow_test.cpp */settings_format_test.cpp */event_list_test.cpp */pattern_verbs_test.cpp)
+set(o3os_unit_formats */native_format_test.cpp */og_*_test.cpp */med_*_test.cpp */modimp_*_test.cpp */wav*_test.cpp */iff_sample_test.cpp */format_registry_test.cpp */preset_format_test.cpp
+                      */import_job_test.cpp */project_state_test.cpp */persist2_format_test.cpp */note11_format_test.cpp */law_format_test.cpp */insx_format_test.cpp */appm_format_test.cpp */lfosine_format_test.cpp */perf_playorder_format_test.cpp)
 set(o3os_unit_plot */plot_*_test.cpp */raster*_test.cpp)
-set(o3os_unit_audio */audio_*_test.cpp */tb303_*_test.cpp */paula_oracle_test.cpp */amiga_*_test.cpp)
+set(o3os_unit_audio */audio_*_test.cpp */tb303_*_test.cpp */paula_oracle_test.cpp */amiga_*_test.cpp */cechip_*_test.cpp)
 set(o3os_unit_seq */seq_*_test.cpp */midi_*_test.cpp */metro_*_test.cpp */play_*_test.cpp)
 # OS-APPUX S2/S3: the shipped apps through the whole stack in the simulator (about a minute under the sanitizers: eleven apps, each driven key by key)
-set(o3os_unit_apps */app_grammar_test.cpp */sim_apps_test.cpp)
-set(o3os_unit_ui */overlay_test.cpp */budget_test.cpp */pattern_view_test.cpp */pattern_zoom_test.cpp */legibility_test.cpp)
+set(o3os_unit_apps */app_grammar_test.cpp */sim_apps_test.cpp */app_tools_panel_test.cpp)
+set(o3os_unit_ui */overlay_test.cpp */budget_test.cpp */pattern_view_test.cpp */pattern_zoom_test.cpp */legibility_test.cpp */events_app_test.cpp)  # OS-MIDIREC S1b
 # Every pattern of every group names a file: a pattern that matches none (a file renamed or removed) is a configure error, not a hole
 # that unit_cover finds only if the whole group goes empty. (unit_rest is the exclusion of all of them: a new file lands there.)
 foreach(group IN LISTS o3os_unit_groups)
@@ -291,10 +349,22 @@ foreach(group IN LISTS o3os_unit_groups)
   set_tests_properties(unit_${group} PROPERTIES TIMEOUT 240 FAIL_REGULAR_EXPRESSION "test cases: +0 ")
   list(APPEND o3os_unit_cover_groups "--source-file=${filter}")
 endforeach()
+# OS-MODPRESET P1: preset_format_test reads the corpus that preset_python writes (below): ctest runs that test first, also for `ctest -R unit_formats`.
+set_tests_properties(unit_formats PROPERTIES FIXTURES_REQUIRED preset_corpus)
 list(JOIN o3os_unit_all "," filter)
 add_test(NAME unit_rest COMMAND ${runner} $<TARGET_FILE:o3os_tests> "--source-file-exclude=${filter}")
 set_tests_properties(unit_rest PROPERTIES TIMEOUT 600 FAIL_REGULAR_EXPRESSION "test cases: +0 ")
 list(APPEND o3os_unit_cover_groups "--source-file-exclude=${filter}")
+
+# OS-CECHIP C1: the CHIP oracle. cechip_oracle_sha: the vendored original is byte for byte what third_party/tracker-ce-chip/PROVENANCE.md records (a cmake
+# script, no build). cechip_oracle: its cases of the unit binary on their own, so that the verdict is a line of its own (they also run in unit_audio).
+add_test(NAME cechip_oracle_sha
+  COMMAND ${CMAKE_COMMAND} -DDIR=${PROJECT_SOURCE_DIR}/third_party/tracker-ce-chip
+    -DSRC_SHA256=d0558823a3cc30d41ea0c98efffdf322d7d3809f2222112149fc0f37f78c2298
+    -DLICENSE_SHA256=92ea2a7264d71826a45e0095badad93c6b22b1c72dc8cf704f43eee1484bf3bb
+    -P ${PROJECT_SOURCE_DIR}/third_party/tracker-ce-chip/check_sha256.cmake)
+add_test(NAME cechip_oracle COMMAND ${runner} $<TARGET_FILE:o3os_tests> "--source-file=*/cechip_*_test.cpp")
+set_tests_properties(cechip_oracle PROPERTIES TIMEOUT 120 FAIL_REGULAR_EXPRESSION "test cases: +0 ")
 
 # Groups of the unit tests that gate the look (OS-003b) also run on their own, so the verdict is its own line in the
 # ctest summary: the contrast of every token pair of every theme (ADR 0010 amendment 1), the display-list budget of
@@ -422,6 +492,25 @@ set_tests_properties(hil_songs_python PROPERTIES TIMEOUT 120)
 # OS-CLEANUP: the generated HIL scenarios are the committed ones (platform/mk66/tools/hil/gen_hil.py is the one place they are edited). Reads files only.
 add_test(NAME hil_scenarios_sync COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/hil_scenarios_sync_test.py ${PROJECT_SOURCE_DIR})
 set_tests_properties(hil_scenarios_sync PROPERTIES TIMEOUT 60)
+# OS-MIDISYNC M1: the host tool of the MIDI clock bench (platform/mk66/tools/hil/midi_clock_tool.py --self-test): the master and the `sync` analysis against a synthetic unit over FIFOs, with the measured
+# numbers asserted. No MIDI device, no root, no SCHED_FIFO (skipped silently); under 60 s.
+add_test(NAME midi_clock_tool_selftest COMMAND ${Python3_EXECUTABLE} -I ${PROJECT_SOURCE_DIR}/platform/mk66/tools/hil/midi_clock_tool.py --self-test)
+set_tests_properties(midi_clock_tool_selftest PROPERTIES TIMEOUT 120 RUN_SERIAL TRUE)
+# OS-MIDISYNC M1: the bench's test songs (`o3pj_tool gen midisync|midisync-song|midisync-load`) build, load back and resave byte for byte, and the Sync track plays the note that names every step.
+add_test(NAME midisync_songs_python COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/midisync_songs_test.py $<TARGET_FILE:o3pj_tool>)
+set_tests_properties(midisync_songs_python PROPERTIES TIMEOUT 120)
+# OS-MTC A2: the MTC test song (`o3pj_tool gen mtc-tempo`) builds, loads back and resaves byte for byte, every step of the Sync track carries its naming note, and its
+# timing FX are the spec's with the values docs/formats gives the types (Tempo 15 value 70 = 140 BPM, Swing 17 value 50, Tempo fine 44 value 132 = +1.00 BPM, Break 13).
+add_test(NAME mtc_tempo_song_python COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/mtc_tempo_song_test.py $<TARGET_FILE:o3pj_tool>)
+set_tests_properties(mtc_tempo_song_python PROPERTIES TIMEOUT 120)
+# OS-MTC B1: the host as MTC master (`midi_clock_tool.py mtc-send`): its frame maths (time labels at 24/25/29.97 drop-frame/30 fps against an independent drop-frame count, the pieces and full frames of
+# fixed vectors, A2's decoder reading the master's stream, the quarter-frame grid, quiet, jump, reverse, jitter, drop, the profile parser). The synthetic chaser and the live loop are midi_clock_tool_selftest.
+add_test(NAME mtc_send_python COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/mtc_send_test.py ${PROJECT_SOURCE_DIR}/platform/mk66/tools/hil/midi_clock_tool.py)
+set_tests_properties(mtc_send_python PROPERTIES TIMEOUT 120)
+# OS-MODPRESET P2: tools/o3preset.py (dump, make, pack) against the hex fixture the C++ reader and writer (preset_format_test) share, and the same refusals with the same error kinds.
+# It also writes the corpus of every good and damaged file it tried, with its reader's outcome, for the C++ reader to be held to (the fixture preset_corpus of unit_formats).
+add_test(NAME preset_python COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/o3preset_test.py ${PROJECT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/preset_corpus)
+set_tests_properties(preset_python PROPERTIES TIMEOUT 120 FIXTURES_SETUP preset_corpus)
 add_test(NAME project_python
   COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/o3project_roundtrip.py
           $<TARGET_FILE:o3pj_tool> ${PROJECT_SOURCE_DIR}/tools/o3project.py ${CMAKE_CURRENT_BINARY_DIR}/project_python)
@@ -581,16 +670,26 @@ set_tests_properties(manual_diagrams PROPERTIES TIMEOUT 60)
 # from fake downloads (byte-identical), the licence and hash checks, and the demo projects through the C++ reader (o3pj_tool resave, byte for byte).
 add_test(NAME starter_python COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/starter_test.py ${PROJECT_SOURCE_DIR} $<TARGET_FILE:o3pj_tool>)
 set_tests_properties(starter_python PROPERTIES TIMEOUT 120)
+# OS-MODPRESET P5: the factory preset packs (modules/<id>/presets.json) against each module.json and the starter zip's presets list.
+add_test(NAME modpreset_packs COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/modpreset_packs_test.py ${PROJECT_SOURCE_DIR})
+set_tests_properties(modpreset_packs PROPERTIES TIMEOUT 60)
 
 # OS-HILCARD: tools/testdata/testdata.py (the test data kept out of git: a release asset plus third-party files fetched by hash), with no network: the committed
 # manifest, the validator's refusals, the asset built twice from fake sources (byte-identical) and unpacked, a wrong hash refused before anything is written.
 add_test(NAME testdata_python COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/testdata_test.py ${PROJECT_SOURCE_DIR})
 set_tests_properties(testdata_python PROPERTIES TIMEOUT 60)
 
+# OS-CEPTFX S0: the .ptfx fixtures, built by tools/ptfx_fixtures.py into build-fixtures/ptfx/ (the six SDK examples of tracker-ce@7fd6c2c with the fetched official
+# builder and our toolchain, our tests/ptfx/*.c with tools/ptfx_pack.py; the SDK files come from `testdata.py fetch --only ptfx-sdk/`, hash-pinned) and inspected by
+# tools/ptfx_inspect.py, then compared field by field with the C++ parser's dump case of ptfx_format_test.cpp through the o3os_tests binary. Skipped (77) without the
+# cross compiler or the fetched SDK; O3_CI=1 fails, so a CI run cannot go quiet.
+add_test(NAME ptfx_fixtures COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/ptfx_fixtures_test.py ${PROJECT_SOURCE_DIR} $<TARGET_FILE:o3os_tests>)
+set_tests_properties(ptfx_fixtures PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
+
 # OS-008a: the MED reader against an independent Python writer. tools/mmd_build.py writes reference modules (MMD0 to MMD3)
 # with the dump it expects of each; o3med_tool dumps what the C++ reader reads out of the same bytes; the two must agree.
 add_executable(o3med_tool tools/o3med_tool.cpp)
-target_link_libraries(o3med_tool PRIVATE formats)
+target_link_libraries(o3med_tool PRIVATE formats formats_tracker)  # OS-FLASHDIET I3: the MED reader is formats_tracker's
 o3os_strict_warnings(o3med_tool)
 add_test(NAME med_python
   COMMAND ${Python3_EXECUTABLE} -I ${PROJECT_SOURCE_DIR}/tools/mmd_build.py --check $<TARGET_FILE:o3med_tool>
@@ -620,13 +719,23 @@ set_tests_properties(boot_logo PROPERTIES TIMEOUT 120 FAIL_REGULAR_EXPRESSION "t
 # OS-MODIMP: the MOD / S3M reader against an independent Python writer. tools/mod_build.py writes reference modules (every MOD variant, S3M with its instrument
 # kinds, markers, panning and channel settings) with the dump it expects of each; o3mod_tool dumps what the C++ reader reads out of the same bytes; the two must agree.
 add_executable(o3mod_tool tools/o3mod_tool.cpp)
-target_link_libraries(o3mod_tool PRIVATE formats)
+target_link_libraries(o3mod_tool PRIVATE formats formats_tracker)  # OS-FLASHDIET I3: the MOD / S3M reader is formats_tracker's
 o3os_strict_warnings(o3mod_tool)
 add_test(NAME mod_python
   COMMAND ${Python3_EXECUTABLE} -I ${PROJECT_SOURCE_DIR}/tools/mod_build.py --check $<TARGET_FILE:o3mod_tool>
           ${CMAKE_CURRENT_BINARY_DIR}/mod_python)
 set_tests_properties(mod_python PROPERTIES TIMEOUT 120)
 add_test(NAME mod_python_selftest COMMAND ${Python3_EXECUTABLE} -I ${PROJECT_SOURCE_DIR}/tools/mod_build.py --self-test)
+# OS-FLASHDIET A2: the deterministic raw-deflate encoder's self-test (tools/deflate_pack.py): every input round-trips through
+# zlib.decompress(data, -12), no distance exceeds 4,096, two runs give identical bytes, the length-limited code lengths stay
+# complete (Kraft sum 1) within their limit, the built-in samples (a text, a bitmap, a code blob) stay within a pinned
+# absolute byte budget, and --check-fixture re-makes the kPackRaw/kPackZ fixture committed in core_inflate_test.cpp and
+# compares it byte for byte.
+add_test(NAME deflate_pack_selftest COMMAND ${Python3_EXECUTABLE} -I ${PROJECT_SOURCE_DIR}/tools/deflate_pack.py --self-test --check-fixture ${PROJECT_SOURCE_DIR}/tests/core_inflate_test.cpp)
+set_tests_properties(deflate_pack_selftest PROPERTIES TIMEOUT 120)
+# OS-FLASHDIET P5/P8: the platform text packer (tools/text_pack.py): the escapes, the file format and its errors, the id layout, and that every platform/mk66/text/*_text.txt parses.
+add_test(NAME text_pack_selftest COMMAND ${Python3_EXECUTABLE} -I ${PROJECT_SOURCE_DIR}/tools/text_pack.py --self-test)
+set_tests_properties(text_pack_selftest PROPERTIES TIMEOUT 60)
 # OS-FINALQA FQA-4: the picture sheets of the QA catalogue (tools/qa_sheet.py) check their own cases: a planted catalogue and picture directory.
 add_test(NAME qa_sheet_python_selftest COMMAND ${Python3_EXECUTABLE} -I ${PROJECT_SOURCE_DIR}/tools/qa_sheet.py --self-test)
 set_tests_properties(qa_sheet_python_selftest PROPERTIES TIMEOUT 60)
@@ -637,7 +746,7 @@ set_tests_properties(qa_sheet_python_selftest PROPERTIES TIMEOUT 60)
 # OS-COREFX CF1: the tracker FX against libopenmpt in the AUDIO: o3corefx_tool plays a synthetic module through the importer, the sequencer and the Modern engine (tracker FX processor, voices, graph)
 # and writes the output; tests/corefx_openmpt_oracle.py renders the same bytes with libopenmpt and compares the pitch and the level of every tick.
 add_executable(o3corefx_tool tools/o3corefx_tool.cpp)
-target_link_libraries(o3corefx_tool PRIVATE formats seq midi model audio core hal usb)
+target_link_libraries(o3corefx_tool PRIVATE formats formats_tracker seq midi model audio core hal usb)  # I3: the importer it plays through is formats_tracker's
 o3os_strict_warnings(o3corefx_tool)
 # OS-E2E-9: the original Open303 (double precision) as a command-line reference for tests/e2e_open303_ref.py, which compares it with the TB-303 journey's render (sim/scenarios/e2e/e2e_ref_303.txt).
 add_executable(o3ref303_tool tools/o3ref303_tool.cpp ${oracle_sources})

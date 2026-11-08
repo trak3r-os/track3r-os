@@ -6,6 +6,7 @@
 #include <o3os/app/project_state.h>
 #include <o3os/app/screens/screen.h>
 #include <o3os/app/text_format.h>
+#include <o3os/app/tools_list.h>
 
 namespace o3os::app {
 
@@ -18,6 +19,35 @@ bool say(ActionContext& ctx, core::Severity severity, const char* text) noexcept
 
 unsigned instrument_slot(const ViewState& view) noexcept {
   return view.instrument < 1 ? 0u : (view.instrument > static_cast<int>(model::kMaxInstruments) ? static_cast<unsigned>(model::kMaxInstruments) - 1u : static_cast<unsigned>(view.instrument - 1));
+}
+
+// The launch behind MODULES F1 and the apps list's F1 and F8: starts catalogue entry `entry` and opens its page. `listed` (the apps list, a modal overlay that hides the strip): a refusal or a question
+// goes to the list's own line (tools_msg) and a launch closes the list. MODULES: the strip says it. NeedsConfirm is answered by the same key again.
+bool launch_entry(ActionContext& ctx, unsigned entry, bool listed) noexcept {
+  const ModuleUi::LaunchResult res = ctx.model.modules->launch_app(entry, ctx.model.project);
+  if (res != ModuleUi::LaunchResult::Ok) {
+    const core::Severity severity = core::Severity::Warn;
+    const char* text = ctx.model.modules->launch_message(res);
+    if (listed) {
+      ctx.view.modules.tools_msg = text;
+      return true;
+    }
+    if (res == ModuleUi::LaunchResult::NeedsConfirm) {  // a question: the head of the strip, where the key row finds it (ask() rewrites the oldest "module" line in place, so a second F1 does not stack)
+      return ctx.view.notify.ask(severity, text, "module", ViewState::kMessageMs);
+    }
+    return say(ctx, severity, text);
+  }
+  if (listed) {
+    ctx.view.overlay = OverlayId::None;
+    ctx.view.modules.tools_msg = "";
+  }
+  if (ctx.model.project != nullptr) {
+    (void)app_params_apply(*ctx.model.modules, *ctx.model.project);  // OS-004d: the values this project remembers for the app (same name and ABI major)
+  }
+  ctx.view.modules.app_row = 0;
+  ctx.view.modules.from_tools = false;
+  (void)switch_screen(screen_registry(), ctx.model, ctx.view, ScreenId::ModuleApp);
+  return true;
 }
 
 }  // namespace
@@ -60,6 +90,13 @@ bool module_engine(ActionContext& ctx, core::ActionArg) noexcept {
 bool module_pick(ActionContext& ctx, core::ActionArg) noexcept {
   if (ctx.view.overlay != OverlayId::ModulePicker) {
     return false;
+  }
+  if (ctx.view.modules.insert_where == ModulesView::kApps) {  // OS-APPSNAV: F1 of the apps list launches the app under the cursor; the list stays open when the launch is refused (the confirm of an app that edits or writes files cannot arise here: those are tool apps)
+    const unsigned k = ctx.view.modules.picker;
+    if (ctx.model.modules == nullptr || k >= apps_count(ctx.model)) {
+      return true;
+    }
+    return launch_entry(ctx, apps_entry(ctx.model, k), true);
   }
   ctx.view.overlay = OverlayId::None;
   if (ctx.model.modules == nullptr) {
@@ -106,20 +143,37 @@ bool module_launch(ActionContext& ctx, core::ActionArg) noexcept {
   if (ctx.model.modules == nullptr) {
     return say(ctx, core::Severity::Info, "NO MODULE SYSTEM IN THIS BUILD");
   }
-  const ModuleUi::LaunchResult res = ctx.model.modules->launch_app(ctx.view.modules.apps, ctx.model.project);
-  if (res == ModuleUi::LaunchResult::NeedsConfirm) {  // a question: the head of the strip, where the key row finds it (ask() rewrites the oldest "module" line in place, so a second F1 does not stack)
-    return ctx.view.notify.ask(core::Severity::Warn, ctx.model.modules->launch_message(res), "module", ViewState::kMessageMs);
+  return launch_entry(ctx, ctx.view.modules.apps, false);
+}
+
+// OS-APPSNAV: Shift + Pattern, the list of the apps that are not tools (the picker in apps mode). The card is read again, as MODULES does, so the list is what the card has now.
+bool apps_open(ActionContext& ctx, core::ActionArg) noexcept {
+  if (ctx.view.overlay != OverlayId::None) {
+    return false;
   }
-  if (res != ModuleUi::LaunchResult::Ok) {
-    return say(ctx, core::Severity::Warn, ctx.model.modules->launch_message(res));
+  if (ctx.model.modules != nullptr) {
+    ctx.model.modules->scan_tools();  // (scan_apps, and which entries are tools: the list is the rest)
   }
-  if (ctx.model.project != nullptr) {
-    (void)app_params_apply(*ctx.model.modules, *ctx.model.project);  // OS-004d: the values this project remembers for the app (same name and ABI major)
-  }
-  ctx.view.modules.app_row = 0;
-  ctx.view.modules.from_tools = false;
-  (void)switch_screen(screen_registry(), ctx.model, ctx.view, ScreenId::ModuleApp);
+  ctx.view.modules.picker = 0;
+  ctx.view.modules.insert_where = ModulesView::kApps;
+  ctx.view.modules.tools_msg = "";
+  ctx.view.overlay = OverlayId::ModulePicker;
   return true;
+}
+
+// Pattern or Shift + Pattern in the apps list closes it (Pattern is the key that opened it); false in the other pickers, which F8 closes.
+bool apps_close(ActionContext& ctx, core::ActionArg) noexcept {
+  if (ctx.view.overlay != OverlayId::ModulePicker || ctx.view.modules.insert_where != ModulesView::kApps) {
+    return false;
+  }
+  ctx.view.overlay = OverlayId::None;
+  return true;
+}
+
+// F8 of the picker: the apps list launches (F1 does too) while it has an app; an empty apps list, the engine and the insert pickers close.
+bool module_picker_f8(ActionContext& ctx, core::ActionArg arg) noexcept {
+  const bool apps = ctx.view.modules.insert_where == ModulesView::kApps && ctx.model.modules != nullptr && apps_count(ctx.model) != 0u;
+  return apps ? module_pick(ctx, arg) : ui_back(ctx, arg);
 }
 
 // Where the exit chord of an app's page goes (OS-H3A): back to Pattern when the app was opened from its F7 TOOLS list (the cursor and the block are the view state's, untouched), to MODULES when it

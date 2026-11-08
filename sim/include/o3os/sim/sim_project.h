@@ -27,14 +27,17 @@
 #include <o3os/app/og_folder.h>
 #include <o3os/app/og_samples.h>
 #include <o3os/app/sample_bank.h>
+#include <o3os/app/wt_user.h>
 #include <o3os/audio/voices.h>
 #include <o3os/hal/storage.h>
 #include <o3os/model/editor.h>
 #include <o3os/model/project.h>
+#include <o3os/module/loader.h>
 
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace o3os::sim {
 
@@ -72,6 +75,17 @@ class SimProject final : public app::ProjectSink {
   // One slice of the load (nothing when none runs): the simulator calls it once a tick in place of the app's pass while busy(). The pass that ends the load hands the document over.
   void pump() noexcept;
 
+  // OS-FLASHDIET I2: the importer module the import goes through (the simulator's stand-in for modules/importers/tracker.tmod of the starter zip):
+  // the tracker host object (O3SIM_TRACKER_HOST_SO) is registered as a native importer entry in a module set, and that set is handed to the import's
+  // proxy. Called once the card is in: the native entry is registered unless the card itself carries a modules/importers/tracker.tmod that is not a
+  // valid importer for this firmware (then the import's own header check refuses that file, with IMPORTER FOR OTHER FIRMWARE).
+  void attach_importer() noexcept;
+
+  // OS-CEWTENV W8: the user contours (/Envelopes/NNN.wav) of this card: `mem` is the simulator's WtUserMem (bound to the audio layer by the SimCard); a project load reloads them
+  // before the descriptors are built (platform/mk66/src/app_main.cpp begin_samples), and reload_envelopes() is the card mount's call. Posts the load report to the strip.
+  void attach_envelopes(app::WtUserMem* mem) noexcept { envelopes_ = mem; }
+  void reload_envelopes() noexcept;
+
  private:
   enum class Phase : std::uint8_t { Idle, Verify, Settle, Project, Samples };
 
@@ -85,6 +99,7 @@ class SimProject final : public app::ProjectSink {
   model::Editor& editor_;
   app::App& app_;
   hal::storage::Storage& card_;
+  app::WtUserMem* envelopes_ = nullptr;  // OS-CEWTENV W8 (attach_envelopes)
   audio::VoicePool& voices_;
   app::SampleBank& bank_;
   std::int16_t* samples_mem_;
@@ -100,7 +115,14 @@ class SimProject final : public app::ProjectSink {
   std::unique_ptr<app::NativeFolderLoader> native_loader_;
   std::unique_ptr<app::ProjectVerify> verify_;
   std::unique_ptr<app::OgSampleLoader> sample_loader_;
-  std::unique_ptr<app::ModuleImport> module_;  // the importers inside are not stack objects either (about 39 KB)
+  std::unique_ptr<app::ModuleImport> module_;  // OS-FLASHDIET I3: the proxy only (the importers themselves run in the importer module, about 1 KB here)
+  // OS-FLASHDIET I2: the module host of the import's proxy (attach_importer)
+  module::ModuleSet imp_set_;
+  module::ModuleLoader imp_loader_;
+  // +64 bytes: attach_importer aligns the base up to 64 (module::Arena::init refuses an unaligned base), whatever the heap gives (OS-BUG-IMPFLAKE)
+  std::vector<std::uint8_t> imp_hot_ = std::vector<std::uint8_t>(8 * 1024 + 64);
+  std::vector<std::uint8_t> imp_cold_ = std::vector<std::uint8_t>(192 * 1024 + 64);
+  void* imp_so_ = nullptr;  // the dlopen handle of the tracker host object, held for the process
 };
 
 }  // namespace o3os::sim

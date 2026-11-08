@@ -121,6 +121,7 @@ TEST_CASE("irq: ADR 0013 D1 priority table, value by value") {
   CHECK(irq::priority(irq::Role::Render) == 128);
   CHECK(irq::priority(irq::Role::PinChange) == 160);
   CHECK(irq::priority(irq::Role::Unassigned) == 224);
+  CHECK(irq::priority(irq::Role::PluginGate) == 240);  // OS-CEPTFX S2b: SVCall keeps the lowest system-handler priority
 }
 
 TEST_CASE("irq: the audio DMA ISR preempts everything, the render is preempted by every I/O ISR") {

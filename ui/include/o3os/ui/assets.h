@@ -8,7 +8,7 @@
 // RAM_G map (1 MB; about 53 KB used here; ui/plot/ram_g_map.h owns the whole map and adds the wave slots after these). Every address and size is a multiple of 4 so every upload keeps the word
 // alignment hal::Display::upload() asks for, and the BITMAP_SOURCEs are aligned for the chip:
 //
-//   0x0000  the four glyph faces, packed by tools/font_convert.py (12,540 bytes, up to kRamGTiles)
+//   0x0000  the four glyph faces, packed by tools/font_convert.py (12,540 raw bytes, up to kRamGTiles; in flash they are deflated streams, OS-FLASHDIET A4)
 //   0x4000  hex-pair tiles 00..7F      128 x 60 B   handle 5   20 x 20, L1, stride 3
 //           hex-pair tiles 80..FF      128 x 60 B   handle 6   (VERTEX2II's cell field is 7 bits: two handles)
 //           note tiles 0..127          128 x 80 B   handle 7   30 x 20, L1, stride 4
@@ -23,7 +23,14 @@
 // kStageBytes from an aligned staging buffer, so a step of the pattern grid is one display-list word per field.
 // Every bitmap that goes through Display::upload() is `alignas(4)` with a static_assert (the generated font and icon
 // data say so in their source; the staging buffer in assets.cpp does too).
+//
+// OS-FLASHDIET A4: the glyph faces are stored in flash as raw-deflate streams (font.h) and are inflated at boot. The
+// one decoder the UI assets share (the help pages will use the same one, A6/A7) and the 4 KiB face scratch the tiles
+// are composed from live in SDRAM_STATIC on the MK66 image, where the platform defines the two accessors below
+// (ui/CMakeLists.txt sets O3OS_UI_ASSETS_EXTERNAL for that image, which drops ui's own copies in assets.cpp); on host
+// and the simulator ui defines them itself. Both are main-loop-only, synchronous, never in the render or an ISR.
 
+#include <o3os/core/inflate.h>
 #include <o3os/hal/display.h>
 #include <o3os/ui/font.h>
 
@@ -186,9 +193,10 @@ struct IconBitmap {
 IconBitmap icon_bitmap() noexcept;
 
 // Composes `count` (1..3) cells of `face` side by side into one tile of count * cell_w pixels: the same pixels the
-// glyphs would have drawn one by one. Output: l1_stride(count * cell_w) * cell_h bytes, most significant bit leftmost,
+// glyphs would have drawn one by one. `bitmap` is the face's inflated pixels (face_bitmap), cell n at
+// bitmap + n * stride * cell_h. Output: l1_stride(count * cell_w) * cell_h bytes, most significant bit leftmost,
 // the pad bits zero. A character outside the face is '?'.
-void compose_tile(const FontFace& face, const char* chars, unsigned count, std::uint8_t* out) noexcept;
+void compose_tile(const FontFace& face, const std::uint8_t* bitmap, const char* chars, unsigned count, std::uint8_t* out) noexcept;
 
 // What note tile `cell` says: "---", "C-0".."B-9", "OFF", "???", "CUT", "FAD", then C10..G10 (cells beyond kNoteTiles are "???"). Octave 10 is
 // spelled in full where it fits the three characters of a tile (C10 D10 E10 F10 G10); its sharps are four characters there
@@ -200,11 +208,20 @@ bool fx_tile_text(unsigned type, char (&out)[4]) noexcept;
 
 // Uploads every glyph face, the icon face and the generated tiles to RAM_G (main loop, at boot), through
 // hal::Display::upload() in chunks of at most kStageBytes from a word-aligned staging buffer on the caller's stack
-// (1.9 KB). Stops at the first chunk the display refuses and returns its result; running it again from the start is
-// harmless (Busy: retry later). Ok when everything is in place.
+// (1.9 KB). OS-FLASHDIET A4: a face's stream is inflated chunk by chunk through that same staging buffer, so every
+// upload is still at most 4 KB and word aligned; the tiles are composed from the face scratch below. Stops at the
+// first chunk the display refuses and returns its result; running it again from the start is harmless (Busy: retry
+// later). Ok when everything is in place.
 hal::UploadResult upload_assets(hal::Display& display) noexcept;
 
 // The size of one staging chunk of upload_assets(): 32 hex tiles or 24 note tiles, below the 4 KB cap.
 inline constexpr std::size_t kStageBytes = 1920;
+
+// The one raw-deflate decoder the UI assets share, and the 4 KiB scratch a face is inflated into before its tiles are
+// composed from it (the 10x20 face, 3,800 B, is the largest the tiles use). Main loop only. Defined by the platform
+// in SDRAM_STATIC on the MK66 image (O3OS_UI_ASSETS_EXTERNAL), by assets.cpp on host and the simulator.
+core::Inflater& asset_inflater() noexcept;
+std::uint8_t* face_scratch() noexcept;
+inline constexpr std::size_t kFaceScratchBytes = 4096;
 
 }  // namespace o3os::ui

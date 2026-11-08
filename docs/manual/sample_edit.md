@@ -70,11 +70,43 @@ New in track3r-os (the original firmware's editor has neither). Both act on the 
 2. Press `Up` or `Down` to pick a row and turn the encoder to change its value. `Shift` + the encoder changes it in bigger steps.
 3. For the **FILTER**, set **TYPE** (low pass, high pass or band pass), **CUTOFF** in Hz and **RESONANCE** (the Q: 0.5 to 15). Press `F1` (**FILTER**). A low pass takes away what is above the cutoff, a high pass what is below. <!-- QA-SED-020 -->
 4. For the **COMPRESSOR**, set **THRESHOLD** (dB), **RATIO**, **ATTACK** and **RELEASE** in ms, **MAKEUP** (**AUTO**, or 0 to 24 dB) and **DETECTOR** (**PEAK** or **RMS**). Press `F2` (**COMPRESS**). Above the threshold the level comes down by the ratio. **AUTO** makeup brings a full-scale peak back to full scale. <!-- QA-SED-021 -->
-5. Press `F8` (**UNDO**) to take it back. Press `Sample Edit` again to return to the edit page.
+5. Press `F8` (**UNDO**) to take it back. Press `Sample Edit` again to reach the **PLUGINS** page (new in the Community OS; it lists the plugins in the card's `Effects` folder and their parameters; see **Run a plugin** below), and once more to return to the edit page. <!-- QA-SED-030 -->
 
 A long process, such as the compressor on a sample of tens of seconds, can be stopped: while the strip shows its progress the key row reads **CANCEL** on `F8`. Press it and the strip says **EDIT COMPRESSOR CANCELLED**. The sample stays exactly as it was and nothing is added to the undo steps. When the process has ended, `F8` is **UNDO** again. <!-- QA-SED-023 -->
 
 The filter starts from silence at the first frame of the selection, so a selection that starts in the middle of a loud sound may click at its start. The exception is a looping instrument whose processed range starts at its loop start (in practice a loop that starts at the first frame, with the whole sample or a selection from 0): the filter and the compressor first run over the end of the loop, so the loop wraps without a click. Edge handles do not snap to the loop markers. If the loop starts in the middle of the sample (a sustain loop) and you process the whole sample, a click can remain at the wrap; process from the loop start instead. <!-- QA-SED-022 --> A long sample takes a while, the compressor longer than the filter (the time is not yet measured on the unit). Both are not yet checked on the unit: listen to the result before you keep it. The values you set stay until you switch the unit off.
+
+### Run a plugin
+<!-- sync: src=app/src/sample_edit_actions.cpp,app/src/ptfx_page.cpp,app/src/app.cpp qa=QA-SED-033,QA-SED-034,QA-SED-035,QA-SED-036,QA-SED-037,QA-SED-038,QA-SED-039,QA-SED-040,QA-SED-041,QA-SED-042,QA-SED-043,QA-SED-044,QA-SED-045 -->
+
+New in track3r-os. A plugin is a small `.ptfx` file in the `Effects` folder at the root of the card. On the **PLUGINS** page (press `Sample Edit` twice) it works on the sample like the other processes.
+
+1. Copy the `.ptfx` files into `/Effects` on the card. Press `F2` (**RESCAN**) if the page was open when you did. <!-- QA-SED-040 -->
+2. Pick the plugin in the list on the left and its values on the right: `Up` and `Down` pick a row, the encoder changes it (`Shift` for bigger steps), `Delete` or `F3` (**DEFAULTS**) brings the plugin's own values back. <!-- QA-SED-042 -->
+3. Make a selection on the edit page first if you want the plugin to act on a part only. Press `F1` (**APPLY**). The strip shows **PLUGIN** and the plugin's name with a percentage, then **DONE**. Without a selection it acts on all of the sample. <!-- QA-SED-033 --><!-- QA-SED-034 -->
+4. Press `F8` (**UNDO**) to take it back. While the strip shows the progress `F8` reads **CANCEL**: press it and the plugin stops and the sample stays as it was. <!-- QA-SED-039 -->
+
+The plugin is one undo step, like the other processes. The strip says why a plugin does not run:
+
+- **NO SAMPLE**: an effect needs a sample; the slot is empty.
+- **NOT FOR THIS TRACKER**: the file was made for another device.
+- **PTFX VERSION NOT SUPPORTED**, **PLUGIN FILE DAMAGED**, **PLUGIN QUARANTINED**: the row is greyed and the strip names the reason. <!-- QA-SED-041 -->
+- **THE EDIT COULD NOT BE KEPT**: there was no room to keep the result; the sample is as it was.
+- **PLUGINS RUN ON THE TRACKER**: the simulator can only run its demo **Mono Tool** (its **AMOUNT** is a gain); every other plugin needs the unit.
+
+A stereo sample stays stereo. A plugin made for both sides runs once on the left and the right together. <!-- QA-SED-043 --> One made for a single channel runs twice, on the left and then on the right, and both sides change the same way. <!-- QA-SED-044 --> **Stereo to Mono** makes the whole sample mono (the left side, whatever the selection), and `F8` brings the stereo one back. <!-- QA-SED-045 --> A generator replaces a stereo sample with a mono one, and `F8` brings it back too.
+
+The plugin's values are kept for the last 8 plugins while the unit stays on; they are not saved with the project.
+
+Three kinds of plugin act differently from an effect:
+
+- **A generator** (tag **GEN**) makes a sound from nothing: up to two seconds, mono. It ignores the selection and replaces the whole sample, as one undo step: `F8` brings the old sample back. On an empty slot it needs no sample: the result goes in like a loaded sample and the instrument is named **Gen NN**, with NN the slot number as the screens show it; the strip says **GENERATED** (then the waveform preview line), and there is nothing to undo. A generator does not run on a stereo sample (make it mono first). <!-- QA-SED-035 --><!-- QA-SED-036 -->
+- **A wavetable plugin** (tag **WT**) also sets the instrument's play mode to **WAVETABLE** after the run. `F8` takes the sound back and the play mode with it (the play mode and the wavetable window go back to what they were); `Shift` + `F8` does both again. <!-- QA-SED-037 -->
+- **A plugin that adds silence** makes the sample longer. Your start, loop and end points keep pointing at the same sound. `F8` brings back the old length and points. <!-- QA-SED-038 -->
+
+The strip also says **NO SAMPLE INSTRUMENT HERE** when you run a generator on an empty-looking slot that holds a MIDI or other non-sample instrument, and **NOTHING PRODUCED** when a generator made no sound.
+
+Status: the effect path is verified in the simulator and on the host; generators, the wavetable mode and Add Silence are verified on the host only (the simulator has no stand-in for them); all of it is still to be checked on the unit.
 
 ### Convert to an Amiga rate
 <!-- sync: src=app/src/sample_edit_actions.cpp qa=QA-SED-001,QA-SED-012,QA-SED-013,QA-SLD-009 -->
@@ -98,16 +130,16 @@ The **COMPRESSOR** and the Amiga conversion work on one signal only. On a stereo
 <!-- manual-tables: keys screen=sample_edit -->
 The key row, and the row drawn while `Shift` is held. `-` means the key does nothing.
 
-| Key | Sample edit | FX page | With `Shift` |
-|---|---|---|---|
-| `F1` | **CROP** | **FILTER** | **AMG 8K** |
-| `F2` | **NORM** | **COMPRESS** | **AMG 16K** |
-| `F3` | **REVERSE** | - | **Q8** |
-| `F4` | **FADE IN** | - | **DC REM** |
-| `F5` | **FADE OUT** | - | **NEXT INS** |
-| `F6` | **AMP** | - | **SAVE WAV** |
-| `F7` | **PREVIEW** | **PREVIEW** | **PRV EDGE** |
-| `F8` | **UNDO** | **UNDO** | **REDO** |
+| Key | Sample edit | FX page | PLUGINS page | With `Shift` |
+|---|---|---|---|---|
+| `F1` | **CROP** | **FILTER** | **APPLY** | **AMG 8K** |
+| `F2` | **NORM** | **COMPRESS** | **RESCAN** | **AMG 16K** |
+| `F3` | **REVERSE** | - | **DEFAULTS** | **Q8** |
+| `F4` | **FADE IN** | - | - | **DC REM** |
+| `F5` | **FADE OUT** | - | - | **NEXT INS** |
+| `F6` | **AMP** | - | - | **SAVE WAV** |
+| `F7` | **PREVIEW** | **PREVIEW** | **PREVIEW** | **PRV EDGE** |
+| `F8` | **UNDO** | **UNDO** | **UNDO** | **REDO** |
 
 <!-- /manual-tables -->
 
@@ -122,6 +154,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 | `F7` (**PREVIEW**) | Play the sample while held. | none yet |
 | `Left`, `Right`, the encoder, `Delete` | Pick an edge, move it, clear the selection. | none yet |
 | `F8` (**UNDO**, **CANCEL** while a process runs) | Take back the last process; while a process is running, stop it and leave the sample as it was. | QA-SED-004, QA-SED-023 |
+| PLUGINS page: `F1` (**APPLY**), `F2` (**RESCAN**), `F3` (**DEFAULTS**) | Run the picked plugin on the selection, or on all of the sample; read the `/Effects` folder again; bring the plugin's values back. | QA-SED-033, QA-SED-040, QA-SED-042 |
 | FX page: `F1` (**FILTER**), `F2` (**COMPRESS**) | Filter or compress the selection, or the whole sample. `Up`, `Down`, `Left`, `Right` pick a row, the encoder changes it. | QA-SED-019, QA-SED-020, QA-SED-021 |
 | `Shift` + `F1` (**AMG 8K**) | Convert to the Amiga rate of 8,287 Hz. | QA-SED-001 |
 | `Shift` + `F2` (**AMG 16K**) | Convert to the Amiga rate of 16,574 Hz. | QA-SED-001 |

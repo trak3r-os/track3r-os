@@ -44,14 +44,8 @@ constexpr std::size_t kFlowChunk = 2048;
 
 }  // namespace
 
-const char* drop_group_name(unsigned index) noexcept {
-  static const char* const kNames[] = {
-      "AdLib instruments", "packed samples", "stereo samples", "instruments refused", "channels without a track", "effects without a counterpart", "effects approximated",
-      "global or master volume", "slide timing",   "loop point",     "flow",                "periods off the table",    "restart position",
-  };
-  static_assert(sizeof kNames / sizeof kNames[0] == kDropGroupCount, "a name for every group");
-  return index < kDropGroupCount ? kNames[index] : "";
-}
+// OS-FLASHDIET I3: drop_group_name (with its table) lives in formats/src/tracker_sniff.cpp now, so the image links it from formats
+// and this library does not have to be linked for the report's names.
 
 void ImportReport::reset() noexcept {
   med.reset();

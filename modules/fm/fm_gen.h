@@ -8,7 +8,7 @@
 #define FM_NAME "FM"
 #define FM_KIND O3M_KIND_INSTRUMENT
 /* The ABI minor this module needs: 0 for an instrument or effect with no views (it loads on an OS of ABI 1.0 too), 1 for views or an app, 2 when the manifest declares abi 1.2 (a module shipped with a version, o3m_pack.py --version). */
-#define FM_ABI_MINOR 8
+#define FM_ABI_MINOR 13
 #define FM_STATE_BYTES 448 /* what the manifest says init() is given: the source's State must fit (static_assert it) */
 
 /* Parameter ids: set_param(state, FM_PARAM_x, value), canvas->params[FM_PARAM_x]. */
@@ -149,11 +149,13 @@ enum {
 #define FM_SDRAM_BYTES_ADVICE 0
 
 /* The descriptor, in the order of o3m_module:
- *   o3m_entry = { FM_ENTRY_HEAD, sizeof(State), FM_ENTRY_PARAMS, init, render, set_param, note_on, note_off, shutdown, FM_ENTRY_VIEWS(&ui_table), FM_ENTRY_TAIL(pitch) };
- * (an app passes NULL for render, note_on and note_off and set_param if it has none; a module without views passes NULL for the table). */
+ *   o3m_entry = { FM_ENTRY_HEAD, sizeof(State), FM_ENTRY_PARAMS, init, render, set_param, note_on, note_off, shutdown, FM_ENTRY_VIEWS(&ui_table), FM_ENTRY_TAIL(pitch), FM_ENTRY_FX };
+ * (an app passes NULL for render, note_on and note_off and set_param if it has none; a module without views passes NULL for the table; an importer (kind 3, ABI 1.11) adds its table with ENTRY_IMP and has no parameters, no views and no sound entries). */
 #define FM_ENTRY_HEAD O3M_ABI_MAJOR, FM_ABI_MINOR, FM_KIND, O3M_MODULE_SIZE(FM_ABI_MINOR), FM_NAME
 #define FM_ENTRY_PARAMS FM_PARAM_COUNT, fm_params
 #define FM_ENTRY_VIEWS(ui) (ui), FM_VIEW_COUNT
+/* ABI 1.12 (OS-INSFX-ABI2), after FM_ENTRY_TAIL: `importer`, render_st (an instrument has none: NULL, NULL), fx_flags (O3M_FX_RATE, OS-MODRATE), then presets and preset_count. */
+#define FM_ENTRY_FX 0, 0, O3M_FX_RATE, 0, 0
 /* ABI 1.8, after the views: the pitch call (NULL for none) and the manifest's page and label tables. */
 #define FM_ENTRY_TAIL(pitch_fn) (pitch_fn), fm_pages, 4, fm_labels
 #define FM_HAS_PITCH 1 /* module.json: "pitch": true: pass your pitch function to FM_ENTRY_TAIL */

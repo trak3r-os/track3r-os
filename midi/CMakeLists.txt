@@ -11,6 +11,8 @@ o3os_library(midi
     src/clock_dll.cpp
     src/in.cpp
     src/out.cpp
+    src/mtc.cpp
+    src/mtc_in.cpp
     src/usb_bind.cpp
   DEPENDS core usb hal audio)
 target_compile_options(midi PRIVATE -fno-math-errno)

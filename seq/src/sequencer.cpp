@@ -4,6 +4,7 @@
 #include <o3os/seq/sequencer.h>
 #include <o3os/seq/rows.h>
 #include <o3os/seq/perform.h>
+#include <o3os/seq/play_orders.h>
 
 #include <algorithm>
 
@@ -72,7 +73,7 @@ std::uint32_t arp_pick(std::uint32_t mask, ArpDir dir, std::uint8_t& pos, std::u
 void fx_range(std::uint8_t type, std::int32_t& lo, std::int32_t& hi) noexcept {
   if (type == fx::kNone || type >= kFxInfoCount) {
     lo = 0;
-    hi = type >= fx::kEngineFirst ? 255 : 100;
+    hi = (type >= fx::kEngineFirst || type == fx::kAmpEnvFx || type == fx::kFilterEnvFx) ? 255 : 100;  // z (98) is 0..100 like the unknown row
     return;
   }
   lo = kFxInfo[type].min;
@@ -84,12 +85,21 @@ void fx_range(std::uint8_t type, std::int32_t& lo, std::int32_t& hi) noexcept {
 Sequencer::Sequencer(const model::Project& project) noexcept : project_(project) {
 #ifndef O3OS_SEQ_ORDER_EXTERNAL
   store_ = &own_store_;
+  ctl_.attach_perf(own_store_.perf);
 #endif
   ctl_.reset();
   rng_.seed(cfg_.seed);
 }
 
-void Sequencer::configure(const Config& c) noexcept { cfg_ = c; }
+void Sequencer::configure(const Config& c) noexcept {
+  cfg_ = c;
+  const std::uint32_t fps = c.emit_mtc ? c.mtc_fps : 0u;  // OS-MTC A3: a change of MTC OUT or MTC START takes effect at the next run (the generator is silent until then)
+  if (fps != mtc_gen_.fps() || c.mtc_hour != mtc_gen_.hour()) {
+    mtc_gen_.configure(fps, c.mtc_hour);
+    mtc_gen_.reset();
+    mtc_wait_stamp_ = 0;
+  }
+}
 
 // ---- events -----------------------------------------------------------------------------------------------------------------
 
@@ -143,6 +153,11 @@ std::uint32_t Sequencer::tempo_x100() const noexcept {
 Q32 Sequencer::played_spt() const noexcept {
   const Q32 spt = core::samples_per_tick_q32(nominal_tempo_x100());
   return rate_ == 1u ? spt << 1 : (rate_ == 2u ? spt >> 1 : spt);
+}
+
+// OS-MTC B3: the chase's rate trim divides the samples per tick (the song runs `trim / 65536` times as fast as the sample clock says). Exactly the identity at 1.0, so a run without a chase is what it was.
+Q32 Sequencer::trimmed(Q32 spt) const noexcept {
+  return trim_q16_ == kTrimOne ? spt : spt * kTrimOne / trim_q16_;  // spt < 2^42 (40 BPM, half time), so the product is below 2^58
 }
 
 std::uint32_t Sequencer::swing() const noexcept {
@@ -346,6 +361,42 @@ bool remap_slot(const model::OrderOp& op, std::uint32_t& p) noexcept {
   return true;
 }
 
+// OS-SONG3 S7: what one edit of the order list does to the looped range [f, l] (first <= last on entry). true: the range is still one. false: the loop is over (every slot of it was removed, or a move
+// touched it: which slots lie between the ends can change, so the ends alone are not followed). An insert at or above f shifts it, one inside it grows it, one past l leaves it; a delete takes the
+// slots it removes out of the range.
+bool remap_range(const model::OrderOp& op, std::uint32_t& f, std::uint32_t& l) noexcept {
+  switch (op.kind) {
+    case model::OrderOp::Insert:
+      f += f >= op.a ? op.n : 0u;
+      l += l >= op.a ? op.n : 0u;
+      return l < model::kMaxSongPositions;
+    case model::OrderOp::Remove: {
+      const std::uint32_t end = static_cast<std::uint32_t>(op.a) + op.n;  // the first slot after the removed ones
+      f = f >= end ? f - op.n : (f >= op.a ? static_cast<std::uint32_t>(op.a) : f);      // a removed first slot: the one that slid into its place
+      if (l >= end) {
+        l -= op.n;
+      } else if (l >= op.a) {
+        if (op.a == 0u) {
+          return false;
+        }
+        l = static_cast<std::uint32_t>(op.a) - 1u;  // a removed last slot: the one before the hole
+      }
+      return f <= l;
+    }
+    case model::OrderOp::Move: {
+      // OS-SONG3 S7: only the two ends were remapped before, so a move that keeps first <= last could change which slots lie between them. Any move that touches the range ends the loop.
+      const std::uint32_t lo = op.a < op.b ? static_cast<std::uint32_t>(op.a) : static_cast<std::uint32_t>(op.b);  // the span the move shifts slots over
+      const std::uint32_t hi = op.a < op.b ? static_cast<std::uint32_t>(op.b) : static_cast<std::uint32_t>(op.a);
+      if (hi < f || lo > l) {
+        return f <= l;  // the move is entirely outside the range: the ends and what lies between them are untouched
+      }
+      return false;
+    }
+    default:
+      return false;
+  }
+}
+
 }  // namespace
 
 // The queued jump follows the edits made after the list it was authored against (the ops from `from` to the journal's end): its slot moves with the list, and it is cancelled when its slot
@@ -388,9 +439,36 @@ void Sequencer::queue_jump(std::uint32_t order_pos, std::uint32_t stamp) noexcep
   remap_queue(store_->cur, queued_from_);
 }
 
+// OS-SONG3 S7. The range is authored against the list of `stamp` like a queued jump's position: carried over the edits made since, refused when the copy does not have that list yet, when the journal no longer
+// holds the ops in between (or a Reset is among them), or when an edit took the range away.
+void Sequencer::set_loop(std::uint32_t first, std::uint32_t last, std::uint32_t stamp) noexcept {
+  loop_first_ = 0xFF;
+  loop_last_ = 0;
+  if (store_ == nullptr || first > last || last >= model::kMaxSongPositions) {
+    return;
+  }
+  const std::uint32_t from = stamp != 0u ? stamp - 1u : store_->cur.ops;
+  const std::uint32_t behind = store_->cur.ops - from;
+  if (static_cast<std::int32_t>(behind) < 0 || behind > model::kOrderJournal) {
+    return;
+  }
+  for (std::uint32_t i = 0; i < behind; ++i) {
+    const model::OrderOp& op = store_->cur.journal[(from + i) % model::kOrderJournal];
+    if (op.kind == model::OrderOp::Reset || !remap_range(op, first, last)) {
+      return;
+    }
+  }
+  if (last >= song_len()) {
+    return;
+  }
+  loop_first_ = static_cast<std::uint8_t>(first);
+  loop_last_ = static_cast<std::uint8_t>(last);
+}
+
 void Sequencer::attach_order_store(OrderStore& store) noexcept {
   store = OrderStore{};
   store_ = &store;
+  ctl_.attach_perf(store.perf);
   order_have_ = false;
 }
 
@@ -419,13 +497,30 @@ void Sequencer::adopt_order() noexcept {
         lost = true;
         break;
       }
+      const bool in_loop = loop_first_ <= loop_last_ && order_pos_ >= loop_first_ && order_pos_ <= loop_last_;  // OS-SONG3 S7
       const bool kept = remap_slot(op, order_pos_);
       after_gone_ = after_gone_ || (!kept && playing_);
       (void)remap_slot(op, located_order_);
       const bool resume_kept = remap_slot(op, resume_order_);
       resume_gone_ = resume_gone_ || (!resume_kept && have_resume_);
+      if (loop_first_ <= loop_last_) {
+        std::uint32_t lf = loop_first_;
+        std::uint32_t ll = loop_last_;
+        if (remap_range(op, lf, ll)) {
+          loop_first_ = static_cast<std::uint8_t>(lf);
+          loop_last_ = static_cast<std::uint8_t>(ll);
+          if (!kept && playing_ && in_loop && order_pos_ > loop_last_) {
+            order_pos_ = loop_first_;  // the playing slot was the loop's last and is gone: the song goes back to the loop's first slot (after_gone_: it plays next, after the rest of this pattern)
+          }
+        } else {
+          loop_first_ = 0xFF;  // OS-SONG3 S7: the edit took the loop's slots away
+          loop_last_ = 0;
+        }
+      }
     }
     if (lost) {  // a load, a clear or too many edits at once: the song stays where it is as far as the new list allows
+      loop_first_ = 0xFF;  // (OS-SONG3 S7: and there is no loop)
+      loop_last_ = 0;
       const std::uint32_t last = order_next_.len != 0u ? order_next_.len - 1u : 0u;
       for (std::uint32_t* p : {&order_pos_, &located_order_, &resume_order_}) {
         *p = *p < model::kMaxSongPositions && *p > last ? last : *p;
@@ -453,6 +548,25 @@ void Sequencer::drain_commands() noexcept {
   Command c;
   for (std::uint32_t i = 0; i < 16u && cmds_.pop(c); ++i) {
     ++stats_.commands;
+    if (chase_run_) {
+      // OS-MTC B3 (Q8 a): while the chase runs the master owns the transport and the song's position: the unit's Play, Stop, Resume, Locate, slot jumps, queued and switched patterns do nothing.
+      switch (c.kind) {
+        case Command::Kind::PlayPattern:
+        case Command::Kind::PlaySong:
+        case Command::Kind::Stop:
+        case Command::Kind::Resume:
+        case Command::Kind::Locate:
+        case Command::Kind::LocateRow:
+        case Command::Kind::QueuePattern:
+        case Command::Kind::QueueJump:
+        case Command::Kind::SetMode:
+        case Command::Kind::SwitchPattern:
+          ++stats_.chase_dropped;
+          continue;
+        default:
+          break;
+      }
+    }
     switch (c.kind) {
       case Command::Kind::PlayPattern:
         play_pattern(c.a, c.c, c.b);
@@ -484,17 +598,43 @@ void Sequencer::drain_commands() noexcept {
       case Command::Kind::QueueJump:
         queue_jump(c.b, c.c);
         break;
+      case Command::Kind::SetLoop:
+        set_loop(c.a, c.b, c.c);
+        break;
       case Command::Kind::SetMode:
         request_mode(c.a == 0u ? PlayMode::Pattern : PlayMode::Song);
         break;
       case Command::Kind::Select:
         select(c.a == 0u ? PlayMode::Pattern : PlayMode::Song, c.b);
         break;
-      case Command::Kind::PerfTrack:
-        set_perf_track(c.a, c.b, c.c & 0xFFu, static_cast<TrackPlayMode>((c.c >> 8) & 0x3u));
+      case Command::Kind::PerfTrack: {
+        // OS-PERFMODES M2: the mask is 0x1F (0..23: FWD, BACK, PING, RND, C1..C20); a value above 23 is Forward.
+        const std::uint32_t m = (c.c >> 8) & 0x1Fu;
+        set_perf_track(c.a, c.b, c.c & 0xFFu, m <= 23u ? static_cast<TrackPlayMode>(m) : TrackPlayMode::Forward);
         break;
+      }
       case Command::Kind::QueueTrackPattern:
         queue_track_pattern(c.c, c.b);
+        break;
+      case Command::Kind::SetTrackPattern:
+        set_track_pattern(c.c, c.b);
+        break;
+      case Command::Kind::MtcAnchor:
+        mtc_answer(c.a, c.c);
+        break;
+      case Command::Kind::ChaseState:
+        if (!pending_chase_) {  // (a start that waits for its block keeps the answer it was given)
+          chase_ans_.tempo_x100 = c.c;
+          chase_ans_.swing = static_cast<std::uint8_t>(c.b);
+          chase_ans_.flags = static_cast<std::uint8_t>(((c.a & 1u) != 0u ? 1u : 0u) | 2u);
+        }
+        break;
+      case Command::Kind::ChaseStart:
+        if (!pending_chase_ && (c.b == kChasePastEnd || (chase_ans_.flags & 2u) != 0u)) {
+          chase_ans_.pos = static_cast<std::uint16_t>(c.b);
+          chase_ans_.song_samples = c.c;
+          chase_ans_.stamp = c.a;
+        }
         break;
       case Command::Kind::PerfStutter:
         set_perf_stutter(c.a, c.b);
@@ -528,6 +668,8 @@ void Sequencer::drain_commands() noexcept {
 // ---- transport ---------------------------------------------------------------------------------------------------------------
 
 void Sequencer::play_pattern(std::uint32_t pattern_id, std::uint32_t from_step, std::uint32_t count_in_bars) noexcept {
+  loop_first_ = 0xFF;  // OS-SONG3 S7: a start that is not the loop's ends the loop (the loop's own play_song is followed by its SetLoop)
+  loop_last_ = 0;
   pending_start_ = true;
   pending_resume_ = false;
   pending_mode_ = PlayMode::Pattern;
@@ -541,6 +683,8 @@ void Sequencer::play_pattern(std::uint32_t pattern_id, std::uint32_t from_step, 
 }
 
 void Sequencer::play_song(std::uint32_t order_pos, std::uint32_t from_step) noexcept {
+  loop_first_ = 0xFF;  // OS-SONG3 S7: as play_pattern
+  loop_last_ = 0;
   pending_start_ = true;
   pending_resume_ = false;
   pending_mode_ = PlayMode::Song;
@@ -553,6 +697,8 @@ void Sequencer::play_song(std::uint32_t order_pos, std::uint32_t from_step) noex
 }
 
 void Sequencer::stop() noexcept {
+  loop_first_ = 0xFF;  // OS-SONG3 S7
+  loop_last_ = 0;
   pending_stop_ = true;
   pending_start_ = false;
   pending_resume_ = false;
@@ -562,6 +708,53 @@ void Sequencer::stop() noexcept {
 void Sequencer::resume() noexcept {
   pending_resume_ = true;
   pending_start_ = false;
+}
+
+// ---- OS-MTC B3: the chase --------------------------------------------------------------------------------------------------------
+
+void Sequencer::chase_go(std::uint64_t origin, PlayMode mode, std::uint32_t pattern_id, std::uint32_t rate_q16) noexcept {
+  const std::uint32_t order = chase_ans_.pos >> 7;
+  pending_chase_ = true;
+  chase_run_ = true;  // from now on the main loop's transport commands are dropped (the run that waits is the master's)
+  pending_start_ = false;
+  pending_resume_ = false;
+  pending_mode_ = mode;
+  pending_order_ = mode == PlayMode::Song ? order : clamp_u32(pattern_id, 0u, 255u);
+  pending_from_ = chase_ans_.pos & 0x7Fu;
+  pending_count_in_ = 0;
+  chase_end_ = origin;
+  chase_map_ = static_cast<Q32>(chase_ans_.song_samples) << core::kQ32Frac;
+  set_rate_trim(rate_q16);
+  chase_ans_.stamp = 0;
+}
+
+void Sequencer::chase_stop() noexcept {
+  pending_chase_ = false;
+  if (playing_) {
+    stop();
+  } else {
+    chase_run_ = false;
+  }
+}
+
+void Sequencer::chase_locate(std::uint32_t order, std::uint32_t step) noexcept {
+  if (playing_ || chase_run_) {
+    return;
+  }
+  const bool song = order != kNoOrder;
+  const std::uint32_t pid = song ? song_at(order) : pattern_id_;
+  const std::uint32_t len = song_pattern_len(pid);
+  located_ = true;
+  located_order_ = order;
+  located_pattern_ = pid;
+  located_step_ = step % len;
+  locate_in_place_ = false;
+  if (song) {
+    order_pos_ = order;
+  }
+  pattern_id_ = pid;
+  pattern_len_ = len;
+  song_step_ = step % len;  // the stopped cursor the screen shows
 }
 
 void Sequencer::set_perf_track(std::uint32_t track, std::uint32_t pattern_id, std::uint32_t length, TrackPlayMode mode) noexcept {
@@ -614,6 +807,28 @@ void Sequencer::queue_track_pattern(std::uint32_t mask, std::uint32_t pattern_id
   }
 }
 
+void Sequencer::set_track_pattern(std::uint32_t mask, std::uint32_t pattern_id) noexcept {
+  if (!playing_ || pattern_id > 255u) {
+    return;
+  }
+  for (std::uint32_t t = 0; t < kMaxTracks; ++t) {
+    if (((mask >> t) & 1u) == 0u) {
+      continue;
+    }
+    TrackState& k = tr_[t];
+    k.perf_pattern = static_cast<std::uint8_t>(pattern_id);
+    k.perf_pending_set = false;   // a change at once replaces a wait
+    k.perf_q = pattern_id != 0u;  // PLAYMODE (set_perf_track) leaves an override's pattern fields alone; no FX end, no ord reset: the track keeps its place
+    k.rejoin = true;
+    // advance_tracks wraps on k.len, which read_row set for the pattern left: take the new pattern's length now (as read_row does), so that the next step is the new pattern's next row (or its loop end).
+    // A track already past the new length steps on instead (len = pos + 2: no wrap here), and read_row rejoins it at the song's step modulo the new length.
+    const std::uint32_t src = pattern_id != 0u ? pattern_id : pattern_id_;
+    const std::uint32_t len = k.perf_len != 0u ? k.perf_len : track_length(project_, src, t, pattern_len_);
+    const std::uint32_t nl = clamp_u32(len, 1u, 128u);
+    k.len = static_cast<std::uint8_t>(k.pos >= nl ? k.pos + 2u : nl);
+  }
+}
+
 void Sequencer::set_perf_stutter(std::uint32_t track, std::uint32_t value) noexcept {
   if (track < kMaxTracks) {
     tr_[track].perf_stutter = static_cast<std::uint8_t>(value > 15u ? 0u : value);
@@ -652,11 +867,24 @@ std::uint64_t Sequencer::next_follow_clock() const noexcept {
   return c;
 }
 
+// OS-MIDISYNC 07: the next microstep is on a clock that the loop has reached only through ticks it may have invented (ClockDll::settled_tick: a master at half tempo reads as
+// a dropout of every other clock, and the tick runs ahead of the master's clock index until the loop re-acquires). The microstep waits for a real clock; it then plays on
+// the settled loop's time, which is in the past (late by the clock's own stamp and the block). Nothing waits while the loop tracks, or after a single dropout is resolved.
+bool Sequencer::follow_unsettled() const noexcept {
+  return follow_ != nullptr && follow_->has_phase() && follow_base_tick_ + micro_index_ / micro_per_clock_ > follow_->settled_tick();
+}
+
 void Sequencer::apply(const midi::TransportEvent& ev) noexcept {
   using K = midi::TransportEvent::Kind;
   switch (ev.kind) {
     case K::Spp:
       locate(ev.spp);
+      if (pending_stop_) {
+        // MIDI 1.0: the SPP is sent while stopped and the Continue after it resumes there. A Stop already waiting in this block makes this SPP one of
+        // those (the run has not ended yet when the byte is applied, so locate() queued it as a jump): the position is for that Continue, and end_run
+        // must not give it up with the stop.
+        locate_pending_ = false;
+      }
       break;
     case K::Stop:
       stop();
@@ -673,6 +901,13 @@ void Sequencer::apply(const midi::TransportEvent& ev) noexcept {
       located_ = false;
       break;
     case K::Continue:
+      if (playing_ && !pending_stop_) {
+        // OS-MIDISYNC M2c: a Continue while already playing (no Stop waiting) does not restart the run and does not
+        // move its clock base: an SPP that came with it is a live jump (locate_pending_) and relocates at the next
+        // step boundary (land_locate, run_microstep), and without an SPP the run simply goes on. With a Stop waiting,
+        // the Continue is the one after it and resumes below, at the located position (the OS-MIDISYNC M2 rule).
+        break;
+      }
       follow_base_tick_ = ev.tick;
       ext_start_ = true;
       pending_resume_ = true;
@@ -694,6 +929,59 @@ Position Sequencer::position() const noexcept {
   p.ustep = static_cast<std::uint8_t>(ustep_ != 0u ? ustep_ - 1u : 0u);  // `ustep_` counts the microsteps run: the playhead is in the last of them
   p.count_in = static_cast<std::uint8_t>(playing_ ? count_in_left_ : 0u);
   return p;
+}
+
+// ---- OS-INSFX-ABI2 A3: the module clock ------------------------------------------------------------------------------------------
+
+audio::ClockPos Sequencer::clock_at(std::uint64_t sample) noexcept {
+  audio::ClockPos c{0u, 0u, 0u};
+  if (!playing_) {
+    clk_bits_ = 0;  // a run that began and ended between two calls tells nobody
+    clk_last_ = 0;
+    const std::int32_t sm = tempo_sm_.current();
+    c.tempo_x100 = clamp_u32(sm > 0 ? static_cast<std::uint32_t>(sm) : project_.tempo_x100(), kMinTempoX100, kMaxTempoX100);
+    return c;
+  }
+  c.tempo_x100 = tempo_x100();
+  constexpr std::uint32_t kStepQ16 = 16384u;  // a step is a quarter beat: 65536 / 4
+  const std::uint32_t idx = clk_idx_;
+  std::uint32_t beat;
+  if (idx == kClkNone) {
+    beat = song_step_ * kStepQ16;  // the first step of the run has not started (the start lead): the beat waits on the start point
+  } else if ((clk_bits_ & kClkFlat) != 0u) {
+    beat = idx * kStepQ16;  // the count-in
+  } else if (follow_ == nullptr) {
+    // The step that runs started at step_start_; between its last microstep and the next step's first, end_step() has already moved step_start_ on and step_dur_ is still that step's length.
+    const Q32 cur = ustep_ == 0u ? step_start_ - step_dur_ : step_start_;
+    const Q32 rel = sample > origin_ ? static_cast<Q32>(sample - origin_) << core::kQ32Frac : 0u;
+    std::uint32_t frac = 0;  // of the step, Q16
+    if (step_dur_ != 0u && rel > cur) {
+      const Q32 den = step_dur_ >> 16;  // Q16 samples: the step is under 2^17 samples (40 BPM at half time is 33,075), so both are under 2^33 and the shifted numerator under 2^49
+      frac = rel - cur >= step_dur_ || den == 0u ? 65536u : static_cast<std::uint32_t>((((rel - cur) >> 16) << 16) / den);
+    }
+    beat = idx * kStepQ16 + (frac >> 2);
+  } else if (follow_->has_phase() && micro_index_ != 0u) {
+    // Under an external clock the timeline is the loop's, microstep by microstep: linear between the last microstep that ran and the next one.
+    const std::uint64_t t_last = micro_time_raw(micro_index_ - 1u);
+    std::uint32_t frac = 0;
+    if (next_abs_ > t_last && sample > t_last) {
+      frac = sample >= next_abs_ ? 65536u : static_cast<std::uint32_t>(((sample - t_last) << 16) / (next_abs_ - t_last));
+    }
+    const std::uint32_t j = ustep_ == 0u ? kMicrostepsPerStep - 1u : ustep_ - 1u;
+    beat = static_cast<std::uint32_t>(((static_cast<std::uint64_t>(idx) * kMicrostepsPerStep + j) * 65536u + frac) / (4u * kMicrostepsPerStep));
+  } else {
+    beat = idx * kStepQ16;
+  }
+  c.beat_q16 = beat;
+  c.flags = 1u;  // PLAYING
+  if ((clk_bits_ & kClkStarted) != 0u) {
+    clk_bits_ = static_cast<std::uint8_t>(clk_bits_ & ~kClkStarted);
+    c.flags |= 2u;  // STARTED
+  } else if (beat < clk_last_) {
+    c.flags |= 4u;  // WRAPPED
+  }
+  clk_last_ = beat;
+  return c;
 }
 
 // ---- the song cursor and the tracks' cursors ----------------------------------------------------------------------------------
@@ -812,6 +1100,8 @@ void Sequencer::load_tracks(std::uint32_t from_step, bool loop) noexcept {
     TrackState& k = tr_[t];
     const std::uint8_t was_pattern = k.pattern_id;
     const std::uint8_t was_len = k.len;
+    k.ch_pass_new = true;  // OS-CECHANCE C1 (3.2): a pattern restart is a pass end; applied once at the next row (read_row), together with a track's own loop end on the same boundary
+    k.ch_rnd = 0;
     k.pattern_id = static_cast<std::uint8_t>(k.perf_pattern != 0u ? k.perf_pattern : pattern_id_);
     const std::uint32_t len = k.perf_len != 0u ? k.perf_len : track_length(project_, k.pattern_id, t, pattern_len_);
     k.len = static_cast<std::uint8_t>(clamp_u32(len, 1u, 128u));
@@ -819,7 +1109,14 @@ void Sequencer::load_tracks(std::uint32_t from_step, bool loop) noexcept {
       continue;
     }
     const std::uint32_t p = from_step % k.len;
-    k.pos = static_cast<std::uint8_t>(k.perf_mode == TrackPlayMode::Backward ? k.len - 1u - p : p);
+    k.ord = static_cast<std::uint8_t>(p);  // OS-PERFMODES M2 (F5): the step count since the loop start, as pos
+    if (is_custom(k.perf_mode)) {
+      // The first step of a run is the order's entry for the start step (all orders begin with step 1: parity at a start on step 1; A-3), over the same span as advance_tracks.
+      const std::uint32_t span = std::max<std::uint32_t>(1u, std::min<std::uint32_t>(k.len, effective_len()));
+      k.pos = static_cast<std::uint8_t>((static_cast<std::uint32_t>(play_order_entry(custom_order(k.perf_mode), k.ord).step) - 1u) % span);
+    } else {
+      k.pos = static_cast<std::uint8_t>(k.perf_mode == TrackPlayMode::Backward ? k.len - 1u - p : p);
+    }
     k.back = false;
   }
 }
@@ -829,6 +1126,7 @@ void Sequencer::land_track_queue(std::uint32_t t, std::uint64_t at) noexcept {
   k.perf_pattern = k.perf_pending;
   k.perf_pending_set = false;
   k.perf_q = k.perf_q && k.perf_pattern != 0u;  // E-PERF-07: back on the song's pattern, the track is the song's again
+  k.ord = 0;                                    // OS-PERFMODES M2 (F6): a landed queue restarts the track's count
   cancel_track_fx(t, at);
 }
 
@@ -836,7 +1134,7 @@ void Sequencer::land_track_queue(std::uint32_t t, std::uint64_t at) noexcept {
 
 void Sequencer::reset_tracks() noexcept {
   for (TrackState& k : tr_) {
-    TrackState fresh;
+    TrackState fresh;  // zeroes the OS-CECHANCE C1 fields too (ch_pass 0, ch_last true, flags clear, ch_pat 0)
     fresh.perf_pattern = k.perf_pattern;
     fresh.perf_len = k.perf_len;
     fresh.perf_mode = k.perf_mode;
@@ -855,6 +1153,9 @@ void Sequencer::begin_run(PlayMode mode, std::uint32_t order_pos, std::uint32_t 
   playing_ = true;
   mode_ = mode;
   mode_request_ = false;
+  clk_idx_ = kClkNone;  // OS-INSFX-ABI2 A3: a run starts: STARTED for the next clock_at, the beat from the start point
+  clk_bits_ = kClkStarted;
+  clk_last_ = 0;
   queued_pattern_ = resuming ? queued_pattern_ : 0u;
   queued_jump_ = resuming ? queued_jump_ : kNoJump;
   after_gone_ = false;  // E-SONG-07: the run starts at order_pos, which names the slot to play
@@ -902,27 +1203,42 @@ void Sequencer::begin_run(PlayMode mode, std::uint32_t order_pos, std::uint32_t 
     }
   }
   swing_odd_ = false;  // the swing pair starts at the first step of a run (the pair parity is cleared at a stop and only a play after a stop is a run)
+  if (chase_run_) {
+    // OS-MTC B3: the chase starts where the master is, with the tempo and swing the song has there (the state before the step's own FX: they run again at its first row) and the swing pair at the parity the map has.
+    fx_tempo_x100_ = clamp_u32(chase_ans_.tempo_x100, kMinTempoX100, kMaxTempoX100);
+    swing_fx_ = static_cast<std::uint8_t>(chase_ans_.swing);
+    swing_odd_ = (chase_ans_.flags & 1u) != 0u;
+  }
   const bool follow = follow_ != nullptr && follow_->has_phase();
   micro_per_clock_ = static_cast<std::uint8_t>(micro_per_clock(rate_));
   ustep_ = 0;
   micro_index_ = 0;
   step_start_ = 0;
   step_dur_ = 0;
+  follow_held_ = false;
   if (follow) {
     origin_ = follow_->origin();
     if (!ext_start_) {
       follow_base_tick_ = next_follow_clock();  // a start of our own (the Play key) under an external clock: on the master's next clock, never in the past
     }
   } else {
-    origin_ = now_ + cfg_.start_lead;
+    origin_ = chase_run_ ? chase_end_ : now_ + cfg_.start_lead;  // OS-MTC B3: the chase's own first sample (the sample at which the master reaches the step)
   }
   ext_start_ = false;
   load_tracks(song_step_);
+  // OS-CECHANCE C1 (3.3): every start (a resume included) counts from pass 0, last true, on the pattern that starts (F6).
+  for (TrackState& k : tr_) {
+    k.ch_pass = 0;
+    k.ch_last = true;
+    k.ch_pass_new = false;
+    k.ch_pat = k.pattern_id;
+    k.ch_rnd = 0;
+  }
   next_abs_ = follow ? micro_time_raw(0) : origin_;
   last_follow_abs_ = next_abs_;
   clk_on_ = cfg_.emit_clock && !follow;
   clk_next_ = 0;
-  clk_tl_ = 8u * played_spt();
+  clk_tl_ = 8u * trimmed(played_spt());
   run_transport_ = cfg_.emit_transport;  // E-CFG-03: latched, so that end_run() sends the Stop of a Start that went out
   if (cfg_.emit_clock && run_transport_) {
     const std::uint32_t index = song_step_index();
@@ -938,9 +1254,12 @@ void Sequencer::begin_run(PlayMode mode, std::uint32_t order_pos, std::uint32_t 
       emit(t_start, EventKind::MidiContinue, audio::kNoTrack, 0, 0, 0, 0, 0);
     }
   }
+  // OS-MTC A3: the time code of the run. With a count-in the run's first sample is the count-in's: the song time there is minus its length (16 N steps at the nominal tempo, straight).
+  mtc_land(next_abs_, count_in_total_ != 0u ? -static_cast<std::int64_t>(core::q32_round(static_cast<Q32>(count_in_total_) * kMicrostepsPerStep * played_spt())) : std::int64_t{0});
 }
 
 void Sequencer::end_run(bool emit_stop, std::uint64_t at) noexcept {
+  mtc_end(emit_stop, at);
   if (mq_pending_ != 0u) {
     mute_release(mq_pending_, at);  // no boundary is coming: the toggles apply with the stop
   }
@@ -960,6 +1279,12 @@ void Sequencer::end_run(bool emit_stop, std::uint64_t at) noexcept {
     k.roll_on = false;
     k.arp_on = false;
     pfx_[t].sent_extra_n = 0;
+    // OS-CECHANCE C1 (3.3, F6): a stop sets pass 0 and last true.
+    k.ch_pass = 0;
+    k.ch_last = true;
+    k.ch_pass_new = false;
+    k.ch_pat = k.pattern_id;
+    k.ch_rnd = 0;
     if (k.perf_q) {
       // E-PERF-07: the track queue is live only: a landed override and a wait that never landed go with the run
       k.perf_q = false;
@@ -970,6 +1295,8 @@ void Sequencer::end_run(bool emit_stop, std::uint64_t at) noexcept {
   queue_.cancel_if(at, [](const audio::SeqEvent& e) { return e.kind == EventKind::Tick; });
   centre_bends(at);  // OS-INSTUI S8b: after the notes' offs
   queued_jump_ = kNoJump;  // a stopped transport has nothing queued (a resume starts a run of its own)
+  loop_first_ = 0xFF;      // OS-SONG3 S7: nor a loop (every end of a run: a stop, the song's end, an export's range)
+  loop_last_ = 0;
   after_gone_ = false;
   switch_pending_ = false;  // OS-PATSWITCH: a switch that had not landed is given up with the run (a stop, a restart and a resume alike)
   switch_release_ = false;
@@ -998,6 +1325,8 @@ void Sequencer::end_run(bool emit_stop, std::uint64_t at) noexcept {
   clk_on_ = false;
   fx_tempo_x100_ = 0;  // a stop: the performance tempo is 0
   swing_fx_ = 0;
+  chase_run_ = false;  // OS-MTC B3: the chase's run is over, the main loop's commands act again
+  pending_chase_ = false;
 }
 
 // ---- the block --------------------------------------------------------------------------------------------------------------------
@@ -1021,7 +1350,21 @@ std::uint32_t Sequencer::step(std::uint64_t block_start, std::uint32_t n, audio:
       end_run(true, now_);
     }
   }
-  if (pending_start_) {
+  if (pending_chase_) {
+    pending_chase_ = false;
+    if (playing_) {
+      end_run(false, now_);  // (clears chase_run_)
+    }
+    chase_run_ = true;
+    located_ = false;
+    std::uint32_t order = kNoOrder;
+    std::uint32_t pid = pending_order_;
+    if (pending_mode_ == PlayMode::Song) {
+      order = pending_order_ < song_len() ? pending_order_ : 0u;
+      pid = song_at(order);
+    }
+    begin_run(pending_mode_, order, pid, pending_from_, false);
+  } else if (pending_start_) {
     pending_start_ = false;
     if (playing_) {
       end_run(false, now_);  // a play while playing restarts: the notes go, the transport does not announce a stop
@@ -1071,15 +1414,29 @@ std::uint32_t Sequencer::step(std::uint64_t block_start, std::uint32_t n, audio:
   if (playing_) {
     // Bounded by the block: the fastest microstep (800 BPM at double time, the widest swing) is 6.5 samples, so n / 6 + 1 of them fit; the guard is slack for a fault.
     std::uint32_t guard = n / 4u + 64u;
+    bool waiting = false;
     while (guard != 0u && playing_ && next_abs_ < block_end_) {
       --guard;
+      if (follow_unsettled()) {
+        waiting = true;  // OS-MIDISYNC 07
+        follow_held_ = true;
+        break;
+      }
+      if (follow_held_) {
+        follow_held_ = false;
+        next_abs_ = next_micro_time();  // released: the loop has settled, its time for this microstep replaces the one taken before the wait
+        continue;
+      }
       run_microstep(next_abs_);
     }
-    if (playing_ && next_abs_ < block_end_) {
+    if (playing_ && !waiting && next_abs_ < block_end_) {
       ++stats_.microstep_overrun;
     }
     if (playing_ && clk_on_ && follow_ == nullptr) {
       fill_clock(block_end_ > origin_ ? (block_end_ - origin_) << core::kQ32Frac : 0u);
+    }
+    if (mtc_gen_.anchored()) {
+      mtc_emit();  // OS-MTC A3
     }
   }
 
@@ -1107,6 +1464,7 @@ std::uint32_t Sequencer::step(std::uint64_t block_start, std::uint32_t n, audio:
   const Position at = position();
   published_.publish(at.playing, at.pattern_id, at.step, at.tempo_x100, at.order_pos, at.ustep);
   published_.publish_count_in(at.count_in);
+  published_.publish_loop(loop_first_, loop_last_);  // OS-SONG3 S7: one relaxed halfword store
   published_.publish_queued(queued_jump_);  // the live jump that waits (the Song screen blinks its slot)  // for the screen and the log: two relaxed word stores, once a block
   static_assert(kPerfTracks == audio::PlayPosition::kTrackWords && kPerfTracks <= kMaxTracks, "one published word per track the Perform layer reaches");
   for (std::uint32_t t = 0; t < kPerfTracks; ++t) {  // E-PERF-07: the track queue for the Perform boxes (relaxed stores, 2 a track, once a block)
@@ -1120,6 +1478,13 @@ void Sequencer::run_microstep(std::uint64_t at) noexcept {
   const bool first = ustep_ == 0u;
   const std::uint32_t u = ustep_ + 1u;  // 1..48
   if (first) {
+    if (locate_pending_) {
+      // OS-MIDISYNC M2c: a locate queued after the last end_step ran — in the last microstep before this boundary,
+      // as an SPP stamped just before the boundary clock — still lands at this boundary, before its Step event is
+      // emitted, so the boundary's step is the located one (battery tests 10/11: the first step after the Continue
+      // is the SPP step, not where the run was).
+      land_locate();
+    }
     begin_step(at);
   }
   const std::uint32_t active = std::min<std::uint32_t>(project_.active_tracks(), kMaxTracks);
@@ -1195,13 +1560,16 @@ void Sequencer::begin_step(std::uint64_t at) noexcept {
 void Sequencer::finish_step() noexcept {
   switch_release_ = false;  // every track has run its first microstep (play_microstep): OS-PATSWITCH's release is over
   release_only_ = 0;
+  clk_idx_ = static_cast<std::uint16_t>(song_step_);  // OS-INSFX-ABI2 A3: the step that runs, for clock_at (a count-in step holds the start point)
+  clk_bits_ = count_in_left_ != 0u ? static_cast<std::uint8_t>(clk_bits_ | kClkFlat) : static_cast<std::uint8_t>(clk_bits_ & ~kClkFlat);
   if (tempo_fine_row_ != 0) {
     // Tempo fine adds to the tempo of its row and, like the Tempo FX it refines, stays (med.md section 4; the FX 44 alone adjusts the tempo in force).
     const std::int32_t t = static_cast<std::int32_t>(nominal_tempo_x100()) + tempo_fine_row_;
     fx_tempo_x100_ = static_cast<std::uint32_t>(clamp_i32(t, static_cast<std::int32_t>(kMinTempoX100), static_cast<std::int32_t>(kMaxTempoX100)));
   }
   if (follow_ == nullptr) {
-    const Q32 spt = played_spt();
+    const Q32 base = played_spt();
+    const Q32 spt = trimmed(base);  // OS-MTC B3: the chase's rate trim (the identity when there is none)
     if (8u * spt != clk_tl_) {
       if (clk_on_) {
         fill_clock(step_start_);  // the ticks before this step keep the old tempo: the new one applies from the row that asked for it
@@ -1209,6 +1577,12 @@ void Sequencer::finish_step() noexcept {
       clk_tl_ = 8u * spt;
     }
     step_dur_ = step_length_q32(spt, swing(), swing_odd_);
+    if (chase_run_) {
+      // The phase of the chased run (Sequencer::chase_end): this step ends, in the map's own arithmetic (no trim: the song time the master's time is compared with), at chase_map_, and the run reaches that at chase_end_.
+      chase_map_ += trim_q16_ == kTrimOne ? step_dur_ : step_length_q32(base, swing(), swing_odd_);
+      chase_end_ = abs_of(step_start_ + step_dur_);
+      ++chase_steps_;
+    }
     swing_odd_ = !swing_odd_;
   }
   if (cfg_.emit_ticks) {
@@ -1288,6 +1662,33 @@ std::uint64_t Sequencer::step_boundary_time() const noexcept {
 
 // ---- the end of a step, of a pattern -------------------------------------------------------------------------------------------
 
+// A pending locate (an SPP or a locate_row() while playing) lands: the song cursor goes to the located position.
+// Called from end_step (the usual place, at the end of the step that is running) and from the first microstep of a
+// step (run_microstep), so that a locate queued in the last microstep before a boundary lands at that boundary too.
+void Sequencer::land_locate() noexcept {
+  locate_pending_ = false;
+  located_ = false;
+  // E-SONG-07: a locate to a slot (an SPP) plays that slot once, whatever slot was deleted before. A locate_row() keeps the mark: it names the slot that slid into the deleted one's place and the
+  // deleted one's pattern, which plays on and is followed by that slot. (Not told apart by the indices: a song that repeats a pattern has the same ones for both.)
+  after_gone_ = after_gone_ && locate_in_place_;
+  order_pos_ = located_order_;
+  pattern_id_ = located_pattern_;
+  pattern_len_ = song_pattern_len(pattern_id_);
+  song_step_ = located_step_;
+  load_tracks(song_step_);
+  // OS-CECHANCE C1 (3.3): a locate (an SPP, a playhead jump) counts from pass 0 and keeps the last result (new Community OS behaviour: tracker-ce has no comparable locate).
+  for (TrackState& k : tr_) {
+    k.ch_pass = 0;
+    k.ch_pass_new = false;
+    k.ch_pat = k.pattern_id;
+    k.ch_rnd = 0;
+  }
+  const std::uint64_t at = step_boundary_time();
+  emit(at, EventKind::Pattern, audio::kNoTrack, static_cast<std::uint8_t>(pattern_id_), static_cast<std::uint8_t>((mode_ == PlayMode::Song ? order_pos_ : kNoOrder) & 0xFFu),
+       static_cast<std::uint8_t>((mode_ == PlayMode::Song ? order_pos_ : kNoOrder) >> 8), 0, static_cast<std::int32_t>(pattern_len_));
+  mtc_land(at, 0);  // OS-MTC A3 (Q6b): a locate is a relocation of the time code
+}
+
 void Sequencer::end_step() noexcept {
   if (follow_ == nullptr) {
     step_start_ += step_dur_;
@@ -1301,19 +1702,7 @@ void Sequencer::end_step() noexcept {
   if (locate_pending_) {
     // An SPP or a locate_row() (OS-PLAYCUR) while playing: the song cursor goes there at this step boundary. This branch comes before the break / jump test below, so a break or a jump queued for this boundary
     // is not acted on here: it stays queued and fires one step after the located row, as with an SPP.
-    locate_pending_ = false;
-    located_ = false;
-    // E-SONG-07: a locate to a slot (an SPP) plays that slot once, whatever slot was deleted before. A locate_row() keeps the mark: it names the slot that slid into the deleted one's place and the
-    // deleted one's pattern, which plays on and is followed by that slot. (Not told apart by the indices: a song that repeats a pattern has the same ones for both.)
-    after_gone_ = after_gone_ && locate_in_place_;
-    order_pos_ = located_order_;
-    pattern_id_ = located_pattern_;
-    pattern_len_ = song_pattern_len(pattern_id_);
-    song_step_ = located_step_;
-    load_tracks(song_step_);
-    const std::uint64_t at = step_boundary_time();
-    emit(at, EventKind::Pattern, audio::kNoTrack, static_cast<std::uint8_t>(pattern_id_), static_cast<std::uint8_t>((mode_ == PlayMode::Song ? order_pos_ : kNoOrder) & 0xFFu),
-         static_cast<std::uint8_t>((mode_ == PlayMode::Song ? order_pos_ : kNoOrder) >> 8), 0, static_cast<std::int32_t>(pattern_len_));
+    land_locate();
     return;
   }
   if (switch_pending_) {
@@ -1364,6 +1753,9 @@ void Sequencer::advance_tracks() noexcept {
           k.pos = 0;
           loop_end = true;
         }
+        if (++k.ord >= k.len) {
+          k.ord = 0;  // OS-PERFMODES M2 (F5): every mode counts its steps since its loop start, wrapped at the track's length
+        }
         break;
       case TrackPlayMode::Backward:
         if (k.pos == 0u || k.pos >= k.len) {
@@ -1371,6 +1763,9 @@ void Sequencer::advance_tracks() noexcept {
           loop_end = true;
         } else {
           --k.pos;
+        }
+        if (++k.ord >= k.len) {
+          k.ord = 0;
         }
         break;
       case TrackPlayMode::PingPong: {
@@ -1403,11 +1798,38 @@ void Sequencer::advance_tracks() noexcept {
             --k.pos;
           }
         }
+        if (++k.ord >= k.len) {
+          k.ord = 0;
+        }
         break;
       }
       case TrackPlayMode::Random:
         k.pos = static_cast<std::uint8_t>(rng_.range(0, static_cast<std::int32_t>(k.len)));
+        // OS-CECHANCE C1 (3.2, F7): Random has no loop end: a pass ends every len rows.
+        if (++k.ch_rnd >= k.len) {
+          k.ch_rnd = 0;
+          k.ch_pass_new = true;
+        }
+        if (++k.ord >= k.len) {
+          k.ord = 0;
+        }
         break;
+      default: {
+        // OS-PERFMODES M2 (3.2): a custom order C1..C20. The span is the track's length, or the Perform PAT LEN when shorter (F4; the same span PING uses).
+        // ord counts up and wraps at the span: that wrap is the track's loop end (F6: an E-PERF-07 queue lands there). The step played is the order's entry for
+        // ord, modulo the span. One flash read and a modulo a step: no allocation, bounded, float-free.
+        const std::uint32_t span = std::max<std::uint32_t>(1u, std::min<std::uint32_t>(k.len, effective_len()));
+        if (++k.ord >= span) {
+          k.ord = 0;
+          loop_end = true;
+        }
+        const PlayOrderEntry e = play_order_entry(custom_order(k.perf_mode), k.ord);
+        k.pos = static_cast<std::uint8_t>((static_cast<std::uint32_t>(e.step) - 1u) % span);
+        break;
+      }
+    }
+    if (loop_end) {
+      k.ch_pass_new = true;  // OS-CECHANCE C1 (3.2): the track's own loop end is a pass end
     }
     if (loop_end && k.perf_pending_set) {
       // The track's own loop end: its source pattern changes, its FX end.
@@ -1433,6 +1855,7 @@ void Sequencer::pattern_end() noexcept {
     return;
   }
   bool order_set = false;
+  bool mtc_reloc = false;  // OS-MTC A3 (Q6b): the song's loop to slot 1, the slot-range loop's wrap (OS-SONG3 S7) and a live jump relocate the time code (a Break and an Order jump are the song's own flow)
   // The live jump (queue_jump): the song carries on at that position. The pattern's own Order jump FX wins (the queue waits for the next end); a position the song no longer has is dropped.
   bool live = false;
   if (!jump_pending_ && queued_jump_ != kNoJump) {
@@ -1441,6 +1864,7 @@ void Sequencer::pattern_end() noexcept {
       mode_ = PlayMode::Song;
       order_pos_ = queued_jump_;
       order_set = true;
+      mtc_reloc = true;
       queued_pattern_ = 0;
       mode_request_ = false;
     } else {
@@ -1489,12 +1913,28 @@ void Sequencer::pattern_end() noexcept {
       mode_ = requested_mode_;
     }
   }
+  if (loop_first_ <= loop_last_ && (order_set || mode_ != PlayMode::Song) && (mode_ != PlayMode::Song || order_pos_ < loop_first_ || order_pos_ > loop_last_)) {
+    loop_first_ = 0xFF;  // OS-SONG3 S7: a live jump or an Order jump that landed outside the range, a queued pattern or a switch to Pattern mode: the song has left the loop
+    loop_last_ = 0;
+  }
   if (!order_set && mode_ == PlayMode::Song) {
     order_pos_ += stay ? 0u : 1u;
+    if (!stay && loop_first_ <= loop_last_ && order_pos_ == static_cast<std::uint32_t>(loop_last_) + 1u) {
+      order_pos_ = loop_first_;  // OS-SONG3 S7: past the loop's last slot the song goes back to its first (a position compare once a pattern, never per block; no SongEnd)
+      mtc_reloc = true;          // OS-SONG3 S7: the wrap to the loop's first slot relocates the time code, as the song's own loop to slot 1 does
+    }
     if (order_pos_ >= song_len()) {
       emit(at, EventKind::SongEnd, audio::kNoTrack, 0, 0, 0, 0, 0);
-      if (cfg_.song_loop) {
+      if (cfg_.song_loop && !chase_run_) {  // OS-MTC B3 (Q9 a): the chase does not loop, the song's end is silence until the master locates back
         order_pos_ = 0;
+        mtc_reloc = true;
+        if (mtc_gen_.enabled()) {
+          // OS-MTC: the time code goes back to song time 0, which the map defines as the run start state: so the Tempo FX and Swing FX of the pass that ends do not carry into the next one,
+          // or its notes would run against the time code (a looping song with a Tempo FX played pass 2 up to 0.3 s early). With MTC OUT off the loop keeps them, as before (F5).
+          fx_tempo_x100_ = 0;
+          swing_fx_ = 0;
+          swing_odd_ = false;
+        }
       } else {
         end_run(true, at);
         return;
@@ -1521,6 +1961,56 @@ void Sequencer::pattern_end() noexcept {
   const std::uint32_t op = mode_ == PlayMode::Song ? order_pos_ : kNoOrder;
   emit(at, EventKind::Pattern, audio::kNoTrack, static_cast<std::uint8_t>(pattern_id_), static_cast<std::uint8_t>(op & 0xFFu), static_cast<std::uint8_t>(op >> 8), 0,
        static_cast<std::int32_t>(pattern_len_));
+  if (mtc_reloc) {
+    mtc_land(at, 0);
+  }
+}
+
+// ---- OS-MTC A3: the time code of a run ------------------------------------------------------------------------------------------
+
+void Sequencer::mtc_land(std::uint64_t at, std::int64_t pre) noexcept {
+  mtc_gen_.reset();  // nothing is sent until the new anchor: no wrong time is ever sent
+  mtc_wait_stamp_ = 0;
+  if (!mtc_gen_.enabled()) {
+    return;
+  }
+  const bool song = mode_ == PlayMode::Song;
+  if ((!song || order_pos_ == 0u) && song_step_ == 0u) {
+    mtc_gen_.anchor(at, pre);  // the fast path: the song's first step is song time 0, no round trip
+    return;
+  }
+  mtc_stamp_ = mtc_stamp_ >= 255u ? std::uint8_t{1} : static_cast<std::uint8_t>(mtc_stamp_ + 1u);
+  mtc_wait_stamp_ = mtc_stamp_;
+  mtc_wait_at_ = at;
+  mtc_wait_pre_ = pre;
+  const std::uint32_t order = song ? std::min<std::uint32_t>(order_pos_, 0xFEu) : 0xFFu;
+  mtc_req_.store((static_cast<std::uint32_t>(mtc_stamp_) << 24) | (order << 16) | ((pattern_id_ & 0xFFu) << 8) | (song_step_ & 0xFFu), std::memory_order_relaxed);
+}
+
+void Sequencer::mtc_answer(std::uint32_t stamp, std::uint32_t song_samples) noexcept {
+  if (stamp == 0u || stamp != mtc_wait_stamp_ || !playing_) {
+    return;  // a stale answer (a newer segment began, or the run stopped)
+  }
+  mtc_wait_stamp_ = 0;
+  const std::uint64_t a = std::max(now_, mtc_wait_at_);  // the position began already (or begins now): anchor here, the song time moved on with the samples
+  mtc_gen_.anchor(a, static_cast<std::int64_t>(song_samples) + mtc_wait_pre_ + static_cast<std::int64_t>(a - mtc_wait_at_));
+}
+
+void Sequencer::mtc_end(bool emit_stop, std::uint64_t at) noexcept {
+  audio::SeqEvent e{};
+  const bool say = mtc_gen_.stop(at, e);  // (always ends the run's time code)
+  mtc_wait_stamp_ = 0;
+  if (emit_stop && say) {
+    emit(at, EventKind::MidiMtcFull, audio::kNoTrack, 0, 0, 0, 0, e.value);  // Logic's playhead goes to the stop time
+  }
+}
+
+void Sequencer::mtc_emit() noexcept {
+  audio::SeqEvent ev[midi::mtc::Generator::kMaxEvents];
+  const std::uint32_t n = mtc_gen_.step(now_, static_cast<std::uint32_t>(block_end_ - now_), ev);
+  for (std::uint32_t i = 0; i < n; ++i) {
+    emit(now_ + ev[i].offset, ev[i].kind, audio::kNoTrack, ev[i].a, 0, 0, 0, ev[i].value);
+  }
 }
 
 // ---- the tracks ---------------------------------------------------------------------------------------------------------------------
@@ -1607,7 +2097,19 @@ void Sequencer::read_row(std::uint32_t t) noexcept {
   const std::uint32_t len = k.perf_len != 0u ? k.perf_len : track_length(project_, k.pattern_id, t, pattern_len_);
   k.len = static_cast<std::uint8_t>(clamp_u32(len, 1u, 128u));
   if (k.pos >= k.len) {
-    k.pos = 0;  // the track got shorter under the cursor (an edit while playing)
+    // The track got shorter under the cursor: an edit while playing goes to the top; a change at once to a shorter pattern (OS-PERFREMIX R1, F4) rejoins at the song's step modulo its length.
+    k.pos = k.rejoin ? static_cast<std::uint8_t>(song_step_ % k.len) : std::uint8_t{0};
+    k.ord = 0;   // OS-PERFMODES M2: with pos
+  }
+  k.rejoin = false;
+  // OS-CECHANCE C1 (3.2): apply the pass that ended at the last step boundary. A pattern change resets the count and keeps the last result (F6); the same pattern counts on.
+  if (k.pattern_id != k.ch_pat) {
+    k.ch_pass = 0;
+    k.ch_pass_new = false;
+    k.ch_pat = k.pattern_id;
+  } else if (k.ch_pass_new) {
+    k.ch_pass = static_cast<std::uint16_t>((static_cast<std::uint32_t>(k.ch_pass) + 1u) % 27720u);
+    k.ch_pass_new = false;
   }
   const RowStatus st = read_step(project_, k.pattern_id, t, k.pos, k.row);
   if (st == RowStatus::Torn) {
@@ -1617,6 +2119,24 @@ void Sequencer::read_row(std::uint32_t t) noexcept {
   }
   fx_sanitize(k.row.fx[0].type, k.row.fx[0].value);
   fx_sanitize(k.row.fx[1].type, k.row.fx[1].value);
+  // OS-PERFMODES M2 (3.2, Q3 a): the roll of the order's entry for this step (F7, F8): 100 % without a draw, 30 / 60 % with one from the seeded RNG; on success
+  // the Roll FX with the option's value goes into the first free column (column 1, else column 2, else nothing). The row's copy is changed, never the pattern;
+  // pre_fx then treats it as a Roll the row holds, a step without a note included (F9).
+  if (is_custom(k.perf_mode)) {
+    const PlayOrderEntry e = play_order_entry(custom_order(k.perf_mode), k.ord);
+    if (e.option != 0u) {
+      const OrderRoll r = order_roll(e.option);
+      if (r.percent == 100u || rng_.range(0, 100) < static_cast<std::int32_t>(r.percent)) {
+        if (k.row.fx[0].type == fx::kNone) {
+          k.row.fx[0].type = fx::kRoll;
+          k.row.fx[0].value = r.value;
+        } else if (k.row.fx[1].type == fx::kNone) {
+          k.row.fx[1].type = fx::kRoll;
+          k.row.fx[1].value = r.value;
+        }
+      }
+    }
+  }
   k.cancel = false;
   k.delayed = false;
   k.start_at = 1;
@@ -1813,10 +2333,59 @@ void Sequencer::pre_fx(std::uint32_t t, std::uint64_t at) noexcept {
   const NoteKind nk = note_kind(r.note);
   const bool has_note = nk == NoteKind::Note;
 
-  // Random FX value: the other column's value becomes a random one within +-this value, inside the other FX's range.
+  // OS-COREFX: ends the tracker FX of the columns that held one on the previous row and hold none of `trk_now` (a TrkFx of type 0); an end the queue refused stays owed and the next row tries again.
+  const auto end_trk_cols = [&](std::uint8_t trk_now) {
+    if ((k.trk_cols | trk_now) != 0u) {  // OS-COREFX: a column that held a tracker FX on the row before and holds none now ends it (the voices keep it until told)
+      std::uint8_t pending = trk_now;
+      for (std::uint32_t c = 0; c < 2u; ++c) {
+        if (((k.trk_cols & ~trk_now) >> c & 1u) != 0u &&
+            !emit(at, EventKind::TrkFx, static_cast<std::uint8_t>(t), 0, 0, 0, static_cast<std::uint8_t>(c), 0)) {
+          pending = static_cast<std::uint8_t>(pending | (1u << c));  // the queue was full: the end is still owed, the next row tries again
+        }
+      }
+      k.trk_cols = pending;
+    }
+  };
+
+  // OS-CECHANCE C1 (3.4): the row's first Chance (column 2, then column 1, Q3 a) is evaluated before anything else of the row — before Random value and before the other FX. Only the
+  // values 0..100 draw from the RNG. A failure cancels the whole row (Q2 a): after kill_roll, pre_fx returns before any other FX of the row, so no micro-move is armed, no CC goes out and
+  // no note starts — but the bookkeeping that ends the PREVIOUS row's tracker FX still runs (a cancelled row holds none, so trk_now is 0). The value is the raw stored one held to 0..174 by fx_sanitize (A5).
+  for (int col = 1; col >= 0; --col) {
+    if (r.fx[col].type == fx::kChance) {
+      kill_roll(k, col);
+      const std::uint8_t v = r.fx[col].value;
+      bool plays = false;
+      if (v <= 100u) {
+        plays = rng_.range(0, 100) < static_cast<std::int32_t>(v);  // Q1 a: a draw in 0..99 below the value plays (0 never, 50 half, 100 always)
+        k.ch_last = plays;
+      } else if (v == fx::kChanceWithLast) {
+        plays = k.ch_last;  // 101 Group with Last: not stored
+      } else if (v == fx::kChanceNotLast) {
+        plays = !k.ch_last;  // 102 Not Last: not stored
+      } else {
+        std::uint32_t n = 0;
+        std::uint32_t m = 0;
+        fx::chance_cycle(v, n, m);
+        const std::uint32_t p = k.ch_pass % (n + m);
+        plays = v >= 139u ? p >= n : p < n;  // Play N / Skip M, Skip N / Play M, counted in passes (F3)
+        k.ch_last = plays;
+      }
+      if (!plays) {
+        k.cancel = true;
+        end_trk_cols(0);  // the cancelled row holds no tracker FX: the previous row's end is still owed
+        return;
+      }
+      break;
+    }
+  }
+
+  // Random FX value: the other column's value becomes a random one within +-this value, inside the other FX's range. It never touches a Chance column (Q3 a).
   for (std::uint32_t c = 0; c < 2u; ++c) {
     if (r.fx[c].type == fx::kRandomValue) {
       const std::uint32_t o = 1u - c;
+      if (r.fx[o].type == fx::kChance) {
+        break;
+      }
       std::int32_t lo = 0;
       std::int32_t hi = 0;
       fx_range(r.fx[o].type, lo, hi);
@@ -1874,10 +2443,7 @@ void Sequencer::pre_fx(std::uint32_t t, std::uint64_t at) noexcept {
         break;
       case fx::kChance:
         kill_roll(k, col);
-        consumed = true;
-        if (rng_.range(0, 100) > static_cast<std::int32_t>(value)) {
-          k.cancel = true;  // a draw in 0..99 above the value cancels: a value of 100 always plays
-        }
+        consumed = true;  // evaluated at the top of pre_fx (the first Chance of the row); a second one does nothing (Q3 a)
         break;
       case fx::kCcA:
       case fx::kCcA + 1:
@@ -1981,16 +2547,7 @@ void Sequencer::pre_fx(std::uint32_t t, std::uint64_t at) noexcept {
       }
     }
   }
-  if ((k.trk_cols | trk_now) != 0u) {  // OS-COREFX: a column that held a tracker FX on the row before and holds none now ends it (the voices keep it until told)
-    std::uint8_t pending = trk_now;
-    for (std::uint32_t c = 0; c < 2u; ++c) {
-      if (((k.trk_cols & ~trk_now) >> c & 1u) != 0u &&
-          !emit(at, EventKind::TrkFx, static_cast<std::uint8_t>(t), 0, 0, 0, static_cast<std::uint8_t>(c), 0)) {
-        pending = static_cast<std::uint8_t>(pending | (1u << c));  // the queue was full: the end is still owed, the next row tries again
-      }
-    }
-    k.trk_cols = pending;
-  }
+  end_trk_cols(trk_now);
   if (col_mask != 0u) {
     apply_columns(t, col_mask, col_type, col_value, at);
   }

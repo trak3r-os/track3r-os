@@ -104,7 +104,7 @@ tap down
 encoder 2
 snap qa_cfg_020
 
-# QA-CFG-021: the MIDI page has lost its METRO VOL row (nine rows since E-CFG-03: CLOCK IN to OUT CHANNEL, with TRANSPORT IN and OUT after CLOCK MODE).
+# QA-CFG-021: the MIDI page has lost its METRO VOL row (thirteen rows since OS-MTC B3 added MTC IN, twelve since OS-MTC A3 added MTC OUT and MTC START, ten since OS-MIDICCMAP S1 added CC MAP, nine since E-CFG-03: CLOCK IN to OUT CHANNEL, with TRANSPORT IN and OUT after CLOCK MODE).
 tap f1
 snap qa_cfg_021
 
@@ -277,7 +277,7 @@ release shift
 snap qa_cfg_218
 
 # E-CFG-03 (row 13): TRANSPORT IN and TRANSPORT OUT, the MIDI page's rows 4 and 5 (after CLOCK MODE). On is the default and today's behaviour.
-# QA-CFG-220: the MIDI page (F1) has nine rows now; the cursor on TRANSPORT IN (On), the card on the right says what Off does.
+# QA-CFG-220: the MIDI page (F1) has thirteen rows since OS-MTC B3 (twelve since OS-MTC A3, ten since OS-MIDICCMAP S1, nine before CC MAP); the cursor on TRANSPORT IN (On), the card on the right says what Off does.
 tap f1
 tap down 3
 snap qa_cfg_220
@@ -294,3 +294,33 @@ snap qa_cfg_222
 # QA-CFG-223: Delete puts the default (On) back on the row under the cursor, TRANSPORT OUT; TRANSPORT IN stays Off.
 tap delete
 snap qa_cfg_223
+
+# OS-MTC A3 (docs/specs/OS-MTC.md 3.7): MTC OUT and MTC START, the MIDI page's rows after TRANSP OUT (Off / 24 / 25 / 30 fps, default Off; 00..23 h, default 01; saved in settings.o3st).
+# QA-CFG-276: MTC OUT, the row after TRANSP OUT: two turns read 25 fps (the cursor was on TRANSP OUT).
+tap down
+encoder 2
+snap qa_cfg_276
+
+# QA-CFG-277: MTC START, the row below: one turn down reads 00 (the default is 01), then Delete puts 01 back and the rows above return to Off.
+tap down
+encoder -1
+snap qa_cfg_277
+tap delete
+tap up
+tap delete
+tap down
+
+# OS-MTC B3 (docs/specs/OS-MTC.md 4.6): MTC IN, the MIDI page's thirteenth row, after MTC START (Off / DIN / USB, default Off; saved in settings.o3st). Not learnable.
+# QA-CFG-278: MTC IN, the row after MTC START: two turns read USB (the cursor was on MTC START); the card says what the row does.
+tap down
+encoder 2
+snap qa_cfg_278
+
+# QA-CFG-279: Delete puts Off back; the cursor stays on MTC IN (the next block counts from it).
+tap delete
+snap qa_cfg_279
+
+# OS-MIDICCMAP S1 (docs/specs/OS-MIDICCMAP.md, Q1 a): CC MAP, the MIDI page's row after IN CHANNEL (Off, On; the default Off, saved in settings.o3st). This slice lands before OS-MTC, so it also raises the settings block 26 -> 32.
+# QA-CFG-275: the MIDI page (F1) has thirteen rows now (twelve before OS-MTC B3, ten before OS-MTC A3); the cursor on CC MAP (Off), the row after IN CHANNEL and before OUT CHANNEL.
+tap down 4
+snap qa_cfg_275

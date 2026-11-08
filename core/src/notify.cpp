@@ -161,6 +161,20 @@ void NotifyQueue::dismiss(const char* source, const char* text) noexcept {
   }
 }
 
+void NotifyQueue::dismiss(Severity severity) noexcept {
+  for (unsigned i = 0; i < size_;) {
+    if (items_[i].severity != severity) {
+      ++i;
+      continue;
+    }
+    remove(i);
+    if (i == 0) {
+      counting_ = false;  // a new head: its TTL starts when it is first shown
+      remaining_ = size_ != 0 ? items_[0].ttl_ms : 0u;
+    }
+  }
+}
+
 void NotifyQueue::clear() noexcept {
   size_ = 0;
   remaining_ = 0;

@@ -1,0 +1,30 @@
+# OS-FLASHDIET P5: the texts only a bench image prints (O3OS_BENCH): the `bench` usage and the kernel helps of bench_report.h. Same format and rules as console_text.txt (`bench_text(btxt::<key>)`).
+k_voice	one sampler voice, a block (the longest plain sample; takes track 16)
+k_voice_f	one sampler voice through the instrument filter (low-pass, resonance 2), a block
+k_voice_od	one sampler voice with the overdrive at 100 (OS-IFX1), a block
+k_voice_bit	one sampler voice at a bit depth of 8 (OS-IFX1), a block
+k_voice_odbit	one sampler voice with overdrive 100 and 8 bits (OS-IFX1), a block
+k_voice_rev	one sampler voice played backward (PLAYBACK, OS-PERF-CPU2), a block
+k_voice_pan	one sampler voice with a pan LFO (OS-PERF-CPU2), a block
+k_voice_st	OS-STEREO A/B: voice_st against voice_mono, flash (O3OS_BENCH_ARCHIVE)
+k_tb303	one TB-303 module instance, a block (mod load tb303; mod bind 1 tb303)
+k_tb303_128	the same TB-303 instance asked for 128 frames in one call (OS-303PERF, E2)
+k_delay	SND A delay, stereo taps, feedback 70, a block
+k_reverb	SND B reverb, HALF quality, a block
+k_reverb_full	SND B reverb, FULL quality, a block
+k_limiter	master limiter, loud noise (limiting on every sample), slow stage on
+k_limiter_q	master limiter, quiet input (the identity path), slow stage on
+k_strips	in situ: the strips stage, N renders of whatever is playing
+k_stages	in situ: every stage of the render, N renders of whatever is playing
+k_mem	cycles a 32-bit load takes from SRAM_U, SRAM_L, flash, SDRAM (no block count)
+k_worst	the slowest render since cpu reset, split by stage (no block count)
+k_kernels	the graph's SIMD kernels on 64 samples each (gain, mac, strips, meters ...)
+k_cpuopt	OS-CPUOPT1 A/B: loop and SVF, old against new (O3OS_BENCH_ARCHIVE)
+k_looper	OS-LOOPER L2b A/B: RMW, cow copy, restore (O3OS_BENCH_ARCHIVE)
+k_disk	OS-USBDISK U1d A/B: card, scratch file, USB (O3OS_BENCH_ARCHIVE)
+k_burst	OS-ODD11 UTAIL: 12 filtered voices: note_ons, first block, steady, 4 spans
+k_dj	OS-DJ: kill EQ held (LOW MID HIGH all), DJ filter, filter + kill, a block each
+k_insert	OS-INSFX: effect insert, adapter and effect alone (mod load example_effect)
+k_wt	OS-CEWTENV: wt_eval no warp/warps/baked warm/cold, wt_make one/all 256, arena
+b_bench_usage_1	usage: bench <kernel|all> [blocks 1..4096, default 64] [alias|direct|sram]   |   bench disk reset|clean\n
+b_bench_1	BENCH disk window opened (bench disk reads it; within 60 s)\n

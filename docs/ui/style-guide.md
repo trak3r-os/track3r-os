@@ -73,7 +73,7 @@ bitmaps are a converted (Modified) version in the sense of the OFL and may not c
 
 ## 4. Palettes
 
-Sixteen colour tokens and `Rec` (`ui/style.h`; `Rec`, the 17th, is the one red of Rec mode, added at the maintainer's request of 2026-10-13 past the sixteen of ADR 0001: it is the last id and the module SDK keeps its 16), valued by each theme (the tables are in `ui/src/themes.cpp`, the only place colour
+Sixteen colour tokens, `Rec` and `SelDim` (`ui/style.h`; `Rec`, the 17th, is the one red of Rec mode, added at the maintainer's request of 2026-10-13 past the sixteen of ADR 0001; `SelDim`, the 18th, is the duller selection blue of a multi-track block, OS-SELTINT: they are the last ids and the module SDK keeps its 16), valued by each theme (the tables are in `ui/src/themes.cpp`, the only place colour
 values are written; `tools/check_layers.py` enforces it). **Amiga** is the default: Workbench grey-blue chrome with dark
 text, a near-black data pane with a faint blue cast, one strong blue, one orange. **Black** is high-contrast for the stage.
 **White** is for daylight (hues and orange darkened until they read on white). `Shift + Master` (`ui.theme.next`,
@@ -98,6 +98,7 @@ provisional until Config exists) cycles them without a reboot; `theme <name>` in
 | `Play` | #54C85C | #46DC5A | #1C8034 |
 | `PlayText` | #0A180C | #001400 | #FFFFFF |
 | `Rec` | #BE1E1E | #DC3434 | #C42020 |
+| `SelDim` | #2C5CB8 | #2C62C8 | #3864BC |
 
 Tokens and what they are for: `Chrome` fill of strips, headers and the key row; `ChromeText` primary text on chrome and the
 fill of inverted key-caps and type badges; `ChromeDim` secondary text and rules on chrome, the fill of the STOP badge;
@@ -105,7 +106,7 @@ fill of inverted key-caps and type badges; `ChromeDim` secondary text and rules 
 numbers, bar rules; `Empty` empty fields and the track separators; `Instr`, `Vol`, `Fx` the column hues (none is orange);
 `Sel` the selected row and underline; `SelText` text on it; `Accent` the cursor block and record-arm; `AccentText` text on it
 and the cursor's one-pixel outline; `Play` the PLAY badge and meter fill; `PlayText` text on it; `Rec` Edit mode of the Pattern screen (NEW Community OS behaviour; OS-RECSIGN: the signs show whenever the pattern can be edited, STEP and LIVE): a three-pixel frame round the grid and the REC badge's fill (record icon and "REC" in `SelText`); in LIVE, while it records, also the
-playhead's bar (in place of `Play`, its text `SelText`).
+playhead's bar (in place of `Play`, its text `SelText`). `SelDim` (OS-SELTINT) the tracks of a block over several tracks other than the cursor's track, which keeps `Sel`; a desaturated blue, not a darker one, so that it holds 3:1 against the pane in every theme; its text is `SelText`.
 
 ### Contrast
 
@@ -140,6 +141,8 @@ pack must pass the same check on load or it is rejected with a notification.
 | `Rec` on `Pane` | Large | 3.0 | 3.14 | 4.58 | 5.62 |
 | `Rec` on `Chrome` | Large | 3.0 | 3.17 | 3.17 | 4.15 |
 | `SelText` on `Rec` | Text | 4.5 | 6.19 | 4.58 | 5.87 |
+| `SelDim` on `Pane` | Large | 3.0 | 3.08 | 3.69 | 5.41 |
+| `SelText` on `SelDim` | Text | 4.5 | 6.31 | 5.69 | 5.65 |
 
 The table lists exactly the pairs the code draws over, or directly against, each other, with the place for each in a
 comment beside it in `ui/theme.h`: the chrome text and the inverted badges, key-caps and chip; the PLAY badge and the
@@ -203,8 +206,7 @@ columns' names, the cursor's column bright with the 2 px `Sel` underline and the
 the 24 px pitch; the info line; the key row). A row: the play marker (the `Play` icon in `Play`, in `SelText` on the selected
 row), the position (a tile, bright every fourth row like the pattern's step numbers), the pattern number (a tile in `Instr`,
 the cursor's `Accent` block with the `AccentText` outline on the selected row, like the pattern grid's cursor), the pattern
-name in `Text` and its length in `Fx`, both Data glyphs. Page 2 (Song pressed again) is the arrangement: start bar, length in
-bars and a `Bar` of the length (`Instr` fill on an `Empty` track, `SelText` on the selected row). The F-key labels are the
+name in `Text` and its length in `Fx`, both Data glyphs. Since OS-SONG3 S1 the page also has the start bar (BAR) and the length in bars (BARS) of each slot, in `Text` and `Fx` (the old ARRANGEMENT page's two numbers; its `Bar` graphic is gone); page 2 (Song pressed again) is TIMELINE. The F-key labels are the
 screen's own (at most 8 characters: that is what a key-cap has room for).
 
 ## 5c. Pattern editing: the block, the marks, the info line, the Shift layer, the choosers (OS-009 P1a.1)
@@ -213,7 +215,7 @@ No new token and no new pair of the contrast table: everything below is the pair
 `tests/pattern_view_test.cpp` (the rendered-pairs test) draws these pictures too and fails on one that is not in it.
 
 - **The selected block**: one `Sel` rectangle a visible row across the selected tracks (the cursor's row has its own bar), the
-  fields inside it in `SelText`, as on the selected row. Two display-list words a row, no colour word between them and the bar. A
+  fields inside it in `SelText`, as on the selected row. Over several tracks (OS-SELTINT) the cursor's track keeps `Sel` and the other tracks are `SelDim`, a duller blue: at most three rectangles a row (the tracks before the cursor's, the cursor's, the tracks after), the dimmed ones also over the cursor row's bar; a block in one track, or a column block, is `Sel` throughout. Two display-list words a row for one run, no colour word between them and the bar. A
   step past its track's own length (the model keeps them; D7 of the spec) is drawn in `Empty`, whatever it holds.
 - **Header marks**, in the badge row at the right end of each track column, each in a place of its own so that one mark toggling
   moves none of the others: `M` muted and `S` soloed in `ChromeText` (the `R` of an armed track, in `Accent` on a `Pane` slot, went with the track arming: OS-LIVEREC; its place stays empty).

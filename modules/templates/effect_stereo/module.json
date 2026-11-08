@@ -1,0 +1,20 @@
+{
+  "name": "Example Auto Pan",
+  "id": "example_stereo",
+  "kind": "effect",
+  "description": "A WIDENS effect (ABI 1.12): an auto-pan that makes a stereo image from a mono input, its cycle in beats (synced to the tempo through get_clock) or in milliseconds, with two factory presets. A stereo effect needs OS-INSFX-ABI2 A4 on the unit: before it the OS never calls render_st.",
+  "state_bytes": 64,
+  "stereo": "widens",
+  "params": [
+    {"name": "Sync", "min": 0, "max": 1, "default": 1, "type": "bool"},
+    {"name": "Beats", "min": 1, "max": 16, "default": 1, "type": "int"},
+    {"name": "Cycle", "min": 50, "max": 10000, "default": 2000, "curve": "log", "unit": "ms"},
+    {"name": "Depth", "min": 0, "max": 100, "default": 60, "unit": "percent"}
+  ],
+  "presets": [
+    {"name": "Quarter Pulse", "values": {"Sync": 1, "Beats": 1, "Depth": 70}},
+    {"name": "Slow Sweep", "values": {"Sync": 0, "Beats": 4, "Cycle": 6000, "Depth": 100}}
+  ],
+  "voices": 1,
+  "memory": {"hot_bytes": 300, "sdram_bytes": 0}
+}

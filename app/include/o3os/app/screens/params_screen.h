@@ -10,13 +10,16 @@ struct CurveScratch;
 
 namespace o3os::app {
 
+struct ParamTarget;
+
 // F1..F8 of the parameter page (OS-INSTUI D1, S1): F1 the source page of a sample instrument (its label follows the instrument; S3), or MIDI for a MIDI instrument, whose one page holds CHANNEL
 // (S8a: F2..F5 are dim there and say why until S8b gives F2 the CC page),
 // F2..F5 VOICE / FILTER / MOD / SENDS (MOD, S6: a SOURCE row Off / Envelope / LFO per destination), F6 / F7 the previous / next instrument (the labels show the neighbours, `<06` and `08>`, and are dimmed at the ends),
 // F8 UNDO. The key row draws F1, F6 and F7 itself; the table is the placeholder text (and what the binding test compares the Shift row with).
-// A module instrument's F1..F4 are the module's pages (1-8, 9-16, ...), F5 is not used. An EMPTY slot's F1 opens the module picker until S5's type chooser replaces it.
+// A module instrument's F1..F4 are the module's pages (1-8, 9-16, ...), F5 is PRESET (OS-INSFX-ABI2 A9: the list of the module's presets, on an insert's page too). An EMPTY slot's F1 opens the module picker until S5's type chooser replaces it.
 inline constexpr const char* kParamsSoftKeys[8] = {"SAMPLE", "VOICE", "FILTER", "MOD", "SENDS", "<INS", "INS>", "UNDO"};
-// While Shift is held: F1..F5 NAME / COPY / PASTE / DELETE / SAVE (S5, S7; a key that does not apply is drawn dim and says why when pressed), F6 / F7 the previous / next instrument IN USE
+// While Shift is held: F1..F5 NAME / COPY / PASTE / DELETE / SAVE (S5, S7; a key that does not apply is drawn dim and says why when pressed; OS-MODPRESET P4: on a bound module's page — an
+// instrument's or an insert's — SAVE names and saves a preset), F6 / F7 the previous / next instrument IN USE
 // (the labels show their numbers; dimmed when there is none), F8 REDO.
 inline constexpr const char* kParamsShiftKeys[8] = {"NAME", "COPY", "PASTE", "DELETE", "SAVE", "<USED", "USED>", "REDO"};
 
@@ -34,7 +37,7 @@ void params_engine_text(const Model& model, unsigned slot, const model::Instrume
 // The text of a row of the source page for the instrument in `slot` as the page shows it (the window size as the engine plays it, the grain's position in seconds, the selected slice `n of m`, the
 // others as the descriptor formats them): the Wave screen's WAVETABLE and GRANULAR pages read the same words (OS-INSTUI S4).
 void params_source_text(const Model& model, unsigned slot, unsigned field, char (&out)[core::kParamTextChars + 1]) noexcept;
-// OS-INSTUI S6, the MOD page: why row `row` (0 = SOURCE) of the destination in view is dimmed, or nullptr (O8: the row stays, the footer says why): "WAVETABLE ONLY", "GRANULAR ONLY", "FILTER OFF" for a
+// OS-INSTUI S6, the MOD page: why row `row` (0 = SOURCE) of the destination in view is dimmed, or nullptr (O8: the row stays, the footer says why): "WAVETABLE OR GRANULAR", "GRANULAR ONLY", "FILTER OFF" for a
 // destination the instrument does not use (every row), "SOURCE OFF: ..." for the rows below a SOURCE that is Off. And the rows the page shows for it, as field ids (SOURCE first, then the LFO's three or the envelope's five).
 const char* params_mod_row_why(const Model& model, const ViewState& view, unsigned row) noexcept;
 // OS-AUDIT E-INST-05, the FILTER page: "FILTER OFF" for the cutoff and resonance rows while the filter is off (the rows stay, dimmed), else nullptr.
@@ -46,6 +49,10 @@ void params_how_clip(ui::Renderer& r, core::FixedString<40>& text, int row_x) no
 // OS-INSTUI S1: the instrument in view, as the key row and the page keys see it.
 enum class SlotKind : std::uint8_t { Empty, Sample, Midi, Module };
 SlotKind params_slot_kind(const Model& model, const ViewState& view) noexcept;
+// OS-INSFX S5: whether the generated parameter page in view is an insert's (the Mixer INSERTS page's Enter on a bound cell; the target is ViewState::params.insert).
+bool params_insert_target(const ViewState& view) noexcept;
+// OS-INSFX-ABI2 A9: the module the parameter page in view shows, as a target (module_ui.h): the insert of ViewState::params.insert, else the instrument slot in view. The F5 PRESET list works on it.
+ParamTarget params_target(const ViewState& view) noexcept;
 // The MIDI channel the chooser gives a new MIDI instrument in 0-based slot `slot` (OS-INSTMIDI Q-IM-3): 1 for the slots 1..48, slot - 48 for 49..64.
 constexpr unsigned midi_channel_for_slot(unsigned slot) noexcept { return slot >= 48u ? slot - 47u : 1u; }
 // The instrument (1..64) before (`dir` < 0) or after (`dir` > 0) `from` that holds something (a sample, a MIDI instrument or a module), or 0 when there is none that way.
@@ -78,6 +85,8 @@ class ParamsScreen final : public Screen {
  public:
   constexpr ParamsScreen() noexcept = default;
   void enter(const Model& model, ViewState& view) const noexcept override;
+  // OS-INSFX S5: leaving the page ends an insert's page (the target is cleared, the next visit is the instrument in view's).
+  void leave(const Model& model, ViewState& view) const noexcept override;
   void render(const Model& model, const ViewState& view, ui::Renderer& r, ui::Rect covered) const noexcept override;
   ScreenId id() const noexcept override { return ScreenId::Instrument; }
   Context context() const noexcept override { return Context::Instrument; }
@@ -104,6 +113,9 @@ class ParamsScreen final : public Screen {
   bool next_window(const Model& model, ViewState& view, unsigned key) const noexcept;
   // The pages a module instrument has (its parameters, eight to a page; 0 for a module with no parameters: no page key, F1 does nothing, OS-MODPAGEKEYS follow-up), and the pages of the other kinds (ip::kGroups).
   unsigned module_page_count(const Model& model, const ViewState& view) const noexcept;
+  // OS-MODSENDS: the MIX page of a module instrument (PANNING, DELAY SEND, REVERB SEND: the host's rows, over the module's own pages). `kMixPage` is the view's page for it; Shift + F2 opens it and a second Shift + F2 leaves it (so does any page key; F1 of a module with no pages), and a slot change resets the page.
+  static constexpr std::uint8_t kMixPage = 7;
+  bool open_mix(const Model& model, ViewState& view) const noexcept;
   bool pad_roles(const Model& model, const ViewState& view, PadRole (&roles)[48]) const noexcept override;
   // OS-INSTUI S5: an empty slot of an open project shows the type chooser (F1 SAMPLE, F2 MIDI, F3 PASTE, F4 MODULE, F5 LOAD): the screen's field level is context instrument.empty there.
   Context field_context(const Model& model, const ViewState& view) const noexcept override;

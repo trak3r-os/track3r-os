@@ -425,6 +425,30 @@ TEST_CASE("notify: dismiss with a text takes only the entries of that source wit
   CHECK(q.remaining_ms() == 3000u);
 }
 
+// OS-MIDIREC S2b: opening the EVENTS list takes every Info entry off, whatever its source (a hidden head never expires behind the modal overlay, so a queued Info would mask the list's own refusals after BACK); warnings and errors stay.
+TEST_CASE("notify: dismiss with a severity takes every entry of that severity off, whatever its source, and keeps the more severe ones") {
+  NotifyQueue q;
+  q.post(Severity::Info, "a", "history", 500);
+  q.post(Severity::Warn, "b", "history", 3000);
+  q.post(Severity::Info, "c", "edit", 700);
+  q.post(Severity::Error, "d", "sd", 900);
+  CHECK(order(q) == "a b c d");
+  q.dismiss(Severity::Info);
+  CHECK(order(q) == "b d");  // "b" was not the head: its whole TTL is still there
+  CHECK(q.remaining_ms() == 3000u);
+  q.post(Severity::Info, "e", "ui", 100);
+  CHECK(order(q) == "b d e");
+  q.dismiss(Severity::Warn);
+  CHECK(order(q) == "d e");
+  CHECK(q.remaining_ms() == 900u);  // "b" was the head: "d" starts with its whole time
+  q.dismiss(Severity::Error);  // the head: the next one starts with its whole time
+  CHECK(order(q) == "e");
+  CHECK(q.remaining_ms() == 100u);
+  q.dismiss(Severity::Info);
+  CHECK(q.empty());
+  CHECK(q.remaining_ms() == 0u);
+}
+
 // OS-BUG-PROMPTQ: a question counts only as the head of the strip, so it goes ahead of Info news (a job's DONE) and the Info head it displaces is dropped; warnings and errors keep their places.
 TEST_CASE("notify: ask puts a question ahead of Info news and drops the Info head it displaces") {
   NotifyQueue q;

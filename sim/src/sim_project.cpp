@@ -2,6 +2,13 @@
 #include <o3os/sim/sim_project.h>
 
 #include <o3os/app/dir_scan.h>
+#include <o3os/audio/wt_contour.h>  // OS-CEWTENV W3c: the bake pool is emptied where the table is
+#include <o3os/module/image.h>
+
+#include <dlfcn.h>
+
+#include <cstring>
+#include <utility>
 
 namespace o3os::sim {
 
@@ -22,6 +29,62 @@ SimProject::SimProject(model::ModelArena& arena, model::Editor& editor, app::App
       module_(std::make_unique<app::ModuleImport>()) {}
 
 SimProject::~SimProject() = default;
+
+// platform/mk66/src/app_main.cpp wt_user_reload: the folder's contours into the bank, and the report to the strip.
+void SimProject::reload_envelopes() noexcept {
+  if (envelopes_ == nullptr || !card_.mounted()) {
+    return;
+  }
+  const app::WtUserReport report = app::wt_user_load(card_, *envelopes_);
+  char text[64];
+  if (app::wt_user_notice(report, text, sizeof text) != 0) {
+    app_.wtenv_notice(text, 4000, report.refused_float != 0 || report.skipped() != 0);
+  }
+}
+
+// OS-FLASHDIET I2: the importer module of the import's proxy. The tracker host object stands for the card's modules/importers/tracker.tmod (the
+// starter zip's file), registered natively; a card that carries a tracker.tmod of its own is consulted first, and a file that is not a valid importer
+// for this firmware keeps the native entry away, so the import's header check at begin() refuses it (IMPORTER FOR OTHER FIRMWARE).
+void SimProject::attach_importer() noexcept {
+  // OS-BUG-IMPFLAKE (as in tests/module_import_test.cpp): Arena::init refuses a base that is not 64-aligned or a target that ends above 4 GiB, and a
+  // truncated heap address is either at random (ASLR), so the arenas take an aligned buffer and fixed 32-bit target addresses.
+  const auto aligned = [](std::vector<std::uint8_t>& v) noexcept {
+    const std::uintptr_t p = reinterpret_cast<std::uintptr_t>(v.data());
+    const std::size_t skip = static_cast<std::size_t>(((p + 63u) & ~static_cast<std::uintptr_t>(63u)) - p);
+    return std::pair<std::uint8_t*, std::uint32_t>{v.data() + skip, static_cast<std::uint32_t>(v.size() - skip)};
+  };
+  const auto hot = aligned(imp_hot_);
+  const auto cold = aligned(imp_cold_);
+  imp_set_.hot().init(hot.first, 0x20000000u, hot.second);
+  imp_set_.cold().init(cold.first, 0x30000000u, cold.second);
+  module_->set_module_host(&imp_set_, &imp_loader_, nullptr, "tracker");
+  bool native = true;
+  hal::storage::FileHandle f{};
+  if (card_.open("modules/importers/tracker.tmod", f) == hal::storage::Status::Ok) {
+    std::uint32_t size = 0;
+    o3m_file_header h{};
+    std::size_t have = 0;
+    bool ok = card_.size(f, size) == hal::storage::Status::Ok;
+    while (ok && have < sizeof h) {
+      std::size_t got = 0;
+      ok = card_.read(f, reinterpret_cast<std::uint8_t*>(&h) + have, sizeof h - have, got) == hal::storage::Status::Ok && got != 0u;
+      have += got;
+    }
+    card_.close(f);
+    native = ok && module::check_header(h, size) == module::Status::Ok;
+  }
+  if (!native) {
+    return;
+  }
+  imp_so_ = dlopen(O3SIM_TRACKER_HOST_SO, RTLD_NOW | RTLD_LOCAL);
+  if (imp_so_ == nullptr) {
+    return;
+  }
+  const o3m_module* entry = static_cast<const o3m_module*>(dlsym(imp_so_, "o3m_entry"));
+  if (entry != nullptr) {
+    (void)imp_set_.add_native("tracker", *entry);
+  }
+}
 
 // platform/mk66/src/app_main.cpp start_project_load: the folder is verified first (the Verify phase, pump()), then begin_open() starts its loader and begin_replace().
 SimProject::Start SimProject::open(const char* folder, Format format) noexcept {
@@ -75,8 +138,8 @@ SimProject::Start SimProject::begin_fresh(bool keep_instruments) noexcept {
   return Start::Started;
 }
 
-// platform/mk66/src/app_main.cpp start_module_import: the file is opened now (a path that is not a module, or a file that will not open, leaves the document as it was), the importer's first act (it resets
-// the project) is its first step() after the Settle; from here the module's report is the load's.
+// platform/mk66/src/app_main.cpp start_module_import: the file is opened now (a path that is not a module leaves the document as it was); the importer's first act (it resets
+// the project) is its first step() after the Settle; from there the module's report is the load's.
 SimProject::Start SimProject::import_module(const char* file, app::ImportEngine engine) noexcept {
   if (phase_ != Phase::Idle) {
     return Start::Busy;
@@ -85,8 +148,14 @@ SimProject::Start SimProject::import_module(const char* file, app::ImportEngine 
     return Start::NoCard;
   }
   refused_ = false;
-  if (module_->begin(card_, file, arena_, engine) != app::ModuleImport::Start::Started) {
-    return Start::BadPath;
+  const app::ModuleImport::Start began = module_->begin(card_, file, arena_, engine);
+  if (!app::import_replaces_document(began)) {
+    if (began != app::ModuleImport::Start::Failed) {
+      return Start::BadPath;  // BadPath / NotModule: nothing started, no report to show
+    }
+    // QA-FIL-139/140, as app_main.cpp start_module_import: refused at begin, no begin_replace: the open project and its modules stay untouched; the phase stays Idle,
+    // so the app's next poll shows the strip from import_summary() at once.
+    return Start::Started;
   }
   native_loader_->release();
   begin_replace();
@@ -107,6 +176,7 @@ void SimProject::begin_replace() noexcept {
     preview_->notes_off(false);
   }
   app_.transport_stopped();
+  app_.cancel_ptfx();  // OS-CEPTFX S3b: a plugin run in progress is cancelled before the sample table is replaced (the unit's begin_replace does the same)
   settle_ms_ = 0;
   phase_ = transport_ != nullptr ? Phase::Settle : Phase::Project;
 }
@@ -179,6 +249,7 @@ void SimProject::pump() noexcept {
         for (unsigned i = 0; i < audio::kSampleSlots; ++i) {
           voices_.set_sample(i, audio::SampleDesc{});
         }
+        audio::wt_bake_reset();  // OS-CEWTENV W3c: no descriptor holds a bake id now
         bank_.clear();
       }
       finish();  // the project did not load: the document stays as the loader left it (a file that read badly leaves it reset)
@@ -203,6 +274,8 @@ void SimProject::begin_samples() noexcept {
     for (unsigned i = 0; i < audio::kSampleSlots; ++i) {
       voices_.set_sample(i, audio::SampleDesc{});
     }
+    audio::wt_bake_reset();  // OS-CEWTENV W3c: no descriptor holds a bake id now (the project's own are baked as they are rebuilt)
+    reload_envelopes();      // OS-CEWTENV W8: the card's user contours, before the descriptors are built
   }
   if (module_->active()) {  // the module's samples are decoded on request into the arena (no folder: nothing is marked as on the card)
     bank_.set_law(audio::LevelLaw::Og12);

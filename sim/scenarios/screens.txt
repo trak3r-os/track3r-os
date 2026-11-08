@@ -10,7 +10,6 @@ tap song
 snap song_page2
 assert state screen=SONG page=1
 tap song
-tap song
 assert state screen=SONG page=0
 snap song_page1
 
@@ -57,47 +56,53 @@ tap f2
 release shift
 snap pattern_pads_notes
 
-# The Navigator (OS-NAV2): a tap of Shift + Pattern opens the view grid and it STAYS open after the keys are let go (a long wait changes nothing);
-# the arrow chooses Song, F8 is GO (the footer says F7 CLOSE / F8 GO, and the screen's F-key row under it is the Navigator's: F1 GO, F7 CLOSE, F8 GO, and
-# the quarter jumps while Shift is still held).
+# The Navigator (OS-APPSNAV, OS-NAV2): the chord Song + Pattern (either order; Master + Song too) opens the view grid and it STAYS open after the keys are let go (a long wait
+# changes nothing); neither screen's tap fires. The arrow chooses Song, F8 is GO (the footer says F7 CLOSE / F8 GO, and the screen's F-key row under it is the Navigator's: F1 GO,
+# F7 CLOSE, F8 GO, and the quarter jumps while Shift is held).
+press song
+press pattern
+release pattern
+release song
 press shift
-tap pattern
 snap navigator_open_shift
 release shift
 wait 450
 snap navigator_open
-assert state overlay=NAVIGATOR keys=~F8:GO
+assert state screen=PATTERN overlay=NAVIGATOR keys=~F8:GO
 tap right
 snap navigator_song
 tap f8
 snap navigator_opened_song
 assert state screen=SONG overlay=NONE
 
-# Held works the same: hold Shift + Pattern past the old hold time, let go of both, the grid is still up; the encoder moves the choice (one cell, the encoder
-# is a cell per detent) and so does an arrow (a row down); F7 is CLOSE and the view stays where it was.
+# Held works the same: hold Master + Song past the hold time, let go of both, the grid is still up; the encoder moves the choice (one cell, the encoder is a cell per
+# detent) and so does an arrow (a row down); F7 is CLOSE and the view stays where it was (no Song peek, no master volume).
 tap pattern
-press shift
-press pattern
+press master
+press song
 wait 450
-release pattern
-release shift
+release song
+release master
 snap navigator_held_open
 encoder 1
 tap down
 snap navigator_down
 tap f7
 snap navigator_closed
+assert state screen=PATTERN overlay=NONE
 
-# Pattern again closes it too (the plain button, and with Shift held it is the same), and F1 is a second GO.
-press shift
-tap pattern
-release shift
+# Pattern closes it too (the plain button), and F1 is a second GO.
+press song
+press pattern
+release pattern
+release song
 tap right
 tap pattern
 snap navigator_closed_by_pattern
-press shift
-tap pattern
-release shift
+press pattern
+press song
+release song
+release pattern
 tap right
 tap f1
 snap navigator_f1_go
@@ -157,10 +162,10 @@ press shift
 tap song
 tap f2
 snap shift_song_quarter
-# (Shift + Pattern is the Navigator now, OS-NAV2: it opens on Song's cell, Left chooses Pattern, F8 is GO, with Shift held all the while.)
+# (Shift + Pattern is the apps list now, OS-APPSNAV, so the way back to Pattern is its button: Shift is let go for it and held again.)
+release shift
 tap pattern
-tap left
-tap f8
+press shift
 tap f2
 snap shift_pattern_quarter
 release shift

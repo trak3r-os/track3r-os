@@ -65,6 +65,7 @@ CATALOGUE = {
     "instrument.md": ["instrument"],
     "mixer.md": ["mixer"],
     "module-instrument-fx.md": ["modules"],
+    "insert_effects.md": ["global"],
     "module_app.md": ["module_app"],
     "module-sounds.md": ["modules"],
     "modules.md": ["modules"],

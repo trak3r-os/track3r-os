@@ -1,0 +1,79 @@
+# OS-CEWTENV W7a / W7b (QA-INS-294..303): the MOD page's WT ENV and WT LFO sources, slot 3 as Gran Length on a granular instrument, and the contour drawing. A file of its own: the contours are made into the card's bank (a run has one card, and qa_instrument.txt opens another later). The goldens are qa_instrument_wt/qa_ins_NNN.
+
+document
+wait 20
+card e2e_card
+action instrument.select 1
+tap params
+wait 8000
+# F4 opens the MOD page (DEST 1/6), F4 again is the next destination: DEST 2/6, the pan.
+tap f4 2
+# QA-INS-294: SOURCE turned three clicks up from Off reads WT ENV (Off, ENV, LFO, WT ENV); the page has eight rows, SOURCE at the top.
+encoder +3
+assert model inst.1.mod1.source=3
+snap qa_ins_294
+# QA-INS-295: the WT ENV rows: WAVE (the contour, F or U and its number), DURATION (10 ms a click), WARP X, WARP Y, SUSTAIN (OFF at 0, then 1..99 %).
+tap down
+encoder +10
+tap down
+encoder +50
+tap down
+encoder +3
+tap down
+encoder -2
+tap down
+encoder +50
+assert model inst.1.wt1.wave=12
+assert model inst.1.wt1.duration=502
+assert model inst.1.wt1.warp_x=3
+assert model inst.1.wt1.warp_y=-2
+assert model inst.1.wt1.sustain=50
+snap qa_ins_295
+# QA-INS-296: one F8 takes back the last change only (SUSTAIN back to OFF); the warps and the duration stay.
+tap f8
+assert model inst.1.wt1.sustain=0
+assert model inst.1.wt1.warp_y=-2
+snap qa_ins_296
+# QA-INS-297: SOURCE one more click up is WT LFO: six rows (SOURCE, WAVE, SPEED, WARP X, WARP Y, AMOUNT); the contour and the warps are the ones just set.
+tap up 5
+encoder +1
+assert model inst.1.mod1.source=4
+assert model inst.1.wt1.wave=12
+snap qa_ins_297
+# QA-INS-298: SPEED is the LFO's own row (a click moves it); the contour is shared with WT ENV (one byte per destination).
+tap down 1
+tap down 1
+encoder +4
+snap qa_ins_298
+# QA-INS-299: back to LFO the SHAPE row reads a Triangle (the stored contour byte stays in the file and plays as a Triangle), and a WT slot's rows are gone.
+tap up 2
+encoder -2
+assert model inst.1.mod1.source=2
+tap down
+snap qa_ins_299
+
+# OS-CEWTENV W7b (QA-INS-300..303): slot 3 on a granular instrument and the WT contour drawing, on the fourth destination (DEST 4/6), two F4 presses on from the pan destination.
+tap f4 2
+tap up 3
+action instrument.play_mode 7
+# QA-INS-300: on a GRANULAR instrument the destination is Gran Length (the header and the rows are lit, no WAVETABLE OR GRANULAR line); SOURCE one click up is Envelope.
+encoder +1
+assert model inst.1.mod3.source=1
+snap qa_ins_300
+# QA-INS-301: SOURCE two clicks on is WT Env: the plot is the contour (F001, a saw rise, as the default WAVE is 0) over its duration, with the length in ms above the right edge.
+encoder +2
+assert model inst.1.mod3.source=3
+snap qa_ins_301
+# QA-INS-302: the warps bend the picture: WARP X +5 and WARP Y -4 (the rows are SOURCE, WAVE, DURATION, WARP X, WARP Y, ...).
+tap down 3
+encoder +5
+tap down
+encoder -4
+assert model inst.1.wt3.warp_x=5
+assert model inst.1.wt3.warp_y=-4
+snap qa_ins_302
+# QA-INS-303: WT LFO draws the same contour over one cycle (the cue reads ONE CYCLE).
+tap up 4
+encoder +1
+assert model inst.1.mod3.source=4
+snap qa_ins_303

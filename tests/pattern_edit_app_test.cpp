@@ -7,8 +7,10 @@
 #include <o3os/app/actions.h>
 #include <o3os/app/app.h>
 #include <o3os/app/buttons.h>
+#include <o3os/app/frame.h>
 #include <o3os/app/pattern_layout.h>
 #include <o3os/app/pattern_source.h>
+#include <o3os/app/pattern_tools_view.h>
 #include <o3os/app/screens/overlay.h>
 #include <o3os/app/screens/pattern_screen.h>
 #include <o3os/app/song_source.h>
@@ -16,13 +18,17 @@
 #include <o3os/core/action.h>
 #include <o3os/app/screens/scene.h>
 #include <o3os/core/input_event.h>
+#include <o3os/core/scales.h>
 #include <o3os/eve/display_list_builder.h>
 #include <o3os/midi/cc_in.h>
 #include <o3os/model/editor.h>
 #include <o3os/model/fx_table.h>
+#include <o3os/model/pattern_verbs.h>
 #include <o3os/platform/host/fakes.h>
 #include <o3os/sim/eve_raster.h>
 #include <o3os/sim/raster_display.h>
+#include <o3os/ui/components.h>
+#include <o3os/ui/font.h>
 #include <o3os/ui/renderer.h>
 #include <o3os/ui/theme.h>
 
@@ -429,7 +435,7 @@ TEST_CASE("pattern edit: the pads in each field, and in Browse they preview") {
   CHECK(rig.step(0, 3).fx[0].type == 0);
   rig.go(3);
   rig.column(Column::Fx1);
-  (void)rig.invoke("step.fx_type", 4);  // Chance 0..100
+  (void)rig.invoke("step.fx_type", 4);  // Chance (the row reaches 174, the pads stay in 0..100, OS-CECHANCE C2)
   rig.go(3);
   rig.tap(Button::Fx);
   rig.pad(47);
@@ -974,6 +980,139 @@ TEST_CASE("pattern edit: Shift + Up at step 0 selects the track's steps, again e
   CHECK_FALSE(rig.edit().selection.extending);
   CHECK(rig.invoke("select.clear") == DispatchResult::Changed);
   CHECK_FALSE(rig.edit().selection.active);
+}
+
+// OS-SELCOL: Shift + Up at step 0 steps through the cursor's column, the whole track, every track. A note, a volume and both FX on every row of tracks 0 and 1.
+static void fill_columns(Rig& rig, int rows) {
+  const model::Step s = {50, 3, 40, {{4, 10}, {27, 20}}};
+  for (std::uint32_t t = 0; t < 2; ++t) {
+    for (int row = 0; row < rows; ++row) {
+      (void)rig.project().set_steps(1, t, static_cast<std::uint32_t>(row), &s, 1);
+    }
+  }
+  rig.go(0);
+}
+
+TEST_CASE("OS-SELCOL: Shift + Up at step 0 selects the cursor's column, then the track, then every track; on Note the first press is the track") {
+  const Column cols[] = {Column::Instr, Column::Vol, Column::Fx1, Column::Fx2, Column::Note};
+  for (const Column col : cols) {
+    CAPTURE(static_cast<int>(col));
+    Rig rig(true, 32);
+    rig.edit_mode();
+    rig.go(0, 2);
+    rig.column(col);
+    rig.press(Button::Shift);
+    rig.pass(1);
+    rig.tap(Button::Up);
+    app::Selection::Block b = rig.edit().selection.block(rig.view().row(), rig.view().track());
+    CHECK((b.row0 == 0 && b.row1 == 31 && b.track0 == 2 && b.track1 == 2));
+    if (col != Column::Note) {
+      CHECK((b.col0 == static_cast<int>(col) && b.col1 == static_cast<int>(col)));
+      rig.tap(Button::Up);  // the whole track
+      b = rig.edit().selection.block(rig.view().row(), rig.view().track());
+      CHECK((b.row0 == 0 && b.row1 == 31 && b.track0 == 2 && b.track1 == 2 && b.whole_steps()));
+    } else {
+      CHECK(b.whole_steps());
+    }
+    rig.tap(Button::Up);  // every track
+    b = rig.edit().selection.block(rig.view().row(), rig.view().track());
+    CHECK((b.row0 == 0 && b.row1 == 31 && b.track0 == 0 && b.track1 > 2 && b.whole_steps()));
+    rig.release(Button::Shift);
+    rig.pass(1);
+    CHECK(rig.edit().selection.active);
+  }
+}
+
+TEST_CASE("OS-SELCOL: the one-column block outlives Shift; Delete clears only that column; a new press starts at the column again") {
+  Rig rig(true, 32);
+  rig.edit_mode();
+  fill_columns(rig, 32);
+  rig.go(0);
+  rig.column(Column::Vol);
+  rig.press(Button::Shift);
+  rig.pass(1);
+  rig.tap(Button::Up);
+  rig.release(Button::Shift);
+  rig.pass(1);
+  CHECK(rig.edit().selection.active);
+  CHECK_FALSE(rig.edit().selection.column);
+  const app::Selection::Block b = rig.edit().selection.block(rig.view().row(), rig.view().track());
+  CHECK((b.col0 == static_cast<int>(Column::Vol) && b.col1 == static_cast<int>(Column::Vol) && b.row0 == 0 && b.row1 == 31));
+  rig.tap(Button::Delete);
+  for (int row = 0; row < 32; ++row) {
+    CHECK_MESSAGE(rig.step(0, row).vol == model::kVolumeUnset, "row " << row);
+    CHECK_MESSAGE((rig.step(0, row).note == 50 && rig.step(0, row).fx[0].type == 4 && rig.step(0, row).fx[1].type == 27), "row " << row);
+    CHECK_MESSAGE(rig.step(1, row).vol == 40, "track 1, row " << row);
+  }
+  CHECK_FALSE(rig.edit().selection.active);
+  // After Shift is let go, a fresh press at step 0 is the column again (not the track).
+  rig.go(0);
+  rig.column(Column::Fx1);
+  rig.shift_tap(Button::Up);
+  const app::Selection::Block c = rig.edit().selection.block(rig.view().row(), rig.view().track());
+  CHECK((c.col0 == static_cast<int>(Column::Fx1) && c.col1 == static_cast<int>(Column::Fx1)));
+  // Shift + Down from the one-column block makes a plain block of whole steps.
+  rig.press(Button::Shift);
+  rig.pass(1);
+  rig.tap(Button::Up);
+  rig.tap(Button::Down);
+  rig.release(Button::Shift);
+  rig.pass(1);
+  CHECK(rig.edit().selection.block(rig.view().row(), rig.view().track()).whole_steps());
+}
+
+TEST_CASE("OS-SELCOL: with a one-column block the encoder changes that column inside the block only (Vol, Fx1, Fx2, Instr)") {
+  Rig rig(true, 32);
+  rig.edit_mode();
+  fill_columns(rig, 32);
+  const model::Step before = rig.step(0, 5);
+  // Vol: the real encoder (and Shift + encoder) on the block of track 0's volumes.
+  rig.go(0);
+  rig.column(Column::Vol);
+  rig.shift_tap(Button::Up);
+  rig.turn(3);
+  for (int row = 0; row < 32; ++row) {
+    CHECK_MESSAGE(rig.step(0, row).vol != 40, "row " << row);
+    CHECK_MESSAGE((rig.step(0, row).note == 50 && rig.step(0, row).fx[0].value == before.fx[0].value && rig.step(0, row).fx[1].value == before.fx[1].value), "row " << row);
+    CHECK_MESSAGE(rig.step(1, row).vol == 40, "track 1, row " << row);
+  }
+  const unsigned vol = rig.step(0, 7).vol;
+  rig.shift_turn(1);  // (Shift + encoder while the block stays)
+  CHECK(rig.step(0, 7).vol != vol);
+  CHECK(rig.step(1, 7).vol == 40);
+  // Fx1 and Fx2: the value of that FX only.
+  const Column fxs[] = {Column::Fx1, Column::Fx2};
+  for (int f = 0; f < 2; ++f) {
+    rig.go(0);
+    rig.column(fxs[f]);
+    rig.shift_tap(Button::Up);
+    const unsigned old_value = rig.step(0, 9).fx[f].value;
+    const unsigned other = rig.step(0, 9).fx[1 - f].value;
+    CHECK(rig.invoke("step.fx_value_delta", 1) == DispatchResult::Changed);
+    for (int row = 0; row < 32; ++row) {
+      CHECK_MESSAGE(rig.step(0, row).fx[f].value != old_value, "row " << row);
+      CHECK_MESSAGE(rig.step(0, row).fx[1 - f].value == other, "row " << row);
+      CHECK_MESSAGE(rig.step(1, row).fx[f].value == old_value, "track 1, row " << row);
+    }
+    CHECK(rig.step(0, 9).fx[f].value != old_value);
+  }
+  // Instr: the instrument of the block's steps only.
+  rig.go(0, 0);
+  rig.column(Column::Instr);
+  rig.shift_tap(Button::Up);
+  const unsigned instr1 = rig.step(1, 3).instr;
+  (void)rig.invoke("step.instrument_delta", 1);
+  CHECK(rig.step(0, 3).instr != instr1);
+  CHECK(rig.step(1, 3).instr == instr1);
+  CHECK((rig.step(0, 3).note == 50 && rig.step(0, 3).fx[0].type == 4));
+  // The block's columns, not the cursor's, decide: a block on Fx2 with the cursor moved to Fx1 leaves FX1 alone.
+  rig.go(0, 1);
+  rig.column(Column::Fx2);
+  rig.shift_tap(Button::Up);
+  rig.column(Column::Fx1);
+  const unsigned fx1 = rig.step(1, 4).fx[0].value;
+  (void)rig.invoke("step.fx_value_delta", 1);
+  CHECK(rig.step(1, 4).fx[0].value == fx1);
 }
 
 TEST_CASE("pattern edit: edits act on the block: a range changes only what it has, a single step takes the single branch") {
@@ -1767,6 +1906,62 @@ TEST_CASE("pattern edit: the strip, the info line and the Shift layer are what t
   CHECK(words(a) != words(b));  // the block
 }
 
+TEST_CASE("pattern edit: the info line names the scale in force, from the one name table, with no trailing space (QA-PAT-433, OS-SCALES28 S2)") {
+  // `assert state` reads `diag state`, which has no scale, so the scenario cannot assert this line: the display list is looked at. The Label-face glyphs on the info line's baseline are put back on the
+  // character grid from the text's own left edge (a space draws nothing and advances), and the chip that follows starts after the text plus its gap, which a trailing space would move.
+  Rig rig(true, 48);
+  const ui::Theme& theme = ui::theme(ui::ThemeId::Amiga);
+  const auto info_line = [&](const app::ViewState& v, std::string& chip_gap_ok, unsigned want_len) {
+    platform::host::FakeDisplay sink;
+    eve::DisplayListBuffer storage;
+    eve::DisplayListBuilder builder(sink, storage.words, eve::kMaxDisplayListWords);
+    ui::Renderer r(builder, theme);
+    r.use_translate(false);  // a glyph is a VERTEX2II (x < 512)
+    const bool began = r.begin(ui::Color::Pane);
+    CHECK(began);
+    app::render_scene(rig.app->model(), v, r);
+    CHECK(r.end());
+    const app::Frame f = app::make_frame(theme, app::PatternView::kVisibleRows);
+    const int y = ui::caps_y(theme, ui::Face::Label, f.info.y, f.info.h);
+    const int cell = theme.geometry(ui::Face::Label).cell_w;
+    const int x0 = 2 * theme.metrics.pad + 5 * cell + 2 * theme.metrics.pad + 3 * theme.metrics.gap;  // OS-INFOLINE: the chip (WATCH, here) is first; the text starts after it and its gap
+    const std::uint32_t label = ui::font_face(theme.font(ui::Face::Label)).handle;
+    std::string line(64, ' ');
+    int first_after = -1;  // the first glyph past the text: the chip's
+    bool bitmaps = false;
+    for (const std::uint32_t w : sink.last_frame()) {
+      if ((w >> 24) == (eve::dl::begin(eve::Primitive::Bitmaps) >> 24)) {
+        bitmaps = (w & 0xFu) == static_cast<std::uint32_t>(eve::Primitive::Bitmaps);
+      } else if (bitmaps && (w >> 30) == eve::opcode::kVertex2iiTag && static_cast<int>((w >> 12) & 0x1FFu) == y && ((w >> 7) & 0x1Fu) == label) {
+        const int x = static_cast<int>((w >> 21) & 0x1FFu);
+        const int c = (x - x0) / cell;
+        if (x >= x0 && (x - x0) % cell == 0 && c >= 0 && c < static_cast<int>(want_len)) {
+          line[static_cast<std::size_t>(c)] = static_cast<char>((w & 0x7Fu) + 32u);
+        } else if (x >= x0 + static_cast<int>(want_len) * cell && (first_after < 0 || x < first_after)) {
+          first_after = x;
+        }
+      }
+    }
+    line.resize(want_len);
+    chip_gap_ok = first_after == x0 + (static_cast<int>(want_len) + 3) * cell ? "" : "the 'pads' word is not where the text's length puts it (" + std::to_string(first_after) + ")";  // (three spaces, then "pads NOTES")
+    return line;
+  };
+  // The name is the one table's (core::kScaleNames, the official index + 1), for every scale; and the QA row's own line, literally (but for the octave's name, see below).
+  for (unsigned scale = 0; scale <= model::kNoteScaleMax; ++scale) {
+    const std::string want = std::string("scale ") + core::kScaleNames[scale + 1u] + " C-3   track 1";  // the Rig has no device setting, so the root C in octave 3 is C-3 (the simulator's MIDDLE C default names it C-4, as QA-PAT-433 reads)
+    app::ViewState v = rig.state();
+    v.edit.entry.scale = static_cast<std::uint8_t>(scale);
+    v.edit.apply_entry();
+    std::string gap;
+    const std::string got = info_line(v, gap, static_cast<unsigned>(want.size()));
+    CHECK_MESSAGE(got == want, "scale " << scale << ": '" << got << "'");
+    CHECK_MESSAGE(gap.empty(), "scale " << scale << ": " << gap);
+    if (scale == 26) {
+      CHECK(want == "scale Hirajoshi C-3   track 1");  // QA-PAT-433's line
+    }
+  }
+}
+
 namespace {
 struct TransportLog final : app::TransportSink {
   unsigned plays = 0, stops = 0, pattern = 0, songs = 0, row = 0;
@@ -2220,6 +2415,99 @@ TEST_CASE("step popups: a held Note shows the note-entry settings on its pads an
   CHECK(rig.state().overlay == app::OverlayId::None);
 }
 
+TEST_CASE("step popups: with Note held the encoder and Up / Down walk the 39 scales as a ring in the official order (OS-SCALES28 S2)") {
+  using app::OverlayId;
+  Rig rig;
+  rig.edit_mode();
+  rig.go(2);
+  hold_open(rig, Button::Note);
+  CHECK(rig.state().popup.kind == app::StepPopupView::Note);
+  CHECK(rig.state().edit.entry.scale == 0);  // Chromatic, the default
+  rig.turn(1);
+  CHECK(rig.state().edit.entry.scale == 1);   // Minor: the official order, one a detent
+  rig.turn(-2);
+  CHECK(rig.state().edit.entry.scale == 38);  // wraps below 0 to the last, Enigmatic
+  rig.turn(1);
+  CHECK(rig.state().edit.entry.scale == 0);   // and round again to Chromatic
+  CHECK(rig.invoke("popup.delta", 39) == DispatchResult::Unchanged);  // a whole ring is no change
+  rig.tap(Button::Down);                      // Down is +1, as in every popup list
+  CHECK(rig.state().edit.entry.scale == 1);
+  rig.tap(Button::Up);
+  CHECK(rig.state().edit.entry.scale == 0);
+  rig.tap(Button::Up);                        // Up is -1: wraps to 38
+  CHECK(rig.state().edit.entry.scale == 38);
+  // Shift + Up / Down stay pages: the panel has no list, so they do nothing.
+  rig.shift_tap(Button::Up);
+  CHECK(rig.state().edit.entry.scale == 38);
+  // The encoder reaches one of the 27 (Hirajoshi, the official 26); with SCALE LOCK on the NOTES board follows it.
+  rig.turn(-38);
+  CHECK(rig.state().edit.entry.scale == 0);
+  rig.pad(47);  // row 4, the last pad: SCALE LOCK on
+  CHECK(rig.state().edit.entry.lock == 1);
+  rig.turn(26);
+  CHECK(rig.state().edit.entry.scale == 26);
+  CHECK(rig.state().edit.pads.scale() == 27);  // the core index (the official 26 + 1)
+  // A pad of row 2 after the encoder: the same twelve, through the model's map (pad 2 is Major, the official 2).
+  rig.pad(13);
+  CHECK(rig.state().edit.entry.scale == 2);
+  CHECK(rig.state().edit.pads.scale() == 3);
+  // Note + Left / Right still move a track while the popup is open.
+  const int track = rig.state().pattern.track();
+  rig.tap(Button::Right);
+  CHECK(rig.state().pattern.track() == track + 1);
+  rig.tap(Button::Left);
+  CHECK(rig.state().pattern.track() == track);
+  let_go(rig, Button::Note);
+  CHECK(rig.state().overlay == OverlayId::None);
+  CHECK(rig.state().edit.entry.scale == 2);  // the choice stays
+}
+
+TEST_CASE("step popups: Shift + encoder does nothing in the Note panel, whatever the scale, and the plain encoder still walks it (QA-PAT-430, OS-SCALES28 S2)") {
+  using app::OverlayId;
+  Rig rig;
+  rig.edit_mode();
+  rig.go(2);
+  hold_open(rig, Button::Note);
+  CHECK(rig.state().popup.kind == app::StepPopupView::Note);
+  rig.turn(5);  // Pent. min: a scale that is neither the first nor the last
+  const app::NoteEntry before = rig.state().edit.entry;
+  CHECK(before.scale == 5);
+  const int row = rig.view().row();
+  const int track = rig.state().pattern.track();
+  const int jump = rig.state().edit.edit_step;
+  for (const int detents : {1, -1, 3, -7, 39, -39, 100}) {
+    rig.shift_turn(detents);
+    CHECK_MESSAGE(rig.state().edit.entry.scale == before.scale, "Shift + encoder " << detents << " moved the scale");
+    CHECK(rig.state().edit.entry.root == before.root);
+    CHECK(rig.state().edit.entry.octave == before.octave);
+    CHECK(rig.state().edit.entry.lock == before.lock);
+    CHECK(rig.state().edit.edit_step == jump);
+    CHECK_MESSAGE(rig.view().row() == row, "Shift + encoder " << detents << " moved the cursor (a page, as in Browse)");
+    CHECK(rig.state().pattern.track() == track);
+    CHECK(rig.step(track, row).note == model::kNoteEmpty);  // and wrote no note
+    CHECK(rig.depth() == 0u);
+    CHECK(rig.state().overlay == OverlayId::StepPopup);  // the panel is still up
+    CHECK(rig.state().popup.kind == app::StepPopupView::Note);
+  }
+  // The same at the ring's ends (a coarse step must not wrap them either), and the plain encoder is unharmed afterwards.
+  rig.turn(-5);
+  CHECK(rig.state().edit.entry.scale == 0);
+  rig.shift_turn(-1);
+  CHECK(rig.state().edit.entry.scale == 0);
+  rig.turn(-1);
+  CHECK(rig.state().edit.entry.scale == 38);
+  rig.shift_turn(1);
+  CHECK(rig.state().edit.entry.scale == 38);
+  rig.turn(1);
+  CHECK(rig.state().edit.entry.scale == 0);
+  let_go(rig, Button::Note);
+  CHECK(rig.state().overlay == OverlayId::None);
+  CHECK(rig.step(track, row).note == model::kNoteEmpty);
+  // The control: with the panel closed the same turn is the Note column's octave step (OS-SHIFTENC), so the check above could see an effect.
+  rig.shift_turn(1);
+  CHECK(rig.step(track, row).note != model::kNoteEmpty);
+}
+
 TEST_CASE("step popups: on the instrument parameters page a held Instr lists the instruments and the choice is the instrument edited") {
   using app::OverlayId;
   Rig rig;
@@ -2319,21 +2607,21 @@ TEST_CASE("OS-CFGWIRE F5 PREVIEW: with no audio path it says so") {
   CHECK(rig.message() == "PREVIEW: NO AUDIO OUTPUT");
 }
 
-TEST_CASE("OS-CFGWIRE F6 INVERT: a block's steps in the reverse order, track by track, whole steps, one undo unit; one step says so; Browse does nothing") {
+TEST_CASE("OS-CFGWIRE INVERT (no key since OS-PTOOLS2 S3: F6 is REPEAT): a block's steps in the reverse order, track by track, whole steps, one undo unit; one step says so; Browse does nothing") {
   Rig rig;
   for (int r = 0; r < 4; ++r) {
     put(rig, 0, r, note_at(static_cast<std::uint8_t>(61 + r), static_cast<std::uint8_t>(1 + r)));
     put(rig, 1, r, note_at(static_cast<std::uint8_t>(70 + r), 9));
   }
   // Browse: nothing is edited and the strip says what the key needs (OS-QAFIX-12).
-  rig.tap(Button::F6);
+  (void)rig.invoke("pattern.invert");
   CHECK(rig.message() == "TURN EDIT ON");
   rig.flush();
   CHECK(rig.depth() == 0);
   CHECK(rig.step(0, 0).note == 61);
   CHECK(rig.step(0, 3).note == 64);
   rig.edit_mode();
-  rig.tap(Button::F6);
+  (void)rig.invoke("pattern.invert");
   CHECK(rig.message() == "SELECT A BLOCK TO INVERT");
   rig.flush();
   CHECK(rig.depth() == 0);
@@ -2342,7 +2630,7 @@ TEST_CASE("OS-CFGWIRE F6 INVERT: a block's steps in the reverse order, track by 
     (void)rig.invoke("select.extend", 1);
   }
   rig.extend_tracks(1);
-  rig.tap(Button::F6);
+  (void)rig.invoke("pattern.invert");
   for (int r = 0; r < 4; ++r) {
     CHECK_MESSAGE(rig.step(0, r).note == 64 - r, "track 0 row " << r);
     CHECK_MESSAGE(rig.step(0, r).instr == 4 - r, "track 0 row " << r);  // whole steps: the instrument goes with its note
@@ -2350,7 +2638,7 @@ TEST_CASE("OS-CFGWIRE F6 INVERT: a block's steps in the reverse order, track by 
   }
   CHECK(rig.step(0, 4).note == model::kNoteEmpty);  // outside the block: untouched
   CHECK(rig.depth() == 1);
-  rig.tap(Button::F6);  // again: back
+  (void)rig.invoke("pattern.invert");  // again: back
   for (int r = 0; r < 4; ++r) {
     CHECK(rig.step(0, r).note == 61 + r);
   }
@@ -2371,6 +2659,7 @@ TEST_CASE("OS-CFGWIRE FILL (pattern.fill, no key since OS-QJUMP): the current no
   (void)rig.invoke("chooser.pad", 4);
   (void)rig.invoke("chooser.toggle", 2);
   NEED(rig.edit().edit_step == 4);
+  (void)rig.invoke("select.column_all");  // OS-PTOOLS2 S3c: the selection is the target; Shift + Up at row 1 selects the track
   (void)rig.invoke("pattern.fill");  // (Shift + Fx was its key until OS-QJUMP: it is the 3/4 jump now)
   CHECK(rig.message() == "FILL: EVERY 4 STEPS");
   for (int r = 0; r < 64; ++r) {
@@ -2386,6 +2675,7 @@ TEST_CASE("OS-CFGWIRE FILL (pattern.fill, no key since OS-QJUMP): the current no
   rig.flush();
 
   // A block: from its first row, every 4th, inside it only. The cursor step is empty now, so the last note played is the note: none yet, the default C-5 (60).
+  (void)rig.invoke("select.clear");
   (void)rig.invoke("nav.scroll", 2);
   (void)rig.invoke("select.extend", 1);
   for (int i = 0; i < 6; ++i) {
@@ -2397,12 +2687,19 @@ TEST_CASE("OS-CFGWIRE FILL (pattern.fill, no key since OS-QJUMP): the current no
     CHECK_MESSAGE((rig.step(0, r).note != model::kNoteEmpty) == (want || r == 0), "row " << r);
   }
   CHECK(rig.step(0, 2).note == 61);  // kDefaultNote 60, as a step byte
+  // Nothing selected: the cursor step alone is the target (OS-PTOOLS2 S3c).
+  (void)rig.invoke("select.clear");
+  (void)rig.invoke("pattern.fill");
+  CHECK(rig.step(0, 9).note == 61);   // the cursor's step (row 9 after the extends)
+  CHECK(rig.step(0, 10).note == model::kNoteEmpty);
+  CHECK(rig.step(0, 5).note == model::kNoteEmpty);
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
   // Browse: nothing is edited, and it says what it needs (and where EXPORT, the key's other half, will come from).
   rig.flush();
   rig.mode(PatternMode::Browse);
   const unsigned depth = rig.depth();
   (void)rig.invoke("pattern.fill");
-  CHECK(rig.message() == "FILL: TURN EDIT ON (EXPORT: F7 TOOLS)");
+  CHECK(rig.message() == "FILL: TURN EDIT ON (EXPORT: F7 APPS >)");
   CHECK(rig.depth() == depth);
 }
 
@@ -2414,6 +2711,7 @@ TEST_CASE("OS-CFGWIRE FILL with the edit step 0 fills every step; the soft key F
   (void)rig.invoke("chooser.pad", 0);
   (void)rig.invoke("chooser.toggle", 2);
   NEED(rig.edit().edit_step == 0);
+  (void)rig.invoke("select.column_all");  // the whole track is the selection's target
   (void)rig.invoke("pattern.fill");
   for (int r = 0; r < 16; ++r) {
     CHECK_MESSAGE(rig.step(0, r).note == 50, "row " << r);
@@ -2426,7 +2724,8 @@ TEST_CASE("OS-CFGWIRE FILL with the edit step 0 fills every step; the soft key F
   rig.tap(Button::F8);
   CHECK(rig.state().overlay == app::OverlayId::None);
   rig.tap(Button::F7);
-  CHECK(rig.state().overlay == app::OverlayId::Tools);  // OS-H3A: F7 is TOOLS now; with no module system it lists EXPORT PATTERN (OS-WAVEXP)
+  rig.pad(15);  // OS-PTOOLS2 S3: the verb menu's APPS > row (pad 16) opens the TOOLS list
+  CHECK(rig.state().overlay == app::OverlayId::VerbMenu);  // OS-H3A: F7 is TOOLS now; with no module system it lists EXPORT PATTERN (OS-WAVEXP)
   rig.tap(Button::F8);
   CHECK(rig.state().overlay == app::OverlayId::None);
   rig.flush();
@@ -2443,7 +2742,7 @@ namespace {
 
 // Moves the dialog's cursor to `row` (FillRow) from the top and changes it by `delta` places.
 void fill_row(Rig& rig, int row, int delta) {
-  for (int i = 0; i < 8; ++i) {
+  for (unsigned i = 0; i < app::kFillRows; ++i) {
     rig.tap(Button::Up);
   }
   for (int i = 0; i < row; ++i) {
@@ -2454,8 +2753,7 @@ void fill_row(Rig& rig, int row, int delta) {
   }
 }
 
-// The rows by name (app::FillRow); the dialog has eight (OS-FILL2). Row 4 is N, EVENTS or DENSITY by TYPE.
-constexpr int kRowScope = static_cast<int>(app::FillRow::Scope);
+// The rows by name (app::FillRow); the dialog has seven (OS-FILL2; no SCOPE since OS-PTOOLS2 S3c). Row 2 is N, EVENTS or DENSITY by TYPE.
 constexpr int kRowWhat = static_cast<int>(app::FillRow::What);
 constexpr int kRowType = static_cast<int>(app::FillRow::Type);
 constexpr int kRowCount = static_cast<int>(app::FillRow::Count);
@@ -2463,7 +2761,7 @@ constexpr int kRowMode = static_cast<int>(app::FillRow::Mode);
 constexpr int kRowKey = static_cast<int>(app::FillRow::Key);
 constexpr int kRowFrom = static_cast<int>(app::FillRow::From);
 constexpr int kRowTo = static_cast<int>(app::FillRow::To);
-static_assert(app::kFillRows == 8, "the dialog has eight rows");
+static_assert(app::kFillRows == 7, "the dialog has seven rows (no SCOPE since OS-PTOOLS2 S3c)");
 
 std::string column_of(Rig& rig, int track, int rows) {
   std::string s;
@@ -2504,9 +2802,10 @@ TEST_CASE("OS-PTOOLS Fill dialog: F4 opens it in Edit only, F8 closes it and cha
   rig.tap(Button::F8);
 }
 
-TEST_CASE("OS-PTOOLS Fill dialog: Euclid 3 events over the track is one undo unit, the track's steps only, the first step a hit") {
+TEST_CASE("OS-PTOOLS Fill dialog: Euclid 3 events over the selected track is one undo unit, the track's steps only, the first step a hit") {
   Rig rig(true, 16);
   rig.edit_mode();
+  (void)rig.invoke("select.column_all");  // OS-PTOOLS2 S3c: the selection is the target; this is the track of Shift + Up at row 1
   rig.tap(Button::F4);
   fill_row(rig, kRowType, 2);   // EUCLID
   fill_row(rig, kRowCount, -1);  // EVENTS 4 -> 3
@@ -2515,7 +2814,7 @@ TEST_CASE("OS-PTOOLS Fill dialog: Euclid 3 events over the track is one undo uni
   rig.tap(Button::F1);
   CHECK(rig.state().overlay == app::OverlayId::None);
   CHECK(column_of(rig, 0, 16) == "x.....x....x....");  // (i * 3) mod 16 < 3: steps 0, 6 and 11
-  CHECK(column_of(rig, 1, 16) == std::string(16, '.'));  // TRACK scope: the other tracks are not touched
+  CHECK(column_of(rig, 1, 16) == std::string(16, '.'));  // the track is the target: the other tracks are not touched
   CHECK(rig.message() == "FILL: EUCLID 3 EVENTS");
   CHECK(rig.depth() == depth + 1);
   CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
@@ -2523,40 +2822,53 @@ TEST_CASE("OS-PTOOLS Fill dialog: Euclid 3 events over the track is one undo uni
   CHECK(rig.depth() == depth);
 }
 
-TEST_CASE("OS-PTOOLS Fill dialog: SCOPE block stays inside the block, track is the cursor's track, pattern is every track, each cut at the pattern's length") {
+TEST_CASE("OS-PTOOLS2 S3c: the target of the fill is the selection — the block, the track of Shift+Up at row 1, the pattern of it again, the cursor step with none; the footer names it") {
   Rig rig(true, 16);
   rig.edit_mode();
-  // A block: rows 2..9 of track 0 (Shift + Down x7 from row 2), every 2nd step.
+  const app::PatternSource src(rig.app->model(), rig.edit().pattern);
+  const auto footer = [&] {
+    char buf[48];
+    (void)app::fill_target_text(rig.state().edit.selection, rig.view().row(), rig.view().track(), src.length(), src.tracks(), buf, sizeof buf);
+    return std::string(buf);
+  };
+  // A block: rows 3..10 of track 1 (nav.scroll 2, then Shift + Down x7), every 2nd step.
   (void)rig.invoke("nav.scroll", 2);
   for (int i = 0; i < 7; ++i) {
     (void)rig.invoke("select.extend", 1);
   }
   rig.tap(Button::F4);
-  CHECK(rig.state().fill.scope == app::FillScope::Block);  // a selection suggests BLOCK
-  fill_row(rig, kRowCount, 1);                             // N = 2
+  CHECK(footer() == "BLOCK  TRACK 1  ROWS 3-10");  // the dialog's footer names the block
+  fill_row(rig, kRowCount, 1);                     // N = 2
   rig.tap(Button::F1);
   CHECK(column_of(rig, 0, 16) == "..x.x.x.x.......");
   CHECK(column_of(rig, 1, 16) == std::string(16, '.'));
-  // TRACK: the block is gone (Select clear), the whole track 0.
+  // The track: Shift + Up at row 1 (the whole column), the whole track 1.
   (void)rig.invoke("select.clear");
+  (void)rig.invoke("select.column_all");
   rig.tap(Button::F4);
-  CHECK(rig.state().fill.scope == app::FillScope::Track);  // no selection: BLOCK falls back to TRACK
+  CHECK(footer() == "TRACK 1  ROWS 1-16");  // 16 steps in this pattern
   rig.tap(Button::F8);
-  // PATTERN: every track, 16 steps each.
+  // The pattern: the column selection over every track.
+  (void)rig.invoke("select.column_all");
   rig.tap(Button::F4);
-  fill_row(rig, kRowScope, 1);  // TRACK -> PATTERN
-  CHECK(rig.state().fill.scope == app::FillScope::Pattern);
+  CHECK(footer() == "PATTERN  ALL TRACKS  ROWS 1-16");
   fill_row(rig, kRowCount, 1);  // N = 3
   rig.tap(Button::F1);
   for (int t = 0; t < 12; ++t) {
     CHECK_MESSAGE(column_of(rig, t, 16) == (t == 0 ? "x.xxx.x.xx..x..x" : "x..x..x..x..x..x"), "track " << t);
   }
   CHECK(rig.step(0, 16).note == model::kNoteEmpty);  // past the pattern's length (the model's rows beyond it are never written)
+  // Nothing selected: the cursor step alone.
+  (void)rig.invoke("select.clear");
+  rig.tap(Button::F4);
+  CHECK(footer() == "STEP  TRACK 1  ROW " + std::to_string(rig.view().row() + 1));
+  rig.tap(Button::F8);
 }
 
 TEST_CASE("OS-PTOOLS Fill dialog: WHAT = INSTR writes the instrument in hand, RANDOM density 100 chooses every step, 0 none and says so") {
   Rig rig(true, 16);
   rig.edit_mode();
+  (void)rig.invoke("select.column_all");  // OS-PTOOLS2 S3c: the track selected, so the fill is the track's
   (void)rig.invoke("instrument.select", 7);
   rig.tap(Button::F4);
   fill_row(rig, kRowWhat, 1);  // INSTR
@@ -2585,9 +2897,10 @@ TEST_CASE("OS-PTOOLS Fill dialog: WHAT = INSTR writes the instrument in hand, RA
   }
 }
 
-TEST_CASE("OS-PTOOLS Fill dialog: pattern.fill (no key since OS-QJUMP) repeats the last fill of the dialog, the same rows and the same result") {
+TEST_CASE("OS-PTOOLS Fill dialog: pattern.fill (no key since OS-QJUMP) repeats the last fill of the dialog on the selection as it is now, the same rows and the same result") {
   Rig rig(true, 16);
   rig.edit_mode();
+  (void)rig.invoke("select.column_all");  // the track is the target
   rig.tap(Button::F4);
   fill_row(rig, kRowType, 2);   // EUCLID, 4 events
   rig.tap(Button::F1);
@@ -2599,6 +2912,935 @@ TEST_CASE("OS-PTOOLS Fill dialog: pattern.fill (no key since OS-QJUMP) repeats t
   (void)rig.invoke("pattern.fill");
   CHECK(column_of(rig, 0, 16) == "x...x...x...x...");  // the same fill again
   CHECK(rig.message() == "FILL: EUCLID 4 EVENTS");
+}
+
+TEST_CASE("OS-PTOOLS2 S3 F6 REPEAT (Q1): the key is tools.repeat and the key row reads RE FILL") {
+  CHECK(std::strcmp(app::kPatternSoftKeys[5], "RE FILL") == 0);  // the label is RE <VERB> (the 8-char key cap over "AGAIN FILL"), FILL until the verb menu tracks the last verb
+  Rig rig(true, 16);
+  rig.edit_mode();
+  (void)rig.invoke("select.column_all");  // OS-PTOOLS2 S3c: the track selected, so the fill is the track's
+  rig.tap(Button::F4);
+  fill_row(rig, kRowType, 2);   // EUCLID, 4 events
+  rig.tap(Button::F1);
+  CHECK(column_of(rig, 0, 16) == "x...x...x...x...");
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  rig.flush();
+  rig.tap(Button::F6);  // REPEAT: the last verb (FILL) again, the same rows and notice as the action
+  CHECK(column_of(rig, 0, 16) == "x...x...x...x...");
+  CHECK(rig.message() == "FILL: EUCLID 4 EVENTS");
+  CHECK(rig.depth() == 1);
+}
+
+TEST_CASE("OS-PTOOLS2 S3 tools.repeat under a modal overlay: the Fill dialog open, it refuses and writes nothing") {
+  Rig rig(true, 16);
+  rig.edit_mode();
+  rig.tap(Button::F4);  // the Fill dialog is up (a modal overlay)
+  CHECK(rig.state().overlay == app::OverlayId::Fill);
+  const unsigned depth = rig.depth();
+  CHECK(rig.invoke("tools.repeat") == DispatchResult::Disabled);  // under the modal overlay the action gets no focus; a direct call returns false (the handler checks the overlay first)
+  CHECK(rig.depth() == depth);
+  CHECK(column_of(rig, 0, 16) == std::string(16, '.'));  // nothing written
+}
+
+TEST_CASE("OS-PTOOLS2 S3 tools.repeat with no verb run yet: NOTHING TO REPEAT, nothing written (the OS-CFGWIRE fill stays pattern.fill's own)") {
+  Rig rig(true, 16);
+  rig.edit_mode();
+  const unsigned depth = rig.depth();
+  rig.tap(Button::F6);
+  CHECK(rig.message() == "NOTHING TO REPEAT");
+  CHECK(rig.depth() == depth);
+  CHECK(column_of(rig, 0, 16) == std::string(16, '.'));
+  CHECK(rig.invoke("pattern.fill") == DispatchResult::Changed);  // the keyless pattern.fill still does the OS-CFGWIRE fill (every JUMPth step)
+  CHECK(column_of(rig, 0, 16) != std::string(16, '.'));
+}
+
+TEST_CASE("OS-PTOOLS2 S3 F6 with a random fill as the last verb: the repeat draws again (the rng advanced), one undo unit") {
+  Rig rig(true, 16);
+  rig.edit_mode();
+  (void)rig.invoke("select.column_all");  // the track is the target
+  rig.tap(Button::F4);
+  fill_row(rig, kRowType, 1);   // RANDOM
+  fill_row(rig, kRowCount, 20); // DENSITY 30 -> 50
+  CHECK(rig.state().fill.plan.density == 50);
+  rig.tap(Button::F1);
+  const std::string first = column_of(rig, 0, 16);
+  CHECK(first != std::string(16, '.'));
+  CHECK(rig.message() == "FILL: RANDOM 50 %");
+  const std::uint32_t rng_before = rig.state().fill.rng.s;
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  CHECK(column_of(rig, 0, 16) == std::string(16, '.'));
+  rig.flush();
+  rig.tap(Button::F6);
+  CHECK(rig.state().fill.rng.s != rng_before);  // a new draw
+  CHECK(column_of(rig, 0, 16) != first);      // and a different one
+  CHECK(rig.message() == "FILL: RANDOM 50 %");
+  CHECK(rig.depth() == 1);
+}
+
+TEST_CASE("OS-PTOOLS2 S3c: F6 REPEAT with a block active: the last fill's target was the block, the repeat fills the block only") {
+  Rig rig(true, 16);
+  rig.edit_mode();
+  for (int i = 0; i < 3; ++i) {
+    (void)rig.invoke("select.extend", 1);  // one row down; three taps make a block of rows 0..3 on the cursor's track
+  }
+  rig.tap(Button::F4);  // the dialog's target is the block (no SCOPE row: the selection is it)
+  fill_row(rig, kRowType, 2);   // EUCLID, 4 events
+  rig.tap(Button::F1);
+  CHECK(column_of(rig, 0, 16) == "xxxx" + std::string(12, '.'));
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  rig.flush();
+  rig.tap(Button::F6);
+  CHECK(column_of(rig, 0, 16) == "xxxx" + std::string(12, '.'));  // the block again, the rest of the track untouched
+  CHECK(rig.message() == "FILL: WHOLE STEPS, EUCLID 4 EVENTS");  // a column block fills as whole steps (OS-AUDIT-56)
+}
+
+TEST_CASE("OS-PTOOLS2 S3c (review): with the Fill dialog open during playback the target does not follow the playhead — F1 fills the block, or the opening step with no selection") {
+  Rig rig(true, 16);
+  rig.edit_mode();
+  audio::PlayPosition pos;
+  rig.app->attach_play_position(&pos);
+  pos.publish(true, 1, 4, 12000, audio::PlayPosition::kNoOrder);  // pattern 1 plays, step 4
+  rig.pass(1);
+  NEED(rig.state().play.playing);
+  CHECK(rig.view().row() == 4);
+  // A block made while following (Shift + Down x3): it stays (OS-BUG-WATCHSEL), and the dialog's target is it.
+  for (int i = 0; i < 3; ++i) {
+    (void)rig.invoke("select.extend", 1);
+  }  // rows 4..7
+  NEED(rig.state().edit.selection.active);
+  rig.tap(Button::F4);
+  CHECK(rig.state().overlay == app::OverlayId::Fill);
+  // The playhead steps on: under the dialog the cursor must not move, so the target stays the block.
+  pos.publish(true, 1, 12, 12000, audio::PlayPosition::kNoOrder);
+  rig.pass(1);
+  CHECK(rig.view().row() == 4);  // the playhead's row when the dialog opened, not the new step 12
+  rig.tap(Button::F1);
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  for (int r = 0; r < 16; ++r) {
+    CHECK_MESSAGE((rig.step(0, r).note != model::kNoteEmpty) == (r >= 4 && r <= 7), "row " << r);
+  }
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  rig.flush();
+  // No selection: the target is the step the cursor was on when the dialog opened.
+  (void)rig.invoke("select.clear");
+  pos.publish(true, 1, 2, 12000, audio::PlayPosition::kNoOrder);
+  rig.pass(1);
+  CHECK(rig.view().row() == 2);
+  rig.tap(Button::F4);
+  CHECK(rig.state().overlay == app::OverlayId::Fill);
+  pos.publish(true, 1, 10, 12000, audio::PlayPosition::kNoOrder);
+  rig.pass(1);
+  CHECK(rig.view().row() == 2);  // not the playhead's 10
+  rig.tap(Button::F1);
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  CHECK(rig.step(0, 2).note != model::kNoteEmpty);
+  for (int r = 0; r < 16; ++r) {
+    if (r != 2) {
+      CHECK_MESSAGE(rig.step(0, r).note == model::kNoteEmpty, "row " << r);
+    }
+  }
+  rig.app->attach_document(nullptr);  // (a take is open while it plays in Edit: the rig destroys its editor before the app)
+}
+
+// ---- OS-PTOOLS2 S3: the F7 verb menu (verb_menu.h; the TOOLS list stays the APPS > row) -------------------------------------------------
+
+TEST_CASE("OS-PTOOLS2 S3 F7 verb menu: opens over Pattern, the arrows move in the 2x8 grid, F8 BACK closes, the last verb is remembered") {
+  Rig rig(true, 16);
+  rig.edit_mode();
+  rig.tap(Button::F7);
+  CHECK(rig.state().overlay == app::OverlayId::VerbMenu);
+  CHECK(rig.state().verb_menu.cursor == 0);
+  rig.tap(Button::Down);   // one row down
+  rig.tap(Button::Right);  // one column right: pad 10
+  CHECK(rig.state().verb_menu.cursor == 9);
+  rig.tap(Button::F8);     // BACK closes
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  rig.tap(Button::F7);     // again: the menu remembers its last verb
+  CHECK(rig.state().overlay == app::OverlayId::VerbMenu);
+  CHECK(rig.state().verb_menu.cursor == 9);
+  rig.tap(Button::F8);
+  CHECK(rig.state().overlay == app::OverlayId::None);
+}
+
+TEST_CASE("OS-PTOOLS2 S3p: the verb menu and the TOOLS dialog open in the right-hand panel, and the stored track window is not moved (the draw narrows and scrolls the grid beside the panel)") {
+  Rig rig(true, 64);
+  rig.edit_mode();
+  rig.go(0, 4);          // the cursor on track 5
+  rig.extend_tracks(2);  // a block over tracks 5..7, the cursor on the last
+  CHECK(rig.view().track() == 6);
+  CHECK(rig.view().left_track() == 2);  // follow() kept the cursor of the extended block in the 5-track window
+  rig.tap(Button::F7);
+  CHECK(rig.state().overlay == app::OverlayId::VerbMenu);
+  CHECK(rig.view().left_track() == 2);  // the stored window stays (BACK leaves the grid where it was)
+  rig.tap(Button::F8);
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  rig.tap(Button::F7);
+  rig.pad(0);  // pad 1 = TRANSPOSE opens the TOOLS dialog
+  CHECK(rig.state().overlay == app::OverlayId::PatternTools);
+  CHECK(rig.view().left_track() == 2);  // the same for the dialog
+  rig.tap(Button::F8);
+  CHECK(rig.state().overlay == app::OverlayId::None);
+}
+
+TEST_CASE("OS-PTOOLS2 S3 verb menu, pad 9 (INVERT): the pick runs pattern.invert on the block as ONE undo unit") {
+  Rig rig;
+  for (int r = 0; r < 4; ++r) {
+    put(rig, 0, r, note_at(static_cast<std::uint8_t>(61 + r), 1));
+  }
+  rig.edit_mode();
+  for (int i = 0; i < 3; ++i) {
+    (void)rig.invoke("select.extend", 1);  // the block: rows 0..3 of the cursor's track
+  }
+  const unsigned depth = rig.depth();
+  rig.tap(Button::F7);
+  CHECK(rig.state().overlay == app::OverlayId::VerbMenu);
+  rig.pad(8);  // pad 9 = INVERT
+  CHECK(rig.state().overlay == app::OverlayId::None);  // the menu closed for the verb
+  for (int r = 0; r < 4; ++r) {
+    CHECK_MESSAGE(rig.step(0, r).note == 64 - r, "row " << r);
+  }
+  CHECK(rig.depth() == depth + 1);  // one undo unit
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  CHECK(rig.step(0, 0).note == 61);
+}
+
+TEST_CASE("OS-PTOOLS2 S3b verb menu, pad 4 (INTERPOLATE): the pick runs the note ramp over the block as ONE undo unit") {
+  Rig rig(true, 16);
+  rig.edit_mode();
+  put(rig, 0, 0, note_at(61, 5));
+  put(rig, 0, 8, note_at(69, 7));
+  for (int i = 0; i < 8; ++i) {
+    (void)rig.invoke("select.extend", 1);  // the block: rows 0..8 of the Note column
+  }
+  const unsigned depth = rig.depth();
+  rig.tap(Button::F7);
+  CHECK(rig.state().overlay == app::OverlayId::VerbMenu);
+  rig.pad(3);  // pad 4 = INTERPOLATE
+  CHECK(rig.state().overlay == app::OverlayId::None);  // the menu closed for the verb
+  for (int r = 1; r <= 7; ++r) {
+    CHECK_MESSAGE(rig.step(0, r).note == 61 + r, "row " << r);  // the chromatic ramp 61..69
+    CHECK(rig.step(0, r).instr == 5);                           // an empty row takes the first anchor's instrument
+  }
+  CHECK(rig.step(0, 0).note == 61);
+  CHECK(rig.step(0, 8).note == 69);
+  CHECK(rig.message() == "INTERPOLATED: 7 STEPS");
+  CHECK(rig.depth() == depth + 1);         // one undo unit
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  CHECK(rig.step(0, 1).note == model::kNoteEmpty);
+  CHECK(rig.step(0, 7).note == model::kNoteEmpty);
+}
+
+TEST_CASE("OS-PTOOLS2 S3 verb menu, pad 1 (TRANSPOSE) on a Vol-column block: refused when the dialog would open, with a message, nothing written (the encoder fired only on the Note column)") {
+  Rig rig(true, 16);
+  rig.edit_mode();
+  put(rig, 0, 0, note_at(61, 3));
+  rig.column(Column::Vol);  // the cursor on the Vol column
+  (void)rig.invoke("select.extend", 1);  // a block of rows 0..1 on the Vol column only (not whole steps)
+  NEED(!rig.state().edit.selection.block(rig.view().row(), rig.view().track()).whole_steps());
+  const unsigned depth = rig.depth();
+  rig.tap(Button::F7);
+  rig.pad(0);  // pad 1 = TRANSPOSE: it would open the TOOLS dialog (OS-PTOOLS2 S2), but not on this column block
+  CHECK(rig.state().overlay == app::OverlayId::None);  // refused at open, not at APPLY after the rows were set
+  CHECK(rig.message() == "TRANSPOSE: WHOLE STEPS OR THE NOTE COLUMN");
+  CHECK(rig.step(0, 0).note == 61);  // the note outside the selected columns is untouched
+  CHECK(rig.depth() == depth);       // no undo unit
+}
+
+TEST_CASE("OS-PTOOLS2 S3 verb menu, pad 1 (TRANSPOSE) on a single empty step in the Note column: the dialog's APPLY takes the multi-cell rule, nothing is written (no note inserted)") {
+  Rig rig(true, 16);
+  rig.edit_mode();  // the cursor on the Note column, row 0 of track 0, an empty step, no selection
+  CHECK(rig.step(0, 0).note == model::kNoteEmpty);
+  const unsigned depth = rig.depth();
+  rig.tap(Button::F7);
+  rig.pad(0);  // pad 1 = TRANSPOSE: the dialog
+  CHECK(rig.state().overlay == app::OverlayId::PatternTools);
+  rig.tap(Button::Down);
+  rig.turn(1);  // AMOUNT +1
+  rig.tap(Button::F1);
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  CHECK(rig.step(0, 0).note == model::kNoteEmpty);  // the single empty step took the multi-cell rule: no default note, no instrument
+  CHECK(rig.step(0, 0).instr == 0);
+  CHECK(rig.depth() == depth);  // nothing written, no unit
+  CHECK(rig.message() == "NOTHING TO CHANGE");
+  // and a single step that holds a note still transposes through the dialog, one unit
+  put(rig, 0, 0, note_at(61, 3));
+  rig.tap(Button::F7);
+  rig.pad(0);
+  rig.tap(Button::Down);
+  rig.turn(1);  // AMOUNT +2 now (the rows are session state)
+  rig.tap(Button::F1);
+  CHECK(rig.step(0, 0).note == 63);
+  CHECK(rig.depth() == depth + 1);
+}
+
+TEST_CASE("OS-PTOOLS2 S3 verb menu refused while another modal is open: with the Fill dialog up, verb.open does not open the menu") {
+  Rig rig(true, 16);
+  rig.edit_mode();
+  rig.tap(Button::F4);
+  CHECK(rig.state().overlay == app::OverlayId::Fill);
+  CHECK(rig.invoke("verb.open") == DispatchResult::Disabled);  // under the modal overlay the action gets no focus
+  CHECK(rig.state().overlay == app::OverlayId::Fill);           // still the Fill dialog, no menu over it
+  rig.tap(Button::F8);
+  rig.tap(Button::F7);
+  CHECK(rig.state().overlay == app::OverlayId::VerbMenu);
+}
+
+TEST_CASE("OS-PTOOLS2 S3 verb menu APPS > (pad 16): opens the old TOOLS list, F8 closes both levels") {
+  Rig rig(true, 16);
+  rig.edit_mode();
+  rig.tap(Button::F7);
+  CHECK(rig.state().overlay == app::OverlayId::VerbMenu);
+  rig.pad(15);  // pad 16 = APPS >
+  CHECK(rig.state().overlay == app::OverlayId::VerbMenu);  // the verb menu's APPS page (OS-PTOOLS2 S6b), the list OS-H3A's F7 opened
+  rig.tap(Button::F8);
+  CHECK(rig.state().overlay == app::OverlayId::None);
+}
+
+// ---- OS-PTOOLS2 S3b: the five S4 verbs wired as block verbs (model/pattern_verbs.h), one undo unit each, F6 REPEAT runs the last one ----------
+
+TEST_CASE("OS-PTOOLS2 S3b verb menu, pads 7/8 (ROTATE UP / DOWN): the block's steps move one row, wrapping inside the block, one undo unit") {
+  Rig rig(true, 16);
+  rig.edit_mode();
+  for (int r = 0; r < 4; ++r) {
+    put(rig, 0, r, note_at(static_cast<std::uint8_t>(61 + r), static_cast<std::uint8_t>(1 + r)));
+  }
+  for (int i = 0; i < 3; ++i) {
+    (void)rig.invoke("select.extend", 1);  // rows 0..3, the Note column (note + instrument move)
+  }
+  const unsigned depth = rig.depth();
+  rig.tap(Button::F7);
+  rig.pad(6);  // pad 7 = ROTATE UP: row i takes row i+1, the first row goes to the end
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  CHECK(rig.step(0, 0).note == 62);
+  CHECK(rig.step(0, 1).note == 63);
+  CHECK(rig.step(0, 2).note == 64);
+  CHECK(rig.step(0, 3).note == 61);
+  CHECK(rig.step(0, 3).instr == 1);
+  CHECK(rig.message() == "ROTATED: 4 STEPS");
+  CHECK(rig.depth() == depth + 1);
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  CHECK(rig.step(0, 0).note == 61);
+  // ROTATE DOWN (pad 8) is the inverse
+  rig.tap(Button::F7);
+  rig.pad(7);
+  CHECK(rig.step(0, 0).note == 64);
+  CHECK(rig.step(0, 3).note == 63);
+  CHECK(rig.depth() == depth + 1);
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  CHECK(rig.step(0, 0).note == 61);
+}
+
+TEST_CASE("OS-PTOOLS2 S3b verb menu, pad 5 (RANDOMISE): in place on the block's column with the fixed default amount, one undo unit; F6 does not repeat it") {
+  Rig rig(true, 16);
+  rig.edit_mode();
+  rig.column(Column::Vol);
+  for (int r = 0; r < 16; ++r) {
+    model::Step s = note_at(61, 1);
+    s.vol = static_cast<std::uint8_t>(r * 8);  // 0..120, every step holds a volume
+    put(rig, 0, r, s);
+  }
+  for (int i = 0; i < 15; ++i) {
+    (void)rig.invoke("select.extend", 1);  // rows 0..15 of the Vol column
+  }
+  const unsigned depth = rig.depth();
+  const std::uint16_t seed0 = rig.state().verb_menu.seed;
+  rig.tap(Button::F7);
+  rig.pad(4);  // pad 5 = RANDOMISE
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  CHECK(rig.state().verb_menu.seed == seed0 + 1);
+  unsigned moved = 0;
+  for (int r = 0; r < 16; ++r) {
+    const unsigned old = static_cast<unsigned>(r * 8);
+    const unsigned now = rig.step(0, r).vol;
+    CHECK(now + 4 >= old);  // AMOUNT 4, clamped: within +-4 of the old value
+    CHECK(now <= old + 4);
+    if (now != old) {
+      ++moved;
+    }
+    CHECK(rig.step(0, r).note == 61);  // only the column moves
+  }
+  CHECK(moved > 0u);
+  CHECK(rig.message() == "RANDOMISED: " + std::to_string(moved) + " STEPS");
+  CHECK(rig.depth() == depth + 1);  // one undo unit
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  CHECK(rig.step(0, 5).vol == 40);
+  rig.flush();
+  // F6 REPEAT stays the last FILL's: with no fill run, it says NOTHING TO REPEAT, writes nothing and does not even advance the seed
+  (void)rig.invoke("tools.repeat");
+  CHECK(rig.state().verb_menu.seed == seed0 + 1);
+  CHECK(rig.depth() == depth);
+  CHECK(rig.message() == "NOTHING TO REPEAT");
+}
+
+// ---- OS-PTOOLS2 S2: the Pattern TOOLS dialog (pattern_tools_view.h), opened by the menu's TRANSPOSE / INSTRUMENT rows --------------------------
+
+TEST_CASE("OS-PTOOLS2 S2 the menu's TRANSPOSE row opens the TOOLS dialog: the OP row flips with Left / Right, AMOUNT clamps at +-24 and Shift + encoder is an octave, F8 BACK leaves the project untouched") {
+  Rig rig(true, 16);
+  rig.edit_mode();
+  put(rig, 0, 0, note_at(61, 3));
+  put(rig, 0, 1, note_at(63, 3));
+  (void)rig.invoke("select.extend", 1);  // the block: rows 0..1 of the Note column
+  const unsigned depth = rig.depth();
+  rig.tap(Button::F7);
+  CHECK(rig.state().overlay == app::OverlayId::VerbMenu);
+  rig.pad(0);  // pad 1 = TRANSPOSE
+  CHECK(rig.state().overlay == app::OverlayId::PatternTools);
+  CHECK(rig.state().ptools.tool == app::PTool::Transpose);
+  CHECK(rig.state().ptools.row == 0);
+  // Left / Right on the OP row rolls over the three OPs
+  rig.tap(Button::Right);
+  CHECK(rig.state().ptools.tool == app::PTool::Instrument);
+  rig.tap(Button::Right);
+  CHECK(rig.state().ptools.tool == app::PTool::Clear);
+  rig.tap(Button::Right);
+  CHECK(rig.state().ptools.tool == app::PTool::Transpose);
+  rig.tap(Button::Left);
+  CHECK(rig.state().ptools.tool == app::PTool::Clear);
+  rig.tap(Button::Left);
+  CHECK(rig.state().ptools.tool == app::PTool::Instrument);
+  rig.tap(Button::Left);
+  CHECK(rig.state().ptools.tool == app::PTool::Transpose);
+  // Up / Down to the AMOUNT row; the encoder clamps at the ends, Shift + encoder is the octave (the coarse step 12)
+  rig.tap(Button::Down);
+  CHECK(rig.state().ptools.row == 1);
+  rig.turn(100);
+  CHECK(rig.state().ptools.amount == 24);
+  rig.turn(-100);
+  CHECK(rig.state().ptools.amount == -24);
+  rig.shift_turn(1);
+  CHECK(rig.state().ptools.amount == -12);
+  rig.shift_turn(-2);
+  CHECK(rig.state().ptools.amount == -24);
+  rig.shift_turn(10);
+  CHECK(rig.state().ptools.amount == 24);
+  rig.turn(-25);
+  CHECK(rig.state().ptools.amount == -1);
+  // F8 BACK: the dialog closes, nothing was written, no undo unit
+  rig.tap(Button::F8);
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  CHECK(rig.depth() == depth);
+  CHECK(rig.step(0, 0).note == 61);
+  CHECK(rig.step(0, 1).note == 63);
+  // pad 2 (INSTRUMENT) opens on INSTRUMENT, with the TO row at the block's first note's instrument (a Note-column block refuses INSTRUMENT at open: take the whole track)
+  (void)rig.invoke("select.clear");
+  (void)rig.invoke("select.column_all");
+  rig.tap(Button::F7);
+  rig.pad(1);
+  CHECK(rig.state().overlay == app::OverlayId::PatternTools);
+  CHECK(rig.state().ptools.tool == app::PTool::Instrument);
+  CHECK(rig.state().ptools.instrument == 3);
+  rig.tap(Button::Down);
+  rig.turn(100);
+  CHECK(rig.state().ptools.instrument == 64);  // TO clamps at 64
+  rig.shift_turn(-8);
+  CHECK(rig.state().ptools.instrument == 1);  // the coarse step 8, eight detents back: clamped to 1
+  rig.tap(Button::F8);
+  // F1 RUN on the menu's row (the cursor remembers the last pick: INSTRUMENT) opens the same dialog
+  rig.tap(Button::F7);
+  rig.tap(Button::F1);  // RUN
+  CHECK(rig.state().overlay == app::OverlayId::PatternTools);
+  CHECK(rig.state().ptools.tool == app::PTool::Instrument);
+  rig.tap(Button::F8);
+  rig.hold_key(Button::F7);
+  rig.pad(0);  // F7 held + pad 1
+  rig.release_key(Button::F7);
+  CHECK(rig.state().overlay == app::OverlayId::PatternTools);
+  rig.tap(Button::F8);
+  CHECK(rig.state().overlay == app::OverlayId::None);
+}
+
+TEST_CASE("OS-PTOOLS2 S2 F1 APPLY TRANSPOSE: one undo unit over the block, `TRANSPOSED: 5 STEPS +12 ST`, cut / fade / off and empty steps untouched (the multi-cell rule)") {
+  Rig rig(true, 16);
+  rig.edit_mode();
+  put(rig, 0, 0, note_at(61, 3));
+  model::Step cut = model::kEmptyStep;
+  cut.note = model::kNoteCut;
+  put(rig, 0, 1, cut);
+  model::Step fade = model::kEmptyStep;
+  fade.note = model::kNoteFade;
+  put(rig, 0, 2, fade);
+  model::Step off = model::kEmptyStep;
+  off.note = model::kNoteOff;
+  put(rig, 0, 3, off);
+  // row 4 stays empty
+  for (int i = 0; i < 4; ++i) {
+    (void)rig.invoke("select.extend", 1);  // rows 0..4
+  }
+  const unsigned depth = rig.depth();
+  rig.tap(Button::F7);
+  rig.pad(0);  // TRANSPOSE opens the dialog
+  CHECK(rig.state().overlay == app::OverlayId::PatternTools);
+  rig.tap(Button::Down);      // the AMOUNT row
+  rig.shift_turn(1);          // +12 ST (an octave)
+  CHECK(rig.state().ptools.amount == 12);
+  rig.tap(Button::F1);        // APPLY
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  CHECK(rig.step(0, 0).note == 73);  // 61 (og 60) + 12
+  CHECK(rig.step(0, 0).instr == 3);
+  CHECK(rig.step(0, 1).note == model::kNoteCut);   // untouched
+  CHECK(rig.step(0, 2).note == model::kNoteFade);  // untouched
+  CHECK(rig.step(0, 3).note == model::kNoteOff);   // untouched
+  CHECK(rig.step(0, 4).note == model::kNoteEmpty);  // no note made from nothing
+  CHECK(rig.step(0, 4).instr == 0);
+  CHECK(rig.message() == "TRANSPOSED: 5 STEPS +12 ST");
+  CHECK(rig.depth() == depth + 1);  // one undo unit
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  CHECK(rig.step(0, 0).note == 61);
+  CHECK(rig.depth() == depth);
+  // AMOUNT 0 says NOTHING TO DO and writes nothing
+  rig.flush();
+  rig.tap(Button::F7);
+  rig.pad(0);
+  rig.tap(Button::Down);
+  rig.turn(-12);  // back to 0
+  CHECK(rig.state().ptools.amount == 0);
+  rig.tap(Button::F1);
+  CHECK(rig.message() == "NOTHING TO DO");
+  CHECK(rig.depth() == depth);
+}
+
+TEST_CASE("OS-PTOOLS2 S2 F1 APPLY INSTRUMENT: every note of the block takes the TO instrument, empty steps keep none, one undo unit; CLEAR via the OP row clears WHAT") {
+  Rig rig(true, 16);
+  rig.edit_mode();
+  put(rig, 0, 0, note_at(61, 3));
+  put(rig, 0, 1, note_at(63, 7));
+  // row 2 empty
+  rig.column(Column::Instr);  // the block's column: INSTRUMENT applies on the Instr column (or whole steps)
+  for (int i = 0; i < 2; ++i) {
+    (void)rig.invoke("select.extend", 1);  // rows 0..2 on the Instr column
+  }
+  const unsigned depth = rig.depth();
+  rig.tap(Button::F7);
+  rig.pad(1);  // INSTRUMENT
+  CHECK(rig.state().overlay == app::OverlayId::PatternTools);
+  CHECK(rig.state().ptools.instrument == 3);  // the block's first note's instrument
+  rig.tap(Button::Down);
+  rig.turn(2);  // TO 5
+  CHECK(rig.state().ptools.instrument == 5);
+  rig.tap(Button::F1);
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  CHECK(rig.step(0, 0).instr == 5);
+  CHECK(rig.step(0, 1).instr == 5);
+  CHECK(rig.step(0, 2).instr == 0);  // an empty step takes no instrument (the multi-cell rule)
+  CHECK(rig.step(0, 0).note == 61);
+  CHECK(rig.message() == "INSTRUMENT SET: 3 STEPS 05");
+  CHECK(rig.depth() == depth + 1);
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  CHECK(rig.step(0, 0).instr == 3);
+  // CLEAR: on a whole-step block (the whole track), flip the OP row, WHAT defaults to ALL, F1 clears the block's steps
+  rig.flush();
+  (void)rig.invoke("select.clear");
+  (void)rig.invoke("select.column_all");
+  (void)rig.invoke("select.column_all");  // (OS-SELCOL: the first press is the cursor's column when it is not Note, the second the whole track)
+  NEED(rig.state().edit.selection.block(rig.view().row(), rig.view().track()).whole_steps());
+  rig.tap(Button::F7);
+  rig.pad(0);  // opens on TRANSPOSE (a whole-step block takes any tool)
+  CHECK(rig.state().overlay == app::OverlayId::PatternTools);
+  rig.tap(Button::Right);
+  rig.tap(Button::Right);  // OP: INSTRUMENT -> CLEAR
+  CHECK(rig.state().ptools.tool == app::PTool::Clear);
+  rig.tap(Button::Down);   // the WHAT row (ALL)
+  CHECK(rig.state().ptools.what == app::SongWhat::All);
+  rig.tap(Button::F1);
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  CHECK(rig.step(0, 0).note == model::kNoteEmpty);
+  CHECK(rig.step(0, 1).note == model::kNoteEmpty);
+  CHECK(rig.step(0, 0).instr == 0);
+  CHECK(rig.message() == "CLEARED: 16 STEPS");
+  CHECK(rig.depth() == depth + 1);
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  CHECK(rig.step(0, 0).note == 61);
+}
+
+TEST_CASE("OS-PTOOLS2 S2 the dialog's column rule at open: TRANSPOSE on a Vol-column block and INSTRUMENT on a Note-column block open no dialog, with the message, nothing written") {
+  Rig rig(true, 16);
+  rig.edit_mode();
+  put(rig, 0, 0, note_at(61, 3));
+  rig.column(Column::Vol);
+  (void)rig.invoke("select.extend", 1);  // a Vol-column block of rows 0..1
+  NEED(!rig.state().edit.selection.block(rig.view().row(), rig.view().track()).whole_steps());
+  const unsigned depth = rig.depth();
+  rig.tap(Button::F7);
+  rig.pad(0);  // TRANSPOSE
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  CHECK(rig.message() == "TRANSPOSE: WHOLE STEPS OR THE NOTE COLUMN");
+  rig.flush();
+  rig.tap(Button::F7);
+  rig.pad(1);  // INSTRUMENT, the Vol column again
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  CHECK(rig.message() == "INSTRUMENT: WHOLE STEPS OR THE INSTR COLUMN");
+  CHECK(rig.step(0, 0).note == 61);  // untouched
+  CHECK(rig.step(0, 0).instr == 3);
+  CHECK(rig.depth() == depth);
+}
+
+TEST_CASE("OS-PTOOLS2 S2 the dialog's column rule at APPLY: a Note-column block opens TRANSPOSE, and flipping the OP row to INSTRUMENT or CLEAR is refused at APPLY, nothing written") {
+  Rig rig(true, 16);
+  rig.edit_mode();
+  put(rig, 0, 0, note_at(61, 3));
+  put(rig, 0, 1, note_at(63, 3));
+  (void)rig.invoke("select.extend", 1);  // a Note-column block of rows 0..1
+  NEED(!rig.state().edit.selection.block(rig.view().row(), rig.view().track()).whole_steps());
+  const unsigned depth = rig.depth();
+  rig.tap(Button::F7);
+  rig.pad(0);  // TRANSPOSE opens the dialog on the Note column
+  CHECK(rig.state().overlay == app::OverlayId::PatternTools);
+  rig.tap(Button::Right);  // OP: TRANSPOSE -> INSTRUMENT
+  CHECK(rig.state().ptools.tool == app::PTool::Instrument);
+  rig.tap(Button::F1);
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  CHECK(rig.message() == "INSTRUMENT: WHOLE STEPS OR THE INSTR COLUMN");
+  rig.flush();
+  rig.tap(Button::F7);
+  rig.pad(0);
+  rig.tap(Button::Right);
+  rig.tap(Button::Right);  // OP: CLEAR
+  CHECK(rig.state().ptools.tool == app::PTool::Clear);
+  rig.tap(Button::F1);
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  CHECK(rig.message() == "CLEAR: WHOLE STEPS ONLY");  // edit_selection ignores the columns: it would have wiped whole steps
+  CHECK(rig.step(0, 0).note == 61);
+  CHECK(rig.step(0, 0).instr == 3);
+  CHECK(rig.step(0, 1).note == 63);
+  CHECK(rig.depth() == depth);
+}
+
+TEST_CASE("OS-PTOOLS2 S2 the cursor step alone (no selection) is whole steps: the dialog applies there") {
+  Rig rig(true, 16);
+  rig.edit_mode();
+  put(rig, 0, 0, note_at(61, 3));
+  const unsigned depth = rig.depth();
+  rig.tap(Button::F7);
+  rig.pad(0);
+  CHECK(rig.state().overlay == app::OverlayId::PatternTools);
+  rig.tap(Button::Down);
+  rig.turn(2);  // AMOUNT +2
+  rig.tap(Button::F1);
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  CHECK(rig.step(0, 0).note == 63);
+  CHECK(rig.message() == "TRANSPOSED: 1 STEP +2 ST");
+  CHECK(rig.depth() == depth + 1);
+}
+
+TEST_CASE("OS-PTOOLS2 S2 F6 REPEAT repeats the last APPLY with the same amount, on the selection as it is now, one undo unit; outside Edit it says TURN EDIT ON") {
+  Rig rig(true, 16);
+  rig.edit_mode();
+  for (int r = 0; r < 4; ++r) {
+    put(rig, 0, r, note_at(static_cast<std::uint8_t>(61 + r), 2));
+  }
+  for (int i = 0; i < 3; ++i) {
+    (void)rig.invoke("select.extend", 1);  // rows 0..3
+  }
+  rig.tap(Button::F7);
+  rig.pad(0);
+  rig.tap(Button::Down);
+  rig.shift_turn(1);  // +12
+  rig.tap(Button::F1);
+  CHECK(rig.step(0, 0).note == 73);
+  CHECK(rig.message() == "TRANSPOSED: 4 STEPS +12 ST");
+  CHECK(std::strcmp(app::pattern_soft_keys(rig.state())[5], "REPEAT") == 0);  // the label is true: what F6 runs is a TOOLS apply, not a fill
+  const unsigned depth = rig.depth();
+  rig.flush();
+  // F6 REPEAT: the same amount again, one more undo unit
+  rig.tap(Button::F6);
+  CHECK(rig.step(0, 0).note == 85);  // 73 + 12
+  CHECK(rig.step(0, 3).note == 88);
+  CHECK(rig.message() == "TRANSPOSED: 4 STEPS +12 ST");
+  CHECK(rig.depth() == depth + 1);
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  CHECK(rig.step(0, 0).note == 73);
+  // outside Edit the repeat of the dialog's APPLY says TURN EDIT ON and writes nothing
+  rig.flush();
+  rig.mode(PatternMode::Browse);
+  const unsigned d2 = rig.depth();
+  rig.tap(Button::F6);
+  CHECK(rig.message() == "TURN EDIT ON");
+  CHECK(rig.depth() == d2);
+  // a fill after the APPLY becomes what F6 repeats again (the last verb wins)
+  rig.flush();
+  rig.edit_mode();
+  (void)rig.invoke("select.column_all");
+  rig.tap(Button::F4);
+  fill_row(rig, kRowType, 2);  // EUCLID, 4 events
+  rig.tap(Button::F1);
+  CHECK(rig.state().fill.valid);
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);  // the track is empty again, so the repeat has something to fill
+  rig.flush();
+  rig.tap(Button::F6);
+  CHECK(rig.message() == "FILL: EUCLID 4 EVENTS");  // the fill, not the transpose
+  CHECK(std::strcmp(app::pattern_soft_keys(rig.state())[5], "RE FILL") == 0);  // and the label says so again
+}
+
+TEST_CASE("OS-PTOOLS2 S2 the dialog's refusals: outside Edit the menu's row says TURN EDIT ON and no dialog opens; with no document NO PROJECT") {
+  Rig rig(true, 16);
+  rig.mode(PatternMode::Browse);
+  rig.tap(Button::F7);
+  CHECK(rig.state().overlay == app::OverlayId::VerbMenu);  // the menu itself opens in Browse (S1)
+  rig.pad(0);
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  CHECK(rig.message() == "TURN EDIT ON");
+  rig.tap(Button::F8);
+  Rig bare(false);  // no document: the demo
+  bare.edit_mode();
+  bare.tap(Button::F7);
+  bare.pad(0);
+  CHECK(bare.state().overlay == app::OverlayId::None);
+  CHECK(bare.message() == "NO PROJECT");
+}
+
+TEST_CASE("OS-PTOOLS2 S2 the footer's text: the target line and the count (steps, notes) of the block, a column block, and the cursor step") {
+  Rig rig(true, 16);
+  rig.edit_mode();
+  put(rig, 0, 0, note_at(61, 3));
+  put(rig, 0, 2, note_at(63, 3));
+  (void)rig.invoke("select.extend", 1);
+  (void)rig.invoke("select.extend", 1);  // rows 0..2 of the Note column
+  const app::Selection::Block b = rig.state().edit.selection.block(rig.view().row(), rig.view().track());
+  core::FixedString<48> target;
+  app::pattern_tools_target(rig.state().edit.selection, rig.view().row(), rig.view().track(), target);
+  CHECK(std::string(target.c_str()) == "BLOCK  TRACK 1  NOTE  ROWS 01-03");
+  unsigned steps = 0;
+  unsigned notes = 0;
+  app::pattern_tools_count(&rig.project(), rig.state().edit.pattern, b, steps, notes);
+  CHECK(steps == 3);
+  CHECK(notes == 2);
+  // the cursor step alone (the cursor is on row 2 after the extends; home resets track and column, not the row)
+  (void)rig.invoke("select.clear");
+  app::pattern_tools_target(rig.state().edit.selection, rig.view().row(), rig.view().track(), target);
+  CHECK(std::string(target.c_str()) == "STEP  TRACK 1  ROW 03");
+}
+
+TEST_CASE("OS-PTOOLS2 S2 the footer of a whole-step block (the track column, extended over two tracks)") {
+  Rig rig(true, 16);
+  rig.edit_mode();
+  put(rig, 0, 0, note_at(61, 3));
+  put(rig, 0, 2, note_at(63, 3));
+  (void)rig.invoke("select.column_all");  // the whole track: whole steps, rows 0..15
+  (void)rig.invoke("select.extend", 10);  // right: with the column block it steps by tracks -> tracks 0..1
+  const app::Selection::Block b2 = rig.state().edit.selection.block(rig.view().row(), rig.view().track());
+  NEED(b2.whole_steps());
+  core::FixedString<48> target;
+  app::pattern_tools_target(rig.state().edit.selection, rig.view().row(), rig.view().track(), target);
+  CHECK(std::string(target.c_str()) == "BLOCK  TRACKS 1-2  ROWS 01-16");
+  unsigned steps = 0;
+  unsigned notes = 0;
+  app::pattern_tools_count(&rig.project(), rig.state().edit.pattern, b2, steps, notes);
+  CHECK(steps == 32);
+  CHECK(notes == 2);
+}
+
+TEST_CASE("OS-PTOOLS2 S3b verb menu, pad 6 (HUMANISE): the steps with a note get a micro-move and a volume jitter, one undo unit") {
+  Rig rig(true, 16);
+  rig.edit_mode();
+  for (int r = 0; r < 8; ++r) {
+    model::Step s = note_at(static_cast<std::uint8_t>(61 + r), 1);
+    s.vol = 100;
+    put(rig, 0, r, s);
+  }
+  put(rig, 0, 9, note_at(70, 1));  // a step past the block: untouched
+  for (int i = 0; i < 7; ++i) {
+    (void)rig.invoke("select.extend", 1);  // rows 0..7, whole steps? no: the Note column; HUMANISE works on notes whatever the columns
+  }
+  const unsigned depth = rig.depth();
+  rig.tap(Button::F7);
+  rig.pad(5);  // pad 6 = HUMANISE (fixed defaults TIME 20, VOL 8)
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  bool any_fx = false;
+  for (int r = 0; r < 8; ++r) {
+    CHECK(rig.step(0, r).note == 61 + r);  // the notes stay
+    CHECK(rig.step(0, r).vol >= 92);  // the volume jitter +-8
+    CHECK(rig.step(0, r).vol <= 108);
+    any_fx = any_fx || rig.step(0, r).fx[0].type == model::verbs::kFxMicroMove || rig.step(0, r).fx[1].type == model::verbs::kFxMicroMove;
+  }
+  CHECK(any_fx);  // the micro-move was written
+  CHECK(rig.step(0, 9).fx[0].type == model::kFxNone);  // outside the block
+  CHECK(rig.depth() == depth + 1);
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  CHECK(rig.step(0, 0).vol == 100);
+  CHECK(rig.step(0, 0).fx[0].type == model::kFxNone);
+}
+
+TEST_CASE("OS-PTOOLS2 S3b the five verbs by name (verb.interpolate / rotate_up / randomise / humanise / rotate_down): one undo unit each, refused outside Edit like the other block verbs") {
+  Rig rig(true, 16);
+  rig.edit_mode();
+  put(rig, 0, 0, note_at(61, 5));
+  put(rig, 0, 4, note_at(65, 5));
+  for (int i = 0; i < 4; ++i) {
+    (void)rig.invoke("select.extend", 1);
+  }
+  const unsigned depth = rig.depth();
+  CHECK(rig.invoke("verb.interpolate") == DispatchResult::Changed);  // the note ramp 61..65
+  CHECK(rig.step(0, 1).note == 62);
+  CHECK(rig.step(0, 3).note == 64);
+  CHECK(rig.depth() == depth + 1);
+  CHECK(rig.invoke("verb.rotate_up") == DispatchResult::Changed);
+  CHECK(rig.step(0, 0).note == 62);
+  CHECK(rig.depth() == depth + 2);
+  CHECK(rig.invoke("verb.rotate_down") == DispatchResult::Changed);  // back
+  CHECK(rig.step(0, 0).note == 61);
+  CHECK(rig.depth() == depth + 3);
+  const unsigned before_rand = rig.depth();
+  CHECK(rig.invoke("verb.randomise") == DispatchResult::Changed);  // the block's column (Note here): in place, within the default AMOUNT
+  CHECK(rig.depth() == before_rand + 1);
+  CHECK(rig.invoke("verb.humanise") == DispatchResult::Changed);
+  CHECK(rig.depth() == before_rand + 2);
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);  // every verb is its own unit
+  // outside Edit the actions are Disabled (the precondition pe::edit_enabled), and run_verb says TURN EDIT ON before dispatching
+  Rig browse(true, 16);
+  CHECK(browse.invoke("verb.interpolate") == DispatchResult::Disabled);
+  CHECK(browse.invoke("verb.rotate_up") == DispatchResult::Disabled);
+  browse.tap(Button::F7);
+  CHECK(browse.state().overlay == app::OverlayId::VerbMenu);  // the menu opens in Browse too
+  const unsigned bdepth = browse.depth();
+  browse.pad(3);  // pad 4 = INTERPOLATE
+  CHECK(browse.state().overlay == app::OverlayId::None);
+  CHECK(browse.message() == "TURN EDIT ON");
+  CHECK(browse.depth() == bdepth);  // nothing written, no unit
+}
+
+TEST_CASE("OS-PTOOLS2 S3b F6 REPEAT stays the last FILL's, as its RE FILL label says: a menu verb (ROTATE, an export) never becomes the repeat") {
+  // ROTATE from the menu, then a fill of the F4 dialog applied, then F6: the FILL repeats (its notice, one unit), the rotation does not run again
+  Rig rig(true, 16);
+  rig.edit_mode();
+  for (int r = 0; r < 4; ++r) {
+    put(rig, 0, r, note_at(static_cast<std::uint8_t>(61 + r), 1));
+  }
+  for (int i = 0; i < 3; ++i) {
+    (void)rig.invoke("select.extend", 1);
+  }
+  rig.tap(Button::F7);
+  rig.pad(6);  // pad 7 = ROTATE UP
+  CHECK(rig.step(0, 0).note == 62);
+  const unsigned depth = rig.depth();
+  rig.flush();
+  rig.tap(Button::F4);
+  fill_row(rig, kRowType, 1);  // RANDOM
+  rig.tap(Button::F1);         // apply the fill over the block
+  CHECK(rig.message().find("FILL:") == 0);
+  CHECK(rig.depth() == depth + 1);
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  rig.flush();
+  rig.tap(Button::F6);  // REPEAT: the fill again, not the rotate
+  CHECK(rig.message().find("FILL:") == 0);
+  CHECK(rig.depth() == depth + 1);
+  CHECK(std::string(app::kPatternSoftKeys[5]) == "RE FILL");  // the label is true: what F6 ran is a fill
+  // after a menu export, F6 says NOTHING TO REPEAT and writes nothing (the export is not re-run, no file rewritten)
+  Rig rig2(true, 16);
+  rig2.edit_mode();
+  const unsigned depth2 = rig2.depth();
+  rig2.tap(Button::F7);
+  rig2.pad(13);  // pad 14 = EXPORT SELECTION
+  CHECK(rig2.state().overlay == app::OverlayId::None);
+  rig2.flush();
+  CHECK(rig2.invoke("tools.repeat") == DispatchResult::Changed);  // it ran and said NOTHING TO REPEAT
+  CHECK(rig2.message() == "NOTHING TO REPEAT");
+  CHECK(rig2.depth() == depth2);
+}
+
+// ---- OS-PTOOLS2 S3b: F7 held + pad (the same held-key + pad grammar as F1 PATTERN) ------------------------------------------------------------
+
+TEST_CASE("OS-PTOOLS2 S3b F7 held + pad runs the verb without opening the menu; a tap of F7 still opens it; a pad of FILL opens the dialog") {
+  Rig rig(true, 16);
+  rig.edit_mode();
+  for (int r = 0; r < 4; ++r) {
+    put(rig, 0, r, note_at(static_cast<std::uint8_t>(61 + r), 1));
+  }
+  for (int i = 0; i < 3; ++i) {
+    (void)rig.invoke("select.extend", 1);  // rows 0..3
+  }
+  const unsigned depth = rig.depth();
+  rig.tap(Button::F7);  // a tap opens the menu
+  CHECK(rig.state().overlay == app::OverlayId::VerbMenu);
+  rig.tap(Button::F8);
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  // F7 held + pad 7 (ROTATE UP): the verb runs at once, the menu never opens
+  rig.hold_key(Button::F7);  // press + hold_ms + 1: the Hold fires (verb.hold, opens nothing)
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  rig.pad(6);
+  CHECK(rig.state().overlay == app::OverlayId::None);  // still no menu
+  CHECK(rig.step(0, 0).note == 62);                    // rotated up
+  CHECK(rig.step(0, 3).note == 61);
+  CHECK(rig.message() == "ROTATED: 4 STEPS");
+  CHECK(rig.depth() == depth + 1);  // one undo unit
+  rig.release_key(Button::F7);
+  // F7 held + pad 3 (FILL, a verb with parameters): opens what the verb opens today, the Fill dialog
+  rig.hold_key(Button::F7);
+  rig.pad(2);
+  CHECK(rig.state().overlay == app::OverlayId::Fill);
+  rig.release_key(Button::F7);
+  rig.tap(Button::F8);  // BACK closes the dialog
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  // a quick tap after all that still opens the menu (the hold only made the tap wait)
+  rig.tap(Button::F7);
+  CHECK(rig.state().overlay == app::OverlayId::VerbMenu);
+  rig.tap(Button::F8);
+  CHECK(rig.state().overlay == app::OverlayId::None);
+}
+
+// F7 down, a pad inside hold_ms, F7 up: the pad's Tap carries F7 as modifier and runs the verb (verb.hold_pad); the Tap of F7 that fires at the
+// release is NOT a menu open (verb.open ignores that one Tap through the pad mark). Same on a FILL pad: the dialog opens and the release does not
+// put the menu over it.
+TEST_CASE("OS-PTOOLS2 S3b F7 released inside hold_ms after a pad: the verb ran and the F7 Tap does not open the menu; the next tap of F7 does") {
+  Rig rig(true, 16);
+  rig.edit_mode();
+  for (int r = 0; r < 4; ++r) {
+    put(rig, 0, r, note_at(static_cast<std::uint8_t>(61 + r), 1));
+  }
+  for (int i = 0; i < 3; ++i) {
+    (void)rig.invoke("select.extend", 1);
+  }
+  const unsigned depth = rig.depth();
+  rig.press(Button::F7);
+  rig.pass(1);  // well inside hold_ms: no Hold yet
+  rig.pad(6);   // pad 7 = ROTATE UP, under the held F7
+  CHECK(rig.state().overlay == app::OverlayId::None);  // the menu never opened
+  CHECK(rig.step(0, 0).note == 62);                    // the verb ran
+  CHECK(rig.depth() == depth + 1);
+  rig.release(Button::F7);
+  rig.pass(1);  // the Tap of F7 fires here: eaten by the pad mark, no menu
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  CHECK(rig.step(0, 0).note == 62);  // not rotated again, no menu over the result
+  rig.tap(Button::F7);  // the next tap of F7 is a real one: the menu opens
+  CHECK(rig.state().overlay == app::OverlayId::VerbMenu);
+  rig.tap(Button::F8);
+  // the same on a FILL pad: the dialog opens, the release does not open the menu over it
+  rig.press(Button::F7);
+  rig.pass(1);
+  rig.pad(2);  // pad 3 = FILL
+  CHECK(rig.state().overlay == app::OverlayId::Fill);
+  rig.release(Button::F7);
+  rig.pass(1);
+  CHECK(rig.state().overlay == app::OverlayId::Fill);  // still the dialog, no menu over it
+  rig.tap(Button::F8);
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  rig.tap(Button::F7);
+  CHECK(rig.state().overlay == app::OverlayId::VerbMenu);
+  rig.tap(Button::F8);
+}
+
+TEST_CASE("OS-PTOOLS2 S3b F7 held + pad refused in LIVE like the menu: the strip says THE PLAYHEAD HOLDS THE CURSOR IN LIVE, nothing runs") {  Rig rig(true, 16);
+  audio::PlayPosition pos;
+  rig.app->attach_play_position(&pos);
+  pos.publish(true, 1, 4, 12000, audio::PlayPosition::kNoOrder);
+  rig.pass(1);
+  NEED(rig.state().play.playing);
+  NEED(rig.state().mode[kPattern] == static_cast<std::uint8_t>(PatternMode::Browse));  // WATCH
+  put(rig, 0, 0, note_at(61, 1));
+  put(rig, 0, 1, note_at(62, 1));
+  (void)rig.invoke("select.extend", 1);
+  rig.shift_tap(Button::Rec);  // LIVE (Edit following the playhead)
+  NEED(app::pattern_editable(rig.state()));
+  CHECK_FALSE(rig.edit().rec_free);
+  const unsigned depth = rig.depth();
+  rig.hold_key(Button::F7);
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  CHECK(rig.message() == "THE PLAYHEAD HOLDS THE CURSOR IN LIVE");
+  rig.pad(6);  // pad 7 = ROTATE UP: refused too
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  CHECK(rig.step(0, 0).note == 61);  // nothing ran
+  CHECK(rig.depth() == depth);
+  rig.release_key(Button::F7);
+  rig.app->attach_document(nullptr);  // (a LIVE take is open: the rig destroys its editor before the app)
 }
 
 // OS-RECSIGN (new Community OS behaviour): the REC signs (the strip's badge, the Rec frame round the grid) show exactly when the edit actions are enabled: one predicate
@@ -3101,12 +4343,11 @@ TEST_CASE("OS-DELPULL: Insert then Shift + Delete gives the pattern back byte fo
     const std::uint64_t pre = pattern_digest(rig, false, false);
     CHECK(rig.invoke("step.insert") == DispatchResult::Changed);
     CHECK(pattern_digest(rig, false, false) != pre);
-    const app::Selection sel = rig.edit().selection;
     CHECK(rig.invoke("step.pull") == DispatchResult::Changed);
     CHECK_MESSAGE(pattern_digest(rig, false, false) == pre, "episode " << episode);
     CHECK(rig.depth() == 2u);  // one undo unit each
-    CHECK((rig.view().row() == row && rig.view().track() == t1));
-    CHECK((rig.edit().selection.active == sel.active && rig.edit().selection.start_row == sel.start_row && rig.edit().selection.end_track == sel.end_track));
+    CHECK((rig.view().row() == (row + 1 < static_cast<int>(len) ? row + 1 : row) && rig.view().track() == t1));  // OS-DELJUMP: the cursor went down by the JUMP (1), no wrap, and the block ended
+    CHECK(!rig.edit().selection.active);
     CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);  // the pull alone is one unit: back to the inserted pattern
     CHECK(pattern_digest(rig, false, false) != pre);
   }
@@ -3125,7 +4366,7 @@ TEST_CASE("OS-DELPULL: the step under the cursor is deleted and the rows below m
   CHECK(rig.step(0, 5).note == 36);  // the row below moved up over it
   CHECK(rig.step(0, 14).note == 45);
   CHECK(rig.step(0, 15).note == 0);  // the last one is cleared
-  CHECK(rig.view().row() == 5);       // and the cursor did not follow (the old backspace pulled the rows above)
+  CHECK(rig.view().row() == 6);       // the cursor did not follow the rows (the old backspace pulled the rows above); it goes down by the JUMP (1) like Delete: OS-DELJUMP
   // at row 0 too
   rig.go(0, 0);
   CHECK(rig.invoke("step.pull") == DispatchResult::Changed);
@@ -3137,6 +4378,246 @@ TEST_CASE("OS-DELPULL: the step under the cursor is deleted and the rows below m
   CHECK(rig.invoke("step.pull") == DispatchResult::Changed);  // (the message is what changed)
   CHECK(rig.message() == "PAST TRACK END");
   CHECK(rig.depth() == 0u);
+}
+
+TEST_CASE("OS-DELJUMP: Shift + Delete pulls and then moves the cursor down by the JUMP like Delete; JUMP 0 stays; a refused or unchanged pull does not move") {
+  Rig rig(true, 32);
+  rig.edit_mode();
+  for (int r = 0; r < 32; ++r) {
+    put_note(rig, 0, r, 30u + static_cast<unsigned>(r));
+  }
+  rig.editor->history_reset();
+  (void)rig.invoke("chooser.toggle", 2);
+  (void)rig.invoke("chooser.pad", 2);
+  (void)rig.invoke("chooser.toggle", 2);
+  NEED(rig.edit().edit_step == 2);
+  rig.go(4, 0);
+  rig.shift_tap(Button::Delete);  // the real key: Shift + Delete
+  CHECK(rig.step(0, 3).note == 33);
+  CHECK(rig.step(0, 4).note == 35);  // the rows below moved up over the cursor's row
+  CHECK(rig.step(0, 31).note == 0);
+  CHECK(rig.view().row() == 6);      // JUMP 2
+  CHECK(!rig.edit().selection.active);
+  // a block ends with the move
+  rig.go(10, 0);
+  (void)rig.invoke("select.extend", 1);
+  CHECK(rig.edit().selection.active);
+  rig.shift_tap(Button::Delete);
+  CHECK(!rig.edit().selection.active);
+  CHECK(rig.view().row() == 13);  // from the cursor's row (11) by 2
+  // no wrap: near the end it stops on the last row
+  rig.go(31, 0);
+  put_note(rig, 0, 31, 60);
+  rig.shift_tap(Button::Delete);
+  CHECK(rig.view().row() == 31);
+  // JUMP 0: the cursor stays
+  (void)rig.invoke("chooser.toggle", 2);
+  (void)rig.invoke("chooser.pad", 0);
+  (void)rig.invoke("chooser.toggle", 2);
+  NEED(rig.edit().edit_step == 0);
+  rig.go(4, 0);
+  const int before = rig.step(0, 5).note;
+  rig.shift_tap(Button::Delete);
+  CHECK(rig.step(0, 4).note == before);
+  CHECK(rig.view().row() == 4);
+  // nothing to pull (empty tail): no change, no move
+  for (int r = 0; r < 32; ++r) {
+    (void)rig.project().set_step(1, 0, static_cast<unsigned>(r), model::kEmptyStep);
+  }
+  (void)rig.invoke("chooser.toggle", 2);
+  (void)rig.invoke("chooser.pad", 2);
+  (void)rig.invoke("chooser.toggle", 2);
+  rig.go(8, 0);
+  (void)rig.invoke("step.pull");
+  CHECK(rig.view().row() == 8);
+  // a track whose end is above the cursor refuses and does not move
+  (void)rig.project().set_track_length(1, 2, 8);
+  rig.go(12, 2);
+  (void)rig.invoke("step.pull");
+  CHECK(rig.message() == "PAST TRACK END");
+  CHECK(rig.view().row() == 12);
+}
+
+// ---- OS-SELSHIFT: Shift + Note/Instr/Vol/Fx jump to a quarter and, in Edit, select the rows they cross ---------------------------------------------------------------------------------------
+
+TEST_CASE("OS-SELSHIFT: in Edit, Shift + Note/Instr/Vol/Fx select the rows between the old and the new row (the new row not included)") {
+  Rig rig;  // 64 rows: the quarters are 0, 16, 32, 48
+  rig.edit_mode();
+  const auto block = [&] { return rig.edit().selection.block(rig.view().row(), rig.view().track()); };
+  // up: from row 16 to row 0 selects 0..15
+  rig.go(16, 0);
+  rig.shift_tap(Button::Note);
+  CHECK(rig.view().row() == 0);
+  CHECK(rig.edit().selection.active);
+  app::Selection::Block b = block();
+  CHECK((b.row0 == 0 && b.row1 == 15 && b.track0 == 0 && b.track1 == 0));
+  // down: from row 0 to row 16 selects 0..15
+  rig.go(0, 0);
+  rig.shift_tap(Button::Instr);
+  CHECK(rig.view().row() == 16);
+  CHECK(rig.edit().selection.active);
+  b = block();
+  CHECK((b.row0 == 0 && b.row1 == 15));
+  // from an inner row: row 20 to row 0 selects 0..19
+  rig.go(20, 0);
+  rig.shift_tap(Button::Note);
+  CHECK(rig.view().row() == 0);
+  b = block();
+  CHECK((b.row0 == 0 && b.row1 == 19));
+  // an active selection is replaced; Vol and Fx jump to 32 and 48
+  rig.go(0, 0);
+  rig.shift_tap(Button::Vol);
+  CHECK(rig.view().row() == 32);
+  b = block();
+  CHECK((b.row0 == 0 && b.row1 == 31));
+  rig.shift_tap(Button::Fx);
+  CHECK(rig.view().row() == 48);
+  b = block();
+  CHECK((b.row0 == 32 && b.row1 == 47));
+  // the track follows the cursor
+  rig.go(16, 2);
+  rig.shift_tap(Button::Note);
+  b = block();
+  CHECK((b.row0 == 0 && b.row1 == 15 && b.track0 == 2 && b.track1 == 2));
+}
+
+TEST_CASE("OS-SELSHIFT: the same row (no move) changes no selection; outside Edit the jump selects nothing") {
+  Rig rig;
+  rig.edit_mode();
+  rig.go(0, 0);
+  rig.shift_tap(Button::Note);  // already on row 0
+  CHECK(rig.view().row() == 0);
+  CHECK_FALSE(rig.edit().selection.active);
+  rig.mode(PatternMode::Browse);
+  rig.go(16, 0);
+  rig.shift_tap(Button::Note);
+  CHECK(rig.view().row() == 0);
+  CHECK_FALSE(rig.edit().selection.active);
+}
+
+TEST_CASE("OS-SELSHIFT: the selected rows are an ordinary range: Delete clears them, and the cursor row is not cleared") {
+  Rig rig;
+  rig.edit_mode();
+  for (int r = 0; r < 24; ++r) {
+    put_note(rig, 0, r, 30u + static_cast<unsigned>(r));
+  }
+  rig.go(16, 0);
+  rig.shift_tap(Button::Note);  // selects 0..15
+  NEED(rig.edit().selection.active);
+  (void)rig.invoke("step.clear");
+  for (int r = 0; r < 16; ++r) {
+    CHECK(rig.step(0, r).note == 0);
+  }
+  CHECK(rig.step(0, 16).note == 46);
+}
+
+TEST_CASE("OS-SELSHIFT fold: after a downward jump Shift + Down grows the block by one row, not two; after an upward jump Shift + Up grows it by one") {
+  Rig rig(true, 8);  // the quarters are 0, 2, 4, 6
+  rig.edit_mode();
+  const auto block = [&] { return rig.edit().selection.block(rig.view().row(), rig.view().track()); };
+  rig.go(0, 0);
+  rig.press(Button::Shift);  // Shift stays down: letting it go ends the block's extending
+  rig.pass(1);
+  rig.tap(Button::Instr);  // row 0 -> 2 selects 0..1 (two rows)
+  NEED(rig.view().row() == 2);
+  app::Selection::Block b = block();
+  CHECK((b.row0 == 0 && b.row1 == 1));
+  rig.tap(Button::Down);  // the real key: one row more, 0..2
+  CHECK(rig.view().row() == 3);
+  b = block();
+  CHECK((b.row0 == 0 && b.row1 == 2));
+  (void)rig.invoke("select.extend", 1);  // and again: 0..3
+  b = block();
+  CHECK((b.row0 == 0 && b.row1 == 3));
+  CHECK(rig.view().row() == 4);
+  (void)rig.invoke("select.extend", -1);  // Shift + Up goes on from the cursor as the arrows do
+  (void)rig.invoke("select.extend", -1);
+  b = block();
+  CHECK((b.row0 == 0 && b.row1 == 2));
+  rig.release(Button::Shift);
+  rig.pass(1);
+  // up: row 4 -> 2 selects 2..3, and Shift + Up grows it to 1..3
+  rig.go(4, 0);
+  (void)rig.invoke("select.jump", 1);
+  NEED(rig.view().row() == 2);
+  b = block();
+  CHECK((b.row0 == 2 && b.row1 == 3));
+  (void)rig.invoke("select.extend", -1);
+  b = block();
+  CHECK((b.row0 == 1 && b.row1 == 3));
+}
+
+TEST_CASE("OS-SELSHIFT fold: a block made by arrows is not touched by the lag, and a second jump replaces a lagging block") {
+  Rig rig(true, 8);
+  rig.edit_mode();
+  const auto block = [&] { return rig.edit().selection.block(rig.view().row(), rig.view().track()); };
+  rig.go(0, 0);
+  (void)rig.invoke("select.extend", 1);
+  (void)rig.invoke("select.extend", 1);  // plain Shift + Down x2: rows 0..2
+  app::Selection::Block b = block();
+  CHECK((b.row0 == 0 && b.row1 == 2));
+  CHECK_FALSE(rig.edit().selection.end_lags);
+  rig.go(0, 0);
+  rig.shift_tap(Button::Instr);  // 0..1, cursor 2
+  CHECK(rig.edit().selection.end_lags);
+  rig.shift_tap(Button::Vol);  // row 2 -> 4 selects 2..3, replacing the block
+  b = block();
+  CHECK((b.row0 == 2 && b.row1 == 3));
+  CHECK(rig.view().row() == 4);
+  (void)rig.invoke("select.clear");
+  CHECK_FALSE(rig.edit().selection.end_lags);
+}
+
+TEST_CASE("OS-SELSHIFT fold: follow mode grows by one row; a 1-row pattern selects nothing; at the last row Shift + Down leaves the block alone") {
+  {  // the cursor rides the playhead (STEP, playing): the jump's block keeps, the arrows set its end
+    Rig rig(true, 16);
+    rig.edit_mode();
+    audio::PlayPosition pos;
+    rig.app->attach_play_position(&pos);
+    pos.publish(true, 1, 4, 12000, audio::PlayPosition::kNoOrder);
+    rig.pass(1);
+    NEED(rig.state().play.playing);
+    NEED(rig.view().row() == 4);
+    (void)rig.invoke("select.jump", 3);  // 4 -> 12 selects 4..11
+    NEED(rig.edit().selection.active);
+    app::Selection::Block b = rig.edit().selection.block(rig.view().row(), rig.view().track());
+    CHECK((b.row0 == 4 && b.row1 == 11));
+    (void)rig.invoke("select.extend", 1);
+    b = rig.edit().selection.block(rig.view().row(), rig.view().track());
+    CHECK((b.row0 == 4 && b.row1 == 12));
+    // the transport stops with the cursor where the jump left it: the follow block is dropped, Shift + Down starts a fresh block and grows it by one row (no stale lag)
+    (void)rig.invoke("select.jump", 3);
+    pos.publish(false, 1, 12, 12000, audio::PlayPosition::kNoOrder);
+    rig.pass(1);
+    NEED(!rig.state().play.playing);
+    const int stopped_row = rig.view().row();
+    NEED(stopped_row == 12);  // (the end sits one row above the cursor: the case the lag would otherwise match)
+    (void)rig.invoke("select.extend", 1);
+    b = rig.edit().selection.block(rig.view().row(), rig.view().track());
+    CHECK((b.row0 == stopped_row && b.row1 == stopped_row + 1));
+    CHECK_FALSE(rig.edit().selection.end_lags);
+    rig.app->attach_document(nullptr);  // (a take is open while it plays in Edit: the rig destroys its editor before the app)
+  }
+  {  // one row: every quarter is row 0, nothing moves, nothing is selected
+    Rig rig(true, 1);
+    rig.edit_mode();
+    for (int q = 0; q < 4; ++q) {
+      (void)rig.invoke("select.jump", q);
+      CHECK(rig.view().row() == 0);
+      CHECK_FALSE(rig.edit().selection.active);
+    }
+  }
+  {  // 4 rows: 0 -> 3 selects 0..2; Shift + Down at the last row cannot move, so the block stays
+    Rig rig(true, 4);
+    rig.edit_mode();
+    rig.go(0, 0);
+    (void)rig.invoke("select.jump", 3);
+    NEED(rig.view().row() == 3);
+    (void)rig.invoke("select.extend", 1);
+    app::Selection::Block b = rig.edit().selection.block(rig.view().row(), rig.view().track());
+    CHECK((b.row0 == 0 && b.row1 == 2));
+    CHECK(rig.view().row() == 3);
+  }
 }
 
 // ---- OS-SHIFTENC: Shift + encoder is a coarse step in the Instr, Vol and FX value columns, a page in Browse, and in the choosers and the Fill dialog -----------------------------------------
@@ -3354,6 +4835,7 @@ std::string pattern_bytes(Rig& rig, int rows) {
 TEST_CASE("OS-FILL2 Fill dialog: VOLUME RAMP fades the track out, the strip says mode and range, and one undo gives every byte back") {
   Rig rig(true, 16);
   rig.edit_mode();
+  (void)rig.invoke("select.column_all");  // OS-PTOOLS2 S3c: the track selected, so the fill is the track's
   const std::string before = pattern_bytes(rig, 16);
   const unsigned depth = rig.depth();
   rig.tap(Button::F4);
@@ -3387,6 +4869,7 @@ TEST_CASE("OS-FILL2 Fill dialog: FX 1 RANDOM writes the FX type and a value insi
   for (int pass = 0; pass < 2; ++pass) {
     Rig rig(true, 16);
     rig.edit_mode();
+  (void)rig.invoke("select.column_all");  // OS-PTOOLS2 S3c: the track selected, so the fill is the track's
     put(rig, 0, 3, note_at(50, 4));  // a note stays a note
     const std::string before = pattern_bytes(rig, 16);
     rig.tap(Button::F4);
@@ -3397,7 +4880,7 @@ TEST_CASE("OS-FILL2 Fill dialog: FX 1 RANDOM writes the FX type and a value insi
     CHECK(rig.state().fill.plan.fx_type == 4);
     fill_row(rig, kRowMode, 2);   // RANDOM
     fill_row(rig, kRowTo, 0);
-    rig.shift_turn(10);           // TO 100 (10 a detent, stopped at the type's maximum)
+    rig.shift_turn(10);           // TO 100 (10 a detent; the draw of a Chance RANDOM stays in 0..100, OS-CECHANCE C2)
     CHECK((rig.state().fill.plan.from == 0 && rig.state().fill.plan.to == 100));
     rig.tap(Button::F1);
     CHECK(rig.message() == "FILL: EVERY 1 STEP, FX 1 RANDOM 0-100");
@@ -3421,7 +4904,7 @@ TEST_CASE("OS-FILL2 Fill dialog: FX 1 RANDOM writes the FX type and a value insi
   }
 }
 
-TEST_CASE("OS-FILL2 Fill dialog: the dialog opens with FROM and TO from what the cursor holds, at every open") {
+TEST_CASE("OS-FILL2 Fill dialog: the first open takes FROM and TO from the cursor, a reopen keeps the session, a change of WHAT starts them again") {
   Rig rig(true, 16);
   rig.edit_mode();
   model::Step here = note_at(70, 3);  // OG note 69
@@ -3436,9 +4919,9 @@ TEST_CASE("OS-FILL2 Fill dialog: the dialog opens with FROM and TO from what the
   rig.shift_turn(1);
   CHECK(rig.state().fill.plan.from == 50);
   rig.tap(Button::F8);
-  rig.tap(Button::F4);          // the session keeps WHAT, the values are the cursor's again
+  rig.tap(Button::F4);          // OS-TOOLSDEDUP: the session keeps WHAT and the values (FROM stays 50, not the cursor's 40)
   CHECK(rig.state().fill.plan.what == model::fill::What::Vol);
-  CHECK((rig.state().fill.plan.from == 40 && rig.state().fill.plan.to == 0));
+  CHECK((rig.state().fill.plan.from == 50 && rig.state().fill.plan.to == 0));
   fill_row(rig, kRowWhat, 2);   // FX 2 (VOLUME + 2 places)
   CHECK(rig.state().fill.plan.what == model::fill::What::Fx2);
   CHECK(rig.state().fill.plan.fx_type == 17);   // the type under the cursor in that column, with its default
@@ -3449,6 +4932,7 @@ TEST_CASE("OS-FILL2 Fill dialog: the dialog opens with FROM and TO from what the
 TEST_CASE("OS-FILL2 Fill dialog: a NOTE RAMP lands in the scale of KEY; MODE is dim for RANDOM and SCALE, whose window is FROM..TO") {
   Rig rig(true, 16);
   rig.edit_mode();
+  (void)rig.invoke("select.column_all");  // OS-PTOOLS2 S3c: the track selected, so the fill is the track's
   rig.tap(Button::F4);
   fill_row(rig, kRowMode, 1);   // RAMP
   fill_row(rig, kRowKey, 3);    // Major
@@ -3489,17 +4973,15 @@ TEST_CASE("OS-FILL2 Fill dialog: a NOTE RAMP lands in the scale of KEY; MODE is 
   CHECK(hi - lo > 11);
 }
 
-// ---- PAT-OPS-A: DUPLICATE x2, EXPAND x2 and SHRINK /2 in the F7 TOOLS list ---------------------------------------------------------------
+// ---- PAT-OPS-A: DUPLICATE x2, EXPAND x2 and SHRINK /2 in the TOOLS list ---------------------------------------------------------------
 
 namespace {
-// F7, the cursor on entry `item` (0 EXPORT PATTERN, 1 DUPLICATE x2, 2 EXPAND x2, 3 SHRINK /2), F1 runs it.
+// The verb menu (F7) pad of the length op `item` (1 DUPLICATE x2 = pad 10, 2 EXPAND x2 = pad 11, 3 SHRINK /2 = pad 12: the numbers of PAT-OPS-A).
+// OS-TOOLSDEDUP: the fixed pads run them; the APPS page lists tool apps only.
 void run_tool(Rig& rig, unsigned item) {
   rig.tap(Button::F7);
-  NEED(rig.state().overlay == app::OverlayId::Tools);
-  for (unsigned k = 0; k < item; ++k) {
-    rig.tap(Button::Down);
-  }
-  rig.tap(Button::F1);
+  NEED(rig.state().overlay == app::OverlayId::VerbMenu);
+  rig.pad(8u + item);
 }
 
 std::vector<unsigned> lengths_of(Rig& rig, unsigned id = 1) {
@@ -4200,12 +5682,15 @@ TEST_CASE("OS-AUDIT-56: a block keeps the columns from where it began to the cur
   CHECK(rig.view().column() == Column::Instr);
   b = sel.block(rig.view().row(), rig.view().track());
   CHECK((b.col0 == 1 && b.col1 == 2));
-  // Shift + Up at step 0 is the whole-column block: whole steps whatever the cursor's column
+  // Shift + Up at step 0 (OS-SELCOL): the cursor's column first, then the whole track as whole steps
   Rig col;
   col.go(0, 1);
   col.column(Column::Fx1);
   (void)col.invoke("select.extend", -kDown);
-  const app::Selection::Block c = col.edit().selection.block(col.view().row(), col.view().track());
+  app::Selection::Block c = col.edit().selection.block(col.view().row(), col.view().track());
+  CHECK((c.track0 == 1 && c.track1 == 1 && c.col0 == 3 && c.col1 == 3 && !c.whole_steps()));
+  (void)col.invoke("select.extend", -kDown);
+  c = col.edit().selection.block(col.view().row(), col.view().track());
   CHECK((c.track0 == 1 && c.track1 == 1 && c.whole_steps()));
 }
 
@@ -4317,7 +5802,7 @@ TEST_CASE("OS-AUDIT-56: Invert, Insert and Pull move the block's columns only") 
   for (int i = 0; i < 3; ++i) {
     (void)rig.invoke("select.extend", kDown);
   }
-  rig.tap(Button::F6);  // INVERT: the volumes of rows 0..3 reversed, the notes where they were
+  (void)rig.invoke("pattern.invert");  // INVERT (no key since OS-PTOOLS2 S3): the volumes of rows 0..3 reversed, the notes where they were
   for (int r = 0; r < 4; ++r) {
     CHECK_MESSAGE(rig.step(0, r).vol == full_step(static_cast<unsigned>(3 - r)).vol, "row " << r);
     CHECK_MESSAGE(rig.step(0, r).note == full_step(static_cast<unsigned>(r)).note, "row " << r);
@@ -4359,10 +5844,7 @@ TEST_CASE("OS-AUDIT-56: DUPLICATE and a fill read a column block as whole steps,
   rig.go(0, 0);
   rig.column(Column::Vol);
   (void)rig.invoke("select.extend", kDown);
-  rig.tap(Button::F7);
-  NEED(rig.state().overlay == app::OverlayId::Tools);
-  rig.tap(Button::Down);
-  rig.tap(Button::F1);
+  run_tool(rig, 1);
   CHECK(rig.message() == "DUPLICATED: 64 STEPS - WHOLE STEPS");
   CHECK(rig.project().pattern(1)->track_length[0] == 64);
   for (int r = 0; r < 4; ++r) {
@@ -4379,10 +5861,7 @@ TEST_CASE("OS-AUDIT-56: DUPLICATE and a fill read a column block as whole steps,
   (void)rig.invoke("select.extend", kRight);
   (void)rig.invoke("select.extend", kRight);
   (void)rig.invoke("select.extend", kRight);  // Note..FX2 and then the next track: whole steps
-  rig.tap(Button::F7);
-  NEED(rig.state().overlay == app::OverlayId::Tools);
-  rig.tap(Button::Down);
-  rig.tap(Button::F1);
+  run_tool(rig, 1);
   CHECK(rig.message().find("WHOLE STEPS") == std::string::npos);
   // The pattern.fill of a Vol-only block (its steps whole, the note column filled): the strip says so
   rig.flush();
@@ -4392,4 +5871,135 @@ TEST_CASE("OS-AUDIT-56: DUPLICATE and a fill read a column block as whole steps,
   (void)rig.invoke("select.extend", kDown);
   (void)rig.invoke("pattern.fill");
   CHECK(rig.message().rfind("FILL: WHOLE STEPS, ", 0) == 0);
+}
+
+// ---- OS-PTOOLS2 S1: Fill keeps its rows, F2 VARY; the TOOLS list's row, the block hint -----------------------------------------------------------------------------------
+
+namespace {
+model::Step tool_step(unsigned note, unsigned instr, unsigned vol) {
+  model::Step s = model::kEmptyStep;
+  s.note = static_cast<std::uint8_t>(note);
+  s.instr = static_cast<std::uint8_t>(instr);
+  s.vol = static_cast<std::uint8_t>(vol);
+  return s;
+}
+void put_step(Rig& rig, int track, int row, const model::Step& s) {
+  (void)rig.project().set_steps(1, static_cast<std::uint32_t>(track), static_cast<std::uint32_t>(row), &s, 1);
+}
+}  // namespace
+
+TEST_CASE("OS-TOOLSDEDUP: Fill reopened in CONST mode keeps FROM; the dialog keeps every row for the session") {
+  Rig rig(true, 16);
+  rig.edit_mode();
+  rig.tap(Button::F4);
+  fill_row(rig, kRowWhat, 2);    // VOLUME
+  fill_row(rig, kRowType, 2);    // EUCLID
+  fill_row(rig, kRowCount, -1);  // EVENTS 3
+  fill_row(rig, kRowMode, 1);    // RAMP
+  fill_row(rig, kRowTo, 10);     // TO 10
+  const model::fill::Plan before = rig.state().fill.plan;
+  CHECK(before.what == model::fill::What::Vol);
+  CHECK(before.mode == model::fill::Mode::Ramp);
+  rig.tap(Button::F8);
+  rig.tap(Button::F4);
+  const model::fill::Plan& again = rig.state().fill.plan;
+  CHECK(again.what == before.what);
+  CHECK(again.type == before.type);
+  CHECK(again.events == before.events);
+  CHECK(again.mode == before.mode);
+  CHECK(again.from == before.from);
+  CHECK(again.to == before.to);  // (QA-PAT-309 said: back to the cursor's at every open)
+  // OS-TOOLSDEDUP: CONST keeps FROM too, whatever volume the cursor holds at the reopen; every other row stays
+  fill_row(rig, kRowMode, -1);
+  CHECK(rig.state().fill.plan.mode == model::fill::Mode::Const);
+  rig.tap(Button::F8);
+  put_step(rig, 0, 5, tool_step(61, 1, 0x20));
+  rig.go(5, 0);
+  rig.tap(Button::F4);
+  CHECK(rig.state().fill.plan.mode == model::fill::Mode::Const);
+  CHECK(rig.state().fill.plan.from == before.from);
+  CHECK(rig.state().fill.plan.from != 0x20);
+  CHECK(rig.state().fill.plan.to == before.to);
+  CHECK(rig.state().fill.plan.events == before.events);
+  rig.tap(Button::F8);
+}
+
+TEST_CASE("OS-PTOOLS2 S1: F2 VARY in a random fill takes back the dialog's last fill and draws again, one unit; it does not touch anything else, and is not live in a fixed fill") {
+  Rig rig(true, 32);
+  rig.edit_mode();
+  (void)rig.invoke("select.column_all");  // OS-PTOOLS2 S3c: the track selected (32 steps), so the fill is the track's
+  const unsigned d0 = rig.depth();
+  rig.tap(Button::F4);
+  fill_row(rig, kRowType, 1);  // RANDOM, DENSITY 30
+  CHECK(app::fill_random(rig.state().fill));
+  rig.tap(Button::F1);
+  CHECK(rig.depth() == d0 + 1);
+  const std::string first = column_of(rig, 0, 32);
+  rig.flush();
+  rig.tap(Button::F4);
+  rig.tap(Button::F2);
+  CHECK(rig.state().overlay == app::OverlayId::Fill);  // VARY keeps the dialog up: F2 again re-rolls
+  CHECK(rig.depth() == d0 + 1);  // the first fill was taken back: still one unit
+  CHECK(column_of(rig, 0, 32) != first);  // the generator moved on
+  rig.tap(Button::F8);  // BACK closes the dialog (VARY left it up)
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  CHECK(column_of(rig, 0, 32) == std::string(32, '.'));  // one undo takes the whole thing: nothing of the first fill is left
+  CHECK(rig.depth() == d0);
+  // an edit in between: VARY adds to it, it never undoes what it did not make
+  rig.flush();
+  rig.tap(Button::F4);
+  rig.tap(Button::F1);
+  const unsigned d1 = rig.depth();
+  put_step(rig, 0, 31, tool_step(70, 1, 0x10));
+  CHECK(rig.invoke("step.note", 50) == DispatchResult::Changed);  // a unit of the editor over the same pattern
+  const unsigned d2 = rig.depth();
+  rig.flush();
+  rig.tap(Button::F4);
+  rig.tap(Button::F2);
+  CHECK(rig.depth() == d2 + 1);
+  (void)d1;
+  // a fixed fill: F2 is not live, and does nothing
+  rig.flush();
+  rig.tap(Button::F4);
+  fill_row(rig, kRowType, -1);  // EVERY N
+  CHECK_FALSE(app::fill_random(rig.state().fill));
+  const unsigned d3 = rig.depth();
+  rig.tap(Button::F2);
+  CHECK(rig.state().overlay == app::OverlayId::Fill);
+  CHECK(rig.depth() == d3);
+  rig.tap(Button::F8);
+}
+
+// ---- OS-PTOOLS2 S1: TOOLS while playing; the block hint -------------------------------------------------------------------------------------------------------------------
+
+TEST_CASE("OS-PTOOLS2 S1: F7 in WATCH while playing with a block opens the tools, on the row they were left on; LIVE refuses and says why") {
+  Rig rig(true, 16);
+  audio::PlayPosition pos;
+  rig.app->attach_play_position(&pos);
+  pos.publish(true, 1, 4, 12000, audio::PlayPosition::kNoOrder);
+  rig.pass(1);
+  NEED(rig.state().play.playing);
+  NEED(rig.state().mode[kPattern] == static_cast<std::uint8_t>(PatternMode::Browse));  // WATCH
+  for (int i = 0; i < 3; ++i) (void)rig.invoke("select.extend", kDown);  // a block made while following keeps (OS-BUG-WATCHSEL)
+  NEED(rig.state().edit.selection.active);
+  rig.tap(Button::F7);
+  NEED(rig.state().overlay == app::OverlayId::VerbMenu);  // the menu opens in WATCH while playing (S1)
+  rig.pad(15);  // APPS > opens the TOOLS list
+  NEED(rig.state().overlay == app::OverlayId::VerbMenu);
+  rig.tap(Button::Down);
+  rig.tap(Button::Down);
+  rig.tap(Button::F8);
+  rig.tap(Button::F7);
+  rig.pad(15);
+  CHECK(rig.state().overlay == app::OverlayId::VerbMenu);
+  CHECK(rig.state().modules.tools == 0);  // (no tool app in this rig: the page is empty, the row stays inside it; the remembered row is tested with apps in module_edit_test)
+  rig.tap(Button::F8);
+  rig.shift_tap(Button::Rec);  // LIVE
+  NEED(app::pattern_editable(rig.state()));
+  CHECK_FALSE(rig.edit().rec_free);
+  rig.tap(Button::F7);
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  CHECK(rig.message() == "THE PLAYHEAD HOLDS THE CURSOR IN LIVE");
+  rig.app->attach_document(nullptr);  // (a LIVE take is open: the rig destroys its editor before the app)
 }

@@ -403,3 +403,52 @@ TEST_CASE("wavetable and grain frames: the window is whole and inside the sample
   CHECK(g.end - g.begin <= 441u);
   CHECK_FALSE(grain_frames(0, 0, 441).valid);
 }
+
+// OS-CEPTFX S4c: insert_points (Add Silence, a plugin's set_extra_samples): a point at or before the insertion's start keeps its frame, one inside moves by the prepend, one at or after the end by both.
+// (A point is a position in 65536 steps: the frame it names rounds down, so the expected points are compared within 2 units.)
+namespace {
+bool near_point(unsigned got, unsigned want) { return got + 2u >= want && got <= want + 2u; }
+}  // namespace
+
+TEST_CASE("insert_points: points and slices follow the frames they name; nothing inserted leaves the record") {
+  PointsRec in;
+  in.points.start = 0;
+  in.points.loop_start = static_cast<std::uint16_t>(frame_to_point(2000, 10000));
+  in.points.loop_end = static_cast<std::uint16_t>(frame_to_point(8000, 10000));
+  in.points.end = kPointMax;
+  in.slices[0] = 0;
+  in.slices[1] = static_cast<std::uint16_t>(frame_to_point(5000, 10000));
+  in.slice_count = 2;
+  const PointsRec same = insert_points(in, 10000, 0, 10000, 0, 0);
+  CHECK(same.points.loop_start == in.points.loop_start);
+  CHECK(same.slice_count == 2u);
+  // 1000 frames of silence in front of the whole sample: every point keeps its audio, now 1000 frames later.
+  const PointsRec pre = insert_points(in, 10000, 0, 10000, 1000, 0);
+  CHECK(pre.points.start == 0u);  // a point at the insertion's start stays
+  CHECK(near_point(pre.points.loop_start, frame_to_point(3000, 11000)));
+  CHECK(near_point(pre.points.loop_end, frame_to_point(9000, 11000)));
+  CHECK(pre.points.end == kPointMax);
+  CHECK(pre.slice_count == 2u);
+  CHECK(near_point(pre.slices[1], frame_to_point(6000, 11000)));
+  // 500 frames appended: the points inside keep their frames of the longer sample; END (at the end) moves with the tail.
+  const PointsRec app = insert_points(in, 10000, 0, 10000, 0, 500);
+  CHECK(near_point(app.points.loop_start, frame_to_point(2000, 10500)));
+  CHECK(near_point(app.points.loop_end, frame_to_point(8000, 10500)));
+  CHECK(app.points.end == kPointMax);
+  CHECK(points_valid(app.points));
+  // Insertions inside a selection [3000, 6000): before it nothing moves, a point inside moves by the prepend, after it by prepend + append.
+  const PointsRec mid = insert_points(in, 10000, 3000, 6000, 100, 50);
+  CHECK(near_point(mid.points.loop_start, frame_to_point(2000, 10150)));
+  CHECK(near_point(mid.points.loop_end, frame_to_point(8150, 10150)));
+  CHECK(near_point(mid.slices[1], frame_to_point(5100, 10150)));
+  CHECK(points_valid(mid.points));
+}
+
+TEST_CASE("insert_points: bad ranges and overflowing lengths return the record as it was") {
+  PointsRec in;
+  in.points.loop_start = 100;
+  CHECK(insert_points(in, 0, 0, 0, 5, 5).points.loop_start == 100u);
+  CHECK(insert_points(in, 1000, 600, 500, 5, 5).points.loop_start == 100u);  // b <= a
+  CHECK(insert_points(in, 1000, 0, 1001, 5, 5).points.loop_start == 100u);   // b past the end
+  CHECK(insert_points(in, 1000, 0, 1000, 0x40000000u, 0).points.loop_start == 100u);
+}

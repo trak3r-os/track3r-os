@@ -63,8 +63,16 @@ LIMITS = [
     ("inst_version_lfo_sine", 0x0104),
     # OS-STEREO step 2: INST 1.5, the 1.3 layout whole and one byte after it, the instrument's stereo flag (docs/specs/OS-STEREO.md, S1); written only for a sample instrument with the flag set
     ("inst_version_stereo", 0x0105),
+    # OS-CEWTENV W1: INST 1.6, the 1.5 layout whole and twelve bytes after it, wt_bend and wt_sust of the six LFO slots in slot order; written only for an instrument with a WT slot (loop 2 or 3) or a non-zero WT byte
+    ("inst_version_wt", 0x0106),
+    # OS-CEPLAYTHRU P1: INST 1.7, the 1.6 layout whole and one byte after it, the play-thru flag (0 a slice stops at the next slice point, 1 it plays to the sample end); written only for a Sample instrument with the flag set
+    ("inst_version_playthru", 0x0107),
+    # OS-MODRATE S3: INST 1.8, the 1.7 layout whole and one byte after it, the module instrument's RATE (0 FULL, 1 = 1/2, 2 = 1/4); written only for a Module instrument with a RATE other than 0
+    ("inst_version_modrate", 0x0108),
     # OS-PERFFX P1 (decision D5): PERF and SCEN 1.1, written only when a slot holds the Perform FX 20 or 21
     ("state_version_fx", 0x0101),
+    # OS-PERFMODES M3: PERF and SCEN 1.2, written only when a slot holds PLAYMODE (id 18) with a custom play order 4..23
+    ("state_version_play_order", 0x0102),
     # OS-APPUX S3: APPM 1.1, written only when the project holds more than app_param_sets_v10 apps (formats/src/native_state.h kAppsVersionV11)
     ("apps_version_v11", 0x0101),
     ("midi_ports", 2),
@@ -74,13 +82,15 @@ LIMITS = [
     ("mix_strips", 17),
     ("perf_slots", 12),
     ("max_perf_fx", 21),  # OS-PERFFX P1: PERF / SCEN 1.1 (1.0 ended at 19: PERF_FX_MAX_V10)
+    ("perf_play_mode_max_v11", 3),  # OS-PERFMODES M3: the last PLAYMODE value of PERF / SCEN 1.0 and 1.1 (model::kPerfPlayModeMaxV11); above it reads as RND (3) in such a chunk
+    ("perf_play_mode_max", 23),  # OS-PERFMODES M3: the last PLAYMODE value of PERF / SCEN 1.2 (model::kPerfPlayModeMax: 4..23 are C1..C20); above it is held to 23
     ("max_app_param_sets", 12),  # OS-APPUX S3: APPM 1.1 (1.0 held at most app_param_sets_v10)
     ("app_param_sets_v10", 6),
     ("app_params_bytes_max", 1015),  # the longest APPM payload: one writer piece
     ("max_app_params", 32),
     # OS-PERSIST2: the session state (model/project_state.h): NOTE, MUTE, SCEN, SNFX
     ("max_note_root", 11),
-    ("max_note_scale", 11),
+    ("max_note_scale", 38),  # OS-SCALES28: the official numbering 0..38 (the 1.0 byte keeps the panel's twelve)
     ("max_note_octave", 9),
     ("max_note_jump", 32),
     ("max_mute_mode", 2),
@@ -94,10 +104,19 @@ CHUNK_VERSION = L["chunk_version"]
 INST_VERSION = L["inst_version"]  # INST is written as 1.1 (OS-002c): 1.0 plus the sample rate, appended
 INST_VERSION_ENGINE = L["inst_version_engine"]  # OS-004d: 1.2 appends the playback engine (u8); written only for an instrument whose engine is not automatic (0)
 STATE_VERSION_FX = L["state_version_fx"]  # OS-PERFFX P1: PERF / SCEN 1.1 (no new byte: the version says that the Perform FX 20 BITDEPTH and 21 OVERDRV are valid); written only when a slot (of a stored scene) holds one
+STATE_VERSION_PLAY_ORDER = L["state_version_play_order"]  # OS-PERFMODES M3: PERF / SCEN 1.2 (no new byte either: a PLAYMODE slot may hold 4..23, the custom play orders C1..C20); written only when a slot (of a stored scene) does
+PERF_PLAY_MODE_MAX_V11 = L["perf_play_mode_max_v11"]  # the last PLAYMODE value of PERF / SCEN 1.0 and 1.1 (model::kPerfPlayModeMaxV11)
+PERF_PLAY_MODE_MAX = L["perf_play_mode_max"]  # the last PLAYMODE value of PERF / SCEN 1.2 (model::kPerfPlayModeMax)
+PERF_FX_PLAYMODE = 18  # seq::PerfFx::PatternPlayMode (formats/src/native_state.h kPerfFxPlayMode)
 APPS_VERSION_V11 = L["apps_version_v11"]  # OS-APPUX S3: APPM 1.1 (the same layout, more than 6 apps); mirrors C++ state_chunks::kAppsVersionV11, compared by the limits table
 PERF_FX_MAX_V10 = 19  # the last Perform FX id of PERF / SCEN 1.0 (formats/src/native_state.h kPerfFxMaxV10); 1.1 goes to L["max_perf_fx"]
 INST_VERSION_LFO_SINE = L["inst_version_lfo_sine"]  # OS-LFOSINE: 1.4 = the 1.3 layout whole; written only for an instrument with an LFO of shape 5 (Sine)
 INST_VERSION_STEREO = L["inst_version_stereo"]  # OS-STEREO step 2: 1.5 = the 1.3 layout whole plus the stereo byte (0 mono, 1 stereo; above 1 reads 0); written only for a sample instrument with the flag set
+INST_VERSION_WT = L["inst_version_wt"]  # OS-CEWTENV W1: 1.6 = the 1.5 layout whole plus the twelve WT bytes (wt_bend, wt_sust of the six slots, in slot order) after the stereo byte; written only for an instrument with a WT slot (a loop of 2 or 3) or a non-zero WT byte
+INST_VERSION_PLAYTHRU = L["inst_version_playthru"]  # OS-CEPLAYTHRU P1: 1.7 = the 1.6 layout whole plus the play-thru flag (0 or 1) after the WT bytes; written only for a Sample instrument with the flag set
+INST_VERSION_MODRATE = L["inst_version_modrate"]  # OS-MODRATE S3: 1.8 = the 1.7 layout whole plus the module RATE (0 FULL, 1 = 1/2, 2 = 1/4; above 2 reads 0) after the play-thru byte; written only for a Module instrument with a RATE other than 0
+INST_RATE_MAX = 2  # model::kInstRateMax (OS-MODRATE S3); a native value above it reads 0
+INST_PLAYTHRU_MAX = 1  # model::kInstSliceThruMax; a native value above it reads 0 (an OG byte above 0 reads 1)
 INST_STEREO_MAX = 1  # model::kInstStereoMax
 INST_VERSION_MIDI = L["inst_version_midi"]  # OS-INSTUI S8b + S9: 1.3 appends twelve bytes after the engine byte (which is then always present); written only for an instrument one of whose twelve is not its default
 # The twelve bytes of INST 1.3 in file order: velocity, program, out, pb range, offset, CC A..F, VEL>: (largest value, default) of each, and the smallest value of velocity (1).
@@ -134,7 +153,10 @@ INSERT_MAX = 4  # model::kMaxInserts
 INSERT_WHERE_MASTER = 16
 INSERT_PARAMS_MAX = 32  # O3M_PARAMS_MAX
 # OS-BUG-PASTE24: the LAW chunk (docs/formats/o3-project.md, "The LAW chunk"): the instrument volume law, 0 the 1.2+ law (no chunk) or 1 the 1.1.14 table; a value above 1 is Malformed in every minor.
-NOTE_FIELDS = [(11, 0), (11, 0), (9, 3), (1, 0), (32, 1)]  # root, scale, octave, lock, jump: (largest value, default)
+# OS-SCALES28: NOTE 1.1 (the appended scale byte, the official order 0..38) and the panel's twelve, pad of row 2 (1..12) -> the official index; the NOTE 1.0 byte is the pad - 1 (model::kNotePanelScales).
+NOTE_VERSION_SCALE = 0x0101
+NOTE_PANEL_SCALES = [0, 2, 1, 3, 7, 4, 9, 18, 17, 15, 11, 23]
+NOTE_FIELDS = [(11, 0), (38, 0), (9, 3), (1, 0), (32, 1)]  # root, scale, octave, lock, jump: (largest value, default); the scale's top is the official 38 (OS-SCALES28)
 MUTE_MODE_MAX = 2
 SEND_FX = [(0, 1, 0), (0, 1, 0), (0, 18, 0), (1, 3500, 500), (0, 70, 50), (0, 100, 100), (0, 1, 0), (0, 100, 50), (0, 100, 50), (0, 100, 50), (0, 100, 80), (0, 1, 0)]  # (min, max, default) by row
 
@@ -228,6 +250,10 @@ def invalid_instrument(i, module_count):
         return "bad stereo flag"
     if i.get("stereo", 0) and i["kind"] != 1:
         return "stereo flag on a non-sample instrument"
+    if i.get("play_thru", 0) > INST_PLAYTHRU_MAX:
+        return "bad play thru flag"
+    if i.get("mod_rate", 0) > INST_RATE_MAX:
+        return "bad module rate"
     if len(i["m13"]) != len(INST13) or i["m13"][0] < 1 or any(not 0 <= x <= hi for x, (hi, _) in zip(i["m13"], INST13)):
         return "bad MIDI field"
     if not safe_relative_path(i["path"]):
@@ -266,6 +292,12 @@ def invalid_instrument(i, module_count):
     if s[14] > 2 or s[15] > 2:
         return "sampler: bad granular mode"
     return None
+
+
+def inst_uses_wt(i):
+    """OS-CEWTENV W1: an instrument with a loop of 2 or more (the writer's gate, as the maximal fixture pins it) or a non-zero WT byte; the writer then writes INST 1.6 with the twelve WT bytes. What a loop MEANS is tested exactly on read (only 2 and 3 are WT slots)."""
+    wt = i.get("wt", [0] * 12)
+    return any(e[7] >= 2 or wt[2 * n] or wt[2 * n + 1] for n, e in enumerate(i["env"]))
 
 
 class Cursor:
@@ -330,7 +362,7 @@ LENGTH_RANGE = {
     b"MIXR": (25, 25),
     b"PERF": (99, 99),
     b"APPM": (3, 3 + 6 * (4 + 31 + 4 * 32)),  # 1.0; APPM 1.1 (OS-APPUX S3) is bounded by 1015, below
-    b"NOTE": (7, 7),
+    b"NOTE": (7, 7),  # 1.1 appends the official scale, below
     b"MUTE": (3, 3 + 16),
     b"SCEN": (295, 295),
     b"SNFX": (3, 3 + 2 * 32),
@@ -400,8 +432,16 @@ def parse(data):
                 hi += len(INST13)  # the MIDI fields and VEL> of version 1.3
             if cid == b"INST" and (version & 0xFF) >= 5:
                 hi += 1  # the stereo flag of version 1.5 (OS-STEREO step 2)
+            if cid == b"INST" and (version & 0xFF) >= 6:
+                hi += 12  # the twelve WT bytes of version 1.6 (OS-CEWTENV W1)
+            if cid == b"INST" and (version & 0xFF) >= 7:
+                hi += 1  # the play-thru flag of version 1.7 (OS-CEPLAYTHRU P1)
+            if cid == b"INST" and (version & 0xFF) >= 8:
+                hi += 1  # the module RATE of version 1.8 (OS-MODRATE S3)
             if cid == b"USBS" and (version & 0xFF) >= 1:
                 hi += 1  # version 1.1: the channel count of a 4 or 6 output project (OS-USBOUTS)
+            if cid == b"NOTE" and (version & 0xFF) >= 1:
+                hi += 1  # version 1.1: the appended scale in the official order 0..38 (OS-SCALES28)
             if cid == b"APPM" and (version & 0xFF) >= 1:
                 hi = L["app_params_bytes_max"]  # version 1.1: up to 12 apps, as many as one writer piece holds (OS-APPUX S3)
             if clen < lo or (not newer and clen > hi):
@@ -472,12 +512,12 @@ def keep_unknown(p, cid, payload, used):
 
 
 def known_minor(cid):
-    """The newest minor version of a chunk this reader knows: INST 1.5, PERF and SCEN 1.1, APPM 1.1, USBS 1.1, the others 1.0."""
+    """The newest minor version of a chunk this reader knows: INST 1.8, PERF and SCEN 1.2 (OS-PERFMODES M3; 1.1 was OS-PERFFX P1), APPM 1.1, USBS 1.1, NOTE 1.1 (OS-SCALES28), the others 1.0."""
     if cid == b"INST":
-        return INST_VERSION_STEREO & 0xFF
+        return INST_VERSION_MODRATE & 0xFF
     if cid in (b"PERF", b"SCEN"):
-        return STATE_VERSION_FX & 0xFF
-    return 1 if cid in (b"APPM", b"USBS") else CHUNK_VERSION & 0xFF
+        return STATE_VERSION_PLAY_ORDER & 0xFF
+    return 1 if cid in (b"APPM", b"USBS", b"NOTE") else CHUNK_VERSION & 0xFF
 
 
 def check_version(version, cid=None):
@@ -729,6 +769,9 @@ def parse_state(p, cid, payload, newer):
         # tolerant like the C++ reader: an FX id the chunk's version does not have (above 19 in 1.0, above 21 in 1.1) is none (row and values reset), a row above 3 is off
         fx_max = L["max_perf_fx"] if minor >= 1 else PERF_FX_MAX_V10
         s = [(0, 0, [0, 0, 0]) if fx > fx_max else (fx, 0 if row > 3 else row, vals) for fx, row, vals in s]
+        # OS-PERFMODES M3: a PLAYMODE value above what the chunk's minor holds reads as that minor's top (3 RND in 1.0 / 1.1, 23 in 1.2)
+        pm_max = PERF_PLAY_MODE_MAX if minor >= 2 else PERF_PLAY_MODE_MAX_V11
+        s = [(fx, row, [min(v, pm_max) if fx == PERF_FX_PLAYMODE else v for v in vals]) for fx, row, vals in s]
         if any(abs(v) > 100 for _, _, vals in s for v in vals):
             malformed("PERF: value out of range")
         p["perf"] = s
@@ -800,8 +843,14 @@ def parse_session(p, cid, payload, newer):
 
     if cid == b"NOTE":
         n = [c.u8() for _ in range(5)]
+        scale11 = c.u8() if minor >= 1 else None  # OS-SCALES28: 1.1 appends the scale in the official order 0..38
         shape()
-        p["note"] = [v if v <= top else default for v, (top, default) in zip(n, NOTE_FIELDS)]
+        out = [v if v <= top else default for v, (top, default) in zip(n, NOTE_FIELDS)]
+        if minor >= 1 and scale11 is not None and scale11 <= NOTE_FIELDS[1][0]:
+            out[1] = scale11  # 1.1: the appended byte wins over the 1.0 one when it is 0..38
+        else:
+            out[1] = NOTE_PANEL_SCALES[n[1]] if n[1] < len(NOTE_PANEL_SCALES) else 0  # 1.0: the panel's twelve, mapped; above 11 is Chromatic
+        p["note"] = out
     elif cid == b"MUTE":
         count = c.u8()
         if c.bad or not 1 <= count <= L["tracks"]:
@@ -826,11 +875,15 @@ def parse_session(p, cid, payload, newer):
                 out.append((0, [(0, 0, [0, 0, 0]) for _ in range(L["perf_slots"])]))
                 continue
             fixed = []
+            pm_max = PERF_PLAY_MODE_MAX if minor >= 2 else PERF_PLAY_MODE_MAX_V11  # OS-PERFMODES M3, as in PERF
             for fx, row, vals in slots:
                 if fx > (L["max_perf_fx"] if minor >= 1 else PERF_FX_MAX_V10):  # an FX the chunk's version does not have (a later version's, or 20 and 21 in a 1.0 chunk): none, with its row and values reset
                     fixed.append((0, 0, [0, 0, 0]))
                 else:
-                    fixed.append((fx, row if row <= 3 else 0, [v if abs(v) <= 100 else 0 for v in vals]))
+                    if fx == PERF_FX_PLAYMODE:  # a PLAYMODE value above the minor's top: RND (3) in 1.0 / 1.1, 23 in 1.2; before the reset below, as the C++ reader clamps before sanitise_scenes_state
+                        vals = [min(v, pm_max) for v in vals]
+                    vals = [v if abs(v) <= 100 else 0 for v in vals]
+                    fixed.append((fx, row if row <= 3 else 0, vals))
             out.append((1, fixed))
         p["scenes"] = (latch if latch <= 1 else 1, out)
     else:  # SNFX
@@ -870,8 +923,29 @@ def parse_inst(p, payload):
     if (version & 0xFF) >= 5:  # version 1.5 appends the stereo flag after the MIDI bytes (OS-STEREO step 2); a value above 1 reads 0, as the engine does
         stereo = c.u8()
         stereo = stereo if stereo <= INST_STEREO_MAX and kind == 1 else 0  # a flag on a MIDI or Module instrument reads 0 (the model refuses it in memory; a file is not failed for it)
+    wt = [0] * 12
+    if (version & 0xFF) >= 6:  # OS-CEWTENV W1: version 1.6 appends the twelve WT bytes after the stereo byte, wt_bend and wt_sust of the six slots in slot order
+        wt = [c.u8() for _ in range(12)]
+        for n in range(6):  # OS-CEWTENV W3a review: WT bytes on a slot whose loop is not 2 or 3 are zeroed on read (only 2 and 3 are WT slots), so they do not force 1.6 on every later save
+            if env[n][7] not in (2, 3):
+                wt[2 * n] = 0
+                wt[2 * n + 1] = 0
+    if (version & 0xFF) < 6:  # OS-CEWTENV W1 (spec A3): an older chunk has no WT bytes; a loop of 2 or 3 in it reads as 1 (an LFO: what those files played)
+        for e in env:
+            if e[7] >= 2:  # the envelope's loop byte
+                e[7] = 1
+    play_thru = 0
+    if (version & 0xFF) >= 7:  # OS-CEPLAYTHRU P1: version 1.7 appends the play-thru flag after the WT bytes; a value above 1 reads 0, as the stereo byte does, and a flag on a MIDI or Module instrument reads 0 (the model's canonical form clears it there; a file is not failed for it)
+        play_thru = c.u8()
+        play_thru = play_thru if play_thru <= INST_PLAYTHRU_MAX and kind == 1 else 0
+    mod_rate = 0
+    if (version & 0xFF) >= 8:  # OS-MODRATE S3: version 1.8 appends the module RATE after the play-thru byte; a value above 2, or a RATE on a Sample or MIDI instrument, reads 0
+        mod_rate = c.u8()
+        mod_rate = mod_rate if mod_rate <= INST_RATE_MAX and kind == 3 else 0
     last_shape = 5 if (version & 0xFF) >= 4 else 4  # OS-LFOSINE: the LFO shapes are 0..4 before INST 1.4 and 0..5 from it; a larger one plays as Triangle (2)
-    for x in lfo:
+    for i, x in enumerate(lfo):
+        if (version & 0xFF) >= 6 and env[i][7] in (2, 3):
+            continue  # OS-CEWTENV W1: a WT slot of a chunk of the WT minor (the loop is tested exactly: only 2 and 3 are WT): the shape is the contour 0..255, verbatim
         if x[0] > last_shape:
             x[0] = 2
     finish_fields(c, newer)
@@ -880,7 +954,7 @@ def parse_inst(p, payload):
     if index in p["instruments"]:
         malformed("INST: duplicate slot")
     inst = {"kind": kind, "midi": midi, "module": module, "name": name, "path": path, "rate": rate, "engine": engine, "m13": m13, "stereo": stereo, "head": head,
-            "env": env, "lfo": lfo, "slices": slices, "blob": blob}
+            "env": env, "lfo": lfo, "slices": slices, "blob": blob, "wt": wt, "play_thru": play_thru, "mod_rate": mod_rate}
     why = invalid_instrument(inst, len(p["modules"]))
     if why:
         malformed(why)
@@ -904,6 +978,24 @@ def stored_steps(row):
     return n
 
 
+def perf_slots_version(slot_lists, v):
+    """PERF / SCEN's version for these slot lists (PERF: one list; SCEN: the stored scenes'): 1.2 (OS-PERFMODES M3) when a slot holds PLAYMODE with a custom order 4..23,
+    else 1.1 (OS-PERFFX P1) when one holds the FX 20 or 21, else 1.0 (the file it always was)."""
+    play_order = False
+    fx11 = False
+    for slots in slot_lists:
+        for fx, _, vals in slots:
+            if fx == PERF_FX_PLAYMODE and any(PERF_PLAY_MODE_MAX_V11 < val <= PERF_PLAY_MODE_MAX for val in vals):
+                play_order = True
+            elif fx > PERF_FX_MAX_V10:
+                fx11 = True
+    if play_order:
+        return struct.pack(">H", STATE_VERSION_PLAY_ORDER)
+    if fx11:
+        return struct.pack(">H", STATE_VERSION_FX)
+    return v
+
+
 def build_state(p, v):
     """The chunks of the project-level state the project has, in the canonical order MIDI, USBS, MIXR, PERF, APPM (OS-004d)."""
     out = []
@@ -923,7 +1015,7 @@ def build_state(p, v):
         m = p["mix"]
         out.append(chunk(b"MIXR", v + bytes([len(m["route"])] + m["route"] + m["ret"] + [m["out_mode"], m["cue"], m["in"]])))
     if p["perf"] is not None:
-        pv = struct.pack(">H", STATE_VERSION_FX) if any(fx > PERF_FX_MAX_V10 for fx, _, _ in p["perf"]) else v  # PERF is 1.1 only when a slot holds the FX 20 or 21
+        pv = perf_slots_version([p["perf"]], v)  # PERF is 1.2 (OS-PERFMODES M3) only when a slot holds PLAYMODE 4..23, 1.1 only when one holds the FX 20 or 21
         out.append(chunk(b"PERF", pv + bytes([len(p["perf"])]) + b"".join(
             bytes([fx, row]) + struct.pack(">3h", *vals) for fx, row, vals in p["perf"])))
     if p["apps"]:
@@ -937,12 +1029,16 @@ def build_session(p, v):
     """The chunks of the session state the project has, in the canonical order NOTE, MUTE, SCEN, SNFX (OS-PERSIST2)."""
     out = []
     if p["note"] is not None:
-        out.append(chunk(b"NOTE", v + bytes(p["note"])))
+        root, scale, octave, lock, jump = p["note"]
+        if scale in NOTE_PANEL_SCALES:  # one of the twelve: NOTE 1.0, the byte is the pad - 1 (the file of before, byte for byte)
+            out.append(chunk(b"NOTE", v + bytes([root, NOTE_PANEL_SCALES.index(scale), octave, lock, jump])))
+        else:  # OS-SCALES28: 1.1, the 1.0 byte 0 (Chromatic) and the official scale appended
+            out.append(chunk(b"NOTE", struct.pack(">H", NOTE_VERSION_SCALE) + bytes([root, 0, octave, lock, jump, scale])))
     if p["mute"] is not None:
         out.append(chunk(b"MUTE", v + bytes([len(p["mute"])]) + bytes(p["mute"])))
     if p["scenes"] is not None:
         latch, scenes = p["scenes"]
-        sv = struct.pack(">H", STATE_VERSION_FX) if any(stored and fx > PERF_FX_MAX_V10 for stored, slots in scenes for fx, _, _ in slots) else v  # SCEN, likewise, for a stored scene
+        sv = perf_slots_version([slots for stored, slots in scenes if stored], v)  # SCEN, likewise: 1.2 (OS-PERFMODES M3) for a stored scene's PLAYMODE 4..23, 1.1 for the FX 20 or 21
         out.append(chunk(b"SCEN", sv + bytes([latch, len(scenes)]) + b"".join(
             bytes([stored]) + b"".join(bytes([fx, row]) + struct.pack(">3h", *vals) for fx, row, vals in slots) for stored, slots in scenes)))
     if p["send"] is not None:
@@ -972,7 +1068,16 @@ def build(p):
         i = p["instruments"][index]
         # 1.3 only for an instrument one of whose twelve MIDI bytes is not its default, 1.2 (the engine byte) only for an instrument that chose an engine: every other is the 1.1 chunk it always was
         # 1.4 (the 1.3 layout whole) for an instrument with a Sine LFO; 1.5 (the same and the stereo byte) for a sample instrument with the stereo flag (it covers a Sine LFO too)
-        if i.get("stereo", 0) and i["kind"] == 1:
+        # 1.6 (OS-CEWTENV W1: the 1.5 layout whole and the twelve WT bytes) for an instrument with a WT slot (a loop of 2 or 3) or a non-zero WT byte (it covers 1.5 and 1.4 too)
+        # 1.7 (OS-CEPLAYTHRU P1: the 1.6 layout whole and the play-thru flag after the WT bytes) for a Sample instrument with the flag set (it covers 1.6, 1.5 and 1.4 too)
+        # 1.8 (OS-MODRATE S3: the 1.7 layout whole and the module RATE after the play-thru byte) for a Module instrument with a RATE other than 0
+        if i.get("mod_rate", 0) and i["kind"] == 3:
+            version = INST_VERSION_MODRATE
+        elif i.get("play_thru", 0) and i["kind"] == 1:
+            version = INST_VERSION_PLAYTHRU
+        elif inst_uses_wt(i):
+            version = INST_VERSION_WT
+        elif i.get("stereo", 0) and i["kind"] == 1:
             version = INST_VERSION_STEREO
         elif any(x[0] == 5 for x in i["lfo"]):
             version = INST_VERSION_LFO_SINE
@@ -988,6 +1093,13 @@ def build(p):
             body += bytes(i["m13"])
         if version >= INST_VERSION_STEREO:
             body += bytes([i.get("stereo", 0)])
+        if version >= INST_VERSION_WT:
+            wt = i.get("wt", [0] * 12)
+            body += bytes(b if i["env"][n // 2][7] in (2, 3) else 0 for n, b in enumerate(wt))  # a slot whose loop is not 2 or 3 writes zeros, as the reader reads back
+        if version >= INST_VERSION_PLAYTHRU:
+            body += bytes([i.get("play_thru", 0)])
+        if version >= INST_VERSION_MODRATE:
+            body += bytes([i.get("mod_rate", 0)])
         chunks.append(chunk(b"INST", body))
     if p["settings"] != [d for d, _, _ in PROJECT_SETTINGS]:  # SETS: every setting, only when one is not its default
         chunks.append(chunk(b"SETS", v + struct.pack(">H", len(p["settings"])) + b"".join(
@@ -1071,9 +1183,9 @@ def dump(p):
     for index in sorted(p["instruments"]):
         i = p["instruments"][index]
         h = i["head"]
-        out.append("instrument %d kind=%d midi=%d module=%d name=%s path=%s rate=%d engine=%d blob=%d/%08x m13=%s stereo=%d" % (
+        out.append("instrument %d kind=%d midi=%d module=%d name=%s path=%s rate=%d engine=%d blob=%d/%08x m13=%s mod_rate=%d stereo=%d play_thru=%d" % (
             index, i["kind"], i["midi"], i["module"], i["name"].hex(), i["path"].hex(), i["rate"], i["engine"], len(i["blob"]),
-            zlib.crc32(i["blob"]) & 0xFFFFFFFF, ",".join("%d" % x for x in i["m13"]), i.get("stereo", 0)))
+            zlib.crc32(i["blob"]) & 0xFFFFFFFF, ",".join("%d" % x for x in i["m13"]), i.get("mod_rate", 0), i.get("stereo", 0), i.get("play_thru", 0)))
         line = "  sampler %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d" % (
             h[0], h[1], h[2], h[3], signed(h[4]), signed(h[5]), h[6], h[7], h[8], h[9], h[10], h[11], h[12],
             h[13], h[14], h[15])
@@ -1081,8 +1193,9 @@ def dump(p):
             h[16], h[17], h[18], h[19], h[20], h[21], h[22], h[23], h[24], h[25], h[26])
         for e in i["env"]:
             line += " | env %08x %d %d %d %d %08x %d %d %d" % tuple(e)
-        for x in i["lfo"]:
-            line += " | lfo %d %d %08x" % tuple(x)
+        for n, x in enumerate(i["lfo"]):
+            wt = i.get("wt", [0] * 12)
+            line += " | lfo %d %d %08x wt=%d,%d" % (x[0], x[1], x[2], wt[2 * n], wt[2 * n + 1])
         line += " | slices" + "".join(" %d" % s for s in i["slices"])
         out.append(line)
     for f, (d, _, _) in enumerate(PROJECT_SETTINGS):

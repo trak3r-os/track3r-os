@@ -29,9 +29,9 @@ TEST_CASE("mk66 undo region: the journal's size is the memory map's, and it is a
   CHECK(mem::kUndoBase % 32u == 0u);
   CHECK(mem::kUndoSize <= model::UndoJournal::kMaxRegionBytes);
   CHECK(mem::kUndoSize >= model::UndoJournal::kMinRegionBytes);
-  // The region is inside SDRAM, between the project and the file / job buffers, as the table lists it.
+  // The region is inside SDRAM, between the project and the ptfx region (OS-CEPTFX S2a took file_job + lut + 64 KiB of ui_cache), as the table lists it.
   CHECK(mem::kUndoBase >= mem::kSdramBase);
-  CHECK(mem::kUndoBase + mem::kUndoSize == mem::kFileJobBase);
+  CHECK(mem::kUndoBase + mem::kUndoSize == mem::kPtfxBase);
   CHECK(mem::kProjectBase + mem::kProjectSize == mem::kUndoBase);
   // The three rings (D6), on a small region (this runs on QEMU too; the 160 / 96 / 128 KiB themselves are the constants above): 5/12, 3/12 and 4/12, a multiple of 4 each, tiling the region.
   alignas(8) static std::uint8_t region[12 * 1024];

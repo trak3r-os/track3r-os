@@ -178,7 +178,10 @@ bool MixerScreen::set_position(const Model& model, ViewState& view, int position
   return changed;
 }
 
-Context MixerScreen::field_context(const Model&, const ViewState& view) const noexcept { return mixer::page_of(view) == MixerPage::Stems ? Context::MixerStems : Context::None; }
+Context MixerScreen::field_context(const Model&, const ViewState& view) const noexcept {
+  const MixerPage page = mixer::page_of(view);
+  return page == MixerPage::Stems ? Context::MixerStems : (page == MixerPage::Inserts ? Context::MixerInserts : Context::None);  // OS-INSKEYS: INSERTS has F6 PARAMS
+}
 
 bool MixerScreen::step(const Model& model, ViewState& view, int dx, int dy) const noexcept {
   const mixer::Cursor now = mixer::cursor(model, view);
@@ -291,6 +294,14 @@ void draw_mixer_page(const Model& model, const ViewState& view, Renderer& r, Rec
     const int cap_w = r.text_width(text.c_str(), Face::Label);
     if (!hidden({x, l.label_y, l.col_w, pitch})) {
       r.text(x + (l.col_w - cap_w) / 2, cap_y, text.c_str(), is_sel ? Color::SelText : (muted(model, c) ? Color::TextDim : Color::Text), Face::Label);
+    }
+    // OS-MIXINS: a dot after the name of a track that has an insert (either slot; a bypassed one counts)
+    if (track && model.project != nullptr && (model.project->find_insert(c, 0u) != nullptr || model.project->find_insert(c, 1u) != nullptr)) {
+      const int dot = m.gap + 1;
+      const Rect mark = {x + (l.col_w + cap_w) / 2 + m.gap, l.label_y + (pitch - dot) / 2, dot, dot};
+      if (!hidden(mark)) {
+        r.panel(mark, Color::Accent);
+      }
     }
     // the level, with the cursor block when it is the field
     text.clear();
@@ -734,9 +745,9 @@ void draw_inserts_page(const Model& model, const ViewState& view, Renderer& r, R
       append_clipped(text, ref->name, 12);
       r.text(cell.x + m.pad, y, text.c_str(), sel ? Color::AccentText : (bypass ? Color::TextDim : Color::Text));
       ModuleUi::InsertCell live{};
-      const bool bound = !master && mu != nullptr && mu->insert_cell(i, s, live);
+      const bool bound = mu != nullptr && mu->insert_cell(master ? static_cast<unsigned>(model::kInsertWhereMaster) : i, s, live);  // (OS-INSFX S6: the master's cell is live too: its two instances, one cost)
       text.clear();
-      append_insert_status(text, bypass, bound, live.forced, !master && mu != nullptr && mu->has_inserts(), live.cost);
+      append_insert_status(text, bypass, bound, live.forced, mu != nullptr && mu->has_inserts(), live.cost, live.st);  // (A5: ST for a stereo effect)
       const Color ink = sel ? Color::AccentText : (bound && live.forced ? Color::Text : Color::TextDim);
       r.text(cell.x + cell.w - m.pad - r.text_width(text.c_str(), Face::Label), ui::caps_y(t, Face::Label, row_y(i), f.row_pitch), text.c_str(), ink, Face::Label);
     }
@@ -894,14 +905,15 @@ void MixerScreen::render(const Model& model, const ViewState& view, Renderer& r,
         break;
       case MixerPage::Inserts: {
         right = "Insert: assign  Delete: remove  arrows: cell";
-        if (cur.row >= mixer::tracks(model)) {
-          left.assign("MASTER INS: shown, not assignable yet");
-          break;
+        const bool master = cur.row >= mixer::tracks(model);  // (OS-INSFX S6: the master's one insert, dual mono)
+        if (master) {
+          left.assign("MASTER INS: ");
+        } else {
+          left.assign("T");
+          append_uint(left, cur.row + 1u);
+          left.append(cur.col == 0u ? " INS A: " : " INS B: ");
         }
-        left.assign("T");
-        append_uint(left, cur.row + 1u);
-        left.append(cur.col == 0u ? " INS A: " : " INS B: ");
-        const model::InsertRecord* rec = model.project != nullptr ? model.project->find_insert(cur.row, cur.col) : nullptr;
+        const model::InsertRecord* rec = model.project != nullptr ? model.project->find_insert(master ? model::kInsertWhereMaster : cur.row, master ? 0u : cur.col) : nullptr;
         const model::ModuleRef* ref = rec != nullptr ? model.project->module(rec->module) : nullptr;
         left.append(ref != nullptr ? ref->name : "empty");
         break;

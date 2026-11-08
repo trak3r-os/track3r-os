@@ -59,7 +59,7 @@ ADR 0001 look: flat panels, 1 px borders, monospace data, one strong row highlig
 | Screen | Purpose | Reach |
 |---|---|---|
 | **Pattern** (home) | Step grid, record, 8-track view; page 2 horizontal, page 3 names (PAR-074, 135) | Pattern |
-| **Song** | Playlist slots, play pattern/song, undo | Song; again: arrangement |
+| **Song** | Playlist slots, play pattern/song, undo | Song; again: timeline |
 | **Instrument** | Tabs F1 ENGINE, F2 FILTER, F3 ENV, F4 LFO, F5 MOD, F6 NOTE FX, F7 FX/SENDS, F8 OUT | Params |
 | **Wave / Chop** | Start, loop, end, zoom; CHOP page for slices | SamplePlay; again: CHOP |
 | **Sample edit** | Offline crop, EQ, overdrive, Amiga prep, undo | SampleEdit |

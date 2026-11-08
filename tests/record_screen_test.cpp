@@ -10,7 +10,10 @@
 #include "support/project_fixture.h"
 
 #include <o3os/app/app.h>
+#include <o3os/app/metro_sync.h>
 #include <o3os/app/og_samples.h>
+#include <o3os/audio/graph_params.h>
+#include <o3os/seq/sequencer.h>
 #include <o3os/app/pad_board.h>
 #include <o3os/app/pad_palette.h>
 #include <o3os/app/record_view.h>
@@ -90,6 +93,7 @@ struct Rig {
   app::SampleBank bank;
   std::unique_ptr<app::MixBoard> mix = std::make_unique<app::MixBoard>();
   std::unique_ptr<app::Recorder> rec = std::make_unique<app::Recorder>();
+  app::MetroSync metro;  // OS-RECCOUNT RC2: the device METRO against the engine, as app_main's sync_metro() steps it on the device (the tests step it into a ring of their own)
   FakeHw hw;
   alignas(8) std::int16_t in[ha::kBlockSamples] = {};
   alignas(8) std::int16_t out[ha::kBlockSamples] = {};
@@ -134,6 +138,7 @@ struct Rig {
     w.mix = mix.get();
     rec->attach(w);
     app->attach_recorder(rec.get());
+    app->attach_metro_sync(&metro);  // OS-RECCOUNT RC2: the App sets the count-in override on it while a Record count-in runs
   }
   // 16 ms of audio (11 blocks) and the app's frame after it.
   void pass(unsigned ms = 16) {
@@ -3001,4 +3006,194 @@ TEST_CASE("record screen (OS-RECCOUNT): a count-in whose tap arm keeps failing i
   CHECK_FALSE(rig.bank.take_held());
   CHECK(rig.message() == "THE COUNT-IN DID NOT START");
   rig.stop_transport();
+}
+
+// ---- OS-RECCOUNT RC2: the count-in clicks with METRO OFF — the App's override on the platform's MetroSync (app/metro_sync.h), the ring it sends through ----
+namespace {
+
+// One step of the rig's MetroSync into a ring of its own (as app_main's sync_metro() does a pass), drained: what the engine and the sequencer were told.
+struct MetroStep {
+  bool mode = false;
+  float mode_value = 0.0f;
+  bool seq = false;
+  float seq_value = 0.0f;
+  bool level = false;
+};
+MetroStep metro_step(app::App& app, app::MetroSync& sync) {
+  core::ParamRing ring;
+  (void)sync.step(app.device_settings(), ring);
+  MetroStep s;
+  core::ParamChange c;
+  while (ring.pop(c)) {
+    if (c.id == audio::master_param(audio::graph_param::master::MetroMode)) {
+      s.mode = true;
+      s.mode_value = c.value;
+    } else if (c.id == core::param_id(core::ParamKind::Project, 0, seq::seq_param::Metro)) {
+      s.seq = true;
+      s.seq_value = c.value;
+    } else if (c.id == audio::master_param(audio::graph_param::master::MetroLevel)) {
+      s.level = true;
+    }
+  }
+  return s;
+}
+
+}  // namespace
+
+// METRO Off + COUNT-IN 1 BAR from stop: the ring carries MetroMode 2 (and the sequencer's Metro on) during the count-in and 0 after the take arms; the level is not re-sent
+// (the click is at the device's METRO VOL) and the device setting reads Off throughout.
+TEST_CASE("record screen (OS-RECCOUNT RC2): METRO Off, COUNT-IN 1 BAR from stop: the ring carries MetroMode 2 during the count-in and 0 after the take arms; the setting reads Off throughout") {
+  CiRig rig;
+  CHECK(rig.app->device_settings().set(model::device_setting::MetroMode, 0.0f) == model::Status::Ok);  // METRO Off
+  rig.rec->cfg.count_in = 1u;
+  rig.settle();
+  MetroStep s = metro_step(*rig.app, rig.metro);  // the first pass: Off goes out
+  CHECK(s.mode); CHECK(s.mode_value == 0.0f);
+  CHECK(s.seq); CHECK(s.seq_value == 0.0f);
+  rig.tap(Button::F1);  // from stop: the count-in phase begins, the transport is asked to play at once
+  CHECK(rig.rec->state() == app::Recorder::State::Armed);
+  CHECK(rig.rec->count_in_waiting());
+  rig.cpass();
+  s = metro_step(*rig.app, rig.metro);
+  CHECK(s.mode); CHECK(s.mode_value == 2.0f);  // Main during the count-in
+  CHECK(s.seq); CHECK(s.seq_value == 1.0f);    // the sequencer emits the Metro events
+  CHECK_FALSE(s.level);                    // at the device's METRO VOL: the level is not re-sent
+  CHECK(rig.app->device_settings().get(model::device_setting::MetroMode) == 0.0f);  // the device setting reads Off throughout
+  rig.start_transport();
+  NEED(rig.until([&] { return rig.rec->state() == app::Recorder::State::Recording; }));  // the take armed: the phase is over
+  CHECK_FALSE(rig.rec->count_in_waiting());
+  rig.cpass();
+  s = metro_step(*rig.app, rig.metro);
+  CHECK(s.mode); CHECK(s.mode_value == 0.0f);  // back to Off when the take arms
+  CHECK(s.seq); CHECK(s.seq_value == 0.0f);
+  CHECK(rig.app->device_settings().get(model::device_setting::MetroMode) == 0.0f);
+  s = metro_step(*rig.app, rig.metro);
+  CHECK_FALSE(s.mode);
+  CHECK_FALSE(s.seq);
+  rig.tap(Button::F1);
+  rig.cpass();
+  rig.discard_take();
+  rig.stop_transport();
+}
+
+// A Stop during the count-in gives the take up and restores the device setting on the ring (METRO Off throughout).
+TEST_CASE("record screen (OS-RECCOUNT RC2): a Stop during the count-in with METRO Off restores MetroMode 0 on the ring") {
+  CiRig rig;
+  CHECK(rig.app->device_settings().set(model::device_setting::MetroMode, 0.0f) == model::Status::Ok);
+  rig.rec->cfg.count_in = 4u;
+  rig.settle();
+  CHECK(metro_step(*rig.app, rig.metro).mode_value == 0.0f);
+  rig.tap(Button::F1);
+  CHECK(rig.rec->count_in_waiting());
+  rig.start_transport();
+  for (int i = 0; i < 5; ++i) {
+    rig.cpass();  // a couple of bars in, the phase is still running
+  }
+  CHECK(rig.rec->count_in_waiting());
+  MetroStep s = metro_step(*rig.app, rig.metro);
+  CHECK(s.mode); CHECK(s.mode_value == 2.0f);
+  rig.stop_transport();  // the published transport falls: the count-in is given up
+  rig.cpass();
+  rig.cpass();
+  CHECK(rig.rec->state() == app::Recorder::State::Idle);
+  s = metro_step(*rig.app, rig.metro);
+  CHECK(s.mode); CHECK(s.mode_value == 0.0f);  // the device setting back
+  CHECK(s.seq); CHECK(s.seq_value == 0.0f);
+  CHECK(rig.app->device_settings().get(model::device_setting::MetroMode) == 0.0f);
+}
+
+// Leaving the Record screen during the count-in gives the device setting back (the override ends with the screen); the phase itself still runs off-screen and arms the take.
+TEST_CASE("record screen (OS-RECCOUNT RC2): leaving the Record screen during the count-in with METRO Off restores MetroMode 0") {
+  CiRig rig;
+  CHECK(rig.app->device_settings().set(model::device_setting::MetroMode, 0.0f) == model::Status::Ok);
+  rig.rec->cfg.count_in = 1u;
+  rig.settle();
+  CHECK(metro_step(*rig.app, rig.metro).mode_value == 0.0f);
+  rig.tap(Button::F1);
+  CHECK(rig.rec->count_in_waiting());
+  rig.cpass();
+  MetroStep s = metro_step(*rig.app, rig.metro);
+  CHECK(s.mode); CHECK(s.mode_value == 2.0f);
+  rig.tap(Button::Pattern);  // the screen leaves mid count-in
+  rig.cpass();
+  s = metro_step(*rig.app, rig.metro);
+  CHECK(s.mode); CHECK(s.mode_value == 0.0f);  // the device setting back while the phase runs on
+  CHECK(s.seq); CHECK(s.seq_value == 0.0f);
+  CHECK(rig.app->device_settings().get(model::device_setting::MetroMode) == 0.0f);
+  rig.start_transport();
+  NEED(rig.until([&] { return rig.rec->state() == app::Recorder::State::Recording; }));  // the take still arms off-screen
+  rig.cpass();
+  s = metro_step(*rig.app, rig.metro);
+  CHECK_FALSE(s.mode);  // no override off-screen: nothing is re-sent
+  CHECK_FALSE(s.seq);
+  rig.tap(Button::SampleRec);  // back to Record to end the take
+  rig.tap(Button::F1);
+  rig.cpass();
+  rig.discard_take();
+  rig.stop_transport();
+}
+
+// METRO Main: the override changes nothing — no extra pushes during or after the count-in.
+TEST_CASE("record screen (OS-RECCOUNT RC2): METRO Main: the count-in's override sends no extra pushes") {
+  CiRig rig;
+  CHECK(rig.app->device_settings().set(model::device_setting::MetroMode, 2.0f) == model::Status::Ok);  // Main
+  rig.rec->cfg.count_in = 1u;
+  rig.settle();
+  MetroStep s = metro_step(*rig.app, rig.metro);  // the first pass: Main goes out
+  CHECK(s.mode); CHECK(s.mode_value == 2.0f);
+  rig.tap(Button::F1);
+  CHECK(rig.rec->count_in_waiting());
+  rig.cpass();
+  s = metro_step(*rig.app, rig.metro);
+  CHECK_FALSE(s.mode);  // no extra pushes with METRO Main
+  CHECK_FALSE(s.seq);
+  CHECK_FALSE(s.level);
+  rig.start_transport();
+  NEED(rig.until([&] { return rig.rec->state() == app::Recorder::State::Recording; }));
+  rig.cpass();
+  s = metro_step(*rig.app, rig.metro);
+  CHECK_FALSE(s.mode);
+  CHECK_FALSE(s.seq);
+  rig.tap(Button::F1);
+  rig.cpass();
+  rig.discard_take();
+  rig.stop_transport();
+}
+
+// The row OFF: no override, even with the Config count-in running (the take waits for the start point as today, the transport counts in).
+TEST_CASE("record screen (OS-RECCOUNT RC2): the COUNT-IN row OFF sends no override, even with the Config count-in running") {
+  CiRig rig;
+  CHECK(rig.app->device_settings().set(model::device_setting::MetroMode, 0.0f) == model::Status::Ok);  // METRO Off
+  CHECK(rig.app->device_settings().set(model::device_setting::CountIn, 2.0f) == model::Status::Ok);  // the Config count-in, on
+  rig.rec->cfg.count_in = 0u;  // the row is OFF
+  rig.settle();
+  MetroStep s = metro_step(*rig.app, rig.metro);
+  CHECK(s.mode); CHECK(s.mode_value == 0.0f);
+  rig.tap(Button::F1);  // from stop, ALIGN BAR: the Config count-in runs, the take waits for the start point
+  CHECK(rig.transport.counted == 1u);
+  CHECK(rig.rec->state() == app::Recorder::State::Armed);
+  CHECK_FALSE(rig.rec->count_in_waiting());  // not the row's phase
+  rig.cpass();
+  s = metro_step(*rig.app, rig.metro);
+  CHECK_FALSE(s.mode);  // no override with the row OFF
+  CHECK_FALSE(s.seq);
+  CHECK(rig.app->device_settings().get(model::device_setting::MetroMode) == 0.0f);
+  rig.tap(Button::F1);  // give the waiting take up
+  rig.settle();
+  CHECK(rig.rec->state() == app::Recorder::State::Idle);
+  CHECK(rig.app->device_settings().set(model::device_setting::CountIn, 0.0f) == model::Status::Ok);
+}
+
+// OS-RECBADGE: the chips of the status strip, as a set.
+TEST_CASE("record badges: each state shows its chip and only its chip") {
+  using namespace o3os::app;
+  CHECK(rec_badges(false, false, false, false, false, false, false) == 0u);                          // idle: none
+  CHECK(rec_badges(true, false, false, false, false, false, false) == kBadgeMonitor);                // MONITOR alone
+  CHECK(rec_badges(false, true, false, false, false, false, false) == kBadgeRec);                    // recording
+  CHECK(rec_badges(false, false, true, false, false, false, false) == kBadgeArmed);                  // armed, waiting for the start
+  CHECK(rec_badges(false, true, true, false, false, false, false) == kBadgeRec);                     // (REC wins over ARMED)
+  CHECK(rec_badges(false, false, false, true, false, false, true) == (kBadgeOverdub | kBadgeLoop));  // a loop under review, overdubbing
+  CHECK(rec_badges(false, false, false, true, true, false, true) == (kBadgeUndo | kBadgeLoop));      // undoing a layer: UNDO replaces OVERDUB
+  CHECK(rec_badges(false, false, false, false, false, true, false) == kBadgeLoop);                   // the LOOP row is on
+  CHECK(rec_badges(true, true, false, false, false, true, false) == (kBadgeMonitor | kBadgeRec | kBadgeLoop));
 }

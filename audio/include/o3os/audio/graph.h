@@ -12,7 +12,7 @@
 //        post-fader mono block = meter + StemTap -> pan law -> MAIN | CUE | REC                   |
 //   SNDA bus -> effect slot A (reserved) -> return -> MAIN (+ CUE)  [ = delay ]                   +-> int32 accumulators (Q19), rounded and
 //   SNDB bus -> effect slot B (reserved) -> return -> MAIN (+ CUE)  [ = reverb ]                  |   saturated ONCE per bus (D2)
-//   MAIN -> master chain (kMasterChain: headroom, saturation, EQ, bass, limiter, space, bit depth; every stage a reserved slot, bypassed
+//   MAIN -> master chain (kMasterChain: headroom, saturation, EQ, bass, insert, limiter, space, bit depth; every stage a reserved slot, bypassed
 //           until its behaviour is specified; with a stage active the bus goes to float STRAIGHT from the accumulators) -> master level   |
 //   CUE  -> cue level                                                                             |
 //   OUT MODE: stereo MAIN, or MAIN (mono) on the left jack and CUE (mono) on the right  -> the TX block
@@ -115,7 +115,9 @@ using ParamRing = core::ParamRing;
 // index is the position in it). `par` is the parity row (PAR-xxx number) each stage comes from (0: none).
 // OS-DJ (orchestrator, 2026-10-19): the EQ and bass slots, which hold the DJ page's kill EQ and DJ filter, sit AHEAD of the limiter, so the limiter catches the peaks they add (an
 // all-pass split and a filter that rings near its open end both raise the peaks of a limited mix; after the limiter the converter would clip them). Neutral at rest, as before.
-enum class MasterStage : std::uint8_t { Headroom, Saturation, Eq, Bass, Limiter, Space, BitDepth, Count };
+// OS-INSFX S6 (docs/specs/OS-INSFX.md section 2; new Community OS behaviour): `Insert` is the master effect module (two instances, L and R: audio/insert_host.h), between Bass and Limiter, so the limiter catches
+// what an effect adds. It renumbers Limiter, Space and BitDepth by one; no persistent file stores a stage number (checked, spec risk 10), tests and `diag` use the names.
+enum class MasterStage : std::uint8_t { Headroom, Saturation, Eq, Bass, Insert, Limiter, Space, BitDepth, Count };
 struct MasterStageInfo {
   MasterStage id;
   const char* name;
@@ -123,8 +125,8 @@ struct MasterStageInfo {
 };
 inline constexpr MasterStageInfo kMasterChain[] = {
     {MasterStage::Headroom, "headroom", 110},     {MasterStage::Saturation, "saturation", 109}, {MasterStage::Eq, "eq", 55},
-    {MasterStage::Bass, "bass", 56},              {MasterStage::Limiter, "limiter", 58},        {MasterStage::Space, "space", 57},
-    {MasterStage::BitDepth, "bit depth", 0},
+    {MasterStage::Bass, "bass", 56},              {MasterStage::Insert, "insert", 0},           {MasterStage::Limiter, "limiter", 58},
+    {MasterStage::Space, "space", 57},            {MasterStage::BitDepth, "bit depth", 0},
 };
 inline constexpr unsigned kMasterStages = sizeof(kMasterChain) / sizeof(kMasterChain[0]);
 static_assert(kMasterStages == static_cast<unsigned>(MasterStage::Count), "one table row per stage");
@@ -182,8 +184,21 @@ class Graph {
   void set_insert_wet(unsigned track, unsigned slot, unsigned wet0, unsigned wet1) noexcept;
   // OS-INSFX S2: the slot's effect may ring on (InsertHost::run, when that state changes). Flash. A bypass clears it.
   void set_insert_tail(unsigned track, unsigned slot, bool on) noexcept;
+  // OS-INSFX-ABI2 A4 (render context, InsertHost::run, when that decision changes): the slot's effect ran STEREO in this block (it took the track's S as input and made the S that side_pass adds), so the
+  // S gain side_pass keeps starts again at unity after it (rule 7); a mono effect, a stereo-capable one on a block without S, a bypassed or an empty slot is not marked (a mono insert scales S by
+  // 255 - wet, OS-INSFX D6). install_insert and a bypass clear the bit. One bit per slot, track * 2 + slot: the Strip and the Insert do not grow. Flash.
+  void set_insert_stereo(unsigned track, unsigned slot, bool on) noexcept;
+  std::uint32_t insert_stereo_mask() const noexcept { return st_ins_; }
+  // The gain (0..255, at the start and at the end of the coming block) the track's S has on reaching slot `upto` (0..2; 2 = MAIN): the walk of side_pass over the slots before it, in order: an un-bypassed mono
+  // insert multiplies by 255 - wet (set_insert_wet), a stereo one (set_insert_stereo) is unity again, its output being the S in force. Flash. A track outside the graph: unity.
+  void side_gain(unsigned track, unsigned upto, std::uint32_t& g0, std::uint32_t& g1) const noexcept;
   // OS-INSFX S1: the two 64-float blocks of the master chain's planes, free while the strips run (the master chain fills them after the buses): an insert's float block and dry copy. Render context, in run_tracks.
   float* insert_scratch(unsigned plane) noexcept { return fl_[plane & 1u]; }
+  // OS-INSFX-ABI2 A7 fold: the two 64-float WET planes for the master chain's Insert stage in a transition block (the chain's own fl_ are the dry planes there). They are the CUE bus's accumulators:
+  // finish_bus(b_cue_) consumes AND ZEROES acc_cue_ in run_buses before the chain runs, and the next block accumulates into it again (run_tracks, run_input), so it MUST be zero between blocks. The Insert
+  // stage zeroes both planes again right after its blend (insert_host.cpp); the bytes are read as floats only here and as int32 accumulators only in the bus code, never both in one block.
+  using AliasFloat = float __attribute__((__may_alias__));  // render context
+  AliasFloat* chain_wet(unsigned plane) noexcept { return reinterpret_cast<AliasFloat*>(acc_cue_[plane & 1u]); }
   // 0: SNDA (the delay), 1: SNDB (the reverb). `param` (OS-SENDFX) takes the slot's ParamChanges (Master kind, fields sendfx::kFieldBase[which] + n); without one they are refused.
   void install_send_fx(unsigned which, SendFxFn fn, void* state, SendFxParamFn param = nullptr) noexcept;
   void set_send_fx_bypass(unsigned which, bool bypass) noexcept;            // closes the effect's input; see "Send effects" above
@@ -249,6 +264,8 @@ class Graph {
   unsigned kill_eq() const noexcept { return kill_eq_.mask(); }  // OS-DJ A3: the master kill EQ's mask (for tests); its stage is master_stage_active(MasterStage::Eq)
   float kill_eq_gain(unsigned band) const noexcept { return kill_eq_.gain(band); }  // (for tests)
   int perf_send(unsigned track, unsigned which) const noexcept { return track < kTracks && which < 2u ? (which == 0u ? strips_[track].perf_send_a : strips_[track].perf_send_b) : 0; }
+  int inst_send(unsigned track, unsigned which) const noexcept { return track < kTracks && which < 2u ? (which == 0u ? strips_[track].inst_send_a : strips_[track].inst_send_b) : 0; }  // (for tests) the instrument's sends at the track's note
+  float voice_pan_offset(unsigned track) const noexcept { return track < kTracks ? strips_[track].pan_offset : 0.0f; }  // (for tests) the note's instrument pan - 50
   int step_send(unsigned track, unsigned which) const noexcept { return track < kTracks && which < 2u ? (which == 0u ? strips_[track].step_send_a : strips_[track].step_send_b) : -1; }
   float track_gain(unsigned track) const noexcept { return track < kTracks ? strips_[track].trk_gain : 1.0f; }  // (for tests)
   float track_pan_mod(unsigned track) const noexcept { return track < kTracks ? strips_[track].pan_mod : 0.0f; }
@@ -334,6 +351,9 @@ class Graph {
     }
   }
 
+  // OS-INSFX-ABI2 A4: the side signal in force for `track` now (null: none): the voice's S as Engine::feed_sides wrote it, or the S an earlier stereo insert of this strip made (InsertHost). Render context.
+  const std::int16_t* side(unsigned track) const noexcept { return track < kTracks ? side_[track].load(std::memory_order_relaxed) : nullptr; }
+
   // The taps and who may ask for them. A tap costs nothing while nobody consumes it: the UI turns the scope and the spectrum on while a screen shows
   // them, and chooses which meters are measured (a bit per channel of meter_ch::; all on by default, so `diag mix` and a mixer screen need nothing).
   const MeterBank& meters() const noexcept { return meters_; }
@@ -374,7 +394,7 @@ class Graph {
   O3OS_AUDIO_HOT void render(const hal::audio::BlockIo& io) noexcept;
 
   // The test sources of the tracks (SourceKind::Sine / Noise): the engine's HW-A tone script drives them.
-  O3OS_AUDIO_HOT void script_tone(unsigned track, bool on) noexcept;
+  O3OS_AUDIO_COLD void script_tone(unsigned track, bool on) noexcept;  // flash (OS-CEWTENV room): called only when the script's target changes (twice in the tone image, never in a release one)
   const TestTone& tone(unsigned track) const noexcept { return strips_[track < kTracks ? track : 0u].tone; }
 
   // The values the render sees, for tests and `diag`: a plain word the render writes, read for display (it may be a block stale; nothing decides on it).
@@ -633,6 +653,9 @@ class Graph {
   MasterDjFilter dj_filter_;  // OS-DJ A2: the `bass` slot's processor (init_defaults installs it, bypassed); the DjFilter ParamChange engages it, and it bypasses itself once it has run down to 0
   // OS-STEREO (c): the side signal S of a stereo voice per track (feed_side), at the end like the members above. Written by the Engine (render context) once a block, read by run_tracks; null: the track is mono.
   std::atomic<const std::int16_t*> side_[kTracks] = {};
+  // OS-INSFX-ABI2 A4: the slots whose effect ran stereo in this block (set_insert_stereo), bit track * 2 + slot. Render context only; at the end, so no offset the render reads moves.
+  std::uint32_t st_ins_ = 0;
+  static_assert(kTracks * 2u <= 32u, "st_ins_ holds one bit per insert slot");
 };
 
 }  // namespace o3os::audio

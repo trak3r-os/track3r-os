@@ -5,8 +5,9 @@
 # The face and icon data are generated at build time into the build tree and compiled into this library; they are never
 # committed. Faces: tools/font_convert.py turns the vendored BDF files into the four glyph faces (Terminus 16x32 and
 # 10x20, SIL OFL 1.1; Spleen 8x16 and 6x12, BSD-2-Clause); icons: tools/icon_convert.py draws the in-house icon face.
-# Both emit word-aligned bitmaps with a static_assert (ADR 0011). Tiles are not generated here: they are composed
-# from the Data face at boot (src/assets.cpp).
+# Both emit word-aligned bitmaps with a static_assert (ADR 0011). OS-FLASHDIET A4: font_convert.py emits each face as a
+# raw-deflate stream of its bitmap (tools/deflate_pack.py), decoded at boot by core::Inflater. Tiles are not generated
+# here: they are composed from the Data face at boot (src/assets.cpp).
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 set(_spleen_dir "${PROJECT_SOURCE_DIR}/third_party/fonts/spleen")
@@ -23,9 +24,9 @@ add_custom_command(
   COMMAND ${Python3_EXECUTABLE} -I "${PROJECT_SOURCE_DIR}/tools/font_convert.py" --out "${_font_gen}"
           --face "f16x32=${_font_display}" --face "f10x20=${_font_data}"
           --face "f8x16=${_font_label}" --face "f6x12=${_font_micro}"
-  DEPENDS "${PROJECT_SOURCE_DIR}/tools/font_convert.py"
+  DEPENDS "${PROJECT_SOURCE_DIR}/tools/font_convert.py" "${PROJECT_SOURCE_DIR}/tools/deflate_pack.py"
           "${_font_display}" "${_font_data}" "${_font_label}" "${_font_micro}"
-  COMMENT "Converting the BDF faces to FT81x L1 font data"
+  COMMENT "Converting the BDF faces to FT81x L1 font data (deflated, OS-FLASHDIET A4)"
   VERBATIM)
 
 add_custom_command(
@@ -39,6 +40,13 @@ o3os_library(ui
   SOURCES src/renderer.cpp src/assets.cpp src/themes.cpp src/components.cpp "${_font_gen}" "${_icon_gen}"
           src/boot_screen.cpp src/boot_logo_data.cpp
   DEPENDS eve)
+
+# OS-FLASHDIET A4: on the MK66 image the assets' shared decoder (core::Inflater) and the 4 KiB face scratch live in
+# SDRAM_STATIC and are defined by the platform (platform/mk66/src/app_main.cpp); this drops ui's own copies in
+# assets.cpp. Host, the simulator and QEMU keep ui's own.
+if(O3OS_PLATFORM STREQUAL "mk66")
+  target_compile_definitions(ui PRIVATE O3OS_UI_ASSETS_EXTERNAL=1)
+endif()
 
 # OS-003f, the boot logo: assets/boot_logo.png is the project's logo.png byte for byte; tools/logo_convert.py turns it into
 # src/boot_logo_data.cpp, which IS committed (unlike the font and icon data above, which are generated into the build tree): the

@@ -13,48 +13,56 @@
 // `tb303` asks the module for 64 frames per call (the engine's block), `tb303_128` for 128 (O3M_BLOCK_MAX): the note carries cycles per frame, so the two read against each other.
 
 #include <o3os/audio/diag.h>
+#include <o3os/platform/mk66/bench_text_ids.h>
 
 #include <cstddef>
 #include <cstdint>
 
 namespace o3os::platform::mk66::bench {
 
-enum class Kernel : std::uint8_t { Voice, VoiceFilter, VoiceDrive, VoiceCrush, VoiceBoth, VoiceRev, VoicePan, VoiceSt, Tb303, Tb303x128, Delay, Reverb, ReverbFull, Limiter, LimiterQuiet, Strips, Stages, Mem, Worst, Kernels, Cpuopt, Looper, Disk, Burst, DjMaster, Insert, Count };
+enum class Kernel : std::uint8_t { Voice, VoiceFilter, VoiceDrive, VoiceCrush, VoiceBoth, VoiceRev, VoicePan, VoiceSt, Tb303, Tb303x128, Delay, Reverb, ReverbFull, Limiter, LimiterQuiet, Strips, Stages, Mem, Worst, Kernels, Cpuopt, Looper, Disk, Burst, DjMaster, Insert, Wt, Count };
 
 struct KernelInfo {
   const char* name;  // lower case, digits and '_'; the argument of `bench`
-  const char* help;  // one line
+  std::uint16_t help;  // the id of the one-line help (btxt::k_<name>, text/bench_text.txt; bench_text(help) is the text)
 };
 
 inline constexpr KernelInfo kKernelInfo[] = {
-    {"voice", "one sampler voice, a block (the longest plain sample; takes track 16)"},
-    {"voice_f", "one sampler voice through the instrument filter (low-pass, resonance 2), a block"},
-    {"voice_od", "one sampler voice with the overdrive at 100 (OS-IFX1), a block"},
-    {"voice_bit", "one sampler voice at a bit depth of 8 (OS-IFX1), a block"},
-    {"voice_odbit", "one sampler voice with overdrive 100 and 8 bits (OS-IFX1), a block"},
-    {"voice_rev", "one sampler voice played backward (PLAYBACK, OS-PERF-CPU2), a block"},
-    {"voice_pan", "one sampler voice with a pan LFO (OS-PERF-CPU2), a block"},
-    {"voice_st", "OS-STEREO: voice_mono and voice_st rows (sample loop, in flash), equality line"},
-    {"tb303", "one TB-303 module instance, a block (mod load tb303; mod bind 1 tb303)"},
-    {"tb303_128", "the same TB-303 instance asked for 128 frames in one call (OS-303PERF, E2)"},
-    {"delay", "SND A delay, stereo taps, feedback 70, a block"},
-    {"reverb", "SND B reverb, HALF quality, a block"},
-    {"reverb_full", "SND B reverb, FULL quality, a block"},
-    {"limiter", "master limiter, loud noise (limiting on every sample), slow stage on"},
-    {"limiter_q", "master limiter, quiet input (the identity path), slow stage on"},
-    {"strips", "in situ: the strips stage, N renders of whatever is playing"},
-    {"stages", "in situ: every stage of the render, N renders of whatever is playing"},
-    {"mem", "cycles a 32-bit load takes from SRAM_U, SRAM_L, flash, SDRAM (no block count)"},
-    {"worst", "the slowest render since cpu reset, split by stage (no block count)"},
-    {"kernels", "the graph's SIMD kernels on 64 samples each (gain, mac, strips, meters ...)"},
-    {"cpuopt", "OS-CPUOPT1 A/B: loop player block and SVF, old against new, with equality lines"},
-    {"looper", "OS-LOOPER L2b: overdub RMW, copy-on-write copy, restore step, equality lines"},
-    {"disk", "OS-USBDISK U1d: card reads, scratch-file writes, USB window (reset|clean)"},
-    {"burst", "OS-ODD11 UTAIL: 12 filtered voices: note_ons, first block, steady, 4 spans"},
-    {"dj", "OS-DJ: kill EQ held (LOW MID HIGH all), DJ filter, filter + kill, a block each"},
-    {"insert", "OS-INSFX: effect insert, adapter and effect alone (mod load example_effect)"},
+    {"voice", btxt::k_voice},
+    {"voice_f", btxt::k_voice_f},
+    {"voice_od", btxt::k_voice_od},
+    {"voice_bit", btxt::k_voice_bit},
+    {"voice_odbit", btxt::k_voice_odbit},
+    {"voice_rev", btxt::k_voice_rev},
+    {"voice_pan", btxt::k_voice_pan},
+    {"voice_st", btxt::k_voice_st},
+    {"tb303", btxt::k_tb303},
+    {"tb303_128", btxt::k_tb303_128},
+    {"delay", btxt::k_delay},
+    {"reverb", btxt::k_reverb},
+    {"reverb_full", btxt::k_reverb_full},
+    {"limiter", btxt::k_limiter},
+    {"limiter_q", btxt::k_limiter_q},
+    {"strips", btxt::k_strips},
+    {"stages", btxt::k_stages},
+    {"mem", btxt::k_mem},
+    {"worst", btxt::k_worst},
+    {"kernels", btxt::k_kernels},
+    {"cpuopt", btxt::k_cpuopt},
+    {"looper", btxt::k_looper},
+    {"disk", btxt::k_disk},
+    {"burst", btxt::k_burst},
+    {"dj", btxt::k_dj},
+    {"insert", btxt::k_insert},
+    {"wt", btxt::k_wt},
 };
 static_assert(sizeof(kKernelInfo) / sizeof(kKernelInfo[0]) == static_cast<std::size_t>(Kernel::Count), "one row per Kernel");
+
+// OS-FLASHDIET B1: the retired one-off A/B benches. They are compiled into a bench image only with -DO3OS_BENCH_ARCHIVE=ON; without it the console still lists them (their help says so) and `run`
+// answers `not in this image (O3OS_BENCH_ARCHIVE)`. The kernels every CPU measurement uses are not archived.
+constexpr bool archived(Kernel k) noexcept {
+  return k == Kernel::Cpuopt || k == Kernel::Looper || k == Kernel::VoiceSt || k == Kernel::Disk;
+}
 
 // Where a kernel's data is, for the A/B of the placement work. Normal is the production placement (the live instance's own state; the SDRAM the core works in through the address
 // sdram_view.h gives it); Alias and Direct force the SDRAM data of the delay and reverb memory, the sampler voice's sample and a COPY of the TB-303's state to the cached ICode alias
@@ -202,6 +210,13 @@ inline std::size_t format_line(const char* name, const Stat& s, const char* note
 inline std::size_t format_na(const char* name, const char* why, char* out, std::size_t cap) noexcept {
   audio::diag::Text t(out, cap);
   t.str("BENCH ").str(name).str(" n/a: ").str(why).nl();
+  return t.size();
+}
+
+// OS-FLASHDIET B1: the answer of an archived kernel in a bench image built without O3OS_BENCH_ARCHIVE (the console still lists it): `ERR <name> is not in this image (O3OS_BENCH_ARCHIVE)`.
+inline std::size_t format_archived(const char* name, char* out, std::size_t cap) noexcept {
+  audio::diag::Text t(out, cap);
+  t.str("ERR ").str(name).str(" is not in this image (O3OS_BENCH_ARCHIVE)").nl();
   return t.size();
 }
 

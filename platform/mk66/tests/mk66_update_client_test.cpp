@@ -810,6 +810,7 @@ TEST_CASE("fw client: every fault maps to its port refusal (the whole table), an
       {Fault::NameLong, fwp::Refusal::NameTooLong},
       {Fault::NotPadded, fwp::Refusal::Io},  // found by the check (state Failed, the fault text on the screen), like the other image faults
       {Fault::CopyExists, fwp::Refusal::Io},  // found by the pad job (state Failed, the fault text on the screen)
+      {Fault::LastSector, fwp::Refusal::Io},  // found by the check, like NotPadded (OS-BUG-LASTSECTOR)
   };
   static_assert(sizeof kTable / sizeof kTable[0] == static_cast<unsigned>(Fault::Count), "one row per Fault");
   for (unsigned i = 0; i < static_cast<unsigned>(Fault::Count); ++i) {
@@ -1193,6 +1194,24 @@ TEST_CASE("fw client pad: only NotPadded gets the offer, every other defect refu
     CHECK(s.state == State::Failed);
     CHECK(s.fault != Fault::NotPadded);
     CHECK(s.fault == c.fault);
+    CHECK(b.svc.ui_pad() == Fault::NotArmed);
+    CHECK(b.store.count_calls("begin ") == 0u);
+    CHECK(b.no_copy_left());
+    b.nothing_armed();
+  }
+}
+
+TEST_CASE("fw client pad: an unpadded image that reaches the last flash sector fails with LastSector, never the pad offer (OS-BUG-LASTSECTOR)") {
+  for (const std::size_t end : {std::size_t{0xFF001}, std::size_t{0xFF800}, std::size_t{0xFFFFF}}) {
+    CAPTURE(end);
+    const std::string text = to_hex(good_image(end - 0x410, false));
+    PadBare b(false);
+    b.store.put_file("last.ptf", std::vector<std::uint8_t>(text.begin(), text.end()));
+    NEED(b.svc.ui_check_begin("last.ptf") == Fault::Ok);
+    const up::UiStatus s = b.drive();
+    CHECK(s.state == State::Failed);
+    CHECK(s.state != State::NeedsPad);
+    CHECK(s.fault == Fault::LastSector);
     CHECK(b.svc.ui_pad() == Fault::NotArmed);
     CHECK(b.store.count_calls("begin ") == 0u);
     CHECK(b.no_copy_left());

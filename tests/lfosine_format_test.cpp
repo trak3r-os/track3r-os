@@ -189,7 +189,7 @@ TEST_CASE("lfosine: an old file reads a shape of 5 as Triangle (it played as one
   CHECK(q->sampler.lfo[0].shape == kLfoShapeTriangle);
 }
 
-TEST_CASE("lfosine: a newer minor (1.6; 1.5 is OS-STEREO's) is read whole, the Sine kept, and written back as 1.4 without the appended bytes") {
+TEST_CASE("lfosine: a newer minor (1.9; 1.5 is OS-STEREO's, 1.6 is OS-CEWTENV W1's twelve WT bytes, 1.7 is OS-CEPLAYTHRU P1's play-thru flag, 1.8 is OS-MODRATE S3's RATE) is read whole, the Sine kept, and written back as 1.4 without the appended bytes") {
   test::fill_small(proj(0));
   const std::uint8_t sine[6] = {2, 2, 5, 2, 2, 2};
   put_shapes(proj(0), sine);
@@ -197,7 +197,13 @@ TEST_CASE("lfosine: a newer minor (1.6; 1.5 is OS-STEREO's) is read whole, the S
   std::vector<RawChunk> cs = test::split_chunks(file);
   RawChunk* c = inst_of(cs, kSlot);
   NEED(c != nullptr);
-  c->payload[1] = 0x06;
+  c->payload[1] = 0x09;
+  c->payload.push_back(0);  // the stereo flag of 1.5: mono
+  for (unsigned i = 0; i < 12; ++i) {
+    c->payload.push_back(0);  // the twelve WT bytes of 1.6: none
+  }
+  c->payload.push_back(0);  // the play-thru flag of 1.7 (OS-CEPLAYTHRU P1): off
+  c->payload.push_back(0);  // the module RATE of 1.8 (OS-MODRATE S3): FULL
   for (unsigned i = 0; i < 40; ++i) {
     c->payload.push_back(0xCD);  // a field of a later version
   }

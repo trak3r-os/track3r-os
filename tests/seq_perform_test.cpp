@@ -44,10 +44,14 @@ struct Log final : seq::CommandSink {
 // The engine as the commands build it: the control table for the groups, and the sequencer's own FX.
 struct Engine {
   seq::ControlTable ctl;
+  seq::ControlTable::PerfStore perf;  // the table's performance values (the sequencer's are in its OrderStore)
   std::uint8_t stutter[16] = {};
   std::uint8_t mode[16] = {};
   std::uint32_t length = 0;
-  Engine() { ctl.reset(); }
+  Engine() {
+    ctl.attach_perf(perf);
+    ctl.reset();
+  }
   void take(const Command& c) {
     seq::ModChange ch[1];
     switch (c.kind) {
@@ -59,7 +63,7 @@ struct Engine {
         }
         break;
       case Command::Kind::PerfStutter: stutter[c.a] = static_cast<std::uint8_t>(c.b); break;
-      case Command::Kind::PerfTrack: mode[c.a] = static_cast<std::uint8_t>((c.c >> 8) & 3u); break;
+      case Command::Kind::PerfTrack: mode[c.a] = static_cast<std::uint8_t>((c.c >> 8) & 0x1Fu); break;  // OS-PERFMODES M2: the sequencer's mask is 0x1F (0..23)
       case Command::Kind::PerfPatternLen: length = c.c; break;
       default: break;
     }
@@ -147,6 +151,10 @@ TEST_CASE("perform: the table - names fit a slot's column, ranges are ordered, l
   CHECK(std::string(text) == "PING");  // OS-BUG-PERFMODE: the labels are the engine's modes (seq_sequencer_test.cpp runs each)
   seq::perf_value_text(PerfFx::PatternPlayMode, 3, text);
   CHECK(std::string(text) == "RND");
+  seq::perf_value_text(PerfFx::PatternPlayMode, 4, text);
+  CHECK(std::string(text) == "C1");  // OS-PERFMODES M4: 4..23 are the custom play orders C1..C20
+  seq::perf_value_text(PerfFx::PatternPlayMode, 23, text);
+  CHECK(std::string(text) == "C20");
   seq::perf_value_text(PerfFx::PatternLength, 8, text);
   CHECK(std::string(text) == "128");
   CHECK(seq::perf_length_steps(0) == 0);
@@ -507,6 +515,94 @@ TEST_CASE("perform: a track that joins gets every active slot, the stutter, play
   CHECK_FALSE(seq::perf_command(12, PerfFx::Volume, 5, c));  // a track past the twelve
 }
 
+// OS-PERFMODES M4: PLAYMODE on the Perform screen is 0..23. The labels are FWD, BACK, PING, RND, C1..C20; the encoder walks the held slot's value to C20 and stops there (and back
+// to FWD); the PerfTrack command carries 4..23 (the sequencer's mask is 0x1F); a pad on the row plays the order on the affected tracks and row 0 ends it; a scene holding a C
+// order recalls it.
+TEST_CASE("perform OS-PERFMODES M4: PLAYMODE 0..23 - the labels, the encoder's ends, the PerfTrack command, the pad on the affected tracks, a scene with C7") {
+  o3os::test::ZeroBank b;
+  Log log;
+  unsigned guard = 0;
+  while (b.fx(0) != PerfFx::PatternPlayMode && guard++ < 40) {
+    b.change_fx(0, +1, log);
+  }
+  CHECK(b.fx(0) == PerfFx::PatternPlayMode);
+  const seq::PerfFxInfo& pm = seq::perf_info(PerfFx::PatternPlayMode);
+  CHECK(pm.min == 0);
+  CHECK(pm.max == 23);
+  static const char* kNames[24] = {"FWD", "BACK", "PING", "RND", "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10",
+                                   "C11", "C12", "C13", "C14", "C15", "C16", "C17", "C18", "C19", "C20"};
+  char text[8];
+  for (int v = 0; v <= 23; ++v) {
+    seq::perf_value_text(PerfFx::PatternPlayMode, v, text);
+    CHECK_MESSAGE(std::string(text) == kNames[v], v);
+  }
+  // the encoder walks to C20 and stops there, and back to FWD; EDIT stores what it walked to
+  b.set_edit(true);
+  b.pad_down(pad(0, 1), log);  // row 1: change_fx gave PLAYMODE its defaults, so it holds 1 (BACK)
+  CHECK(b.live(0) == 1);
+  CHECK(b.turn(+100, log));
+  CHECK(b.live(0) == 23);
+  CHECK(b.stored(0, 1) == 23);
+  CHECK_FALSE(b.turn(+5, log));  // the end holds: no change
+  CHECK(b.live(0) == 23);
+  CHECK(b.turn(-100, log));
+  CHECK(b.live(0) == 0);
+  CHECK(b.stored(0, 1) == 0);
+  b.pad_up(pad(0, 1), log);
+  b.set_edit(false);
+  CHECK(b.live(0) == 0);
+  // the command carries 4..23 as the mode byte (0..23 all of them; a value past 23 is held to C20)
+  Command c{};
+  for (int v = 0; v <= 23; ++v) {
+    NEED(seq::perf_command(4, PerfFx::PatternPlayMode, v, c));
+    CHECK(c.kind == Command::Kind::PerfTrack);
+    CHECK(c.a == 4);
+    CHECK(c.c == (static_cast<std::uint32_t>(v) << 8));
+  }
+  NEED(seq::perf_command(4, PerfFx::PatternPlayMode, 30, c));
+  CHECK(c.c == (23u << 8));
+  // a pad on the row plays the order on the affected tracks; row 0 ends it (the track is FWD again)
+  b.toggle_track(2, log);
+  b.set_edit(true);
+  b.pad_down(pad(0, 1), log);
+  CHECK(b.turn(+10, log));  // C7
+  b.pad_up(pad(0, 1), log);
+  b.set_edit(false);
+  CHECK(b.row(0) == 1);
+  CHECK(b.live(0) == 10);
+  Engine e;
+  e.take(log, 0);
+  CHECK(e.mode[2] == 10);
+  CHECK(e.mode[0] == 0);  // track 0 is not affected
+  log.sent.clear();
+  b.pad_down(pad(0, 0), log);  // row 0: off
+  b.pad_up(pad(0, 0), log);
+  CHECK(b.row(0) == 0);
+  CHECK_FALSE(b.active(0));
+  e.take(log, 0);
+  CHECK(e.mode[2] == 0);
+  // a scene holding C7 recalls it
+  b.pad_down(pad(0, 1), log);  // row 1 again: C7 from the stored value
+  b.pad_up(pad(0, 1), log);
+  CHECK(b.row(0) == 1);
+  CHECK(b.live(0) == 10);
+  CHECK(b.store_scene(0));
+  b.all_off(log);
+  b.set_edit(true);
+  b.pad_down(pad(0, 1), log);
+  CHECK(b.turn(-7, log));  // C1
+  b.pad_up(pad(0, 1), log);
+  b.set_edit(false);
+  CHECK(b.live(0) == 3);
+  log.sent.clear();
+  CHECK(b.recall_scene(0, log));
+  CHECK(b.row(0) == 1);
+  CHECK(b.live(0) == 10);
+  CHECK(b.stored(0, 1) == 10);
+  e.take(log, 0);
+  CHECK(e.mode[2] == 10);
+}
+
 TEST_CASE("perform: a full ring loses nothing - the refused commands go out at the next apply, none twice") {
   seq::PerformBank b;
   Log log;
@@ -729,7 +825,7 @@ TEST_CASE("perform: a random walk over every operation keeps the engine exactly 
     std::size_t taken = 0;
     for (unsigned step = 0; step < 600; ++step) {
       log.room = rng.below(4) == 0u ? rng.below(4) : 1000u;  // sometimes the ring is nearly full
-      switch (rng.below(10)) {
+      switch (rng.below(11)) {
         case 0: case 1: b.pad_down(rng.below(seq::kPerfPads), log); break;
         case 2: case 3: b.pad_up(rng.below(seq::kPerfPads), log); break;
         case 4: b.turn(static_cast<int>(rng.below(21)) - 10, log); break;
@@ -737,6 +833,7 @@ TEST_CASE("perform: a random walk over every operation keeps the engine exactly 
         case 6: b.change_fx(rng.below(seq::kPerfSlots), rng.below(2) == 0u ? 1 : -1, log); break;
         case 7: b.swap_slots(rng.below(seq::kPerfSlots), rng.below(seq::kPerfSlots), log); break;
         case 8: b.set_edit(rng.below(2) == 0u); b.copy_slot(rng.below(seq::kPerfSlots)); b.paste_slot(rng.below(seq::kPerfSlots), log); break;
+        case 9: b.set_cc(rng.below(seq::kPerfSlots), rng.below(128), log); break;  // OS-MIDICCMAP S3
         default: if (rng.below(5) == 0u) { b.turn_off(log); } break;
       }
       e.take(log, taken);
@@ -1092,4 +1189,206 @@ TEST_CASE("perform rate: the bank sends PerfRate once when the wanted rate chang
   c.toggle_track(0, l2);
   NEED(l2.sent.size() > n);
   CHECK(l2.sent[n].kind == Command::Kind::PerfRate);
+}
+
+// ---- OS-MIDICCMAP S3 (docs/specs/OS-MIDICCMAP.md 3.4): the CC row of a Perform slot (CC 51..62) ------------------------------------------------------------------
+
+TEST_CASE("perform OS-MIDICCMAP S3: set_cc gives every FX's range the official law, a labelled FX its label, and touches neither the stored row and values nor state() nor the scenes") {
+  for (unsigned f = 1; f < seq::kPerfFxCount; ++f) {
+    const seq::PerfFxInfo& info = seq::kPerfFxInfo[f];
+    o3os::test::ZeroBank b;
+    Log log;
+    o3os::model::PerfState st{};
+    st.fx[0] = static_cast<std::uint8_t>(f);
+    st.row[0] = 0;
+    b.load_slots(st);
+    const o3os::model::PerfState before = b.state();
+    const o3os::model::ScenesState scenes_before = b.scenes_state();
+    b.store_scene(0);  // a scene stored before the CC: CC mode must not change what it matches
+    const o3os::model::ScenesState stored_scene = b.scenes_state();
+    CHECK(b.set_cc(0, 0, log));  // the first message enters CC mode
+    for (unsigned v : {0u, 1u, 64u, 100u, 127u}) {
+      (void)b.set_cc(0, v, log);
+      CHECK(b.cc_mode(0));
+      const int want = info.min + static_cast<int>(v) * (info.max - info.min) / 127;
+      CHECK(b.live(0) == want);
+      CHECK(b.active(0) == (want != 0));  // a value of 0 is off
+      CHECK(b.row(0) == 0);               // the stored row is untouched
+    }
+    CHECK_FALSE(b.set_cc(0, 128, log));     // past the CC range: nothing
+    CHECK_FALSE(b.set_cc(12, 127, log));    // past the board: nothing
+    // a labelled FX: at 127 the value is the range's max and reads its label
+    char text[8];
+    if (f == static_cast<unsigned>(PerfFx::SamplePlayback)) {
+      CHECK(b.live(0) == 1);  // 127 over 0..1
+      seq::perf_value_text(PerfFx::SamplePlayback, b.live(0), text);
+      CHECK(std::string(text) == "<<<");
+    }
+    if (f == static_cast<unsigned>(PerfFx::StepRepeater)) {
+      CHECK(b.live(0) == 15);  // 127 over 0..15
+      seq::perf_value_text(PerfFx::StepRepeater, b.live(0), text);
+      CHECK(std::string(text) == "1/16");
+    }
+    CHECK(b.set_cc(0, 64, log));            // a value that differs from the last: changed
+    CHECK_FALSE(b.set_cc(0, 64, log));      // the same value again: nothing changed
+    // state() and the scenes never saw CC mode
+    CHECK(b.state() == before);
+    CHECK(b.scenes_state() == stored_scene);
+    CHECK(!(b.scenes_state() == scenes_before));  // the store_scene changed them, the set_cc calls did not (the comparison above holds the stored one)
+    CHECK(b.scene_matches(0));                 // the scene is still in force
+  }
+  // a slot with no FX ignores the message
+  o3os::test::ZeroBank b;
+  Log log;
+  o3os::model::PerfState st{};
+  st.fx[0] = 0;
+  b.load_slots(st);
+  CHECK_FALSE(b.set_cc(0, 127, log));
+  CHECK_FALSE(b.cc_mode(0));
+  CHECK(log.sent.empty());
+}
+
+TEST_CASE("perform OS-MIDICCMAP S3: set_cc ends the slots of the same FX (exclude) and apply sends the value to the affected tracks only; a law value of 0 ends the FX") {
+  o3os::test::ZeroBank b;
+  Log log;
+  b.toggle_track(0, log);
+  b.toggle_track(3, log);
+  log.sent.clear();
+  // slot 3 (LOWPASS) on row 1, and slot 7 the same FX (a paste)
+  b.pad_down(pad(3, 1), log);
+  b.pad_up(pad(3, 1), log);
+  b.copy_slot(3);
+  b.paste_slot(7, log);
+  b.pad_down(pad(7, 1), log);
+  b.pad_up(pad(7, 1), log);
+  CHECK(b.row(7) == 1);
+  CHECK_FALSE(b.active(7));  // the ZeroBank's row 1 holds 0: no FX yet
+  CHECK_FALSE(b.active(3));  // the paste's pad ended the first slot
+  log.sent.clear();
+  // CC 51+6 = 57 on slot 7: 127 over -100..100 is +100, sent to tracks 0 and 3 only
+  CHECK(b.set_cc(7, 127, log));
+  CHECK(b.cc_mode(7));
+  CHECK(b.live(7) == 100);
+  CHECK(b.active(7));
+  NEED(log.sent.size() == 2);
+  for (const Command& c : log.sent) {
+    CHECK(c.kind == Command::Kind::PerfControl);
+    CHECK(c.b == static_cast<std::uint16_t>(FxGroup::Filter));
+    CHECK(c.c == static_cast<std::uint16_t>(audio::perf_filter_value(audio::kFilterLow, 100)));
+    CHECK((c.a == 0 || c.a == 3));
+  }
+  Engine e;
+  e.take(log, 0);
+  CHECK(e.ctl.perf_holds(0, FxGroup::Filter));
+  CHECK(e.ctl.perf_holds(3, FxGroup::Filter));
+  CHECK_FALSE(e.ctl.perf_holds(5, FxGroup::Filter));  // track 5 is not affected
+  // the same FX on another slot ends the CC slot (exclude through set_cc)
+  b.copy_slot(7);
+  b.paste_slot(4, log);  // slot 4 was HIPASS: now LOWPASS too
+  log.sent.clear();
+  CHECK(b.set_cc(4, 64, log));  // 64 over -100..100 is 0: the FX ends
+  CHECK(b.cc_mode(4));
+  CHECK(b.live(4) == 0);
+  CHECK_FALSE(b.active(4));       // a value of 0 is off
+  CHECK_FALSE(b.cc_mode(7));      // the slot holding the same FX ended, its CC mode with it
+  CHECK_FALSE(b.active(7));
+  NEED(log.sent.size() == 2);     // the ends go to the two affected tracks
+  for (const Command& c : log.sent) {
+    CHECK(c.kind == Command::Kind::PerfControl);
+    CHECK(c.c == (1u << 16));
+    CHECK((c.a == 0 || c.a == 3));
+  }
+  e.take(log, 0);  // log.sent was cleared before the set_cc: the two ends are its only commands
+  CHECK_FALSE(e.ctl.perf_holds(0, FxGroup::Filter));
+  CHECK_FALSE(e.ctl.perf_holds(3, FxGroup::Filter));
+}
+
+TEST_CASE("perform OS-MIDICCMAP S3: every exit of CC mode — a pad (down or up), RESET, leaving the screen, a scene recall, change_fx, paste, swap, a load") {
+  o3os::test::ZeroBank b;
+  Log log;
+  const o3os::model::PerfState st = b.state();
+  b.toggle_track(0, log);
+  // a pad of the slot
+  CHECK(b.set_cc(0, 100, log));
+  CHECK(b.cc_mode(0));
+  b.pad_down(pad(0, 1), log);
+  CHECK_FALSE(b.cc_mode(0));
+  // the pad's release
+  CHECK(b.set_cc(0, 100, log));
+  b.pad_down(pad(0, 2), log);
+  CHECK(b.set_cc(0, 100, log));  // the CC while the pad is held: the slot is held and in CC mode
+  CHECK(b.cc_mode(0));
+  b.pad_up(pad(0, 2), log);
+  CHECK_FALSE(b.cc_mode(0));
+  // RESET
+  CHECK(b.set_cc(0, 100, log));
+  (void)b.all_off(log);
+  CHECK_FALSE(b.cc_mode(0));
+  // leaving the screen
+  CHECK(b.set_cc(0, 100, log));
+  (void)b.turn_off(log);
+  CHECK_FALSE(b.cc_mode(0));
+  // a scene recall
+  (void)b.store_scene(0);
+  CHECK(b.set_cc(0, 100, log));
+  CHECK(b.recall_scene(0, log));
+  CHECK_FALSE(b.cc_mode(0));
+  // change_fx of that slot
+  CHECK(b.set_cc(0, 100, log));
+  (void)b.change_fx(0, 1, log);
+  CHECK_FALSE(b.cc_mode(0));
+  // paste_slot of that slot
+  b.copy_slot(1);
+  CHECK(b.set_cc(0, 100, log));
+  (void)b.paste_slot(0, log);
+  CHECK_FALSE(b.cc_mode(0));
+  // swap_slots of that slot
+  CHECK(b.set_cc(0, 100, log));
+  (void)b.swap_slots(0, 1, log);
+  CHECK_FALSE(b.cc_mode(0));
+  CHECK_FALSE(b.cc_mode(1));
+  // load_slots
+  CHECK(b.set_cc(0, 100, log));
+  b.load_slots(st);
+  CHECK_FALSE(b.cc_mode(0));
+  // and a slot ended by exclude loses its CC mode too
+  b.pad_down(pad(3, 1), log);
+  b.pad_up(pad(3, 1), log);
+  b.copy_slot(3);
+  b.paste_slot(7, log);
+  CHECK(b.set_cc(3, 100, log));
+  CHECK(b.set_cc(7, 100, log));
+  CHECK_FALSE(b.cc_mode(3));  // slot 7 took the LOWPASS over: slot 3 ended
+  CHECK(b.cc_mode(7));
+}
+
+TEST_CASE("perform OS-MIDICCMAP S3: the encoder on a held slot in CC mode changes the live value as for a row (EDIT stores it too)") {
+  o3os::test::ZeroBank b;
+  Log log;
+  b.toggle_track(0, log);
+  b.set_edit(true);
+  b.pad_down(pad(0, 1), log);  // slot 0 is VOLUME, row 1 held
+  CHECK(b.set_cc(0, 100, log));  // -100 + 100 * 200 / 127 = 57
+  CHECK(b.live(0) == 57);
+  CHECK(b.cc_mode(0));
+  CHECK(b.turn(+10, log));
+  CHECK(b.live(0) == 67);
+  CHECK(b.stored(0, 1) == 67);  // EDIT stored it, as for a row
+  CHECK(b.turn(-1000, log));
+  CHECK(b.live(0) == -100);     // held to the FX's range
+  b.pad_up(pad(0, 1), log);
+  CHECK_FALSE(b.cc_mode(0));
+  CHECK(b.live(0) == -100);     // the release reloads the stored value
+  b.set_edit(false);
+  // the same on row 0: a held slot in CC mode with its row 0 is turned too
+  b.pad_down(pad(0, 0), log);
+  CHECK(b.set_cc(0, 100, log));
+  CHECK(b.live(0) == 57);
+  CHECK(b.active(0));
+  CHECK(b.turn(+10, log));
+  CHECK(b.live(0) == 67);
+  CHECK(b.stored(0, 1) == -100);  // not EDIT: the row's stored value keeps what it had
+  b.pad_up(pad(0, 0), log);
+  CHECK_FALSE(b.cc_mode(0));
+  CHECK(b.live(0) == 0);  // row 0: off again
 }

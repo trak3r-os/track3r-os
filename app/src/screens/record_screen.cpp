@@ -269,6 +269,22 @@ void RecordScreen::render(const Model& model, const ViewState& view, Renderer& r
     } else {
       strip.row().field("STATE", Face::Data, badge, Color::ChromeDim, Color::ChromeText);
     }
+    if (rec != nullptr) {  // OS-RECBADGE: what is switched on, as chips after the state (each only while it is on; the cpu group at the right edge stays clear: three chips at most are on together)
+      const std::uint8_t on = rec_badges(rec->cfg.monitor, state == Recorder::State::Recording, state == Recorder::State::Armed, rec->overdubbing(), rec->restoring(), rec->cfg.loop_bars != 0u, rec->loop_review());
+      ui::FieldRow& row = strip.row();
+      const auto chip = [&](std::uint8_t bit, const char* word, Color fill, Color ink) {
+        if ((on & bit) != 0u) {
+          row.chip(Face::Label, word, fill, ink);
+          row.skip(m.gap);
+        }
+      };
+      chip(kBadgeMonitor, "MONITOR", Color::Sel, Color::SelText);
+      chip(kBadgeRec, "REC", Color::Rec, Color::SelText);
+      chip(kBadgeArmed, "ARMED", Color::ChromeDim, Color::Chrome);
+      chip(kBadgeUndo, "UNDO", Color::Accent, Color::AccentText);
+      chip(kBadgeOverdub, "OVERDUB", Color::Accent, Color::AccentText);
+      chip(kBadgeLoop, "LOOP", Color::Sel, Color::SelText);
+    }
     strip.cpu(model.load);
   }
   if (!hidden(f.header)) {

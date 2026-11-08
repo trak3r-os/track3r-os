@@ -151,7 +151,6 @@ bool image_of(sim::Simulator& s, SelImage& out) {
   out.selected = v.edit.selection.active;
   out.editable = app::pattern_editable(v);
   out.fill_open = v.overlay == app::OverlayId::Fill;
-  out.fill_scope = static_cast<int>(v.fill.scope);
   out.fill_what = static_cast<int>(v.fill.plan.what);
   out.song_pos = v.song.pos();
   out.song_first = v.song.first();
@@ -334,21 +333,15 @@ void span_paste(const SelImage& b, int, const SelContext& c, Span& sp) {
   sp.cells.push_back({b.pattern, static_cast<unsigned>(b.cur_track), static_cast<unsigned>(b.cur_track + c.clip->tracks - 1), static_cast<unsigned>(b.cur_row), static_cast<unsigned>(b.cur_row + c.clip->rows - 1), kFAll});
 }
 
-// The Fill dialog (OS-PTOOLS, OS-FILL2): SCOPE says the places, WHAT the fields. BLOCK = the selection (the cursor step with none), TRACK = the cursor's track over its length, PATTERN = every active track; "each track is cut
-// at its own length (D7)". WHAT: NOTE and INSTR write the step by the single-step rule (an empty step also takes the last instrument or the note 60), VOLUME the volume (the single-step rule too), FX 1 and FX 2 only their own
-// column ("only the FX column is written. The note, instrument and volume stay").
+// The Fill dialog (OS-PTOOLS, OS-FILL2; OS-PTOOLS2 S3c: no SCOPE row, the selection is the target): the block says the places — the cursor step with none, a range, the whole column of Shift + Up at row 1 (its rows are 0..steps-1), every
+// track when that selection covers them all; "each track is cut at its own length (D7)". WHAT says the fields: NOTE and INSTR write the step by the single-step rule (an empty step also takes the last instrument or the note 60), VOLUME the
+// volume (the single-step rule too), FX 1 and FX 2 only their own column ("only the FX column is written. The note, instrument and volume stay").
 void span_fill(const SelImage& b, int, const SelContext&, Span& sp) {
   std::uint8_t fields = kFNote | kFInstr;
   fields = b.fill_what == 2 ? static_cast<std::uint8_t>(kFVol | kFNote | kFInstr) : fields;
   fields = b.fill_what == 3 ? kFFx1 : fields;
   fields = b.fill_what == 4 ? kFFx2 : fields;
-  if (b.fill_scope == 0) {
-    span_block(b, fields, sp);
-  } else if (b.fill_scope == 1) {
-    sp.cells.push_back({b.pattern, static_cast<unsigned>(b.cur_track), static_cast<unsigned>(b.cur_track), 0, model::kMaxPatternLength - 1u, fields});
-  } else {
-    sp.cells.push_back({b.pattern, 0, active_tracks(b) > 0 ? active_tracks(b) - 1u : 0u, 0, model::kMaxPatternLength - 1u, fields});
-  }
+  span_block(b, fields, sp);
 }
 
 // DUPLICATE, EXPAND, SHRINK: the block's tracks (every active track with no selection) over their whole column and their lengths (PAT-OPS Q1 a).
@@ -374,10 +367,10 @@ const char* each_block_cell(const SelImage& b, Fn fn) {
   return nullptr;
 }
 
-// OS-PTOOLS D7: "each track is cut at its own length": a fill writes no step past the end of its track.
+// OS-PTOOLS D7: "each track is cut at its own length": a fill writes no step past the end of its track. The target is the selection (OS-PTOOLS2 S3c), so the tracks are the block's.
 const char* inside_fill(const SelImage& b, const SelImage& a, int, const SelContext&) {
-  const unsigned t0 = b.fill_scope == 0 ? static_cast<unsigned>(b.track0) : (b.fill_scope == 1 ? static_cast<unsigned>(b.cur_track) : 0u);
-  const unsigned t1 = b.fill_scope == 0 ? static_cast<unsigned>(b.track1) : (b.fill_scope == 1 ? static_cast<unsigned>(b.cur_track) : (active_tracks(b) > 0 ? active_tracks(b) - 1u : 0u));
+  const unsigned t0 = static_cast<unsigned>(b.track0);
+  const unsigned t1 = static_cast<unsigned>(b.track1);
   for (unsigned t = t0; t <= t1 && t < model::kMaxTracks; ++t) {
     for (unsigned r = track_len(b, b.pattern, t); r < model::kMaxPatternLength; ++r) {
       if (!same(cell(a, b.pattern, t, r), cell(b, b.pattern, t, r))) {
@@ -867,7 +860,7 @@ const std::vector<SelOp>& selection_ops() {
       {"step.fx_value", ScreenId::Pattern, "OS-009 table: the FX value, clamped to the type's range", "the several-step branch", pattern_edit_ok, span_block_fx, nullptr},
       {"step.fx_pad", ScreenId::Pattern, "OS-009 table: the FX value by pad, scaled onto the type's range", "the several-step branch", pattern_edit_ok, span_block_fx, nullptr},
       {"step.fx_type", ScreenId::Pattern, "OS-009 table: the FX type on the cursor's FX column", "the several-step branch", pattern_edit_ok, span_block_fx, nullptr},
-      {"fill.apply", ScreenId::Pattern, "OS-PTOOLS, OS-FILL2: the fill writes the scope (BLOCK = the selection, TRACK, PATTERN), the field WHAT names, each track cut at its own length", "which steps of the scope the type picks and what they get", fill_ok, span_fill, inside_fill},
+      {"fill.apply", ScreenId::Pattern, "OS-PTOOLS, OS-FILL2, OS-PTOOLS2 S3c: the fill writes the selection (a block, a column block, the cursor step; the track or the pattern of Shift + Up at step 1), the field WHAT names, each track cut at its own length", "which steps of the selection the type picks and what they get", fill_ok, span_fill, inside_fill},
       {"step.insert", ScreenId::Pattern, "OS-009 table, OS-PATUX: the selected tracks shift down from the block's first row through step 127", "", pattern_edit_ok, span_from_cursor, inside_insert},
       {"step.pull", ScreenId::Pattern, "OS-DELPULL: the selected tracks come up from the block's first row through step 127", "", pattern_edit_ok, span_from_cursor, inside_pull},
       {"pattern.invert", ScreenId::Pattern, "OS-009 P1b: INVERT swaps the symmetric steps of each selected track", "a block that runs past a track's end", pattern_edit_ok, span_block_all, inside_invert},
@@ -908,7 +901,6 @@ const std::vector<NotJudged>& selection_ops_not_judged() {
       {"song.add_slot", "DEFERRED: arg 0 changes only the order, but arg 1 (Shift + Insert) also copies the pattern into the first free number, so its span needs the pattern bank, which the masks of this table do not have yet"},
       {"song.tools", "the dialog over the map's rectangle (SONG-UX): the map's cells are not a range of slots"},
       {"song.select_tracks", "selects the tracks of the map's rectangle only; the cells' operations of the map are judged with the map (not in this slice)"},
-      {"tools.run", "launches an app with the block as its context: the app is a module"},
       {"perform.copy", "the perform board's slot copy: not a selection of the document"},
       {"learn.delete", "acts on the learn list's row under the cursor: not a selection of the document"},
       {"file.delete", "acts on the file under the cursor of the card: asks first, and the card is not the document"},

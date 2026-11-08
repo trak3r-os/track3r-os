@@ -1,0 +1,401 @@
+# OS-MIDIREC S1b/S1c (docs/specs/OS-MIDIREC.md): the EVENTS overlay of the Pattern screen, opened by F6 in the F7 TOOLS menu
+# (OS-TOOLSDEDUP: F6 EVENTS, on the grid and on the APPS page). One snap per catalogue row this slice covers (docs/qa/catalogue/pattern.md
+# QA-PAT-400..407, 408, 409, 410; the budget sweep is the `events_worst` state of the budget harness, QA-PAT-411). The document
+# is `document events` (sim/src/demo_project.cpp): pattern 1 of 64 steps with every row kind in its first four tracks, instrument
+# 49 a MIDI instrument on channel 3, the project's CC numbers A 74 and C 71, and an empty pattern 2.
+
+# QA-PAT-409 (first refusal): no project (no `document` line yet: the demo runs without one), F7 TOOLS says NO PROJECT.
+tap f7
+snap qa_pat_409a
+wait 2500
+
+document events
+
+# QA-PAT-400: open EVENTS on the cursor's track (track 1, step 1): F7 (the verb menu), F6 EVENTS. The pane lists the
+# track's events in time order — the note on 001 with its LEN 04.00 (its OFF on 005 is folded, no OFF row), the micro-moved note
+# on 009.50, the dim sample row on 013 (VAL ---, CH --), the gated note with a Chord on 017 (LEN 00.50, FL G, FX1 Chord, FX2 Gate), the OFF row on
+# 025 and the note on 029 with LEN >36.00; the header reads the pattern, track, steps, the count and ALL, and 01/06 at the right.
+tap f7
+tap f6
+snap qa_pat_400
+
+# QA-PAT-402: the cursor row moved down: the OFF that ends no note above it is a row of its own, and the note above the window's
+# end reads LEN >36.00 (it plays on past the track's end).
+tap down 4
+snap qa_pat_402
+
+# QA-PAT-401: open over a block (tracks 1-3, steps 1-16): the list shows the TRK column and only the block's rows.
+tap f8
+action cursor.jump_fraction 0
+press shift
+tap down 15
+tap right 10
+release shift
+tap f7
+tap f6
+snap qa_pat_401
+
+# QA-PAT-403: a micro-move in TIME: on track 2 the CC B of step 9 is listed at 009.00 and the micro-moved note at 009.50.
+tap f8
+action select.clear
+tap right 5
+tap f7
+tap f6
+snap qa_pat_403
+
+# QA-PAT-404: what the CC rows send: on track 3, CC A reads #074 on CH 03 (the MIDI instrument's controller 74), CC B PROG on CH 03,
+# CC C #071 on CH 01 (the Config number on the notes channel) and CC D -- (unassigned).
+tap f8
+tap right 5
+tap f7
+tap f6
+snap qa_pat_404
+
+# QA-PAT-405: CH and IN: on track 4 the first note has no instrument of its own (IN ??, CH --, dim) and the second is instrument 49
+# on channel 3 (IN 49, CH 03).
+tap f8
+tap right 5
+tap f7
+tap f6
+snap qa_pat_405
+
+# QA-PAT-408: BACK on a CC row: the grid cursor lands on that step, track and the FX column that holds the CC.
+tap f8
+tap left 5
+tap f7
+tap f6
+tap down
+tap f8
+snap qa_pat_408
+
+# QA-PAT-409 (second refusal): a pattern the project lacks (pattern 3): EVENTS says PATTERN IS EMPTY and the list stays closed.
+action chooser.hold 0
+action chooser.delta 2
+action chooser.release 0
+tap f7
+tap f6
+snap qa_pat_409b
+wait 2500
+
+# QA-PAT-409 (third refusal): WATCH while playing: the verb menu and the TOOLS list open (OS-PTOOLS2 S1) and EVENTS says STOP PLAYING TO OPEN EVENTS.
+playhead 5
+tap f7
+tap f6
+snap qa_pat_409c
+wait 2500
+playhead stop
+
+# QA-PAT-409 (the empty scope): pattern 2 exists and holds nothing: the list opens empty with NO EVENTS: INSERT ADDS ONE.
+action chooser.hold 0
+action chooser.delta -1
+action chooser.release 0
+tap f7
+tap f6
+snap qa_pat_409d
+
+# QA-PAT-406: other FX on the cursor's row: back on pattern 1, track 1, the cursor on the gated note with a Chord on step 17
+# (the fourth row): the FL reads G, FX1 reads the Chord and FX2 the Gate, and the info line says ALSO: CHORD 47.
+tap f8
+action chooser.hold 0
+action chooser.delta -1
+action chooser.release 0
+action cursor.jump_fraction 0
+action nav.scroll 0
+action cursor.home
+tap f7
+tap f6
+tap down 3
+snap qa_pat_406
+
+# QA-PAT-484 (OS-EVFX): the same row with the field cursor walked to FX1 (Right x6: CH, DATA, VAL, LEN, IN, FX1): the FX1 cell is the
+# highlighted field. Editing is covered by tests/events_app_test.cpp (one undo unit per detent).
+tap right 6
+snap qa_pat_484
+
+# QA-PAT-407: FILTER: on track 3 (two notes and four CC rows), F1 three times: ALL 1/3 with 6 events, NOTE 2/3 with 2, CC 3/3
+# with 4, then back to ALL; the header's count and the F1 label follow each press.
+tap f8
+action cursor.jump_fraction 0
+action nav.scroll 0
+action cursor.home
+tap right 10
+tap f7
+tap f6
+snap qa_pat_407
+tap f1
+snap qa_pat_407b
+tap f1
+snap qa_pat_407c
+tap f1
+
+# QA-PAT-410: while playing, in STEP (Rec), the list open on track 1: the Accent bar in the left margin marks the row of the
+# playing step (Q5 a) — step 9 here — and moves with the playhead to step 17; the cursor and the window stay.
+tap f8
+action cursor.jump_fraction 0
+action nav.scroll 0
+action cursor.home
+tap rec
+playhead 8
+tap f7
+tap f6
+snap qa_pat_410
+playhead 16
+snap qa_pat_410b
+playhead stop
+tap rec
+
+# ---- OS-MIDIREC S2b: the field edits of the list (docs/specs/OS-MIDIREC.md 3.5, A13-A14, A21; QA-PAT-412..420, 424). The list
+# is open at the end of the S1c section, in STEP on track 1. Each snap below is one catalogue row; a refusal is snapped after
+# F8 BACK, because the strip waits behind the modal overlay (the notice is posted at the edit key). The grid cursor is moved
+# before the list opens (the overlay captures: the arrows would edit, not move the grid, while it is up).
+
+# QA-PAT-424: edits need STEP. Back on the grid, WATCH (Rec), the list open, the encoder on TIME: the strip says TURN EDIT ON,
+# nothing is written, no undo unit (the info line's undo count is unchanged).
+tap f8
+tap rec
+tap f7
+tap f6
+encoder 1
+tap f8
+snap qa_pat_424
+wait 2500
+
+# STEP again (Rec on the grid), the grid cursor home (step 1, track 1).
+tap rec
+action cursor.jump_fraction 0
+action nav.scroll 0
+action cursor.home
+
+# QA-PAT-412: DATA of the NOTE on 001 — the encoder a semitone, Shift + encoder an octave, a pad the pad's note; one undo unit each.
+tap f7
+tap f6
+tap right 2
+encoder 1
+snap qa_pat_412
+press shift
+encoder 1
+release shift
+snap qa_pat_412b
+pad 5
+snap qa_pat_412c
+
+# QA-PAT-413: VAL of the note on 013 (VAL ---): the first detent is 127, a pad ramps to 0.
+tap f8
+action cursor.jump_fraction 0
+action nav.scroll 12
+tap f7
+tap f6
+tap right 3
+encoder 1
+snap qa_pat_413
+pad 0
+snap qa_pat_413b
+
+# QA-PAT-414: TIME of the NOTE on 001 — encoder +24 microsteps: 001.50 (a Micro-move in FX 2); +24 more: past .96 the note goes
+# to 002.00 and its end (the OFF on 005) moves to 006.
+tap f8
+action cursor.jump_fraction 0
+action nav.scroll 0
+action cursor.home
+tap f7
+tap f6
+encoder 24
+snap qa_pat_414
+encoder 24
+snap qa_pat_414b
+
+# QA-PAT-415: Shift + encoder on TIME moves a note one step with its LEN; its CC rows stay. On track 2 the NOTE 009.50 goes to
+# 010.50, the CC B stays on 009.
+tap f8
+action select.clear
+action cursor.jump_fraction 0
+action nav.scroll 8
+tap right 5
+tap f7
+tap f6
+tap down 1
+press shift
+encoder 1
+release shift
+snap qa_pat_415
+
+# QA-PAT-416: a CC row moves by whole steps only: the CC A of track 2, from 001 to 002, same column.
+tap f8
+tap f7
+tap f6
+tap up 3
+encoder 1
+snap qa_pat_416
+
+# QA-PAT-417: LEN of the NOTE on 002 of track 1 — the OFF moves from 006 to 007 (LEN 05.00); on the gated note of 017 the edit is
+# refused: THE GATE FX SETS THIS LENGTH (snapped after BACK, on the strip).
+tap f8
+action select.clear
+action cursor.jump_fraction 0
+action nav.scroll 0
+action cursor.home
+tap f7
+tap f6
+tap right 4
+encoder 1
+snap qa_pat_417
+tap down 3
+encoder 1
+tap f8
+snap qa_pat_417b
+wait 2500
+
+# QA-PAT-418: TYPE of a CC row cycles the letter (the value stays), then VAL of the CC row is the FX value. On track 3, the CC A
+# of 002 becomes CC F; its value 074 goes to 075.
+tap f8
+action select.clear
+action cursor.jump_fraction 0
+action nav.scroll 0
+action cursor.home
+tap right 10
+tap f7
+tap f6
+tap down
+tap right
+encoder 5
+snap qa_pat_418
+tap right 3
+encoder 1
+snap qa_pat_418b
+
+# QA-PAT-419: CH of the NOTE on 005 of track 4 (instrument 49, channel 3): +1 is channel 4, which has no MIDI instrument — the
+# refusal NO MIDI INSTRUMENT ON CH 04 (snapped after BACK).
+tap f8
+action select.clear
+action cursor.jump_fraction 0
+action nav.scroll 0
+action cursor.home
+tap right 15
+tap f7
+tap f6
+tap down
+tap right
+encoder 1
+tap f8
+snap qa_pat_419
+wait 2500
+
+# QA-PAT-420: IN of the NOTE on 001 of track 1 — the grid's Instr walk (49 to 48).
+action cursor.jump_fraction 0
+action nav.scroll 0
+action cursor.home
+tap f7
+tap f6
+tap right 5
+encoder 1
+snap qa_pat_420
+tap f8
+
+# ---- OS-MIDIREC S2c / S3: Insert, Delete, the history inside the list and QUANT (docs/specs/OS-MIDIREC.md A9, A10, A12, 3.4;
+# QA-PAT-421..423, 426..428). Each part starts from a fresh `document events` (STEP stays on, the grid cursor goes home). The
+# message of a refusal or a count is snapped after F8 BACK, because the strip waits behind the modal overlay.
+
+# QA-PAT-421: Insert on the NOTE on 001 of track 1 copies it onto its end step (the OFF on 005): a second NOTE row, the cursor on
+# it; Shift + Insert on that row adds a CC A 000 on its step, the cursor on the new CC row.
+document events
+action select.clear
+action cursor.jump_fraction 0
+action nav.scroll 0
+action cursor.home
+tap f7
+tap f6
+tap insert
+snap qa_pat_421
+press shift
+tap insert
+release shift
+snap qa_pat_421b
+
+# QA-PAT-421 (the empty list): pattern 2 holds nothing; Insert adds a NOTE at its first step on the cursor's track.
+tap f8
+action chooser.hold 0
+action chooser.delta 1
+action chooser.release 0
+tap f7
+tap f6
+tap insert
+snap qa_pat_421c
+tap f8
+action chooser.hold 0
+action chooser.delta -1
+action chooser.release 0
+
+# QA-PAT-422: Delete on track 3: the NOTE on 005 goes with its bytes, and an OFF takes its place so that the NOTE on 001 above
+# keeps its LEN (04.00); the cursor goes to the nearest row, the CC C of 006. Delete on that CC row clears its FX column.
+document events
+action select.clear
+action cursor.jump_fraction 0
+action nav.scroll 0
+action cursor.home
+tap right 10
+tap f7
+tap f6
+tap down 3
+tap delete
+snap qa_pat_422
+tap delete
+snap qa_pat_422b
+
+# QA-PAT-423: F7 UNDO inside the list brings the CC row back and the list projects again with the cursor on it; Shift + F7 REDO
+# takes it away again; BACK, then F8 on the grid undoes the CC row's Delete again (the strip says UNDO EVENT).
+tap f7
+pad 15
+snap qa_pat_423
+press shift
+tap f7
+pad 15
+release shift
+snap qa_pat_423b
+tap f8
+tap f8
+snap qa_pat_423c
+
+# QA-PAT-426: QUANT of a row. Track 2: the NOTE on 009.50 goes to 010.00 (step 10 is free); then a microstep edit puts it at
+# 010.21 and F2 snaps it back to 010.00.
+document events
+action select.clear
+action cursor.jump_fraction 0
+action nav.scroll 0
+action cursor.home
+tap right 5
+tap f7
+tap f6
+tap down 3
+tap f2
+snap qa_pat_426
+encoder 10
+snap qa_pat_426b
+tap f2
+snap qa_pat_426c
+
+# QA-PAT-428: F2 on a CC row says CC IS ON THE STEP and writes nothing (snapped after BACK).
+tap up 3
+tap f2
+tap f8
+snap qa_pat_428
+wait 2500
+
+# QA-PAT-427: Shift + F2 over a block (tracks 1-2, steps 1-16): every NOTE row the list shows is quantised as one unit. The
+# micro-moved notes of 009.50 on both tracks go to 010.00; the strip says QUANTISED 2.
+document events
+action select.clear
+action cursor.jump_fraction 0
+action nav.scroll 0
+action cursor.home
+press shift
+tap down 15
+tap right 5
+release shift
+tap f7
+tap f6
+press shift
+tap f2
+release shift
+snap qa_pat_427
+tap f8
+snap qa_pat_427b

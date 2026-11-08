@@ -3,6 +3,12 @@ firmware image, loaded like the same file from the SD card.
 
 tb303: a single-precision port of the algorithms and constants of Open303
 (github.com/maddanio/open303), whose licence follows.
-chip, fm, sid: written for this project. MIT licence, Copyright (c) 2026 the track3r-os
+fm, sid: written for this project. MIT licence, Copyright (c) 2026 the track3r-os
 authors (the terms of the module SDK, module/sdk/LICENSE).
+
+chip: written for this project (MIT licence, Copyright (c) 2026 the track3r-os authors), plus a
+port of the CHIP synth engine of Polyend Tracker Community Edition (tracker-ce,
+github.com/polyend/tracker-ce, core/synth/engines/ChiptuneSynthVoice.cpp): Copyright (c)
+2020-2026 Polyend Sp. z o.o. and Polyend Tracker Community Edition Contributors, MIT licence
+with the conditions of its Part 2, whose text follows (Parts 1 and 2 of its LICENSE).
 

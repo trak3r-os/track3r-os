@@ -41,6 +41,11 @@ void fill_tb303_project(model::Project& project) noexcept;
 // OS-INSFX S4 (`document inserts`): the demo project with three insert records for the Mixer's INSERTS page: T1 INS A "biquad", T1 INS B "reverb" (bypassed; the card of `apps on` has no such file, so the picker greys it), T3 INS A "biquad".
 void fill_insert_project(model::Project& project) noexcept;
 
+// OS-MIDIREC S1 (`document events`): the document of the EVENTS list's scenarios and budget sweep: pattern 1 of 64 steps with
+// every row kind in its first four tracks (see demo_project.cpp), instrument 1 a sample and 49 a MIDI instrument on channel 3, the
+// project's CC numbers A 74 and C 71, and an empty pattern 2.
+void fill_events_project(model::Project& project) noexcept;
+
 // The same, then the project's Learn store: CC 74 bound to the cutoff of instrument 1 (pickup) and CC 71 to its resonance (jump).
 void fill_demo_project_with_bindings(model::Project& project) noexcept;
 

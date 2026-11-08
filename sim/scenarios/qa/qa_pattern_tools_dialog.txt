@@ -1,0 +1,76 @@
+# OS-PTOOLS2 S2 (docs/specs/OS-PTOOLS2.md section 3.1 point 3 and the S2 row of the slice plan): the Pattern TOOLS dialog over the block,
+# opened by the verb menu's TRANSPOSE / INSTRUMENT rows — the catalogue rows QA-PAT-457..459 of docs/qa/catalogue/pattern.md.
+# The demo document's pattern 1 is 12 tracks of 64 steps (app::fill_demo); the facts used below: track 0 (KICK) holds note 25 on instrument 1 on rows 0, 4, 8 ...
+# State-line keys used: overlay=, msg=; the model's pat.<p>.<track>.<row>.<field> (0-based) and digest.
+
+# QA-PAT-457: the menu's TRANSPOSE row (pad 1) opens the TOOLS dialog over the block: the OP row, the AMOUNT row, the footer naming the target
+# (BLOCK  TRACK 1  NOTE  ROWS 01-03) and the count (3 STEPS  3 NOTES), the key row F1 APPLY / F8 BACK. AMOUNT +12 with Shift + the encoder (an octave).
+document
+action view.mode 0
+action cursor.jump_fraction 0
+action cursor.home
+action select.clear
+action step.note 61
+action step.note 63
+action step.note 65
+action cursor.jump_fraction 0
+assert model pat.1.0.0.note=61
+assert model pat.1.0.1.note=63
+assert model pat.1.0.2.note=65
+action select.extend 1
+action select.extend 1
+assert state overlay=NONE
+mark model d0
+tap f7
+assert state overlay=VERB_MENU
+pad 0
+assert state overlay=PATTERN_TOOLS
+snap qa_pat_457
+tap down
+press shift
+encoder 1
+release shift
+snap qa_pat_458
+# F8 BACK leaves the project untouched (the digest is the one marked before)
+tap f8
+assert state overlay=NONE
+assert model digest=@d0
+# F1 APPLY runs the transpose as ONE undo unit: TRANSPOSED: 3 STEPS +12 ST (the AMOUNT row kept +12 from the first open, the rows are session
+# state), the undo gives the document back
+tap f7
+pad 0
+tap down
+tap f1
+assert state overlay=NOTIFY msg=~^TRANSPOSED:.3.STEPS.\+12.ST$
+assert model pat.1.0.0.note=73
+assert model pat.1.0.1.note=75
+assert model pat.1.0.2.note=77
+action edit.undo
+assert model digest=@d0
+wait 10000
+# F6 REPEAT repeats the last APPLY with the same amount (+12 ST again), one undo unit
+tap f6
+assert state overlay=NOTIFY msg=~^TRANSPOSED:.3.STEPS.\+12.ST$
+assert model pat.1.0.0.note=73
+assert model pat.1.0.2.note=77
+action edit.undo
+assert model digest=@d0
+wait 10000
+
+# QA-PAT-459: the menu's INSTRUMENT row (pad 2) opens the dialog on INSTRUMENT; the block is the whole track (whole steps, so INSTRUMENT applies),
+# TO at the block's first note's instrument (1), TO 5, F1 APPLY sets every note's instrument, one undo unit (an empty step would take none).
+action select.clear
+action select.column_all
+tap f7
+pad 1
+assert state overlay=PATTERN_TOOLS
+snap qa_pat_459
+tap down
+encoder 4
+tap f1
+assert state overlay=NOTIFY msg=~^INSTRUMENT.SET:.64.STEPS.05$
+assert model pat.1.0.0.instr=5
+assert model pat.1.0.2.instr=5
+assert model pat.1.0.0.note=61
+action edit.undo
+assert model digest=@d0

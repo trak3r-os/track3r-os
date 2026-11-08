@@ -602,7 +602,7 @@ Blob blob_v10() {
 
 TEST_CASE("module abi: a 1.0 and a 1.1 module still load, a 1.2 module loads and carries its version, a newer minor does not") {
   CHECK(kOsAbiMajor == 1u);
-  CHECK(kOsAbiMinor == 10u);
+  CHECK(kOsAbiMinor == 13u);  // (OS-MODRATE S2: 1.13 the RATE bit; OS-INSFX-ABI2 A1: 1.12 published the effect surface; 1.11 the importer kind)
   {
     LoadRig r;
     r.card.write("modules/instruments/old.tmod", blob_v10().file());
@@ -838,7 +838,7 @@ TEST_CASE("module abi: an app of ABI 1.3 carries its capabilities, every older a
 
 TEST_CASE("module abi: the SDK constants the packer and the generator rely on") {
   CHECK(O3M_ABI_MAJOR == 1);
-  CHECK(O3M_ABI_MINOR == 10);
+  CHECK(O3M_ABI_MINOR == 13);  // (OS-MODRATE S2; OS-INSFX-ABI2 A1; OS-FLASHDIET I1 was 11)
   CHECK(O3M_VIEWS_MAX == 8u);
   CHECK(O3M_PARAM_UNIT(O3M_PARAM_WITH_UNIT(O3M_UNIT_HZ) | O3M_PARAM_LOG) == O3M_UNIT_HZ);
   CHECK((O3M_PARAM_WITH_UNIT(O3M_UNIT_COUNT - 1u) & ~O3M_PARAM_UNIT_MASK) == 0u);

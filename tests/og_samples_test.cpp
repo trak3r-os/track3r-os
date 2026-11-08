@@ -450,6 +450,14 @@ TEST_CASE("og samples: slice mode binds the selected slice, beat slice binds the
   d = make_sample_desc(sl, pcm, 100000, &approx);
   CHECK(d.data == pcm + static_cast<std::uint32_t>(10000.0f * (100000.0f / 65535.0f)));
   CHECK(d.data + d.length == pcm + 100000);
+  // OS-CEPLAYTHRU P2: with slice_thru the selected slice runs to the end of the sample whatever the next point (to = 65535): length = frames - start.
+  sl.slice_thru = 1;
+  sl.sampler.slices[2] = 30000;  // a next point after this one: it is not the end any more
+  d = make_sample_desc(sl, pcm, 100000, &approx);
+  CHECK(d.data == pcm + static_cast<std::uint32_t>(10000.0f * (100000.0f / 65535.0f)));
+  CHECK(d.length == 100000u - static_cast<std::uint32_t>(10000.0f * (100000.0f / 65535.0f)));
+  CHECK(d.data + d.length == pcm + 100000u);
+  sl.slice_thru = 0;
 
   // Beat slice (5): the table has slice_count + 1 boundaries, as two halves each, the last one the length; a slice that fits no table is the whole sample.
   o3os::model::Instrument bs = sample_instrument(5);
@@ -484,6 +492,13 @@ TEST_CASE("og samples: slice mode binds the selected slice, beat slice binds the
   d = make_sample_desc(bs, pcm, frames, &approx, big_table);
   CHECK(bound(d.slices, 2) == frames);
   CHECK(bound(d.slices, 3) == frames);
+  // OS-CEPLAYTHRU P2: a beat slice descriptor carries the flag (beat_slice_span ends a slice at the sample end with it); without it, 0
+  CHECK(d.slice_thru == 0u);
+  bs.slice_thru = 1;
+  d = make_sample_desc(bs, pcm, 100000, &approx, table);
+  CHECK(d.beat_slice);
+  CHECK(d.slice_thru == 1u);
+  bs.slice_thru = 0;
 
   // Wavetable (6): the current window as a loop, with the wavetable's pitch law; the window is clamped to the last whole one; start and end are not used.
   o3os::model::Instrument wt = sample_instrument(6);
@@ -628,7 +643,7 @@ TEST_CASE("og samples: backward and ping-pong bind the loop with the direction, 
   CHECK(a.decay == 44u);
   CHECK(a.release == 55u);
   in.sampler.envelope[2].loop = 1;
-  in.sampler.lfo[2] = o3os::model::Lfo{3, 17, 0.35f};
+  in.sampler.lfo[2] = o3os::model::Lfo{3, 17, 0, 0, 0.35f};
   const audio::FilterMod l = make_sample_desc(in, pcm, 1000, nullptr).filter.mod;
   CHECK(l.kind == audio::kFmodLfo);
   CHECK(l.shape == 3u);
@@ -1458,3 +1473,58 @@ TEST_CASE("og samples: loaded project with instruments keeps its tempo (OS-BUG-T
   CHECK(target.project.tempo_x100() == 13700);
 }
 
+
+// OS-CEWTENV W5 (spec 3.6, F2): on a granular instrument slot 3's enable bit 0x02 is the grain LENGTH destination: its source (any kind) goes to make_sample_desc's `grlen`
+// out-parameter (the pool's grlen_bind array with set_sample/stage_sample), not to pos_mod (that is slot 4's); bit 0x01 alone runs nothing, and a wavetable or plain instrument ignores the bit.
+TEST_CASE("og samples: on a granular instrument slot 3's bit 0x02 binds the grain length source (OS-CEWTENV W5)") {
+  static std::int16_t pcm[4096];
+  using o3os::app::make_sample_desc;
+  namespace audio = o3os::audio;
+  bool approx = false;
+  o3os::model::Instrument gr = sample_instrument(7);
+  gr.sampler.grain_length = 441;
+  audio::FilterMod gl{};
+  SampleDesc d = make_sample_desc(gr, pcm, 4096, &approx, nullptr, audio::LevelLaw::Og12, nullptr, &gl);
+  CHECK(d.granular);
+  CHECK(gl.kind == audio::kFmodNone);  // enable 0: no length destination
+  gr.sampler.envelope[3].enable = 1;   // bit 0x01 alone (the wavetable position, meaningless on a granular): not the length
+  gr.sampler.envelope[3].amount = 0.8f;
+  d = make_sample_desc(gr, pcm, 4096, &approx, nullptr, audio::LevelLaw::Og12, nullptr, &gl);
+  CHECK(gl.kind == audio::kFmodNone);
+  CHECK(d.pos_mod.kind == audio::kFmodNone);  // slot 3 is not the granular position (slot 4 is)
+  gr.sampler.envelope[3].enable = 2;  // bit 0x02: the grain length, an ADSR of the slot's own fields
+  gr.sampler.envelope[3].amount = 0.6f;
+  gr.sampler.envelope[3].attack = 300;
+  gr.sampler.envelope[3].sustain = 0.5f;
+  d = make_sample_desc(gr, pcm, 4096, &approx, nullptr, audio::LevelLaw::Og12, nullptr, &gl);
+  CHECK(gl.kind == audio::kFmodEnv);
+  CHECK(gl.amount == doctest::Approx(0.6f));
+  CHECK(gl.attack == 300u);
+  CHECK(gl.sustain == doctest::Approx(0.5f));
+  CHECK(d.pos_mod.kind == audio::kFmodNone);
+  gr.sampler.envelope[3].enable = 3;  // both bits: the length runs (bit 0x02); the position stays slot 4's
+  gr.sampler.envelope[3].loop = 1;   // an LFO source kind: shape, rate and amount from lfo[3]
+  gr.sampler.lfo[3].shape = 3;
+  gr.sampler.lfo[3].speed = 7;
+  gr.sampler.lfo[3].amount = 0.3f;
+  d = make_sample_desc(gr, pcm, 4096, &approx, nullptr, audio::LevelLaw::Og12, nullptr, &gl);
+  CHECK(gl.kind == audio::kFmodLfo);
+  CHECK(gl.shape == 3u);
+  CHECK(gl.rate == 7u);
+  CHECK(gl.amount == doctest::Approx(0.3f));
+  // a wavetable instrument ignores bit 0x02 for the length (its slot 3 is the position, bit 0x01)
+  o3os::model::Instrument wt = sample_instrument(6);
+  wt.sampler.wavetable_window_size = 256;
+  wt.sampler.envelope[3].enable = 3;
+  wt.sampler.envelope[3].amount = 0.9f;
+  d = make_sample_desc(wt, pcm, 4096, &approx, nullptr, audio::LevelLaw::Og12, nullptr, &gl);
+  CHECK(gl.kind == audio::kFmodNone);
+  CHECK(d.pos_mod.kind == audio::kFmodEnv);  // bit 0x01: the wavetable position
+  CHECK(d.pos_mod.amount == doctest::Approx(0.9f));
+  // a plain instrument: neither
+  o3os::model::Instrument plain = sample_instrument(0);
+  plain.sampler.envelope[3].enable = 2;
+  d = make_sample_desc(plain, pcm, 4096, &approx, nullptr, audio::LevelLaw::Og12, nullptr, &gl);
+  CHECK(gl.kind == audio::kFmodNone);
+  CHECK(d.pos_mod.kind == audio::kFmodNone);
+}

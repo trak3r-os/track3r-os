@@ -19,6 +19,9 @@ char fx_type_char(std::uint8_t type) noexcept {
   if (type >= 46 && type <= 62) {
     return "@^~<>=\"';/:|[]()\x7b"[type - 46];  // OS-COREFX: tracker Arpeggio, Volume slide, Fine volume slide, Fine porta up, down; CF2: Pan slide, Vib wave, Trem wave, Glissando, Retrigger, Tremor, Channel pan; CF3: Channel volume [, slide ], Global volume (, slide ), Panbrello {
   }
+  if (type >= 96 && type <= 98) {
+    return "wyz"[type - 96];  // OS-CEWTENV W6b: tracker-ce step FX w (amp envelope), y (cutoff envelope), z (granular length)
+  }
   if (type >= 128) {
     return static_cast<char>('a' + (type - 128) % 26);
   }

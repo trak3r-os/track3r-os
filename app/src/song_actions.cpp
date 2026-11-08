@@ -6,9 +6,11 @@
 #include "action_handlers.h"
 #include "param_access.h"
 
+#include <o3os/app/screens/song_screen.h>
 #include <o3os/app/song_edit.h>
 #include <o3os/app/song_source.h>
 #include <o3os/app/text_format.h>
+#include <o3os/audio/graph_params.h>
 #include <o3os/model/editor.h>
 #include <o3os/model/limits.h>
 #include <o3os/seq/sequencer.h>
@@ -19,6 +21,8 @@ namespace o3os::app {
 
 namespace {
 
+namespace gp = audio::graph_param;
+
 static_assert(SongView::kClipMax == static_cast<int>(model::kMaxSongPositions), "the clipboard holds a whole order list");
 
 constexpr unsigned kTapTimeoutMs = 1500;  // 1500 ms: a longer pause starts a new run of taps
@@ -26,7 +30,7 @@ constexpr std::uint32_t kTapMaxX100 = 30000;  // OS-PATTEMPO: the tap tempo's ce
 constexpr int kMaxDetents = 1 << 16;      // an encoder fed from data is clamped before it is multiplied
 
 bool say(ActionContext& ctx, core::Severity severity, const char* text) noexcept {
-  return ctx.view.notify.post(severity, text, "song", ViewState::kMessageMs);
+  return say_tag(ctx, severity, text, "song");
 }
 
 constexpr int clamp_int(int v, int lo, int hi) noexcept { return v < lo ? lo : (v > hi ? hi : v); }
@@ -34,10 +38,21 @@ constexpr int clamp_int(int v, int lo, int hi) noexcept { return v < lo ? lo : (
 // The cursor's slot, inside a list of `count` positions (-1 for an empty one).
 int cursor_slot(const ActionContext& ctx, int count) noexcept { return count > 0 ? clamp_int(ctx.view.song.pos(), 0, count - 1) : -1; }
 
-// The first pattern number nothing uses, 0 when all 255 are taken.
+// The first pattern number nothing can reach: no pattern of the pool holds it and no slot of the order list names it (a slot may name a pattern that does not exist yet — pointing a second slot at that
+// number would make both play the pattern once it is created, and a copy landed there would change what the first slot plays). 0 when all 255 are taken.
 unsigned first_free_pattern(const model::Project& p) noexcept {
+  bool used[model::kMaxPatternId + 1] = {};
+  const std::uint32_t length = p.song_length();  // at most 255: an order entry always fits the table
+  for (std::uint32_t pos = 0; pos < length; ++pos) {
+    used[p.order(pos)] = true;
+  }
   for (unsigned id = 1; id <= model::kMaxPatternId; ++id) {
-    if (p.pattern(id) == nullptr) {
+    if (p.pattern(id) != nullptr) {
+      used[id] = true;
+    }
+  }
+  for (unsigned id = 1; id <= model::kMaxPatternId; ++id) {
+    if (!used[id]) {
       return id;
     }
   }
@@ -185,6 +200,28 @@ bool song_add_slot(ActionContext& ctx, core::ActionArg arg) noexcept {
   return true;
 }
 
+// Copy held + F3 (OS-SONG3 S5, ADD EMPTY; new Community OS behaviour): a slot after the cursor's on the first free pattern number (the first pattern the project does not have), so a new section starts from
+// silence, not from a copy of the one before it. The insert is one undo unit like ADD SLOT's; NO FREE PATTERN when the pool is full (no free pattern can be created then) or no number is free, and nothing is
+// changed then.
+bool song_add_empty(ActionContext& ctx, core::ActionArg) noexcept {
+  const model::Project& p = ctx.edit->project();
+  const int count = static_cast<int>(p.song_length());
+  if (count >= static_cast<int>(model::kMaxSongPositions)) {
+    return say(ctx, core::Severity::Warn, "SONG FULL");
+  }
+  const unsigned fresh = p.pattern_count() >= model::kMaxPatterns ? 0u : first_free_pattern(p);
+  if (fresh == 0u) {
+    return say(ctx, core::Severity::Warn, "NO FREE PATTERN");
+  }
+  const int pos = cursor_slot(ctx, count);
+  if (ctx.edit->insert_order(static_cast<std::uint32_t>(pos + 1), fresh) != model::Status::Ok) {
+    return false;
+  }
+  ctx.view.song.leave_edit();
+  (void)ctx.view.song.set(pos + 1, count + 1);
+  return true;
+}
+
 namespace {
 
 // The slots first..first+n-1 leave the list and the cursor goes to the slot before the first one that went (not the last slot: the selection moves up one; whether the official firmware does the same is an open research question). The caller checked that a slot is left.
@@ -263,7 +300,10 @@ bool song_clear(ActionContext& ctx, core::ActionArg arg) noexcept { return ctx.v
 // the insert: set_order writes of the slots that change). The cursor and the range follow, and the column and the tracks of the rectangle stay. At the
 // top or the bottom nothing happens. Held, the arrow repeats (the action is kActionRepeatable) and each step is a unit of its own (D2). Allowed while the song plays, as an insert and a delete are (D3): the play
 // position stays a position of the list.
-bool song_move(ActionContext& ctx, core::ActionArg arg) noexcept {
+namespace {
+
+// The move itself, for Copy + Up / Down on the list and Copy + Left / Right on TIMELINE.
+bool move_slots(ActionContext& ctx, core::ActionArg arg) noexcept {
   if (arg != -1 && arg != 1) {
     return false;
   }
@@ -286,6 +326,14 @@ bool song_move(ActionContext& ctx, core::ActionArg arg) noexcept {
   (void)sv.shift_range(arg, count);
   return true;
 }
+
+}  // namespace
+
+// Copy + Up / Down: the list's gesture. On TIMELINE Up / Down are the tracks, so the slots move with Copy + Left / Right instead (song_move_along).
+bool song_move(ActionContext& ctx, core::ActionArg arg) noexcept { return !song_on_timeline(ctx.view) && move_slots(ctx, arg); }
+
+// Copy held + Left / Right (OS-SONG3 S2, NEW; arg = -1 left, +1 right): the same move along TIMELINE's slots, whose Left / Right are the slot axis. Does nothing on the list, where Left / Right walk the columns.
+bool song_move_along(ActionContext& ctx, core::ActionArg arg) noexcept { return song_on_timeline(ctx.view) && move_slots(ctx, arg); }
 
 // Note / Shift + Note (OS-SONGSHARE S4, NEW; arg = +1 next, -1 previous): the cursor goes to the next (previous) slot that holds the cursor's pattern, wrapping round the list. The strip says where it landed, `SLOT 12 (2 OF 4)`,
 // and `ONLY IN THIS SLOT` when no other slot holds the pattern (the cursor stays). A plain jump: the range collapses, as every cursor move does, and the column of the map is kept. A view change only: no undo unit.
@@ -368,10 +416,16 @@ bool song_tempo(ActionContext& ctx, core::ActionArg) noexcept {
   return changed;
 }
 
-// Shift + Up / Down (arg = +-1): the range of slots grows from where Shift was first used, as the pattern's block. NEW.
+// Shift + Up / Down (arg = +-1): the range of slots grows from where Shift was first used, as the pattern's block. NEW. OS-SONG3 S2: on TIMELINE, where Up / Down are the tracks, they grow the range of tracks (in a lane only).
 bool song_select(ActionContext& ctx, core::ActionArg arg) noexcept {
   ctx.view.song.set_tempo_focus(false);
-  return (arg == 1 || arg == -1) && ctx.view.song.extend(arg, SongSource(ctx.model).count());
+  if (arg != 1 && arg != -1) {
+    return false;
+  }
+  if (song_on_timeline(ctx.view)) {
+    return ctx.view.song.extend_tracks(arg, song_map_cells(ctx.model, ctx.view));
+  }
+  return ctx.view.song.extend(arg, SongSource(ctx.model).count());
 }
 
 // Copy: the selected range (or the cursor's slot) into the clipboard, as pattern numbers (not the patterns' contents: a paste names the same patterns). NEW.
@@ -429,15 +483,127 @@ bool song_paste(ActionContext& ctx, core::ActionArg) noexcept {
   return true;
 }
 
+// ---- PREVIEW (OS-SONG3 S4, docs/specs/OS-SONG3.md section 3.4 point 1; new Community OS behaviour) ----------------------------------------------
+//
+// F1 in a lane of the TIMELINE page loops the cursor slot's pattern with only the rectangle's tracks sounding, through the existing solo path from the main loop: the project's
+// track solo flags (what the pads and the Mixer use, D18) are set to the rectangle's tracks and the strips are told on the ring (the Solo ParamChanges, as tracks_apply does after a
+// load). No new sequencer mask. The audition is not an undo unit and writes nothing journaled: the flags go through Project::set_track with Editor::synced right after, so the Editor
+// does not read them as a change behind its back (no history reset, no record); the SongPreview state (view.song.preview) remembers the solo set in force and hands it back when the
+// audition ends, exactly once (song_preview_end: F1 again, Stop, leaving the screen, a project load).
+
+// The solo set in force now, as a bit mask (bit n = track n's solo flag).
+std::uint16_t song_solo_now(const model::Project& project) noexcept {
+  std::uint16_t mask = 0;
+  for (unsigned t = 0; t < model::kMaxTracks; ++t) {
+    const model::TrackSlot* slot = project.track(t);
+    if (slot != nullptr && (slot->flags & model::kTrackSolo) != 0u) {
+      mask = static_cast<std::uint16_t>(mask | (1u << t));
+    }
+  }
+  return mask;
+}
+
+// Applies `mask` as the tracks' solo flags, plain and non-journaled (Editor::set_track_flags_plain: the generation does not move, so nothing is journaled, no history is
+// reset and the save layer does not call it unsaved work), and tells the strips (the Solo ParamChanges on the ring, ramp 1 as tracks_apply). A push that finds the ring full
+// leaves the engine a pass behind: `view.song.preview_resync` is set and the next main-loop pass re-sends every strip's mute and solo (song_solo_resync, App::run_once).
+void song_solo_set(ViewState& view, model::Editor* edit, core::ParamRing* ring, std::uint16_t mask) noexcept {
+  if (edit == nullptr) {
+    return;
+  }
+  const model::Project& project = edit->project();
+  for (unsigned t = 0; t < model::kMaxTracks; ++t) {
+    const model::TrackSlot* slot = project.track(t);
+    if (slot == nullptr) {
+      continue;
+    }
+    const bool solo = ((mask >> t) & 1u) != 0u;
+    if (((slot->flags & model::kTrackSolo) != 0u) == solo) {
+      continue;
+    }
+    const std::uint8_t flags = static_cast<std::uint8_t>(solo ? (slot->flags | model::kTrackSolo) : (slot->flags & ~model::kTrackSolo));
+    edit->set_track_flags_plain(t, flags);
+    if (ring != nullptr && !ring->push(core::ParamChange{audio::strip_param(t, gp::strip::Solo), solo ? 1.0f : 0.0f, 1})) {
+      view.song.preview_resync = true;  // the ring was full: the strip was not told, the next pass re-sends
+    }
+  }
+}
+
+// Re-sends every strip's Mute and Solo (tracks_apply's strip loop), the retry when a PREVIEW's Solo push found the ring full. True when every one of them went.
+bool song_solo_resync(const model::Project& project, core::ParamRing* ring) noexcept {
+  if (ring == nullptr) {
+    return true;
+  }
+  unsigned sent = 0;
+  for (unsigned t = 0; t < model::kMaxTracks; ++t) {
+    const model::TrackSlot* slot = project.track(t);
+    const std::uint8_t flags = slot != nullptr ? slot->flags : std::uint8_t{0};
+    sent += ring->push(core::ParamChange{audio::strip_param(t, gp::strip::Mute), (flags & model::kTrackMute) != 0u ? 1.0f : 0.0f, 1}) ? 1u : 0u;
+    sent += ring->push(core::ParamChange{audio::strip_param(t, gp::strip::Solo), (flags & model::kTrackSolo) != 0u ? 1.0f : 0.0f, 1}) ? 1u : 0u;
+  }
+  return sent == 2u * model::kMaxTracks;
+}
+
+// Ends the audition of view.song.preview if one runs, restoring the saved solo set exactly once (SongPreview::end is a no-op the second time, so F1 again, Stop and a screen change
+// can all call this). True when an audition ended and the solo set was put back.
+bool song_preview_end(model::Editor* edit, ViewState& view, core::ParamRing* ring) noexcept {
+  bool restore = false;
+  const std::uint16_t saved = view.song.preview.end(restore);
+  if (!restore || edit == nullptr) {
+    return restore;
+  }
+  song_solo_set(view, edit, ring, saved);
+  return true;
+}
+
 // F1 PLAY PAT: the pattern of the cursor's slot plays from its first step, looping, or the transport stops (the playing of the
 // selected slot's pattern; again it stops). Like Play, the badge follows the request that went through.
+// OS-SONG3 S4 (PREVIEW): in a lane of the TIMELINE page (the cursor in the map, the page transposed), F1 instead loops the cursor slot's pattern with only the rectangle's tracks
+// sounding (the solo path above), and F1 again ends the audition and stops. While the song plays it becomes PLAY PAT of that slot. Outside a lane F1 is as it was.
 bool song_play_pattern(ActionContext& ctx, core::ActionArg) noexcept {
   if (ctx.transport == nullptr) {
     return false;
   }
+  model::Editor* edit = ctx.session != nullptr ? ctx.session->state_editor() : nullptr;
+  SongView& sv = ctx.view.song;
+  const bool lane = ctx.model.project != nullptr && song_on_timeline(ctx.view) && sv.in_map();
+  if (lane && sv.preview.active()) {  // F1 again: the audition ends (the saved solo set comes back, once) and the transport stops, as PLAY PAT does when playing
+    if (!ctx.transport->stop()) {
+      return false;
+    }
+    (void)song_preview_end(edit, ctx.view, ctx.params);
+    ctx.view.playing = false;
+    return true;
+  }
   bool ok = false;
+  if (lane) {  // PREVIEW begins: the rectangle's tracks become the solo set, the slot's pattern loops (while the song plays it becomes PLAY PAT of this slot)
+    const SongSource src(ctx.model);
+    const int pos = cursor_slot(ctx, src.count());
+    if (pos < 0) {
+      return say(ctx, core::Severity::Info, "SONG IS EMPTY");
+    }
+    // the rectangle's tracks, clamped to the project's active tracks as rectangle() does (a stale track anchor may run past them)
+    const int active = static_cast<int>(ctx.model.project->active_tracks());
+    const int t0 = clamp_int(sv.tfirst(), 0, active - 1);
+    const int t1 = clamp_int(sv.tlast(), t0, active - 1);
+    const std::uint16_t mask = sv.preview.begin(song_solo_now(*ctx.model.project), t0, t1);
+    song_solo_set(ctx.view, edit, ctx.params, mask);
+    ok = ctx.transport->play(src.pattern(pos));
+    if (!ok) {  // the request did not go: the solo set must not stay applied
+      bool restore = false;
+      const std::uint16_t saved = sv.preview.end(restore);
+      if (restore) {
+        song_solo_set(ctx.view, edit, ctx.params, saved);
+      }
+      return false;
+    }
+    ctx.view.playing = true;
+    return true;
+  }
   if (ctx.view.playing) {
     ok = ctx.transport->stop();
+    if (ok) {
+      (void)song_preview_end(edit, ctx.view, ctx.params);  // a stop ends the audition too (F1 on the block row while a PREVIEW runs)
+    }
   } else {
     const SongSource src(ctx.model);
     const int pos = cursor_slot(ctx, src.count());
@@ -476,6 +642,7 @@ bool queue_slot(ActionContext& ctx, int pos, bool& cancelled) noexcept {
 
 // Rec while playing (NEW): the live jump. The cursor's slot is queued to play after the pattern that plays now (TransportSink::queue_jump: a command on the sequencer's ring, applied at the pattern's
 // boundary on the render's timeline); the slot blinks while it waits and Rec on the same slot cancels it. Stopped, there is nothing to jump in.
+// OS-SONG3 S4: a live jump ends a PREVIEW audition first (the saved solo set comes back), like Stop does.
 bool song_queue_jump(ActionContext& ctx, core::ActionArg) noexcept {
   if (ctx.transport == nullptr) {
     return false;
@@ -488,6 +655,7 @@ bool song_queue_jump(ActionContext& ctx, core::ActionArg) noexcept {
   if (pos < 0) {
     return say(ctx, core::Severity::Info, "SONG IS EMPTY");
   }
+  (void)song_preview_end(ctx.session != nullptr ? ctx.session->state_editor() : nullptr, ctx.view, ctx.params);  // OS-SONG3 S4
   bool cancel = false;
   if (!queue_slot(ctx, pos, cancel)) {
     return false;  // no sequencer behind the sink, or the ring is full: nothing changed
@@ -521,6 +689,45 @@ bool song_pad(ActionContext& ctx, core::ActionArg arg) noexcept {
   }
   const bool left = ctx.view.song.leave_edit();
   return ctx.view.song.set(pos, count) || left;
+}
+
+// F2 held (OS-SONG3 S7, new Community OS behaviour): the selected slots (the cursor's alone with no range) loop. Stopped, the song starts at the range's first slot; playing outside it, the first slot is queued
+// like a Rec jump and the loop starts when the song gets there; playing inside it, nothing moves. The same range held again takes the loop back and the song plays on. The sequencer owns the rest (Sequencer::set_loop).
+bool song_loop(ActionContext& ctx, core::ActionArg) noexcept {
+  if (ctx.transport == nullptr) {
+    return false;
+  }
+  const int count = SongSource(ctx.model).count();
+  if (count <= 0) {
+    return say(ctx, core::Severity::Info, "SONG IS EMPTY");
+  }
+  (void)song_preview_end(ctx.session != nullptr ? ctx.session->state_editor() : nullptr, ctx.view, ctx.params);  // OS-SONG3 S4: holding F2 to loop the range ends a PREVIEW audition first
+  const SongView& sv = ctx.view.song;
+  const int first = clamp_int(sv.first(), 0, count - 1);
+  const int last = clamp_int(sv.last(), 0, count - 1);
+  const audio::PlayPosition::Value& pl = ctx.view.play;
+  const bool running = ctx.view.playing || pl.playing;
+  if (pl.playing && pl.loop_first == static_cast<unsigned>(first) && pl.loop_last == static_cast<unsigned>(last)) {
+    return ctx.transport->loop_range(0, 0xFFFFu) && say(ctx, core::Severity::Info, "LOOP OFF");
+  }
+  if (!running) {
+    if (!ctx.transport->play_song(static_cast<unsigned>(first))) {
+      return false;
+    }
+    ctx.view.playing = true;
+  }
+  if (!ctx.transport->loop_range(static_cast<unsigned>(first), static_cast<unsigned>(last))) {
+    return say(ctx, core::Severity::Warn, "LOOP NOT SET");
+  }
+  if (running && !(pl.playing && pl.order >= static_cast<unsigned>(first) && pl.order <= static_cast<unsigned>(last))) {
+    (void)ctx.transport->queue_jump(static_cast<unsigned>(first));  // the song enters the range at the end of this pattern (in Pattern mode this starts the song there)
+  }
+  char text[16] = "LOOP 00-00";
+  text[5] = static_cast<char>('0' + (first / 10) % 10);
+  text[6] = static_cast<char>('0' + first % 10);
+  text[8] = static_cast<char>('0' + (last / 10) % 10);
+  text[9] = static_cast<char>('0' + last % 10);
+  return say(ctx, core::Severity::Info, text);
 }
 
 }  // namespace o3os::app

@@ -140,20 +140,63 @@ Bytes written(const model::Settings& s) {
   return out;
 }
 
-// The default device settings as the spec says they are written: 246 bytes (docs/formats/o3-settings.md section 8; 238 before E-PAT-35 appended PAT SWITCH, 222 before E-CFG-03 appended TRANSPORT IN and OUT, 214 before OS-PADOFFSET appended PAD OFFSET, 198 before OS-RECMICRO appended REC MICRO and REC VELOCITY, 182 before OS-METRO appended METRO and COUNT-IN, 174 before OS-USBAUDIO appended USB AUDIO, 150 before OS-006e appended RETURN LEVEL (and the two rows of OS-LIVEREC), 142 before OS-USBRET appended USB RETURN, 94 with the first seven settings alone). Computed from the description with Python, not by the writer.
+// The default device settings as the spec says they are written: 278 bytes (docs/formats/o3-settings.md section 8; 270 before OS-MTC B3 appended MTC IN, 254 before OS-MTC A3 appended MTC OUT and MTC START, 246 before OS-MIDICCMAP S1 appended CC MAP, 238 before E-PAT-35 appended PAT SWITCH, 222 before E-CFG-03 appended TRANSPORT IN and OUT, 214 before OS-PADOFFSET appended PAD OFFSET, 198 before OS-RECMICRO appended REC MICRO and REC VELOCITY, 182 before OS-METRO appended METRO and COUNT-IN, 174 before OS-USBAUDIO appended USB AUDIO, 150 before OS-006e appended RETURN LEVEL (and the two rows of OS-LIVEREC), 142 before OS-USBRET appended USB RETURN, 94 with the first seven settings alone). Computed from the description with Python, not by the writer.
 const Bytes kDefaultFile = {
-    0x46, 0x4f, 0x52, 0x4d, 0x00, 0x00, 0x00, 0xee, 0x4f, 0x33, 0x53, 0x54, 0x53, 0x45, 0x54, 0x53, 0x00, 0x00, 0x00, 0xd4, 0x01, 0x00, 0x00, 0x1a,
-    0x05, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x01, 0x40, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x02, 0x42, 0x48, 0x00, 0x00,
-    0x05, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x04, 0x3f, 0x80, 0x00, 0x00, 0x05, 0x00, 0x00, 0x05, 0x40, 0x00, 0x00, 0x00,
-    0x05, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x08, 0x40, 0x00, 0x00, 0x00,
-    0x05, 0x00, 0x00, 0x09, 0x40, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x0b, 0x3f, 0x80, 0x00, 0x00,
-    0x05, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x0d, 0x3f, 0x80, 0x00, 0x00, 0x05, 0x00, 0x00, 0x0e, 0x00, 0x00, 0x00, 0x00,
-    0x05, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x10, 0x42, 0xc8, 0x00, 0x00, 0x05, 0x00, 0x00, 0x11, 0x3f, 0x80, 0x00, 0x00,
-    0x05, 0x00, 0x00, 0x12, 0x3f, 0x80, 0x00, 0x00, 0x05, 0x00, 0x00, 0x13, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00,
-    0x05, 0x00, 0x00, 0x15, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x16, 0x41, 0x40, 0x00, 0x00, 0x05, 0x00, 0x00, 0x17, 0x3f, 0x80, 0x00, 0x00,
-    0x05, 0x00, 0x00, 0x18, 0x3f, 0x80, 0x00, 0x00, 0x05, 0x00, 0x00, 0x19, 0x00, 0x00, 0x00, 0x00, 0x43, 0x52, 0x43, 0x20, 0x00, 0x00, 0x00, 0x06,
-    0x01, 0x00, 0xb0, 0xcd, 0x92, 0x5a,
+    0x46, 0x4f, 0x52, 0x4d, 0x00, 0x00, 0x01, 0x0e, 0x4f, 0x33, 0x53, 0x54, 0x53, 0x45, 0x54, 0x53, 0x00, 0x00, 0x00, 0xf4, 0x01, 0x00, 0x00, 0x1e, 0x05, 0x00, 0x00,
+    0x00, 0x40, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x01, 0x40, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x02, 0x42, 0x48, 0x00, 0x00, 0x05, 0x00, 0x00, 0x03, 0x00, 0x00,
+    0x00, 0x00, 0x05, 0x00, 0x00, 0x04, 0x3f, 0x80, 0x00, 0x00, 0x05, 0x00, 0x00, 0x05, 0x40, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x05,
+    0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x08, 0x40, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x09, 0x40, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x0a,
+    0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x0b, 0x3f, 0x80, 0x00, 0x00, 0x05, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x0d, 0x3f, 0x80, 0x00,
+    0x00, 0x05, 0x00, 0x00, 0x0e, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x10, 0x42, 0xc8, 0x00, 0x00, 0x05, 0x00,
+    0x00, 0x11, 0x3f, 0x80, 0x00, 0x00, 0x05, 0x00, 0x00, 0x12, 0x3f, 0x80, 0x00, 0x00, 0x05, 0x00, 0x00, 0x13, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x14, 0x00,
+    0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x15, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x16, 0x41, 0x40, 0x00, 0x00, 0x05, 0x00, 0x00, 0x17, 0x3f, 0x80, 0x00, 0x00,
+    0x05, 0x00, 0x00, 0x18, 0x3f, 0x80, 0x00, 0x00, 0x05, 0x00, 0x00, 0x19, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x1a, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00,
+    0x1b, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x1c, 0x3f, 0x80, 0x00, 0x00, 0x05, 0x00, 0x00, 0x1d, 0x00, 0x00, 0x00, 0x00, 0x43, 0x52, 0x43, 0x20, 0x00, 0x00,
+    0x00, 0x06, 0x01, 0x00, 0x91, 0x75, 0x9c, 0xc9,
 };
+
+// The default file as it was written before OS-MTC B3 (29 settings, 270 bytes, valid CRC): the file of a device that never heard of MTC IN.
+const Bytes kFile29 = {
+    0x46, 0x4f, 0x52, 0x4d, 0x00, 0x00, 0x01, 0x06, 0x4f, 0x33, 0x53, 0x54, 0x53, 0x45, 0x54, 0x53, 0x00, 0x00, 0x00, 0xec, 0x01, 0x00, 0x00, 0x1d, 0x05, 0x00, 0x00,
+    0x00, 0x40, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x01, 0x40, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x02, 0x42, 0x48, 0x00, 0x00, 0x05, 0x00, 0x00, 0x03, 0x00, 0x00,
+    0x00, 0x00, 0x05, 0x00, 0x00, 0x04, 0x3f, 0x80, 0x00, 0x00, 0x05, 0x00, 0x00, 0x05, 0x40, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x05,
+    0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x08, 0x40, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x09, 0x40, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x0a,
+    0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x0b, 0x3f, 0x80, 0x00, 0x00, 0x05, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x0d, 0x3f, 0x80, 0x00,
+    0x00, 0x05, 0x00, 0x00, 0x0e, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x10, 0x42, 0xc8, 0x00, 0x00, 0x05, 0x00,
+    0x00, 0x11, 0x3f, 0x80, 0x00, 0x00, 0x05, 0x00, 0x00, 0x12, 0x3f, 0x80, 0x00, 0x00, 0x05, 0x00, 0x00, 0x13, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x14, 0x00,
+    0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x15, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x16, 0x41, 0x40, 0x00, 0x00, 0x05, 0x00, 0x00, 0x17, 0x3f, 0x80, 0x00, 0x00,
+    0x05, 0x00, 0x00, 0x18, 0x3f, 0x80, 0x00, 0x00, 0x05, 0x00, 0x00, 0x19, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x1a, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00,
+    0x1b, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x1c, 0x3f, 0x80, 0x00, 0x00, 0x43, 0x52, 0x43, 0x20, 0x00, 0x00, 0x00, 0x06, 0x01, 0x00, 0x7a, 0x8d, 0xd7, 0xe0,
+};
+
+// The default file as it was written before OS-MTC A3 (27 settings, 254 bytes, valid CRC): the file of a device that never heard of MTC OUT and MTC START.
+const Bytes kFile27 = {
+    0x46, 0x4f, 0x52, 0x4d, 0x00, 0x00, 0x00, 0xf6, 0x4f, 0x33, 0x53, 0x54, 0x53, 0x45, 0x54, 0x53, 0x00, 0x00, 0x00, 0xdc, 0x01, 0x00, 0x00, 0x1b, 0x05, 0x00, 0x00,
+    0x00, 0x40, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x01, 0x40, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x02, 0x42, 0x48, 0x00, 0x00, 0x05, 0x00, 0x00, 0x03, 0x00, 0x00,
+    0x00, 0x00, 0x05, 0x00, 0x00, 0x04, 0x3f, 0x80, 0x00, 0x00, 0x05, 0x00, 0x00, 0x05, 0x40, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x05,
+    0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x08, 0x40, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x09, 0x40, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x0a,
+    0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x0b, 0x3f, 0x80, 0x00, 0x00, 0x05, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x0d, 0x3f, 0x80, 0x00,
+    0x00, 0x05, 0x00, 0x00, 0x0e, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x10, 0x42, 0xc8, 0x00, 0x00, 0x05, 0x00,
+    0x00, 0x11, 0x3f, 0x80, 0x00, 0x00, 0x05, 0x00, 0x00, 0x12, 0x3f, 0x80, 0x00, 0x00, 0x05, 0x00, 0x00, 0x13, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x14, 0x00,
+    0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x15, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x16, 0x41, 0x40, 0x00, 0x00, 0x05, 0x00, 0x00, 0x17, 0x3f, 0x80, 0x00, 0x00,
+    0x05, 0x00, 0x00, 0x18, 0x3f, 0x80, 0x00, 0x00, 0x05, 0x00, 0x00, 0x19, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x1a, 0x00, 0x00, 0x00, 0x00, 0x43, 0x52, 0x43,
+    0x20, 0x00, 0x00, 0x00, 0x06, 0x01, 0x00, 0xba, 0xde, 0x65, 0x2d,
+};
+
+// The default file as it was written before OS-MIDICCMAP S1 (26 settings, 246 bytes, valid CRC): the file of a device that never heard of CC MAP.
+const Bytes kFile26 = {
+    0x46, 0x4f, 0x52, 0x4d, 0x00, 0x00, 0x00, 0xee, 0x4f, 0x33, 0x53, 0x54, 0x53, 0x45, 0x54, 0x53, 0x00, 0x00, 0x00, 0xd4, 0x01, 0x00, 0x00, 0x1a, 0x05, 0x00, 0x00,
+    0x00, 0x40, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x01, 0x40, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x02, 0x42, 0x48, 0x00, 0x00, 0x05, 0x00, 0x00, 0x03, 0x00, 0x00,
+    0x00, 0x00, 0x05, 0x00, 0x00, 0x04, 0x3f, 0x80, 0x00, 0x00, 0x05, 0x00, 0x00, 0x05, 0x40, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x05,
+    0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x08, 0x40, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x09, 0x40, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x0a,
+    0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x0b, 0x3f, 0x80, 0x00, 0x00, 0x05, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x0d, 0x3f, 0x80, 0x00,
+    0x00, 0x05, 0x00, 0x00, 0x0e, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x10, 0x42, 0xc8, 0x00, 0x00, 0x05, 0x00,
+    0x00, 0x11, 0x3f, 0x80, 0x00, 0x00, 0x05, 0x00, 0x00, 0x12, 0x3f, 0x80, 0x00, 0x00, 0x05, 0x00, 0x00, 0x13, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x14, 0x00,
+    0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x15, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x16, 0x41, 0x40, 0x00, 0x00, 0x05, 0x00, 0x00, 0x17, 0x3f, 0x80, 0x00, 0x00,
+    0x05, 0x00, 0x00, 0x18, 0x3f, 0x80, 0x00, 0x00, 0x05, 0x00, 0x00, 0x19, 0x00, 0x00, 0x00, 0x00, 0x43, 0x52, 0x43, 0x20, 0x00, 0x00, 0x00, 0x06, 0x01, 0x00, 0xb0,
+    0xcd, 0x92, 0x5a,
+};
+
 
 // The default file as it was written before E-PAT-35 (25 settings, 238 bytes, valid CRC): the file of a device that never heard of PAT SWITCH.
 const Bytes kFile25 = {
@@ -267,10 +310,10 @@ const Bytes kFile13 = {
 
 }  // namespace
 
-TEST_CASE("settings file: the default block is these 246 bytes, and they read back as the default block") {
+TEST_CASE("settings file: the default block is these 278 bytes, and they read back as the default block") {
   const model::Settings d = fresh();
   CHECK(written(d) == kDefaultFile);
-  CHECK(formats::crc32(kDefaultFile.data(), kDefaultFile.size() - 14) == 0xb0cd925au);  // zlib.crc32 of the first 232 bytes
+  CHECK(formats::crc32(kDefaultFile.data(), kDefaultFile.size() - 14) == 0x91759cc9u);  // zlib.crc32 of the first 264 of the 278 bytes
   CHECK(fs::sniff(kDefaultFile.data(), kDefaultFile.size()));
   CHECK_FALSE(fs::sniff(kDefaultFile.data(), 11));
   CHECK_FALSE(fs::sniff(reinterpret_cast<const std::uint8_t*>("FORM\0\0\0\0O3PJ"), 12));
@@ -299,8 +342,8 @@ TEST_CASE("settings file: values and bindings round trip, byte for byte, and the
   CHECK(s.set_learn(1, core::LearnBinding{core::param_id(core::ParamKind::Master, 0, 0), 11, 16, 1, 0}) == model::Status::Ok);
   CHECK(s.set_learn(2, core::LearnBinding{core::param_id(core::ParamKind::Device, 0, 2), 21, 3, 2, 0}) == model::Status::Ok);
   const Bytes a = written(s);
-  NEED(a.size() > 246);
-  CHECK(a.size() == 246u + 8u + 4u + 3u * 8u);  // the default 246, an LRNB chunk of three bindings
+  NEED(a.size() > 278);
+  CHECK(a.size() == 278u + 8u + 4u + 3u * 8u);  // the default 278, an LRNB chunk of three bindings
   model::Settings back = fresh();
   const fs::Report r = fs::read(a.data(), a.size(), back);
   CHECK(r.error == fs::Error::None);
@@ -331,7 +374,7 @@ TEST_CASE("settings file: values and bindings round trip, byte for byte, and the
     CHECK(big.set_learn(i, core::LearnBinding{core::param_id(core::ParamKind::Track, i % 16, i / 16), static_cast<std::uint8_t>(i), 0, 0, 0}) == model::Status::Ok);
   }
   const Bytes b = written(big);
-  CHECK(b.size() == 12u + (8u + 212u) + (8u + 4u + 32u * 8u) + 14u);
+  CHECK(b.size() == 12u + (8u + 244u) + (8u + 4u + 32u * 8u) + 14u);  // SETS holds 30 entries now (29 before OS-MTC B3 appended MTC IN, id 29)
   CHECK(b.size() <= fs::kMaxFileBytes);
   model::Settings big_back = fresh();
   CHECK(fs::read(b.data(), b.size(), big_back).error == fs::Error::None);
@@ -464,6 +507,7 @@ TEST_CASE("settings file: every refusal, and the block is the defaults after eac
   odd_length[7] = 0x55;
   refused(odd_length, fs::Error::Malformed, "odd FORM length");
   Bytes short_length = kDefaultFile;
+  short_length[6] = 0;  // (the length is 262 since OS-MTC A3: two bytes)
   short_length[7] = 2;
   refused(short_length, fs::Error::Malformed, "FORM length 2");
   Bytes huge = kDefaultFile;
@@ -474,7 +518,8 @@ TEST_CASE("settings file: every refusal, and the block is the defaults after eac
   refused(flipped, fs::Error::BadCrc, "one bit of the body");
   // The CRC chunk must be there, last, and right.
   Bytes no_crc(kDefaultFile.begin(), kDefaultFile.end() - 14);
-  no_crc[7] = 0x48;  // the FORM length of the file without its CRC chunk: 4 + 68
+  no_crc[6] = 0;
+  no_crc[7] = 0x48;  // a FORM length that ends inside the SETS chunk (below the file, so not Truncated): 72
   refused(no_crc, fs::Error::Malformed, "no CRC chunk");
   const Bytes after_crc = [] {  // a chunk after the CRC chunk
     Bytes f = kDefaultFile;
@@ -533,10 +578,10 @@ TEST_CASE("settings file: no single flipped bit of the file is accepted, but the
     (void)s.set_learn(0, core::LearnBinding{core::param_id(core::ParamKind::Track, 3, 0), 7, 2, 1, 0});
     return s;
   }());
-  NEED(bits.size() == 266u);
-  // The low byte of the CRC chunk's version, which the CRC does not cover (the SETS and LRNB versions at 21 and 241 are in what it covers):
+  NEED(bits.size() == 298u);  // 290 before OS-MTC B3: one more SETS entry
+  // The low byte of the CRC chunk's version, which the CRC does not cover (the SETS and LRNB versions at 21 and 265 are in what it covers):
   // a newer minor of the CRC chunk is read, by the rule of the format.
-  const auto is_minor = [](std::size_t i) { return i == 261; };
+  const auto is_minor = [](std::size_t i) { return i == 293; };  // +8 since OS-MTC B3 appended MTC IN to SETS
   unsigned accepted = 0;
   for (std::size_t i = 0; i < bits.size(); ++i) {
     for (int bit = 0; bit < 8; ++bit) {
@@ -607,9 +652,9 @@ TEST_CASE("settings file: write refuses what it cannot write") {
   std::memset(&uninitialised, 0, sizeof uninitialised);
   CHECK(fs::write(uninitialised, out.data(), out.size()) == 0u);
   const model::Settings d = fresh();
-  CHECK(fs::write(d, out.data(), 221) == 0u);  // one byte short
-  CHECK(fs::write(d, out.data(), 246) == 246u);
-  CHECK(fs::write(d, nullptr, 246) == 0u);
+  CHECK(fs::write(d, out.data(), 277) == 0u);  // one byte short
+  CHECK(fs::write(d, out.data(), 278) == 278u);
+  CHECK(fs::write(d, nullptr, 278) == 0u);
 }
 
 // OS-011a appended six device settings (the MIDI clock and ports, the channels, the theme). The settings file written before it (7 settings, 94 bytes, valid CRC) still
@@ -659,7 +704,7 @@ TEST_CASE("settings file: a file written before the Config settings existed read
 TEST_CASE("settings file: USB RETURN is appended without a version bump; a file from before it reads RETURN On; Off round trips") {
   namespace ds = model::device_setting;
   CHECK(ds::UsbReturn == 13u);
-  CHECK(ds::kCount == 26u);
+  CHECK(ds::kCount == 30u);  // 27 before OS-MTC A3 appended MTC OUT and MTC START, 26 before OS-MIDICCMAP S1 appended CC MAP
   CHECK(fresh().get(ds::UsbReturn) == 1.0f);  // On by default
   CHECK(kFile13.size() == 142u);
   model::Settings out = fresh();
@@ -676,7 +721,7 @@ TEST_CASE("settings file: USB RETURN is appended without a version bump; a file 
   CHECK(s.set(ds::UsbReturn, 2.0f) == model::Status::BadValue);
   CHECK(s.set(ds::UsbReturn, -1.0f) == model::Status::BadValue);
   const Bytes bytes = written(s);
-  CHECK(bytes.size() == 246u);
+  CHECK(bytes.size() == 278u);
   model::Settings back = fresh();
   CHECK(fs::read(bytes.data(), bytes.size(), back).error == fs::Error::None);
   CHECK(same(s, back));
@@ -712,7 +757,7 @@ TEST_CASE("settings file: RETURN LEVEL is appended without a version bump; a fil
   CHECK(s.set(ds::UsbReturnLevel, 101.0f) == model::Status::BadValue);
   CHECK(s.set(ds::UsbReturnLevel, -1.0f) == model::Status::BadValue);
   const Bytes bytes = written(s);
-  CHECK(bytes.size() == 246u);
+  CHECK(bytes.size() == 278u);
   model::Settings back = fresh();
   CHECK(fs::read(bytes.data(), bytes.size(), back).error == fs::Error::None);
   CHECK(back.get(ds::UsbReturnLevel) == 40.0f);
@@ -741,7 +786,7 @@ TEST_CASE("settings file: REC POLY and REC QUANTIZE are rows 14 and 15; files of
   CHECK(ds::RecPoly == 14u);
   CHECK(ds::RecQuantize == 15u);
   CHECK(ds::UsbReturnLevel == 16u);
-  CHECK(ds::kCount == 26u);
+  CHECK(ds::kCount == 30u);  // 27 before OS-MTC A3 appended MTC OUT and MTC START, 26 before OS-MIDICCMAP S1 appended CC MAP
   CHECK(fresh().get(ds::RecPoly) == 0.0f);      // Off
   CHECK(fresh().get(ds::RecQuantize) == 0.0f);  // Nearest step
   // The file before both: nothing skipped, the three at their defaults, and what it says kept.
@@ -809,7 +854,7 @@ TEST_CASE("settings file: REC POLY and REC QUANTIZE are rows 14 and 15; files of
   CHECK(s.set(ds::RecQuantize, -1.0f) == model::Status::BadValue);
   CHECK(s.set(ds::MetronomeVolume, 77.0f) == model::Status::Ok);
   const Bytes bytes = written(s);
-  CHECK(bytes.size() == 246u);
+  CHECK(bytes.size() == 278u);
   model::Settings back = fresh();
   const fs::Report rb = fs::read(bytes.data(), bytes.size(), back);
   CHECK(rb.error == fs::Error::None);
@@ -819,8 +864,8 @@ TEST_CASE("settings file: REC POLY and REC QUANTIZE are rows 14 and 15; files of
   CHECK(back.get(ds::RecQuantize) == 1.0f);
   CHECK(written(back) == bytes);
   CHECK(bytes[24 + 8 * 16 + 3] == 16);  // RETURN LEVEL follows them (USB AUDIO, OS-USBAUDIO, and METRO and COUNT-IN, OS-METRO, come after)
-  CHECK(bytes[24 + 8 * 25 + 3] == 25);  // the last entry is E-PAT-35's, id 25
-  CHECK(bytes[24 + 8 * 26] == 'C');     // the CRC chunk follows
+  CHECK(bytes[24 + 8 * 26 + 3] == 26);  // the last entry is OS-MIDICCMAP S1's, id 26 (E-PAT-35's id 25 is the one before)
+  CHECK(bytes[24 + 8 * 30] == 'C');     // the CRC chunk follows
   // The older reader, as the codec sees it: a build of 14 settings has no setting under ids 14, 15 and 16. They are skipped and counted; the rest is read.
   std::vector<std::pair<std::uint32_t, float>> entries;
   for (unsigned f = 0; f < ds::RecPoly; ++f) {
@@ -860,10 +905,10 @@ TEST_CASE("settings file: REC POLY and REC QUANTIZE are rows 14 and 15; files of
 TEST_CASE("settings file: USB AUDIO is appended without a version bump; files of 13, 14, 16 and 17 settings read USB AUDIO On; Off round trips; an older reader skips it") {
   namespace ds = model::device_setting;
   CHECK(ds::UsbAudio == 17u);
-  CHECK(ds::kCount == 26u);
-  CHECK(ds::UsbAudio + 9u == ds::kCount);  // the rows appended behind it (ids 18 to 25: OS-METRO, OS-RECMICRO, OS-PADOFFSET, E-CFG-03, E-PAT-35) keep the ones before at their ids
+  CHECK(ds::kCount == 30u);  // 27 before OS-MTC A3 appended MTC OUT and MTC START, 26 before OS-MIDICCMAP S1 appended CC MAP
+  CHECK(ds::UsbAudio + 13u == ds::kCount);  // the rows appended behind it (ids 18 to 29: OS-METRO, OS-RECMICRO, OS-PADOFFSET, E-CFG-03, E-PAT-35, OS-MIDICCMAP S1, OS-MTC A3, OS-MTC B3) keep the ones before at their ids
   CHECK(fresh().get(ds::UsbAudio) == 1.0f);  // On by default
-  CHECK(kDefaultFile.size() == 246u);
+  CHECK(kDefaultFile.size() == 278u);
   CHECK(kFile18.size() == 182u);
   CHECK(kFile17.size() == 174u);
   CHECK(kFile16.size() == 166u);
@@ -895,7 +940,7 @@ TEST_CASE("settings file: USB AUDIO is appended without a version bump; files of
   CHECK(s.set(ds::UsbAudio, -1.0f) == model::Status::BadValue);
   CHECK(s.get(ds::UsbAudio) == 0.0f);
   const Bytes bytes = written(s);
-  CHECK(bytes.size() == 246u);
+  CHECK(bytes.size() == 278u);
   model::Settings back = fresh();
   const fs::Report rb = fs::read(bytes.data(), bytes.size(), back);
   CHECK(rb.error == fs::Error::None);
@@ -904,8 +949,8 @@ TEST_CASE("settings file: USB AUDIO is appended without a version bump; files of
   CHECK(back.get(ds::UsbAudio) == 0.0f);
   CHECK(written(back) == bytes);
   CHECK(bytes[24 + 8 * 17 + 3] == 17);  // USB AUDIO is entry 17 of SETS (an early entry; five follow since OS-RECMICRO)
-  CHECK(bytes[24 + 8 * 25 + 3] == 25);  // the last entry is E-PAT-35's, id 25
-  CHECK(bytes[24 + 8 * 26] == 'C');     // the CRC chunk follows
+  CHECK(bytes[24 + 8 * 26 + 3] == 26);  // the last entry is OS-MIDICCMAP S1's, id 26 (E-PAT-35's id 25 is the one before)
+  CHECK(bytes[24 + 8 * 30] == 'C');     // the CRC chunk follows
   // The only bytes that differ from the default file are the value of entry 17 (0x3f80 -> 0x0000) and the CRC.
   std::size_t diffs = 0;
   for (std::size_t i = 0; i < bytes.size() - 6; ++i) {
@@ -956,13 +1001,13 @@ TEST_CASE("settings file: METRO and COUNT-IN are appended without a version bump
   namespace ds = model::device_setting;
   CHECK(ds::MetroMode == 18u);
   CHECK(ds::CountIn == 19u);
-  CHECK(ds::kCount == 26u);
+  CHECK(ds::kCount == 30u);  // 27 before OS-MTC A3 appended MTC OUT and MTC START, 26 before OS-MIDICCMAP S1 appended CC MAP
   CHECK(ds::MetronomeVolume == 2u);  // METRO VOL keeps its id and its range: only the page moved
   CHECK(fresh().get(ds::MetroMode) == 1.0f);  // Cue
   CHECK(fresh().get(ds::CountIn) == 0.0f);    // Off
   CHECK(fresh().get(ds::MetronomeVolume) == 50.0f);
   CHECK(kFile18.size() == 182u);
-  CHECK(kDefaultFile.size() == 246u);
+  CHECK(kDefaultFile.size() == 278u);
   // The files of every build before this one: nothing skipped, the two at their defaults, what the file says kept.
   for (const Bytes* file : {&kFile13, &kFile14, &kFile16, &kFile17, &kFile18}) {
     model::Settings out = fresh();
@@ -986,7 +1031,7 @@ TEST_CASE("settings file: METRO and COUNT-IN are appended without a version bump
       CHECK(s.set(ds::CountIn, static_cast<float>(bars)) == model::Status::Ok);
       CHECK(s.set(ds::MetronomeVolume, 80.0f) == model::Status::Ok);
       const Bytes bytes = written(s);
-      CHECK(bytes.size() == 246u);
+      CHECK(bytes.size() == 278u);
       model::Settings back = fresh();
       const fs::Report rb = fs::read(bytes.data(), bytes.size(), back);
       CHECK(rb.error == fs::Error::None);
@@ -998,8 +1043,8 @@ TEST_CASE("settings file: METRO and COUNT-IN are appended without a version bump
       CHECK(written(back) == bytes);
       CHECK(bytes[24 + 8 * 18 + 3] == 18);  // METRO is entry 18, COUNT-IN entry 19 (REC MICRO and REC VELOCITY follow, OS-RECMICRO)
       CHECK(bytes[24 + 8 * 19 + 3] == 19);
-      CHECK(bytes[24 + 8 * 25 + 3] == 25);  // the last entry is E-PAT-35's, id 25
-      CHECK(bytes[24 + 8 * 26] == 'C');  // the CRC chunk follows
+      CHECK(bytes[24 + 8 * 26 + 3] == 26);  // the last entry is OS-MIDICCMAP S1's, id 26 (E-PAT-35's id 25 is the one before)
+      CHECK(bytes[24 + 8 * 30] == 'C');  // the CRC chunk follows
     }
   }
   model::Settings s = fresh();
@@ -1100,7 +1145,7 @@ TEST_CASE("settings file: REC MICRO and REC VELOCITY are appended without a vers
   namespace ds = model::device_setting;
   CHECK(ds::RecMicro == 20u);
   CHECK(ds::RecVelocity == 21u);
-  CHECK(ds::kCount == 26u);
+  CHECK(ds::kCount == 30u);  // 27 before OS-MTC A3 appended MTC OUT and MTC START, 26 before OS-MIDICCMAP S1 appended CC MAP
   CHECK(fresh().get(ds::RecMicro) == 0.0f);
   CHECK(fresh().get(ds::RecVelocity) == 0.0f);
   CHECK(kFile20.size() == 198u);
@@ -1127,7 +1172,7 @@ TEST_CASE("settings file: REC MICRO and REC VELOCITY are appended without a vers
       CHECK(s.set(ds::RecVelocity, static_cast<float>(velocity)) == model::Status::Ok);
       CHECK(s.set(ds::MetroMode, 2.0f) == model::Status::Ok);
       const Bytes bytes = written(s);
-      CHECK(bytes.size() == 246u);
+      CHECK(bytes.size() == 278u);
       model::Settings back = fresh();
       const fs::Report rb = fs::read(bytes.data(), bytes.size(), back);
       CHECK(rb.error == fs::Error::None);
@@ -1139,8 +1184,8 @@ TEST_CASE("settings file: REC MICRO and REC VELOCITY are appended without a vers
       CHECK(written(back) == bytes);
       CHECK(bytes[24 + 8 * 20 + 3] == 20);  // REC MICRO is entry 20, REC VELOCITY entry 21 (PAD OFFSET, 22, is the last of SETS since OS-PADOFFSET)
       CHECK(bytes[24 + 8 * 21 + 3] == 21);
-      CHECK(bytes[24 + 8 * 25 + 3] == 25);  // the last entry is E-PAT-35's, id 25
-      CHECK(bytes[24 + 8 * 26] == 'C');     // the CRC chunk follows
+      CHECK(bytes[24 + 8 * 26 + 3] == 26);  // the last entry is OS-MIDICCMAP S1's, id 26 (E-PAT-35's id 25 is the one before)
+      CHECK(bytes[24 + 8 * 30] == 'C');     // the CRC chunk follows
     }
   }
   model::Settings s = fresh();
@@ -1211,10 +1256,10 @@ TEST_CASE("settings file: REC MICRO and REC VELOCITY are appended without a vers
 TEST_CASE("settings file: PAD OFFSET is appended without a version bump; every older file reads 12; 0..12 round trip; an older reader skips it") {
   namespace ds = model::device_setting;
   CHECK(ds::PadOffset == 22u);
-  CHECK(ds::kCount == 26u);
+  CHECK(ds::kCount == 30u);  // 27 before OS-MTC A3 appended MTC OUT and MTC START, 26 before OS-MIDICCMAP S1 appended CC MAP
   CHECK(fresh().get(ds::PadOffset) == 12.0f);
   CHECK(kFile22.size() == 214u);
-  CHECK(kDefaultFile.size() == 246u);
+  CHECK(kDefaultFile.size() == 278u);
   // The default file ends its settings with the new entry, 12.0 (0x41400000), and the old default file is the same bytes without it.
   CHECK((kDefaultFile[24 + 8 * 22 + 3] == 22 && kDefaultFile[24 + 8 * 22 + 4] == 0x41 && kDefaultFile[24 + 8 * 22 + 5] == 0x40));
   CHECK(std::equal(kFile22.begin() + 24, kFile22.begin() + 24 + 8 * 22, kDefaultFile.begin() + 24));
@@ -1248,7 +1293,7 @@ TEST_CASE("settings file: PAD OFFSET is appended without a version bump; every o
     CHECK(seen.get(ds::CountIn) == 2.0f);
     CHECK(seen.get(ds::RecVelocity) == 1.0f);
     CHECK(seen.get(ds::PadOffset) == 12.0f);
-    CHECK(written(seen).size() == 246u);  // saved by this build it gains the entry
+    CHECK(written(seen).size() == 278u);  // saved by this build it gains the entry
   }
   // Every value round trips byte for byte and nothing else moves; the entry is the last of SETS and holds the value as a big-endian float.
   for (unsigned v = 0; v <= 12u; ++v) {
@@ -1256,7 +1301,7 @@ TEST_CASE("settings file: PAD OFFSET is appended without a version bump; every o
     CHECK(s.set(ds::PadOffset, static_cast<float>(v)) == model::Status::Ok);
     CHECK(s.set(ds::MetroMode, 2.0f) == model::Status::Ok);
     const Bytes bytes = written(s);
-    CHECK(bytes.size() == 246u);
+    CHECK(bytes.size() == 278u);
     model::Settings back = fresh();
     const fs::Report rb = fs::read(bytes.data(), bytes.size(), back);
     CHECK(rb.error == fs::Error::None);
@@ -1271,8 +1316,8 @@ TEST_CASE("settings file: PAD OFFSET is appended without a version bump; every o
                                bytes[24 + 8 * 22 + 7];
     std::memcpy(&f, &bits, sizeof f);
     CHECK(f == static_cast<float>(v));
-    CHECK(bytes[24 + 8 * 25 + 3] == 25);  // the last entry is E-PAT-35's, id 25
-    CHECK(bytes[24 + 8 * 26] == 'C');  // the CRC chunk follows
+    CHECK(bytes[24 + 8 * 26 + 3] == 26);  // the last entry is OS-MIDICCMAP S1's, id 26 (E-PAT-35's id 25 is the one before)
+    CHECK(bytes[24 + 8 * 30] == 'C');  // the CRC chunk follows
   }
   // The block refuses a value outside the range; a file with one skips the entry and counts it, the setting keeping its default.
   model::Settings s = fresh();
@@ -1328,7 +1373,7 @@ TEST_CASE("settings: a file of 23 settings (kFile23, 222 bytes) reads with TRANS
   CHECK(ds::TransportIn == 23u);
   CHECK(ds::TransportOut == 24u);
   CHECK(kFile23.size() == 222u);
-  CHECK(kDefaultFile.size() == kFile23.size() + 24u);  // three entries of 8 bytes (E-CFG-03's two, E-PAT-35's one)
+  CHECK(kDefaultFile.size() == kFile23.size() + 56u);  // six entries of 8 bytes (E-CFG-03's two, E-PAT-35's one, OS-MIDICCMAP S1's CC MAP, OS-MTC A3's two)
   CHECK(std::equal(kFile23.begin() + 24, kFile23.begin() + 24 + 8 * 23, kDefaultFile.begin() + 24));
   for (const Bytes* file : {&kFile13, &kFile14, &kFile16, &kFile17, &kFile18, &kFile20, &kFile22, &kFile23}) {
     model::Settings out = fresh();
@@ -1361,7 +1406,7 @@ TEST_CASE("settings: TRANSPORT IN and OUT round trip Off and On byte for byte") 
       CHECK(s.set(ds::TransportOut, static_cast<float>(out)) == model::Status::Ok);
       CHECK(s.set(ds::MetroMode, 2.0f) == model::Status::Ok);  // something else moved, which must stay
       const Bytes bytes = written(s);
-      CHECK(bytes.size() == 246u);
+      CHECK(bytes.size() == 278u);
       model::Settings back = fresh();
       const fs::Report rb = fs::read(bytes.data(), bytes.size(), back);
       CHECK(rb.error == fs::Error::None);
@@ -1373,8 +1418,8 @@ TEST_CASE("settings: TRANSPORT IN and OUT round trip Off and On byte for byte") 
       CHECK(written(back) == bytes);
       CHECK(bytes[24 + 8 * 23 + 3] == 23);  // the entries are ids 23 and 24 of SETS, then E-PAT-35's id 25, then the CRC chunk
       CHECK(bytes[24 + 8 * 24 + 3] == 24);
-      CHECK(bytes[24 + 8 * 25 + 3] == 25);  // the last entry is E-PAT-35's, id 25
-      CHECK(bytes[24 + 8 * 26] == 'C');
+      CHECK(bytes[24 + 8 * 26 + 3] == 26);  // the last entry is OS-MIDICCMAP S1's, id 26 (E-PAT-35's id 25 is the one before)
+      CHECK(bytes[24 + 8 * 30] == 'C');
       CHECK(bytes[24 + 8 * 23 + 4] == (in != 0u ? 0x3f : 0x00));
       CHECK(bytes[24 + 8 * 24 + 4] == (out != 0u ? 0x3f : 0x00));
     }
@@ -1431,13 +1476,15 @@ TEST_CASE("settings: a value of 2 for TRANSPORT IN is refused and skipped, the d
 TEST_CASE("settings: PAT SWITCH is appended without a version bump; every older file reads Step; Step and Pattern end round trip; an older reader skips it") {
   namespace ds = model::device_setting;
   CHECK(ds::PatSwitch == 25u);
-  CHECK(ds::kCount == model::Settings::kMaxFields);  // the device scope is full: the next setting raises the block
+  CHECK(ds::kCount == 30u);  // 27 before OS-MTC A3
+  CHECK(model::Settings::kMaxFields == 32u);    // OS-MIDICCMAP S1 appended CC MAP (id 26) and made the raise 26 -> 32 itself (it landed before OS-MTC, whose ids 26..28 now have room)
+  CHECK(model::Settings::kValueBytes == 32u);
   CHECK(fresh().get(ds::PatSwitch) == 0.0f);
   CHECK(kFile25.size() == 238u);
-  CHECK(kDefaultFile.size() == kFile25.size() + 8u);  // one entry of 8 bytes
+  CHECK(kDefaultFile.size() == kFile25.size() + 40u);  // four entries of 8 bytes (E-PAT-35's PAT SWITCH, OS-MIDICCMAP S1's CC MAP, OS-MTC A3's two)
   CHECK(std::equal(kFile25.begin() + 24, kFile25.begin() + 24 + 8 * 25, kDefaultFile.begin() + 24));
   // Default-fill: the file of a device that never heard of the setting reads Step, nothing skipped; saved by this build it gains the entry.
-  for (const Bytes* file : {&kFile13, &kFile14, &kFile16, &kFile17, &kFile18, &kFile20, &kFile22, &kFile23, &kFile25}) {
+  for (const Bytes* file : {&kFile13, &kFile14, &kFile16, &kFile17, &kFile18, &kFile20, &kFile22, &kFile23, &kFile25, &kFile26, &kFile27, &kFile29}) {
     model::Settings out = fresh();
     (void)out.set(ds::PatSwitch, 1.0f);  // something to be overwritten by the default
     const fs::Report r = fs::read(file->data(), file->size(), out);
@@ -1457,7 +1504,7 @@ TEST_CASE("settings: PAT SWITCH is appended without a version bump; every older 
     CHECK(s.set(ds::PatSwitch, static_cast<float>(v)) == model::Status::Ok);
     CHECK(s.set(ds::TransportOut, 0.0f) == model::Status::Ok);
     const Bytes bytes = written(s);
-    CHECK(bytes.size() == 246u);
+    CHECK(bytes.size() == 278u);
     model::Settings back = fresh();
     const fs::Report rb = fs::read(bytes.data(), bytes.size(), back);
     CHECK(rb.error == fs::Error::None);
@@ -1503,4 +1550,280 @@ TEST_CASE("settings: PAT SWITCH is appended without a version bump; every older 
   CHECK((d->min == 0.0f && d->max == 1.0f && d->def == 0.0f));
   CHECK((d->flags & core::kParamLearnable) != 0);
   CHECK(model::param_group_name(core::ParamKind::Device, d->group) == std::string("PATTERN"));
+}
+
+// OS-MIDICCMAP S1 (docs/specs/OS-MIDICCMAP.md, Q1 a): CC MAP, device setting 26, appended without a version bump, default Off. This slice landed before OS-MTC, so it makes the raise itself: the block's room goes 26 -> 32 (OS-MTC's ids 26..28 have room now).
+TEST_CASE("settings: CC MAP is appended without a version bump; every older file reads Off; Off and On round trip; an older reader skips it") {
+  namespace ds = model::device_setting;
+  CHECK(ds::CcMap == 26u);
+  CHECK(ds::kCount == 30u);  // 27 before OS-MTC A3 appended MTC OUT and MTC START
+  CHECK(model::Settings::kMaxFields == 32u);    // the raise this slice makes
+  CHECK(model::Settings::kValueBytes == 32u);
+  CHECK(fresh().get(ds::CcMap) == 0.0f);                                            // Off, the official default
+  CHECK(kFile26.size() == 246u);
+  CHECK(kDefaultFile.size() == kFile26.size() + 32u);  // three entries of 8 bytes (CC MAP, OS-MTC A3's two)
+  CHECK(std::equal(kFile26.begin() + 24, kFile26.begin() + 24 + 8 * 26, kDefaultFile.begin() + 24));
+  // Default-fill: the file of a device that never heard of the setting reads Off, nothing skipped; saved by this build it gains the entry.
+  for (const Bytes* file : {&kFile13, &kFile14, &kFile16, &kFile17, &kFile18, &kFile20, &kFile22, &kFile23, &kFile25, &kFile26, &kFile27, &kFile29}) {
+    model::Settings out = fresh();
+    (void)out.set(ds::CcMap, 1.0f);  // something to be overwritten by the default
+    const fs::Report r = fs::read(file->data(), file->size(), out);
+    CHECK_MESSAGE(r.error == fs::Error::None, file->size() << " bytes");
+    CHECK_MESSAGE(r.skipped_entries == 0u, file->size() << " bytes");
+    CHECK_FALSE(r.newer_minor);
+    CHECK_MESSAGE(out.get(ds::CcMap) == 0.0f, file->size() << " bytes");
+    CHECK(same(out, fresh()));
+    CHECK(out.check_invariants());
+  }
+  model::Settings seen = fresh();
+  CHECK(fs::read(kFile26.data(), kFile26.size(), seen).error == fs::Error::None);
+  CHECK(written(seen) == kDefaultFile);
+  // Round trip, with something else moved too.
+  for (unsigned v = 0; v <= 1u; ++v) {
+    model::Settings s = fresh();
+    CHECK(s.set(ds::CcMap, static_cast<float>(v)) == model::Status::Ok);
+    CHECK(s.set(ds::PatSwitch, 1.0f) == model::Status::Ok);
+    const Bytes bytes = written(s);
+    CHECK(bytes.size() == 278u);
+    model::Settings back = fresh();
+    const fs::Report rb = fs::read(bytes.data(), bytes.size(), back);
+    CHECK(rb.error == fs::Error::None);
+    CHECK(rb.skipped_entries == 0u);
+    CHECK(same(s, back));
+    CHECK(back.get(ds::CcMap) == static_cast<float>(v));
+    CHECK(back.get(ds::PatSwitch) == 1.0f);
+    CHECK(written(back) == bytes);
+    CHECK(bytes[24 + 8 * 26 + 3] == 26);                            // the entry after PAT SWITCH is CC MAP, id 26 (MTC OUT and MTC START follow)
+    CHECK(bytes[24 + 8 * 26 + 4] == (v != 0u ? 0x3f : 0x00));
+  }
+  // A value outside Off / On is refused and skipped; the default stays.
+  model::Settings s = fresh();
+  CHECK(s.set(ds::CcMap, 2.0f) == model::Status::BadValue);
+  CHECK(s.get(ds::CcMap) == 0.0f);
+  std::vector<std::pair<std::uint32_t, float>> entries;
+  for (unsigned f = 0; f < ds::kCount; ++f) {
+    entries.push_back({dev(f), fresh().get(f)});
+  }
+  entries[ds::CcMap].second = 2.0f;
+  const Bytes bad = build({{kSets, sets_payload(entries)}});
+  model::Settings badseen = fresh();
+  const fs::Report rbad = fs::read(bad.data(), bad.size(), badseen);
+  CHECK(rbad.error == fs::Error::None);
+  CHECK(rbad.skipped_entries == 1u);
+  CHECK(badseen.get(ds::CcMap) == 0.0f);
+  // The older reader, as the codec sees it: a build without the row has no setting under id 26 (here: under kCount, the first id this build lacks). The entry is skipped and counted.
+  entries.clear();
+  for (unsigned f = 0; f < ds::CcMap; ++f) {
+    entries.push_back({dev(f), fresh().get(f)});
+  }
+  entries.push_back({dev(ds::kCount), 1.0f});
+  const Bytes older = build({{kSets, sets_payload(entries)}});
+  model::Settings olderseen = fresh();
+  const fs::Report ro = fs::read(older.data(), older.size(), olderseen);
+  CHECK(ro.error == fs::Error::None);
+  CHECK(ro.skipped_entries == 1u);
+  CHECK(olderseen.get(ds::CcMap) == 0.0f);
+  // The descriptor: Off / On, default Off, not learnable (a device MIDI routing switch), on the MIDI page.
+  const core::ParamDesc* d = model::param_desc(core::param_id(core::ParamKind::Device, 0, ds::CcMap));
+  NEED(d != nullptr);
+  CHECK(std::strlen(d->name) <= core::kParamNameChars);
+  CHECK((d->min == 0.0f && d->max == 1.0f && d->def == 0.0f));
+  CHECK((d->flags & core::kParamLearnable) == 0);
+  CHECK(model::param_group_name(core::ParamKind::Device, d->group) == std::string("MIDI"));
+}
+
+// OS-MTC A3 (docs/specs/OS-MTC.md 3.7; the spec numbered them 26 and 27, CC MAP took 26 first): MTC OUT (id 27: Off, 24, 25, 30 fps; default Off) and MTC START (id 28: 0..23 h; default 1) are appended
+// by the documented rule: no chunk, no version bump, default-fill. The file of the build before them (27 entries, 254 bytes) is the literal kFile27.
+TEST_CASE("settings: MTC OUT and MTC START are appended without a version bump; every older file reads Off / 01; every value round trips byte for byte; an older reader skips both") {
+  namespace ds = model::device_setting;
+  CHECK(ds::MtcOut == 27u);
+  CHECK(ds::MtcStart == 28u);
+  CHECK(ds::kCount == 30u);
+  CHECK(model::Settings::kMaxFields == 32u);  // the raise of OS-MIDICCMAP S1 holds them: sizeof(Settings) and the arena do not move
+  CHECK(model::Settings::kValueBytes == 32u);
+  CHECK(fresh().get(ds::MtcOut) == 0.0f);  // Off
+  CHECK(fresh().get(ds::MtcStart) == 1.0f);  // 01:00:00:00, Logic's default
+  CHECK(kFile27.size() == 254u);
+  CHECK(kDefaultFile.size() == kFile27.size() + 24u);  // two entries of 8 bytes
+  CHECK(std::equal(kFile27.begin() + 24, kFile27.begin() + 24 + 8 * 27, kDefaultFile.begin() + 24));
+  // The container is the same version as before: the SETS chunk version bytes (0x0100) and the FORM tag did not move.
+  CHECK(kDefaultFile[20] == 0x01);
+  CHECK(kDefaultFile[21] == 0x00);
+  CHECK(kFile27[20] == 0x01);
+  CHECK(kFile27[21] == 0x00);
+  // Default-fill: every older file reads Off / 1, nothing skipped; saved by this build it gains the two entries.
+  for (const Bytes* file : {&kFile13, &kFile14, &kFile16, &kFile17, &kFile18, &kFile20, &kFile22, &kFile23, &kFile25, &kFile26, &kFile27, &kFile29}) {
+    model::Settings out = fresh();
+    (void)out.set(ds::MtcOut, 2.0f);   // something to be overwritten by the default
+    (void)out.set(ds::MtcStart, 9.0f);
+    const fs::Report r = fs::read(file->data(), file->size(), out);
+    CHECK_MESSAGE(r.error == fs::Error::None, file->size() << " bytes");
+    CHECK_MESSAGE(r.skipped_entries == 0u, file->size() << " bytes");
+    CHECK_FALSE(r.newer_minor);
+    CHECK_MESSAGE(out.get(ds::MtcOut) == 0.0f, file->size() << " bytes");
+    CHECK_MESSAGE(out.get(ds::MtcStart) == 1.0f, file->size() << " bytes");
+    CHECK(same(out, fresh()));
+    CHECK(out.check_invariants());
+  }
+  model::Settings seen = fresh();
+  CHECK(fs::read(kFile27.data(), kFile27.size(), seen).error == fs::Error::None);
+  CHECK(written(seen) == kDefaultFile);
+  // Round trip every value of both, byte for byte, with something else moved too (the CC MAP before them, a binding after).
+  for (unsigned out_v = 0; out_v <= 3u; ++out_v) {
+    for (unsigned hour = 0; hour <= 23u; ++hour) {
+      model::Settings s = fresh();
+      CHECK(s.set(ds::MtcOut, static_cast<float>(out_v)) == model::Status::Ok);
+      CHECK(s.set(ds::MtcStart, static_cast<float>(hour)) == model::Status::Ok);
+      CHECK(s.set(ds::CcMap, 1.0f) == model::Status::Ok);
+      const Bytes bytes = written(s);
+      CHECK(bytes.size() == 278u);
+      model::Settings back = fresh();
+      const fs::Report rb = fs::read(bytes.data(), bytes.size(), back);
+      CHECK(rb.error == fs::Error::None);
+      CHECK(rb.skipped_entries == 0u);
+      CHECK(same(s, back));
+      CHECK(back.get(ds::MtcOut) == static_cast<float>(out_v));
+      CHECK(back.get(ds::MtcStart) == static_cast<float>(hour));
+      CHECK(back.get(ds::CcMap) == 1.0f);
+      CHECK(written(back) == bytes);
+      CHECK(bytes[24 + 8 * 27 + 3] == 27);  // the last two entries of SETS are MTC OUT, id 27, and MTC START, id 28
+      CHECK(bytes[24 + 8 * 28 + 3] == 28);
+    }
+  }
+  // 4 for MTC OUT and 24 for MTC START are refused by the block and skipped by the reader (counted), the defaults staying.
+  model::Settings s = fresh();
+  CHECK(s.set(ds::MtcOut, 4.0f) == model::Status::BadValue);
+  CHECK(s.set(ds::MtcStart, 24.0f) == model::Status::BadValue);
+  CHECK(s.set(ds::MtcStart, -1.0f) == model::Status::BadValue);
+  CHECK(s.get(ds::MtcOut) == 0.0f);
+  CHECK(s.get(ds::MtcStart) == 1.0f);
+  std::vector<std::pair<std::uint32_t, float>> entries;
+  for (unsigned f = 0; f < ds::kCount; ++f) {
+    entries.push_back({dev(f), fresh().get(f)});
+  }
+  entries[ds::MtcOut].second = 4.0f;
+  entries[ds::MtcStart].second = 24.0f;
+  const Bytes bad = build({{kSets, sets_payload(entries)}});
+  model::Settings badseen = fresh();
+  const fs::Report rbad = fs::read(bad.data(), bad.size(), badseen);
+  CHECK(rbad.error == fs::Error::None);
+  CHECK(rbad.skipped_entries == 2u);
+  CHECK(badseen.get(ds::MtcOut) == 0.0f);
+  CHECK(badseen.get(ds::MtcStart) == 1.0f);
+  // The older reader, as the codec sees it: a build without the rows has no setting under ids 27 and 28 (here: under kCount and kCount + 1, the first ids this build lacks). Both are skipped and counted.
+  entries.clear();
+  for (unsigned f = 0; f < ds::MtcOut; ++f) {
+    entries.push_back({dev(f), fresh().get(f)});
+  }
+  entries.push_back({dev(ds::kCount), 2.0f});
+  entries.push_back({dev(ds::kCount + 1u), 5.0f});
+  const Bytes older = build({{kSets, sets_payload(entries)}});
+  model::Settings olderseen = fresh();
+  const fs::Report ro = fs::read(older.data(), older.size(), olderseen);
+  CHECK(ro.error == fs::Error::None);
+  CHECK(ro.skipped_entries == 2u);
+  CHECK(olderseen.get(ds::MtcOut) == 0.0f);
+  CHECK(olderseen.get(ds::MtcStart) == 1.0f);
+  // The descriptors: Off / 24 / 25 / 30 and 0..23, not learnable, on the MIDI page.
+  const core::ParamDesc* d = model::param_desc(core::param_id(core::ParamKind::Device, 0, ds::MtcOut));
+  NEED(d != nullptr);
+  CHECK(std::strlen(d->name) <= core::kParamNameChars);
+  CHECK((d->min == 0.0f && d->max == 3.0f && d->def == 0.0f));
+  CHECK((d->flags & core::kParamLearnable) == 0);
+  CHECK(model::param_group_name(core::ParamKind::Device, d->group) == std::string("MIDI"));
+  const core::ParamDesc* h = model::param_desc(core::param_id(core::ParamKind::Device, 0, ds::MtcStart));
+  NEED(h != nullptr);
+  CHECK((h->min == 0.0f && h->max == 23.0f && h->def == 1.0f));
+  CHECK((h->flags & core::kParamLearnable) == 0);
+  CHECK(model::param_group_name(core::ParamKind::Device, h->group) == std::string("MIDI"));
+}
+
+// OS-MTC B3 (docs/specs/OS-MTC.md 4.6; Q7 a: the block already holds 32 fields since OS-MIDICCMAP S1, so no raise): MTC IN (id 29: Off, DIN, USB; default Off) is appended by the documented rule: no chunk,
+// no version bump, default-fill. The file of the build before it (29 entries, 270 bytes) is the literal kFile29; the default file is 278 bytes.
+TEST_CASE("settings: MTC IN is appended without a version bump; every older file reads Off; every value round trips byte for byte; 3 is refused and skipped; an older reader skips it") {
+  namespace ds = model::device_setting;
+  CHECK(ds::MtcIn == 29u);
+  CHECK(ds::kCount == 30u);
+  CHECK(model::Settings::kMaxFields == 32u);  // no raise: the block, sizeof(Settings) and the arena did not move
+  CHECK(model::Settings::kValueBytes == 32u);
+  CHECK(fresh().get(ds::MtcIn) == 0.0f);  // Off
+  CHECK(kFile29.size() == 270u);
+  CHECK(kDefaultFile.size() == 278u);
+  CHECK(kDefaultFile.size() == kFile29.size() + 8u);  // one entry of 8 bytes
+  CHECK(std::equal(kFile29.begin() + 24, kFile29.begin() + 24 + 8 * 29, kDefaultFile.begin() + 24));
+  // The container is the same version as before: the SETS chunk version bytes (0x0100) did not move; only the count (30) and the lengths did.
+  CHECK(kDefaultFile[20] == 0x01);
+  CHECK(kDefaultFile[21] == 0x00);
+  CHECK(kDefaultFile[23] == 30);
+  CHECK(kFile29[23] == 29);
+  // Default-fill: every older file reads Off, nothing skipped; saved by this build it gains the entry.
+  for (const Bytes* file : {&kFile13, &kFile14, &kFile16, &kFile17, &kFile18, &kFile20, &kFile22, &kFile23, &kFile25, &kFile26, &kFile27, &kFile29}) {
+    model::Settings out = fresh();
+    (void)out.set(ds::MtcIn, 2.0f);  // something to be overwritten by the default
+    const fs::Report r = fs::read(file->data(), file->size(), out);
+    CHECK_MESSAGE(r.error == fs::Error::None, file->size() << " bytes");
+    CHECK_MESSAGE(r.skipped_entries == 0u, file->size() << " bytes");
+    CHECK_FALSE(r.newer_minor);
+    CHECK_MESSAGE(out.get(ds::MtcIn) == 0.0f, file->size() << " bytes");
+    CHECK(same(out, fresh()));
+    CHECK(out.check_invariants());
+  }
+  model::Settings seen = fresh();
+  CHECK(fs::read(kFile29.data(), kFile29.size(), seen).error == fs::Error::None);
+  CHECK(written(seen) == kDefaultFile);
+  // Round trip every value, byte for byte, with the settings before it moved too.
+  for (unsigned v = 0; v <= 2u; ++v) {
+    model::Settings s = fresh();
+    CHECK(s.set(ds::MtcIn, static_cast<float>(v)) == model::Status::Ok);
+    CHECK(s.set(ds::MtcOut, 2.0f) == model::Status::Ok);
+    CHECK(s.set(ds::MtcStart, 0.0f) == model::Status::Ok);
+    const Bytes bytes = written(s);
+    CHECK(bytes.size() == 278u);
+    model::Settings back = fresh();
+    const fs::Report rb = fs::read(bytes.data(), bytes.size(), back);
+    CHECK(rb.error == fs::Error::None);
+    CHECK(rb.skipped_entries == 0u);
+    CHECK(same(s, back));
+    CHECK(back.get(ds::MtcIn) == static_cast<float>(v));
+    CHECK(back.get(ds::MtcOut) == 2.0f);
+    CHECK(back.get(ds::MtcStart) == 0.0f);
+    CHECK(written(back) == bytes);
+    CHECK(bytes[24 + 8 * 29 + 3] == 29);  // the last entry of SETS is MTC IN, id 29
+  }
+  // 3 is refused by the block and skipped by the reader (counted), the default staying.
+  model::Settings s = fresh();
+  CHECK(s.set(ds::MtcIn, 3.0f) == model::Status::BadValue);
+  CHECK(s.set(ds::MtcIn, -1.0f) == model::Status::BadValue);
+  CHECK(s.get(ds::MtcIn) == 0.0f);
+  std::vector<std::pair<std::uint32_t, float>> entries;
+  for (unsigned f = 0; f < ds::kCount; ++f) {
+    entries.push_back({dev(f), fresh().get(f)});
+  }
+  entries[ds::MtcIn].second = 3.0f;
+  const Bytes bad = build({{kSets, sets_payload(entries)}});
+  model::Settings badseen = fresh();
+  const fs::Report rbad = fs::read(bad.data(), bad.size(), badseen);
+  CHECK(rbad.error == fs::Error::None);
+  CHECK(rbad.skipped_entries == 1u);
+  CHECK(badseen.get(ds::MtcIn) == 0.0f);
+  // The older reader, as the codec sees it: a build without the row has no setting under id 29 (here: under kCount, the first id this build lacks). It is skipped and counted, the rest is read.
+  entries.clear();
+  for (unsigned f = 0; f < ds::MtcIn; ++f) {
+    entries.push_back({dev(f), fresh().get(f)});
+  }
+  entries.push_back({dev(ds::kCount), 2.0f});
+  const Bytes older = build({{kSets, sets_payload(entries)}});
+  model::Settings olderseen = fresh();
+  const fs::Report ro = fs::read(older.data(), older.size(), olderseen);
+  CHECK(ro.error == fs::Error::None);
+  CHECK(ro.skipped_entries == 1u);
+  CHECK(olderseen.get(ds::MtcIn) == 0.0f);
+  // The descriptor: Off / DIN / USB, not learnable, on the MIDI page.
+  const core::ParamDesc* d = model::param_desc(core::param_id(core::ParamKind::Device, 0, ds::MtcIn));
+  NEED(d != nullptr);
+  CHECK(std::strlen(d->name) <= core::kParamNameChars);
+  CHECK(std::string(d->name) == "MTC IN");
+  CHECK((d->min == 0.0f && d->max == 2.0f && d->def == 0.0f));
+  CHECK((d->flags & core::kParamLearnable) == 0);
+  CHECK(model::param_group_name(core::ParamKind::Device, d->group) == std::string("MIDI"));
 }

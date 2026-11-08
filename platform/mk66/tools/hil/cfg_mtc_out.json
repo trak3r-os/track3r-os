@@ -1,0 +1,39 @@
+{
+ "name": "cfg_mtc_out",
+ "title": "OS-MTC A3 setup: Config MIDI, MTC OUT 25 fps, MTC START 01 (the unit sends MIDI Time Code from the first Play on: run the host tool `midi_clock_tool.py mtc` as MTC.md says; writes Settings/device.o3st)",
+ "needs": ["card"],
+ "steps": [
+  {"card": {}, "note": "a device setting is written to Settings/device.o3st on the card 1.5 s after the change"},
+  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "NAVIGATOR"}, "note": "(a leftover Navigator is closed: F7 is CLOSE, F8 would GO since OS-NAV2)"},
+  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
+  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "TEXT_ENTRY"}, "note": "(the on-screen keyboard is cancelled with F7, never accepted)"},
+  {"keys": ["pattern"], "gap": 0.4},
+  {"state": {"screen": "PATTERN"}, "within": 3},
+  {"keys": ["config"], "gap": 0.5, "if_state": {"screen": "~^(?!CONFIG$)"}},
+  {"state": {"screen": "CONFIG"}, "within": 3},
+  {"keys": ["f1"], "gap": 0.4},
+  {"state": {"page": "0"}, "within": 2},
+  {"keys": ["up"], "gap": 0.1, "repeat": 10},
+  {"keys": ["down"], "gap": 0.2, "repeat": 5},
+  {"keys": ["delete"], "gap": 0.3, "note": "MTC OUT: Off first, a known start"},
+  {"enc": 2, "note": "MTC OUT: 25 fps (Off, 24, 25, 30)"},
+  {"shot": "mtc_out_25", "non_blank": true},
+  {"keys": ["down"], "gap": 0.2},
+  {"keys": ["delete"], "gap": 0.3, "note": "MTC START: 01, the default (01:00:00:00, Logic's)"},
+  {"shot": "mtc_start_01", "non_blank": true},
+  {"keys": ["pattern"], "gap": 0.5}
+ ],
+ "finally": [
+  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "NAVIGATOR"}, "note": "(a leftover Navigator is closed: F7 is CLOSE, F8 would GO since OS-NAV2)"},
+  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
+  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "TEXT_ENTRY"}, "note": "(the on-screen keyboard is cancelled with F7, never accepted)"},
+  {"keys": ["config"], "gap": 0.5, "if_state": {"screen": "~^(?!CONFIG$)"}},
+  {"state": {"screen": "CONFIG"}, "within": 3},
+  {"keys": ["f1"], "gap": 0.4},
+  {"state": {"page": "0"}, "within": 2},
+  {"keys": ["up"], "gap": 0.1, "repeat": 10},
+  {"keys": ["down"], "gap": 0.2, "repeat": 5},
+  {"keys": ["delete"], "gap": 0.3, "note": "MTC OUT back to Off"},
+  {"keys": ["pattern"], "gap": 0.4}
+ ]
+}

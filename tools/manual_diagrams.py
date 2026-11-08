@@ -618,7 +618,7 @@ def render_map(root, spec, ctx):
             raise DiagramError("%s: the registry has no hidden or buttonless row %s" % (spec.name, want))
     if len(hidden) != 3:
         raise DiagramError("%s: the registry has %d screens with no button, the map draws 3: add a card for %s" % (spec.name, len(hidden), sorted(set(hidden) - {"Modules", "InputTest", "ModuleApp"})))
-    open_nav, _ = resolve_bind(binds, "Global navigator.open", 0)
+    open_nav, _ = resolve_bind(binds, "Global navigator.open via Pattern", 0)
     accept, _ = resolve_bind(binds, "Navigator navigator.accept via F8 plain", 0)
     launch, _ = resolve_bind(binds, "Modules module.launch", 0)
     leave, _ = resolve_bind(binds, "ModuleApp module.exit via F8 tap plain", 0)

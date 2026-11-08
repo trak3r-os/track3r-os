@@ -1,0 +1,6 @@
+# The help pages use a tab as the key/text separator; a key line with no text ends in a tab.
+app/help/pages.txt -whitespace
+# The golden of the old help table uses the same tab separator; a key line with no text ends in a tab.
+tests/data/help_old_pages.txt -whitespace
+# The console and bench text pools keep each string verbatim; many end in a space or a tab.
+platform/mk66/text/*.txt -whitespace

@@ -23,7 +23,7 @@ namespace o3os::formats::og {
 // does no file I/O, allocates nothing and trusts no length; any input, however hostile, ends in Done or in a typed
 // error. The files other than the project file add to the project and undo their own changes on failure.
 //
-// Versions (ADR 0006 amendment 1): a version newer than the highest with evidence (project 17, pattern 5,
+// Versions (ADR 0006 amendment 1): a version newer than the highest with evidence (project 17, pattern 6,
 // instrument 9, PAMD 1), or one in a gap nobody has seen (project 8-10 and 15), is read as far as its layout is
 // known to be unchanged, reported as `unverified_version`, and never guessed at: see docs/formats/og.md.
 // Project v17 (official 1.9.2, OS-004c) is a third class: no file of it has been seen, so its layout is an open research
@@ -32,7 +32,7 @@ namespace o3os::formats::og {
 
 inline constexpr std::uint8_t kProjectVerified = 16;    // the highest project version with fixture evidence
 inline constexpr std::uint8_t kProjectObservedOnly = 17;  // no file backs it (open research question, unverified; assumed to be official 1.9.2's)
-inline constexpr std::uint8_t kPatternVerified = 5;
+inline constexpr std::uint8_t kPatternVerified = 6;  // OS-CEPAT S1: v6 (tracker-ce, from the source: tracker-ce@7fd6c2c) is read
 inline constexpr std::uint8_t kInstrumentVerified = 9;
 inline constexpr std::uint8_t kPamdVerified = 1;
 
@@ -44,9 +44,22 @@ inline constexpr std::uint32_t kProjectBytes17 = 2324;
 // replaces the document. Never stricter than the reader. `why` (may be null) gets the reader's words for a refusal.
 bool project_frame_ok(const std::uint8_t* head, std::size_t n, std::uint32_t size, const char** why = nullptr) noexcept;
 inline constexpr std::uint32_t kPatternHead = 28;
-inline constexpr std::uint32_t kPatternRow = 769;   // length byte + 128 steps of 6 bytes
-inline constexpr std::uint32_t kPatternBytes8 = 6184;
-inline constexpr std::uint32_t kPatternBytes12 = 9260;
+inline constexpr std::uint32_t kPatternRow = 769;    // v1..v5: length byte + 128 steps of 6 bytes (8, 12 or 16 rows)
+inline constexpr std::uint32_t kPatternBytes8 = 6184;   // v1..v5, 8 tracks
+inline constexpr std::uint32_t kPatternBytes12 = 9260;  // v1..v5, 12 tracks (firmware 1.9)
+// v5, 16 tracks (tracker-ce reads it; OS-CEPAT S1b, from the source: tracker-ce@7fd6c2c:core/include/patternFileValidation.h:12, 26-29)
+inline constexpr std::uint32_t kPatternBytes16 = 12336;
+// v6 (OS-CEPAT S1, tracker-ce@7fd6c2c:core/source/mtSequencer.h:282-336, from the source): length byte + 128 steps
+// of 8 bytes per row, 28 + n * 1,025 + 4 bytes for n = 8, 12 or 16 tracks; the size u16 at offset 12 says which.
+inline constexpr std::uint32_t kPatternRow6 = 1025;
+inline constexpr std::uint32_t kPatternRowMax = kPatternRow6;
+inline constexpr std::uint32_t kPatternBytes6_8 = 8232;    // 28 + 8 * 1,025 + 4
+inline constexpr std::uint32_t kPatternBytes6_12 = 12332;  // 28 + 12 * 1,025 + 4
+inline constexpr std::uint32_t kPatternBytes6_16 = 16432;  // 28 + 16 * 1,025 + 4
+// The track count a v6 declared size gives: 8, 12 or 16, or 0 when the size is not one of the three v6 sizes.
+inline constexpr std::uint32_t pattern_tracks_v6(std::uint32_t size) noexcept {
+  return size == kPatternBytes6_8 ? 8u : size == kPatternBytes6_12 ? 12u : size == kPatternBytes6_16 ? 16u : 0u;
+}
 inline constexpr std::uint32_t kInstrumentBytes = 392;  // header + sampler struct + CRC: a whole .mti, the head of a .pti
 inline constexpr std::uint32_t kInstrumentBytesLegacy = 388;  // versions 1 to 3
 inline constexpr std::uint32_t kPamdHeader = 16;
@@ -104,12 +117,16 @@ bool inspect_names(const std::uint8_t* payload, std::uint32_t length, std::uint3
 struct ImportReport : FormatReport {
   std::uint8_t version = 0;       // the structure version byte of the file (0 until it was read)
   bool observed_only = false;    // project v17: a layout with no file of it to check (open research question), read like v16 (not unverified_version)
-  std::uint8_t tracks = 0;        // pattern: 8 or 12
+  std::uint8_t tracks = 0;        // pattern: 8, 12 or 16
   std::uint8_t start_pattern = 0; // project: the pattern the project opens on, the project file's saved-pattern field (0x114), at least 1; 0 until read (OS-007j)
   std::uint32_t names_applied = 0;  // PAMD: pattern names set
   std::uint32_t names_skipped = 0;  // PAMD: names of patterns that are not in the project
   bool partial_record = false;    // PAMD: bytes after the last whole record, ignored
   bool names_kept = false;        // PAMD: the file was kept verbatim (OGPN) for Export; false: the pool had no room
+  // OS-CEPAT S1 (A10), pattern v6 and the id map: what the new columns and the cleared ids cost.
+  std::uint32_t micromoves_dropped = 0;  // micromove values with no FX column free for them, or with Random value 16 in the other one
+  std::uint32_t values_clamped = 0;      // volume values above 100, read as full volume (tracker-ce never writes them)
+  std::uint32_t ce_fx_cleared = 0;       // OG FX ids 75..127, cleared to (none, 0) by the id map of 3.1 (OS-CEPAT S1b)
 };
 
 namespace detail {
@@ -159,15 +176,18 @@ class ProjectReader final : public detail::ReaderBase {
   std::uint8_t image_[kProjectImageMax];
 };
 
-// pattern_NN.mtp: 8 tracks (6,184 B) or 12 tracks (9,260 B, firmware 1.9), versions 1 to 5 verified. Creates
-// the pattern `params.index` (1..255), one track row at a time. Memory: 1.8 KB (MK66).
+// pattern_NN.mtp: 8 tracks (6,184 B), 12 tracks (9,260 B, firmware 1.9) or 16 tracks (12,336 B, tracker-ce's v5;
+// versions 1 to 5, the stream tells the track count, OS-CEPAT S1b), or v6 (8, 12 or 16 tracks, 8,232 / 12,332 /
+// 16,432 B, tracker-ce: the declared size at offset 12 gives the layout, OS-CEPAT S1; versions above 6 with a v6
+// size are read the same way and flagged unverified_version). Creates the pattern `params.index` (1..255), one
+// track row at a time. Memory: 2.1 KB (MK66, in the SDRAM slack window, see platform/mk66/src/app_main.cpp).
 class PatternReader final : public detail::ReaderBase {
  public:
   void begin(core::ByteSource& source, model::ModelArena& arena, const ReadParams& params) noexcept override;
   Progress step(std::size_t byte_budget = kDefaultStepBudget) noexcept override;
 
  private:
-  enum class State : std::uint8_t { Head, Row, Tail, Crc, End, Done, Failed };
+  enum class State : std::uint8_t { Head, Row, Tail, Tail12, Crc, End, Done, Failed };
 
   void reject(FormatError e, const char* detail) noexcept;
   void on_head() noexcept;
@@ -179,10 +199,13 @@ class PatternReader final : public detail::ReaderBase {
   std::size_t have_ = 0;
   std::uint8_t id_ = 0;
   bool created_ = false;
+  bool v6_ = false;               // version >= 6: the declared size at offset 12 fixed the layout (OS-CEPAT S1)
+  std::uint8_t tracks_total_ = 0;  // v6: the track count the declared size gives
   std::uint8_t track_ = 0;
   std::uint8_t first_length_ = 0;
-  std::uint32_t crc8_ = 0;  // the CRC after the first eight tracks: it is the file's CRC when the file ends there
-  std::uint8_t scratch_[kPatternRow];
+  std::uint32_t crc8_ = 0;   // the CRC after the first eight tracks: it is the file's CRC when the file ends there
+  std::uint32_t crc12_ = 0;  // the same after twelve tracks (OS-CEPAT S1b: a 16-track v5 file goes on, a 12-track one ends here)
+  std::uint8_t scratch_[kPatternRowMax];
   model::Step row_[model::kMaxPatternLength];
 };
 
@@ -245,7 +268,8 @@ class PamdReader final : public detail::ReaderBase {
 struct ExportDrops {
   std::uint32_t tracks_beyond_12 = 0;      // steps that hold something in tracks 13-16 (OG 1.9 has 12 tracks)
   std::uint32_t engine_fx = 0;             // FX columns with an engine FX type (128..255), written as none
-  std::uint32_t core_fx = 0;               // FX columns with a core FX type (43..127, ADR 0004), written as none
+  std::uint32_t core_fx = 0;               // FX columns with a core FX type (43..95, ADR 0004), written as none
+  std::uint32_t ce_fx = 0;                 // FX columns with a tracker-ce FX type (96..127 = OG id + 53, ADR 0004 amendment 3), written as none
   std::uint32_t volume_as_fx18 = 0;        // volume columns written as FX 18 (kept, but no longer a column)
   std::uint32_t volume_dropped = 0;        // volume columns that could not be written: both FX slots taken, or FX 18 there
   std::uint32_t track_settings = 0;        // tracks with a pan, solo, output bus or external-audio type: OG has none
@@ -258,6 +282,7 @@ struct ExportDrops {
   std::uint32_t unknown_chunks = 0;        // native chunks this version keeps for a newer one: no OG home
   std::uint32_t instrument_names_cut = 0;  // instrument names longer than the OG's 31 characters
   std::uint32_t lfo_sine = 0;              // OS-LFOSINE: sample instruments with an LFO of the Sine shape (OG has five shapes): written as Triangle
+  std::uint32_t wt_mod = 0;                // OS-CEWTENV W1: WT slots of a sample instrument (an envelope loop of 2 or 3; OG 1.9 has no WT modes): written off (loop 0, enable 0, the shape held to 0..4, the warp and sustain bytes zero), one per slot
   std::uint32_t pattern_names = 0;         // patterns with a name that is not the one in the PAMD file Export writes back
   std::uint32_t settings_ignored = 0;      // OGPM / OGPN chunks that were not valid (or repeated) and so were not used
   // OS-FILES-C C2b (docs/specs/OS-FILES-C.md section 4): the PCM stage and the levels, counted by app/og_export.h when it plans the sample instruments (no writer counts them).

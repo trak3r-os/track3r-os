@@ -142,3 +142,5 @@ against formulae and the draw API's budgets; `pitch()` and `O3M_NOTE_RAMP`.
 
 Copy `sid.tmod` to `/modules/instruments/` on a test card (or pick SID from the ENGINE list when it is built in), Instrument page F1 ENGINE, pick SID, play: each wave, the PWM, sync and ring, the envelope times by ear, and read
 `diag mod` and `diag cpu` for a held note, one voice and three (OS-SID bench items B1, B3 and B4). The cost target is at most 5 % of a block a sounding voice (S8).
+
+RATE (OS-MODRATE, ABI 1.13): this module declares `O3M_FX_RATE` (`"rate": true` in `module.json`), so the MIX page offers FULL, 1/2 and 1/4: it is called for half or a quarter of the frames at 22050 or 11025 Hz and the OS holds each sample. Every rate is derived from `host->sample_rate` at `init`.

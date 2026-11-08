@@ -1,0 +1,193 @@
+# OS-QA: rows of docs/qa/catalogue/perform.md proven with audio renders and strip-text asserts (no `snap` here, so this scenario needs no golden): QA-PRF-002, 003, 013, 020, 021, 031, 140 and 142. The document is `sound`
+# (instrument 1, a looped sample); a step is recorded on the pattern first so the Perform slots have a note to work on. Each `render` asserts the audio the engine produced over the windows named; the state asserts read the strip
+# (msg=, spaces as _). The slots' own drawing and the pages stay open in the rows.
+document sound
+audio on
+wait 30
+tap rec
+action cursor.jump_fraction 0
+action instrument.select 1
+pad 12
+assert model pat.1.0.0.note=61
+assert model pat.1.0.0.instr=1
+tap rec
+wait 50
+tap performance
+assert state screen=PERFORM
+press shift
+pad 0
+release shift
+# QA-PRF-020: a VOLUME slot turned on the held pad's track cuts the render (about -12 dB at -50) and silences it at -100; the value back at 0 gives the full level again.
+render vol 1450
+tap play
+assert state playing=1
+wait 200
+pad 24 down
+wait 200
+pad 24 up
+tap f8
+wait 200
+pad 36 down
+wait 200
+pad 36 up
+tap f8
+wait 200
+pad 12 down
+wait 20
+encoder 25
+wait 180
+encoder 100
+wait 200
+pad 12 up
+tap f8
+wait 100
+tap play
+wait 200
+assert audio vol in=30-190 rms=-9.03+-0.3 peak=-6.02+-0.3 pan=C+-0.2
+assert audio vol in=260-390 rms=-21.07+-0.5
+assert audio vol in=460-590 rms=-9.03+-0.3
+assert audio vol in=660-790 silent
+assert audio vol in=860-990 rms=-9.03+-0.3
+assert audio vol in=1080-1190 rms=-9.03+-0.3
+assert audio vol in=1260-1390 rms=-9.03+-0.3
+# QA-PRF-021: a PANNING slot turned on the held pad's track moves the render's pan off centre (hard left at -75) and the value back at 0 gives the centre back.
+render pan 1650
+tap play
+wait 200
+pad 13 down
+wait 200
+pad 13 up
+tap f8
+wait 200
+pad 25 down
+wait 200
+encoder -75
+wait 200
+pad 25 up
+tap f8
+wait 200
+pad 37 down
+wait 200
+pad 37 up
+tap f8
+wait 200
+tap play
+wait 200
+assert audio pan in=30-190 pan=C+-0.2
+assert audio pan in=260-390 pan=L
+assert audio pan in=460-590 pan=C+-0.2
+assert audio pan in=660-790 pan=R
+assert audio pan in=860-990 pan=-6.02+-0.6
+assert audio pan in=1060-1190 pan=C+-0.2
+assert audio pan in=1260-1390 pan=L
+assert audio pan in=1460-1590 pan=C+-0.2
+# QA-PRF-031: a TUNE slot moves the render's pitch by whole semitones (+12 is an octave up) and the value back at 0 gives the note's own pitch back.
+render tune 1500
+tap play
+wait 200
+pad 14 down
+wait 200
+pad 14 up
+tap f8
+wait 200
+pad 26 down
+wait 200
+pad 26 up
+tap f8
+wait 200
+pad 38 down
+wait 200
+pad 38 up
+tap f8
+wait 200
+tap play
+wait 200
+assert audio tune in=30-190 pitch=441.18+-3c
+assert audio tune in=280-390 pitch=220.59+-3c
+assert audio tune in=680-790 pitch=882.35+-3c
+assert audio tune in=1080-1190 pitch=661.02+-3c
+assert audio tune in=1280-1390 pitch=441.18+-3c
+# QA-PRF-002 / QA-PRF-003: Shift + F1 stores the scene at once (SCENE 1 STORED, the release recalls nothing), a plain F1 recalls it (no SCENE IS EMPTY), and F2 held one second stores SCENE 2 STORED; the render then plays the stored scene.
+render scene 700
+tap play
+wait 200
+pad 36 down
+press shift
+tap f1
+assert state msg=SCENE_1_STORED
+release shift
+assert state msg=SCENE_1_STORED
+pad 36 up
+tap f8
+wait 200
+wait 200
+tap f1
+assert state msg=SCENE_1_STORED
+wait 200
+wait 50
+assert audio scene in=30-190 rms=-9.03+-0.3
+assert audio scene in=460-590 rms=-9.03+-0.3
+assert audio scene in=660-690 silent
+press f2
+wait 1100
+assert state msg=SCENE_2_STORED
+release f2
+assert state msg=SCENE_2_STORED
+tap f8
+render scene2 600
+wait 250
+tap f2
+wait 350
+tap f8
+tap play
+wait 200
+assert audio scene2 in=40-230 rms=-9.03+-0.3
+assert audio scene2 in=300-590 silent
+assert state screen=PERFORM page=0
+tap performance
+assert state screen=PERFORM page=1
+# QA-PRF-140: F6 on the DJ page says LATCH ON: FILTER AND PAD EFFECTS STAY; a second tap says LATCH OFF.
+tap f6
+assert state msg=LATCH_ON:_FILTER_AND_PAD_EFFECTS_STAY
+tap f6
+assert state msg=LATCH_OFF
+# QA-PRF-142: a tap on F4 says FILTER: HOLD, TURN THE ENCODER.
+tap f4
+assert state msg=FILTER:_HOLD,_TURN_THE_ENCODER
+tap performance
+assert state screen=PERFORM page=0
+tap rec
+tap down
+tap down
+tap rec
+# QA-PRF-013: an OVERDRV slot turned up on the affected tracks raises the render's spectral centroid step by step, and back down lets it fall.
+render od 1700
+tap play
+wait 200
+pad 12 down
+wait 200
+pad 12 up
+tap f8
+wait 200
+pad 24 down
+wait 200
+pad 24 up
+tap f8
+wait 200
+pad 36 down
+wait 200
+pad 36 up
+tap f8
+wait 200
+pad 0 down
+wait 200
+pad 0 up
+tap f8
+wait 100
+tap play
+wait 200
+assert audio od in=30-190 centroid<450
+assert audio od in=260-390 centroid>470
+assert audio od in=660-790 centroid>600
+assert audio od in=1060-1190 centroid>900
+assert audio od in=1460-1590 centroid<460

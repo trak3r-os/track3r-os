@@ -34,8 +34,8 @@ Each soft key does what its label says on the screen in view. These are examples
 | `F3` | opens the JUMP chooser | shows the MST FX page | - |
 | `F4` | **FILL**: opens the Fill dialog | shows the STEMS page | QA-PAT-086 |
 | `F5` | **PREVIEW** | **CUE LVL**: goes to the cue level | - |
-| `F6` | **INVERT** | - | - |
-| `F7` | **TOOLS**: opens the tools list | **MUTE**: mutes the track under the cursor | - |
+| `F6` | **RE FILL** (**REPEAT**: the last fill or TOOLS apply again; the key reads **REPEAT** after a TOOLS apply) | - | QA-PAT-435 |
+| `F7` | **TOOLS**: opens the verb menu (pads 1-16 pick a verb); held + a pad runs the verb directly | **MUTE**: mutes the track under the cursor | QA-PAT-436, QA-PAT-456 |
 | `F8` | **UNDO** (`Shift` + `F8` is **REDO**) | **SOLO**: solos the track under the cursor | QA-PAT-089 |
 
 If a `Shift` + soft key has no label, it does nothing. It never acts as the plain key. <!-- QA-GLB-013 -->
@@ -58,11 +58,12 @@ If a `Shift` + soft key has no label, it does nothing. It never acts as the plai
 | `Sample Recorder` | the Record screen | - |
 | `Song` | the Song screen, when you let go of the key. Held: the Song screen until you let go, then back to where you were ([Song](song.md)) | - |
 | `Pattern` | the Pattern screen, when you let go of the key. Held, with the encoder: the tempo, on any screen; held, with a pad: tap tempo (see [Tempo from any screen](#tempo-from-any-screen)) | QA-GLB-153, QA-GLB-155 |
-| `Shift` + `Pattern` | opens the Navigator; press `F8` (**GO**) to go to the screen you chose, or `F7` (**CLOSE**) to leave it | - |
+| `Song` + `Pattern`, or `Master` + `Song`, pressed together | opens the Navigator on any screen; press `F8` (**GO**) to go to the screen you chose, or `F7` (**CLOSE**) to leave it. Neither key does its own job, and the Song peek and the held volume and tempo turns stay off | QA-GLB-233 |
+| `Shift` + `Pattern` | lists the module apps that are not tools; `F1` or `F8` (**LAUNCH**) starts one, `Pattern` leaves the list. It was the Navigator before | QA-MOD-252 |
 | `Shift` + `Master` | steps to the next colour theme: Amiga, Black, White, then Amiga again. The THEME row on Config says the same. New in track3r-os. Not yet checked on the unit. | QA-GLB-157 |
 | `Shift` + `Config` | opens the help page of the screen you are on (see [The help page](#the-help-page)) | QA-GLB-141 |
 
-![Panel: Shift is ringed and Pattern is marked. Hold Shift, then press Pattern to open the Navigator.](img/chord_navigator.svg)
+![Panel: Song and Pattern are marked. Press both together to open the Navigator.](img/chord_navigator.svg)
 
 ## Tempo from any screen
 <!-- sync: src=app/src/bindings.cpp qa=QA-GLB-153,QA-GLB-154,QA-GLB-155 -->
@@ -104,13 +105,31 @@ These four keys select a column of the Pattern grid. They work on the Pattern sc
 | Key | Colour | What it does on Pattern | Ref |
 |---|---|---|---|
 | `Note` | teal | selects the Note column; hold it to open the note popup | - |
-| `Instr` | yellow | selects the Instr column; hold it to open the instrument list | - |
-| `Vol` | purple | selects the volume column. The step grid calls this column **VOL**. Hold the key to open its popup. | - |
+| `Instr` | yellow | selects the Instr column; hold it to open the instrument list. The tap acts when you let go of the key, so `Instr` with `Vol` or `Fx` is a chord and selects nothing | - |
+| `Vol` | purple | selects the volume column. The step grid calls this column **VOL**. Hold the key to open its popup. The tap acts when you let go of the key. | - |
 | `Fx` | cyan | selects the FX column; hold `Fx` and turn the encoder to change the FX type | - |
+
+### Learn a MIDI control
+<!-- sync: src=app/src/bindings.cpp qa=QA-GLB-118,QA-GLB-177,QA-GLB-178,QA-GLB-179 -->
 
 Press `Vol` and `Fx` together to open Learn.
 
 ![Panel: Vol and Fx are marked. Press both together to open Learn.](img/chord_learn.svg)
+
+The Learn dialog works on the row under the cursor of the screen below. Move a MIDI control (a CC) and it binds to that row: the target line names the parameter, its instrument and the controller (`CC 74 PICKUP`). `F1` unbinds it, `F2` changes how the controller moves it (**MODE**: pickup, jump, relative), `F3` deletes the binding the list's cursor is on, `F4` clears them all (pressed twice), `F8` goes back. `F5` **FOLLOW** makes the binding follow the selected instrument instead of its own — the target line then reads `INS *` and the binding text ends `FOLLOW` — and `F5` again pins it back to its instrument. The key row names `F5` only when the target is an instrument parameter with a binding. <!-- QA-GLB-118, QA-GLB-177 -->
+
+Use your keyboard as a synth: bind the knobs on one instrument, press `F5` on each, then select any instrument — the same knobs now shape whichever instrument is selected. A binding follows instrument parameters only, and it acts only when the selected instrument has the row with its meaning (a sampler row on a MIDI instrument does nothing). A follow binding is saved with the project. <!-- QA-GLB-178, QA-GLB-179 -->
+
+### Put one parameter on the encoder
+<!-- sync: src=app/src/bindings.cpp,app/src/param_actions.cpp,app/src/rec_actions.cpp qa=QA-GLB-228,QA-GLB-229,QA-GLB-230,QA-GLB-231,QA-GLB-232 -->
+
+Any row that Learn can bind can also sit on the encoder, without a MIDI controller. Put the cursor on the row (for example on the Instrument screen), press `Instr` and `Fx` together, and the strip says `ENCODER: <PARAM> INS <n>`. A row Learn cannot bind says `NO TARGET FOR ENCODER`. There is one encoder target in all: pressing the chord on another row replaces it, and pressing it on the same row again only shows the message again. There is no clear gesture. The target stays on that row and that instrument until you replace it or switch the unit off. It is not saved. <!-- QA-GLB-228 -->
+
+To use it, hold `Instr` and `Vol` and turn the encoder, on any screen with no dialog open. Each click moves the row by one step; hold `Shift` for the coarse step. The strip shows `<PARAM> <value>`. Moves undo like a Learn knob. With no target the strip says `NO ENCODER TARGET (INSTR + FX2)`. While both keys are held the encoder does nothing else. Turning cancels the `Instr` popup and the `Vol` tap, so a turn never selects a column. Pressing the two keys without turning does nothing. <!-- QA-GLB-229, QA-GLB-230 -->
+
+Recording follows the Learn rule. In LIVE recording, with Record knob moves as FX on, a move writes the matching FX on the playing step (cutoff, panning, delay send, reverb send, overdrive and bit depth have one). In Edit with free recording, a move writes the FX on the cursor's step of the cursor's track, and one hold of the two keys is one undo unit. A row with no FX still moves the sound and records nothing: the strip says `REC FX: <PARAM> HAS NO FX` on the first move. Browse records nothing. <!-- QA-GLB-231, QA-GLB-232 -->
+
+New in track3r-os. Not yet checked on the unit.
 
 ## Edit block
 <!-- sync: src=app/src/step_actions.cpp,app/src/bindings.cpp qa=QA-PAT-007,QA-PAT-319,QA-PAT-320,QA-PAT-321,QA-SNG-003,QA-SNG-012,QA-SNG-028,QA-SNG-053,QA-SNG-054,QA-SNG-056,QA-SNG-057,QA-SNG-058,QA-GLB-014 -->
@@ -124,19 +143,19 @@ Each key has a second label printed on it. `Shift` + the key runs that label.
 | `Delete` (second label: Backspace) | clears what the cursor column holds: the whole step in Note or Instr, the volume in Vol, the FX in Fx. With a block selected, it clears the highlighted columns, or whole steps when the block spans tracks. | `Shift` + `Delete` removes the step under the cursor and pulls the steps below up, to close a gap. It is the reverse of `Insert`, and works from the block's first step when a block is selected. | - |
 | `Up`, `Down`, `Left`, `Right` | move the cursor | `Shift` + `Up` or `Down` selects the block; `Shift` + `Left` or `Right` grows a block of columns one column at a time; past the last column it takes the next track whole | QA-PAT-007, QA-PAT-319 |
 
-A block can cover just some columns of one track. `Delete` and `Copy` then act on those columns only, while Fill and the TOOLS list always take whole steps, and the strip says **WHOLE STEPS** when they do. <!-- QA-PAT-320, QA-PAT-321 --> See [Pattern](pattern.md).
+A block can cover just some columns of one track. `Delete` and `Copy` then act on those columns only, while Fill and the TOOLS menu always take whole steps, and the strip says **WHOLE STEPS** when they do. <!-- QA-PAT-320, QA-PAT-321 --> See [Pattern](pattern.md).
 
 On the Song screen, `Insert` adds a slot, `Shift` + `Insert` adds a slot with a copy of the pattern, and `Delete` removes the slot, or clears the selected cells when the cursor is in the track map. `Shift` + `Delete` cuts instead: the slot (or the selected slots) goes into the slot clipboard and out of the list, and in the track map the selected cells go into the song clip and are cleared; `Shift` + `Copy` puts them back anywhere. Hold `Copy` and press `Up` or `Down` to move the slot (or the selected slots) one place, and keep the arrow held to go on. `Note` jumps to the next slot that holds the same pattern, and `Shift` + `Note` to the previous one. The cut, the move and the jump are new in track3r-os. On lists, `Shift` + `Up` and `Shift` + `Down` move one page. <!-- QA-SNG-003 --> <!-- QA-SNG-012 --> <!-- QA-SNG-028 --> <!-- QA-SNG-053 --> <!-- QA-SNG-054 --> <!-- QA-SNG-056 --> <!-- QA-SNG-057 --> <!-- QA-SNG-058 --> <!-- QA-GLB-014 -->
 
 The second label Backspace is not what `Shift` + `Delete` does on Pattern: it pulls steps up and erases nothing backwards. The backspace is the plain `Delete` key on the on-screen keyboard. The pull is new in track3r-os.
 
-Most screen buttons act when you press them. `Pattern`, `Song` and `Master` act when you let go, because a hold can mean something else: `Shift` + `Pattern` opens the Navigator, and a hold of `Song` for 0.4 seconds shows the Song screen as a peek. <!-- QA-MIX-031, QA-SNG-060, QA-SNG-061 --> Playback does not stop when you change screen. Leaving Perform ends its effects, except when you go to the Mixer or Song; see [Perform](perform.md). <!-- QA-PRF-011 -->
+Most screen buttons act when you press them. `Pattern`, `Song` and `Master` act when you let go, because a hold can mean something else: `Song` + `Pattern` and `Master` + `Song` open the Navigator and `Shift` + `Pattern` lists the module apps, and a hold of `Song` for 0.4 seconds shows the Song screen as a peek. <!-- QA-MIX-031, QA-SNG-060, QA-SNG-061 --> Playback does not stop when you change screen. Leaving Perform ends its effects, except when you go to the Mixer or Song; see [Perform](perform.md). <!-- QA-PRF-011 -->
 
 The buttons have no lights. The screen shows the state instead, for example the mode chip and the red **REC** badge on Pattern. <!-- QA-PAT-001 -->
 
-Some keys act on a tap and some only while you hold them. On Pattern, `F1` opens the pattern picker only while you hold it, so a tap opens nothing. On Pattern, `F2` and `F3` toggle a chooser with a tap. On Song, `F7` selects the tempo field, and a second tap taps the tempo. On the Mixer, `F1` on the MIXER page changes nothing. <!-- QA-MIX-032 -->
+Some keys act on a tap and some only while you hold them. On Pattern, `F1` opens the pattern picker only while you hold it, so a tap opens nothing. On Pattern, `F7` held with a pad runs that verb without opening the menu, so a tap of `F7` opens the menu. On Pattern, `F2` and `F3` toggle a chooser with a tap. On Song, `F7` selects the tempo field, and a second tap taps the tempo. On the Mixer, `F1` on the MIXER page changes nothing. <!-- QA-MIX-032, QA-PAT-456 -->
 
-While a dialog or a list is open, it owns the key row: the row shows only the dialog's own keys, every other key is blank and does nothing, and `Shift` does not change the row. `F8` goes back. On the on-screen keyboard, `F8` keeps the text and `F7` cancels. Learn shows **BACK** on `F8` alone until it has a target or a binding. Fill shows **FILL** on `F1` and **BACK** on `F8`, and a running WAV export shows **CANCEL** on `F8`. The Navigator reads **GO** on `F1`, **CLOSE** on `F7` and **GO** on `F8`; with `Shift` held it reads only **CLOSE** and **GO**. The screen buttons do nothing until the dialog closes. New in track3r-os. Not yet checked on the unit. On Song, a question on the strip asks **ALL** (`F1`) or **UNIQUE** (`F2`), and any other key withdraws it. On Config, **APPLY** and **DEFAULTS** ask for a second press within a short time. <!-- QA-GLB-118, QA-GLB-119, QA-INS-050 -->
+While a dialog or a list is open, it owns the key row: the row shows only the dialog's own keys, every other key is blank and does nothing, and `Shift` does not change the row. `F8` goes back. On the on-screen keyboard, `F8` keeps the text and `F7` cancels. Learn shows **BACK** on `F8` alone until it has a target or a binding, and **FOLLOW** on `F5` when the target is a bound instrument parameter (see "Learn a MIDI control" above). Fill shows **FILL** on `F1` and **BACK** on `F8`, and a running WAV export shows **CANCEL** on `F8`. The Navigator reads **GO** on `F1`, **CLOSE** on `F7` and **GO** on `F8`; with `Shift` held it reads only **CLOSE** and **GO**. The screen buttons do nothing until the dialog closes. New in track3r-os. Not yet checked on the unit. On Song, a question on the strip asks **ALL** (`F1`) or **UNIQUE** (`F2`), and any other key withdraws it. On Config, **APPLY** and **DEFAULTS** ask for a second press within a short time. <!-- QA-GLB-118, QA-GLB-119, QA-INS-050 -->
 
 ## Transport
 
@@ -168,6 +187,8 @@ The pad mode stays until you change it and is not saved.
 | turn the encoder | changes the value under the cursor, or scrolls the list in view | - |
 | `Shift` + turn the encoder | a coarse step on the Instrument screen; a fine step on the Song screen | - |
 | turn the encoder quickly in a list | in File, Sample load, the Modules list and the module picker, a quick spin moves 4 rows a detent, then 8; a slow turn moves one. The Pattern cursor, every value and the `Shift` coarse steps are unchanged. New in track3r-os. Not yet checked on the unit. The numbers are being tuned. | QA-GLB-159 |
+
+With `Instr` and `Vol` both held, the encoder moves the parameter you picked with `Instr` and `Fx` and does nothing else (see "Put one parameter on the encoder" above). New in track3r-os. Not yet checked on the unit.
 
 The encoder has no push function.
 

@@ -53,6 +53,8 @@ enum class Fault : std::uint8_t {
   // the image's end (hex_validator.h, OS-GATE-BOOTCRASH), appended after NameLong so that no value moves
   NotPadded,     // the image's end (last address + 1) is not a multiple of 4096: the SD bootloader leaves a short final sector as it was, so the tail would be stale bytes
   CopyExists,    // a pad: the padded copy's name is taken (an older copy, or the original itself): nothing is written or removed, the user picks it from the list (OS-UPDPAD)
+  // the image's end again (hex_validator.h, OS-BUG-LASTSECTOR), appended so that no value moves
+  LastSector,    // the image's end (last address + 1) is above 0xFF000: it reaches the last flash sector, after which the unit hung (never waived on the device)
   Count
 };
 
@@ -96,6 +98,7 @@ inline constexpr const char* fault_name(Fault f) noexcept {
     case Fault::NameLong: return "name over 30 characters";
     case Fault::NotPadded: return "image not padded: may not boot";
     case Fault::CopyExists: return "copy exists, pick it from list";
+    case Fault::LastSector: return "image reaches last flash sector";
     case Fault::Count: break;
   }
   return "?";

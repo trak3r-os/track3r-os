@@ -3,9 +3,12 @@
 
 #include <o3os/app/dir_scan.h>
 #include <o3os/app/import_job.h>
+#include <o3os/core/fast_math.h>
+#include <o3os/module/image.h>
 
 #include "text_line.h"
 
+#include <cstddef>
 #include <cstring>
 
 namespace o3os::app {
@@ -16,14 +19,7 @@ using hal::storage::Status;
 namespace med = formats::med;
 namespace mod = formats::mod;
 
-constexpr std::size_t kCellsPerByte = 8;  // the platform's byte budget of a pass, as cells of the importers' work
-
-// The importers never read a byte of the ByteSource of FormatReader::begin (they take ReadParams::random): this is the one they are given.
-class NoBytes final : public core::ByteSource {
- public:
-  core::IoResult read(void*, std::size_t) noexcept override { return {0, core::IoStatus::Failed}; }
-};
-NoBytes g_no_bytes;
+constexpr std::size_t kCellsPerByte = 8;  // the platform's byte budget of a pass, as cells of the importer's work
 
 constexpr char upper(char c) noexcept { return c >= 'a' && c <= 'z' ? static_cast<char>(c - ('a' - 'A')) : c; }
 
@@ -65,12 +61,16 @@ void module_report_text(const ModuleSummary& s, ModuleReportText& out) noexcept 
   (void)line().str(s.name);
   if (!s.ok) {
     (void)line().str("FAILED    ").str(s.error);
-    if (s.detail[0] != '\0') {
+    // OS-FLASHDIET I2: the importer file's refusals carry two hint lines of their own (docs/specs/OS-FLASHDIET.md 3.6), '\n'-separated in `detail`
+    for (const char* p = s.detail; *p != '\0';) {
       Line l = line();
       l.str("          ");
-      for (const char* p = s.detail; *p != '\0'; ++p) {
+      for (; *p != '\0' && *p != '\n'; ++p) {
         const char c[2] = {upper(*p), '\0'};
         l.str(c);
+      }
+      if (*p == '\n') {
+        ++p;
       }
     }
     return;
@@ -245,6 +245,26 @@ void ModuleImport::fail(const char* text) noexcept {
   state_ = State::Failed;
 }
 
+// OS-FLASHDIET I2 (3.6): a refusal of the importer file (no modules/importers/<stem>.tmod, or one for another firmware) fails at begin() with the
+// report page's two extra lines: NEEDS MODULES/IMPORTERS/TRACKER.TMOD and FROM THE STARTER ZIP OF THIS RELEASE (each within the page's 46 characters).
+void ModuleImport::fail_importer_file(const char* text) noexcept {
+  std::size_t n = 0;
+  const char* const parts[2] = {"needs modules/importers/", ".tmod\nfrom the starter zip of this release"};
+  // "needs modules/importers/<stem>.tmod\nfrom the starter zip of this release"
+  for (const char* p = parts[0]; *p != '\0' && n + 1u < sizeof detail_buf_; ++p) {
+    detail_buf_[n++] = *p;
+  }
+  for (const char* p = importer_stem_; *p != '\0' && n + 1u < sizeof detail_buf_; ++p) {
+    detail_buf_[n++] = *p;
+  }
+  for (const char* p = parts[1]; *p != '\0' && n + 1u < sizeof detail_buf_; ++p) {
+    detail_buf_[n++] = *p;
+  }
+  detail_buf_[n] = '\0';
+  summary_.detail = detail_buf_;
+  fail(text);
+}
+
 ModuleImport::Probe ModuleImport::decide(const char* name, const std::uint8_t* head, std::size_t n, std::uint32_t size) noexcept {
   // What the bytes are: the registry's own tests (formats/src/builtin_formats.cpp sniff_med, sniff_mod, sniff_s3m; the S3M and MOD ones are formats::mod::sniff_kind).
   Probe seen = Probe::NotModule;
@@ -301,6 +321,12 @@ ModuleImport::Probe ModuleImport::probe(hal::storage::Storage& storage, const ch
 }
 
 ModuleImport::Start ModuleImport::begin(hal::storage::Storage& storage, const char* path, model::ModelArena& arena, ImportEngine engine) noexcept {
+  // OS-FLASHDIET I3 review: with no module host there is nothing to load or run the importer with: refuse at the top, whatever the card holds
+  // (a valid modules/importers/<stem>.tmod included — its header check below could pass) — the first step would dereference the null host.
+  if (modules_ == nullptr || loader_ == nullptr) {
+    fail("NO IMPORTER");
+    return Start::Failed;
+  }
   if (path == nullptr || !hal::storage::valid_path(path)) {
     return Start::BadPath;  // (nothing changes: the last import's report stays)
   }
@@ -309,15 +335,12 @@ ModuleImport::Start ModuleImport::begin(hal::storage::Storage& storage, const ch
   if (seen == Probe::NotModule) {
     return Start::NotModule;
   }
-  const bool med_ext = seen == Probe::Med || (seen == Probe::Unreadable && module_name_kind(path) == ModuleName::Med);
   close();
   state_ = State::Idle;
   summary_ = ModuleSummary{};
   active_ = true;
   touched_ = false;
-  reader_ = nullptr;
   arena_ = &arena;
-  is_med_ = med_ext;
   storage_ = &storage;
   summary_.valid = true;
   name_from(path);
@@ -325,18 +348,21 @@ ModuleImport::Start ModuleImport::begin(hal::storage::Storage& storage, const ch
   std::uint32_t size = 0;
   if (opened != Status::Ok || storage.size(file_, size) != Status::Ok) {
     fail(opened == Status::NotFound ? "FILE NOT FOUND" : "READ ERROR");
-    return Start::Started;
+    return Start::Failed;  // OS-FLASHDIET I2 (QA-FIL-139/140): refused at begin: the platform does not hand it to the replace, the document stays as it was
   }
   window_.attach(storage, file_, size);
-  // The options only; the readers' begin() resets the project, so it waits for the first step() (after the platform's Settle).
-  if (is_med_) {
-    reader_ = &med_;
-    med_.options() = med::ImportReader::amiga_default();
-    med_.options().engine_fx = engine != ImportEngine::Modern;  // Auto and Amiga: the engine window (OS-008c's default); Modern: the OG / core mapping
-  } else {
-    reader_ = &mod_;
-    mod_.options() = mod::ImportOptions{};
-    mod_.options().engine_fx = engine == ImportEngine::Auto ? mod::EngineFx::Auto : (engine == ImportEngine::Amiga ? mod::EngineFx::On : mod::EngineFx::Off);
+  probe_ = seen;
+  engine_ = engine;
+  // OS-FLASHDIET I2/I3: the importer file's header is checked here, before anything is placed or reset: a missing file or one for another
+  // firmware (wrong kind, ABI or layout tag) fails at begin() and the document stays as it was (no module host at all is refused at the top).
+  // A set that already holds the importer (a native entry: the host tests and the simulator register it) is this build's own, version-locked
+  // by construction, so the card file is not consulted.
+  if (modules_ == nullptr || modules_->find_importer(importer_stem_) < 0) {
+    const module::Status imp = check_importer_header();
+    if (imp != module::Status::Ok) {
+      fail_importer_file(imp == module::Status::NotFound || imp == module::Status::Io || imp == module::Status::TooShort ? "NO IMPORTER" : "IMPORTER FOR OTHER FIRMWARE");
+      return Start::Failed;  // QA-FIL-139/140: the platform skips begin_replace and shows the strip directly, with the open project and its modules untouched
+    }
   }
   state_ = State::Running;
   return Start::Started;
@@ -346,73 +372,264 @@ ModuleImport::State ModuleImport::step(std::size_t byte_budget) noexcept {
   if (state_ != State::Running) {
     return state_;
   }
-  if (!touched_) {  // the first step: the reader resets the project (the platform has settled by now)
-    touched_ = true;
-    formats::ReadParams params;
-    params.size_hint = window_.size();
-    params.name = summary_.name;
-    params.random = &window_;
-    reader_->begin(g_no_bytes, *arena_, params);
-  }
   std::size_t cells = byte_budget / kCellsPerByte;
   cells = cells < kMinCells ? kMinCells : cells;
-  // Slices of kMinCells until the budget is spent, a card read costing kFillCells (see kFillCells).
+  return step_module(cells);
+}
+
+// OS-FLASHDIET I2/I3: the module path of step() — the only path now (I3: the linked readers are gone from the image). The first call resets
+// the document (as the linked reader's begin did), then loads the importer into the module region (the old project's SD modules were
+// unloaded at the platform's Settle, so the region is as free as it gets) and begins the import in it; later calls run the module's step()
+// until the budget is spent. A load that fails after the reset leaves the document empty (3.6): NO MODULE MEMORY or IMPORTER DAMAGED.
+ModuleImport::State ModuleImport::step_module(std::size_t cells) noexcept {
   std::size_t spent = 0;
-  formats::Progress p;
-  do {
-    const std::uint32_t fills = window_.fills();
-    p = reader_->step(kMinCells);
-    spent += kMinCells + static_cast<std::size_t>(window_.fills() - fills) * kFillCells;
-  } while (p == formats::Progress::Running && spent < cells);
-  switch (p) {
-    case formats::Progress::Running: return state_;
-    case formats::Progress::Done: summarise(); state_ = State::Done; return state_;
-    case formats::Progress::Failed: break;
+  if (!touched_) {
+    touched_ = true;
+    arena_->project.reset();  // the first step resets the document (the platform has settled by now)
+    if (!start_importer()) {
+      return state_;  // fail() has said why (NO MODULE MEMORY / IMPORTER DAMAGED)
+    }
   }
-  const formats::FormatReport& rep = reader_->report();
-  const bool overflow = is_med_ ? med_.importer().report().overflow : mod_.importer().report().overflow;
-  summary_.detail = rep.detail != nullptr ? rep.detail : "";
-  fail(overflow ? "SONG NEEDS MORE PATTERNS THAN A PROJECT HOLDS"
-               : (window_.error() != Status::Ok ? "READ ERROR" : import_failure_text(rep)));
+  if (imp_phase_ == ImpPhase::Loading) {  // the loader is stepped across passes, within this step's budget
+    while (loader_->state() == module::ModuleLoader::State::Running && spent < cells) {
+      (void)loader_->step(kMinCells);
+      spent += kMinCells;  // bytes of the importer's file count as budget
+    }
+    if (loader_->state() == module::ModuleLoader::State::Running) {
+      return state_;
+    }
+    if (loader_->state() != module::ModuleLoader::State::Done) {
+      fail(loader_->status() == module::Status::NoMemory ? "NO MODULE MEMORY" : "IMPORTER DAMAGED");
+      return state_;
+    }
+    imp_ = &loader_->module();
+    imp_from_card_ = true;
+    imp_phase_ = ImpPhase::Running;
+    if (!begin_import()) {
+      return state_;
+    }
+  }
+  const o3m_module* entry = imp_ != nullptr ? imp_->entry : nullptr;
+  const o3m_importer* t = entry != nullptr ? entry->importer : nullptr;
+  if (t == nullptr || t->step == nullptr) {
+    fail("IMPORTER DAMAGED");
+    return state_;
+  }
+  while (spent < cells) {
+    const std::uint32_t fills = window_.fills();
+    const std::uint32_t r = t->step(imp_state_, kMinCells);
+    spent += kMinCells + static_cast<std::size_t>(window_.fills() - fills) * kFillCells;
+    if (r == O3M_IMPORT_RUNNING) {
+      continue;
+    }
+    copy_report();
+    if (r == O3M_IMPORT_DONE) {
+      summarise();
+      state_ = State::Done;
+      return state_;
+    }
+    const formats::FormatReport& rep = report_.common;
+    summary_.detail = rep.detail != nullptr ? rep.detail : "";
+    fail(report_.overflow ? "SONG NEEDS MORE PATTERNS THAN A PROJECT HOLDS"
+                          : (window_.error() != Status::Ok ? "READ ERROR" : import_failure_text(rep)));
+    return state_;
+  }
   return state_;
 }
 
+// begin()'s header-only check of modules/importers/<stem>.tmod: the file is opened, its 64-byte header read and checked (check_header), and it is closed again;
+// the loader opens it again at the first step. Ok, or the Status that says what is wrong (NotFound / Io / TooShort: no importer; anything else: one for another firmware).
+module::Status ModuleImport::check_importer_header() noexcept {
+  char path[24 + module::kStemMax + 8];
+  std::size_t n = 0;
+  for (const char* p = "modules/importers/"; *p != '\0'; ++p) {
+    path[n++] = *p;
+  }
+  for (const char* p = importer_stem_; *p != '\0'; ++p) {
+    path[n++] = *p;
+  }
+  for (const char* p = ".tmod"; *p != '\0'; ++p) {
+    path[n++] = *p;
+  }
+  path[n] = '\0';
+  hal::storage::FileHandle f{};
+  if (storage_->open(path, f) != Status::Ok) {
+    return module::Status::NotFound;
+  }
+  std::uint32_t size = 0;
+  if (storage_->size(f, size) != Status::Ok) {
+    storage_->close(f);
+    return module::Status::Io;
+  }
+  o3m_file_header h{};
+  std::size_t have = 0;
+  while (have < sizeof h) {
+    std::size_t got = 0;
+    const Status s = storage_->read(f, reinterpret_cast<std::uint8_t*>(&h) + have, sizeof h - have, got);
+    if (s != Status::Ok || got == 0u || got > sizeof h - have) {
+      storage_->close(f);
+      return module::Status::Io;  // a short or failed read is an I/O refusal, whatever the status said
+    }
+    have += got;
+  }
+  storage_->close(f);
+  return module::check_header(h, size);
+}
+
+// The first step's load: the set may already hold the importer (a native entry: the host tests and the simulator register it), else the loader starts
+// loading modules/importers/<stem>.tmod into the region (ImpPhase::Loading; step() drives it on). With the module there, its state block is taken,
+// init() called and the import begun in it.
+bool ModuleImport::start_importer() noexcept {
+  arena_mark_ = modules_->state_mark();
+  const int at = modules_->find_importer(importer_stem_);
+  if (at >= 0) {
+    imp_ = modules_->importer_at(static_cast<unsigned>(at));
+    imp_from_card_ = false;
+    imp_phase_ = ImpPhase::Running;
+    return begin_import();
+  }
+  if (!loader_->begin(*storage_, *modules_, importer_stem_, sync_, true)) {  // true: the importer scan (modules/importers/ only)
+    fail(loader_->status() == module::Status::NoMemory ? "NO MODULE MEMORY" : "IMPORTER DAMAGED");
+    return false;
+  }
+  imp_phase_ = ImpPhase::Loading;
+  return true;
+}
+
+bool ModuleImport::begin_import() noexcept {
+  const o3m_module* entry = imp_ != nullptr ? imp_->entry : nullptr;
+  if (entry == nullptr || entry->importer == nullptr || entry->importer->begin == nullptr) {
+    fail("IMPORTER DAMAGED");
+    return false;
+  }
+  std::uint8_t* mem = nullptr;
+  std::uint32_t addr = 0;
+  if (!modules_->take_state(imp_->header.state_bytes, mem, addr)) {
+    fail("NO MODULE MEMORY");
+    return false;
+  }
+  imp_state_ = mem;
+  build_host();
+  if (entry->init(imp_state_, &host_) != 0) {
+    fail("IMPORTER DAMAGED");
+    return false;
+  }
+  formats::ImportModuleOptions opts{};
+  opts.engine = static_cast<std::uint8_t>(engine_);
+  file_window_ = o3m_file_window{sizeof(o3m_file_window), &window_, &ModuleImport::window_read, &ModuleImport::window_size};  // struct_size first
+  if (entry->importer->begin(imp_state_, &file_window_, format_index(), arena_, &opts, sizeof opts) != 0) {
+    fail("IMPORTER DAMAGED");
+    return false;
+  }
+  return true;
+}
+
+// close()'s unload: the module's close() and shutdown(), the state block and (when we loaded it from the card) the module itself back to the set, and the
+// arenas to the marks taken before the load.
+void ModuleImport::unload_importer() noexcept {
+  if (imp_ != nullptr) {
+    const o3m_module* entry = imp_->entry;
+    if (entry != nullptr && imp_state_ != nullptr) {
+      if (entry->importer != nullptr && entry->importer->close != nullptr) {
+        entry->importer->close(imp_state_);
+      }
+      if (entry->shutdown != nullptr) {
+        entry->shutdown(imp_state_);
+      }
+    }
+    if (imp_from_card_) {
+      (void)modules_->drop_importer(importer_stem_);
+    }
+    modules_->state_rollback(arena_mark_);
+  }
+  imp_ = nullptr;
+  imp_state_ = nullptr;
+  imp_from_card_ = false;
+  imp_phase_ = ImpPhase::None;
+}
+
+// The module's format list entry for the probed file: "mod", "s3m" or "med" (the module's table order is its own; the OS offers the file by extension).
+std::uint32_t ModuleImport::format_index() const noexcept {
+  const o3m_module* entry = imp_ != nullptr ? imp_->entry : nullptr;
+  const o3m_importer* t = entry != nullptr ? entry->importer : nullptr;
+  if (t == nullptr) {
+    return 0;
+  }
+  const char* const want = probe_ == Probe::Med ? "med" : (probe_ == Probe::S3m ? "s3m" : "mod");
+  for (std::uint32_t i = 0; i < t->format_count && i < O3M_IMPORTER_FORMATS_MAX; ++i) {
+    if (t->formats != nullptr && t->formats[i].ext != nullptr && std::strcmp(t->formats[i].ext, want) == 0) {
+      return i;
+    }
+  }
+  return 0;
+}
+
+void ModuleImport::copy_report() noexcept {
+  const o3m_module* entry = imp_ != nullptr ? imp_->entry : nullptr;
+  const o3m_importer* t = entry != nullptr ? entry->importer : nullptr;
+  if (t != nullptr && t->report != nullptr) {
+    (void)t->report(imp_state_, &report_, static_cast<std::uint32_t>(sizeof report_));
+  }
+}
+
+// The o3m_host the importer's init() is given: the OS's libm-free exp2 / log2; sin / cos are stubs (the importers need none of them). Its `size` stays the 52 bytes of ABI 1.0..1.11
+// (OS-INSFX-ABI2 A-12): the 1.12 members (get_clock, track_level) are not lent to an importer, so O3M_HOST_HAS is false for them there and no importer sees a NULL function.
+void ModuleImport::build_host() noexcept {
+  host_ = o3m_host{};
+  host_.abi_major = O3M_ABI_MAJOR;
+  host_.abi_minor = O3M_ABI_MINOR;
+  host_.size = static_cast<std::uint32_t>(offsetof(o3m_host, get_clock));
+  host_.sample_rate = 44100.0f;
+  host_.log = &ModuleImport::host_log;
+  host_.exp2_f = &ModuleImport::host_exp2;
+  host_.log2_f = &ModuleImport::host_log2;
+  host_.sin_f = &ModuleImport::host_sin;
+  host_.cos_f = &ModuleImport::host_cos;
+}
+
+float ModuleImport::host_exp2(float x) noexcept { return core::exp2_fast(x); }
+float ModuleImport::host_log2(float x) noexcept { return core::log2_fast(x); }
+
+// The importers need no sin / cos (the host table is complete anyway): a stub, not a copy of audio::ModuleVoices' polynomial (the copy was dead .text).
+float ModuleImport::host_sin(float) noexcept { return 0.0f; }
+float ModuleImport::host_cos(float) noexcept { return 0.0f; }
+
+std::int32_t ModuleImport::window_read(void* ctx, std::uint32_t offset, void* dst, std::uint32_t n) noexcept {
+  return static_cast<Window*>(ctx)->read_at(offset, dst, n) ? 0 : -1;
+}
+std::uint32_t ModuleImport::window_size(void* ctx) noexcept { return static_cast<Window*>(ctx)->size(); }
+
+// OS-FLASHDIET I2/I3: the report the module copied out (I3: the only side — the linked readers are gone).
 void ModuleImport::summarise() noexcept {
-  const formats::FormatReport& rep = reader_->report();
+  const formats::FormatReport& rep = report_.common;
   summary_.ok = true;
   summary_.dropped_groups = rep.dropped_groups;
   summary_.clamped = rep.sanitised;
-  if (is_med_) {
-    const med::ImportReport& r = med_.importer().report();
+  if (report_.is_med) {
     summary_.format = ModuleSummary::Format::Med;
-    summary_.amiga_commands = med_.options().engine_fx;
-    summary_.channels = static_cast<std::uint8_t>(r.tracks_used);
-    summary_.patterns = r.patterns;
-    summary_.order = r.order;
-    summary_.tracks_kept = r.tracks_kept;
-    summary_.tracks_dropped = r.tracks_dropped;
-    summary_.instruments = r.instruments;
-    summary_.instruments_refused = r.instruments_refused;
-    for (unsigned i = 0; i < 256u; ++i) {
-      summary_.cmd_approx += r.cmd_approx[i];
-      summary_.cmd_dropped += r.cmd_dropped[i];
-    }
+    summary_.amiga_commands = report_.engine_fx;
+    summary_.channels = report_.channels;
+    summary_.patterns = report_.patterns;
+    summary_.order = report_.order;
+    summary_.tracks_kept = report_.tracks_kept;
+    summary_.tracks_dropped = report_.tracks_dropped;
+    summary_.instruments = report_.instruments;
+    summary_.instruments_refused = report_.instruments_refused;
+    summary_.cmd_approx = report_.cmd_approx;
+    summary_.cmd_dropped = report_.cmd_dropped;
     return;
   }
-  const mod::ImportReport& r = mod_.importer().report();
-  summary_.format = r.kind == mod::Kind::S3m ? ModuleSummary::Format::S3m : ModuleSummary::Format::Mod;
-  summary_.amiga_commands = r.engine_fx;
-  summary_.channels = r.channels;
-  summary_.patterns = r.med.patterns;
-  summary_.order = r.med.order;
-  summary_.tracks_kept = r.med.tracks_kept;
-  summary_.tracks_dropped = r.med.tracks_dropped;
-  summary_.instruments = r.med.instruments;
-  summary_.instruments_refused = static_cast<std::uint16_t>(r.med.instruments_refused + (r.instruments_beyond > 0xFFFFu ? 0xFFFFu : r.instruments_beyond));
-  for (const mod::FxTally& f : r.fx) {
-    summary_.cmd_approx += f.approx;
-    summary_.cmd_dropped += f.dropped;
-  }
+  summary_.format = report_.mod_kind == static_cast<std::uint8_t>(mod::Kind::S3m) ? ModuleSummary::Format::S3m : ModuleSummary::Format::Mod;
+  summary_.amiga_commands = report_.engine_fx;
+  summary_.channels = report_.channels;
+  summary_.patterns = report_.patterns;
+  summary_.order = report_.order;
+  summary_.tracks_kept = report_.tracks_kept;
+  summary_.tracks_dropped = report_.tracks_dropped;
+  summary_.instruments = report_.instruments;
+  summary_.instruments_refused = report_.instruments_refused;
+  summary_.cmd_approx = report_.cmd_approx;
+  summary_.cmd_dropped = report_.cmd_dropped;
 }
 
 void ModuleImport::samples_done(const SampleLoadReport& report) noexcept {
@@ -424,7 +641,19 @@ void ModuleImport::samples_done(const SampleLoadReport& report) noexcept {
   close();
 }
 
+void ModuleImport::set_module_host(module::ModuleSet* set, module::ModuleLoader* loader, module::ModuleLoader::SyncFn sync, const char* importer_stem) noexcept {
+  modules_ = set;
+  loader_ = loader;
+  sync_ = sync;
+  std::size_t n = 0;
+  for (const char* p = importer_stem; p != nullptr && *p != '\0' && n + 1u < sizeof importer_stem_; ++p) {
+    importer_stem_[n++] = *p;
+  }
+  importer_stem_[n] = '\0';
+}
+
 void ModuleImport::close() noexcept {
+  unload_importer();  // OS-FLASHDIET I2: the importer module goes back to the set (and its arenas) here
   window_.detach();
   if (storage_ != nullptr && file_.is_open()) {
     storage_->close(file_);
@@ -433,22 +662,29 @@ void ModuleImport::close() noexcept {
 }
 
 std::uint32_t ModuleImport::frames(unsigned slot) const noexcept {
-  if (state_ != State::Done || reader_ == nullptr) {
+  if (state_ != State::Done || imp_ == nullptr || slot > med::caps::kMaxSamples) {
     return 0;
   }
-  if (is_med_) {
-    return slot < med::caps::kMaxSamples && med_.importer().report().instrument[slot].result == med::InstResult::Sample ? med_.importer().pcm_frames(slot) : 0u;
-  }
-  return slot < mod::caps::kSlots && mod_.importer().report().med.instrument[slot].result == med::InstResult::Sample ? mod_.importer().pcm_frames(slot) : 0u;
+  return report_.slots[slot].result == static_cast<std::uint8_t>(med::InstResult::Sample) ? report_.slots[slot].frames : 0u;
 }
 
-std::uint32_t ModuleImport::rate(unsigned slot) const noexcept { return is_med_ ? med_.importer().pcm_rate() : mod_.importer().pcm_rate(slot); }
+std::uint32_t ModuleImport::rate(unsigned slot) const noexcept {
+  if (state_ != State::Done || imp_ == nullptr || slot > med::caps::kMaxSamples) {
+    return 0;
+  }
+  return report_.slots[slot].rate;
+}
 
 bool ModuleImport::read(unsigned slot, std::uint32_t first, std::uint32_t n, std::int16_t* dst) noexcept {
   if (state_ != State::Done) {
     return false;
   }
-  return (is_med_ ? med_.importer().read_pcm(slot, first, n, dst) : mod_.importer().read_pcm(slot, first, n, dst)).ok();
+  const o3m_module* entry = imp_ != nullptr ? imp_->entry : nullptr;  // OS-FLASHDIET I2: the module's read_pcm (I3: the only side)
+  const o3m_importer* t = entry != nullptr ? entry->importer : nullptr;
+  if (t == nullptr || t->read_pcm == nullptr) {
+    return false;
+  }
+  return t->read_pcm(imp_state_, slot, first, n, dst) == 0;
 }
 
 }  // namespace o3os::app

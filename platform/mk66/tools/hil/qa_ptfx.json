@@ -1,0 +1,356 @@
+{
+ "name": "qa_ptfx",
+ "title": "OS-CEPTFX S6: .ptfx plugins on the unit: console runs of the SDK fixtures, hang timeout, fault_scs containment, worst render block, undo (docs/specs/OS-CEPTFX.md section 5)",
+ "vars": {
+  "GAIN": "1",
+  "MMF": "2",
+  "DELAY": "3",
+  "HANG": "4",
+  "FAULT": "5"
+ },
+ "steps": [
+  {
+   "run": "_load_tv16"
+  },
+  {
+   "keys": [
+    "-shift"
+   ],
+   "gap": 0.2,
+   "note": "(Shift released, in case a former run left it down)"
+  },
+  {
+   "keys": [
+    "f7"
+   ],
+   "gap": 0.3,
+   "if_state": {
+    "overlay": "NAVIGATOR"
+   },
+   "note": "(a leftover Navigator is closed: F7 is CLOSE, F8 would GO since OS-NAV2)"
+  },
+  {
+   "keys": [
+    "f8"
+   ],
+   "gap": 0.3,
+   "if_state": {
+    "overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP)$"
+   },
+   "note": "(a leftover overlay is put away: F8 is Back)"
+  },
+  {
+   "keys": [
+    "f7"
+   ],
+   "gap": 0.3,
+   "if_state": {
+    "overlay": "TEXT_ENTRY"
+   },
+   "note": "(the on-screen keyboard is cancelled with F7, never accepted)"
+  },
+  {
+   "keys": [
+    "pattern"
+   ],
+   "gap": 0.4
+  },
+  {
+   "state": {
+    "screen": "PATTERN"
+   },
+   "within": 3
+  },
+  {
+   "run": "_stop"
+  },
+  {
+   "cmd": "cpu reset",
+   "note": "(the cpu counters are since boot or since this reset: a scenario that checks underruns / over-budget starts from zero)"
+  },
+  {
+   "keys": [
+    "sampleedit"
+   ],
+   "gap": 0.5
+  },
+  {
+   "state": {
+    "screen": "SAMPLE_EDIT"
+   },
+   "within": 3
+  },
+  {
+   "pad": 0,
+   "note": "a pad on the Sample edit screen picks the instrument: 1"
+  },
+  {
+   "state": {
+    "instrument": "1"
+   },
+   "within": 2
+  },
+  {
+   "cmd": "inst 1",
+   "expect": "inst 01: mode \\d+ start \\d+ len \\d+",
+   "note": "the sample of instrument 1 is bound (else this scenario has nothing to edit)"
+  },
+  {
+   "say": "OS-CEPTFX S6: the unit checks of docs/specs/OS-CEPTFX.md section 5. The card carries the six SDK fixtures plus hang and fault_scs under /Effects. Set the plugin numbers of `ptfx list` with --var (HANG, FAULT, DELAY, MMF, GAIN); the scenario reads, it never writes the card."
+  },
+  {
+   "cmd": "ptfx list",
+   "expect": "ptfx \\d+ files",
+   "show": true,
+   "note": "the console lists /Effects: the tester notes each plugin's number and status"
+  },
+  {
+   "cmd": "ptfx info ${MMF}",
+   "expect": "\\S",
+   "show": true,
+   "note": "Multi-Mode Filter's header and parameters"
+  },
+  {
+   "cmd": "ptfx run 99",
+   "expect": "ERR ptfx",
+   "note": "an unknown number is refused cleanly"
+  },
+  {
+   "say": "A no-op or gain plugin over instrument 1: runs, commits, undoes (sum equals QEMU's)"
+  },
+  {
+   "cmd": "ptfx run ${GAIN}",
+   "expect": "ptfx run: started",
+   "note": "the plugin starts as one job over instrument 1"
+  },
+  {
+   "wait": 6.0
+  },
+  {
+   "cmd": "inst 1",
+   "expect": "inst 01: mode \\d+ start \\d+ len \\d+",
+   "show": true,
+   "note": "the sample's line after the run: compare len and sum with the QEMU oracle of the same plugin"
+  },
+  {
+   "keys": [
+    "f8"
+   ],
+   "gap": 0.5,
+   "note": "F8 UNDO takes the whole run back (one undo step)"
+  },
+  {
+   "state": {
+    "msg": "~^UNDONE$"
+   },
+   "within": 3,
+   "soft": true
+  },
+  {
+   "say": "Multi-Mode Filter over instrument 1 (R5: the tester also reads the DWT cycles per frame)"
+  },
+  {
+   "cmd": "ptfx run ${MMF}",
+   "expect": "ptfx run: started",
+   "note": "the plugin starts as one job over instrument 1"
+  },
+  {
+   "wait": 6.0
+  },
+  {
+   "cmd": "inst 1",
+   "expect": "inst 01: mode \\d+ start \\d+ len \\d+",
+   "show": true,
+   "note": "the sample's line after the run: compare len and sum with the QEMU oracle of the same plugin"
+  },
+  {
+   "keys": [
+    "f8"
+   ],
+   "gap": 0.5,
+   "note": "F8 UNDO takes the whole run back (one undo step)"
+  },
+  {
+   "state": {
+    "msg": "~^UNDONE$"
+   },
+   "within": 3,
+   "soft": true
+  },
+  {
+   "say": "Stereo Delay with a project playing: the render's worst block (R3/R5 capture: `cpu` max)"
+  },
+  {
+   "keys": [
+    "play"
+   ],
+   "gap": 0.5
+  },
+  {
+   "state": {
+    "playing": "1"
+   },
+   "within": 3
+  },
+  {
+   "cmd": "cpu reset"
+  },
+  {
+   "cmd": "ptfx run ${DELAY}",
+   "expect": "ptfx run: started"
+  },
+  {
+   "wait": 8.0
+  },
+  {
+   "cmd": "cpu",
+   "expect": "render last (\\d+)",
+   "show": true,
+   "collect": {
+    "as": "WORST",
+    "re": "max (\\d+)"
+   },
+   "note": "the worst render block while the plugin ran (cpu-budget: below the block period)"
+  },
+  {
+   "run": "_stop"
+  },
+  {
+   "say": "hang: the gate times out within 3 s and the unit stays responsive with playback running"
+  },
+  {
+   "keys": [
+    "play"
+   ],
+   "gap": 0.5
+  },
+  {
+   "state": {
+    "playing": "1"
+   },
+   "within": 3
+  },
+  {
+   "cmd": "ptfx run ${HANG}",
+   "expect": "ptfx run: started"
+  },
+  {
+   "cmd": "ptfx list",
+   "expect": "ptfx \\d+ files",
+   "within": 3,
+   "poll": 0.5,
+   "note": "the console answers while the plugin runs (responsive)"
+  },
+  {
+   "state": {
+    "playing": "1"
+   },
+   "within": 1,
+   "note": "playback is still running"
+  },
+  {
+   "wait": 3.5
+  },
+  {
+   "cmd": "ptfx list",
+   "expect": "ptfx \\d+ files",
+   "show": true,
+   "note": "after 3 s the run is over: the list shows the hang plugin's status"
+  },
+  {
+   "run": "_stop"
+  },
+  {
+   "say": "fault_scs: contained, no reset (the uptime keeps counting); R3: fault_periph tells whether peripherals fault unprivileged"
+  },
+  {
+   "cmd": "ptfx run ${FAULT}",
+   "expect": "ptfx run: started"
+  },
+  {
+   "wait": 3.0
+  },
+  {
+   "cmd": "ptfx list",
+   "expect": "ptfx \\d+ files",
+   "show": true,
+   "note": "the unit answers: no reset happened; the plugin is listed as faulted or quarantined"
+  },
+  {
+   "cmd": "ptfx run ${GAIN}",
+   "expect": "ptfx run: started",
+   "note": "the next run after a contained fault still works"
+  },
+  {
+   "wait": 6.0
+  },
+  {
+   "keys": [
+    "f8"
+   ],
+   "gap": 0.5
+  }
+ ],
+ "finally": [
+  {
+   "keys": [
+    "-shift"
+   ],
+   "gap": 0.2
+  },
+  {
+   "keys": [
+    "-f7"
+   ],
+   "gap": 0.2
+  },
+  {
+   "keys": [
+    "f7"
+   ],
+   "gap": 0.3,
+   "if_state": {
+    "overlay": "NAVIGATOR"
+   },
+   "note": "(a leftover Navigator is closed: F7 is CLOSE, F8 would GO since OS-NAV2)"
+  },
+  {
+   "keys": [
+    "f8"
+   ],
+   "gap": 0.3,
+   "if_state": {
+    "overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP)$"
+   },
+   "note": "(a leftover overlay is put away: F8 is Back)"
+  },
+  {
+   "keys": [
+    "f7"
+   ],
+   "gap": 0.3,
+   "if_state": {
+    "overlay": "TEXT_ENTRY"
+   },
+   "note": "(the on-screen keyboard is cancelled with F7, never accepted)"
+  },
+  {
+   "keys": [
+    "pattern"
+   ],
+   "gap": 0.4
+  },
+  {
+   "run": "_load_tv16"
+  },
+  {
+   "keys": [
+    "pattern"
+   ],
+   "gap": 0.4
+  },
+  {
+   "run": "_stop"
+  }
+ ]
+}

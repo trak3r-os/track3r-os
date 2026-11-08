@@ -6,6 +6,7 @@
 #include "internal.h"
 #include "regs.h"
 
+#include <o3os/hal/code_gate.h>
 #include <o3os/hal/cycles.h>
 #include <o3os/platform/mk66/clock_config.h>
 #include <o3os/platform/mk66/platform.h>
@@ -35,7 +36,24 @@ void irq_restore(std::uint32_t primask) noexcept { asm volatile("msr primask, %0
 
 }  // namespace
 
-extern "C" void SysTick_Handler() { g_uptime_ms = g_uptime_ms + 1; }
+// The SysTick entry. The OS-CEPTFX call gate's check runs first, while it costs one load and one branch (the gate's
+// active flag); only while a call runs is the hook called, with the EXC_RETURN of the interrupted context (in lr
+// only at entry, so this is naked). Then the uptime. The gate may have rewritten the interrupted frame's PC to its
+// abort stub; the return below still goes back to the (rewritten) context.
+extern "C" [[gnu::naked]] void SysTick_Handler() {
+  asm volatile(
+      "push {r4, lr}\n\t"  // r4 keeps the 8-byte stack alignment of the calls below
+      "ldr r0, =o3os_hal_gate_active\n\t"
+      "ldr r0, [r0]\n\t"
+      "cbz r0, 1f\n\t"
+      "mov r0, lr\n\t"  // the hook's argument: the EXC_RETURN of the interrupted context
+      "bl o3os_hal_gate_systick\n\t"
+      "1:\n\t"
+      "bl o3os_systick_uptime\n\t"
+      "pop {r4, pc}\n\t"
+      ".ltorg");
+}
+extern "C" void o3os_systick_uptime() { g_uptime_ms = g_uptime_ms + 1; }
 
 core::Tick SysTickClock::now() const noexcept {
   const std::uint32_t primask = irq_save();

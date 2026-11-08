@@ -462,6 +462,176 @@ TEST_CASE("og instrument: OG -> model -> OG is byte-identical for a .pti v9") {
   }
 }
 
+// OS-CEWTENV W1 (docs/specs/OS-CEWTENV.md): a WT slot of a v9 file (loop 2 WT Env, 3 WT LFO) reads back exactly — the shape is the contour 0..255 and bytes +2/+3 are the warp and sustain (verified parity,
+// tracker-ce@7fd6c2c:core/source/mtStructs.h:629-637) — a slot with loop 0 or 1 keeps today's rule (a shape above 4: Triangle, bytes +2/+3 dropped), and Export writes a WT slot off (Q4 a) and counts it in wt_mod.
+TEST_CASE("og instrument: OS-CEWTENV W1, a WT slot of a v9 file reads back exactly, and Export writes the slot off and counts it") {
+  InstrumentSpec spec;
+  spec.frames = 100;
+  Bytes file = instrument_bytes(spec);
+  // slot 2: loop 2 (WT Env), shape 37, bend 0x9C, sust 40; slot 4: loop 3 (WT LFO), shape 200, bend 0x17, sust 99; slot 0: loop 0 with a shape of 7 and junk in bytes +2/+3; slot 3: loop 1 with a shape of 9; slot 5: a garbage loop byte 200 with a contour shape and warp bytes
+  const std::size_t e0 = 92 + 20 * 0, e2 = 92 + 20 * 2, e3 = 92 + 20 * 3, e4 = 92 + 20 * 4, e5 = 92 + 20 * 5;
+  const std::size_t l0 = 212 + 8 * 0, l2 = 212 + 8 * 2, l3 = 212 + 8 * 3, l4 = 212 + 8 * 4, l5 = 212 + 8 * 5;
+  file[e2 + 18] = 2;
+  file[l2] = 37; file[l2 + 2] = 0x9C; file[l2 + 3] = 40;
+  file[e4 + 18] = 3;
+  file[l4] = 200; file[l4 + 2] = 0x17; file[l4 + 3] = 99;
+  file[e0 + 18] = 0; file[l0] = 7; file[l0 + 2] = 0xAB; file[l0 + 3] = 0xCD;
+  file[e3 + 18] = 1; file[l3] = 9; file[l3 + 2] = 0x55; file[l3 + 3] = 0x66;
+  file[e5 + 18] = 200; file[l5] = 250; file[l5 + 2] = 0x77; file[l5 + 3] = 88;  // a garbage loop byte: only 2 and 3 are WT slots (W3a review)
+  p32(file, 388, formats::crc32(file.data(), 388));
+  model::Project& proj = fresh();
+  NEED(import_instrument(file, true, 4) == Progress::Done);
+  const model::SamplerParams& s = proj.instrument(4)->sampler;
+  CHECK(s.envelope[2].loop == 2);
+  CHECK(s.lfo[2].shape == 37);
+  CHECK(s.lfo[2].wt_bend == 0x9C);
+  CHECK(s.lfo[2].wt_sust == 40);
+  CHECK(s.envelope[4].loop == 3);
+  CHECK(s.lfo[4].shape == 200);
+  CHECK(s.lfo[4].wt_bend == 0x17);
+  CHECK(s.lfo[4].wt_sust == 99);
+  CHECK(s.envelope[0].loop == 0);
+  CHECK(s.lfo[0].shape == model::kLfoShapeTriangle);  // loop 0, a shape above 4: Triangle, as before
+  CHECK((s.lfo[0].wt_bend == 0 && s.lfo[0].wt_sust == 0));  // bytes +2/+3 dropped
+  CHECK(s.envelope[3].loop == 1);
+  CHECK(s.lfo[3].shape == model::kLfoShapeTriangle);  // loop 1 too
+  CHECK((s.lfo[3].wt_bend == 0 && s.lfo[3].wt_sust == 0));
+  CHECK(s.envelope[5].loop == 200);                     // a garbage loop byte reads verbatim, but it is NOT a WT slot:
+  CHECK(s.lfo[5].shape == model::kLfoShapeTriangle);    // a shape above 4: Triangle, as for loop 0/1
+  CHECK((s.lfo[5].wt_bend == 0 && s.lfo[5].wt_sust == 0));  // bytes +2/+3 dropped
+  // Export (Q4 a): the two WT slots are written off — loop 0, enable 0, the shape held to 0..4, bytes +2/+3 zero — and counted in wt_mod, one per slot; the Sine rule is untouched for loop <= 1
+  const Bytes pcm(file.begin() + 392, file.end());
+  Bytes out;
+  NEED(export_instrument(proj, 4, out, &pcm, 100) == Progress::Done);
+  CHECK(out.size() == file.size());
+  CHECK((out[e2 + 18] == 0 && out[e2 + 19] == 0));
+  CHECK((out[e4 + 18] == 0 && out[e4 + 19] == 0));
+  CHECK(out[l2] == 4);  // 37 held to 0..4
+  CHECK((out[l2 + 2] == 0 && out[l2 + 3] == 0));
+  CHECK(out[l4] == 4);  // 200 held to 0..4
+  CHECK((out[l4 + 2] == 0 && out[l4 + 3] == 0));
+  CHECK(out[l0] == 2);  // the loop-0 slot's shape was read as Triangle and writes back as Triangle
+  CHECK((out[l0 + 2] == 0 && out[l0 + 3] == 0));
+  CHECK(out[l3] == 2);
+  CHECK(out[e5 + 18] == 200);  // the garbage loop byte writes back verbatim (not a WT slot: not zeroed, not counted)
+  CHECK(out[l5] == 2);
+  CHECK((out[l5 + 2] == 0 && out[l5 + 3] == 0));
+  CHECK(writer().export_report().drops.wt_mod == 2u);
+  CHECK(writer().export_report().drops.lfo_sine == 0u);
+  // an official fixture (loop 0/1 everywhere, bytes +2/+3 zero) stays byte-identical on OG -> model -> OG, and counts nothing
+  {
+    const Bytes official = instrument_bytes(InstrumentSpec{});
+    model::Project& p2 = fresh();  // resets arena 0 (the WT instrument of slot 4 was already exported above)
+    NEED(import_instrument(official, true, 9) == Progress::Done);  // import_instrument reads into arena 0
+    const Bytes pcm2(official.begin() + 392, official.end());
+    Bytes out2;
+    NEED(export_instrument(p2, 9, out2, &pcm2, 1000) == Progress::Done);
+    CHECK(out2 == official);
+    CHECK(writer().export_report().drops.wt_mod == 0u);
+    CHECK(writer().export_report().drops.lfo_sine == 0u);
+  }
+}
+
+// OS-CEWTENV W5 (docs/specs/OS-CEWTENV.md 3.6, F2): slot 3's enable byte is a bit mask; bit 0x02 (the granular length, no OG 1.9 equivalent) is cleared on Export and counted in wt_mod, one per drop;
+// a file without the bit (0, 1, and a stray high bit) is written byte for byte as before and counts nothing.
+TEST_CASE("og instrument: OS-CEWTENV W5, Export clears slot 3's enable bit 0x02 and counts it") {
+  const std::size_t e3 = 92 + 20 * 3;
+  for (unsigned en : {0u, 1u, 0x81u}) {  // no bit 0x02: identical on write, nothing counted
+    InstrumentSpec spec;
+    spec.frames = 100;
+    Bytes file = instrument_bytes(spec);
+    file[e3 + 19] = static_cast<std::uint8_t>(en);
+    p32(file, 388, formats::crc32(file.data(), 388));
+    model::Project& proj = fresh();
+    NEED(import_instrument(file, true, 4) == Progress::Done);
+    const Bytes pcm(file.begin() + 392, file.end());
+    Bytes out;
+    NEED(export_instrument(proj, 4, out, &pcm, 100) == Progress::Done);
+    CHECK_MESSAGE(out == file, "enable " << en);
+    CHECK(writer().export_report().drops.wt_mod == 0u);
+  }
+  for (unsigned en : {2u, 3u, 0x83u}) {  // bit 0x02 set: cleared, the rest kept, one drop
+    InstrumentSpec spec;
+    spec.frames = 100;
+    Bytes file = instrument_bytes(spec);
+    file[e3 + 19] = static_cast<std::uint8_t>(en);
+    p32(file, 388, formats::crc32(file.data(), 388));
+    model::Project& proj = fresh();
+    NEED(import_instrument(file, true, 4) == Progress::Done);
+    CHECK(proj.instrument(4)->sampler.envelope[3].enable == en);  // the model keeps the byte whole
+    const Bytes pcm(file.begin() + 392, file.end());
+    Bytes out;
+    NEED(export_instrument(proj, 4, out, &pcm, 100) == Progress::Done);
+    CHECK(out.size() == file.size());
+    CHECK_MESSAGE(out[e3 + 19] == (en & ~2u), "enable " << en);
+    CHECK(writer().export_report().drops.wt_mod == 1u);
+  }
+}
+
+// OS-CEPLAYTHRU P1 (docs/specs/OS-CEPLAYTHRU.md): OG instrument byte 279, the padding between the delay send and the slice table, is the play-thru flag: any non-zero byte reads 1, in every version (verified parity,
+// tracker-ce@7fd6c2c:core/FileManager/fileManagerInstrument.cpp:663-706: the struct is copied raw, with no version rule for the byte). Export writes the model's 0 or 1, so a file without the flag is byte-identical.
+TEST_CASE("og instrument: OS-CEPLAYTHRU P1, byte 279 reads 0, 1, 1 in every version, and Export writes 0 or 1") {
+  for (unsigned v : {4u, 6u, 8u, 9u}) {
+    for (unsigned raw : {0u, 1u, 7u}) {
+      InstrumentSpec spec;
+      spec.version = v;
+      spec.frames = 100;
+      Bytes f = instrument_bytes(spec);
+      f[279] = static_cast<std::uint8_t>(raw);
+      p32(f, 388, formats::crc32(f.data(), 388));
+      formats::og::ImportReport rep;
+      model::Project& proj = fresh();
+      NEED(import_instrument(f, true, 4, &rep) == Progress::Done);
+      CHECK_MESSAGE(rep.sanitised == 0, "version " << v << ", byte " << raw);  // any non-zero is On: not a replacement, not counted
+      const model::Instrument* in = proj.instrument(4);
+      NEED(in != nullptr);
+      CHECK_MESSAGE(in->slice_thru == (raw != 0 ? 1 : 0), "version " << v << ", byte " << raw);
+      // Export writes the model's value: the file exports as the same file with the byte at 0, but for 279 (and the CRC)
+      const Bytes pcm(f.begin() + 392, f.end());
+      Bytes out;
+      NEED(export_instrument(proj, 4, out, &pcm, 100) == Progress::Done);
+      CHECK(out.size() == f.size());
+      CHECK_MESSAGE(out[279] == (raw != 0 ? 1 : 0), "version " << v << ", byte " << raw);
+      Bytes f0 = instrument_bytes(spec);  // the same file with byte 279 = 0
+      model::Project& proj0 = fresh();   // resets arena 0, which import_instrument reads into
+      NEED(import_instrument(f0, true, 4) == Progress::Done);
+      Bytes out0;
+      NEED(export_instrument(proj0, 4, out0, &pcm, 100) == Progress::Done);
+      for (std::size_t i = 0; i < out.size(); ++i) {
+        if (i == 279 || (i >= 388 && i < 392)) continue;
+        CHECK_MESSAGE(out[i] == out0[i], "version " << v << ", byte " << raw << ", offset " << i);
+      }
+      if (v == 9 && raw == 0) {
+        CHECK(out == f);  // a v9 file without the flag round-trips byte for byte
+      }
+    }
+  }
+}
+
+// OS-CEPLAYTHRU review fold: the flag is a Sample instrument's only. An OG file with byte 279 set still loads whatever the instrument's kind (validate_instrument does not reject it), and Project::set_instrument — the load path of an OG import — clears the flag on a non-Sample instrument.
+TEST_CASE("og instrument: OS-CEPLAYTHRU review fold, byte 279 on a non-Sample instrument still loads and reads 0") {
+  InstrumentSpec spec;
+  spec.version = 9;
+  spec.frames = 100;
+  Bytes f = instrument_bytes(spec);
+  f[279] = 1;
+  p32(f, 388, formats::crc32(f.data(), 388));
+  model::Project& proj = fresh();
+  NEED(import_instrument(f, true, 4) == Progress::Done);  // the OG import itself still loads
+  const model::Instrument* in = proj.instrument(4);
+  NEED(in != nullptr);
+  CHECK(in->kind == model::InstrumentKind::Sample);
+  CHECK(in->slice_thru == 1);  // a Sample instrument keeps the flag
+  model::Instrument midi = *in;
+  midi.kind = model::InstrumentKind::Midi;
+  midi.midi_channel = 1;
+  CHECK(proj.set_instrument(48, midi) == model::Status::Ok);  // not rejected: a non-Sample instrument with the flag set loads
+  const model::Instrument* m = proj.instrument(48);
+  NEED(m != nullptr);
+  CHECK(m->kind == model::InstrumentKind::Midi);
+  CHECK(m->slice_thru == 0);  // the canonical form clears it
+}
+
 TEST_CASE("og instrument: LFO and SOURCE edits made with the MOD page's rows survive a save and a reload, and nothing else of the file moves") {
   // OS-INSTUI S6: import -> edit with the rows of the page (model::instrument_param::mod, the path write_param takes) -> Export -> import again. The fixture's envelopes carry loop = i & 1 and
   // enable = (i + 1) & 1 and a distinct LFO each (instrument_head), so slot 1 is a loop byte on a slot that is not enabled (Off on the page) and slot 2 is an Envelope.

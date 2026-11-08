@@ -111,7 +111,7 @@ struct Rig {
     release(Button::Shift);
     pass(1);
   }
-  // The note-entry settings through the panel (held Note, then its pads): root 0..11, scale 0..11, lock 0 / 1.
+  // The note-entry settings through the panel (held Note, then its pads): root 0..11, a scale pad of row 2 (0..11), lock 0 / 1.
   void set_entry(unsigned root, unsigned scale, unsigned lock) {
     hold_open(Button::Note);
     tap_pad(root);
@@ -132,7 +132,8 @@ TEST_CASE("pad lights: the Instr popup lights the instruments with content Back,
   rig.instrument(2, model::InstrumentKind::Midi);
   rig.instrument(5, model::InstrumentKind::Sample);
   PadRole roles[48];
-  CHECK_FALSE(rig.lights(roles));  // no popup, Browse: the platform's own policy
+  NEED(rig.lights(roles));  // no popup, Browse: the NOTES board's lights (OS-NOTESLED), not the popup's
+  CHECK(roles[36] == PadRole::Front);
   rig.hold_open(Button::Instr);
   NEED(rig.state().overlay == app::OverlayId::StepPopup);
   CHECK(rig.state().instrument == 1);
@@ -152,7 +153,8 @@ TEST_CASE("pad lights: the Instr popup lights the instruments with content Back,
   CHECK(roles[0] == PadRole::Back);
   CHECK(roles[2] == PadRole::Back);
   rig.let_go(Button::Instr);
-  CHECK_FALSE(rig.lights(roles));
+  NEED(rig.lights(roles));  // the NOTES board again
+  CHECK(roles[36] == PadRole::Front);
 }
 
 TEST_CASE("pad lights: the Fx popup lights the current FX") {
@@ -280,11 +282,12 @@ TEST_CASE("pad modes in the App: Shift + F1..F3 choose, the picker is on the key
   CHECK(rig.state().padmode.effective() == app::PadMode::Piano);
   // pattern.fill (OS-CFGWIRE; no key since OS-QJUMP, Shift + Fx is the 3/4 jump) is an edit: outside Edit it says so (and where EXPORT, the key's other half, will come from)
   (void)rig.app->invoke(core::action_id("pattern.fill"));
-  CHECK(std::string(rig.app->message()) == "FILL: TURN EDIT ON (EXPORT: F7 TOOLS)");
-  // the plain F7 is TOOLS (OS-H3A): with a document it lists EXPORT PATTERN even with no module system (OS-WAVEXP); F8 closes it
+  CHECK(std::string(rig.app->message()) == "FILL: TURN EDIT ON (EXPORT: F7 APPS >)");
+  // the plain F7 is the verb menu (OS-PTOOLS2 S3), whose APPS > row is the TOOLS list (OS-H3A): with a document it lists EXPORT PATTERN even with no module system (OS-WAVEXP); F8 closes it
   rig.pass(3000);
   tap(Button::F7);
-  CHECK(rig.state().overlay == app::OverlayId::Tools);
+  rig.tap_pad(15);  // APPS > (pad 16)
+  CHECK(rig.state().overlay == app::OverlayId::VerbMenu);
   tap(Button::F8);
   CHECK(rig.state().overlay == app::OverlayId::None);
   // the picker is drawn: a frame with Shift held differs from one without
@@ -520,7 +523,8 @@ TEST_CASE("TRACKS pads: the LEDs of each row (Front = yours, Back = silenced by 
   }
   rig.release(Button::Shift);
   rig.pass(1);
-  CHECK_FALSE(rig.lights(roles));  // NOTES again: the platform's own policy
+  NEED(rig.lights(roles));  // NOTES again: its own lights (OS-NOTESLED), the root Front
+  CHECK(roles[36] == PadRole::Front);
 }
 
 TEST_CASE("TRACKS pads: the track flash lights for a moment per note counter change, nothing at start-up, nothing without a sink") {
@@ -548,7 +552,7 @@ TEST_CASE("TRACKS pads: the track flash lights for a moment per note counter cha
 
 TEST_CASE("note entry: the scales are the masks of core/scales.h, snap goes to the nearest in-scale note and the lower one on a tie") {
   app::NoteEntry e;
-  e.scale = 1;  // Major
+  e.scale = 2;  // Major, the official index (OS-SCALES28)
   CHECK(std::string(e.scale_name()) == "Major");
   CHECK(e.snap(60) == 60);
   CHECK(e.snap(61) == 60);  // C# is as far from C as from D: the lower
@@ -559,11 +563,11 @@ TEST_CASE("note entry: the scales are the masks of core/scales.h, snap goes to t
   CHECK(e.in_scale(61));
   CHECK_FALSE(e.in_scale(60));
   CHECK(e.snap(60) == 59);  // B is in (one below), C# one above: the lower
-  e.scale = 9;              // Blues on A: A C D Eb E G
+  e.scale = 15;             // Blues, the official index: Blues on A: A C D Eb E G
   CHECK(std::string(e.scale_name()) == "Blues");
   CHECK(e.snap(70) == 69);  // A# -> A
   // For every scale, root and note: the result is in the scale, within 2 semitones and a valid MIDI note; an in-scale note is itself.
-  for (unsigned scale = 0; scale < app::kNoteScales; ++scale) {
+  for (unsigned scale = 0; scale <= model::kNoteScaleMax; ++scale) {  // all 39 official scales (OS-SCALES28)
     for (unsigned root = 0; root < 12; ++root) {
       e.scale = static_cast<std::uint8_t>(scale);
       e.root = static_cast<std::uint8_t>(root);
@@ -571,7 +575,9 @@ TEST_CASE("note entry: the scales are the masks of core/scales.h, snap goes to t
         const unsigned s = e.snap(note);
         NEED(s < 128);
         NEED(e.in_scale(s));
-        NEED((s > note ? s - note : note - s) <= 2);
+        const unsigned dist = s > note ? s - note : note - s;
+        NEED(dist <= 4u);                                              // at the range's edges the snap may go the long way round
+        if (note >= 6u && note <= 121u) NEED(dist <= 2u);               // inside, no gap of the 39 is wider than 4 semitones
         NEED((!e.in_scale(note) || s == note));
       }
     }
@@ -579,7 +585,7 @@ TEST_CASE("note entry: the scales are the masks of core/scales.h, snap goes to t
   e.lock = 0;
   CHECK(e.locked(61) == 61);
   e.lock = 1;
-  e.scale = 1;
+  e.scale = 2;  // Major
   e.root = 0;
   CHECK(e.locked(61) == 60);
 }
@@ -592,8 +598,14 @@ TEST_CASE("note entry: the panel's pads set root, scale, jump, octave and lock, 
   CHECK(p.entry.root == 4);
   CHECK(p.pads.note(36) == 40);
   CHECK_FALSE(p.entry_pad(4));   // no change
-  CHECK(p.entry_pad(12 + 1));    // row 2: SCALE Major (which is only the lock's layout, the lock being off)
-  CHECK(p.entry.scale == 1);
+  CHECK(p.entry_pad(12 + 1));    // row 2: SCALE Major, pad 2 (the official 2; which is only the lock's layout, the lock being off)
+  CHECK(p.entry.scale == 2);
+  CHECK(p.entry_pad(12 + 0));    // pad 1: Chromatic, the official 0
+  CHECK(p.entry.scale == 0);
+  CHECK(p.entry_pad(12 + 11));   // pad 12: Whole tone, the official 23 (OS-SCALES28: row 2 goes through model::kNotePanelScales)
+  CHECK(p.entry.scale == 23);
+  CHECK(p.entry_pad(12 + 1));    // back to Major
+  CHECK(p.entry.scale == 2);
   CHECK(p.pads.note(37) == 41);  // still chromatic
   CHECK(p.entry_pad(24 + 5));    // row 3: JUMP 5: the F3 chooser's own setting
   CHECK(p.edit_step == 5);
@@ -626,11 +638,11 @@ TEST_CASE("note entry: the held Note button's pads set the entry, light each row
   CHECK(roles[36 + 10] == PadRole::Front);  // LOCK off
   CHECK(roles[36 + 11] == PadRole::Back);
   rig.input.push(core::make_pad_event(rig.clock.now(), 7, 100));  // ROOT G
-  rig.input.push(core::make_pad_event(rig.clock.now(), 12 + 2, 100));  // SCALE Minor
+  rig.input.push(core::make_pad_event(rig.clock.now(), 12 + 2, 100));  // SCALE Minor (pad 3 = the official 1)
   rig.input.push(core::make_pad_event(rig.clock.now(), 36 + 11, 100));  // LOCK on
   rig.pass(1);
   CHECK(rig.state().edit.entry.root == 7);
-  CHECK(rig.state().edit.entry.scale == 2);
+  CHECK(rig.state().edit.entry.scale == 1);
   CHECK(rig.state().edit.entry.lock == 1);
   NEED(rig.lights(roles));
   CHECK(roles[7] == PadRole::Front);
@@ -641,6 +653,25 @@ TEST_CASE("note entry: the held Note button's pads set the entry, light each row
   rig.let_go(Button::Note);
   CHECK(rig.state().overlay == app::OverlayId::None);
   CHECK(rig.app->failed_frames() == 0u);  // the panel is drawn
+}
+
+TEST_CASE("note entry: a scale from the 27 of a file lights no pad of row 2 (OS-SCALES28)") {
+  Rig rig;
+  model::NoteState n;
+  model::init_note_state(n);
+  n.scale = 26;  // Hirajoshi, the official index: outside the panel's twelve
+  n.lock = 1;
+  CHECK(rig.project().set_note(n) == model::Status::Ok);
+  rig.app->document_replaced();
+  CHECK(rig.state().edit.entry.scale == 26);
+  CHECK(rig.state().edit.pads.scale() == 27);  // the core index, laid out with the lock on
+  PadRole roles[48];
+  rig.hold_open(Button::Note);
+  NEED(rig.lights(roles));
+  for (unsigned c = 0; c < 12; ++c) {
+    CHECK(roles[12 + c] == PadRole::Back);  // no pad of row 2 is Front, as JUMP above 11 leaves row 3 dark
+  }
+  rig.let_go(Button::Note);
 }
 
 // ---- OS-PADS-B: PIANO ---------------------------------------------------------------------------------------------------------------------------
@@ -733,6 +764,47 @@ TEST_CASE("PIANO: the LEDs light the existing keys, the root Front, the in-scale
   CHECK(roles[39] == PadRole::Back);   // E
   CHECK(roles[40] == PadRole::Off);    // F is not in D major
   CHECK(roles[26] == PadRole::Back);   // C#, the 7th of D major
+}
+
+// OS-NOTESLED: the NOTES board lit as PIANO and ISO light theirs; what a pad plays is not touched.
+TEST_CASE("NOTES: the LEDs light the board, the root Front, the other notes of the scale Back, a chromatic note outside the scale Off, and with SCALE LOCK only the roots stand out (OS-NOTESLED)") {
+  Rig rig;
+  PadRole roles[48];
+  NEED(rig.state().padmode.fixed() == app::PadMode::Notes);
+  NEED(rig.lights(roles));
+  CHECK(roles[36] == PadRole::Front);  // C-3, the root (pad 36 is the bottom row's first pad)
+  CHECK(roles[37] == PadRole::Back);   // C#: Chromatic lights every note
+  CHECK(roles[24] == PadRole::Front);  // C-4, the root an octave up (the next row up)
+  rig.set_entry(2, 1, 0);  // D major, lock off: the board keeps its chromatic notes
+  NEED(rig.lights(roles));
+  for (unsigned pad = 0; pad < 48u; ++pad) {
+    const unsigned n = rig.state().edit.pads.note(pad);
+    const bool root = n % 12u == 2u;
+    const bool in_scale = root || n % 12u == 4u || n % 12u == 6u || n % 12u == 7u || n % 12u == 9u || n % 12u == 11u || n % 12u == 1u;  // D E F# G A B C#
+    CHECK(roles[pad] == (root ? PadRole::Front : (in_scale ? PadRole::Back : PadRole::Off)));
+  }
+  unsigned off = 0;
+  for (const PadRole r : roles) {
+    off += r == PadRole::Off ? 1u : 0u;
+  }
+  CHECK(off > 0u);  // F, G#, A#, D#, C are on the chromatic board and not in the scale
+  rig.set_entry(2, 1, 1);  // SCALE LOCK on: the board holds the scale's notes only
+  NEED(rig.lights(roles));
+  unsigned fronts = 0;
+  for (unsigned pad = 0; pad < 48u; ++pad) {
+    const unsigned n = rig.state().edit.pads.note(pad);
+    CHECK(roles[pad] == (n % 12u == 2u ? PadRole::Front : PadRole::Back));  // no pad is Off: every note of the board is in the scale
+    fronts += roles[pad] == PadRole::Front ? 1u : 0u;
+  }
+  CHECK(fronts > 0u);
+  CHECK(fronts < 48u);
+  // PIANO keeps its own lights and leaving it for NOTES brings these back.
+  rig.shift_tap(Button::F3);
+  NEED(rig.lights(roles));
+  CHECK(roles[0] == PadRole::Back);  // PIANO's navigation column
+  rig.shift_tap(Button::F2);
+  NEED(rig.lights(roles));
+  CHECK(roles[0] == (rig.state().edit.pads.note(0) % 12u == 2u ? PadRole::Front : PadRole::Back));
 }
 
 // ---- OS-PADS-B: ISOMORPHIC ----------------------------------------------------------------------------------------------------------------------

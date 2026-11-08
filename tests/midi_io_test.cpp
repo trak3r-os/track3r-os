@@ -496,6 +496,15 @@ TEST_CASE("usb bind: an event word's message bytes by code index number, the res
   }
   CHECK(midi::usb_event_bytes(0x00000000u, b) == 0u);  // padding
   CHECK(midi::usb_event_bytes(0x00AABB01u, b) == 0u);  // cable events
+  // Two-byte system common (CIN 0x2): MTC and Song Select take two bytes, but the SPP (F2) is a three-byte message — a host that packs
+  // it with CIN 0x2 still means all three bytes, and the second data byte must reach the parser (OS-MIDISYNC M2b).
+  CHECK(midi::usb_event_bytes(0x02 | (0xF1u << 8) | (0x22u << 16), b) == 2u);
+  CHECK(b[0] == 0xF1);
+  CHECK(b[1] == 0x22);
+  CHECK(midi::usb_event_bytes(0x02 | (midi::kSongPosition << 8) | (0x08u << 16) | (0x00u << 24), b) == 3u);
+  CHECK(b[0] == midi::kSongPosition);
+  CHECK(b[1] == 0x08);
+  CHECK(b[2] == 0x00);
   // SysEx on the wire: 0x4 starts or continues (three data bytes), 0x5 ends with one, 0x6 with two, 0x7 with three.
   CHECK(midi::usb_event_bytes(0x04 | (0xF0u << 8) | (1u << 16) | (2u << 24), b) == 3u);
   CHECK(midi::usb_event_bytes(0x05 | (0xF7u << 8), b) == 1u);

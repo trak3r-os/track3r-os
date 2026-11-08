@@ -141,23 +141,23 @@ std::vector<Case> make_cases() {
   paste("Pattern, a 3 x 2 clip pasted at row 14 of tracks 1-2 (clipped at the track ends)", cursor_to(14, 1));
   paste("Pattern, a 3 x 2 clip pasted on the last track", cursor_to(6, 99));  // 99: replaced by the last active track
   paste("Pattern, a 3 x 2 clip pasted over itself (row 3, track 0)", cursor_to(3, 0));
-  // Pattern: the Fill dialog (F4). SCOPE starts at TRACK; the scope and the target are set with the dialog's own rows.
-  auto fill = [&](const char* name, const std::string& select, int scope_delta, int what_delta) {
+  // Pattern: the Fill dialog (F4). OS-PTOOLS2 S3c: no SCOPE row; the target is the selection — the block, the column of Shift + Up at step 1, every
+  // track when that is done again, the cursor step with no selection. WHAT is row 0 of the dialog now.
+  auto fill = [&](const char* name, const std::string& select, int what_delta) {
     std::string dialog = "action fill.open\n";
-    dialog += scope_delta != 0 ? "action fill.delta " + std::to_string(scope_delta) + "\n" : "";
-    dialog += what_delta != 0 ? "action fill.move 1\naction fill.delta " + std::to_string(what_delta) + "\naction fill.move -1\n" : "";
+    dialog += what_delta != 0 ? "action fill.delta " + std::to_string(what_delta) + "\n" : "";
     pat(name, select + dialog, {{"fill.apply", 0}});
   };
   const std::string block = cursor_to(4, 1) + extend(2, 1);
-  fill("Pattern, Fill, scope BLOCK, NOTE (block rows 4-6, tracks 1-2)", block, -1, 0);
-  fill("Pattern, Fill, scope BLOCK, INSTR (block rows 4-6, tracks 1-2)", block, -1, 1);
-  fill("Pattern, Fill, scope BLOCK, VOLUME (block rows 4-6, tracks 1-2)", block, -1, 2);
-  fill("Pattern, Fill, scope BLOCK, FX 1 (block rows 4-6, tracks 1-2)", block, -1, 3);
-  fill("Pattern, Fill, scope BLOCK, FX 2 (block rows 4-6, tracks 1-2)", block, -1, 4);
-  fill("Pattern, Fill, scope BLOCK, NOTE (no selection, cursor row 6, track 2)", cursor_to(6, 2), -1, 0);
-  fill("Pattern, Fill, scope TRACK, NOTE (block rows 4-6, tracks 1-2, cursor on track 2)", block, 0, 0);
-  fill("Pattern, Fill, scope TRACK, NOTE (cursor on the 12-step track 2, row 3)", cursor_to(3, 2), 0, 0);
-  fill("Pattern, Fill, scope PATTERN, NOTE (block rows 4-6, tracks 1-2)", block, 1, 0);
+  fill("Pattern, Fill, the block, NOTE (block rows 4-6, tracks 1-2)", block, 0);
+  fill("Pattern, Fill, the block, INSTR (block rows 4-6, tracks 1-2)", block, 1);
+  fill("Pattern, Fill, the block, VOLUME (block rows 4-6, tracks 1-2)", block, 2);
+  fill("Pattern, Fill, the block, FX 1 (block rows 4-6, tracks 1-2)", block, 3);
+  fill("Pattern, Fill, the block, FX 2 (block rows 4-6, tracks 1-2)", block, 4);
+  fill("Pattern, Fill, the cursor step, NOTE (no selection, cursor row 6, track 2)", cursor_to(6, 2), 0);
+  fill("Pattern, Fill, the track, NOTE (the column of track 2, selected after the block)", block + "action select.column_all\n", 0);
+  fill("Pattern, Fill, the track, NOTE (the 12-step track 2's column, cursor at row 3)", cursor_to(3, 2) + "action select.column_all\n", 0);
+  fill("Pattern, Fill, the pattern, NOTE (the column selection over every track)", block + "action select.column_all\naction select.column_all\n", 0);
   // Song: the range of slots.
   auto song = [&](const char* name, const std::string& steps) {
     Case c;

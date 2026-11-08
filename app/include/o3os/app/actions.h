@@ -136,6 +136,13 @@ class TransportSink {
     (void)row;
     return false;
   }
+  // OS-SONG3 S7 (seq::Command::SetLoop): the song loops the slots `first`..`last` of the order list, from the next pattern end on; `last` 0xFFFF takes the loop back. The range is authored against the list as it is now. Refuses
+  // (false) by default and when the command did not go (no sequencer behind the sink, the outputs not open yet, ring full). What holds is read back from view.play.loop_first / loop_last.
+  virtual bool loop_range(unsigned first, unsigned last) noexcept {
+    (void)first;
+    (void)last;
+    return false;
+  }
   // The sequencer's own queue (seq::Command::QueuePattern, the sequential switch; OS-PADS-B's PATS pads): while playing, pattern `id` (1..255) plays next, at the end of the pattern now
   // playing, and the transport then loops it (Pattern mode); id 0 cancels the one waiting. Refuses (false) by default: a sink with no sequencer behind it. What waits is not published:
   // the caller remembers it (PatternEdit::queued_pattern) until the sequencer's position shows that pattern.

@@ -136,7 +136,7 @@ TEST_CASE("sid: the descriptor is valid as the loader reads it, and the 31 param
   CHECK(std::string(m.name) == "SID");
   CHECK(m.kind == O3M_KIND_INSTRUMENT);
   CHECK(m.abi_major == O3M_ABI_MAJOR);
-  CHECK(m.abi_minor == 8u);  // views, pitch, pages and labels, a version in its header
+  CHECK(m.abi_minor == 13u);  // ABI 1.13 (RATE flag, OS-MODRATE): views, pitch, pages and labels, a version in its header
   CHECK(m.param_count == 31u);
   CHECK(m.param_count == SID_PARAM_COUNT);
   CHECK(m.view_count == SID_VIEW_COUNT);
@@ -1527,7 +1527,7 @@ TEST_CASE("sid: the packed .tmod passes the loader's checks, relocates, reads ba
   CHECK(t.relocation == Status::Ok);
   CHECK(t.descriptor == Status::Ok);
   CHECK(t.h.kind == O3M_KIND_INSTRUMENT);
-  CHECK(t.h.abi_minor == 8u);
+  CHECK(t.h.abi_minor == 13u);
   CHECK(t.h.module_version == O3M_VERSION(1, 0, 0));
   CHECK(t.h.param_count == SID_PARAM_COUNT);
   CHECK(t.h.view_count == SID_VIEW_COUNT);

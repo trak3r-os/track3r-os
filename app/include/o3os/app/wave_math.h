@@ -47,10 +47,18 @@ struct PointsRec {
   std::uint8_t engine = 0;   // model::Instrument::engine
   std::int8_t tune = 0;      // model::SamplerParams::tune
   std::uint32_t rate = 0;    // model::Instrument::sample_rate
+  // OS-CEPTFX S4c: a WAVETABLE plugin's run also sets the play mode: its two records carry the mode and the window the instrument has before and after (pm 0xFF: this step leaves them as they are).
+  std::uint8_t pm = 0xFF;    // model::SamplerParams::play_mode
+  std::uint16_t wsz = 0;     // wavetable_window_size
+  std::uint32_t wpos = 0;    // wavetable_window
 };
+static_assert(sizeof(PointsRec) == 120, "PointsRec is 120 bytes (the history keeps two per step, in SDRAM): the comment above says so");
 // The record of a sample cropped to frames [a, b) of `frames` (a < b <= frames): every point and slice keeps the frame it names, relative to the new start; points
 // that fell outside are held to its ends, slices outside it are dropped (the first slice, if any survives, is at 0), the order and the loop conditions are made valid.
 PointsRec crop_points(const PointsRec& in, std::uint32_t frames, std::uint32_t a, std::uint32_t b) noexcept;
+// The record of a sample of `frames` that got `prepend` frames inserted at `a` and `append` at `b` (a < b <= frames; Add Silence, a plugin's set_extra_samples): a point or slice at or
+// before `a` keeps its frame, one inside (a, b) moves by `prepend`, one at or after `b` by `prepend + append`; the rest as crop_points. Unchanged when nothing was inserted.
+PointsRec insert_points(const PointsRec& in, std::uint32_t frames, std::uint32_t a, std::uint32_t b, std::uint32_t prepend, std::uint32_t append) noexcept;
 
 // ---- The slice table (up to 48 ascending starts; slice k plays from at[k] to at[k + 1], the last to the end of the sample) -----------------------------------
 

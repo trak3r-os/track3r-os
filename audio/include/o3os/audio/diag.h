@@ -46,6 +46,10 @@ std::size_t format_cpu(const StatusSnapshot& s, std::uint32_t cycles_per_block, 
 // `diag cpu` and the HIL gates read "guard  shed 0 blocks": anything else under a normal load is a finding. The line ends with the window in force, "n <window>" (Pipeline::starve_blocks(), `guard n`).
 std::size_t format_shed(std::uint32_t blocks, std::uint32_t late, std::uint32_t runs, std::uint32_t longest, std::uint32_t window, char* out, std::size_t cap) noexcept;
 
+// `diag cpu`, a line after the guard's, only once the bake pool has an entry or a refusal (OS-CEWTENV W3c): `wtbake  used <u>/<n>  refused <r> calls` (no newline, as format_app_tap). `refused` counts wt_bake CALLS that found
+// the pool full (a rebuild counts once a slot): those slots play their warps live, the cost the baking saves comes back.
+std::size_t format_wt_bake(std::uint32_t used, std::uint32_t capacity, std::uint32_t refused, char* out, std::size_t cap) noexcept;
+
 // `diag mix` (OS-005b): the meters' last window as dBFS lines, one per channel that has sounded (a hold above zero) and always the master
 // pair. The names are the routing matrix's: T01..T16, IN L/R, MAIN, CUE, SNDA, SNDB, REC, MST.
 std::size_t format_mix(const MeterSnapshot& s, char* out, std::size_t cap) noexcept;

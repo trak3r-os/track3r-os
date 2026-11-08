@@ -24,8 +24,11 @@ const char* overlay_name(OverlayId id) noexcept {
     case OverlayId::StepPopup: return "STEP_POPUP";
     case OverlayId::Fill: return "FILL";
     case OverlayId::PlayMode: return "PLAY_MODE";
-    case OverlayId::Tools: return "TOOLS";
+    case OverlayId::Preset: return "PRESET";
+    case OverlayId::VerbMenu: return "VERB_MENU";  // OS-PTOOLS2 S3
+    case OverlayId::Events: return "EVENTS";
     case OverlayId::SongTools: return "SONG_TOOLS";
+    case OverlayId::PatternTools: return "PATTERN_TOOLS";  // OS-PTOOLS2 S2
     case OverlayId::ExportProgress: return "EXPORT_PROGRESS";
     case OverlayId::FirmwareUpdate: return "FIRMWARE_UPDATE";
     case OverlayId::Help: return "HELP";

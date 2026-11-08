@@ -128,7 +128,7 @@ New to track3r-os? Start here: these are the keys worth learning first. The [qui
 | **get help on any screen** | `Shift` + `Config` opens the help page of the screen you are on. `Left` and `Right` turn the pages, `Up`, `Down` and the encoder scroll, any other key closes it. |
 | **change the volume** | Hold `Master` and turn the encoder, on any screen. |
 | **change the tempo** | Hold `Pattern` and turn the encoder, on any screen: one BPM a click, a tenth of a BPM with `Shift` held first. Tap pads while you hold `Pattern` to tap the tempo. |
-| **jump to any screen** | `Shift` + `Pattern` opens the Navigator, a list of every screen. |
+| **jump to any screen** | `Master` + `Song` or `Song` + `Pattern` opens the Navigator, a list of every screen. |
 | **look at the song** | Hold `Song`. Let go and you are back where you were. |
 | **write notes** | `Rec` turns step entry on; `Shift` + `Rec` turns live recording on. |
 | **switch patterns while playing** | On Pattern, hold `F1` and pick a pattern. It takes over at the next step, with no stop. |

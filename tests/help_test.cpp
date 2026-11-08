@@ -497,7 +497,10 @@ TEST_CASE("help: on a module app's page Shift + Config opens it, the app hears n
 
 TEST_CASE("help: Shift + Config under the Navigator or another dialog does nothing") {
   Rig rig;
-  rig.shift_tap(Button::Pattern);  // the Navigator
+  rig.press(Button::Song);  // the Navigator: the chord Song + Pattern (OS-APPSNAV)
+  rig.press(Button::Pattern);
+  rig.release(Button::Pattern);
+  rig.release(Button::Song);
   NEED(rig.state().overlay == OverlayId::Navigator);
   rig.help();
   CHECK(rig.state().overlay == OverlayId::Navigator);

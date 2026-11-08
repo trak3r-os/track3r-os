@@ -45,16 +45,21 @@ constexpr ContextWord kContextWords[] = {
     {"wave.wt", Context::WaveWt},
     {"wave.gran", Context::WaveGran},
     {"playmode", Context::PlayModePicker},
-    {"tools", Context::ToolsList},
+    {"verbmenu", Context::VerbMenu},  // OS-PTOOLS2 S3
+    {"patterntools", Context::PatternTools},  // OS-PTOOLS2 S2: the Pattern TOOLS dialog over the block
+    {"events", Context::Events},  // OS-MIDIREC S1b
     {"instrument.empty", Context::InstrumentEmpty},
     {"file.export", Context::FileExport},
     {"exportprogress", Context::ExportProgress},
     {"help", Context::Help},
     {"sampleedit", Context::SampleEdit},
     {"sampleedit.fx", Context::SampleEditFx},
+    {"sampleedit.plug", Context::SampleEditPlug},
     {"config", Context::Config},
     {"mixer", Context::Mixer},
     {"mixer.stems", Context::MixerStems},
+    {"mixer.inserts", Context::MixerInserts},  // OS-INSKEYS
+    {"instrument.insert", Context::InsertParams},  // OS-INSKEYS
     {"perform", Context::Perform},
     {"perform.dj", Context::PerformDj},
     {"record", Context::Record},
@@ -66,6 +71,7 @@ constexpr ContextWord kContextWords[] = {
     {"modules", Context::Modules},
     {"moduleapp", Context::ModuleApp},
     {"modulepicker", Context::ModulePicker},
+    {"preset", Context::Preset},
     {"textentry", Context::TextEntry},
     {"steppopup", Context::StepPopup},
     {"pads.tracks", Context::PadsTracks},
@@ -126,7 +132,7 @@ TEST_CASE("builtin bindings: contexts, the modifier set and the pool sizes") {
   CHECK(app::context_id(Context::FirmwareUpdate) == 48);  // OS-FWCONFIG: the firmware update dialog (46 and 47 went to the DJ page and Help; 41-43 are left to the branches that add contexts)
   CHECK(app::context_id(Context::Record) == 27);      // OS-011c: the Record screen (22, 23 Mixer and Perform; 24-26 the modules' contexts)
   CHECK(app::kModifierButtons == (std::uint64_t{1} << static_cast<unsigned>(Button::Shift)));
-  CHECK(app::keymap_names().modifiers == (app::kModifierButtons | (std::uint64_t{1} << static_cast<unsigned>(Button::Note)) | (std::uint64_t{1} << static_cast<unsigned>(Button::Copy))));  // the loader names Shift (the recogniser's own modifier), Note and Copy (held modifiers where the bindings say so: OS-ZOOM, OS-SONGSHARE S3)
+  CHECK(app::keymap_names().modifiers == (app::kModifierButtons | (std::uint64_t{1} << static_cast<unsigned>(Button::Note)) | (std::uint64_t{1} << static_cast<unsigned>(Button::Copy)) | (std::uint64_t{1} << static_cast<unsigned>(Button::F7))));  // the loader names Shift (the recogniser's own modifier), Note, Copy and F7 (held modifiers where the bindings say so: OS-ZOOM, OS-SONGSHARE S3, OS-PTOOLS2 S3b)
   CHECK(sizeof(core::Binding) == 16u);
   CHECK(app::kUserBindings * sizeof(core::Binding) + app::kPresetBindings * sizeof(core::Binding) <= 2048u);
 }
@@ -308,7 +314,7 @@ TEST_CASE("builtin bindings: every Shift binding is one of these, and none of th
   };
   expected.push_back(line("global", "tap", "master", "ui.theme.next", 0));
   expected.push_back(line("global", "tap", "rec", "pattern.rec_free", 0));  // OS-RECSWAP: Edit following / free (the plain Rec enters Edit free); it was the mode cycle until the Select mode went
-  expected.push_back(line("global", "tap", "pattern", "navigator.open", 0));  // OS-NAV2: tapped or held (a tap at the press), the Navigator stays open
+  expected.push_back(line("global", "tap", "pattern", "apps.open", 0));  // OS-APPSNAV: the list of the apps that are not tools (the Navigator is the chords Master + Song and Song + Pattern; OS-NAV2 had it here)
   expected.push_back(line("global", "tap", "config", "help.open", 0));  // OS-HELP: the help page of the screen in view; the plain Config is the Config screen
   expected.push_back(line("moduleapp", "tap", "config", "help.open", 0));  // (the app page captures, so Global's chord does not reach it)
   expected.push_back(line("pattern", "tap", "f8", "edit.redo", 0));  // OS-002c: F8 is UNDO on Pattern and Song, Shift + F8 REDO
@@ -344,6 +350,8 @@ TEST_CASE("builtin bindings: every Shift binding is one of these, and none of th
   expected.push_back(line("instrument", "tap", "delete", "instrument.init", 0));  // Shift + Delete INIT
   expected.push_back(line("instrument", "tap", "f6", "instrument.used", -1));
   expected.push_back(line("instrument", "tap", "f7", "instrument.used", 1));
+  expected.push_back(line("instrument.insert", "tap", "f6", "ui.none", 0));  // OS-INSKEYS: an insert's parameter page has no neighbouring instrument: Shift + F6 / F7 do nothing
+  expected.push_back(line("instrument.insert", "tap", "f7", "ui.none", 0));
   // OS-009 P1a.1: the block, HOME and pull, the octave of the encoder, mute and solo on the first two rows of pads.
   expected.push_back("pattern tap shift+left select.extend -10\n");
   expected.push_back("pattern tap shift+right select.extend 10\n");
@@ -358,7 +366,7 @@ TEST_CASE("builtin bindings: every Shift binding is one of these, and none of th
   expected.push_back("pattern.instr tap shift+enc0 step.instrument_coarse @value\n");
   expected.push_back("pattern.vol tap shift+enc0 step.vol_coarse @value\n");
   expected.push_back("pattern.fx tap shift+enc0 step.fx_value_coarse @value\n");
-  for (const char* list : {"file", "sampleload", "playmode", "learn", "navigator", "modules", "modulepicker", "tools", "help"}) {
+  for (const char* list : {"file", "sampleload", "playmode", "learn", "navigator", "modules", "modulepicker", "preset", "verbmenu", "help"}) {
     expected.push_back(std::string(list) + " tap shift+enc0 cursor.page @value\n");
   }
   expected.push_back("steppopup tap shift+enc0 popup.page @value\n");
@@ -374,10 +382,10 @@ TEST_CASE("builtin bindings: every Shift binding is one of these, and none of th
     expected.push_back(line("pattern", "tap", (std::string("f") + std::to_string(n + 2)).c_str(), "pads.mode", pad_modes[n]));
   }
   // OS-QJUMP: Shift + Note, Instr, Vol (FX1) and Fx (FX2) are the quarter jumps (Shift + Fx was FILL again; pattern.fill has no key now, the F4 dialog is the Fill key).
-  expected.push_back(line("pattern", "tap", "note", "cursor.jump_fraction", 0));
-  expected.push_back(line("pattern", "tap", "instr", "cursor.jump_fraction", 1));
-  expected.push_back(line("pattern", "tap", "vol", "cursor.jump_fraction", 2));
-  expected.push_back(line("pattern", "tap", "fx", "cursor.jump_fraction", 3));
+  expected.push_back(line("pattern", "tap", "note", "select.jump", 0));  // OS-SELSHIFT: in Edit they also select the rows they cross
+  expected.push_back(line("pattern", "tap", "instr", "select.jump", 1));
+  expected.push_back(line("pattern", "tap", "vol", "select.jump", 2));
+  expected.push_back(line("pattern", "tap", "fx", "select.jump", 3));
   expected.push_back(line("pattern", "tap", "play", "transport.play_cursor", 0));  // OS-PLAYCUR: play from the cursor's row (also the Focus Loop's key)
   // OS-011a: the Wave / Chop screen: the coarse encoder, Shift + pad selects a slice silently, F8 REDO as on the other editors, and on the CHOP page
   // Shift + Up / Down set how many slices EVEN makes.
@@ -401,6 +409,9 @@ TEST_CASE("builtin bindings: every Shift binding is one of these, and none of th
   expected.push_back("sampleedit.fx tap shift+enc0 sedit.fx_coarse @value\n");  // OS-AUDIT-15: the FX page's coarse step (its plain encoder is sedit.fx)
   expected.push_back("sampleedit.fx tap shift+up ui.none 0\n");  // OS-AUDIT-15: the edit page's AMP is not on the FX page
   expected.push_back("sampleedit.fx tap shift+down ui.none 0\n");
+  expected.push_back("sampleedit.plug tap shift+enc0 sedit.plug_coarse @value\n");  // OS-CEPTFX S4a: the PLUGINS page (the plain encoder is sedit.plug)
+  expected.push_back("sampleedit.plug tap shift+up ui.none 0\n");  // the edit page's AMP is not on the PLUGINS page
+  expected.push_back("sampleedit.plug tap shift+down ui.none 0\n");
   expected.push_back("sampleedit tap shift+up sedit.amp 1\n");
   expected.push_back("sampleedit tap shift+down sedit.amp -1\n");
   expected.push_back("wave.wt tap shift+enc0 param.coarse @value\n");    // OS-INSTUI S4: the WAVETABLE and GRANULAR views edit their rows as the source page does
@@ -419,6 +430,7 @@ TEST_CASE("builtin bindings: every Shift binding is one of these, and none of th
   expected.push_back("perform.dj tap shift+right dj.tempo 1\n");
   // OS-012b: an app's page keeps the Shift layer of its parameters (the app gets everything else): the row, the edit and the default.
   expected.push_back("moduleapp tap shift+f8 ui.none 0\n");  // OS-KEYROWDLG S5: Shift + F8 reads nothing and must not fall through to BACK
+  expected.push_back("preset tap shift+f5 preset.save 0\n");  // OS-MODPRESET P4: SAVE in the F5 PRESET list (its own key, not a fall-through)
   expected.push_back("moduleapp tap shift+up nav.up 0\n");
   expected.push_back("moduleapp tap shift+down nav.down 0\n");
   expected.push_back("moduleapp tap shift+enc0 module.app_edit @value\n");
@@ -439,14 +451,24 @@ TEST_CASE("builtin bindings: every Shift binding is one of these, and none of th
   expected.push_back("sampleload tap shift+right sample.mark 0\n");  // OS-AUDIT-A7 (SLD-MULTI): mark the file and step down / clear the marks
   expected.push_back("sampleload tap shift+left sample.mark 1\n");
   // OS-NAV3: Shift + Up / Down is a page on the lists (cursor.page, the rows the list shows; the step popup's own popup.page).
-  for (const char* context : {"file", "sampleload", "modules", "modulepicker", "tools", "learn", "help"}) {  // (OS-H3A: the TOOLS list; OS-HELP: a screenful)
+  for (const char* context : {"file", "sampleload", "modules", "modulepicker", "preset", "verbmenu", "learn", "help"}) {  // (OS-H3A: the TOOLS list; OS-PTOOLS2 S3: the verb menu; OS-HELP: a screenful)
     expected.push_back(std::string(context) + " tap shift+up cursor.page -1\n");
     expected.push_back(std::string(context) + " tap shift+down cursor.page 1\n");
   }
   expected.push_back("song.tools tap shift+enc0 songtools.coarse @value\n");  // OS-SONGMAP: the TOOLS dialog's coarse step
+  expected.push_back("patterntools tap shift+enc0 ptool.coarse @value\n");     // OS-PTOOLS2 S2: the Pattern TOOLS dialog's coarse step (an octave on AMOUNT)
+  // OS-MIDIREC S1b/S2b/S2c/S3: the EVENTS overlay: a page on Shift + Up / Down, QUANT ALL on Shift + F2 (the argument 1 says every
+  // row; F2 alone is the row's), Shift + Insert (the other kind, A9), REDO on Shift + F7 (events.redo: the list's own, which projects
+  // again), and the coarse field edit on Shift + the encoder (S2b; the plain encoder is events.edit, not a Shift binding).
+  expected.push_back("events tap shift+up events.page -1\n");
+  expected.push_back("events tap shift+down events.page 1\n");
+  expected.push_back("events tap shift+enc0 events.coarse @value\n");
+  expected.push_back(line("events", "tap", "f2", "events.quant", 1));
+  expected.push_back("events tap shift+insert events.insert 1\n");
+  expected.push_back(line("events", "tap", "f7", "events.redo", 0));
   expected.push_back("steppopup tap shift+up popup.page -1\n");
   expected.push_back("steppopup tap shift+down popup.page 1\n");
-  // The Navigator captures, so it has its own: no jumps; Shift + F7 / F8 stay CLOSE / GO (Shift is down from the Shift + Pattern that opened it), the rest nothing.
+  // The Navigator captures, so it has its own: no jumps; Shift + F7 / F8 stay CLOSE / GO (a Shift press falls back to the plain tap), the rest nothing.
   for (int n = 0; n < 6; ++n) {
     expected.push_back(line("navigator", "tap", (std::string("f") + std::to_string(n + 1)).c_str(), "ui.none", 0));
   }
@@ -509,7 +531,7 @@ TEST_CASE("builtin bindings: every Shift binding is one of these, and none of th
                            : on_pattern && n < 3 ? "chooser.toggle"
                            : on_pattern && n == 3 ? "fill.open"  // OS-PTOOLS: F4 FILL
                            : on_pattern && n == 4 ? "pattern.preview"
-                           : on_pattern && n == 5 ? "pattern.invert"  // OS-CFGWIRE: F6 INVERT
+                           : on_pattern && n == 5 ? "tools.repeat"   // OS-PTOOLS2 S3: F6 REPEAT (AGAIN <VERB>)
                            : c == &song ? (n == 0 ? "song.play_pattern" : n == 1 ? "transport.play" : n == 2 ? "song.add_slot" : n == 3 ? "song.delete_slot" : n == 4 ? "song.unique" : "song.tools")  // OS-SONG1; OS-SONGMAP: F5 UNIQUE, F6 TOOLS (they were the slot's pattern - / +)
                                                   : "ui.softkey";
         const core::ActionId want = core::action_id(name);
@@ -557,7 +579,7 @@ TEST_CASE("builtin bindings: every Shift binding is one of these, and none of th
   for (const Chain* c : {&pattern, &select, &song}) {
     CHECK(resolve_in(*c, core::GestureKind::Tap, Button::Master, true).action == core::action_id("ui.theme.next"));
     CHECK(resolve_in(*c, core::GestureKind::Tap, Button::Master, false).action == core::action_id("nav.screen"));
-    CHECK(resolve_in(*c, core::GestureKind::Tap, Button::Pattern, true).action == core::action_id("navigator.open"));
+    CHECK(resolve_in(*c, core::GestureKind::Tap, Button::Pattern, true).action == core::action_id("apps.open"));  // OS-APPSNAV
     CHECK(resolve_in(*c, core::GestureKind::Tap, Button::Pattern, false).action == core::action_id("nav.screen"));  // the plain Pattern button is untouched
   }
   const Chain learn{"learn", {Context::Learn, Context::Global}, true};
@@ -593,6 +615,17 @@ TEST_CASE("builtin bindings: every Shift binding is one of these, and none of th
   // leaves them what they are (select-a-range and the like are left for later, bound where nothing else is). (Shift + F1..F5
   // take the position jumps instead of the "mute track 1-8" keys that the official manual describes, docs/ui/official-manual-map.md, not verified: the maintainer's OS-002b decision, an open question.)
   // (OS-009 P1a.1 bound the arrows, Insert and Delete: they are in the list of Shift rows above; OS-PATCOPY bound Copy (Shift + Copy is a paste); OS-PLAYCUR bound Shift + Play on Pattern: the next block checks it, and that every other screen's Shift + Play is still the plain Play.)
+}
+
+TEST_CASE("builtin bindings: in the EVENTS overlay a pad tap is events.pad with the pad's id, and the encoder events.edit (OS-MIDIREC S2b)") {
+  const Chain events{"events", {Context::Events, Context::Global}, true};
+  const core::BindingSet set{{core::BindingView{nullptr, 0}, core::BindingView{nullptr, 0}, app::builtin_bindings()}};
+  const core::Gesture pad_tap{0, core::GestureKind::Tap, app::pad_ref(5), core::kNoInput, 0};
+  const core::Resolution pad = core::resolve(set, chain_of(events), pad_tap);
+  CHECK_MESSAGE((pad.status == core::Resolution::Status::Bound && pad.action == core::action_id("events.pad") && pad.arg == 5), "pad 5 in events: " << pad.action);
+  const core::Gesture enc{0, core::GestureKind::Tap, app::encoder_ref(0), core::kNoInput, 3};
+  const core::Resolution turn = core::resolve(set, chain_of(events), enc);
+  CHECK_MESSAGE((turn.status == core::Resolution::Status::Bound && turn.action == core::action_id("events.edit") && turn.arg == 3), "the encoder in events: " << turn.action);
 }
 
 TEST_CASE("builtin bindings: Shift + Play is play-from-the-cursor on Pattern (OS-PLAYCUR) and the plain Play everywhere else") {
@@ -636,7 +669,7 @@ TEST_CASE("builtin bindings: Shift + Up / Down keep their own meaning where they
     resolves({"list", {ctx, Context::Global}, false}, true, "cursor.page", -1);
     resolves({"list", {ctx, Context::Global}, false}, false, "cursor.page", 1);
   }
-  for (const Context ctx : {Context::ModulePicker, Context::Learn}) {
+  for (const Context ctx : {Context::ModulePicker, Context::Preset, Context::Learn}) {
     resolves({"overlay list", {ctx, Context::Global}, true}, true, "cursor.page", -1);
     resolves({"overlay list", {ctx, Context::Global}, true}, false, "cursor.page", 1);
   }
@@ -693,7 +726,7 @@ TEST_CASE("builtin bindings: every screen button has its nav.screen binding, and
     }
     CHECK_MESSAGE(found == 1, e.name << " has " << found << " nav.screen bindings");
   }
-  // And nothing else is bound to nav.screen: OS-NAV2 opens the Navigator with a tap of Shift + Pattern, so Pattern has no Hold
+  // And nothing else is bound to nav.screen: the Navigator opens with the chords Master + Song and Song + Pattern (OS-APPSNAV, before it OS-NAV2's Shift + Pattern), so Pattern has no Hold
   // binding to wait for any more (a button with none taps at the press) and no long-press twin of the Pattern button is needed.
   std::size_t total = 0, app_total = 0;
   for (std::size_t k = 0; k < builtin.count; ++k) {
@@ -707,8 +740,38 @@ TEST_CASE("builtin bindings: every screen button has its nav.screen binding, and
   for (std::size_t i = 0; i < table.count; ++i) {
     with_button += table.items[i].hidden || table.items[i].buttonless ? 0u : 1u;
   }
-  CHECK(total == with_button + 1u);  // the buttons, and the INPUT TEST screen's chord out of it
+  CHECK(total == with_button + 2u);  // the buttons, the INPUT TEST screen's chord out of it, and F6 BACK on an insert's page (OS-INSKEYS)
   CHECK(app_total == with_button);   // OS-APPUX S3: on an app's page (the ModuleApp context) every screen button leaves the app for its screen, the same ones, one each
+}
+
+TEST_CASE("builtin bindings: Master + Song and Song + Pattern open the Navigator from every screen, in either order, and the apps list closes with Pattern (OS-APPSNAV)") {
+  const core::BindingSet set{{core::BindingView{nullptr, 0}, core::BindingView{nullptr, 0}, app::builtin_bindings()}};
+  const Chain pattern{"pattern", {Context::PatternEdit, Context::Pattern, Context::Global}, false};
+  const Chain song{"song", {Context::Song, Context::Global}, false};
+  const Chain config{"config", {Context::Config, Context::Global}, false};
+  const Chain navigator{"navigator", {Context::Navigator, Context::Global}, true};
+  const Chain picker{"picker", {Context::ModulePicker, Context::Global}, true};
+  const Button pairs[2][2] = {{Button::Master, Button::Song}, {Button::Song, Button::Pattern}};
+  for (const Chain* c : {&pattern, &song, &config}) {
+    for (const auto& pair : pairs) {
+      CHECK(core::chord_bound(set, chain_of(*c), app::button_ref(pair[0]), app::button_ref(pair[1])));
+      CHECK(core::chord_bound(set, chain_of(*c), app::button_ref(pair[1]), app::button_ref(pair[0])));
+      for (int swap = 0; swap < 2; ++swap) {
+        const core::Trigger t = core::chord(app::button_ref(pair[swap]), app::button_ref(pair[1 - swap]));
+        const core::Resolution r = core::resolve(set, chain_of(*c), core::Gesture{0, t.gesture, t.input, t.modifier, 0});
+        CHECK_MESSAGE((r.status == core::Resolution::Status::Bound && r.action == core::action_id("navigator.open")), c->what << " chord " << swap);
+      }
+    }
+  }
+  CHECK_FALSE(core::chord_bound(set, chain_of(pattern), app::button_ref(Button::Master), app::button_ref(Button::Pattern)));  // the third pair is not one
+  CHECK_FALSE(core::chord_bound(set, chain_of(navigator), app::button_ref(Button::Master), app::button_ref(Button::Song)));   // a capturing context hides Global's chords
+  // The list of the apps: Pattern and Shift + Pattern (which falls back to the plain tap) close it, F8 launches, F1 launches.
+  for (const bool shift : {false, true}) {
+    const core::Resolution r = resolve_in(picker, core::GestureKind::Tap, Button::Pattern, shift);
+    CHECK_MESSAGE((r.status == core::Resolution::Status::Bound && r.action == core::action_id("apps.close")), "picker Pattern shift " << shift);
+  }
+  CHECK(resolve_in(picker, core::GestureKind::Tap, Button::F8, false).action == core::action_id("module.picker_f8"));
+  CHECK(resolve_in(picker, core::GestureKind::Tap, Button::F1, false).action == core::action_id("module.pick"));
 }
 
 TEST_CASE("builtin bindings: F8 is UNDO and Shift + F8 REDO on Pattern (every mode) and Song, and Back in the overlays (OS-002c)") {
@@ -723,7 +786,7 @@ TEST_CASE("builtin bindings: F8 is UNDO and Shift + F8 REDO on Pattern (every mo
     CHECK_MESSAGE((redo.status == core::Resolution::Status::Bound && redo.action == core::action_id("edit.redo")), c->what);
     // The other F-keys are still the soft keys of the screen.
     const core::Resolution f7 = resolve_in(*c, core::GestureKind::Tap, Button::F7, false);
-    CHECK_MESSAGE((f7.status == core::Resolution::Status::Bound && f7.action == core::action_id(c == &song ? "song.tempo" : (c == &instrument ? "instrument.step" : (c == &edit || c == &select ? "tools.open" : "ui.softkey")))),
+    CHECK_MESSAGE((f7.status == core::Resolution::Status::Bound && f7.action == core::action_id(c == &song ? "song.tempo" : (c == &instrument ? "instrument.step" : (c == &edit || c == &select ? "verb.open" : "ui.softkey")))),
                   c->what);  // (OS-INSTUI: F7 is INS> on the Instrument screen; OS-H3A: TOOLS on Pattern)  // OS-SONG1: F7 is TEMPO on the song (OS-PADS-A: EXPORT moved to Shift + Fx)
   }
   // The overlays capture and bind F8 as Back; a held Shift falls through to it (they have no Shift + F8 of their own). The Navigator is the exception (OS-NAV2): its F8 is GO, its Back is F7 and Pattern.
@@ -828,7 +891,8 @@ TEST_CASE("builtin bindings: the Copy rows (OS-SONGSHARE S3) are Song's, make Co
       copied.push_back(binding_line(b));
     }
   }
-  std::vector<std::string> expected = {"song tap copy+up song.move -1\n", "song tap copy+down song.move 1\n"};
+  std::vector<std::string> expected = {"song tap copy+up song.move -1\n", "song tap copy+down song.move 1\n", "song tap copy+left song.move_along -1\n", "song tap copy+right song.move_along 1\n",  // (OS-SONG3 S2: the same move along TIMELINE)
+      "song tap copy+f3 song.add_empty 0\n"};  // OS-SONG3 S5: Copy held + F3, ADD EMPTY
   std::sort(copied.begin(), copied.end());
   std::sort(expected.begin(), expected.end());
   CHECK(copied == expected);
@@ -852,7 +916,11 @@ TEST_CASE("builtin bindings: the Copy rows (OS-SONGSHARE S3) are Song's, make Co
   CHECK(resolved(song, core::GestureKind::Tap, Button::Up, Button::Copy).action == core::action_id("song.move"));
   CHECK(resolved(song, core::GestureKind::Tap, Button::Down, Button::Copy).arg == 1);
   CHECK(resolved(song, core::GestureKind::Tap, Button::Up, Button::Copy).arg == -1);
-  CHECK(resolved(song, core::GestureKind::Tap, Button::Left, Button::Copy).action == core::action_id("nav.left"));  // no Copy row: the plain key
+  CHECK(resolved(song, core::GestureKind::Tap, Button::Left, Button::Copy).action == core::action_id("song.move_along"));  // OS-SONG3 S2: Copy + Left / Right is the move along TIMELINE
+  CHECK(resolved(song, core::GestureKind::Tap, Button::Right, Button::Copy).arg == 1);
+  CHECK(resolved(song, core::GestureKind::Tap, Button::Left, Button::Copy).arg == -1);
+  CHECK(resolved(song, core::GestureKind::Tap, Button::F3, Button::Copy).action == core::action_id("song.add_empty"));  // OS-SONG3 S5: ADD EMPTY; the plain F3 is still ADD SLOT
+  CHECK(core::resolve(set, chain_of(song), core::Gesture{0, core::GestureKind::Tap, app::button_ref(Button::F3), core::kNoInput, 0}).action == core::action_id("song.add_slot"));
   CHECK(resolved(song, core::GestureKind::Tap, Button::Up, Button::Shift).action == core::action_id("song.select"));  // Shift wins
   CHECK(resolved(pattern, core::GestureKind::Tap, Button::Up, Button::Copy).action != core::action_id("song.move"));  // not on Pattern
   CHECK(resolved(song, core::GestureKind::Tap, Button::Copy, Button::Shift).action == core::action_id("song.paste"));
@@ -910,5 +978,70 @@ TEST_CASE("builtin bindings: the Note rows (OS-ZOOM) are Pattern's and the step 
   CHECK(resolved(pattern, core::GestureKind::Tap, Button::Fx, Button::Note).action == core::action_id("pattern.fx_column"));
   CHECK(resolved(popup, core::GestureKind::Tap, Button::Instr, Button::Note).action == core::action_id("pattern.zoom"));
   CHECK(resolved(popup, core::GestureKind::Tap, Button::Up, Button::Note).action == core::action_id("popup.move"));  // the popup's own rows stay under Note
-  CHECK(resolved(pattern, core::GestureKind::Tap, Button::Instr, Button::Shift).action == core::action_id("cursor.jump_fraction"));
+  CHECK(resolved(pattern, core::GestureKind::Tap, Button::Instr, Button::Shift).action == core::action_id("select.jump"));  // OS-SELSHIFT
+}
+
+TEST_CASE("builtin bindings: Instr + FX2 assigns the encoder target from every screen but not in a capturing overlay (OS-ENCLEARN)") {
+  const core::BindingSet set{{core::BindingView{nullptr, 0}, core::BindingView{nullptr, 0}, app::builtin_bindings()}};
+  const Chain pattern{"pattern", {Context::PatternNote, Context::Pattern, Context::Global}, false};
+  const Chain instrument{"instrument", {Context::Instrument, Context::Global}, false};
+  const Chain learn{"learn", {Context::Learn, Context::Global}, true};
+  const core::Gesture assign{0, core::GestureKind::Chord, app::button_ref(Button::Instr), app::button_ref(Button::Fx), 0};
+  const core::Gesture assign_swapped{0, core::GestureKind::Chord, app::button_ref(Button::Fx), app::button_ref(Button::Instr), 0};
+  const auto assigns = [&](const Chain& c) {  // (the recogniser hands the pair over in canonical order; either spelling resolves)
+    for (const core::Gesture& g : {assign, assign_swapped}) {
+      const core::Resolution r = core::resolve(set, chain_of(c), g);
+      if (r.status == core::Resolution::Status::Bound && r.action == core::action_id("enc.assign")) {
+        return true;
+      }
+    }
+    return false;
+  };
+  CHECK(assigns(pattern));
+  CHECK(assigns(instrument));
+  CHECK_FALSE(assigns(learn));
+  CHECK(core::chord_bound(set, chain_of(pattern), app::button_ref(Button::Fx), app::button_ref(Button::Instr)));  // either order
+  // the turn itself is not a binding: App::run_once takes it ahead of the gesture layer
+  CHECK(core::resolve(set, chain_of(pattern), core::Gesture{0, core::GestureKind::HoldEncoder, app::encoder_ref(0), app::button_ref(Button::Instr), 1}).action != core::action_id("enc.turn"));
+}
+
+TEST_CASE("builtin bindings: in the EVENTS overlay Insert, Delete, F2 and F7 are the list's own actions (OS-MIDIREC S2c, S3)") {
+  const Chain events{"events", {Context::Events, Context::Global}, true};
+  const core::BindingSet set{{core::BindingView{nullptr, 0}, core::BindingView{nullptr, 0}, app::builtin_bindings()}};
+  const auto bound = [&](Button b, bool shift, const char* action, int arg) {
+    const core::Resolution r = core::resolve(set, chain_of(events), core::Gesture{0, core::GestureKind::Tap, app::button_ref(b), shift ? app::button_ref(Button::Shift) : core::kNoInput, 0});
+    return r.status == core::Resolution::Status::Bound && r.action == core::action_id(action) && r.arg == arg;
+  };
+  CHECK(bound(Button::Insert, false, "events.insert", 0));
+  CHECK(bound(Button::Insert, true, "events.insert", 1));
+  CHECK(bound(Button::Delete, false, "events.delete", 0));
+  CHECK(bound(Button::F2, false, "events.quant", 0));
+  CHECK(bound(Button::F2, true, "events.quant", 1));
+  CHECK(bound(Button::F7, false, "events.undo", 0));
+  CHECK(bound(Button::F7, true, "events.redo", 0));
+}
+
+TEST_CASE("builtin bindings: OS-PTOOLS2 S3b, F7 held + pad runs the verb without the menu (verb.hold_pad), a tap of F7 still opens it, and the hold itself is verb.hold") {
+  const core::BindingSet set{{core::BindingView{nullptr, 0}, core::BindingView{nullptr, 0}, app::builtin_bindings()}};
+  const Chain edit{"pattern edit", {Context::PatternEdit, Context::Pattern, Context::Global}, false};
+  const Chain note{"pattern note", {Context::PatternNote, Context::Pattern, Context::Global}, false};  // a field level: its plain pads do not answer under F7
+  const auto res = [&](const Chain& c, core::GestureKind kind, core::InputRef input, core::InputRef mod) {
+    return core::resolve(set, chain_of(c), core::Gesture{0, kind, input, mod, 0});
+  };
+  for (const Chain* c : {&edit, &note}) {
+    const core::Resolution pad = res(*c, core::GestureKind::Tap, app::pad_ref(6), app::button_ref(Button::F7));
+    CHECK_MESSAGE((pad.status == core::Resolution::Status::Bound && pad.action == core::action_id("verb.hold_pad") && pad.arg == 6), c->what);
+    const core::Resolution any = res(*c, core::GestureKind::Tap, app::pad_ref(core::kAnyId), app::button_ref(Button::F7));
+    CHECK_MESSAGE((any.status == core::Resolution::Status::Bound && any.action == core::action_id("verb.hold_pad")), c->what);
+    // without the held F7 the pad is the field's / mode's own (a plain row), never the verb
+    const core::Resolution plain = res(*c, core::GestureKind::Tap, app::pad_ref(6), core::kNoInput);
+    CHECK_MESSAGE(plain.action != core::action_id("verb.hold_pad"), c->what);
+  }
+  const core::Resolution tap = res(edit, core::GestureKind::Tap, app::button_ref(Button::F7), core::kNoInput);
+  CHECK_MESSAGE((tap.status == core::Resolution::Status::Bound && tap.action == core::action_id("verb.open")), "a tap of F7 still opens the menu");
+  const core::Resolution hold = res(edit, core::GestureKind::Hold, app::button_ref(Button::F7), core::kNoInput);
+  CHECK_MESSAGE((hold.status == core::Resolution::Status::Bound && hold.action == core::action_id("verb.hold")), "the hold of F7");
+  // F7 is a held modifier only where a binding names it: the wants of the chain say so, and the Song screen does not have the pad rows
+  const core::Resolution song_pad = res(Chain{"song", {Context::Song, Context::Global}, false}, core::GestureKind::Tap, app::pad_ref(6), app::button_ref(Button::F7));
+  CHECK_MESSAGE(song_pad.action != core::action_id("verb.hold_pad"), "no verb.hold_pad on Song");
 }

@@ -55,7 +55,8 @@ constexpr std::size_t kLine = 768;  // the state line's buffer (the scenario run
 
 // The actions that may lower the undo depth, and that need no unit and no question to change the document: File NEW and OPEN replace it, undo and redo move along it.
 bool exempt(const std::string& action) {
-  return action == "file.new" || action == "file.open" || action == "edit.undo" || action == "edit.redo" || action == "sedit.undo" || action == "sedit.redo";
+  return action == "file.new" || action == "file.open" || action == "edit.undo" || action == "edit.redo" || action == "sedit.undo" || action == "sedit.redo" ||
+         action == "events.undo" || action == "events.redo";  // OS-MIDIREC S2c: F7 / Shift + F7 inside the EVENTS list run the grid's undo
 }
 
 }  // namespace

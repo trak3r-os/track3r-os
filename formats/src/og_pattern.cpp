@@ -11,19 +11,26 @@ using namespace codec;  // NOLINT: the shared field access and layouts
 
 // ---- reader -----------------------------------------------------------------------------------------------
 //
-// A pattern file is a 28-byte head, eight 769-byte track rows, then either the 4-byte CRC (the 8-track file of
-// firmware up to 1.8, 6,184 B) or four more rows and the CRC (1.9, 9,260 B). Which one it is shows only at the
-// end of the eighth row: five more bytes mean 12 tracks, the end of the source after four means 8. Rows are
-// turned into model steps as they arrive, so only one row (and its 128 converted steps) is ever held; if the
-// file then proves bad, the pattern is deleted again.
+// A pattern file is a 28-byte head, then track rows, then a 4-byte CRC. Versions 1 to 5 hold 769-byte rows (a length
+// byte plus 128 steps of 6 bytes): eight of them are the 8-track file of firmware up to 1.8 (6,184 B), twelve the
+// 1.9 file (9,260 B), sixteen the 16-track v5 of tracker-ce (12,336 B, OS-CEPAT S1b); which one it is shows only in
+// the stream: at the end of the eighth row, four bytes and the end of the source mean 8 tracks, five more bytes a
+// ninth row; at the end of the twelfth row, four bytes and the end mean 12 tracks, a 13th row means 16. Version 6
+// (tracker-ce, OS-CEPAT S1) holds 1,025-byte rows (128 steps of 8 bytes, with the volume and micromove columns) and
+// says its track count in the declared size at offset 12 of the head: 8, 12 or 16 rows, 8,232 / 12,332 / 16,432 B.
+// Rows are turned into model steps as they arrive, so only one row (and its 128 converted steps) is ever held; if
+// the file then proves bad, the pattern is deleted again.
 
 void PatternReader::begin(core::ByteSource& source, model::ModelArena& arena, const ReadParams& params) noexcept {
   begin_base(source, arena);
   id_ = 0;
   created_ = false;
+  v6_ = false;
+  tracks_total_ = 0;
   track_ = 0;
   first_length_ = 0;
   crc8_ = 0;
+  crc12_ = 0;
   want_ = kPatternHead;
   have_ = 0;
   state_ = State::Head;
@@ -52,6 +59,17 @@ void PatternReader::on_head() noexcept {
   }
   report_.version = version;
   report_.unverified_version = version > kPatternVerified;
+  if (version >= 6) {
+    // OS-CEPAT S1: v6 and above declare their size at offset 12; only the three v6 sizes have a known layout, and
+    // they give the track count (a v7+ file of a v6 size is read with the v6 layout and flagged unverified above).
+    const std::uint32_t tracks = pattern_tracks_v6(get16(scratch_ + 12));
+    if (tracks == 0) {
+      reject(FormatError::Malformed, "v6 pattern of an unknown size");
+      return;
+    }
+    v6_ = true;
+    tracks_total_ = static_cast<std::uint8_t>(tracks);
+  }
   switch (project_->create_pattern(id_, project_->default_pattern_length())) {
     case model::Status::Ok:
       created_ = true;
@@ -64,7 +82,7 @@ void PatternReader::on_head() noexcept {
       return;
   }
   state_ = State::Row;
-  want_ = kPatternRow;
+  want_ = v6_ ? kPatternRow6 : kPatternRow;
   have_ = 0;
 }
 
@@ -74,8 +92,15 @@ void PatternReader::on_row() noexcept {
     reject(FormatError::Malformed, "track length byte above 127");
     return;
   }
-  for (std::uint32_t s = 0; s < model::kMaxPatternLength; ++s) {
-    row_[s] = step_from_og(scratch_ + 1 + s * patt::kStep);
+  if (v6_) {  // 128 steps of 8 bytes: bytes 0-5 as v5, then the volume and micromove columns (OS-CEPAT S1, 3.3)
+    for (std::uint32_t s = 0; s < model::kMaxPatternLength; ++s) {
+      row_[s] = step_from_og_v6(scratch_ + 1 + s * patt::kStep6, &report_.micromoves_dropped, &report_.values_clamped,
+                                &report_.ce_fx_cleared);
+    }
+  } else {
+    for (std::uint32_t s = 0; s < model::kMaxPatternLength; ++s) {
+      row_[s] = step_from_og(scratch_ + 1 + s * patt::kStep, &report_.ce_fx_cleared);
+    }
   }
   if (project_->set_steps(id_, track_, 0, row_, model::kMaxPatternLength) != model::Status::Ok ||
       project_->set_track_length(id_, track_, static_cast<std::uint32_t>(length) + 1u) != model::Status::Ok) {
@@ -119,7 +144,13 @@ Progress PatternReader::step(std::size_t byte_budget) noexcept {
         } else {
           finish();
         }
-      } else if (state_ == State::End) {  // the 12-track file ends where it should
+      } else if (state_ == State::Tail12 && have_ == 4) {  // ... and after twelve: those four bytes are the CRC
+        if (get32(scratch_) != crc12_) {  // (OS-CEPAT S1b: a 16-track v5 file goes on instead, see State::Tail12)
+          reject(FormatError::BadCrc, "the CRC does not match the pattern");
+        } else {
+          finish();
+        }
+      } else if (state_ == State::End) {  // the 12- or 16-track file ends where it should
         finish();
       } else {
         reject(FormatError::Truncated, "the file ends inside the pattern");
@@ -135,12 +166,26 @@ Progress PatternReader::step(std::size_t byte_budget) noexcept {
         if (progress_ != Progress::Running) {
           break;
         }
-        if (track_ == 8) {
+        if (v6_) {  // the declared size fixed the track count: after the last row come the 4 CRC bytes
+          if (track_ == tracks_total_) {
+            state_ = State::Crc;
+            want_ = 4;
+            have_ = 0;
+          } else {
+            want_ = kPatternRow6;
+            have_ = 0;
+          }
+        } else if (track_ == 8) {
           crc8_ = crc_.value();
           state_ = State::Tail;
           want_ = 5;
           have_ = 0;
-        } else if (track_ == kTracks) {
+        } else if (track_ == kTracks) {  // twelve rows in: a 13th row means 16 tracks (OS-CEPAT S1b), else the CRC
+          crc12_ = crc_.value();
+          state_ = State::Tail12;
+          want_ = 5;
+          have_ = 0;
+        } else if (track_ == model::kMaxTracks) {  // the sixteenth row of a 16-track v5 file: the CRC follows
           state_ = State::Crc;
           want_ = 4;
           have_ = 0;
@@ -149,7 +194,11 @@ Progress PatternReader::step(std::size_t byte_budget) noexcept {
           have_ = 0;
         }
         break;
-      case State::Tail:  // five bytes: the first of the ninth row, so this is the 12-track file
+      case State::Tail:  // five bytes: the first of the ninth row, so this is not the 8-track file
+        state_ = State::Row;
+        want_ = kPatternRow;  // have_ stays 5: those bytes are the start of the row
+        break;
+      case State::Tail12:  // five bytes: the first of the 13th row, so this is the 16-track file (OS-CEPAT S1b)
         state_ = State::Row;
         want_ = kPatternRow;  // have_ stays 5: those bytes are the start of the row
         break;

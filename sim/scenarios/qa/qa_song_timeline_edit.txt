@@ -1,0 +1,131 @@
+# OS-SONG3 S2 (docs/specs/OS-SONG3.md; new Community OS behaviour, no format change): the editable TIMELINE, QA-SNG-116..134, docs/qa/catalogue/song.md. Goldens are keyed qa_song_timeline_edit/<snap>.
+# The twins of the map's rows (QA-SNG-020..038, 053, 054, 056, 057, 066) on the TIMELINE page: the list's model transposed (Left / Right are the slots, Up / Down the tracks), the same actions.
+# Four slots over the patterns 1..4 (DUP PAT makes each a copy of the demo pattern), the cursor on slot 0 of TIMELINE, on the block row.
+document
+tap pattern
+wait 3000
+tap song
+press shift
+tap insert 3
+release shift
+tap up 3
+tap song
+assert state screen=SONG page=1
+
+# QA-SNG-116 (QA-SNG-020 twin): Down on the block row enters lane 1: the cell is the cursor's (an Accent box with an outline), the lane's number in the margin is the bright one, the block keeps a one-pixel frame, the info line names the track.
+tap down
+snap qa_sng_116
+
+# QA-SNG-117 (QA-SNG-021 twin): Down walks the lanes (clamped at the 12th), Right keeps the lane and moves the slot, Up walks back and from lane 1 returns to the block row (no wrap).
+tap down 3
+tap right
+snap qa_sng_117
+tap down 20
+tap up 20
+tap left
+tap down
+
+# QA-SNG-118 (QA-SNG-022 twin): Shift + Right / Down select slots x tracks (3 slots x 3 lanes), drawn on a band through the lanes, the cursor's cell on its last cell; the info line says slots 00 to 02, tracks 01 to 03.
+press shift
+tap right 2
+tap down 2
+release shift
+snap qa_sng_118
+
+# QA-SNG-119 (QA-SNG-023 twin): Copy takes the rectangle's cells into the song clip.
+tap copy
+snap qa_sng_119
+
+# QA-SNG-120 (QA-SNG-066 twin) / QA-SNG-121 (QA-SNG-028 twin): Delete over slots 0..2 x lanes 1..3 asks CLEAR 3 PATTERNS?; F1 clears those tracks of patterns 2, 3 and 4 (the lanes show no ticks in them).
+tap left 2
+tap up 2
+press shift
+tap right 2
+tap down 2
+release shift
+tap delete
+snap qa_sng_120
+tap f1
+snap qa_sng_121
+
+# QA-SNG-122 (QA-SNG-025 twin): Shift + Copy over the selection tiles the clip to fill it: the three cleared patterns are written again (the ticks come back).
+press shift
+tap copy
+release shift
+snap qa_sng_122
+
+# QA-SNG-123 (QA-SNG-024 twin): Shift + Copy with no selection lands the clip's top-left on the cursor's cell and drops what runs past the last slot (one slot is left of the three).
+tap up
+tap delete
+press shift
+tap copy
+release shift
+snap qa_sng_123
+
+# QA-SNG-124 (QA-SNG-029 twin): F6 TOOLS opens the dialog over the cursor's cell: OP and AMOUNT, the scope, F1 APPLY and F8 BACK; the lanes stay behind it.
+tap f6
+snap qa_sng_124
+
+# QA-SNG-125 (QA-SNG-030 twin): TRANSPOSE by +5 semitones: one undo unit, the strip says TRANSPOSED.
+tap down
+encoder +5
+tap f1
+snap qa_sng_125
+
+# QA-SNG-126 (QA-SNG-033 twin): TOOLS on the block row acts on the cursor slot's tracks, all of them: the scope line says TRACKS 1-12.
+tap up 20
+tap f6
+snap qa_sng_126
+tap f8
+
+# QA-SNG-127 (QA-SNG-034 twin): F5 UNIQUE with no selection gives a slot that shares its pattern a copy of its own: ADD SLOT makes a slot that holds the cursor's pattern again, UNIQUE copies it for that slot.
+tap right 3
+tap insert
+tap f5
+snap qa_sng_127
+
+# QA-SNG-128 (QA-SNG-036 twin): the question: an edit that would also change a slot outside the rectangle asks first; nothing is written, the key row marks F1 ALL and F2 UNIQUE.
+tap insert
+tap down
+tap delete
+snap qa_sng_128
+
+# QA-SNG-129 (QA-SNG-037 twin): F2 UNIQUE makes the copy and clears the copy only (one undo unit: F8 takes both back).
+tap f2
+snap qa_sng_129
+
+# QA-SNG-130 (QA-SNG-038 twin): any other key takes the question back and acts as usual (Right moves the cursor's slot); nothing was written.
+tap left
+tap delete
+tap right
+snap qa_sng_130
+
+# QA-SNG-131 (QA-SNG-054 twin): Shift + Delete in a lane cuts the cell: the song clip is filled and the cell cleared; Shift + Copy puts it back.
+tap up 20
+tap down
+press shift
+tap delete
+release shift
+snap qa_sng_131
+
+# QA-SNG-132 (QA-SNG-053 twin): Shift + Delete on the block row cuts the slot into the slot clipboard and out of the list; the strip says CUT 1 SLOT.
+tap up
+press shift
+tap delete
+release shift
+snap qa_sng_132
+
+# QA-SNG-133 (QA-SNG-056 twin): Copy held + Right moves the cursor's slot one position along the song (the slot it steps over goes the other way), the cursor follows; one undo unit a press.
+press copy
+tap right
+release copy
+snap qa_sng_133
+
+# QA-SNG-134 (QA-SNG-057 twin): a selected range of slots (Shift + Right) moves as a block with Copy + Right.
+press shift
+tap right
+release shift
+press copy
+tap right
+release copy
+snap qa_sng_134

@@ -175,8 +175,8 @@ TEST_CASE("source page: the rows follow the play mode, PLAY MODE first and PLAY 
       {1, {ip::PlayMode, ip::PlayEngine, ip::PlayStereo}},
       {2, {ip::PlayMode, ip::PlayEngine, ip::PlayStereo}},
       {3, {ip::PlayMode, ip::PlayEngine, ip::PlayStereo}},
-      {4, {ip::PlayMode, ip::Slices, ip::Slice, ip::PlayEngine, ip::PlayStereo}},
-      {5, {ip::PlayMode, ip::Slices, ip::Slice, ip::PlayEngine, ip::PlayStereo}},
+      {4, {ip::PlayMode, ip::Slices, ip::Slice, ip::PlayThru, ip::PlayEngine, ip::PlayStereo}},  // (OS-CEPLAYTHRU P2: PLAY THRU after SLICE)
+      {5, {ip::PlayMode, ip::Slices, ip::Slice, ip::PlayThru, ip::PlayEngine, ip::PlayStereo}},
       {6, {ip::PlayMode, ip::WtPos, ip::WtSize, ip::PlayEngine, ip::PlayStereo}},
       {7, {ip::PlayMode, ip::GrainPos, ip::GrainLength, ip::GrainShape, ip::GrainLoop, ip::PlayEngine, ip::PlayStereo}},
   };
@@ -380,7 +380,7 @@ TEST_CASE("source page: rows that do not apply are dimmed with the reason, not h
   CHECK(rig.rows() == 5);  // the rows are all there (PLAY MODE, WT POS, WT SIZE, PLAY ENGINE, STEREO)
   rig.select(kSlot);
   rig.set_mode(5);
-  CHECK(rig.rows() == 5);  // SLICE is a row whatever the slices (dimmed while there are none)
+  CHECK(rig.rows() == 6);  // SLICE is a row whatever the slices (dimmed while there are none); with PLAY THRU after it: PLAY MODE, SLICES, SLICE, PLAY THRU, PLAY ENGINE, STEREO
   CHECK(rig.app->frames() >= 1u);
   CHECK(rig.app->failed_frames() == 0u);
 }
@@ -478,10 +478,77 @@ TEST_CASE("stereo row: a MIDI instrument has no such page, and the write path re
   CHECK(rig.arena->project.generation() == before);
 }
 
+// OS-CEPLAYTHRU P2: the PLAY THRU row, a virtual field after SLICE in the Slice and Beat Slice modes only (the page stays at six rows there). OFF by default; the encoder turns it ON as
+// one undo unit and the slot is rebound, so the rebuilt descriptor carries the flag (beat_slice_span ends a slice at the sample end with it).
+TEST_CASE("play thru row: after SLICE in the slice modes only, OFF by default, one undo unit, and the rebound descriptor carries the flag") {
+  Rig rig;
+  for (const unsigned mode : {4u, 5u}) {  // the row's place in both slice modes
+    rig.set_mode(mode);
+    NEED(rig.rows() == 6);
+    CHECK_MESSAGE(rig.field_at(3) == ip::PlayThru, "mode " << mode);
+  }
+  app::ParamScratch scratch;
+  const core::ParamId id = rig.focus();
+  const core::ParamDesc* d = app::describe_param(rig.app->model(), id, scratch);
+  NEED(d != nullptr);
+  CHECK(std::string(d->name) == "PLAY THRU");
+  CHECK(std::string(d->names[0]) == "OFF");
+  CHECK(std::string(d->names[1]) == "ON");
+  CHECK(rig.inst().slice_thru == 0);
+  rig.clear_notes();
+  rig.turn(1);  // OFF -> ON
+  CHECK(rig.inst().slice_thru == 1);
+  (void)rig.invoke("edit.undo");
+  CHECK(rig.inst().slice_thru == 0);
+  (void)rig.invoke("edit.redo");
+  CHECK(rig.inst().slice_thru == 1);
+  // the rebound descriptor carries the flag (the bank rebuilds it when stopped and idle, as every instrument edit)
+  rig.clear_notes();
+  rig.pass(100);
+  CHECK(rig.voices->sample(kSlot).beat_slice);
+  CHECK(rig.voices->sample(kSlot).slice_thru == 1u);
+  // the other modes have no such row
+  for (const unsigned mode : {0u, 1u, 6u, 7u}) {
+    rig.set_mode(mode);
+    for (int i = 0; i < rig.rows(); ++i) {
+      CHECK_MESSAGE(rig.field_at(i) != ip::PlayThru, "mode " << mode << " row " << i);
+    }
+  }
+}
+
+TEST_CASE("play thru row: a MIDI instrument has no such page, and the write path refuses the field on an instrument that is not a sample") {
+  Rig rig;
+  const core::ParamId id = core::param_id(core::ParamKind::Instrument, 9, ip::PlayThru);  // the MIDI instrument of the rig
+  app::ParamScratch scratch;
+  CHECK(app::is_play_thru_param(id));
+  CHECK(app::describe_param(rig.app->model(), id, scratch) != nullptr);  // (the descriptor is the field's, whatever the slot)
+  CHECK(model::param_desc(id) == nullptr);                               // (not a table row: the generation block does not grow)
+  CHECK_FALSE(model::instrument_field_app_writable(ip::PlayThru));
+  // The write path itself (not only the descriptor): a MIDI slot is NoInstrument whatever the value; on the sample slot NaN, a negative and a value past the two choices are Rejected and nothing is written.
+  auto model = std::make_unique<app::Model>();
+  app::ViewState view;
+  app::ActionContext ctx{*model, view, app::App::kSoftKeyLabels, 1000, true, &rig.app->session()};
+  ctx.edit = rig.editor.get();
+  ctx.samples = &rig.bank;
+  const std::uint32_t before = rig.arena->project.generation();
+  for (const float v : {0.0f, 1.0f}) {
+    CHECK(app::write_param(ctx, id, v) == app::WriteResult::NoInstrument);
+  }
+  CHECK(rig.arena->project.instrument(9)->slice_thru == 0);
+  const core::ParamId sample_id = core::param_id(core::ParamKind::Instrument, kSlot, ip::PlayThru);
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  for (const float v : {nan, -1.0f, 2.0f, 255.0f}) {
+    CHECK(app::write_param(ctx, sample_id, v) == app::WriteResult::Rejected);
+  }
+  CHECK(app::write_param(ctx, sample_id, 0.0f) == app::WriteResult::Unchanged);  // already OFF
+  CHECK(rig.inst().slice_thru == 0);
+  CHECK(rig.arena->project.generation() == before);
+}
+
 // The instrument is 720 B with no padding (Instrument::reserved), so the whole-instrument memcmp of a no-op edit and of PASTE compares defined bytes.
 TEST_CASE("stereo flag: a no-op instrument edit records no undo unit, and a paste of an identical instrument says it already holds it") {
   Rig rig;
-  static_assert(sizeof(model::Instrument) == offsetof(model::Instrument, reserved) + sizeof(model::Instrument::reserved), "no tail padding");
+  static_assert(sizeof(model::Instrument) == offsetof(model::Instrument, rate) + sizeof(model::Instrument::rate), "no tail padding");
   const std::size_t depth = rig.editor->journal().depth();
   const model::Instrument same = rig.inst();
   NEED(rig.editor->set_instrument(kSlot, same) == model::Status::Ok);
@@ -491,7 +558,10 @@ TEST_CASE("stereo flag: a no-op instrument edit records no undo unit, and a past
   NEED(rig.editor->set_instrument(kSlot, fresh) == model::Status::Ok);
   CHECK(rig.editor->journal().depth() == depth);
   CHECK(rig.inst().reserved[0] == 0);
-  CHECK(rig.inst().reserved[2] == 0);
+  fresh = rig.inst();
+  fresh.slice_thru = 0xAA;  // OS-CEPLAYTHRU P1: a flag above 1 is refused (validate_instrument), as the stereo flag is
+  CHECK(rig.editor->set_instrument(kSlot, fresh) == model::Status::BadValue);
+  CHECK(rig.inst().slice_thru == 0);
   // PASTE: copy slot 5 (SHIFT+F2 on the Instrument screen), paste it in a second slot that holds the same instrument.
   rig.clear_notes();
   rig.select(kSlot);

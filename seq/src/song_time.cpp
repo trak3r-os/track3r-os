@@ -53,6 +53,7 @@ struct Walk {
   std::uint32_t jump_order = 0;
   std::int32_t tempo_fine_row = 0;
   std::uint32_t walked = 0;
+  bool wrapped = false;  // the song's loop back to its first slot happened (the order list ended): the chase's walk stops there
 
   std::uint32_t active() const noexcept { return std::min<std::uint32_t>(p.active_tracks(), model::kMaxTracks); }
   // Sequencer::nominal_tempo_x100 without the live layers (no performance override, no external clock): the FX tempo, else the project tempo.
@@ -87,6 +88,7 @@ struct Walk {
       ++order_pos;
       if (order_pos >= p.song_length()) {
         order_pos = 0;  // the song's loop back to its first slot
+        wrapped = true;
       }
     }
     if (mode == PlayMode::Song) {
@@ -115,6 +117,9 @@ struct Walk {
     tempo_fine_row = 0;
     break_pending = false;
     jump_pending = false;
+    const std::uint32_t tempo_in = nominal_tempo_x100();  // OS-MTC B3: the state before this row's FX
+    const std::uint32_t swing_in = swing();
+    const bool odd_in = swing_odd;
     const std::uint32_t act = active();
     for (std::uint32_t t = 0; t < act; ++t) {
       model::Step row;
@@ -168,6 +173,10 @@ struct Walk {
     pt.order = mode == PlayMode::Song ? static_cast<std::uint16_t>(order_pos) : audio::PlayPosition::kNoOrder;
     pt.pattern = static_cast<std::uint8_t>(pattern_id);
     pt.step = static_cast<std::uint16_t>(song_step);
+    pt.tempo_in_x100 = tempo_in;
+    pt.swing_in = static_cast<std::uint8_t>(swing_in);
+    pt.odd = odd_in;
+    pt.past_end = false;
     pt.capped = false;
     time += dur;
     advance();
@@ -228,13 +237,18 @@ SongPoint song_time_at(const model::Project& project, PlayMode mode, std::uint32
   }
 }
 
-SongPoint song_position_at(const model::Project& project, PlayMode mode, std::uint32_t order, core::Q32 samples) noexcept {
+SongPoint song_position_at(const model::Project& project, PlayMode mode, std::uint32_t order, core::Q32 samples, bool loop) noexcept {
   Walk w = walk_init(project, mode, mode == PlayMode::Song ? 0u : order);
   for (;;) {
     const SongPoint pt = w.step();
     ++w.walked;
     if (pt.time >= samples) {
       return pt;
+    }
+    if (!loop && w.wrapped) {
+      SongPoint end = pt;  // the end of the song came before the time: it is past the last step (this one lasts until the end)
+      end.past_end = true;
+      return end;
     }
     if (w.walked >= kWalkCap) {
       SongPoint cap = pt;

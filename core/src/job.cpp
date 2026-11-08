@@ -67,7 +67,7 @@ void JobRunner::finish(unsigned slot, JobStatus status, std::uint32_t slice_us, 
   ++s.stats.steps;
   s.stats.total_us += used_us;
   s.stats.max_step_us = used_us > s.stats.max_step_us ? used_us : s.stats.max_step_us;
-  s.stats.overruns += overran(used_us, slice_us) ? 1u : 0u;
+  s.stats.overruns += (!s.job->long_step() && overran(used_us, slice_us)) ? 1u : 0u;  // OS-CEPTFX A17: an indivisible step is not an overrun
   // A job may have cancelled itself during its step: that stays, whatever it then answered.
   if (s.state == SlotState::Running) {
     if (status == JobStatus::Done) {

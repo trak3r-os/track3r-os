@@ -9,17 +9,20 @@
 #include <o3os/audio/event_source.h>
 #include <o3os/audio/smoothing.h>
 #include <o3os/audio/voices.h>
+#include <o3os/audio/wt_contour.h>  // OS-CEWTENV W3a: the tests bind their own contour bank
 #include <o3os/hal/audio.h>
 
 #include "data/loop_walk_vectors.h"
 #include "support/need.h"
 #include "support/static_slot.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
+#include <vector>
 
 namespace {
 
@@ -268,6 +271,48 @@ TEST_CASE("voices: a beat slice plays the slice the note names, at the root's pi
       CHECK(out[k] == ramp[k]);
     }
   }
+}
+
+// OS-CEPLAYTHRU P2: with the descriptor's slice_thru, beat_slice_span ends a slice at the sample end instead of the next bound — the note's slice and the Slice FX's forced one both.
+TEST_CASE("voices: beat_slice_span with play through ends the slice at the sample end, forced slice too (OS-CEPLAYTHRU P2)") {
+  static std::uint16_t table[2 * 4];
+  put_bounds(table, {0, 250, 600, 1000});  // slices 0 [0, 250), 1 [250, 600), 2 [600, 1000)
+  SampleDesc d;
+  d.length = 1000;
+  d.beat_slice = true;
+  d.slice_count = 3;
+  d.slices = table;
+  std::uint32_t from = 0, len = 0;
+  bool ok = o3os::audio::beat_slice_span(d, 24, o3os::audio::kNoForcedSlice, from, len);
+  // without the flag: the next bound
+  CHECK(ok);
+  CHECK((from == 0u && len == 250u));
+  ok = o3os::audio::beat_slice_span(d, 25, o3os::audio::kNoForcedSlice, from, len);
+  CHECK(ok);
+  CHECK((from == 250u && len == 350u));
+  d.slice_thru = 1;
+  // with it: the sample end, whatever the slice
+  ok = o3os::audio::beat_slice_span(d, 24, o3os::audio::kNoForcedSlice, from, len);
+  CHECK(ok);
+  CHECK((from == 0u && len == 1000u));
+  ok = o3os::audio::beat_slice_span(d, 25, o3os::audio::kNoForcedSlice, from, len);
+  CHECK(ok);
+  CHECK((from == 250u && len == 750u));
+  // the Slice FX's forced slice too (forced modulo the count)
+  ok = o3os::audio::beat_slice_span(d, 60, 1, from, len);
+  CHECK(ok);
+  CHECK((from == 250u && len == 750u));
+  ok = o3os::audio::beat_slice_span(d, 60, 7, from, len);  // 7 % 3 = 1
+  CHECK(ok);
+  CHECK((from == 250u && len == 750u));
+  ok = o3os::audio::beat_slice_span(d, 60, 2, from, len);
+  CHECK(ok);
+  CHECK((from == 600u && len == 400u));
+  // no slice table: the whole sample either way
+  d.slice_count = 0;
+  ok = o3os::audio::beat_slice_span(d, 24, o3os::audio::kNoForcedSlice, from, len);
+  CHECK(ok);
+  CHECK((from == 0u && len == 1000u));
 }
 
 TEST_CASE("voices: the wavetable pitch law is the note table times window x 523.2511306 / 44100, and a window plays as an oscillator (OS-007h)") {
@@ -3328,4 +3373,1829 @@ TEST_CASE("perform layer (P8): a looped sample, a granular voice and a wavetable
   p.set_gate(0);
   p.cut(0);
   p.set_sample(0, SampleDesc{data, 1000, 0, 0, 65536});
+}
+
+// ---- OS-CEWTENV W3a: the WT Env and WT LFO kinds on the cutoff (docs/specs/OS-CEWTENV.md section 3.4, laws F5 and F6) --------------------------------
+
+namespace {
+
+namespace audio = o3os::audio;
+
+constexpr double kSamplesPerMsD = static_cast<double>(haudio::sample_rate_mhz()) * 1e-6;
+constexpr double kEvalAt = 0.0;        // OS-CEWTENV W3c: the cutoff's WT kinds are evaluated once a block, at its first sample (the 16-sample grid of the ADSR and LFO is not theirs)
+constexpr std::uint8_t kWtShape = 37;  // a factory contour of the bank
+
+audio::WtBank& wt_test_bank() {
+  static audio::WtBank bank;  // .bss: 64 KiB never on a stack (the qemu tests run this file too)
+  return bank;
+}
+
+audio::WtBakeBank& wt_test_bake() {
+  static audio::WtBakeBank pool;  // OS-CEWTENV W3c: the baked warps (33 KB)
+  return pool;
+}
+
+// Binds the test bank (the render's only view of it is the binding) and makes the contour the tests play.
+struct WtBankFixture {
+  WtBankFixture() {
+    audio::wt_bind(wt_test_bank());
+    audio::wt_bake_bind(wt_test_bake());  // (a slot of these tests bakes only when it asks: FilterMod::delay is the id, 0 by default: the warps are live)
+    audio::wt_make_bound(kWtShape);
+  }
+  float eval(double phase, std::uint8_t bend = 0u) const { return audio::wt_eval(audio::wt_contour(wt_test_bank(), kWtShape), static_cast<float>(phase), bend); }
+};
+
+// A looping instrument with the filter on, low-pass, resonance 0, cutoff `base`, the modulator `m`, and an amp envelope with a very long release, so a NoteOff does not
+// end the voice (the cutoff's WT Env release is then observable in filter_cutoff()).
+SampleDesc wt_desc(const audio::FilterMod& m, float base) {
+  static std::int16_t pcm[4000];
+  for (std::uint32_t i = 0; i < 4000; ++i) {
+    pcm[i] = static_cast<std::int16_t>(std::lround(12000.0 * std::sin(0.11 * static_cast<double>(i))));
+  }
+  SampleDesc d{pcm, 4000, 0, 4000, 65536};
+  d.filter.enable = true;
+  d.filter.type = audio::kFilterLow;
+  d.filter.cutoff = base;
+  d.filter.resonance = 0.0f;
+  d.filter.mod = m;
+  d.env.enable = true;
+  d.env.release = 60000;
+  return d;
+}
+
+audio::FilterMod wt_env(std::uint16_t decay_ms, std::uint16_t release_ms, std::uint8_t sust, float amount, std::uint8_t bend = 0u) {
+  audio::FilterMod m;
+  m.kind = audio::kFmodWtEnv;
+  m.shape = kWtShape;
+  m.decay = decay_ms;
+  m.release = release_ms;
+  m.wt_sust = sust;
+  m.wt_bend = bend;
+  m.amount = amount;
+  return m;
+}
+
+audio::FilterMod wt_lfo(std::uint8_t rate, float amount, std::uint8_t bend = 0u) {
+  audio::FilterMod m;
+  m.kind = audio::kFmodWtLfo;
+  m.shape = kWtShape;
+  m.rate = rate;
+  m.amount = amount;
+  m.lfo_amount = amount;
+  m.wt_bend = bend;
+  return m;
+}
+
+double clamp01d(double v) { return v < 0.0 ? 0.0 : (v > 1.0 ? 1.0 : v); }
+
+}  // namespace
+
+TEST_CASE("voices: OS-CEWTENV W3a, a cutoff WT Env one-shot traces the contour x amount at the 16-sample points, and repeats while the key is held (law F5)") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  p.cut(0);
+  const double base = 0.3;
+  const double D = 20.0 * kSamplesPerMsD;  // the slot's decay: the WT Env's duration (882 samples)
+  p.set_sample(0, wt_desc(wt_env(20, 60, 0, 0.5f), static_cast<float>(base)));
+  CHECK(p.sample(0).filter.mod.kind == audio::kFmodWtEnv);  // set_sample keeps the WT kind, the contour shape and the warp bytes
+  CHECK(p.sample(0).filter.mod.shape == kWtShape);
+  p.restart_clock();
+  p.on_step(0);
+  p.note_on(0, 60, 0, 127);
+  static std::int16_t buf[kBlk];
+  double worst = 0.0;
+  for (std::uint32_t b = 0; b < 40; ++b) {  // 2560 samples: past two wraps of the one-shot
+    render_blocks(p, buf, 1);
+    const double t = static_cast<double>(b * kBlk) + kEvalAt;
+    const double ph = std::fmod(t, D) / D;  // one-shot, key held: it starts again at the end
+    const double want = clamp01d(base + static_cast<double>(w.eval(ph)) * 0.5);
+    const double err = std::fabs(static_cast<double>(p.filter_cutoff(0)) - want);
+    worst = err > worst ? err : worst;
+  }
+  CHECK_MESSAGE(worst < 1e-4, "worst difference " << worst);
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W3a, a sustained cutoff WT Env freezes at the sustain %, and its release runs from where it is: phase = start + r (1 - start), output x (1 - r)") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  const double base = 0.2;
+  const double D = 20.0 * kSamplesPerMsD;
+  const double R = 60.0 * kSamplesPerMsD;  // the slot's release, 60 ms (below 50 would be 50)
+  static std::int16_t buf[kBlk];
+  // (a) the key goes during the play: the release starts from the phase it was at
+  p.cut(0);
+  p.set_sample(0, wt_desc(wt_env(20, 60, 50, 0.5f), static_cast<float>(base)));
+  p.restart_clock();
+  p.on_step(0);
+  p.note_on(0, 60, 0, 127);
+  const std::uint32_t b_off = 5;  // t_off = 320 samples: still playing (the freeze is at 0.5 x D = 441)
+  double worst = 0.0;
+  for (std::uint32_t b = 0; b < 25; ++b) {
+    if (b == b_off) {
+      p.note_off(0);
+    }
+    render_blocks(p, buf, 1);
+    const double t = static_cast<double>(b * kBlk) + kEvalAt;
+    const double t_off = static_cast<double>(b_off * kBlk);
+    double want;
+    if (t < t_off) {  // the key is held: playing, or frozen once past the sustain point
+      want = t < 0.5 * D ? clamp01d(base + static_cast<double>(w.eval(t / D)) * 0.5)
+                         : clamp01d(base + static_cast<double>(w.eval(0.5)) * 0.5);
+    } else {  // the release from where it was at the key-off (t_off = 320 < the freeze at 441)
+      const double start = t_off / D;
+      const double r = (t - t_off) / R;
+      const double ph = start + r * (1.0 - start);
+      want = clamp01d(base + static_cast<double>(w.eval(ph)) * 0.5 * (1.0 - r));
+    }
+    const double err = std::fabs(static_cast<double>(p.filter_cutoff(0)) - want);
+    worst = err > worst ? err : worst;
+  }
+  CHECK_MESSAGE(worst < 1e-4, "release from the play: worst difference " << worst);
+  // (b) the key goes at the freeze: the release starts from the sustain point
+  p.cut(0);
+  p.set_sample(0, wt_desc(wt_env(20, 60, 50, 0.5f), static_cast<float>(base)));
+  p.restart_clock();
+  p.on_step(0);
+  p.note_on(0, 60, 0, 127);
+  const std::uint32_t b_off2 = 12;  // t_off = 768 samples: past the freeze
+  worst = 0.0;
+  for (std::uint32_t b = 0; b < 30; ++b) {
+    if (b == b_off2) {
+      p.note_off(0);
+    }
+    render_blocks(p, buf, 1);
+    const double t = static_cast<double>(b * kBlk) + kEvalAt;
+    const double t_off = static_cast<double>(b_off2 * kBlk);
+    double want;
+    if (t < 0.5 * D) {
+      want = clamp01d(base + static_cast<double>(w.eval(t / D)) * 0.5);
+    } else if (t < t_off) {
+      want = clamp01d(base + static_cast<double>(w.eval(0.5)) * 0.5);
+    } else {
+      const double r = (t - t_off) / R;
+      const double ph = 0.5 + r * 0.5;
+      want = clamp01d(base + static_cast<double>(w.eval(ph)) * 0.5 * (1.0 - r));
+    }
+    const double err = std::fabs(static_cast<double>(p.filter_cutoff(0)) - want);
+    worst = err > worst ? err : worst;
+  }
+  CHECK_MESSAGE(worst < 1e-4, "release from the freeze: worst difference " << worst);
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W3a, a cutoff WT LFO walks the LFO's phase for the same rate and start step, and its output is bipolar (2y - 1) x amount (law F6)") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  p.cut(0);
+  const double base = 0.5;
+  const double amount = 0.4;
+  p.set_sample(0, wt_desc(wt_lfo(17, static_cast<float>(amount)), static_cast<float>(base)));  // rate 17: a period of 576 x 0.375 = 216 ticks
+  CHECK(p.sample(0).filter.mod.kind == audio::kFmodWtLfo);
+  p.restart_clock();
+  p.on_step(0);  // the note starts in step 0: the LFO's shift is 0
+  p.note_on(0, 60, 0, 127);
+  const std::uint32_t period = 216;
+  const double ticks_per_sample = 12000.0 * 384.0 / static_cast<double>(haudio::sample_rate_mhz());  // 120 BPM (the pool's default tempo), x100 = 12000
+  static std::int16_t buf[kBlk];
+  double worst = 0.0;
+  double lo = 1.0, hi = -1.0;
+  for (std::uint32_t b = 0; b < 80; ++b) {  // 5120 samples: many periods
+    render_blocks(p, buf, 1);
+    const double ticks = (static_cast<double>(b * kBlk) + kEvalAt) * ticks_per_sample;
+    const std::int64_t x0 = static_cast<std::int64_t>(std::floor(ticks + 1e-9));
+    bool matched = false;
+    double want = 0.0;
+    for (int d = -1; d <= 1 && !matched; ++d) {  // the pool's tick count is an integer that may sit across the floor of the product
+      const std::int64_t x = x0 + d;
+      const double u = static_cast<double>(((x % period) + period) % period) / static_cast<double>(period);
+      want = clamp01d(base + (2.0 * static_cast<double>(w.eval(u)) - 1.0) * amount);
+      if (std::fabs(static_cast<double>(p.filter_cutoff(0)) - want) < 1e-4) {
+        matched = true;
+      }
+    }
+    CHECK(matched);
+    const double err = std::fabs(static_cast<double>(p.filter_cutoff(0)) - want);
+    worst = err > worst ? err : worst;
+    lo = want < lo ? want : lo;
+    hi = want > hi ? want : hi;
+  }
+  CHECK_MESSAGE(worst < 1e-4, "worst difference " << worst);
+  CHECK(lo < base - 0.2);  // bipolar: the output swings both sides of the base (the contour spans 0..1, the amount 0.4)
+  CHECK(hi > base + 0.2);
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W3a, loop 0 or 1 renders bit-identically whatever WT bytes the descriptor carries: the kinds never become WT, and the render is unchanged") {
+  static o3os::test::StaticSlot<VoicePool> slot_b;
+  VoicePool& a = pool();
+  VoicePool& b = slot_b.make();
+  audio::FilterMod mods[2];
+  mods[0].kind = audio::kFmodEnv;  // loop 0: an ADSR
+  mods[0].amount = 0.6f;
+  mods[0].sustain = 0.4f;
+  mods[0].attack = 40;
+  mods[0].decay = 30;
+  mods[0].release = 50;
+  mods[1].kind = audio::kFmodLfo;  // loop 1: an LFO
+  mods[1].shape = 2;
+  mods[1].rate = 17;
+  mods[1].amount = 0.4f;
+  mods[1].lfo_amount = 0.4f;
+  static std::int16_t out_a[40 * kBlk];
+  static std::int16_t out_b[40 * kBlk];
+  for (const audio::FilterMod& m : mods) {
+    audio::FilterMod junk = m;
+    junk.wt_bend = 0xFF;
+    junk.wt_sust = 200;
+    for (VoicePool* p : {&a, &b}) {
+      p->cut(0);
+      p->set_sample(0, wt_desc(p == &a ? m : junk, 0.45f));
+      CHECK(p->sample(0).filter.mod.kind == m.kind);  // never a WT kind
+      CHECK(p->sample(0).filter.mod.wt_bend == 0u);   // ... and the WT bytes are cleared for a non-WT kind
+      CHECK(p->sample(0).filter.mod.wt_sust == 0u);
+      p->restart_clock();
+      p->on_step(0);
+      p->note_on(0, 64, 0, 127);
+    }
+    for (std::uint32_t blk = 0; blk < 40; ++blk) {
+      render_blocks(a, out_a + blk * kBlk, 1);
+      render_blocks(b, out_b + blk * kBlk, 1);
+    }
+    CHECK_MESSAGE(std::memcmp(out_a, out_b, sizeof out_a) == 0, "kind " << unsigned(m.kind));
+  }
+  a.cut(0);
+  b.cut(0);
+  a.set_sample(0, SampleDesc{});
+  b.set_sample(0, SampleDesc{});
+}
+
+// ---- OS-CEWTENV W3a review: the six small items ----------------------------------------------------------------------------------------
+
+TEST_CASE("voices: OS-CEWTENV W3a review, a WT LFO is re-phased on the transport start and on a Step after a stop (no phase jump)") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  p.cut(0);
+  p.set_sample(0, wt_desc(wt_lfo(8, 0.4f), 0.5f));  // rate 8: a period of 576 x 8 = 4608 ticks
+  p.set_tempo_x100(30000);                           // 300 BPM: 0.261 ticks a sample, a period is 276 blocks
+  static std::int16_t buf[kBlk];
+  double v[160];
+  // (a) the transport starts (FxReset) while the count ran on stopped: clock_restart_impl re-phases the WT LFO
+  p.restart_clock();
+  p.transport_stopped();
+  p.note_on(0, 60, 0, 127);
+  for (unsigned b = 0; b < 100; ++b) {
+    render_blocks(p, buf, 1);
+    v[b] = static_cast<double>(p.filter_cutoff(0));
+  }
+  p.restart_clock();
+  p.on_step(0);
+  for (unsigned b = 100; b < 130; ++b) {
+    render_blocks(p, buf, 1);
+    v[b] = static_cast<double>(p.filter_cutoff(0));
+  }
+  double step = 0.0;
+  for (unsigned b = 21; b < 130; ++b) {
+    if (b != 100) {
+      const double d = v[b] > v[b - 1] ? v[b] - v[b - 1] : v[b - 1] - v[b];
+      step = d > step ? d : step;
+    }
+  }
+  const double jump_a = v[100] > v[99] ? v[100] - v[99] : v[99] - v[100];
+  CHECK_MESSAGE(jump_a <= 3.0 * step + 1e-9, "restart: jump " << jump_a << " against a step of " << step);
+  double lo = 1.0, hi = 0.0;
+  for (unsigned b = 21; b < 130; ++b) {
+    lo = v[b] < lo ? v[b] : lo;
+    hi = v[b] > hi ? v[b] : hi;
+  }
+  CHECK(hi - lo > 0.1);  // the WT LFO still moves after the start
+  // (b) a Step after a stop with no start (Continue): resume_phase re-phases it the same way
+  p.cut(0);
+  p.set_sample(0, wt_desc(wt_lfo(8, 0.4f), 0.5f));
+  p.restart_clock();
+  p.transport_stopped();
+  p.note_on(0, 60, 0, 127);
+  for (unsigned b = 0; b < 100; ++b) {
+    render_blocks(p, buf, 1);
+    v[b] = static_cast<double>(p.filter_cutoff(0));
+  }
+  p.on_step(7);  // Continue: the count snaps to the step, the WT LFO keeps its phase
+  for (unsigned b = 100; b < 130; ++b) {
+    render_blocks(p, buf, 1);
+    v[b] = static_cast<double>(p.filter_cutoff(0));
+  }
+  step = 0.0;
+  for (unsigned b = 21; b < 130; ++b) {
+    if (b != 100) {
+      const double d = v[b] > v[b - 1] ? v[b] - v[b - 1] : v[b - 1] - v[b];
+      step = d > step ? d : step;
+    }
+  }
+  const double jump_b = v[100] > v[99] ? v[100] - v[99] : v[99] - v[100];
+  CHECK_MESSAGE(jump_b <= 3.0 * step + 1e-9, "resume: jump " << jump_b << " against a step of " << step);
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W3a review, a Filter LFO FX row over a running WT LFO only moves its rate (was_lfo: no mod_start, no phase jump)") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  p.cut(0);
+  p.set_filter_lfo(0, false, 0);
+  p.set_sample(0, wt_desc(wt_lfo(8, 0.4f), 0.5f));
+  p.set_tempo_x100(30000);
+  static std::int16_t buf[kBlk];
+  double v[120];
+  p.restart_clock();
+  p.transport_stopped();
+  p.note_on(0, 60, 0, 127);
+  for (unsigned b = 0; b < 60; ++b) {
+    render_blocks(p, buf, 1);
+    v[b] = static_cast<double>(p.filter_cutoff(0));
+  }
+  p.on_step(7);           // the cursor moves on (Continue): resume_phase keeps the phase
+  p.transport_stopped();  // and the count runs on again
+  for (unsigned b = 60; b < 80; ++b) {
+    render_blocks(p, buf, 1);
+    v[b] = static_cast<double>(p.filter_cutoff(0));
+  }
+  p.set_filter_lfo(0, true, 8);  // the FX row on, the same rate 8: only the rate moves (here: not at all)
+  for (unsigned b = 80; b < 100; ++b) {
+    render_blocks(p, buf, 1);
+    v[b] = static_cast<double>(p.filter_cutoff(0));
+  }
+  p.set_filter_lfo(0, false, 0);  // the row off: back to the instrument's WT LFO at its own rate, phase kept
+  for (unsigned b = 100; b < 120; ++b) {
+    render_blocks(p, buf, 1);
+    v[b] = static_cast<double>(p.filter_cutoff(0));
+  }
+  double step = 0.0;
+  for (unsigned b = 21; b < 120; ++b) {
+    if (b != 60 && b != 80 && b != 100) {
+      const double d = v[b] > v[b - 1] ? v[b] - v[b - 1] : v[b - 1] - v[b];
+      step = d > step ? d : step;
+    }
+  }
+  for (const unsigned seam : {60u, 80u, 100u}) {
+    const double jump = v[seam] > v[seam - 1] ? v[seam] - v[seam - 1] : v[seam - 1] - v[seam];
+    CHECK_MESSAGE(jump <= 3.0 * step + 1e-9, "seam " << seam << ": jump " << jump << " against a step of " << step);
+  }
+  p.cut(0);
+  p.set_filter_lfo(0, false, 0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W3a review, a NoteOff before the first filter evaluation still releases the WT Env (the deferred setup does not undo it)") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  p.cut(0);
+  const double base = 0.2;
+  const double R = 60.0 * kSamplesPerMsD;  // the slot's release, 60 ms (the play's 20 ms do not matter: the key is off from the first evaluation)
+  SampleDesc d = wt_desc(wt_env(20, 60, 50, 0.5f), static_cast<float>(base));  // sustained 50 %
+  d.env.enable = false;  // no amp envelope: a NoteOff in its delay would end the note at once; a fade keeps the voice sounding (300 ms)
+  p.set_sample(0, d);
+  p.restart_clock();
+  p.on_step(0);
+  p.note_on(0, 60, 0, 127);
+  p.fade(0);  // the key goes off before any render: the WT setup has not run yet (l_inv 0)
+  static std::int16_t buf[kBlk];
+  double worst = 0.0;
+  for (std::uint32_t b = 0; b < 40; ++b) {
+    render_blocks(p, buf, 1);
+    const double t = static_cast<double>(b * kBlk) + kEvalAt;
+    const double r = t / R > 1.0 ? 1.0 : t / R;  // the release from phase 0 (the key was off at the first evaluation)
+    const double want = clamp01d(base + static_cast<double>(w.eval(r)) * 0.5 * (1.0 - r));
+    const double err = std::fabs(static_cast<double>(p.filter_cutoff(0)) - want);
+    worst = err > worst ? err : worst;
+  }
+  CHECK_MESSAGE(worst < 1e-4, "worst difference " << worst);
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W3a review, set_sample clears a WT kind on the slots nothing evaluates (a plain sample's position slot) and keeps it on the others (W3b, the amp slot's W4)") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  p.cut(0);
+  SampleDesc d = wt_desc(wt_env(20, 60, 50, 0.5f), 0.5f);  // the cutoff slot keeps its WT kind
+  const audio::FilterMod wt = wt_lfo(8, 0.4f);              // shape 37: a contour index
+  d.pan_mod = wt;
+  d.tune_mod = wt;
+  d.amp_mod = wt;
+  d.pos_mod = wt;
+  p.set_sample(0, d);
+  CHECK(p.sample(0).filter.mod.kind == audio::kFmodWtEnv);
+  CHECK(p.sample(0).pan_mod.kind == audio::kFmodWtLfo);   // OS-CEWTENV W3b: mod_block evaluates them
+  CHECK(p.sample(0).pan_mod.shape == kWtShape);
+  CHECK(p.sample(0).tune_mod.kind == audio::kFmodWtLfo);
+  CHECK(p.sample(0).amp_mod.kind == audio::kFmodWtLfo);   // OS-CEWTENV W4: the amp slot has its own machine (wt_amp_block) and keeps its WT kind
+  CHECK(p.sample(0).pos_mod.kind == audio::kFmodNone);    // a plain sample (no wavetable windows, not granular) never runs slot 3 or 4
+  p.restart_clock();
+  p.on_step(0);
+  p.note_on(0, 60, 0, 127);
+  static std::int16_t buf[kBlk];
+  for (unsigned b = 0; b < 8; ++b) {
+    render_blocks(p, buf, 1);
+  }
+  CHECK(p.feed(0) != nullptr);  // the voice renders: no WT kind reached flfo_eval on those slots
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W3a review, the Filter LFO FX over a WT cutoff slot plays the triangle, not the contour index as a random shape") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  p.cut(0);
+  p.set_filter_lfo(0, false, 0);
+  const double base = 0.5;
+  const double amount = 0.4;
+  p.set_sample(0, wt_desc(wt_lfo(17, static_cast<float>(amount)), static_cast<float>(base)));  // shape 37: a contour index
+  p.set_filter_lfo(0, true, 17);  // the FX on before the note: note_on forces the plain LFO kind over the WT slot (period 576 x 0.375 = 216 ticks)
+  p.restart_clock();
+  p.on_step(0);  // the note starts in step 0: the LFO's shift is 0
+  p.note_on(0, 60, 0, 127);
+  const std::uint32_t period = 216;
+  const double ticks_per_sample = 12000.0 * 384.0 / static_cast<double>(haudio::sample_rate_mhz());  // 120 BPM, the pool's default tempo
+  static std::int16_t buf[kBlk];
+  double worst = 0.0;
+  for (std::uint32_t b = 0; b < 80; ++b) {  // 5120 samples: 535 ticks, still inside the first step (a step is 5512 samples)
+    render_blocks(p, buf, 1);
+    const double ticks = (static_cast<double>(b * kBlk) + 48.0) * ticks_per_sample;  // (the forced plain LFO keeps the 16-sample grid: its last evaluation of a block)
+    const std::int64_t x0 = static_cast<std::int64_t>(std::floor(ticks + 1e-9));
+    bool matched = false;
+    double want = 0.0;
+    for (int d = -1; d <= 1 && !matched; ++d) {  // the pool's tick count is an integer that may sit across the floor of the product
+      const std::int64_t x = x0 + d;
+      const double u = static_cast<double>(((x % period) + period) % period) / static_cast<double>(period);
+      const double tri = u < 0.5 ? 2.0 * u : 2.0 - 2.0 * u;  // the triangle: l_ovr 3, which flfo_level prefers over the contour index
+      want = clamp01d(base + (2.0 * tri * amount - amount));
+      if (std::fabs(static_cast<double>(p.filter_cutoff(0)) - want) < 1e-4) {
+        matched = true;
+      }
+    }
+    CHECK(matched);
+    const double err = std::fabs(static_cast<double>(p.filter_cutoff(0)) - want);
+    worst = err > worst ? err : worst;
+  }
+  CHECK_MESSAGE(worst < 1e-4, "worst difference " << worst);
+  p.cut(0);
+  p.set_filter_lfo(0, false, 0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W3a review, a one-shot WT Env with the key off emits its end value once and then stops (tracker-ce parity)") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  p.cut(0);
+  const double base = 0.3;
+  const double D = 30.0 * kSamplesPerMsD;  // the slot's decay 30 ms: the duration 1323.5 samples; the first evaluation past it (once a block, W3c) is block 21's, at 1344
+  p.set_sample(0, wt_desc(wt_env(30, 60, 0, 0.5f), static_cast<float>(base)));  // one-shot (wt_sust 0)
+  p.restart_clock();
+  p.on_step(0);
+  p.note_on(0, 60, 0, 127);
+  const std::uint32_t b_off = 5;  // the key goes at t = 320, before the end (1323): a one-shot plays on whatever the key does
+  static std::int16_t buf[kBlk];
+  double worst = 0.0;
+  for (std::uint32_t b = 0; b < 30; ++b) {
+    if (b == b_off) {
+      p.note_off(0);
+    }
+    render_blocks(p, buf, 1);
+    const double t = static_cast<double>(b * kBlk) + kEvalAt;
+    double want;
+    if (t < D) {
+      want = clamp01d(base + static_cast<double>(w.eval(t / D)) * 0.5);  // playing to the end
+    } else if (b == 21) {
+      want = clamp01d(base + static_cast<double>(w.eval(1.0)) * 0.5);  // the end value y(1) x amount, emitted once (the evaluation at 1344)
+    } else {
+      want = base;  // off: no modulation from the next evaluation on
+    }
+    const double err = std::fabs(static_cast<double>(p.filter_cutoff(0)) - want);
+    worst = err > worst ? err : worst;
+  }
+  CHECK_MESSAGE(worst < 1e-4, "worst difference " << worst);
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+// ---- OS-CEWTENV W3b: the WT kinds on the pan, the finetune and the wavetable position (docs/specs/OS-CEWTENV.md section 3.4; laws F5 and F6, once a block, in mod_block) ----------------------------
+
+namespace {
+
+constexpr std::uint32_t kW3bLen = 6000;
+std::int16_t g_w3b_ramp[kW3bLen];  // 5 a frame: the output is the position, so the slope of a block is the pitch increment
+constexpr unsigned kW3bWin = 256;
+constexpr unsigned kW3bWindows = 8;
+std::int16_t g_w3b_stack[kW3bWin * kW3bWindows];  // window w is the constant (w + 1) x 1000: a window is told by its level
+
+// A looping sample with a long amp release (a NoteOff does not end the voice), no filter: the modulator under test goes in the slot the caller sets.
+SampleDesc w3b_plain() {
+  SampleDesc d = wt_desc(audio::FilterMod{}, 0.5f);
+  d.filter.enable = false;
+  return d;
+}
+
+SampleDesc w3b_ramp() {
+  for (std::uint32_t i = 0; i < kW3bLen; ++i) {
+    g_w3b_ramp[i] = static_cast<std::int16_t>(5u * i);
+  }
+  SampleDesc d{g_w3b_ramp, kW3bLen, 0, 0, 65536};  // a one shot: its position is told by its level
+  d.env.enable = true;
+  d.env.release = 60000;
+  return d;
+}
+
+SampleDesc w3b_wavetable(unsigned pos) {
+  for (unsigned w = 0; w < kW3bWindows; ++w) {
+    for (unsigned i = 0; i < kW3bWin; ++i) {
+      g_w3b_stack[w * kW3bWin + i] = static_cast<std::int16_t>((w + 1u) * 1000u);
+    }
+  }
+  SampleDesc d{g_w3b_stack + pos * kW3bWin, kW3bWin, 0, kW3bWin, 65536};
+  d.wt_size = kW3bWin;
+  d.wt_windows = kW3bWindows;
+  d.wt_pos = pos;
+  d.offset = pos * kW3bWin;
+  return d;
+}
+
+int w3b_clampi(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+int w3b_trunc100(double v) { return static_cast<int>(v * 100.0); }
+double w3b_slope(const std::int16_t* b) { return static_cast<double>(b[kBlk - 1] - b[0]) / (5.0 * static_cast<double>(kBlk - 1)); }
+double w3b_inc_of(int fine) { return static_cast<double>(audio::tuned_inc_q32(60, 0, fine)) / 4294967296.0; }
+
+// The pan the pool hands the Engine for track 0 after the block just rendered.
+int pan_of(VoicePool& p) {
+  p.take_pan_mods();
+  return static_cast<int>(p.pan_mod_value(0));
+}
+
+void note_at_step0(VoicePool& p) {
+  p.restart_clock();
+  p.on_step(0);
+  p.note_on(0, 60, 0, 127);
+}
+
+}  // namespace
+
+// ---- OS-CEWTENV W4: the WT Env and WT LFO on the amp slot (docs/specs/OS-CEWTENV.md section 3.5, law F7) ----------------------------------------------
+
+namespace {
+
+// A looping DC instrument (every sample 16000, unity gain), no filter, no amp envelope, the amp slot `m`: the output of a grid cell's last sample is 16000 x the multiplier the cell walks to
+// (trem_span: 16 steps from the old multiplier to the grid point's target), so a cell's value is the contour at the cell's start time. The first kAttackSamples carry the attack ramp: the
+// checks start at block 1.
+SampleDesc wt_amp_desc(const audio::FilterMod& m) {
+  static std::int16_t pcm[4000];
+  for (std::int16_t& x : pcm) {
+    x = 16000;
+  }
+  SampleDesc d{pcm, 4000, 0, 4000, 65536};
+  d.amp_mod = m;
+  return d;
+}
+
+constexpr double kDc = 16000.0;
+
+// The output of sample `n` of the note's span (the cell's last sample: 16 c + 15 within its block).
+double at_cell(const std::int16_t* out, std::uint32_t block, std::uint32_t cell) { return static_cast<double>(out[block * kBlk + cell * 16u + 15u]); }
+
+audio::FilterMod wt_amp_lfo(std::uint8_t rate, float depth) {
+  audio::FilterMod m = wt_lfo(rate, depth);
+  m.lfo_amount = depth;
+  return m;
+}
+
+}  // namespace
+
+TEST_CASE("voices: OS-CEWTENV W3b, a pan WT Env one-shot traces the contour x amount x 100 (truncated) around the instrument's pan, once a block, and repeats while the key is held") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  p.cut(0);
+  const double D = 20.0 * kSamplesPerMsD;
+  const std::uint8_t bend = 0x34;  // warp X +3, Y +4: the warps reach mod_block's evaluation
+  SampleDesc d = w3b_plain();
+  d.pan = 50;
+  d.pan_mod = wt_env(20, 60, 0, 0.8f, bend);
+  p.set_sample(0, d);
+  CHECK(p.sample(0).pan_mod.kind == audio::kFmodWtEnv);
+  CHECK(p.sample(0).pan_mod.wt_bend == bend);
+  note_at_step0(p);
+  static std::int16_t buf[kBlk];
+  int worst = 0;
+  int lo = 100, hi = 0;
+  for (std::uint32_t b = 0; b < 40; ++b) {  // 2560 samples: past two wraps of the one shot
+    render_blocks(p, buf, 1);
+    const double ph = std::fmod(static_cast<double>(b * kBlk), D) / D;  // the generator is evaluated at the block's first sample
+    const int want = w3b_clampi(50 + w3b_trunc100(static_cast<double>(w.eval(ph, bend)) * 0.8), 0, 100);
+    const int got = pan_of(p);
+    worst = std::max(worst, std::abs(got - want));
+    lo = std::min(lo, got);
+    hi = std::max(hi, got);
+  }
+  CHECK_MESSAGE(worst <= 1, "worst difference " << worst << " units of pan");
+  CHECK(hi - lo > 10);  // it moves
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W4, an amp WT Env one-shot multiplies the voice by y at the 16-sample points, ends the voice at the duration, declicks, and does not start again with the key held (law F7)") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  p.cut(0);
+  const double D = 20.0 * kSamplesPerMsD;  // the slot's decay: the duration, 882 samples (block 13.8)
+  p.set_sample(0, wt_amp_desc(wt_env(20, 60, 0, 0.5f)));  // one-shot; the amount is not used (law F7: y alone)
+  CHECK(p.sample(0).amp_mod.kind == audio::kFmodWtEnv);   // set_sample keeps the amp slot's WT kind
+  CHECK_FALSE(p.sample(0).env.enable);
+  p.restart_clock();
+  p.on_step(0);
+  CHECK(p.note_on(0, 60, 0, 127));
+  static std::int16_t out[40 * kBlk];
+  for (std::uint32_t b = 0; b < 40; ++b) {
+    render_blocks(p, out + b * kBlk, 1);
+    if (b == 13) {
+      CHECK(p.track_playing(0));  // still before the duration
+    }
+    if (b == 16) {
+      CHECK_FALSE(p.track_playing(0));  // the end at 896 (block 14), the walk to 0 in its last cell, the stop at the next block's evaluation
+    }
+  }
+  double worst = 0.0;
+  for (std::uint32_t b = 1; b < 14; ++b) {  // blocks 1..13: t = 64 b + 16 c < 882
+    for (std::uint32_t c = 0; c < 4; ++c) {
+      const double t = static_cast<double>(b * kBlk + c * 16u);
+      const double want = kDc * static_cast<double>(w.eval(t / D));
+      const double err = std::fabs(at_cell(out, b, c) - want);
+      worst = err > worst ? err : worst;
+    }
+  }
+  CHECK_MESSAGE(worst < 3.0, "worst difference " << worst);
+  // the end: block 14's first cell holds y(1) (emitted once), then 0; the voice is silent from block 15 on, and the key (held all along) does not start it again
+  CHECK(std::fabs(at_cell(out, 14, 0) - kDc * static_cast<double>(w.eval(1.0))) < 3.0);
+  double maxabs = 0.0;
+  for (std::uint32_t i = 15 * kBlk; i < 40 * kBlk; ++i) {
+    const double a = std::fabs(static_cast<double>(out[i]));
+    maxabs = a > maxabs ? a : maxabs;
+  }
+  CHECK(maxabs == 0.0);
+  // the declick: no step larger than the 16-sample walk from y(1) to 0 (and the contour's own slope before it)
+  double step = 0.0;
+  for (std::uint32_t i = 14 * kBlk + 1u; i < 16 * kBlk; ++i) {
+    const double d = std::fabs(static_cast<double>(out[i]) - static_cast<double>(out[i - 1]));
+    step = d > step ? d : step;
+  }
+  const double y_end = static_cast<double>(w.eval(1.0));
+  const double y_prev = static_cast<double>(w.eval(880.0 / D));  // the cell before the end
+  const double slope = std::fabs(y_end - y_prev);
+  CHECK_MESSAGE(step <= kDc * (y_end > slope ? y_end : slope) / 16.0 + 8.0, "largest step " << step);
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W4, an amp WT Env one-shot on a gated (muted) track still ends the voice at the duration: the slot frees while the track stays muted") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  p.cut(0);
+  p.set_sample(0, wt_amp_desc(wt_env(20, 60, 0, 0.5f)));  // one-shot; the duration is 20 ms = 882 samples (the end at block 14's evaluation, t = 896)
+  CHECK(p.sample(0).amp_mod.kind == audio::kFmodWtEnv);
+  p.restart_clock();
+  p.on_step(0);
+  CHECK(p.note_on(0, 60, 0, 127));
+  static std::int16_t out[40 * kBlk];
+  for (std::uint32_t b = 0; b < 40; ++b) {
+    p.set_gate(b < 2u ? 0u : 1u);  // the strip closes from block 2 on (set_gate is render context, before begin_block)
+    render_blocks(p, out + b * kBlk, 1);
+    if (b == 13u) {
+      CHECK(p.track_playing(0));  // still before the duration
+      CHECK(p.voices_in_use() == 1u);
+    }
+    if (b == 16u) {
+      CHECK_FALSE(p.track_playing(0));  // the off stage at block 14's evaluation, the stop at block 15's (while gated trem_span never runs: tcur stays put, the gate stops the voice)
+      CHECK(p.voices_in_use() == 0u);   // the slot is free while the track is still muted
+    }
+  }
+  p.set_gate(0u);  // unmute: the note ended while muted, so nothing sounds and nothing restarts
+  render_blocks(p, out, 4);
+  for (std::uint32_t i = 0; i < 4u * kBlk; ++i) {
+    CHECK(out[i] == std::int16_t{0});
+  }
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W4, a NoteOff on a gated track runs the amp WT Env's own release and stops the voice while still muted (law F7, the gate)") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  p.cut(0);
+  p.set_sample(0, wt_amp_desc(wt_env(20, 60, 50, 0.5f)));  // sustained 50 % (the freeze at t = 441), release 60 ms = 2646 samples
+  p.restart_clock();
+  p.on_step(0);
+  CHECK(p.note_on(0, 60, 0, 127));
+  static std::int16_t out[90 * kBlk];
+  const std::uint32_t b_off = 10;  // t = 640: past the freeze, the release runs from there and is off at t = 640 + 2646 (block 52)
+  for (std::uint32_t b = 0; b < 90; ++b) {
+    p.set_gate(b < 2u ? 0u : 1u);
+    if (b == b_off) {
+      p.note_off(0);  // while gated: the WT Env's own release runs (the key goes off), not the amp ramp (law F7)
+    }
+    render_blocks(p, out + b * kBlk, 1);
+    if (b == 50u) {
+      CHECK(p.track_playing(0));  // the release is still running
+    }
+    if (b == 60u) {
+      CHECK_FALSE(p.track_playing(0));  // the release ran out at block 52; the voice stopped while muted
+      CHECK(p.voices_in_use() == 0u);
+    }
+  }
+  p.set_gate(0u);
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W3b, a sustained pan WT Env freezes at the sustain % and releases from there: phase = start + r (1 - start), output x (1 - r), then the instrument's pan again") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  p.cut(0);
+  const double D = 20.0 * kSamplesPerMsD;
+  const double R = 60.0 * kSamplesPerMsD;
+  SampleDesc d = w3b_plain();
+  d.pan = 50;
+  d.pan_mod = wt_env(20, 60, 50, 0.8f);  // sustain 50 %
+  p.set_sample(0, d);
+  note_at_step0(p);
+  static std::int16_t buf[kBlk];
+  const std::uint32_t b_off = 20;
+  int worst = 0;
+  for (std::uint32_t b = 0; b < 70; ++b) {
+    if (b == b_off) {
+      p.note_off(0);
+    }
+    render_blocks(p, buf, 1);
+    const double t = static_cast<double>(b * kBlk);
+    double level;
+    if (b < b_off) {
+      level = static_cast<double>(w.eval(std::min(t / D, 0.5))) * 0.8;  // plays to the sustain point, then holds
+    } else {
+      const double r = static_cast<double>((b - b_off) * kBlk) / R;
+      level = r >= 1.0 ? 0.0 : static_cast<double>(w.eval(0.5 + r * 0.5)) * 0.8 * (1.0 - r);
+    }
+    const int want = w3b_clampi(50 + w3b_trunc100(level), 0, 100);
+    worst = std::max(worst, std::abs(pan_of(p) - want));
+  }
+  CHECK_MESSAGE(worst <= 1, "worst difference " << worst << " units of pan");
+  CHECK(pan_of(p) == 50);  // the release has run out
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W4, a sustained amp WT Env holds at the sustain % while the key is held, and a NoteOff runs its own release (not the 5.8 ms ramp), then the voice stops (law F5 for F7)") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  p.cut(0);
+  const double D = 20.0 * kSamplesPerMsD;  // the contour's duration: 882 samples; the freeze is at 50 %, t = 441
+  const double R = 60.0 * kSamplesPerMsD;  // the release: 60 ms, 2646 samples
+  p.set_sample(0, wt_amp_desc(wt_env(20, 60, 50, 0.5f)));
+  p.restart_clock();
+  p.on_step(0);
+  CHECK(p.note_on(0, 60, 0, 127));
+  static std::int16_t out[90 * kBlk];
+  const std::uint32_t b_off = 30;  // t_off = 1920: far past the freeze
+  for (std::uint32_t b = 0; b < 90; ++b) {
+    if (b == b_off) {
+      p.note_off(0);
+    }
+    render_blocks(p, out + b * kBlk, 1);
+    if (b == b_off - 1u) {
+      CHECK(p.track_playing(0));  // held far past the duration (a one-shot would have ended at block 14)
+    }
+    if (b == b_off + 4u) {
+      CHECK(p.track_playing(0));  // 5 blocks into a 41-block release: the 5.8 ms ramp would have ended it (4 blocks)
+    }
+    if (b == 60) {
+      CHECK(p.track_playing(0));  // the release runs to 1920 + 2646 = 4566 (block 71)
+    }
+    if (b == 75) {
+      CHECK_FALSE(p.track_playing(0));
+    }
+  }
+  double worst_hold = 0.0;
+  for (std::uint32_t b = 1; b < b_off; ++b) {
+    for (std::uint32_t c = 0; c < 4; ++c) {
+      const double t = static_cast<double>(b * kBlk + c * 16u);
+      const double ph = t < 0.5 * D ? t / D : 0.5;  // plays to the sustain %, then holds
+      const double err = std::fabs(at_cell(out, b, c) - kDc * static_cast<double>(w.eval(ph)));
+      worst_hold = err > worst_hold ? err : worst_hold;
+    }
+  }
+  CHECK_MESSAGE(worst_hold < 3.0, "play and hold: worst difference " << worst_hold);
+  double worst_rel = 0.0;
+  for (std::uint32_t b = b_off; b < 71; ++b) {  // the release: phase = 0.5 + r (1 - 0.5), output x (1 - r), r = (t - t_off) / R
+    for (std::uint32_t c = 0; c < 4; ++c) {
+      const double t = static_cast<double>(b * kBlk + c * 16u);
+      const double r = (t - static_cast<double>(b_off * kBlk)) / R;
+      if (r >= 1.0) {
+        continue;
+      }
+      const double want = kDc * static_cast<double>(w.eval(0.5 + r * 0.5)) * (1.0 - r);
+      const double err = std::fabs(at_cell(out, b, c) - want);
+      worst_rel = err > worst_rel ? err : worst_rel;
+    }
+  }
+  CHECK_MESSAGE(worst_rel < 3.0, "release: worst difference " << worst_rel);
+  double maxabs = 0.0;
+  for (std::uint32_t i = 73 * kBlk; i < 90 * kBlk; ++i) {
+    const double a = std::fabs(static_cast<double>(out[i]));
+    maxabs = a > maxabs ? a : maxabs;
+  }
+  CHECK(maxabs == 0.0);
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W3b, a pan WT LFO walks the transport's phase at each block's start and is bipolar (2y - 1) x amount around the instrument's pan") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  p.cut(0);
+  SampleDesc d = w3b_plain();
+  d.pan = 40;
+  d.pan_mod = wt_lfo(17, 0.5f);  // rate 17: a period of 216 ticks
+  p.set_sample(0, d);
+  CHECK(p.sample(0).pan_mod.kind == audio::kFmodWtLfo);
+  note_at_step0(p);
+  const std::uint32_t period = 216;
+  const double ticks_per_sample = 12000.0 * 384.0 / static_cast<double>(haudio::sample_rate_mhz());  // 120 BPM, x100 = 12000
+  static std::int16_t buf[kBlk];
+  std::uint32_t bad = 0;
+  int lo = 100, hi = 0;
+  for (std::uint32_t b = 0; b < 80; ++b) {
+    render_blocks(p, buf, 1);
+    const int got = pan_of(p);
+    const std::int64_t x0 = static_cast<std::int64_t>(std::floor(static_cast<double>(b * kBlk) * ticks_per_sample + 1e-9));
+    bool ok = false;
+    for (int dd = -1; dd <= 1 && !ok; ++dd) {  // the pool's tick count is an integer that may sit across the floor of the product
+      const double u = static_cast<double>(((x0 + dd) % period + period) % period) / static_cast<double>(period);
+      const int want = w3b_clampi(40 + w3b_trunc100((2.0 * static_cast<double>(w.eval(u)) - 1.0) * 0.5), 0, 100);
+      ok = std::abs(got - want) <= 1;
+    }
+    bad += ok ? 0u : 1u;
+    lo = std::min(lo, got);
+    hi = std::max(hi, got);
+  }
+  CHECK_MESSAGE(bad == 0u, bad << " blocks off the oracle");
+  CHECK(lo < 40 - 10);  // both sides of the instrument's pan
+  CHECK(hi > 40 + 10);
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W4, a NoteFade still fades an amp WT Env voice (300 ms), and a one-shot's second note starts its contour again") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  p.cut(0);
+  p.set_sample(0, wt_amp_desc(wt_env(20, 1000, 50, 0.5f)));  // sustained, a 1 s release: the fade (300 ms) ends it first
+  p.restart_clock();
+  p.on_step(0);
+  CHECK(p.note_on(0, 60, 0, 127));
+  static std::int16_t buf[kBlk];
+  const auto run = [&](std::uint32_t blocks) {  // one block at a time into `buf` (render_blocks writes `blocks` x kBlk samples)
+    for (std::uint32_t b = 0; b < blocks; ++b) {
+      render_blocks(p, buf, 1);
+    }
+  };
+  run(20);
+  p.fade(0);
+  run(150);  // 9,600 samples into the 13,230 of the fade
+  CHECK(p.track_playing(0));
+  run(70);  // past the fade (207 blocks in all)
+  CHECK_FALSE(p.track_playing(0));
+  // a second note on the same instrument plays the contour from its start (the generator is made again at the note)
+  p.set_sample(0, wt_amp_desc(wt_env(20, 60, 0, 0.5f)));
+  p.restart_clock();
+  p.on_step(0);
+  static std::int16_t o1[24 * kBlk];
+  static std::int16_t o2[24 * kBlk];
+  CHECK(p.note_on(0, 60, 0, 127));
+  render_blocks(p, o1, 24);
+  p.cut(0);
+  run(8);
+  p.restart_clock();
+  p.on_step(0);
+  CHECK(p.note_on(0, 60, 0, 127));
+  render_blocks(p, o2, 24);
+  CHECK(std::memcmp(o1, o2, sizeof o1) == 0);
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W4, an amp WT LFO multiplies the voice by 1 - (1 - y) x depth at the LFO's phase, held to 0..1 (law F7)") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  p.cut(0);
+  const double depth = 0.6;
+  // the amp's rate table starts at index 5: rate 12 is the table's 17, a period of 576 x 0.375 = 216 ticks (as the cutoff's test)
+  p.set_sample(0, wt_amp_desc(wt_amp_lfo(12, static_cast<float>(depth))));
+  CHECK(p.sample(0).amp_mod.kind == audio::kFmodWtLfo);
+  p.restart_clock();
+  p.on_step(0);
+  CHECK(p.note_on(0, 60, 0, 127));
+  const std::int64_t period = 216;
+  const double ticks_per_sample = 12000.0 * 384.0 / static_cast<double>(haudio::sample_rate_mhz());
+  static std::int16_t out[80 * kBlk];
+  render_blocks(p, out, 80);
+  double lo = 1.0, hi = 0.0;
+  std::uint32_t bad = 0;
+  for (std::uint32_t b = 1; b < 80; ++b) {  // 5,120 samples: still inside the first step
+    for (std::uint32_t c = 0; c < 4; ++c) {
+      const double ticks = static_cast<double>(b * kBlk + c * 16u) * ticks_per_sample;
+      const std::int64_t x0 = static_cast<std::int64_t>(std::floor(ticks + 1e-9));
+      bool matched = false;
+      double want = 0.0;
+      for (int d = -1; d <= 1 && !matched; ++d) {  // the pool's tick count is an integer that may sit across the floor of the product
+        const std::int64_t x = x0 + d;
+        const double u = static_cast<double>(((x % period) + period) % period) / static_cast<double>(period);
+        want = 1.0 - (1.0 - static_cast<double>(w.eval(u))) * depth;
+        if (std::fabs(at_cell(out, b, c) - kDc * want) < 4.0) {
+          matched = true;
+        }
+      }
+      bad += matched ? 0u : 1u;
+      lo = want < lo ? want : lo;
+      hi = want > hi ? want : hi;
+    }
+  }
+  CHECK_MESSAGE(bad == 0u, bad << " grid points off the law");
+  CHECK(hi <= 1.0);
+  CHECK(lo >= 1.0 - depth - 1e-6);  // the multiplier never goes below 1 - depth (y >= 0)
+  CHECK(hi - lo > 0.2);             // and it moves: a contour of 0..1 at depth 0.6
+  // a NoteOff on a WT LFO voice is the plain release: it ends in a few blocks (the LFO has no end of its own)
+  p.note_off(0);
+  static std::int16_t buf[8 * kBlk];
+  render_blocks(p, buf, 8);
+  CHECK_FALSE(p.track_playing(0));
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W3b, a finetune WT Env moves the pitch by the contour x amount x 100 cents (the increment follows the linear law), once a block") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  p.cut(0);
+  const double D = 20.0 * kSamplesPerMsD;
+  const std::uint8_t bend = 0x34;
+  SampleDesc d = w3b_ramp();
+  d.tune_mod = wt_env(20, 60, 0, 1.0f, bend);
+  p.set_sample(0, d);
+  CHECK(p.sample(0).tune_mod.kind == audio::kFmodWtEnv);
+  note_at_step0(p);
+  static std::int16_t buf[kBlk];
+  double worst = 0.0;
+  double top = 0.0;
+  for (std::uint32_t b = 0; b < 40; ++b) {
+    render_blocks(p, buf, 1);
+    if (b < 2u) {
+      continue;  // (the voice's own attack ramp is in the first samples)
+    }
+    const double ph = std::fmod(static_cast<double>(b * kBlk), D) / D;
+    const int fine = w3b_clampi(w3b_trunc100(static_cast<double>(w.eval(ph, bend))), -100, 100);
+    const double inc = w3b_slope(buf);
+    worst = std::max(worst, std::fabs(inc - w3b_inc_of(fine)));
+    top = std::max(top, inc);
+  }
+  CHECK_MESSAGE(worst < 0.01, "worst difference " << worst << " of the increment");
+  CHECK(top > w3b_inc_of(0) + 0.01);  // the pitch went up: the modulator acts
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W3b, a finetune WT LFO is bipolar around the instrument's fine tune") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  p.cut(0);
+  SampleDesc d = w3b_ramp();
+  d.fine_tune = -20;
+  d.tune_mod = wt_lfo(17, 0.5f);
+  p.set_sample(0, d);
+  note_at_step0(p);
+  static std::int16_t buf[kBlk];
+  double lo = 1e9, hi = -1e9;
+  for (std::uint32_t b = 0; b < 80; ++b) {
+    render_blocks(p, buf, 1);
+    if (b < 2u) {
+      continue;
+    }
+    const double inc = w3b_slope(buf);
+    lo = std::min(lo, inc);
+    hi = std::max(hi, inc);
+  }
+  CHECK(lo < w3b_inc_of(-20) - 0.005);  // both sides of the instrument's pitch
+  CHECK(hi > w3b_inc_of(-20) + 0.005);
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W3b, a wavetable position WT Env moves the window by the contour x amount x windows, once a block, held to the stack") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  p.cut(0);
+  const double D = 40.0 * kSamplesPerMsD;
+  SampleDesc d = w3b_wavetable(1);
+  d.env.enable = true;
+  d.env.release = 60000;
+  d.pos_mod = wt_env(40, 60, 99, 1.0f);  // sustained at 99 %: it plays the contour to its end and holds there
+  p.set_sample(0, d);
+  CHECK(p.sample(0).pos_mod.kind == audio::kFmodWtEnv);
+  note_at_step0(p);
+  static std::int16_t buf[kBlk];
+  int worst = 0;
+  int lo = 8, hi = -1;
+  for (std::uint32_t b = 0; b < 60; ++b) {
+    render_blocks(p, buf, 1);
+    const double ph = std::min(static_cast<double>(b * kBlk) / D, 0.99);
+    const int want = w3b_clampi(1 + static_cast<int>(static_cast<double>(w.eval(ph)) * static_cast<double>(kW3bWindows)), 0, 7);
+    const int window = (buf[kBlk - 1] + 500) / 1000 - 1;  // a window is told by its level
+    worst = std::max(worst, std::abs(window - want));
+    lo = std::min(lo, window);
+    hi = std::max(hi, window);
+  }
+  CHECK_MESSAGE(worst <= 1, "worst window difference " << worst);
+  CHECK(hi - lo >= 2);  // it moves
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W3b, a granular position WT LFO moves the grain (the same render without it differs); a WT kind never reaches a plain sample's position slot") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  p.cut(0);
+  const auto run = [&](const audio::FilterMod& m) {
+    for (std::uint32_t i = 0; i < kW3bLen; ++i) {
+      g_w3b_ramp[i] = static_cast<std::int16_t>(5u * i);
+    }
+    SampleDesc d{g_w3b_ramp, kW3bLen, 0, 0, 65536};
+    d.granular = true;
+    d.gr_len = 441;
+    d.gr_pos = 32768;
+    d.pos_mod = m;
+    p.cut(0);
+    p.set_sample(0, d);
+    note_at_step0(p);
+    std::vector<std::int16_t> out(80u * kBlk);
+    render_blocks(p, out.data(), 80);
+    return out;
+  };
+  const std::vector<std::int16_t> plain = run(audio::FilterMod{});
+  const std::vector<std::int16_t> moved = run(wt_lfo(17, 0.5f));
+  CHECK(p.sample(0).pos_mod.kind == audio::kFmodWtLfo);  // a granular instrument keeps the WT kind on its position slot
+  CHECK(plain != moved);
+  p.cut(0);
+  SampleDesc s = w3b_plain();  // a plain sample: no windows, not granular
+  s.pos_mod = wt_lfo(17, 0.5f);
+  p.set_sample(0, s);
+  CHECK(p.sample(0).pos_mod.kind == audio::kFmodNone);
+  SampleDesc one = w3b_wavetable(0);  // a wavetable of one window: nothing to move
+  one.wt_windows = 1;
+  one.pos_mod = wt_env(20, 60, 0, 1.0f);
+  p.set_sample(0, one);
+  CHECK(p.sample(0).pos_mod.kind == audio::kFmodNone);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W3b, slot 3's enable byte is a bit mask: 0x01 is the wavetable position, 0x02 alone is none (the live path); the other slots read any non-zero byte as on") {
+  VoicePool& p = pool();
+  p.cut(0);
+  namespace ipp = audio::inst_param;
+  SampleDesc d = w3b_wavetable(1);
+  d.pos_mod = wt_lfo(8, 0.5f);
+  d.pos_mod.lfo = true;
+  d.pan_mod = wt_lfo(8, 0.5f);
+  d.pan_mod.lfo = true;
+  p.set_sample(0, d);
+  std::uint32_t pan_tracks = 0;
+  const auto kind = [&] { return p.sample(0).pos_mod.kind; };
+  CHECK(p.apply_param(0, ipp::envelope(3, ipp::EnvEnable), 2.0f, pan_tracks));
+  CHECK(kind() == audio::kFmodNone);  // 0x02: the granular length's bit
+  CHECK(p.apply_param(0, ipp::envelope(3, ipp::EnvEnable), 1.0f, pan_tracks));
+  CHECK(kind() == audio::kFmodLfo);
+  CHECK(p.apply_param(0, ipp::envelope(3, ipp::EnvEnable), 0.0f, pan_tracks));
+  CHECK(kind() == audio::kFmodNone);
+  CHECK(p.apply_param(0, ipp::envelope(3, ipp::EnvEnable), 3.0f, pan_tracks));
+  CHECK(kind() == audio::kFmodLfo);  // 0x03: both bits, the position is on
+  CHECK(p.apply_param(0, ipp::envelope(1, ipp::EnvEnable), 0.0f, pan_tracks));
+  CHECK(p.sample(0).pan_mod.kind == audio::kFmodNone);
+  CHECK(p.apply_param(0, ipp::envelope(1, ipp::EnvEnable), 2.0f, pan_tracks));
+  CHECK(p.sample(0).pan_mod.kind == audio::kFmodLfo);  // a slot that is not 3: any non-zero byte
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+// ---- OS-CEWTENV W3c: the warps baked at bind time, the cutoff once a block (docs/specs/OS-CEWTENV.md Q3 a) -------------------------------------------------------------------
+
+TEST_CASE("voices: OS-CEWTENV W3c, a pan WT Env with its warps baked (FilterMod::delay = the bake id) traces the baked contour, and stays close to the live warps") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  p.cut(0);
+  const double D = 20.0 * kSamplesPerMsD;
+  const std::uint8_t bend = 0x34;
+  const unsigned id = audio::wt_bake(kWtShape, bend);
+  NEED(id != 0u);
+  SampleDesc d = w3b_plain();
+  d.pan = 50;
+  d.pan_mod = wt_env(20, 60, 0, 0.8f, bend);
+  d.pan_mod.delay = static_cast<std::uint16_t>(id);
+  p.set_sample(0, d);
+  CHECK(p.sample(0).pan_mod.delay == id);  // the bake id survives the sanitizing
+  note_at_step0(p);
+  static std::int16_t buf[kBlk];
+  int worst_baked = 0;
+  int worst_live = 0;
+  for (std::uint32_t b = 0; b < 40; ++b) {
+    render_blocks(p, buf, 1);
+    const double ph = std::fmod(static_cast<double>(b * kBlk), D) / D;
+    const int baked = w3b_clampi(50 + w3b_trunc100(static_cast<double>(audio::wt_eval_slot(kWtShape, id, bend, static_cast<float>(ph))) * 0.8), 0, 100);
+    const int live = w3b_clampi(50 + w3b_trunc100(static_cast<double>(w.eval(ph, bend)) * 0.8), 0, 100);
+    const int got = pan_of(p);
+    worst_baked = std::max(worst_baked, std::abs(got - baked));
+    worst_live = std::max(worst_live, std::abs(got - live));
+  }
+  CHECK_MESSAGE(worst_baked <= 1, "against the baked contour: " << worst_baked << " units of pan");
+  CHECK_MESSAGE(worst_live <= 4, "against the live warps: " << worst_live << " units of pan");  // the 128-point resampling of the composite (a smooth contour: a few percent at most)
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W3c, the cutoff's WT kinds are evaluated once a block: the cutoff holds its value on the 16-sample grid inside a block and takes the next at the block's first sample") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  p.cut(0);
+  const double base = 0.3;
+  const std::uint8_t bend = 0x34;
+  audio::FilterMod m = wt_env(20, 60, 0, 0.5f, bend);
+  m.delay = static_cast<std::uint16_t>(audio::wt_bake(kWtShape, bend));
+  p.set_sample(0, wt_desc(m, static_cast<float>(base)));
+  p.restart_clock();
+  p.on_step(0);
+  p.note_on(0, 60, 0, 127);
+  static std::int16_t buf[kBlk];
+  const double D = 20.0 * kSamplesPerMsD;
+  double worst = 0.0;
+  unsigned moved = 0;
+  double prev = -1.0;
+  for (std::uint32_t b = 0; b < 12; ++b) {  // inside the first play of the one shot: the contour moves block to block
+    render_blocks(p, buf, 1);
+    const double ph = static_cast<double>(b * kBlk) / D;
+    const double want = clamp01d(base + static_cast<double>(audio::wt_eval_slot(kWtShape, m.delay, bend, static_cast<float>(ph))) * 0.5);
+    const double got = static_cast<double>(p.filter_cutoff(0));
+    worst = std::max(worst, std::fabs(got - want));  // the value after the block is the block's first sample's: not the 16-sample grid's last (t = b x 64 + 48)
+    moved += (prev >= 0.0 && std::fabs(got - prev) > 1e-6) ? 1u : 0u;
+    prev = got;
+  }
+  CHECK_MESSAGE(worst < 1e-4, "worst difference " << worst);
+  CHECK(moved >= 6u);  // it does move block to block
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W3c, set_sample holds a WT kind's bake id to the pool; a plain kind's delay is its own") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  p.cut(0);
+  SampleDesc d = wt_desc(wt_env(20, 60, 0, 0.5f), 0.5f);
+  d.filter.mod.delay = 9999;  // not an id of the pool
+  d.pan_mod = wt_lfo(8, 0.4f);
+  d.pan_mod.delay = static_cast<std::uint16_t>(audio::kWtBakeCount);
+  d.tune_mod.kind = audio::kFmodEnv;
+  d.tune_mod.delay = 300;  // an ADSR's delay in ms
+  p.set_sample(0, d);
+  CHECK(p.sample(0).filter.mod.delay == 0u);
+  CHECK(p.sample(0).pan_mod.delay == audio::kWtBakeCount);
+  CHECK(p.sample(0).tune_mod.delay == 300u);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W3c fold, a live SOURCE or enable edit that takes a slot off WT clears the bake id, the WT bytes and a contour index in `shape` (no ADSR delay of 1..128 ms)") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  p.cut(0);
+  namespace ipp = audio::inst_param;
+  const std::uint8_t bend = 0x34;
+  const unsigned id = audio::wt_bake(kWtShape, bend);
+  NEED(id != 0u);
+  const auto make = [&] {
+    SampleDesc d = w3b_plain();
+    d.pan_mod = wt_env(20, 60, 50, 0.8f, bend);
+    d.pan_mod.delay = static_cast<std::uint16_t>(id);
+    d.tune_mod = wt_lfo(8, 0.4f, bend);
+    d.tune_mod.delay = static_cast<std::uint16_t>(id);
+    p.set_sample(0, d);
+    CHECK(p.sample(0).pan_mod.delay == id);
+    CHECK(p.sample(0).tune_mod.delay == id);
+  };
+  std::uint32_t pan_tracks = 0;
+  make();
+  CHECK(p.apply_param(0, ipp::lfo(1, ipp::LfoSource), 1.0f, pan_tracks));  // SOURCE: Envelope
+  const audio::FilterMod pan = p.sample(0).pan_mod;
+  CHECK(pan.kind == audio::kFmodEnv);
+  CHECK(pan.delay == 0u);
+  CHECK(pan.wt_bend == 0u);
+  CHECK(pan.wt_sust == 0u);
+  CHECK(pan.shape <= audio::kLfoShapeSine);  // the contour 37 is not an LFO shape
+  CHECK(p.apply_param(0, ipp::lfo(5, ipp::LfoSource), 2.0f, pan_tracks));  // SOURCE: LFO, on the other slot
+  const audio::FilterMod tune = p.sample(0).tune_mod;
+  CHECK(tune.kind == audio::kFmodLfo);
+  CHECK(tune.delay == 0u);
+  CHECK(tune.wt_bend == 0u);
+  CHECK(tune.shape <= audio::kLfoShapeSine);
+  make();
+  CHECK(p.apply_param(0, ipp::envelope(1, ipp::EnvEnable), 1.0f, pan_tracks));  // the enable byte
+  CHECK(p.sample(0).pan_mod.kind == audio::kFmodEnv);
+  CHECK(p.sample(0).pan_mod.delay == 0u);
+  make();
+  CHECK(p.apply_param(0, ipp::envelope(1, ipp::EnvEnable), 0.0f, pan_tracks));
+  CHECK(p.sample(0).pan_mod.kind == audio::kFmodNone);
+  CHECK(p.sample(0).pan_mod.delay == 0u);
+  // an ADSR slot's own delay is not touched by an edit
+  SampleDesc d = w3b_plain();
+  d.pan_mod.kind = audio::kFmodEnv;
+  d.pan_mod.delay = 250;
+  p.set_sample(0, d);
+  CHECK(p.apply_param(0, ipp::lfo(1, ipp::LfoSource), 1.0f, pan_tracks));
+  CHECK(p.sample(0).pan_mod.delay == 250u);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W3c fold, a cutoff WT Env counts filter samples: a note that starts mid-block is re-evaluated 64 to 79 samples after its start, then every 64") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  p.cut(0);
+  const double base = 0.3;
+  const double D = 20.0 * kSamplesPerMsD;
+  p.set_sample(0, wt_desc(wt_env(20, 60, 0, 0.5f), static_cast<float>(base)));
+  p.restart_clock();
+  p.on_step(0);
+  constexpr unsigned kStart = 21;  // the note starts at sample 21 of block 0: not on the 16-sample grid, not at the block's start
+  // the evaluations the rule gives, in samples from the block 0's start: the note's first sample, then the first grid point (every 16) where 64 filter samples have gone by
+  std::vector<unsigned> evals{kStart};
+  for (unsigned g = 16u * ((kStart + 15u) / 16u); g < 14u * kBlk; g += 16u) {
+    if (g > kStart && g - evals.back() >= 64u) {
+      evals.push_back(g);
+    }
+  }
+  CHECK(evals[1] - evals[0] >= 64u);
+  CHECK(evals[1] - evals[0] <= 79u);  // 96 - 21 = 75
+  CHECK(evals[2] - evals[1] == 64u);
+  static std::int16_t buf[kBlk];
+  double worst = 0.0;
+  for (std::uint32_t b = 0; b < 13u; ++b) {  // inside the first play of the one shot (883 samples)
+    p.begin_block();
+    if (b == 0u) {
+      p.render(0, kStart);
+      p.note_on(0, 60, 0, 127);
+      p.render(kStart, kBlk);
+    } else {
+      p.render(0, kBlk);
+    }
+    p.end_block();
+    unsigned last = evals[0];
+    for (const unsigned e : evals) {
+      last = e < (b + 1u) * kBlk ? e : last;
+    }
+    const double ph = static_cast<double>(last - kStart) / D;
+    const double want = clamp01d(base + static_cast<double>(w.eval(ph)) * 0.5);
+    worst = std::max(worst, std::fabs(static_cast<double>(p.filter_cutoff(0)) - want));
+  }
+  (void)buf;
+  CHECK_MESSAGE(worst < 1e-4, "worst difference " << worst);
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W4, an ADSR or LFO amp slot renders bit-identically whatever WT bytes the descriptor carries") {
+  static o3os::test::StaticSlot<VoicePool> slot_b;
+  VoicePool& a = pool();
+  VoicePool& b = slot_b.make();
+  static std::int16_t out_a[60 * kBlk];
+  static std::int16_t out_b[60 * kBlk];
+  for (unsigned kind = 0; kind < 3; ++kind) {  // 0: the plain gain, 1: the amp ADSR, 2: the amp LFO (a tremolo)
+    audio::FilterMod m;
+    if (kind == 2u) {
+      m = wt_amp_lfo(8, 0.7f);
+      m.kind = audio::kFmodLfo;
+      m.shape = 2;
+    }
+    audio::FilterMod junk = m;
+    junk.wt_bend = 0xFF;
+    junk.wt_sust = 200;
+    for (VoicePool* p : {&a, &b}) {
+      p->cut(0);
+      SampleDesc d = wt_amp_desc(p == &a ? m : junk);
+      d.env.enable = kind == 1u;
+      d.env.attack = 40;
+      d.env.decay = 200;
+      d.env.sustain = 1u << 29;
+      d.env.release = 120;
+      p->set_sample(0, d);
+      CHECK(p->sample(0).amp_mod.kind == m.kind);
+      CHECK(p->sample(0).amp_mod.wt_bend == 0u);
+      CHECK(p->sample(0).amp_mod.wt_sust == 0u);
+      p->restart_clock();
+      p->on_step(0);
+      p->note_on(0, 64, 0, 127);
+    }
+    for (std::uint32_t blk = 0; blk < 60; ++blk) {
+      if (blk == 40) {
+        a.note_off(0);
+        b.note_off(0);
+      }
+      render_blocks(a, out_a + blk * kBlk, 1);
+      render_blocks(b, out_b + blk * kBlk, 1);
+    }
+    CHECK_MESSAGE(std::memcmp(out_a, out_b, sizeof out_a) == 0, "kind " << kind);
+  }
+  a.cut(0);
+  b.cut(0);
+  a.set_sample(0, SampleDesc{});
+  b.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W4, the Perform VOL LFO over a WT amp slot plays kPerfLfoMod's triangle, as over an Off amp slot (the contour index is not a shape; W3b's rule for every slot but the cutoff)") {
+  static o3os::test::StaticSlot<VoicePool> slot_b;
+  WtBankFixture w;
+  VoicePool& a = pool();
+  VoicePool& b = slot_b.make();
+  const auto hold = [](VoicePool& p) {
+    SeqEvent e{};
+    e.kind = EventKind::ModSet;
+    e.track = 0;
+    e.a = 0;
+    e.b = 0;
+    e.c = audio::kLayerPerf;
+    e.flags = static_cast<std::uint8_t>(audio::kModGroupLfoVolume);
+    e.value = 2;  // the layer's offset: two steps up the table from "1 step"
+    p.fx_event(0, e);
+  };
+  audio::FilterMod wt = wt_amp_lfo(3, 0.7f);  // shape 37: a contour index; the layer's LFO would read it as the random shape
+  audio::FilterMod tri;                       // an Off amp slot that stores no audible LFO amount: the layer's LFO plays kPerfLfoMod (a triangle at 50 %) at the table index the layer's offset gives (kPerfLfoBase + 2)
+  tri.lfo_amount = 0.0f;
+  static std::int16_t out_a[40 * kBlk];
+  static std::int16_t out_b[40 * kBlk];
+  for (VoicePool* p : {&a, &b}) {
+    p->cut(0);
+    p->perf_clear();
+    p->set_sample(0, wt_amp_desc(p == &a ? wt : tri));
+    hold(*p);
+    p->restart_clock();
+    p->on_step(0);
+    CHECK(p->note_on(0, 64, 0, 127));
+  }
+  render_blocks(a, out_a, 40);
+  render_blocks(b, out_b, 40);
+  CHECK(std::memcmp(out_a, out_b, sizeof out_a) == 0);
+  for (VoicePool* p : {&a, &b}) {
+    p->perf_clear();
+    p->cut(0);
+    p->set_sample(0, SampleDesc{});
+  }
+}
+
+// ---- OS-CEWTENV W6a: the step FX w (model id 96, the amp slot) and y (97, the cutoff slot) ----------------------------------------------------
+namespace o3os::audio {
+// The test's view of the pool's private state (voices.h friend): the voice's envelope pointer and pmask, the FX copies.
+struct FxEnvW6aTest {
+  static unsigned voice_of(VoicePool& p, unsigned track) { return p.find(track); }
+  static const AmpEnvelope* env(VoicePool& p, unsigned i) { return p.v_[i].env; }
+  static const AmpEnvelope* own_env(VoicePool& p, unsigned i) { return &p.samples_[p.v_[i].slot].env; }
+  static const AmpEnvelope* fx_env(VoicePool&, unsigned i) { return &VoicePool::fxm_->env[i]; }
+  static bool amp_wt(VoicePool& p, unsigned i) { return (p.v_[i].pmask & VoicePool::kPmFxAmp) != 0u; }
+  static bool cut_fx(VoicePool& p, unsigned i) { return (p.v_[i].pmask & VoicePool::kPmFxCut) != 0u; }
+  static const FilterMod& amp_copy(VoicePool&, unsigned i) { return VoicePool::fxm_->wt[i]; }
+  static const FilterMod& cut(VoicePool& p, unsigned i) { return p.cut_mod(p.v_[i]); }
+};
+}  // namespace o3os::audio
+
+namespace {
+using o3os::audio::FxEnvW6aTest;
+namespace oa = o3os::audio;
+
+constexpr std::uint8_t kFxW = 0, kFxY = 1;
+
+// This test binary's FX storage, bound once (on the unit it is O3OS_SDRAM_NOINIT in the SDRAM slack window, app_main.cpp; voices.h fxe_bind).
+oa::FxEnvMem g_w6a_mem;
+struct W6aBind {
+  W6aBind() { oa::fxe_bind(&g_w6a_mem); }
+} g_w6a_bind;
+
+// A looping DC instrument with an amp ADSR (attack in ms, decay 500 ms, release 100 ms, sustain full) and a low-pass cutoff ADSR (100 / 200 / 300 ms, sustain 0.6).
+SampleDesc w6a_desc(std::uint16_t attack_ms) {
+  static std::int16_t pcm[4000];
+  for (std::int16_t& x : pcm) {
+    x = 16000;
+  }
+  SampleDesc d{pcm, 4000, 0, 4000, 65536};
+  d.env.enable = true;
+  d.env.attack = oa::env_units(attack_ms);
+  d.env.decay = oa::env_units(500);
+  d.env.release = oa::env_units(100);
+  d.filter.enable = true;
+  d.filter.type = oa::kFilterLow;
+  d.filter.cutoff = 0.9f;
+  d.filter.mod.kind = oa::kFmodEnv;
+  d.filter.mod.attack = 100;
+  d.filter.mod.decay = 200;
+  d.filter.mod.release = 300;
+  d.filter.mod.sustain = 0.6f;
+  return d;
+}
+
+void w6a_fx(VoicePool& p, std::uint8_t which, unsigned value) {  // value 256: the FX ends (ModEnd)
+  const unsigned group = which == kFxW ? oa::kModGroupAmpEnv : oa::kModGroupFilterEnv;
+  const unsigned type = which == kFxW ? oa::kFxAmpEnv : oa::kFxFilterEnv;
+  p.fx_event(0, group, value > 255u ? 0u : type, value > 255u ? 0u : value);
+}
+
+void w6a_note(VoicePool& p) {
+  p.cut(0);
+  static std::int16_t tmp[6 * kBlk];
+  render_blocks(p, tmp, 6);
+  p.restart_clock();
+  p.on_step(0);
+  CHECK(p.note_on(0, 60, 0, 127));
+}
+
+double w6a_peak(const std::int16_t* out, std::uint32_t first, std::uint32_t last) {
+  double m = 0.0;
+  for (std::uint32_t i = first * kBlk; i < last * kBlk; ++i) {
+    m = std::max(m, std::fabs(static_cast<double>(out[i])));
+  }
+  return m;
+}
+}  // namespace
+
+TEST_CASE("voices: OS-CEWTENV W6a, the FX w on an amp ADSR: attack = T[x], decay = release = T[y], sustain 0 when y <= 6; the FX's end gives the instrument's envelope back") {
+  VoicePool& p = pool();
+  p.clear_slide_fxs();
+  p.set_sample(0, w6a_desc(300));
+  const oa::AmpEnvelope own = p.sample(0).env;
+  w6a_fx(p, kFxW, 0x9A);  // x 9: 650 ms, y 10: 1,000 ms, sustain kept
+  w6a_note(p);
+  const unsigned i = FxEnvW6aTest::voice_of(p, 0);
+  if (!(i != oa::kMaxVoices)) {
+    FAIL_CHECK("W6a: precondition");
+    return;
+  }
+  if (!(FxEnvW6aTest::env(p, i) == FxEnvW6aTest::fx_env(p, i))) {
+    FAIL_CHECK("W6a: precondition");
+    return;
+  }
+  CHECK(FxEnvW6aTest::env(p, i)->attack == oa::env_units(650));
+  CHECK(FxEnvW6aTest::env(p, i)->decay == oa::env_units(1000));
+  CHECK(FxEnvW6aTest::env(p, i)->release == oa::env_units(1000));
+  CHECK(FxEnvW6aTest::env(p, i)->sustain == own.sustain);
+  CHECK(FxEnvW6aTest::env(p, i)->amount == own.amount);
+  CHECK(FxEnvW6aTest::env(p, i)->delay == own.delay);
+  // a new value reaches the sounding voice; y 6 is the last that drops the sustain, x 0 is T[0] = 0 ms (one unit)
+  w6a_fx(p, kFxW, 0x06);
+  CHECK(FxEnvW6aTest::env(p, i)->attack == oa::env_units(0));
+  CHECK(FxEnvW6aTest::env(p, i)->decay == oa::env_units(140));
+  CHECK(FxEnvW6aTest::env(p, i)->sustain == 0u);
+  w6a_fx(p, kFxW, 0xF7);  // y 7 keeps the sustain
+  CHECK(FxEnvW6aTest::env(p, i)->attack == oa::env_units(8000));
+  CHECK(FxEnvW6aTest::env(p, i)->decay == oa::env_units(240));
+  CHECK(FxEnvW6aTest::env(p, i)->sustain == own.sustain);
+  // the FX ends: the descriptor's envelope is back for the sounding voice and the next note
+  w6a_fx(p, kFxW, 256);
+  CHECK(FxEnvW6aTest::env(p, i) == FxEnvW6aTest::own_env(p, i));
+  w6a_fx(p, kFxW, 0x55);
+  w6a_fx(p, kFxW, 256);
+  w6a_note(p);
+  CHECK(FxEnvW6aTest::env(p, FxEnvW6aTest::voice_of(p, 0)) == FxEnvW6aTest::own_env(p, FxEnvW6aTest::voice_of(p, 0)));
+  p.clear_slide_fxs();
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W6a, the FX w is heard: a short attack fills the note at once, a y <= 6 drops the sustain, and a note after the FX's end is bit for bit the instrument's") {
+  VoicePool& p = pool();
+  static std::int16_t base[30 * kBlk];
+  static std::int16_t fast[30 * kBlk];
+  static std::int16_t slow[30 * kBlk];
+  static std::int16_t after[30 * kBlk];
+  p.clear_slide_fxs();
+  p.set_sample(0, w6a_desc(2000));  // a 2 s attack
+  w6a_note(p);
+  render_blocks(p, slow, 30);
+  w6a_fx(p, kFxW, 0x0F);  // x 0: the attack takes one unit; y 15: the decay is 8 s, the sustain is full
+  w6a_note(p);
+  render_blocks(p, fast, 30);
+  CHECK(w6a_peak(fast, 10, 30) > 5000.0);
+  CHECK(w6a_peak(slow, 10, 30) < 0.1 * w6a_peak(fast, 10, 30));
+  w6a_fx(p, kFxW, 256);
+  // the instrument with a fast attack and a full sustain stays loud; the FX 0x00 (a one-unit decay, sustain 0) silences it after the attack
+  p.set_sample(0, w6a_desc(1));
+  w6a_note(p);
+  render_blocks(p, base, 30);
+  CHECK(w6a_peak(base, 10, 30) > 5000.0);
+  w6a_fx(p, kFxW, 0x00);
+  w6a_note(p);
+  render_blocks(p, fast, 30);
+  CHECK(w6a_peak(fast, 10, 30) < 50.0);
+  w6a_fx(p, kFxW, 256);
+  w6a_note(p);
+  render_blocks(p, after, 30);
+  CHECK(std::memcmp(base, after, sizeof base) == 0);
+  p.clear_slide_fxs();
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W6a, the FX y on a cutoff ADSR: attack = max(8x, 1) ms, decay = release = 8y ms, sustain 0 when y <= 6; the instrument's own slot is untouched") {
+  VoicePool& p = pool();
+  p.clear_slide_fxs();
+  p.set_sample(0, w6a_desc(1));
+  w6a_fx(p, kFxY, 0x37);
+  w6a_note(p);
+  const unsigned i = FxEnvW6aTest::voice_of(p, 0);
+  if (!(i != oa::kMaxVoices)) {
+    FAIL_CHECK("W6a: precondition");
+    return;
+  }
+  CHECK(FxEnvW6aTest::cut_fx(p, i));
+  CHECK(FxEnvW6aTest::cut(p, i).attack == 24u);
+  CHECK(FxEnvW6aTest::cut(p, i).decay == 56u);
+  CHECK(FxEnvW6aTest::cut(p, i).release == 56u);
+  CHECK(FxEnvW6aTest::cut(p, i).sustain == 0.6f);  // y 7 keeps it
+  CHECK(FxEnvW6aTest::cut(p, i).amount == 1.0f);
+  w6a_fx(p, kFxY, 0x06);
+  CHECK(FxEnvW6aTest::cut(p, i).sustain == 0.0f);
+  w6a_fx(p, kFxY, 0x00);  // 8 x 0 is 0 ms: the attack is held to 1 ms
+  CHECK(FxEnvW6aTest::cut(p, i).attack == 1u);
+  CHECK(FxEnvW6aTest::cut(p, i).decay == 0u);
+  w6a_fx(p, kFxY, 0xFF);
+  CHECK(FxEnvW6aTest::cut(p, i).attack == 120u);
+  CHECK(FxEnvW6aTest::cut(p, i).decay == 120u);
+  CHECK(p.sample(0).filter.mod.attack == 100u);  // the descriptor keeps its own
+  CHECK(p.sample(0).filter.mod.decay == 200u);
+  w6a_fx(p, kFxY, 256);
+  CHECK_FALSE(FxEnvW6aTest::cut_fx(p, i));
+  CHECK(FxEnvW6aTest::cut(p, i).attack == 100u);
+  CHECK(FxEnvW6aTest::cut(p, i).sustain == 0.6f);
+  p.clear_slide_fxs();
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W6a, an LFO slot is unchanged by the FX w and y, and the next note without the FX restores the track") {
+  VoicePool& p = pool();
+  p.clear_slide_fxs();
+  SampleDesc d = w6a_desc(1);
+  d.env.enable = false;  // an LFO amp slot: no ADSR, a tremolo
+  d.amp_mod.kind = oa::kFmodLfo;
+  d.filter.mod.kind = oa::kFmodLfo;
+  p.set_sample(0, d);
+  w6a_fx(p, kFxW, 0x34);
+  w6a_fx(p, kFxY, 0x34);
+  w6a_note(p);
+  const unsigned i = FxEnvW6aTest::voice_of(p, 0);
+  if (!(i != oa::kMaxVoices)) {
+    FAIL_CHECK("W6a: precondition");
+    return;
+  }
+  CHECK(FxEnvW6aTest::env(p, i) == nullptr);
+  CHECK_FALSE(FxEnvW6aTest::amp_wt(p, i));
+  CHECK_FALSE(FxEnvW6aTest::cut_fx(p, i));
+  CHECK(&FxEnvW6aTest::cut(p, i) == &p.sample(0).filter.mod);
+  // the FX on an ADSR instrument, then FxReset (clear_slide_fxs): the next note plays the instrument's envelope
+  p.set_sample(0, w6a_desc(300));
+  w6a_fx(p, kFxW, 0x34);
+  w6a_fx(p, kFxY, 0x34);
+  p.clear_slide_fxs();
+  w6a_note(p);
+  const unsigned j = FxEnvW6aTest::voice_of(p, 0);
+  CHECK(FxEnvW6aTest::env(p, j) == FxEnvW6aTest::own_env(p, j));
+  CHECK_FALSE(FxEnvW6aTest::cut_fx(p, j));
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W6a, the FX w and y on a WT slot: the WT Env's duration is scaled by x (floor 10 ms, ceiling 65535, base 1,000 ms when decay <= 1), y - 8 moves the warp X (held to -7..7)") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  p.clear_slide_fxs();
+  struct Row {
+    unsigned x;
+    unsigned want;
+  };
+  // base 1,000 ms: x 0: 50, 7: 881, 8: 1,000, 9: 1,428, 15: 4,000
+  const Row rows[] = {{0, 50}, {7, 881}, {8, 1000}, {9, 1428}, {15, 4000}};
+  for (const Row& r : rows) {
+    p.set_sample(0, wt_amp_desc(wt_env(1000, 60, 0, 0.5f)));
+    w6a_fx(p, kFxW, r.x << 4 | 8u);
+    w6a_note(p);
+    const unsigned i = FxEnvW6aTest::voice_of(p, 0);
+    if (!(i != oa::kMaxVoices)) {
+      FAIL_CHECK("W6a: precondition");
+      return;
+    }
+    CHECK(FxEnvW6aTest::amp_wt(p, i));
+    CHECK(FxEnvW6aTest::amp_copy(p, i).decay == r.want);
+    CHECK(FxEnvW6aTest::amp_copy(p, i).release == 60u);
+    CHECK(FxEnvW6aTest::amp_copy(p, i).wt_bend == p.sample(0).amp_mod.wt_bend);  // y 8: the warp is the instrument's
+    CHECK(p.sample(0).amp_mod.decay == 1000u);                                    // the descriptor is not touched
+  }
+  // the floor, the ceiling and the base of 1,000 ms for a decay of 1 (or 0)
+  const struct {
+    std::uint16_t decay;
+    unsigned x;
+    unsigned want;
+  } lim[] = {{100, 0, 10}, {60000, 15, 65535}, {1, 8, 1000}, {0, 15, 4000}};
+  for (const auto& l : lim) {
+    p.set_sample(0, wt_amp_desc(wt_env(l.decay, 60, 0, 0.5f)));
+    w6a_fx(p, kFxW, l.x << 4 | 8u);
+    w6a_note(p);
+    CHECK(FxEnvW6aTest::amp_copy(p, FxEnvW6aTest::voice_of(p, 0)).decay == l.want);
+  }
+  // the warp: the instrument's X is +3, Y is -2
+  const std::uint8_t bend = oa::wt_pack_warp(3, -2);
+  const struct {
+    unsigned y;
+    int want_x;
+  } wr[] = {{0, -5}, {7, 2}, {8, 3}, {9, 4}, {12, 7}, {15, 7}};
+  for (const auto& r : wr) {
+    p.set_sample(0, wt_amp_desc(wt_env(1000, 60, 0, 0.5f, bend)));
+    w6a_fx(p, kFxW, 8u << 4 | r.y);
+    w6a_note(p);
+    const unsigned i = FxEnvW6aTest::voice_of(p, 0);
+    CHECK(oa::wt_warp_x(FxEnvW6aTest::amp_copy(p, i).wt_bend) == r.want_x);
+    CHECK(oa::wt_warp_y(FxEnvW6aTest::amp_copy(p, i).wt_bend) == -2);
+  }
+  p.set_sample(0, wt_amp_desc(wt_env(1000, 60, 0, 0.5f, oa::wt_pack_warp(-6, 0))));
+  w6a_fx(p, kFxW, 8u << 4 | 0u);  // -6 - 8 held to -7
+  w6a_note(p);
+  CHECK(oa::wt_warp_x(FxEnvW6aTest::amp_copy(p, FxEnvW6aTest::voice_of(p, 0)).wt_bend) == -7);
+  // a WT LFO takes the warp offset and keeps its duration field; the FX's end clears the override
+  oa::FilterMod lfo = wt_lfo(5, 0.5f, bend);
+  lfo.decay = 123;
+  p.set_sample(0, wt_amp_desc(lfo));
+  w6a_fx(p, kFxW, 0x00);
+  w6a_note(p);
+  const unsigned k = FxEnvW6aTest::voice_of(p, 0);
+  CHECK(FxEnvW6aTest::amp_wt(p, k));
+  CHECK(FxEnvW6aTest::amp_copy(p, k).decay == 123u);
+  CHECK(oa::wt_warp_x(FxEnvW6aTest::amp_copy(p, k).wt_bend) == -5);
+  w6a_fx(p, kFxW, 256);
+  CHECK_FALSE(FxEnvW6aTest::amp_wt(p, k));
+  // the cutoff slot: the FX y on a WT Env
+  p.set_sample(0, wt_desc(wt_env(1000, 60, 0, 0.5f, bend), 0.5f));
+  w6a_fx(p, kFxY, 0x9C);
+  w6a_note(p);
+  const unsigned c = FxEnvW6aTest::voice_of(p, 0);
+  CHECK(FxEnvW6aTest::cut_fx(p, c));
+  CHECK(FxEnvW6aTest::cut(p, c).decay == 1428u);
+  CHECK(oa::wt_warp_x(FxEnvW6aTest::cut(p, c).wt_bend) == 7);
+  w6a_fx(p, kFxY, 256);
+  CHECK_FALSE(FxEnvW6aTest::cut_fx(p, c));
+  CHECK(FxEnvW6aTest::cut(p, c).decay == 1000u);
+  p.clear_slide_fxs();
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W6a, with no fxe_bind() (a null storage) the FX w and y do nothing; bound again they work") {
+  VoicePool& p = pool();
+  p.clear_slide_fxs();
+  p.set_sample(0, w6a_desc(300));
+  oa::fxe_bind(nullptr);
+  w6a_fx(p, kFxW, 0x9A);
+  w6a_fx(p, kFxY, 0x9A);
+  w6a_note(p);
+  const unsigned i = FxEnvW6aTest::voice_of(p, 0);
+  if (!(i != oa::kMaxVoices)) {
+    oa::fxe_bind(&g_w6a_mem);
+    FAIL_CHECK("W6a: precondition");
+    return;
+  }
+  CHECK(FxEnvW6aTest::env(p, i) == FxEnvW6aTest::own_env(p, i));
+  CHECK_FALSE(FxEnvW6aTest::amp_wt(p, i));
+  CHECK_FALSE(FxEnvW6aTest::cut_fx(p, i));
+  CHECK(FxEnvW6aTest::cut(p, i).attack == 100u);  // the instrument's own cutoff ADSR
+  w6a_fx(p, kFxW, 256);                           // the end with no storage is no crash either
+  w6a_fx(p, kFxY, 256);
+  oa::fxe_bind(&g_w6a_mem);
+  w6a_fx(p, kFxW, 0x9A);
+  w6a_fx(p, kFxY, 0x9A);
+  w6a_note(p);
+  const unsigned j = FxEnvW6aTest::voice_of(p, 0);
+  CHECK(FxEnvW6aTest::env(p, j) == FxEnvW6aTest::fx_env(p, j));
+  CHECK(FxEnvW6aTest::cut_fx(p, j));
+  w6a_fx(p, kFxW, 256);
+  w6a_fx(p, kFxY, 256);
+  p.clear_slide_fxs();
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W6a, the value's nibble x and y read against the literal table T for all 16 values (amp: T[x] / T[y]; cutoff: 8x ms / 8y ms)") {
+  VoicePool& p = pool();
+  p.clear_slide_fxs();
+  p.set_sample(0, w6a_desc(300));
+  const std::uint16_t T[16] = {0, 5, 12, 25, 45, 80, 140, 240, 400, 650, 1000, 1500, 2200, 3300, 5000, 8000};
+  w6a_fx(p, kFxW, 0x00);
+  w6a_fx(p, kFxY, 0x00);
+  w6a_note(p);
+  const unsigned i = FxEnvW6aTest::voice_of(p, 0);
+  if (!(i != oa::kMaxVoices)) {
+    FAIL_CHECK("W6a: precondition");
+    return;
+  }
+  for (unsigned v = 0; v < 16u; ++v) {
+    const unsigned x = v, y = 15u - v;
+    const unsigned value = x << 4 | y;
+    w6a_fx(p, kFxW, value);
+    w6a_fx(p, kFxY, value);
+    CAPTURE(value);
+    CHECK(FxEnvW6aTest::env(p, i)->attack == oa::env_units(T[x]));
+    CHECK(FxEnvW6aTest::env(p, i)->decay == oa::env_units(T[y]));
+    CHECK(FxEnvW6aTest::env(p, i)->release == oa::env_units(T[y]));
+    CHECK(FxEnvW6aTest::cut(p, i).attack == (x == 0u ? 1u : 8u * x));
+    CHECK(FxEnvW6aTest::cut(p, i).decay == 8u * y);
+    CHECK(FxEnvW6aTest::cut(p, i).release == 8u * y);
+  }
+  w6a_fx(p, kFxW, 256);
+  w6a_fx(p, kFxY, 256);
+  p.clear_slide_fxs();
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W6a, the FX w on an amp WT Env is heard: x 0 ends the one-shot note much earlier than x 15") {
+  WtBankFixture w;
+  VoicePool& p = pool();
+  p.clear_slide_fxs();
+  static std::int16_t out[kBlk];
+  unsigned len[3] = {};
+  const unsigned xs[3] = {0u, 8u, 15u};
+  for (unsigned k = 0; k < 3u; ++k) {
+    p.set_sample(0, wt_amp_desc(wt_env(100, 60, 0, 0.5f)));  // a one-shot of 100 ms; x scales it: 10 ms (the floor), 100 ms, 400 ms
+    w6a_fx(p, kFxW, xs[k] << 4 | 8u);
+    w6a_note(p);
+    unsigned n = 0;
+    while (p.track_playing(0) && n < 600u) {
+      render_blocks(p, out, 1);
+      ++n;
+    }
+    len[k] = n;
+  }
+  CAPTURE(len[0]);
+  CAPTURE(len[1]);
+  CAPTURE(len[2]);
+  CHECK(len[0] < 20u);
+  CHECK(len[1] > len[0] + 20u);
+  CHECK(len[2] > len[1] + 100u);
+  CHECK(len[2] < 600u);
+  w6a_fx(p, kFxW, 256);
+  p.clear_slide_fxs();
+  p.cut(0);
+  p.set_sample(0, SampleDesc{});
+}
+
+TEST_CASE("voices: OS-CEWTENV W6a, the FX is per track: the FX on track 0 leaves a note of track 1 on the instrument's own envelope and cutoff") {
+  VoicePool& p = pool();
+  p.clear_slide_fxs();
+  p.set_sample(0, w6a_desc(300));
+  p.set_sample(1, w6a_desc(300));
+  w6a_fx(p, kFxW, 0x9A);  // track 0
+  w6a_fx(p, kFxY, 0x9A);
+  p.cut(0);
+  p.cut(1);
+  static std::int16_t tmp[6 * kBlk];
+  render_blocks(p, tmp, 6);
+  p.restart_clock();
+  p.on_step(0);
+  CHECK(p.note_on(0, 60, 0, 127));
+  CHECK(p.note_on(1, 60, 1, 127));
+  const unsigned a = FxEnvW6aTest::voice_of(p, 0);
+  const unsigned b = FxEnvW6aTest::voice_of(p, 1);
+  if (!(a != oa::kMaxVoices && b != oa::kMaxVoices && a != b)) {
+    FAIL_CHECK("W6a: precondition");
+    return;
+  }
+  CHECK(FxEnvW6aTest::env(p, a) == FxEnvW6aTest::fx_env(p, a));
+  CHECK(FxEnvW6aTest::cut_fx(p, a));
+  CHECK(FxEnvW6aTest::env(p, b) == FxEnvW6aTest::own_env(p, b));
+  CHECK_FALSE(FxEnvW6aTest::amp_wt(p, b));
+  CHECK_FALSE(FxEnvW6aTest::cut_fx(p, b));
+  CHECK(FxEnvW6aTest::cut(p, b).attack == 100u);
+  // a new value of track 0 under the sounding voices reaches track 0 only
+  w6a_fx(p, kFxW, 0x55);
+  CHECK(FxEnvW6aTest::env(p, a)->attack == oa::env_units(80));
+  CHECK(FxEnvW6aTest::env(p, b) == FxEnvW6aTest::own_env(p, b));
+  w6a_fx(p, kFxW, 256);
+  w6a_fx(p, kFxY, 256);
+  p.clear_slide_fxs();
+  p.cut(0);
+  p.cut(1);
+  p.set_sample(0, SampleDesc{});
+  p.set_sample(1, SampleDesc{});
 }

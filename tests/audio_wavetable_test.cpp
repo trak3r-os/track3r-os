@@ -9,12 +9,26 @@
 #include <o3os/audio/voices.h>
 #include <o3os/hal/audio.h>
 
+#include "support/rng.h"
 #include "support/static_slot.h"
 
+#include <cfloat>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <vector>
+
+namespace o3os::audio {
+
+// OS-FLASHDIET T3: drives VoicePool::move_position on a hand-made Voice over a sweep of mod and window counts; no code
+struct MovePositionSweepTest {
+  using V = VoicePool::Voice;
+  static void move(V& v, const SampleDesc& s, float mod) noexcept { VoicePool::move_position(v, s, mod); }
+};
+
+}  // namespace o3os::audio
+
 
 #define REQ(cond) \
   do {            \
@@ -353,4 +367,115 @@ TEST_CASE("gran pos: an ADSR moves the grain's position by output x 65535 (the g
     hi = std::max<std::int32_t>(hi, out[i]);
   }
   CHECK(hi < 120);
+}
+
+// ---- OS-FLASHDIET T3: move_position clamps the float product to +-2 x wt_windows and converts through int32 (no float -> int64, so no __aeabi_f2lz and its
+// double helpers in the image). The window it picks must equal the old expression's for every finite mod and every window count.
+namespace {
+
+// The window the expression before T3 picked: wt_pos + (int64)(mod * wt_windows), cut toward zero and held to [0, wt_windows - 1]. The float -> int64 conversion is
+// modelled with the saturation of the unit's helper (__aeabi_f2lz) and the sum without overflow, so the [0, last] clamp is what decides the out-of-range products too.
+std::int64_t old_window(std::uint32_t wt_pos, std::uint32_t windows, float mod) {
+  const float prod = mod * static_cast<float>(windows);
+  std::int64_t t;
+  if (prod >= 9223372036854775808.0f) {  // >= 2^63, +inf included
+    t = INT64_MAX;
+  } else if (prod <= -9223372036854775808.0f) {  // <= -2^63, -inf included
+    t = INT64_MIN;
+  } else {
+    t = static_cast<std::int64_t>(prod);  // cut toward zero, defined in this range
+  }
+  const std::int64_t last = static_cast<std::int64_t>(windows) - 1;
+  const std::int64_t pos = static_cast<std::int64_t>(wt_pos);  // <= last in the sweep
+  if (t >= 0) {
+    return t > last - pos ? last : pos + t;
+  }
+  return t < -pos ? 0 : pos + t;
+}
+
+}  // namespace
+
+TEST_CASE("wt pos (OS-FLASHDIET T3): the window move_position picks equals the old expression's over a sweep of mod and window counts") {
+  using audio::MovePositionSweepTest;
+  constexpr std::uint32_t kMaxW = 1u << 19;  // wt_windows is frames / wt_size <= 2^27 on the unit; the sweep's stack holds one frame a window
+  static std::int16_t stack[kMaxW + 1];
+  const float mods[] = {
+      0.0f, -0.0f, 0.25f, -0.25f, 0.5f, -0.5f, 1.0f, -1.0f, 1.5f, -1.5f, 2.0f, -2.0f, 2.5f, -2.5f, 3.0f, -3.0f, 100.0f, -100.0f,
+      1e6f, -1e6f, 1e10f, -1e10f, 1e18f, -1e18f, 1e30f, -1e30f, FLT_MAX, -FLT_MAX, std::nextafter(FLT_MAX, 0.0f), -std::nextafter(FLT_MAX, 0.0f),
+      std::nextafter(2.0f, 0.0f), std::nextafter(2.0f, 3.0f), std::nextafter(-2.0f, 0.0f), std::nextafter(-2.0f, -3.0f),
+  };
+  o3os::test::Rng rng(0x5144u);
+  std::uint64_t bad = 0;
+  std::uint64_t cases = 0;
+  const auto check = [&](std::uint32_t w, std::uint32_t wt_pos, float mod) {
+    SampleDesc s{};
+    s.data = stack + wt_pos;  // window wt_pos of the stack, wt_size 1
+    s.wt_size = 1;
+    s.wt_windows = w;
+    s.wt_pos = wt_pos;
+    MovePositionSweepTest::V v{};  // mode 0: not granular
+    v.data = s.data;
+    MovePositionSweepTest::move(v, s, mod);
+    const std::int64_t want = w > 1u ? old_window(wt_pos, w, mod) : static_cast<std::int64_t>(wt_pos);  // one window: nothing moves
+    const std::int64_t got = (v.data - s.data) + static_cast<std::int64_t>(wt_pos);
+    ++cases;
+    if (got != want) {
+      if (bad == 0u) {
+        MESSAGE("mismatch: w=" << w << " wt_pos=" << wt_pos << " mod=" << mod << " got=" << got << " want=" << want);
+      }
+      ++bad;
+    }
+  };
+  const std::uint32_t window_counts[] = {2u, 3u, 4u, 5u, 8u, 16u, 17u, 63u, 64u, 65u, 100u, 255u, 256u, 257u, 1000u, 4096u, 32768u, 65536u, kMaxW};
+  for (unsigned wi = 0; wi < 512u; ++wi) {  // every window count 1..512
+    const std::uint32_t w = wi + 1u;
+    const std::uint32_t wt_positions[] = {0u, w / 2u, w - 1u};
+    for (const std::uint32_t wt_pos : wt_positions) {
+      for (const float mod : mods) {
+        check(w, wt_pos, mod);
+      }
+      // boundary products: mod x windows landing on the integers around 0, +-2 x windows and the clamp's ends
+      const std::int64_t ks[] = {-2 * (std::int64_t)w - 1, -2 * (std::int64_t)w, -2 * (std::int64_t)w + 1, -(std::int64_t)w, -(std::int64_t)w + 1, -1, 0, 1,
+                                 (std::int64_t)w - 1, (std::int64_t)w, (std::int64_t)w + 1, 2 * (std::int64_t)w - 1, 2 * (std::int64_t)w, 2 * (std::int64_t)w + 1,
+                                 (std::int64_t)w - 1 - (std::int64_t)wt_pos, (std::int64_t)w - (std::int64_t)wt_pos, -(std::int64_t)wt_pos - 1, -(std::int64_t)wt_pos, -(std::int64_t)wt_pos + 1};
+      for (const std::int64_t k : ks) {
+        check(w, wt_pos, static_cast<float>(k) / static_cast<float>(w));
+      }
+      for (unsigned r = 0; r < 64u; ++r) {  // random finite floats of every magnitude
+        std::uint32_t bits = rng.next();
+        float f;
+        std::memcpy(&f, &bits, 4);
+        if (std::isnan(f) || std::isinf(f)) {
+          continue;
+        }
+        check(w, wt_pos, f);
+      }
+    }
+  }
+  for (const std::uint32_t w : window_counts) {  // the larger window counts, same sweep
+    if (w <= 512u) {
+      continue;
+    }
+    const std::uint32_t wt_positions[] = {0u, w / 2u, w - 1u};
+    for (const std::uint32_t wt_pos : wt_positions) {
+      for (const float mod : mods) {
+        check(w, wt_pos, mod);
+      }
+      const std::int64_t ks[] = {-2 * (std::int64_t)w, -(std::int64_t)w, -1, 0, 1, (std::int64_t)w, 2 * (std::int64_t)w, (std::int64_t)w - 1 - (std::int64_t)wt_pos, -(std::int64_t)wt_pos};
+      for (const std::int64_t k : ks) {
+        check(w, wt_pos, static_cast<float>(k) / static_cast<float>(w));
+      }
+      for (unsigned r = 0; r < 256u; ++r) {
+        std::uint32_t bits = rng.next();
+        float f;
+        std::memcpy(&f, &bits, 4);
+        if (std::isnan(f) || std::isinf(f)) {
+          continue;
+        }
+        check(w, wt_pos, f);
+      }
+    }
+  }
+  MESSAGE("cases=" << cases << " mismatches=" << bad);
+  CHECK(bad == 0u);
 }

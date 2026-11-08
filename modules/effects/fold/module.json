@@ -1,0 +1,20 @@
+{
+  "name": "Fold",
+  "id": "fold",
+  "kind": "effect",
+  "abi": "1.2",
+  "description": "A wavefolder insert for a track: a triangle fold with a level-compensated drive (Fold, in dB: the signal folds back from 1/Fold of full scale, so the fold never raises the level), a Symmetry offset that folds one side first, a one-pole Tone low-pass that tames the aliasing, an always-on DC blocker, a dry/wet mix and an output level, with a view of the transfer curve. One mono instance.",
+  "state_bytes": 96,
+  "params": [
+    {"name": "Fold", "min": 0, "max": 24, "default": 9, "unit": "db", "mod": true},
+    {"name": "Symmetry", "min": -100, "max": 100, "default": 0, "unit": "percent", "mod": true},
+    {"name": "Tone", "min": 500, "max": 20000, "default": 12000, "curve": "log", "unit": "hz", "mod": true},
+    {"name": "Mix", "min": 0, "max": 100, "default": 100, "unit": "percent", "mod": true},
+    {"name": "Output", "min": -24, "max": 6, "default": 0, "unit": "db", "mod": true}
+  ],
+  "views": [
+    {"name": "Curve", "min_size": [120, 80], "preferred_size": [380, 140]}
+  ],
+  "voices": 1,
+  "memory": {"hot_bytes": 1296, "sdram_bytes": 0}
+}

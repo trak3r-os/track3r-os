@@ -13,6 +13,13 @@ std::uint32_t usb_event_bytes(std::uint32_t event, std::uint8_t out[3]) noexcept
       n = 1;
       break;
     case 0x2:
+      // A two-byte system common (MTC, Song Select) takes two bytes — but the SPP (F2) is a three-byte message, and a host that packs
+      // it with this code index still means all three bytes. Decoding only two leaves the parser (midi/src/in.cpp InParser::feed)
+      // waiting for the second data byte forever — every byte after it is real-time and passes through untouched — so the SPP is
+      // silently ignored (OS-MIDISYNC M2b: on the unit the SPP arrived packed as CIN 0x2 and was dropped, while the CIN 0xF
+      // real-time bytes, clock and Start/Continue/Stop, all worked).
+      n = (static_cast<std::uint8_t>((event >> 8) & 0xFFu) == kSongPosition) ? 3u : 2u;
+      break;
     case 0x6:
     case 0xC:
     case 0xD:

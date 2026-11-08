@@ -188,6 +188,13 @@ void mode_roles(const Model& model, const ViewState& view, const PatternContent&
     return;
   }
   const NoteEntry& e = view.edit.entry;
+  if (view.padmode.fixed() == PadMode::Notes) {  // OS-NOTESLED: the NOTES board lit as PIANO and ISO light their notes (nothing else on the pads: no jump, no octave pads)
+    for (unsigned pad = 0; pad < kPadCount; ++pad) {
+      const unsigned n = view.edit.pads.note(pad);
+      roles[pad] = e.is_root(n) ? PadRole::Front : (e.in_scale(n) ? PadRole::Back : PadRole::Off);  // (with SCALE LOCK the board holds scale notes only: the roots stand out)
+    }
+    return;
+  }
   for (unsigned pad = 0; pad < kPadCount; ++pad) {
     PadFn fn;
     switch (view.padmode.fixed()) {
@@ -243,7 +250,15 @@ void popup_roles(const Model& model, const ViewState& view, PadRole (&roles)[48]
       break;
     default: {  // Note (OS-PADS-B): the settings. Every pad of a row Back, the row's choice Front: ROOT, SCALE, JUMP (0..11), OCTAVE (0..9) and the two SCALE LOCK pads
       const NoteEntry& e = view.edit.entry;
-      const unsigned choice[4] = {e.root, e.scale, view.edit.edit_step, e.octave};
+      // OS-SCALES28: row 2's Front pad is the pad whose scale is in force; one of the 27 outside the twelve lights no pad of the row, as JUMP above 11 leaves row 3 dark
+      unsigned scale_col = 12u;
+      for (unsigned c = 0; c < 12u; ++c) {
+        if (model::kNotePanelScales[c] == e.scale) {
+          scale_col = c;
+          break;
+        }
+      }
+      const unsigned choice[4] = {e.root, scale_col, view.edit.edit_step, e.octave};
       for (unsigned pad = 0; pad < kPadCount; ++pad) {
         const unsigned row = pad / kPadCols;
         const unsigned col = pad % kPadCols;

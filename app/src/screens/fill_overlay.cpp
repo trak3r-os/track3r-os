@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The Fill dialog (OS-PTOOLS part 1; docs/specs/OS-PTOOLS.md; OS-FILL2): eight rows (fill_view.h), a line that shows which steps the rule chooses in the range, and the keys. The F-key row is
-// the dialog's own (F1 FILL, F8 BACK), painted on the frame band as the Navigator's is (ViewState::overlay_keys), so the Pattern screen's labels do not show through it.
+// The Fill dialog (OS-PTOOLS part 1; docs/specs/OS-PTOOLS.md; OS-FILL2): seven rows (fill_view.h; OS-PTOOLS2 S3c: no SCOPE row, the selection is the target), a line that shows which steps the rule chooses in the range, a footer
+// that names the target, and the keys. The F-key row is the dialog's own (F1 FILL, F8 BACK), painted on the frame band as the Navigator's is (ViewState::overlay_keys), so the Pattern screen's labels do not show through it.
 #include <o3os/app/frame.h>
 #include <o3os/app/key_prompt.h>
 #include <o3os/app/pattern_source.h>
@@ -24,16 +24,13 @@ constexpr int kFillW = 520;
 constexpr int kPreviewMax = 64;  // the longest line of x and . the dialog draws
 
 Dialog fill_dialog(const ui::Theme& theme) noexcept {
-  return make_dialog(theme, kFillW, (static_cast<int>(kFillRows) + 3) * theme.metrics.row_pitch);  // the rows, the preview and its count, the keys
+  return make_dialog(theme, kFillW, (static_cast<int>(kFillRows) + 4) * theme.metrics.row_pitch);  // the rows, the preview and its count, the target, the keys
 }
 
-// The steps of the range the preview describes: the cursor track's, cut at the block (BLOCK) or whole (TRACK, PATTERN: every track is cut at its own length, the cursor's is shown).
+// The steps of the range the preview describes: the selection's, on the cursor's track, cut at the track's length (a block or the cursor step; TRACK and PATTERN selections are the whole range, every track cut at its own length).
 int preview_length(const Model& model, const ViewState& view) noexcept {
   const PatternSource src(model, view.edit.pattern);
   const int len = src.track_length(view.pattern.track());
-  if (view.fill.scope != FillScope::Block) {
-    return len;
-  }
   const Selection::Block b = view.edit.selection.block(view.pattern.row(), view.pattern.track());
   const int last = b.row1 < len - 1 ? b.row1 : len - 1;
   return last >= b.row0 ? last - b.row0 + 1 : 0;
@@ -108,7 +105,14 @@ void FillOverlay::render(const Model& model, const ViewState& view, ui::Renderer
   r.text(x, ui::caps_y(t, Face::Data, py, pitch), line.c_str(), Color::ChromeText, Face::Data);
   r.text(x, ui::caps_y(t, Face::Label, py + pitch, pitch), count.c_str(), Color::ChromeDim, Face::Label);
 
-  const int foot = py + 2 * pitch;
+  // The footer names the target, in the Song TOOLS way (`BLOCK  TRACK 3  ROWS 1-16`; OS-PTOOLS2 S3c: the selection is the scope).
+  const int ty = py + 2 * pitch;
+  const PatternSource src(model, view.edit.pattern);
+  char target[48];
+  (void)fill_target_text(view.edit.selection, view.pattern.row(), view.pattern.track(), src.length(), src.tracks(), target, sizeof target);
+  r.text(x, ui::caps_y(t, Face::Label, ty, pitch), target, Color::ChromeDim, Face::Label);
+
+  const int foot = py + 3 * pitch;
   (void)draw_prompt_hints(r, x, foot, pitch, prompt_in_force(model, view), 3);  // F1 FILL, F8 BACK: the dialog line and the key row are one table (OS-KEYROWDLG)
   const char* help = "UP DOWN: ROW   LEFT RIGHT: VALUE";
   r.text(d.body.x + d.body.w - 2 * m.pad - r.text_width(help, Face::Label), ui::caps_y(t, Face::Label, foot, pitch), help, Color::ChromeDim, Face::Label);

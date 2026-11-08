@@ -41,8 +41,8 @@ struct Panel {
   std::string hash() const { return platform::host::sha256_hex(raster.rgba(), EveRaster::kFramebufferBytes); }
 };
 
-unsigned logo_level(const ui::BootLogo& logo, unsigned x, unsigned y) {
-  const std::uint8_t b = logo.bytes[y * ui::kBootLogoStride + x / 2];
+unsigned logo_level(const std::uint8_t* px, unsigned x, unsigned y) {
+  const std::uint8_t b = px[y * ui::kBootLogoStride + x / 2];
   return (x % 2 == 0) ? b >> 4 : b & 0xFu;
 }
 
@@ -69,7 +69,9 @@ TEST_CASE("boot screen pixels: the logo is the bitmap at x3 pixel for pixel, cen
   Panel p;
   CHECK(ui::show_boot_screen(p.display, usb::kProductString, "0123456789ab"));
   CHECK(p.display.render_failures() == 0);
-  const ui::BootLogo logo = ui::boot_logo();
+  // OS-FLASHDIET A5: the logo's raw bitmap, inflated from its stream (the pixels the RAM_G upload put there).
+  std::uint8_t logo_px[ui::kBootLogoBytes];
+  CHECK(ui::boot_logo_bitmap(logo_px, sizeof logo_px));
 
   // Every pixel of the 372 x 372 rectangle. The coefficient is 85 (8.8, a third is 85.33), so the source pixel of column dx is
   // floor((2 dx + 1) * 85 / 512): the guide's matrix at the pixel centre (the simulator's [A] assumption), worked out here.
@@ -77,7 +79,7 @@ TEST_CASE("boot screen pixels: the logo is the bitmap at x3 pixel for pixel, cen
   unsigned wrong = 0;
   for (unsigned dy = 0; dy < 372; ++dy) {
     for (unsigned dx = 0; dx < 372; ++dx) {
-      const unsigned level = logo_level(logo, source_of(dx), source_of(dy));
+      const unsigned level = logo_level(logo_px, source_of(dx), source_of(dy));
       wrong += p.pixel(ui::kBootLogoX + static_cast<int>(dx), ui::kBootLogoY + static_cast<int>(dy)) == grey(level * 17) ? 0 : 1;
     }
   }

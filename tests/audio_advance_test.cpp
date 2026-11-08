@@ -657,7 +657,7 @@ TEST_CASE("closed form: a retrigger in the block the gate lifts carries no tail 
   }
 }
 
-TEST_CASE("closed form: an export that starts over a gated plain voice: cut() carries no tail, so the stem's first block lacks the reference's fade-out (accepted; Engine::offline_quiet)") {
+TEST_CASE("closed form: cut() of a gated plain voice carries no tail, so the first block lacks the reference's fade-out (pool level; Engine::offline_enter drops both)") {
   init_noise();
   VoicePool& x = slot_x.make();  // the baseline: the same notes, never gated
   VoicePool& y = slot_y.make();  // track 0 muted from block 2 to block 7

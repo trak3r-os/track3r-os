@@ -1,0 +1,10 @@
+{
+  "name": "extra",
+  "author": "track3r-os",
+  "flags": [],
+  "scratch": 0,
+  "params": [
+    { "label": "Pre", "type": "d", "min": 0, "max": 44100, "default": 100, "step": 1, "unit": "smp" },
+    { "label": "Post", "type": "d", "min": 0, "max": 44100, "default": 200, "step": 1, "unit": "smp" }
+  ]
+}

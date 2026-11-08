@@ -28,7 +28,7 @@ constexpr UiRange kUiRanges[42] = {
     {1, 0, 0},    // Off
     {2, 0, 100},  // Micro-move
     {3, 0, 53},   // Roll
-    {4, 0, 100},  // Chance
+    {4, 0, 174},  // Chance (OS-CECHANCE C2: 0..100 a probability, 101..174 the conditions of ADR 0004 amendment 4)
     {5, 0, 100},  // Random note
     {6, 0, 47},   // Random instrument
     {7, 0, 100},  // Random velocity
@@ -86,6 +86,7 @@ TEST_CASE("seq fx: the value range of every type 1..42 is the one the UI shows, 
     CAPTURE(static_cast<int>(r.id));
     CHECK(r.id == i + 1);
     CHECK(seq::kFxInfo[r.id].min == r.min);
+    // OS-CECHANCE C2: Chance (4) reaches 174 in both tables — the sequencer clamps a stored value to 174 at the point of use and the editor's row accepts it (ADR 0004 amendment 4).
     CHECK(seq::kFxInfo[r.id].max == r.max);
     CHECK(model::fx::kRows[r.id].lo == r.min);
     CHECK(model::fx::kRows[r.id].hi == r.max);
@@ -107,7 +108,8 @@ TEST_CASE("seq fx: the value range of every type 1..42 is the one the UI shows, 
     }
   }
   for (std::uint32_t t = seq::fx::kCoreLast + 1u; t < 128; ++t) {
-    CHECK(seq::fx_kind(static_cast<std::uint8_t>(t)) == seq::FxKind::Inert);  // reserved core range: preserved, inert
+    const bool ce = t == seq::fx::kAmpEnvFx || t == seq::fx::kFilterEnvFx || t == seq::fx::kGranLenFx;  // OS-CEWTENV W6a, W6b: the step FX w, y and z (96, 97, 98) act
+    CHECK((seq::fx_kind(static_cast<std::uint8_t>(t)) == seq::FxKind::Inert) == !ce);  // reserved core range: preserved, inert
   }
   for (std::uint32_t t = 128; t < 256; ++t) {
     CHECK(seq::fx_kind(static_cast<std::uint8_t>(t)) == seq::FxKind::Voice);  // the engine's window

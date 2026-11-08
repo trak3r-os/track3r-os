@@ -74,10 +74,31 @@ inline constexpr std::uint16_t kInstVersionLfoSine = 0x0104;
 // was (byte for byte). A reader that knows 1.5 reads older chunks as 0 and a value above 1 as 0; a chunk that sets the flag on a Module or MIDI instrument is Malformed (model::validate_instrument). An older reader meets a newer minor, reads
 // the chunk as of 1.4 and loses the byte on its next save (the instrument then plays mono, by design).
 inline constexpr std::uint16_t kInstVersionStereo = 0x0105;
+// OS-CEWTENV W1 (docs/specs/OS-CEWTENV.md, the W1 slice; new Community OS behaviour for the minor, verified parity for the bytes): INST 1.6 appends twelve bytes after the stereo byte: wt_bend and wt_sust of the
+// six LFO slots, in slot order (u8 each; model::Lfo, the OG LFO entry's bytes +2/+3, tracker-ce@7fd6c2c:core/source/mtStructs.h:629-637). The layout before them is 1.5's, whole (the engine byte, the twelve MIDI bytes
+// and the stereo byte always present). The writer writes 1.6 only for an instrument with a WT slot (an envelope loop of 2 or 3) or a non-zero WT byte (model::inst_uses_wt), so every project without WT bytes is byte for
+// byte the file it was. A reader that knows 1.6 reads an older chunk's loop of 2 or 3 as 1 (an LFO: what those files played, spec A3) and a WT slot's shape verbatim (the contour 0..255); an older reader meets 1.6 as a newer
+// minor, reads the chunk as of 1.5 and skips the twelve bytes (they are the payload's tail), losing them on its next save.
+inline constexpr std::uint16_t kInstVersionWt = 0x0106;
+// OS-CEPLAYTHRU P1 (docs/specs/OS-CEPLAYTHRU.md; the minor and the writer's gate are new Community OS behaviour, the OG byte is verified parity): INST 1.7 appends one byte after the twelve WT bytes of 1.6, the instrument's
+// play-thru flag (u8, 0 a slice stops at the next slice point, 1 it plays on to the sample end: model::Instrument::slice_thru, OG instrument byte 279, tracker-ce@7fd6c2c:core/source/mtStructs.h:653-654). The layout before it is 1.6's,
+// whole (the engine byte, the twelve MIDI bytes, the stereo byte and the twelve WT bytes always present), so 1.7 covers 1.6, 1.5 and 1.4 too. The writer writes 1.7 only for a Sample instrument with the flag set, so every project
+// without the flag is byte for byte the file it was. A reader that knows 1.7 reads an older chunk as 0 and a value above 1 as 0 (as the stereo byte does); an older reader meets 1.7 as a newer minor, reads the chunk as of 1.6 and skips
+// the byte (it is the payload's tail), losing the flag on its next save.
+inline constexpr std::uint16_t kInstVersionPlayThru = 0x0107;
+// OS-MODRATE S3 (docs/specs/OS-MODRATE.md 3.3; new Community OS behaviour): INST 1.8 appends one byte after the play-thru byte of 1.7, the instrument module's RATE (u8: 0 FULL, 1 half the engine rate, 2 a quarter:
+// model::Instrument::rate; a Module instrument's only). The layout before it is 1.7's, whole (so 1.8 covers 1.7 .. 1.4 too). The writer writes 1.8 only for a Module instrument with a non-zero rate, so every project
+// without one is byte for byte the file it was. A reader that knows 1.8 reads an older chunk as 0 and a value above 2 as 0 (as the stereo byte does); an older reader meets 1.8 as a newer minor, reads the chunk as of 1.7
+// and skips the byte (it is the payload's tail), reading FULL and losing the rate on its next save.
+inline constexpr std::uint16_t kInstVersionRate = 0x0108;
 // OS-PERFFX P1 (decision D5, option A): PERF and SCEN 1.1 add no field and no byte: the version only says that the Perform FX ids 20 (BITDEPTH) and 21 (OVERDRV) are valid. The writer writes 1.1 only when a slot
 // (of a stored scene, for SCEN) holds one of them and 1.0, byte for byte as before, for every other bank (state_chunks::version_of); a reader that knows 1.1 reads 1.0 with 20 and 21 as none. An older reader
 // meets 1.1 as a newer minor of a chunk it knows at 1.0: it reads the chunk whole (the length is the same), reads the two ids as none and loses them on its next save.
 inline constexpr std::uint16_t kStateVersionFx = 0x0101;
+// OS-PERFMODES M3: PERF and SCEN 1.2 add no field and no byte (the layout and the length of 1.0: 99 and 295 bytes): the version only says that a PLAYMODE (id 18) slot's value may be 4..23, the custom play orders C1..C20 (model::kPerfPlayModeMax). The writer writes 1.2 only when a slot
+// (of a stored scene, for SCEN) holds PLAYMODE with a value 4..23 in any of its three rows, 1.1 when it holds the FX 20 or 21 and 1.0 for every other bank, byte for byte as before (state_chunks::version_of). A reader that knows 1.2 reads 1.0 and 1.1 as before (a PLAYMODE value above 3 as RND, 3) and 1.2 as it is, a value above 23 held to 23. An older reader
+// (minor 1 known) meets a 1.2 chunk as a newer minor of a chunk it knows at 1.1: same length, read whole, "newer fields skipped", the PLAYMODE value above 3 held to 3 (RND); its next save writes 1.1 or 1.0 with RND, so a downgrade through a save loses the order, nothing else.
+inline constexpr std::uint16_t kStateVersionPlayOrder = 0x0102;
 
 // Working memory of Reader and Writer (one piece of chunk at a time), and the work done per step() by default.
 inline constexpr std::size_t kScratchBytes = 1024;

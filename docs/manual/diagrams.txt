@@ -30,11 +30,11 @@ bind = Global learn.toggle
 [chord_navigator.svg]
 kind = chord
 chapter = panel.md
-region = nav+edit
-extra = Shift is a hold and Pattern a press, on two blocks of the panel; no label says that this opens the Navigator.
-alt = Panel: Shift is ringed and Pattern is marked. Hold Shift, then press Pattern to open the Navigator.
-caption = Hold Shift, then press Pattern. The Navigator opens.
-bind = Global navigator.open
+region = nav
+extra = Song and Pattern are two keys of the panel; no label says that pressing them together opens the Navigator.
+alt = Panel: Song and Pattern are marked. Press both together to open the Navigator.
+caption = Press Song and Pattern together. The Navigator opens.
+bind = Global navigator.open via Pattern
 
 [chord_boot.svg]
 kind = chord

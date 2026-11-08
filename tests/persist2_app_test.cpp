@@ -127,7 +127,8 @@ TEST_CASE("persist2 (app): the model's ranges and defaults are the runtime's") {
   CHECK(app::note_state_of(edit) == def);  // the defaults of the runtime (NoteEntry, edit_step) are the model's defaults
   CHECK(def.jump == edit.edit_step);
   CHECK(def.octave == app::NoteEntry{}.octave);
-  CHECK(model::kNoteScaleMax + 1u == app::kNoteScales);
+  CHECK(model::kNoteScaleMax == 38u);  // OS-SCALES28: the official numbering, in the model and in the runtime
+  CHECK(sizeof model::kNotePanelScales == app::kNoteScales);  // the panel's twelve are the model's map
   CHECK(model::kNoteOctaveMax + 1u == app::kEntryOctaves);
   // mute modes
   CHECK(model::kMuteModeMax + 1u == app::kMuteModes);
@@ -158,19 +159,19 @@ TEST_CASE("persist2 (app): note_apply puts the settings and JUMP in and lays the
   model::NoteState s;
   model::init_note_state(s);
   s.root = 7;
-  s.scale = 9;
+  s.scale = 15;  // Blues, the official index (OS-SCALES28)
   s.octave = 5;
   s.lock = 1;
   s.jump = 12;
   CHECK(app::note_apply(edit, s));
   CHECK(edit.entry.root == 7);
-  CHECK(edit.entry.scale == 9);
+  CHECK(edit.entry.scale == 15);
   CHECK(edit.entry.octave == 5);
   CHECK(edit.entry.lock == 1);
   CHECK(edit.edit_step == 12);
   CHECK(app::note_state_of(edit) == s);
   // the NOTES board follows the settings (with SCALE LOCK on the scale, from the octave's root note)
-  CHECK(edit.pads.scale() == edit.entry.og_scale());
+  CHECK(edit.pads.scale() == edit.entry.core_scale());
   CHECK(edit.pads.root() == edit.entry.board_root());
   CHECK_FALSE(app::note_apply(edit, s));  // nothing changed
   s.lock = 0;
@@ -183,7 +184,7 @@ TEST_CASE("persist2 (app): note_apply puts the settings and JUMP in and lays the
   CHECK(model::validate_note_state(read) == nullptr);
   CHECK(read.root == 0);
   CHECK(read.jump == 1);
-  CHECK(read.scale == 9);
+  CHECK(read.scale == 15);
 }
 
 TEST_CASE("persist2 (app): mute_apply and send_fx_apply: the board follows, the engine is told only what changed, as the page's own parameter change") {
@@ -313,9 +314,9 @@ TEST_CASE("persist2 (app): a change of the mute modes, the send controls, the no
   seq::PerformBank& bank = rig.perform->bank;
   CHECK(bank.store_scene(2));
   bank.set_latch(false);
-  rig.panel(4, 2, 5, 6, 1);  // E, Minor, JUMP 5, OCTAVE 6, LOCK on
+  rig.panel(4, 2, 5, 6, 1);  // E, Minor (pad 3 = the official 1), JUMP 5, OCTAVE 6, LOCK on
   CHECK(rig.state().edit.entry.root == 4);
-  CHECK(rig.state().edit.entry.scale == 2);
+  CHECK(rig.state().edit.entry.scale == 1);
   CHECK(rig.state().edit.entry.octave == 6);
   CHECK(rig.state().edit.entry.lock == 1);
   CHECK(rig.state().edit.edit_step == 5);
@@ -333,7 +334,7 @@ TEST_CASE("persist2 (app): a change of the mute modes, the send controls, the no
   CHECK(p.scenes().scene[0].stored == 0);
   CHECK(p.scenes().scene[2].slots == bank.state());
   CHECK(p.note().root == 4);
-  CHECK(p.note().scale == 2);
+  CHECK(p.note().scale == 1);
   CHECK(p.note().octave == 6);
   CHECK(p.note().lock == 1);
   CHECK(p.note().jump == 5);
@@ -363,7 +364,7 @@ TEST_CASE("persist2 (app): a project that is loaded sets the runtime, tells the 
   model::NoteState n;
   model::init_note_state(n);
   n.root = 9;
-  n.scale = 11;
+  n.scale = 23;  // Whole tone, the official index (OS-SCALES28); the twelfth pad of row 2
   n.octave = 2;
   n.lock = 1;
   n.jump = 32;
@@ -398,7 +399,7 @@ TEST_CASE("persist2 (app): a project that is loaded sets the runtime, tells the 
   CHECK_FALSE(bank.latch());
   CHECK(bank.scenes_state() == sc);
   CHECK(rig.state().edit.entry.root == 9);
-  CHECK(rig.state().edit.entry.scale == 11);
+  CHECK(rig.state().edit.entry.scale == 23);
   CHECK(rig.state().edit.entry.octave == 2);
   CHECK(rig.state().edit.entry.lock == 1);
   CHECK(rig.state().edit.edit_step == 32);
@@ -451,7 +452,7 @@ TEST_CASE("persist2 (app): the whole way: the runtime is saved with the project,
   rig.board->fx[6] = 1;      // DLY MODE STEREO
   rig.perform->bank.store_scene(0);
   rig.perform->bank.set_latch(false);
-  rig.panel(11, 5, 2, 8, 1);
+  rig.panel(11, 5, 2, 8, 1);  // B, Lydian (pad 6 = the official 4), JUMP 2, OCTAVE 8, LOCK on
   rig.pass();
   std::vector<std::uint8_t> file;
   NEED(test::save(p, file) == formats::native::Progress::Done);
@@ -477,7 +478,7 @@ TEST_CASE("persist2 (app): the whole way: the runtime is saved with the project,
   CHECK(rig.perform->bank.scenes_state() == scenes);
   CHECK_FALSE(rig.perform->bank.latch());
   CHECK(rig.state().edit.entry.root == 11);
-  CHECK(rig.state().edit.entry.scale == 5);
+  CHECK(rig.state().edit.entry.scale == 4);
   CHECK(rig.state().edit.edit_step == 2);
   CHECK(rig.state().edit.entry.octave == 8);
   CHECK(rig.state().edit.entry.lock == 1);
@@ -536,7 +537,7 @@ TEST_CASE("persist2 (app): a project folder with the session chunks loads from t
   CHECK(bad.sanitised == 2u);
   CHECK(bad.line.find(", 2 values reset") != std::string::npos);
   CHECK(test::arena(1).project.note().root == 0);  // 99: its default
-  CHECK(test::arena(1).project.note().scale == 9);
+  CHECK(test::arena(1).project.note().scale == 15);  // Blues, the official index (the 1.0 byte was 9)
   // one value
   for (test::RawChunk& c : cs) {
     if (c.id == formats::native::kChunkNote) {
@@ -546,4 +547,90 @@ TEST_CASE("persist2 (app): a project folder with the session chunks loads from t
   const Result one = load(test::build_file(cs, {}));
   CHECK(one.sanitised == 1u);
   CHECK(one.line.find(", 1 value reset") != std::string::npos);
+}
+
+TEST_CASE("OS-SCALES28 (app): a NOTE 1.1 project sets the entry and lays the NOTES pads out for its scale, and a row-2 pad writes 1.0 again") {
+  Rig rig;
+  model::Project& p = rig.project();
+  test::fill_scales(test::arena(0).project);  // Hirajoshi (the official 26), SCALE LOCK on: a NOTE 1.1 chunk
+  std::vector<std::uint8_t> file;
+  NEED(test::save(test::arena(0).project, file) == formats::native::Progress::Done);
+  {
+    const std::vector<test::RawChunk> cs = test::split_chunks(file);
+    const test::RawChunk* note = nullptr;
+    for (const test::RawChunk& c : cs) {
+      if (c.id == formats::native::kChunkNote) note = &c;
+    }
+    NEED(note != nullptr);
+    CHECK(note->payload == std::vector<std::uint8_t>({0x01, 0x01, 7, 0, 5, 1, 4, 26}));  // 1.1, scale10 0, the appended official scale
+  }
+  formats::native::Report rep;
+  NEED(test::load(test::arena(1), file, &rep) == formats::native::Progress::Done);
+  CHECK_FALSE(rep.newer_minor);
+  CHECK(rep.settings_skipped == 0u);
+  rig.app->document_replaced();
+  CHECK(rig.state().edit.entry.scale == 26);                       // the official index in the runtime
+  CHECK(rig.state().edit.entry.lock == 1);
+  CHECK(rig.state().edit.pads.scale() == rig.state().edit.entry.core_scale());  // 27: Hirajoshi in the core table, laid out with the lock on
+  CHECK(rig.state().edit.pads.scale() == 27);
+  // a pad of row 2 (Blues, pad 10) sets one of the twelve and the next save writes NOTE 1.0 with its byte 9
+  rig.press(Button::Note);
+  rig.pass(core::kGestureTimings.hold_ms + 1);
+  rig.tap_pad(12 + 9);
+  rig.release(Button::Note);
+  rig.pass(1);
+  CHECK(rig.state().edit.entry.scale == 15);
+  rig.pass();
+  CHECK(p.note().scale == 15);
+  std::vector<std::uint8_t> again;
+  NEED(test::save(p, again) == formats::native::Progress::Done);
+  const std::vector<test::RawChunk> cs = test::split_chunks(again);
+  for (const test::RawChunk& c : cs) {
+    if (c.id == formats::native::kChunkNote) {
+      CHECK(c.payload == std::vector<std::uint8_t>({0x01, 0x00, 7, 9, 5, 1, 4}));  // 1.0 again, byte for byte as before
+    }
+  }
+}
+
+TEST_CASE("OS-SCALES28 (app): a scale above 38 read from a file never reaches the runtime; the entry's index and name stay inside the 39 (and core_scale() clamps a stray one)") {
+  // The file side: a NOTE 1.1 chunk whose appended scale is 39, 100 or 255 (the loader falls back to the scale of the 1.0 byte: pad 4 of the panel's map, Dorian), SCALE LOCK on.
+  test::fill_persist2(test::arena(2).project);
+  std::vector<std::uint8_t> base;
+  NEED(test::save(test::arena(2).project, base) == formats::native::Progress::Done);
+  const unsigned pad_byte = 3;  // the 1.0 byte, the panel's fourth pad
+  const std::uint8_t fallback = model::kNotePanelScales[pad_byte];
+  for (const unsigned appended : {39u, 100u, 255u}) {
+    Rig rig;
+    std::vector<test::RawChunk> cs = test::split_chunks(base);
+    for (test::RawChunk& c : cs) {
+      if (c.id == formats::native::kChunkNote) {
+        c.payload = {0x01, 0x01, 7, static_cast<std::uint8_t>(pad_byte), 5, 1, 4, static_cast<std::uint8_t>(appended)};
+      }
+    }
+    formats::native::Report rep;
+    NEED(test::load(test::arena(1), test::build_file(cs, {}), &rep) == formats::native::Progress::Done);
+    CHECK_MESSAGE(rep.settings_skipped == 1u, "appended " << appended << ": counted");
+    rig.app->document_replaced();
+    const app::NoteEntry& e = rig.state().edit.entry;
+    CHECK_MESSAGE(e.scale == fallback, "appended " << appended << ": the 1.0 byte's scale, not " << int(e.scale));
+    CHECK(e.scale <= model::kNoteScaleMax);
+    CHECK(e.core_scale() == fallback + 1u);
+    CHECK(std::strcmp(e.scale_name(), core::kScaleNames[fallback + 1u]) == 0);
+    CHECK(e.lock == 1);
+    CHECK(rig.state().edit.pads.scale() == e.core_scale());  // the NOTES board lays out a scale that exists
+    CHECK(rig.project().note().scale == fallback);
+  }
+  // The runtime side: an index the loader would never hand over (a stray write) still reads a real scale: core_scale() is Chromatic, never a row past the table.
+  app::NoteEntry stray;
+  for (const unsigned s : {39u, 40u, 100u, 255u}) {
+    stray.scale = static_cast<std::uint8_t>(s);
+    CHECK_MESSAGE(stray.core_scale() == 1u, "scale " << s);
+    CHECK(std::strcmp(stray.scale_name(), "Chromatic") == 0);
+    CHECK(stray.core_scale() < core::kScaleCount);
+    (void)stray.in_scale(60);  // reads inside the table (the sanitizer build is the judge)
+    (void)stray.snap(61);
+  }
+  stray.scale = model::kNoteScaleMax;  // the last valid one is not clamped
+  CHECK(stray.core_scale() == core::kScaleCount - 1u);
+  CHECK(std::strcmp(stray.scale_name(), "Enigmatic") == 0);
 }

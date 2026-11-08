@@ -9,6 +9,11 @@
 
 namespace o3os::app {
 
+// The one say() of the action files (OS-FLASHDIET T2), declared in action_handlers.h: posts on the strip with the caller's tag.
+bool say_tag(ActionContext& ctx, core::Severity severity, const char* text, const char* tag) noexcept {
+  return ctx.view.notify.post(severity, text, tag, ViewState::kMessageMs);
+}
+
 namespace {
 
 // The cursor actions work on whatever owns the input (the grid, the list, the Navigator while it is up), so they do not
@@ -79,7 +84,12 @@ constexpr ActionDef kActions[] = {
     make_action("job.cancel", job_cancel),
     // OS-012b: the SD modules. The pick is an undo unit (Disabled without a document, which says NO PROJECT) and runs while the picker is up (no focus).
     make_action("module.engine", module_engine, kFocus),
-    make_action("module.pick", module_pick, core::kActionUndoable | core::kActionSaysNoProject),
+    make_action("module.pick", module_pick, core::kActionUndoableIfOpen),  // (OS-APPSNAV: the apps list's F1 launches and needs no project; the pickers' own path says NO PROJECT when `edit` is null)
+    make_action("apps.open", apps_open, kFocus),                            // OS-APPSNAV: Shift + Pattern, the list of the apps that are not tools
+    make_action("apps.close", apps_close),                                  // Pattern in that list
+    make_action("module.picker_f8", module_picker_f8),                      // F8 of the picker: launch in the apps list, close in the others
+    make_action("preset.load", preset_load, core::kActionUndoable | core::kActionSaysNoProject),  // OS-INSFX-ABI2 A9: the F5 PRESET list's F1, one undo unit on an instrument
+    make_action("preset.save", preset_save, 0),  // OS-MODPRESET P4: the list's Shift + F5 SAVE: the keyboard for a preset's name (a modal overlay: no focus)
     make_action("module.rescan", module_rescan, kFocus),
     make_action("module.launch", module_launch, kFocus),
     make_action("module.exit", module_exit, kFocus),
@@ -87,8 +97,46 @@ constexpr ActionDef kActions[] = {
     make_action("module.app_reset", module_app_reset, kFocus),
     make_action("module.app_tempo", module_app_tempo, core::kActionUndoable),
     make_action("module.app_group", module_app_group, core::kActionUndoable),  // OS-H3A: an app's edit group; the unit's argument is the app's catalog entry (UNDO says its name)
-    make_action("tools.open", tools_open, kFocus, pattern_screen_in_view),     // OS-H3A: Pattern F7 TOOLS
-    make_action("tools.run", tools_run, 0),  // (the list is a modal overlay: no focus)
+    make_action("tools.open", tools_open, kFocus, pattern_screen_in_view),     // OS-H3A: Pattern F7 opened the TOOLS list; since OS-PTOOLS2 S3 F7 opens the verb menu and the list is its APPS > row
+    make_action("verb.open", verb_open, kFocus, pattern_screen_in_view),  // OS-PTOOLS2 S3: Pattern F7, the verb menu (verb_menu.h)
+    make_action("verb.pick", verb_pick, 0),  // pads 1-16 in the menu, arg = the pad's index 0..15 (the menu is a modal overlay: no focus)
+    make_action("verb.run", verb_run, 0),    // F1 in the menu: the verb under the cursor (no focus)
+    make_action("verb.events", verb_events, 0),  // F6 in the menu: the EVENTS list (OS-TOOLSDEDUP)
+    make_action("verb.hold", verb_hold, kFocus, pattern_screen_in_view),        // OS-PTOOLS2 S3b: F7 held; the pads under it run verbs (verb.hold_pad)
+    make_action("verb.hold_pad", verb_hold_pad, kFocus, pattern_screen_in_view), // OS-PTOOLS2 S3b: F7 held + pad 1-16, arg = the pad's index 0..15
+    make_action("verb.hold_end", verb_hold_end, kFocus, pattern_screen_in_view), // OS-PTOOLS2 S3b: the release of a held F7 after its Hold
+    make_action("verb.transpose", verb_transpose, core::kActionUndoable | core::kActionSaysNoProject, pe::edit_enabled),  // the menu's pad 1 (a block verb: refused on a column block off the Note column)
+    make_action("verb.instrument", verb_instrument, core::kActionUndoable | core::kActionSaysNoProject, pe::edit_enabled),  // the menu's pad 2 (same, off the Instr column)
+    make_action("verb.interpolate", verb_interpolate, core::kActionUndoable | core::kActionSaysNoProject, pe::edit_enabled),  // OS-PTOOLS2 S3b: the menu's pad 4, one undo unit over the block (model::verbs::apply_block)
+    make_action("verb.randomise", verb_randomise, core::kActionUndoable | core::kActionSaysNoProject, pe::edit_enabled),      // pad 5: fixed default amounts, one undo unit
+    make_action("verb.humanise", verb_humanise, core::kActionUndoable | core::kActionSaysNoProject, pe::edit_enabled),          // pad 6: fixed default amounts, one undo unit
+    make_action("verb.rotate_up", verb_rotate_up, core::kActionUndoable | core::kActionSaysNoProject, pe::edit_enabled),        // pad 7: one undo unit
+    make_action("verb.rotate_down", verb_rotate_down, core::kActionUndoable | core::kActionSaysNoProject, pe::edit_enabled),    // pad 8: one undo unit
+    // OS-PTOOLS2 S2: the Pattern TOOLS dialog (pattern_tools_view.h), opened by the menu's TRANSPOSE / INSTRUMENT rows. The overlay is modal, so no focus flag on its keys;
+    // ptool.apply is the undoable one (F1 APPLY: one undo unit through pe::edit_selection).
+    make_action("ptool.open", ptool_open, kFocus, pattern_screen_in_view),  // the menu's pads 1 / 2, arg = the OP it opens with (PTool)
+    make_action("ptool.move", ptool_move, kNav),                           // Up / Down: the row
+    make_action("ptool.delta", ptool_delta, kNav),                         // Left / Right, the encoder: the row's value
+    make_action("ptool.coarse", ptool_coarse, kNav),                       // Shift + encoder: the row's coarse step (AMOUNT an octave)
+    make_action("ptool.apply", ptool_apply, core::kActionUndoable | core::kActionSaysNoProject),  // F1 APPLY: one undo unit; F8 BACK leaves the project untouched
+    // OS-MIDIREC S1b/S2b: the EVENTS overlay's actions. The overlay is modal, so no focus flag; move / page / field repeat on a
+    // held arrow. The edit actions are undoable (one unit a detent in the PATTERN ring, A12) and say TURN EDIT ON themselves
+    // outside STEP (A13), like pattern.op run from the TOOLS list.
+    make_action("events.open", events_open, 0),        // verb.events (F6 in the TOOLS menu) calls it; no key
+    make_action("events.move", events_move, kNav),      // Up / Down
+    make_action("events.page", events_page, kNav),      // Shift + Up / Down (OS-NAV3)
+    make_action("events.field", events_field, kNav),    // Left / Right
+    make_action("events.back", events_back, 0),         // F8 BACK
+    make_action("events.filter", events_filter, 0),     // F1 FILTER (S1c)
+    make_action("events.quant", events_quant, core::kActionUndoable | core::kActionSaysNoProject),  // S3: F2 the row / Shift + F2 every row, one unit (the Edit-on check is its own)
+    make_action("events.preview", events_preview, 0),   // F5 PREVIEW (S1c)
+    make_action("events.edit", events_edit, core::kActionUndoable | core::kActionSaysNoProject),    // S2b: the encoder on the field
+    make_action("events.coarse", events_coarse, core::kActionUndoable | core::kActionSaysNoProject),  // S2b: Shift + encoder (OS-SHIFTENC)
+    make_action("events.pad", events_pad, core::kActionUndoable | core::kActionSaysNoProject),        // S2b: a pad (A14)
+    make_action("events.insert", events_insert, core::kActionUndoable | core::kActionSaysNoProject),  // S2c: Insert / Shift + Insert (A9)
+    make_action("events.delete", events_delete, core::kActionUndoable | core::kActionSaysNoProject),  // S2c: Delete (A10)
+    make_action("events.undo", events_undo, 0),         // S2c: F7 inside the list (A12): no focus flag, the list owns the input; the history is the grid's
+    make_action("events.redo", events_redo, 0),         // S2c: Shift + F7
     // OS-010a: the File screen.
     make_action("file.open", file_open, kFocus, file_open_available),
     make_action("file.rescan", file_rescan, kFocus),
@@ -145,6 +193,9 @@ constexpr ActionDef kActions[] = {
     make_action("sedit.run", sedit_run, kFocus, sedit_enabled),
     make_action("sedit.fx", sedit_fx, kFocus, sedit_enabled),
     make_action("sedit.fx_coarse", sedit_fx_coarse, kFocus, sedit_enabled),
+    make_action("sedit.plug", sedit_plug, kFocus, sedit_enabled),
+    make_action("sedit.plug_coarse", sedit_plug_coarse, kFocus, sedit_enabled),
+    make_action("sedit.plug_do", sedit_plug_do, kFocus, sedit_enabled),
     make_action("sedit.amiga", sedit_amiga, kFocus, sedit_enabled),
     make_action("sedit.q8", sedit_q8, kFocus, sedit_enabled),
     make_action("sedit.instrument", sedit_instrument, kFocus),
@@ -164,21 +215,26 @@ constexpr ActionDef kActions[] = {
     make_action("firmware.back", firmware_back),
     make_action("learn.clear", learn_clear, core::kActionUndoableIfOpen),
     make_action("learn.mode", learn_mode, core::kActionUndoableIfOpen),
+    make_action("learn.follow", learn_follow, core::kActionUndoableIfOpen),  // OS-LEARNFOLLOW S1
     make_action("learn.delete", learn_delete, core::kActionUndoableIfOpen),
     make_action("learn.clear_all", learn_clear_all, core::kActionUndoableIfOpen),
-    make_action("midi.cc", midi_cc, core::kActionUndoableIfOpen),
+    make_action("midi.cc", midi_cc, core::kActionUndoableIfOpen | core::kActionRecords),  // OS-FXREC 3.4: a CC never closes a take; in one its parameter write is final (apply_cc) and only the recorded FX join it
+    make_action("enc.assign", enc_assign),  // OS-ENCLEARN: Instr + FX2, the Learn row becomes the encoder's target
+    make_action("enc.turn", enc_turn, core::kActionUndoableIfOpen | core::kActionRecords),  // OS-ENCLEARN: Instr + FX1 and the encoder; as midi.cc it never closes a take and its parameter write is final in one
     // OS-009 P1a.1: the pattern's edit core. Modes, the selection and the pad preview are view state; the step actions are undo units.
     make_action("pattern.edit_toggle", pattern_edit_toggle, kFocus),
     make_action("pattern.rec_free", pattern_rec_free, kFocus),
     make_action("pattern.preview", pattern_preview),
     make_action("pattern.export", pattern_export, kFocus),  // no binding: EXPORT is Pattern F7 TOOLS now (OS-WAVEXP); a keymap or a scenario can name it, and the stub says where it is
     make_action("pattern.fill", pattern_fill, kStep, pattern_screen_in_view),
+    make_action("tools.repeat", tools_repeat, kStep, pattern_screen_in_view),  // OS-PTOOLS2 S3: REPEAT on F6 (the key row reads RE <VERB>, today RE FILL), the last verb again (today the last FILL)
     make_action("fill.open", fill_open, kFocus, pattern_screen_in_view),  // OS-PTOOLS: the dialog; its rows are view state, the fill is the undo unit
     make_action("fill.move", fill_move, kNav),
     make_action("fill.delta", fill_delta, kNav),
     make_action("fill.coarse", fill_coarse, kNav),  // OS-SHIFTENC
     make_action("fill.apply", fill_apply, core::kActionUndoable | core::kActionSaysNoProject),
-    make_action("pattern.invert", pattern_invert, kStep, pattern_screen_in_view),  // outside Edit the handler says TURN EDIT ON (OS-QAFIX-12)
+    make_action("fill.vary", fill_vary, 0),  // OS-PTOOLS2 S1: F2 VARY; not an edit itself (it runs edit.undo and fill.apply, each its own dispatch)
+    make_action("pattern.invert", pattern_invert, kStep, pattern_screen_in_view),  // no key since OS-PTOOLS2 S3 (F6 is REPEAT; the verb menu's pad 9 takes it); outside Edit the handler says TURN EDIT ON (OS-QAFIX-12)
     make_action("pads.mode", pads_mode, kFocus),
     make_action("pads.octave", pads_octave, kFocus),  // OS-PADOCT
     make_action("pads.track", pads_track, kFocus),
@@ -191,9 +247,11 @@ constexpr ActionDef kActions[] = {
     make_action("transport.play_cursor", transport_play_cursor, kFocus, transport_available),
     make_action("select.extend", select_extend, kFocus | kNav, pe::select_enabled),
     make_action("select.column_all", select_column_all, kFocus, pe::select_enabled),
+    make_action("select.jump", select_jump),
     make_action("select.clear", select_clear, kFocus),
     // OS-SONG1: the Song screen's editing. The edits are undo units (Disabled without a document, which says NO PROJECT); the range, the tempo field and the clipboard are view state.
     make_action("song.add_slot", song_add_slot, kSongEdit, song_enabled),
+    make_action("song.add_empty", song_add_empty, kSongEdit, song_enabled),  // OS-SONG3 S5: Copy held + F3, a slot on the first free pattern
     make_action("song.delete_slot", song_delete_slot, kSongEdit, song_enabled),
     make_action("song.pattern_delta", song_pattern_delta, kSongEdit | core::kActionRepeatable, song_enabled),
     make_action("song.turn", song_turn, kSongEdit, song_enabled),
@@ -207,8 +265,10 @@ constexpr ActionDef kActions[] = {
     make_action("song.name", song_name, kFocus, song_enabled),  // OS-NAMES: opens the on-screen keyboard on the slot's pattern
     make_action("song.play_pattern", song_play_pattern, kFocus, song_play_enabled),
     make_action("song.queue_jump", song_queue_jump, kFocus, song_play_enabled),
+    make_action("song.loop", song_loop, kFocus, song_play_enabled),  // OS-SONG3 S7: F2 held, the selected slots loop
     make_action("song.next_use", song_next_use, kFocus, song_enabled),  // OS-SONGSHARE S4: Note / Shift + Note; the cursor only, no undo unit
     make_action("song.move", song_move, kStepRepeat, song_enabled),  // OS-SONGSHARE S3: Copy held + Up / Down; repeatable, one unit a step
+    make_action("song.move_along", song_move_along, kStepRepeat, song_enabled),  // OS-SONG3 S2: Copy held + Left / Right on TIMELINE (the same move)
     make_action("song.cut", song_cut, kSongEdit, song_enabled),  // OS-SONGSHARE S2: Shift + Delete, not repeatable: a held key cuts once
     make_action("song.clear", song_clear, kSongEdit, song_enabled),  // OS-SONGMAP: Delete (the cells in the map, the slot on PAT); not repeatable: a held key does it once
     make_action("song.select_tracks", song_select_tracks, kFocus | kNav, song_enabled),
@@ -283,6 +343,7 @@ constexpr ActionDef kActions[] = {
     make_action("mixer.master_vol", mixer_master_vol, kEditOnceRec),  // OS-MASTERVOL (kActionRecords: a LIVE take stays open under it; the edit is final, so it adds nothing to the take)
     make_action("mixer.reset", mixer_reset, kEditOnce),
     make_action("mixer.stem_set", mixer_stem_set, kEditOnce),
+    make_action("mixer.params", mixer_params, kFocus),  // OS-INSFX S5: Params on the INSERTS page opens the insert's parameter page
     make_action("mixer.mute", mixer_mute, kEditOnce),
     make_action("mixer.solo", mixer_solo, kEditOnce),
     make_action("mixer.name", mixer_name, kFocus),  // OS-NAMES: opens the on-screen keyboard; text.accept makes the name an undo unit
@@ -346,8 +407,8 @@ bool name_equals(const char* name, const char* s, std::size_t length) noexcept {
 
 // The actions whose area is the first record's, whatever the screen (D2): a controller message resolves to a parameter wherever it is, Learn writes the bindings, an app's group says
 // what it touched.
-constexpr core::ActionId kAutoArea[] = {core::action_id("midi.cc"), core::action_id("learn.clear"), core::action_id("learn.mode"), core::action_id("learn.delete"),
-                                        core::action_id("learn.clear_all"), core::action_id("module.app_group")};
+constexpr core::ActionId kAutoArea[] = {core::action_id("midi.cc"), core::action_id("enc.turn"), core::action_id("learn.clear"), core::action_id("learn.mode"), core::action_id("learn.follow"),
+                                        core::action_id("learn.delete"), core::action_id("learn.clear_all"), core::action_id("module.app_group")};
 
 model::UndoArea undo_area_of(core::ActionId id, ScreenId screen) noexcept {
   for (const core::ActionId a : kAutoArea) {
@@ -372,7 +433,7 @@ bool is_mixer_action(core::ActionId id) noexcept {
 }
 
 constexpr core::ActionId kMacroControls[] = {core::action_id("macro.record"), core::action_id("macro.play"),
-                                             core::action_id("edit.undo"), core::action_id("edit.redo"), core::action_id("midi.cc"),
+                                             core::action_id("edit.undo"), core::action_id("edit.redo"), core::action_id("events.undo"), core::action_id("events.redo"), core::action_id("midi.cc"),
                                              core::action_id("module.app_group")};  // (an app's group lives in the module system's buffer, not in the macro)
 
 // While a macro records, every action that ran is appended, except the controls of the macro and of the history, and midi.cc: a

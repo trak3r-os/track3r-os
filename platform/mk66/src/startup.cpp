@@ -15,6 +15,7 @@
 #include "internal.h"
 #include "regs.h"
 
+#include <o3os/hal/code_gate.h>
 #include <o3os/platform/mk66/crash_record.h>
 #include <o3os/platform/mk66/flash_config.h>
 #include <o3os/platform/mk66/irq_list.h>
@@ -67,6 +68,15 @@ namespace mk66 = o3os::platform::mk66;
 // stack before r0 and r1 are read. It masks interrupts (PRIMASK) first, so no ISR can run on the fault stack's account;
 // PRIMASK does not mask NMI or HardFault, so a fault inside the reporter re-enters this stub, which restarts on the same
 // fault stack (the record may then be written twice; its CRC protects the reader).
+//
+// OS-CEPTFX S2b first: while a .ptfx call runs, a fault from thread mode on PSP whose frame lies in the plugin stack (or
+// below it, or a stacking error) is contained instead — o3os_hal_gate_fault_contain records the fault fields, clears
+// CFSR/HFSR, forges a fresh basic frame at the plugin stack top (PC = the gate's abort stub) and sets PSP to it. That
+// path must NOT leave PRIMASK set (it survives the exception return) and must give MSP back as it was at entry (pending
+// ISRs run on MSP after the return and must not find the 512 B fault stack), so it restores MSP from the word saved
+// on the fault stack and re-enables interrupts before returning to thread mode on PSP (0xFFFFFFFD); every other
+// fault takes the crash-record path unchanged. Unit check: a contained fault leaves MSP as before (the QEMU stub does
+// not switch stacks, so only the unit exercises this).
 extern "C" [[gnu::naked]] void Default_Handler() {
   asm volatile(
       "cpsid i\n\t"  // first: nothing of higher priority may preempt the reporter while it runs on the fault stack
@@ -75,9 +85,21 @@ extern "C" [[gnu::naked]] void Default_Handler() {
       "mrseq r0, msp\n\t"
       "mrsne r0, psp\n\t"
       "mov r1, lr\n\t"
+      "mov r3, sp\n\t"  // the entry MSP, kept on the fault stack for the contained path
       "ldr r2, =__fault_stack_top\n\t"
       "mov sp, r2\n\t"
+      "push {r0-r3}\n\t"  // four words: the fault stack stays 8-byte aligned
+      "bl o3os_hal_gate_fault_contain\n\t"
+      "cmp r0, #0\n\t"
+      "bne 1f\n\t"
+      "pop {r0-r3}\n\t"
       "b o3os_fault_entry\n\t"
+      "1:\n\t"  // contained: give MSP back as it was at entry, then clear PRIMASK (set above)
+      "ldr r3, [sp, #12]\n\t"
+      "mov sp, r3\n\t"
+      "cpsie i\n\t"
+      "ldr r0, =0xFFFFFFFD\n\t"  // thread mode, PSP: pop the forged frame at the plugin stack top
+      "bx r0\n\t"
       ".ltorg");
 }
 
@@ -87,7 +109,7 @@ extern "C" void HardFault_Handler() __attribute__((weak, alias("Default_Handler"
 extern "C" void MemManage_Handler() __attribute__((weak, alias("Default_Handler")));
 extern "C" void BusFault_Handler() __attribute__((weak, alias("Default_Handler")));
 extern "C" void UsageFault_Handler() __attribute__((weak, alias("Default_Handler")));
-extern "C" void SVC_Handler() __attribute__((weak, alias("Default_Handler")));
+extern "C" void SVC_Handler() __attribute__((weak, alias("Default_Handler")));  // weak: hal/src/code_gate_m4.cpp defines the real one (the OS-CEPTFX call gate)
 extern "C" void DebugMon_Handler() __attribute__((weak, alias("Default_Handler")));
 extern "C" void PendSV_Handler() __attribute__((weak, alias("Default_Handler")));
 extern "C" void SysTick_Handler();  // clock.cpp

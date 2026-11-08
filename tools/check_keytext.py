@@ -32,6 +32,12 @@ KEY = re.compile(r"\bF[1-8]\b|\b[Ss][Hh][Ii][Ff][Tt]\s*\+\s*[Ff][1-8]\b")
 
 # (file, the literal as written between the quotes, the reason). Grouped by reason; the reason of a group is repeated on each of its entries.
 ALLOW = (
+    # ---- OS-MODPRESET P4: the F5 PRESET list's empty line names its own SAVE key (Shift+F5)
+    ('app/src/screens/preset_overlay.cpp', 'NO PRESETS, SHIFT+F5 SAVES', "OS-MODPRESET P4: the empty PRESET list's help line points at the list's own Shift+F5 SAVE key (bound in the preset context, key_prompt.cpp)"),
+    # ---- OS-PTOOLS2 S1
+    ('app/src/screens/pattern_screen.cpp', '  F7: TOOLS  PAD: SET  DEL: CLEAR', "OS-PTOOLS2 S1: the block hint of the Pattern info line (spec 3.1 item 7) points at the plain F7 key of its own screen"),
+    # ---- OS-PTOOLS2 S3p
+    ('app/src/screens/verb_menu_overlay.cpp', 'PAD 1-16: PICK   F7+PAD: RUN', "OS-PTOOLS2 S3p: the verb panel's pad hint (spec 3.3 mock-up A) points at the held F7 plus a pad, a gesture of its own panel that has no key-table row"),
     # ---- OS-USBDISK U2b
     ('app/src/param_actions.cpp', 'THE COMPUTER GETS THE CARD: SAVES STOP. F7 AGAIN', "OS-USBDISK U2b: the CARD AS DISK row and the strips of the card that is out name their own key; the texts are spec section 9's"),
     ('app/src/param_actions.cpp', 'USB AUDIO PAUSES. F7 AGAIN TO SHARE THE CARD', "OS-USBDISK U2b: the CARD AS DISK row and the strips of the card that is out name their own key; the texts are spec section 9's"),
@@ -120,7 +126,7 @@ ALLOW = (
     # ---- a notice on the strip points at a key of the screen's plain row or of another screen's (audit E1)
     ('app/src/file_ops_actions.cpp', ' INSTRUMENT - F8 ON PARAMS UNDOES', "a notice on the strip points at a key of the screen's plain row or of another screen's"),
     ('app/src/file_ops_actions.cpp', ' INSTRUMENTS - F8 ON PARAMS UNDOES', "a notice on the strip points at a key of the screen's plain row or of another screen's"),
-    ('app/src/fill_actions.cpp', 'FILL: TURN EDIT ON (EXPORT: F7 TOOLS)', "a notice on the strip points at a key of the screen's plain row or of another screen's"),
+    ('app/src/fill_actions.cpp', 'FILL: TURN EDIT ON (EXPORT: F7 APPS >)', "a notice on the strip points at a key of the screen's plain row (F7 opens the verb menu, whose APPS > row is the list with EXPORT)"),
     ('app/src/instrument_actions.cpp', ' - F8 UNDO', "a notice on the strip points at a key of the screen's plain row or of another screen's"),
     ('app/src/instrument_actions.cpp', 'NOTHING TO PASTE: SHIFT+F2 COPIES', "a notice on the strip points at a key of the screen's plain row or of another screen's"),
     ('app/src/module_import.cpp', 'F8 REPORT', "a notice on the strip points at a key of the screen's plain row or of another screen's"),

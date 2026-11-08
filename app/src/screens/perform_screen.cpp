@@ -288,9 +288,13 @@ void render_dj(const Model& model, const ViewState& view, Renderer& r, Rect cove
 
 }  // namespace
 
-Context PerformScreen::field_context(const Model&, const ViewState& view) const noexcept { return view.dj_page() ? Context::PerformDj : Context::None; }
+Context PerformScreen::field_context(const Model&, const ViewState& view) const noexcept {
+  return view.dj_page() ? Context::PerformDj : Context::None;
+}
 
-const char* const* PerformScreen::shift_row(const ViewState& view) const noexcept { return view.dj_page() ? kPerformDjShiftKeys : soft_keys_shifted(); }
+const char* const* PerformScreen::shift_row(const ViewState& view) const noexcept {
+  return view.dj_page() ? kPerformDjShiftKeys : soft_keys_shifted();
+}
 
 bool PerformScreen::pad_roles(const Model& model, const ViewState& view, PadRole (&roles)[48]) const noexcept {
   if (view.dj_page()) {  // OS-DJ A1: row 4 is the fader, the pad nearest the position Front; the FILT pad (A2) is Back, Front while the filter is away from 0; the other pads are the later slices'
@@ -319,8 +323,8 @@ bool PerformScreen::pad_roles(const Model& model, const ViewState& view, PadRole
     roles[p] = PadRole::Off;
   }
   for (unsigned s = 0; s < seq::kPerfSlots; ++s) {
-    if (bank.fx(s) == seq::PerfFx::None) {
-      continue;
+    if (bank.fx(s) == seq::PerfFx::None || bank.cc_mode(s)) {
+      continue;  // OS-MIDICCMAP S3: no pad of a slot in CC mode is lit
     }
     const unsigned pad = bank.row(s) * seq::kPerfSlots + s;
     roles[pad] = bank.held(s) ? PadRole::Front : PadRole::Back;
@@ -413,12 +417,17 @@ void PerformScreen::render(const Model& model, const ViewState& view, Renderer& 
           r.panel({cell.x, cell.y, cell.w, m.border * 2}, ink);  // a pad is down in this slot: a bar over its row
         }
         char text[8];
-        // row 0 is "off"; the others show the value (the live one on the selected row, the stored one otherwise)
+        // row 0 is "off"; the others show the value (the live one on the selected row, the stored one otherwise); a slot in CC mode tags its selected cell "CC"
+        // (OS-MIDICCMAP S3: the mapped CC drives the slot, no pad of it is lit)
         if (fx == seq::PerfFx::None) {
           text[0] = '-';
           text[1] = '-';
           text[2] = '-';
           text[3] = '\0';
+        } else if (bank->cc_mode(s) && sel) {
+          text[0] = 'C';
+          text[1] = 'C';
+          text[2] = '\0';
         } else if (row == 0u) {
           text[0] = 'O';
           text[1] = 'F';

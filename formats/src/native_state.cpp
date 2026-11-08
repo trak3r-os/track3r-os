@@ -18,6 +18,22 @@ bool usb_counted(const model::UsbState& u) noexcept { return u.profile == 5 || u
 // The factory mask of slot i of P8 (T1..T6, Master L, Master R: audio/stem_map.h; the bits are stem_src).
 std::uint16_t p8_factory_mask(std::uint32_t i) noexcept { return static_cast<std::uint16_t>(i < 6 ? 1u << i : 1u << (i == 6 ? 12 : 13)); }
 
+// OS-SCALES28: is the scale one of the note panel's twelve (a NOTE 1.0 chunk holds those, byte for byte as always)? `scale` is the official index 0..38.
+bool note_scale_is_panel(std::uint8_t scale) noexcept {
+  for (std::uint8_t s : model::kNotePanelScales) {
+    if (s == scale) return true;
+  }
+  return false;
+}
+
+// OS-SCALES28: the 1.0 byte of a panel scale: its pad - 1.
+std::uint8_t note_panel_byte(std::uint8_t scale) noexcept {
+  for (std::uint32_t i = 0; i < sizeof model::kNotePanelScales; ++i) {
+    if (model::kNotePanelScales[i] == scale) return static_cast<std::uint8_t>(i);
+  }
+  return 0;
+}
+
 }  // namespace
 
 bool present(const model::Project& p, Part part) noexcept {
@@ -54,7 +70,7 @@ std::size_t payload_size(const model::Project& p, Part part) noexcept {
       }
       return n;
     }
-    case Part::Note: return kNoteBytes;
+    case Part::Note: return note_scale_is_panel(p.note().scale) ? kNoteBytes : kNoteBytesV11;  // OS-SCALES28: 1.1 (8 bytes) for a scale outside the twelve
     case Part::Mute: return kMuteMax;  // written with all 16 tracks
     case Part::Scene: return kSceneBytes;
     case Part::SendFx: return kSendFxFixed + 2u * model::kSendFxCount;
@@ -91,6 +107,30 @@ unsigned drop_fx_after_v10(model::PerfState& s) noexcept {
   return dropped;
 }
 
+// OS-PERFMODES M3: does a slot hold PLAYMODE (id 18) with a custom play order (a value 4..23) in any of its three rows?
+bool uses_play_order(const model::PerfState& s) noexcept {
+  for (std::uint32_t i = 0; i < model::kPerfSlots; ++i) {
+    if (s.fx[i] == kPerfFxPlayMode) {
+      for (std::int16_t v : s.value[i]) {
+        if (v > model::kPerfPlayModeMaxV11 && v <= model::kPerfPlayModeMax) return true;
+      }
+    }
+  }
+  return false;
+}
+
+// OS-PERFMODES M3: the PLAYMODE values a chunk of this minor holds: in 1.0 and 1.1 a value above 3 reads as RND (3, what every build before this one played), in 1.2 as it is, above 23 held to 23 (the bank holds it to 0..23).
+void clamp_play_mode(model::PerfState& s, unsigned chunk_minor) noexcept {
+  const std::int16_t max = chunk_minor >= 2u ? model::kPerfPlayModeMax : model::kPerfPlayModeMaxV11;
+  for (std::uint32_t i = 0; i < model::kPerfSlots; ++i) {
+    if (s.fx[i] == kPerfFxPlayMode) {
+      for (std::int16_t& v : s.value[i]) {
+        if (v > max) v = max;
+      }
+    }
+  }
+}
+
 }  // namespace
 
 std::uint16_t version_of(const model::Project& p, Part part) noexcept {
@@ -101,13 +141,28 @@ std::uint16_t version_of(const model::Project& p, Part part) noexcept {
   if (part == Part::Usb && usb_counted(p.usb())) {
     return state_chunks::kUsbVersionCount;
   }
-  if (part == Part::Perf && uses_fx_after_v10(p.perf())) {
-    return native::kStateVersionFx;
+  if (part == Part::Perf) {
+    if (uses_play_order(p.perf())) {
+      return native::kStateVersionPlayOrder;  // OS-PERFMODES M3: 1.2 when a slot holds a custom play order 4..23
+    }
+    if (uses_fx_after_v10(p.perf())) {
+      return native::kStateVersionFx;
+    }
+  }
+  if (part == Part::Note && !note_scale_is_panel(p.note().scale)) {
+    return kNoteVersionScale;  // OS-SCALES28: NOTE 1.1 for one of the 27 scales outside the panel's twelve
   }
   if (part == Part::Scene) {
+    bool play_order = false;
+    bool fx_after_v10 = false;
     for (const model::SceneState& sc : p.scenes().scene) {
-      if (sc.stored != 0 && uses_fx_after_v10(sc.slots)) return native::kStateVersionFx;
+      if (sc.stored != 0) {
+        if (uses_play_order(sc.slots)) play_order = true;  // OS-PERFMODES M3: a C order in any stored scene
+        if (uses_fx_after_v10(sc.slots)) fx_after_v10 = true;
+      }
     }
+    if (play_order) return native::kStateVersionPlayOrder;  // OS-PERFMODES M3: 1.2 outranks 1.1, whatever scene holds what
+    if (fx_after_v10) return native::kStateVersionFx;
   }
   return kVersion;
 }
@@ -175,11 +230,13 @@ void encode(Enc& e, const model::Project& p, Part part) noexcept {
     }
     case Part::Note: {
       const model::NoteState& n = p.note();
+      const bool panel = note_scale_is_panel(n.scale);
       e.u8(n.root);
-      e.u8(n.scale);
+      e.u8(panel ? note_panel_byte(n.scale) : 0);  // the 1.0 field: the panel's twelve, and 0 (Chromatic) in a 1.1 chunk, so an older build snaps no note outside the user's scale
       e.u8(n.octave);
       e.u8(n.lock);
       e.u8(n.jump);
+      if (!panel) e.u8(n.scale);  // OS-SCALES28: 1.1 appends the scale in the official order 0..38
       return;
     }
     case Part::Mute: {
@@ -310,6 +367,7 @@ const char* decode(Cursor& c, bool newer_minor, model::Project& p, Part part, st
           s.row[i] = 0;
         }
       }
+      clamp_play_mode(s, chunk_minor);  // OS-PERFMODES M3: 1.2 holds the custom orders 4..23, an older chunk reads above 3 as RND, above 23 is held to 23
       if (const char* why = model::validate_perf_state(s)) return why;
       return p.set_perf(s) == model::Status::Ok ? nullptr : "PERF: rejected by the model";
     }
@@ -341,11 +399,21 @@ const char* decode(Cursor& c, bool newer_minor, model::Project& p, Part part, st
     case Part::Note: {
       model::NoteState n;
       n.root = c.u8();
-      n.scale = c.u8();
+      const std::uint8_t scale10 = c.u8();  // the 1.0 field: 0..11 the panel's twelve (model::kNotePanelScales), above 11 Chromatic (counted)
       n.octave = c.u8();
       n.lock = c.u8();
       n.jump = c.u8();
+      // OS-SCALES28: 1.1 appends the scale in the official order 0..38, and it wins over the 1.0 byte; above 38 the 1.0 byte's scale stands (counted).
+      const bool has11 = chunk_minor >= 1u;
+      const std::uint8_t scale11 = has11 ? c.u8() : 0u;
       if (!shape_ok(c, newer_minor)) return kShort;
+      if (has11 && scale11 <= model::kNoteScaleMax) {
+        n.scale = scale11;
+      } else {
+        n.scale = scale10 < sizeof model::kNotePanelScales ? model::kNotePanelScales[scale10] : 0;
+        if (has11) ++reset;  // a 1.1 scale above 38: the 1.0 byte's scale, the value counted
+      }
+      if (scale10 >= sizeof model::kNotePanelScales) ++reset;  // as every 1.0 field out of range
       reset += model::sanitise_note_state(n);
       return p.set_note(n) == model::Status::Ok ? nullptr : "NOTE: rejected by the model";
     }
@@ -379,6 +447,9 @@ const char* decode(Cursor& c, bool newer_minor, model::Project& p, Part part, st
         for (model::SceneState& sc : s.scene) {
           if (sc.stored == 1) reset += drop_fx_after_v10(sc.slots);
         }
+      }
+      for (model::SceneState& sc : s.scene) {  // OS-PERFMODES M3: the PLAYMODE values the chunk's minor holds (1.2: the custom orders 4..23, above 23 held to 23; older: above 3 as RND)
+        clamp_play_mode(sc.slots, chunk_minor);
       }
       reset += model::sanitise_scenes_state(s);
       return p.set_scenes(s) == model::Status::Ok ? nullptr : "SCEN: rejected by the model";

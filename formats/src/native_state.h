@@ -14,6 +14,7 @@
 // model's sanitise_*), not strictly like these five; the shape of a chunk is still the only error:
 //
 //   NOTE  u16 version, u8 root, u8 scale, u8 octave, u8 lock, u8 jump                                                                                   (7 bytes)
+//         1.1 (OS-SCALES28, only for a scale outside the panel's twelve): + u8 scale (the official 0..38); the 1.0 scale byte is 0                              (8 bytes)
 //   MUTE  u16 version, u8 count (1..16), u8 mode[count]                                                                                                 (3 .. 19 bytes)
 //   SCEN  u16 version, u8 latch, u8 count (3), then per scene u8 stored and 12 PERF-slot records (u8 fx, u8 row, i16 value[3])                          (295 bytes)
 //   SNFX  u16 version, u8 rows (1..32), u16 value[rows]                                                                                                 (3 .. 67 bytes)
@@ -34,6 +35,7 @@
 //
 // PERF reads an FX id above the table as none and a row above 3 as off (a later version may extend the table; INST's engine does the same); every other value out of range is an error.
 // The table of version 1.0 ends at id 19; PERF and SCEN 1.1 (OS-PERFFX P1, native.h kStateVersionFx) add 20 and 21 and are written only when a slot holds one of them: in a 1.0 chunk those two read as none.
+// PERF and SCEN 1.2 (OS-PERFMODES M3, native.h kStateVersionPlayOrder) add no byte either: the version says that a PLAYMODE slot (id 18, kPerfFxPlayMode) may hold 4..23 (the custom play orders C1..C20), and are written only when a slot does: in a 1.0 or 1.1 chunk a PLAYMODE value above 3 reads as 3 (RND), in 1.2 as it is, above model::kPerfPlayModeMax (23) held to 23.
 // Each is written only when the project has the part (Project::state_present(); APPM when an app is remembered) and read with the strict rules of every known chunk: a value outside
 // its range, a count the layout does not fit, or unused bytes in a chunk of this minor are Malformed; a newer minor only appends. A file without them reads as the defaults.
 #include "native_codec.h"
@@ -50,6 +52,7 @@ inline constexpr unsigned kParts = 11;  // the file order of the chunks
 
 inline constexpr std::uint16_t kVersion = 0x0100;
 inline constexpr std::uint8_t kPerfFxMaxV10 = 19;  // the last Perform FX id of PERF / SCEN 1.0 (seq::PerfFx::PatternLength); 1.1 goes to model::kPerfFxMax
+inline constexpr std::uint8_t kPerfFxPlayMode = 18;  // seq::PerfFx::PatternPlayMode: the PLAYMODE slot, whose value is the play mode 0..3 in 1.0 / 1.1 and 0..23 in 1.2 (OS-PERFMODES M3)
 
 // Payload bounds of version 1.0: the shortest chunk of any minor, and the longest of this one (a newer minor may be longer: only this much is read).
 inline constexpr std::size_t kMidiBytes = 2 + 4 + model::kMidiCcSlots + 4 * model::kMidiPorts;  // 20
@@ -67,6 +70,9 @@ inline constexpr std::size_t kAppsMax = model::kAppParamsBytesMax;              
 inline constexpr std::uint16_t kAppsVersionV11 = 0x0101;                                                                                             // APPM 1.1: the same layout, more than 6 apps
 
 inline constexpr std::size_t kNoteBytes = 2 + 5;                                                  // 7
+// OS-SCALES28: NOTE 1.1 appends one byte after `jump`, the scale in the official order 0..38 (model::kNoteScaleMax); the 1.0 scale byte keeps its 1.0 meaning and is 0 in a 1.1 chunk.
+inline constexpr std::size_t kNoteBytesV11 = kNoteBytes + 1;                                      // 8
+inline constexpr std::uint16_t kNoteVersionScale = 0x0101;                                        // NOTE 1.1 (OS-SCALES28)
 inline constexpr std::size_t kMuteFixed = 3;
 inline constexpr std::size_t kMuteMax = kMuteFixed + model::kMaxTracks;                           // 19
 inline constexpr std::size_t kSceneRecord = 1 + model::kPerfSlots * (2 + 2 * model::kPerfStoredRows);  // 97: stored, 12 slots
@@ -81,7 +87,7 @@ inline constexpr std::size_t kInsxMax = kInsxFixed + model::kMaxInserts * (kInsx
 static_assert(kMidiBytes == 20 && kMixBytes == 25 && kPerfBytes == 99 && kAppsMax10 == 981 && kAppsMax == 1015, "the chunk sizes of docs/formats/o3-project.md");
 static_assert(kLawBytes == 3, "the chunk size of docs/formats/o3-project.md (OS-BUG-PASTE24)");
 static_assert(kInsxMax == 535, "the chunk size of docs/formats/o3-project.md (OS-INSFX S3a)");
-static_assert(kNoteBytes == 7 && kMuteMax == 19 && kSceneBytes == 295 && kSendFxMax == 67, "the chunk sizes of docs/formats/o3-project.md (OS-PERSIST2)");
+static_assert(kNoteBytes == 7 && kNoteBytesV11 == 8 && kNoteVersionScale == 0x0101 && kMuteMax == 19 && kSceneBytes == 295 && kSendFxMax == 67, "the chunk sizes of docs/formats/o3-project.md (OS-PERSIST2, OS-SCALES28)");
 static_assert(native::codec::kChunkHeader + kAppsMax + 1 <= native::kScratchBytes, "every state chunk is one writer piece and is read whole");
 static_assert(kAppsMax10 <= kAppsMax && model::kMaxAppParamSets > model::kAppParamSetsV10, "APPM 1.1 is the longer one");
 
@@ -102,7 +108,7 @@ constexpr std::uint32_t chunk_id(Part p) noexcept {
 // Whether the writer writes the part, and its payload size (0 when it is not written).
 bool present(const model::Project& p, Part part) noexcept;
 std::size_t payload_size(const model::Project& p, Part part) noexcept;
-// The version the writer puts at the start of the payload: kVersion (1.0), except PERF and SCEN, which are native::kStateVersionFx (1.1) when a slot holds the Perform FX 20 or 21, and APPM, which is kAppsVersionV11 (1.1) when it holds more than 6 apps.
+// The version the writer puts at the start of the payload: kVersion (1.0), except PERF and SCEN, which are native::kStateVersionPlayOrder (1.2) when a slot holds PLAYMODE with a value 4..23 (OS-PERFMODES M3), native::kStateVersionFx (1.1) when it holds the Perform FX 20 or 21, APPM, which is kAppsVersionV11 (1.1) when it holds more than 6 apps, and NOTE, which is kNoteVersionScale (1.1) when the scale is outside the panel's twelve (OS-SCALES28).
 std::uint16_t version_of(const model::Project& p, Part part) noexcept;
 // The whole payload, version included.
 void encode(native::codec::Enc& e, const model::Project& p, Part part) noexcept;

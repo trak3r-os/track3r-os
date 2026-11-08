@@ -68,9 +68,10 @@ assert state screen=SONG overlay=NONE
 snap qa_glb_146
 
 # QA-GLB-147: under the Navigator Shift + Config does nothing (the Navigator stays up); after F7 CLOSE it opens help again.
-press shift
-tap pattern
-release shift
+press song
+press pattern
+release pattern
+release song
 wait 50
 press shift
 tap config

@@ -35,7 +35,11 @@
 //   mod        OS-012a: the SD modules (ADR 0002): `mod` lists the memory in use, the loaded modules, the bound instruments and the quarantine; `mod load <name>` reads
 //              modules/{instruments,effects,apps}/<name>.tmod (the first directory that has the stem: loader.cpp; an app is loaded and checked here, never started: launch it from MODULES with F1) into the slab and the module region (a slice a pass; the result is in `log`); `mod bind <1..64> <name>` gives instrument n an
 //              instance of a loaded module (until the next project load); `mod note <n> <note> [vel]` / `mod off <n>` play it on track 16 (the outputs must be open: press Play
-//              once); `mod set <n> <id> <value>` changes one of its parameters. Reads the card (load); writes no register.
+//              once); `mod set <n> <id> <value>` changes one of its parameters; `mod preset <1..64> <1..32>` loads a factory preset (OS-INSFX-ABI2 A8). OS-MODPRESET P3: `mod presets <stem>` lists the card's
+//              presets of a module, `mod psave <1..64> <name>` saves the instrument's values in force as modules/presets/<stem>/<name>.o3mp, `mod pload <1..64> <name>` loads one back. Reads the card (load, presets); writes no register.
+//   scratch    OS-BUG-SCRATCH: the master scratch's tuning (inertia, ahead, gate slope, anti-alias); `scratch <ms> <ahead> <gate> <aa>` sets it for the session (MAIN is the single writer, not saved)
+//   ptfx       OS-CEPTFX: `ptfx quarantine` the boot's set of up to 16 .ptfx plugin ids with the reason and the full flag (a memory read); S3b: `ptfx list` scans the card's Effects folder, `ptfx info <n>`
+//              reads plugin n's header and parameters, `ptfx run <n>` runs it over the sample in view and its selection as one job and one undo step (reads the card)
 //   radio      OS-RAD1: the FM radio driver's state, step, last failure (step/cause), last I2C result, registers as last read and pin levels; `radio retry` runs the
 //              power-up again from the reset (the one thing it writes: the receiver, over the control bus, from the main loop)
 //   voices     OS-VOX: the sampler voices' in use, peak and steal count, as the render published them (audio::VoicePool::voice_snapshot, lock-free), through
@@ -73,6 +77,8 @@
 #include <o3os/platform/mk66/storage/device.h>
 #include <o3os/platform/mk66/storage/ls_command.h>
 #include <o3os/platform/mk66/storage/sd_text.h>
+#include <o3os/platform/mk66/console_text_ids.h>
+#include <o3os/platform/mk66/text.h>
 #include <o3os/platform/mk66/usb/command_table.h>
 #include <o3os/platform/mk66/update/fw_device.h>
 #include <o3os/platform/mk66/usb/diag_text.h>
@@ -84,6 +90,7 @@
 #include <o3os/platform/mk66/usb/soc_facts.h>
 #include <o3os/platform/mk66/usb/usb0.h>
 #include <o3os/audio/stem_map.h>
+#include <o3os/audio/wt_contour.h>
 #include <o3os/usb/diag_log.h>
 #include <o3os/usb/diag_pump.h>
 #include <o3os/usb/diag_shell.h>
@@ -178,6 +185,16 @@ bool same(const char* a, const char* b) {
 }
 
 // ---- Commands ------------------------------------------------------------------------------------------------------------------------
+// OS-FLASHDIET P5: a command's help is a text id in command_table.h (the shell's own `help` field stays null, see bind()); found by the command's name.
+const char* help_of(const char* name) {
+  for (const CommandInfo& ci : kCommandInfo) {
+    if (std::strcmp(ci.name, name) == 0) {
+      return text(ci.help);
+    }
+  }
+  return "";
+}
+
 void cmd_help(shell::Shell& sh, const shell::Args&) {
   for (std::size_t i = 0; i < sh.command_count(); ++i) {
     const shell::Command& c = sh.commands()[i];
@@ -189,7 +206,7 @@ void cmd_help(shell::Shell& sh, const shell::Args&) {
     for (; len < 8u; ++len) {  // the help texts line up
       sh.out().chr(' ');
     }
-    sh.out().text(c.help).nl();
+    sh.out().text(help_of(c.name)).nl();
   }
 }
 
@@ -213,24 +230,30 @@ void cmd_cpu(shell::Shell& sh, const shell::Args& a) {
     if (o3os::audio::AppTap* const tap = audio_engine().graph().app_tap()) {
       tap->reset_cost();  // OS-H2a: the render zeroes the tap's cost figures at its next block
     }
-    sh.out().text("cpu: peaks and fault counters reset\n");
+    sh.out().text(text(txt::cpu_1));
     return;
   }
   if (a.argc == 3 && same(a.argv[1], "perf") && same(a.argv[2], "off")) {
     if (audio::ModuleVoices* mv = appimg::module_voices()) {
       mv->stop_perf();  // OS-303PERF: the render reads no extra stamps again; the governor's figures are the ones without the split
     }
-    sh.out().text("cpu: module perf off (cpu reset starts it again)\n");
+    sh.out().text(text(txt::cpu_2));
     return;
   }
   if (a.argc != 1) {
-    sh.out().text("usage: cpu [reset | perf off]\n");
+    sh.out().text(text(txt::cpu_3));
     return;
   }
   char buf[kTextBuffer];
   send(sh, o3os::audio::diag::format_cpu(audio_status().snapshot(), hal::audio::kCyclesPerBlock, buf, sizeof buf), buf);
   const o3os::audio::Pipeline& pipe = audio_pipeline();
   send(sh, o3os::audio::diag::format_shed(pipe.shed_blocks(), pipe.shed_late(), pipe.shed_runs(), pipe.shed_longest(), pipe.starve_blocks(), buf, sizeof buf), buf);  // OS-MAINGUARD: since boot or `cpu reset` (the render zeroes them)
+  if (o3os::audio::wt_bake_used() != 0u || o3os::audio::wt_bake_refused() != 0u) {  // OS-CEWTENV W3c: the baked warps; `refused` calls found the pool full (those slots play their warps live: the cost the baking saves comes back)
+    char line[64];
+    const std::size_t n = o3os::audio::diag::format_wt_bake(o3os::audio::wt_bake_used(), o3os::audio::kWtBakeCount, o3os::audio::wt_bake_refused(), line, sizeof line - 1);
+    line[n] = '\n';
+    sh.out().text(line, n + 1);
+  }
   if (const o3os::audio::AppTap* const tap = audio_engine().graph().app_tap()) {  // OS-H2a: the apps' audio tap, when an app has used it since boot or `cpu reset`
     const o3os::audio::AppTap::Cost c = tap->cost();
     if (c.blocks != 0u || tap->source() != o3os::audio::AppTap::Source::Off) {
@@ -249,7 +272,7 @@ void cmd_guard(shell::Shell& sh, const shell::Args& a) {
   if (a.argc == 3 && same(a.argv[1], "n") && parse_dec(a.argv[2], o3os::audio::kStarveBlocksMax, n) && n != 0u) {
     audio_set_starve_blocks(n);
   } else if (a.argc != 1) {
-    sh.out().text("usage: guard [n <1..255>]\n");
+    sh.out().text(text(txt::guard_1));
     return;
   }
   char buf[kTextBuffer];
@@ -279,7 +302,7 @@ void cmd_crash(shell::Shell& sh, const shell::Args&) {
 void usb_audio_view(shell::Shell& sh) {
   const o3os::usb::IsoAudio* iso = usb0::iso();
   if (iso == nullptr) {
-    sh.out().text("usb audio: the driver is not running\n");
+    sh.out().text(text(txt::usb_audio_view_1));
     return;
   }
   const o3os::usb::ControlPipe& pipe = usb0::control();
@@ -312,26 +335,26 @@ void usb_audio_view(shell::Shell& sh) {
 void usb_request(shell::Shell& sh, o3os::usb::Mode mode, o3os::usb::Profile profile, bool wish) {
   const bool usb_return = o3os::usb::return_presented(profile, wish);
   if (!usb0::request_layout(mode, profile, wish)) {
-    sh.out().text(usb0::change_phase() != 0u ? "a mode change is already in progress\n"
-                  : usb0::mode() == o3os::usb::Mode::Disk ? "refused: the USB DISK mode ends with a restart\n"
-                                                        : "refused: profile not supported yet (4s needs post-pan stems) or driver down\n");
+    sh.out().text(usb0::change_phase() != 0u ? text(txt::usb_request_1)
+                  : usb0::mode() == o3os::usb::Mode::Disk ? text(txt::usb_request_2)
+                                                        : text(txt::usb_request_3));
     return;
   }
   char layout[20];
   (void)usb_layout_name(profile, usb_return, layout);
   if (wish && !usb_return) {
-    sh.out().text("usb: the return is not presented at 10 or more channels (the setting stays On; 8 channels or fewer bring it back)\n");
+    sh.out().text(text(txt::usb_request_4));
   }
   if (usb0::change_phase() == 0u) {
     if (usb0::mode() == o3os::usb::Mode::Disk) {  // (accepted only because it is the layout DISK already presents)
-      sh.out().text("usb: DISK mode is held by the boot disk until a restart, nothing changed: ").text(layout).nl();
+      sh.out().text(text(txt::usb_request_5)).text(layout).nl();
       return;
     }
-    sh.out().text(mode == o3os::usb::Mode::Audio ? "usb: already presenting AUDIO with that layout: " : "usb: STANDARD, layout set (used by the next AUDIO attach): ").text(layout).nl();
+    sh.out().text(mode == o3os::usb::Mode::Audio ? text(txt::usb_request_6) : text(txt::usb_request_7)).text(layout).nl();
     return;
   }
   sh.out().text("usb: re-enumerating as ").text(usb_mode_name(mode)).text(" (").text(layout).text(
-      "); this terminal drops, reconnect in about a second\n");
+      text(txt::usb_request_8));
 }
 
 void usb_map_command(shell::Shell& sh, const shell::Args& a) {
@@ -344,12 +367,12 @@ void usb_map_command(shell::Shell& sh, const shell::Args& a) {
     std::uint32_t slot = 0;
     std::uint32_t sources = 0;
     if (!parse_dec(a.argv[2], o3os::usb::kMaxChannels, slot) || slot == 0u || !o3os::audio::parse_sources(a.argv[3], sources) || !map.set_slot(slot - 1u, sources)) {
-      sh.out().text("usage: usb map [reset | <slot> <sources>]   slot 1..profile channels, sources like T1+T9, ML, MR, SA, SB or -\n");
+      sh.out().text(text(txt::usb_map_command_1));
       return;
     }
     usb0::apply_stem_map();
   } else if (a.argc != 2) {
-    sh.out().text("usage: usb map [reset | <slot> <sources>]\n");
+    sh.out().text(text(txt::usb_map_command_2));
     return;
   }
   send(sh, format_stem_map(map, buf, sizeof buf), buf);
@@ -359,7 +382,7 @@ void usb_map_command(shell::Shell& sh, const shell::Args& a) {
 void usb_ep0_view(shell::Shell& sh) {
   const o3os::usb::Ep0Trace& trace = usb0::ep0_trace();
   const unsigned n = trace.count();
-  sh.out().text("usb ep0: ").text(n == 0u ? "nothing recorded (no DISK attach since the boot)\n" : "the first events of the last DISK attach\n");
+  sh.out().text("usb ep0: ").text(n == 0u ? text(txt::usb_ep0_view_1) : text(txt::usb_ep0_view_2));
   char line[96];
   for (unsigned i = 0; i < n; ++i) {
     send(sh, format_usb_ep0_entry(i, trace.entry(i), line, sizeof line), line);
@@ -386,7 +409,7 @@ void usb_subcommand(shell::Shell& sh, const shell::Args& a) {
     } else if (a.argc == 3 && same(a.argv[2], "standard")) {
       usb_request(sh, o3os::usb::Mode::Standard, usb0::profile(), usb0::return_wanted());
     } else {
-      sh.out().text("usage: usb mode [standard|audio]\n");
+      sh.out().text(text(txt::usb_subcommand_1));
     }
   } else if (same(sub, "profile")) {
     std::uint32_t channels = 0;
@@ -401,8 +424,7 @@ void usb_subcommand(shell::Shell& sh, const shell::Args& a) {
       profile = channels == 2u ? o3os::usb::Profile::P2 : (channels == 4u ? o3os::usb::Profile::P4 : (channels == 6u ? o3os::usb::Profile::P6 : (channels == 8u ? o3os::usb::Profile::P8 : (channels == 11u ? o3os::usb::Profile::P11 : o3os::usb::Profile::P10))));
       usb_request(sh, usb0::mode(), profile, usb_return);  // in AUDIO mode this re-enumerates; in STANDARD it only sets what the next AUDIO attach uses
     } else {
-      sh.out().text("usage: usb profile <2|4|6|8|10|11> [out|duplex]   (10 = T1..T8 + master, 8 = T1..T6 + master, 6 = T1..T4, 4 = T1, T2 + master; out = capture only: `profile 10 out` is \"10 OUT\",\n"
-                    "       duplex adds the stereo return: `profile 8 duplex` is \"8 OUT / 2 IN\", the layout that opens both ways behind a hub)\n");
+      sh.out().text(text(txt::usb_subcommand_2));
     }
   } else if (same(sub, "return")) {
     if (a.argc == 2) {
@@ -411,14 +433,14 @@ void usb_subcommand(shell::Shell& sh, const shell::Args& a) {
     } else if (a.argc == 3 && (same(a.argv[2], "on") || same(a.argv[2], "off"))) {
       usb_request(sh, usb0::mode(), usb0::profile(), same(a.argv[2], "on"));
     } else {
-      sh.out().text("usage: usb return [on|off]   (off = no playback stream: the host cannot open a return the bus has no room for)\n");
+      sh.out().text(text(txt::usb_subcommand_3));
     }
   } else if (same(sub, "map")) {
     usb_map_command(sh, a);
   } else if (same(sub, "ep0")) {
     usb_ep0_view(sh);
   } else {
-    sh.out().text("usage: usb [audio [reset] | mode [standard|audio] | profile <2|4|6|8|10|11> [out|duplex] | return [on|off] | map [reset | <slot> <sources>] | ep0]\n");
+    sh.out().text(text(txt::usb_subcommand_4));
   }
 }
 
@@ -472,13 +494,13 @@ void cmd_input(shell::Shell& sh, const shell::Args& a) {
     return;
   }
   if (g_tee == nullptr) {
-    sh.out().text("no input tap: the app has not started\n");
+    sh.out().text(text(txt::input_1));
     return;
   }
   core::InputEvent stale;
   while (g_tee->pop(stale)) {  // what happened before the command is not live
   }
-  sh.out().text("input events, live (any key stops):\n");
+  sh.out().text(text(txt::input_2));
   sh.start_stream(&input_stream, nullptr);
 }
 
@@ -511,19 +533,19 @@ void cmd_mon(shell::Shell& sh, const shell::Args& a) {
       level = digits && v <= 100u ? static_cast<float>(v) : -1.0f;
     }
     if (level < 0.0f) {
-      sh.out().text("usage: mon [off|on|0..100]\n");
+      sh.out().text(text(txt::mon_1));
       return;
     }
     const bool queued = audio_engine().params().push(
         o3os::audio::ParamChange{o3os::audio::strip_param(o3os::audio::kInputStrip, o3os::audio::graph_param::strip::Volume), level, 0u});
     if (!queued) {
-      sh.out().text("mon: the parameter ring is full, try again\n");
+      sh.out().text(text(txt::mon_2));
       return;
     }
   }
   audio::diag::Text t(buf, sizeof buf);
-  t.str("monitor gain (Q16, 65536 = unity) ").dec(static_cast<std::uint32_t>(audio_engine().graph().level_gain(o3os::audio::kInputStrip)));
-  t.str(", routes MAIN + CUE; mon on = ").dec(static_cast<std::uint32_t>(kMonitorOn)).str(", mon off = 0").nl();
+  t.str(text(txt::mon_3)).dec(static_cast<std::uint32_t>(audio_engine().graph().level_gain(o3os::audio::kInputStrip)));
+  t.str(text(txt::mon_4)).dec(static_cast<std::uint32_t>(kMonitorOn)).str(", mon off = 0").nl();
   send(sh, t.size(), buf);
 }
 
@@ -534,16 +556,16 @@ void cmd_peek(shell::Shell& sh, const shell::Args& a) {
   std::uint32_t addr = 0;
   std::uint32_t count = 1;
   if (a.argc < 2 || a.argc > 3 || !parse_hex32(a.argv[1], addr) || (a.argc == 3 && (!parse_dec(a.argv[2], kPeekMaxWords, count) || count == 0u))) {
-    sh.out().text("usage: peek <hexaddr> [count 1..16]\n");
+    sh.out().text(text(txt::peek_1));
     return;
   }
   const Access ok = check_peek(addr, count);
   if (ok == Access::Unaligned) {
-    sh.out().text("peek: the address must be 4-byte aligned\n");
+    sh.out().text(text(txt::peek_2));
     return;
   }
   if (ok != Access::Ok) {
-    sh.out().text("peek: refused, outside the modules clocked on in this image (a read of a gated module is a bus fault)\n");
+    sh.out().text(text(txt::peek_3));
     return;
   }
   char buf[kTextBuffer];
@@ -560,16 +582,16 @@ void cmd_poke(shell::Shell& sh, const shell::Args& a) {
   std::uint32_t addr = 0;
   std::uint32_t value = 0;
   if (a.argc != 3 || !parse_hex32(a.argv[1], addr) || !parse_hex32(a.argv[2], value)) {
-    sh.out().text("usage: poke <hexaddr> <hexvalue>\n");
+    sh.out().text(text(txt::poke_1));
     return;
   }
   const Access ok = check_poke(addr);
   if (ok == Access::Unaligned) {
-    sh.out().text("poke: the address must be 4-byte aligned\n");
+    sh.out().text(text(txt::poke_2));
     return;
   }
   if (ok != Access::Ok) {
-    sh.out().text("poke: refused, only I2S0 (0x4002F000..0x4002F1FF) may be written\n");
+    sh.out().text(text(txt::poke_3));
     return;
   }
   volatile std::uint32_t& word = *reinterpret_cast<volatile std::uint32_t*>(static_cast<std::uintptr_t>(addr));
@@ -601,9 +623,9 @@ void cmd_audio(shell::Shell& sh, const shell::Args& a) {
   send(sh, format_audio_start(result, fault, buf, sizeof buf), buf);
   if (audio_running()) {
     clear_boot_fault(kFaultAudio);
-    log("audio start: Ok, outputs open when clean");
+    log(text(txt::audio_1));
   } else {
-    log_dec("audio start: FAILED, result", result);
+    log_dec(text(txt::audio_2), result);
     log_audio_clock_fault("audio start", fault);
   }
 }
@@ -618,11 +640,11 @@ void cmd_rot(shell::Shell& sh, const shell::Args& a) {
   }
   display::Ft812Display& screen = display::device::display();
   if (!screen.ready() || screen.failed()) {
-    sh.out().text("rot: the display is not running\n");
+    sh.out().text(text(txt::rot_1));
     return;
   }
   if (!screen.idle()) {
-    sh.out().text("rot: the display is busy with a frame, try again\n");
+    sh.out().text(text(txt::rot_2));
     return;
   }
   display::device::chip().wr32(display::ft812::reg::kRotate, value);
@@ -638,12 +660,12 @@ void cmd_status(shell::Shell& sh, const shell::Args& a) {
     return;
   }
   if (a.argc != 2 || !(same(a.argv[1], "blink") || same(a.argv[1], "off"))) {
-    sh.out().text("usage: status [blink|off]\n");
+    sh.out().text(text(txt::status_1));
     return;
   }
   const bool on = same(a.argv[1], "blink");
   appimg::status_led(on);
-  sh.out().text("status: heartbeat ").text(on ? "blink" : "off").text(" (not saved; a fault code still blinks)\n");
+  sh.out().text("status: heartbeat ").text(on ? "blink" : "off").text(text(txt::status_2));
 }
 
 // `sd`: the slot, the mount, the card, the counters (storage/sd_text.h); the loader's last summary is the last line but one. `sd mount` runs the
@@ -660,7 +682,7 @@ void cmd_sd(shell::Shell& sh, const shell::Args& a) {
       return;
     }
     if (storage::device::card_busy()) {  // OS-SDSWAP: a save is as much "in use" as a load: the mount closes every handle, which would end it
-      sh.out().text("sd: the card is in use (a load, a save, an upload, a listing), try again in a moment\n");
+      sh.out().text(text(txt::sd_1));
       return;
     }
     ls_release(storage::device::storage());  // a listing that a key press ended
@@ -668,7 +690,7 @@ void cmd_sd(shell::Shell& sh, const shell::Args& a) {
     const hal::storage::Status s = storage::device::mount();
     appimg::service_while_blocked(false);
     sh.out().text("sd mount: ").text(hal::storage::status_name(s)).nl();
-    log(s == hal::storage::Status::Ok ? "sd: mounted again from the console" : "sd: mount from the console FAILED");
+    log(s == hal::storage::Status::Ok ? text(txt::sd_2) : text(txt::sd_3));
   }
   char buf[kTextBuffer];
   storage::SdReport report = storage::device::report();
@@ -686,19 +708,19 @@ void cmd_disk(shell::Shell& sh, const shell::Args& a) {
   if (a.argc >= 2 && same(a.argv[1], "share") && a.argc <= 3 && (a.argc == 2 || same(a.argv[2], "ro"))) {
     refusal = appimg::disk_share_request(a.argc == 3);
     if (refusal == nullptr) {
-      sh.out().text(a.argc == 3 ? "disk: sharing read-only; the console port re-enumerates, open it again and `disk` shows the state\n" : "disk: sharing; the console port re-enumerates, open it again and `disk` shows the state\n");
-      log("disk: share asked from the console");
+      sh.out().text(a.argc == 3 ? text(txt::disk_1) : text(txt::disk_2));
+      log(text(txt::disk_3));
       return;
     }
   } else if (a.argc == 2 && same(a.argv[1], "eject")) {
     refusal = appimg::disk_eject_request();
     if (refusal == nullptr) {
-      sh.out().text("disk: ejecting; the card is remounted, the USB set comes back\n");
-      log("disk: eject asked from the console");
+      sh.out().text(text(txt::disk_4));
+      log(text(txt::disk_5));
       return;
     }
   } else if (a.argc != 1) {
-    sh.out().text("usage: disk [share [ro]|eject]\n");
+    sh.out().text(text(txt::disk_6));
     return;
   }
   if (refusal != nullptr) {
@@ -720,15 +742,15 @@ void cmd_load(shell::Shell& sh, const shell::Args& a) {
   char folder[hal::storage::kPathMax + 1];
   if (!join_path_args(a, 1, folder, sizeof folder)) {
     if (a.argc > 1) {
-      sh.out().text("load: folder name too long\n");
+      sh.out().text(text(txt::load_1));
       return;
     }
     std::strcpy(folder, "Workspace");
   }
   const appimg::LoadStart started = appimg::start_project_load(folder);
   if (started == appimg::LoadStart::Started) {
-    sh.out().text("load: reading ").text(folder).text(" (`sd` shows the result)\n");
-    log("load: started by the console");
+    sh.out().text("load: reading ").text(folder).text(text(txt::load_2));
+    log(text(txt::load_3));
   } else {
     sh.out().text("load: ").text(appimg::load_start_name(started)).nl();
   }
@@ -755,12 +777,12 @@ void cmd_inst(shell::Shell& sh, const shell::Args& a) {
 void cmd_ogexp(shell::Shell& sh, const shell::Args& a) {
   const bool status = a.argc == 2 && same(a.argv[1], "status");
   if (a.argc > 2 || (a.argc == 2 && !status && !same(a.argv[1], "cancel"))) {
-    sh.out().text("usage: ogexp [status|cancel]\n");
+    sh.out().text(text(txt::ogexp_1));
     return;
   }
   if (a.argc == 2 && !status) {
     appimg::cancel_og_export();
-    sh.out().text("ogexp: cancel asked, no file after the one in progress\n");
+    sh.out().text(text(txt::ogexp_2));
     return;
   }
   if (a.argc == 1) {
@@ -772,7 +794,7 @@ void cmd_ogexp(shell::Shell& sh, const shell::Args& a) {
   }
   appimg::OgExportStatus s;
   if (!appimg::og_export_status(s)) {
-    sh.out().text("ogexp: this image has no save layer\n");
+    sh.out().text(text(txt::ogexp_3));
     return;
   }
   sh.out().text("ogexp: ").text(s.state).text(" ").dec(s.done).text("/").dec(s.total).text(" files");
@@ -797,7 +819,7 @@ void cmd_ogexp(shell::Shell& sh, const shell::Args& a) {
         any = true;
       }
     }
-    sh.out().text(any ? "; see the EXPORT page for the rest]" : " other kinds, see the EXPORT page]");
+    sh.out().text(any ? text(txt::ogexp_4) : text(txt::ogexp_5));
   }
   if (s.levels[0] != '\0') {
     sh.out().text(" ").text(s.levels);
@@ -846,16 +868,44 @@ bool parse_value(const char* s, float& out) {
   return *s == '\0';
 }
 
-// OS-INSFX S1: effect modules as per-track inserts (audio/insert_host.h). `ins` / `ins list`: the totals and the bound inserts; `ins bind <track 1..16> <slot 1..2> <module>` (the module
+// OS-INSFX-ABI2 A8: the reply of `mod preset` and `ins preset`: ok and the preset's name, and how many values reached no instance (the project holds them), or why not.
+[[gnu::noinline]] static void preset_reply(shell::Shell& sh, const char* who, const char* why, const char* name, unsigned dropped) {
+  sh.out().text(who).text("preset ").text(why == nullptr ? "ok " : why).text(why == nullptr ? name : "");
+  if (why == nullptr && dropped != 0u) {
+    sh.out().text(", ").dec(dropped).text(" not sent");
+  }
+  sh.out().nl();
+}
+
+// OS-MODPRESET P3: the tokenizer has no quoting, so a preset name with spaces (the "Acid 2" a taken name gets) is typed as the tail arguments; they are joined with single spaces.
+static void join_tail(const shell::Args& a, unsigned from, char* out, std::size_t cap) noexcept {
+  if (cap == 0u) {
+    return;
+  }
+  std::size_t n = 0;
+  for (unsigned i = from; i < a.argc; ++i) {
+    if (i != from && n + 1u < cap) {
+      out[n++] = ' ';
+    }
+    for (const char* p = a.argv[i]; *p != '\0' && n + 1u < cap; ++p) {
+      out[n++] = *p;
+    }
+  }
+  out[n] = '\0';
+}
+
+// OS-INSFX S1: effect modules as per-track inserts (audio/insert_host.h). `ins` / `ins list`: the totals and the bound inserts; `ins bind <track 1..16> <slot 1..2> <module>` (S6: `ins bind master <module>`, `ins unbind master`,
+// `ins bypass master on|off`: the master insert, two instances of the module, L and R, counting 2 of the cap of four; the listing shows `master L` and `master R`) (the module
 // is loaded from modules/effects when it is not in the set; S4: the same path as the Mixer's INSERTS page), `ins unbind <track> <slot>`, `ins bypass <track> <slot> on|off` (off is a reset of the effect). S3b: each one is written to the project (INSX), so a save keeps it and a
 // load binds the saved ones (not undoable).
 void cmd_ins(shell::Shell& sh, const shell::Args& a) {
   std::uint32_t track = 0;
   std::uint32_t slot = 0;
+  std::uint32_t n = 0;  // (preset)
   const char* sub = a.argc >= 2 ? a.argv[1] : "list";
   const char* why = nullptr;
   if (std::strcmp(sub, "list") == 0 && a.argc <= 2) {
-    char line[160];
+    char line[192];
     for (unsigned i = 0; i < 6u; ++i) {  // the totals and the four inserts (and one to spare)
       const std::size_t len = appimg::insert_line(i, line, sizeof line);
       if (len == 0u) {
@@ -866,14 +916,57 @@ void cmd_ins(shell::Shell& sh, const shell::Args& a) {
     return;
   }
   const bool two = a.argc >= 4 && parse_dec(a.argv[2], 16u, track) && track != 0u && parse_dec(a.argv[3], 2u, slot) && slot != 0u;
+  const bool master = a.argc >= 3 && std::strcmp(a.argv[2], "master") == 0;  // S6: the master's one insert is the project's `where` 16, slot 0
+  constexpr unsigned kMasterTrack = 16u;
   if (std::strcmp(sub, "bind") == 0 && a.argc == 5 && two) {
     why = appimg::insert_bind(track - 1u, slot - 1u, a.argv[4]);
+  } else if (std::strcmp(sub, "bind") == 0 && a.argc == 4 && master) {
+    why = appimg::insert_bind(kMasterTrack, 0u, a.argv[3]);
   } else if (std::strcmp(sub, "unbind") == 0 && a.argc == 4 && two) {
     why = appimg::insert_unbind(track - 1u, slot - 1u);
+  } else if (std::strcmp(sub, "unbind") == 0 && a.argc == 3 && master) {
+    why = appimg::insert_unbind(kMasterTrack, 0u);
   } else if (std::strcmp(sub, "bypass") == 0 && a.argc == 5 && two && (std::strcmp(a.argv[4], "on") == 0 || std::strcmp(a.argv[4], "off") == 0)) {
     why = appimg::insert_bypass(track - 1u, slot - 1u, std::strcmp(a.argv[4], "on") == 0);
+  } else if (std::strcmp(sub, "bypass") == 0 && a.argc == 4 && master && (std::strcmp(a.argv[3], "on") == 0 || std::strcmp(a.argv[3], "off") == 0)) {
+    why = appimg::insert_bypass(kMasterTrack, 0u, std::strcmp(a.argv[3], "on") == 0);
+  } else if (std::strcmp(sub, "preset") == 0 && a.argc == 5 && two && parse_dec(a.argv[4], 32u, n) && n != 0u) {
+    // OS-INSFX-ABI2 A8: factory preset <n> (1-based, the order of the module's table) of the insert: every parameter written to its record and sent (not an undo step, D9).
+    char name[16] = {};
+    unsigned dropped = 0;
+    why = appimg::insert_preset(track - 1u, slot - 1u, n, name, sizeof name, dropped);
+    preset_reply(sh, "ins: ", why, name, dropped);
+    return;
+  } else if (std::strcmp(sub, "psave") == 0 && a.argc >= 5 && two) {
+    // OS-MODPRESET P3: the values in force of the insert's module as modules/presets/<stem>/<name>.o3mp (the next free "<name> 2" on a taken name); the job's strip words its end. The name is the tail arguments joined.
+    char name[40] = {};
+    join_tail(a, 4, name, sizeof name);
+    char final[40] = {};
+    const char* w = appimg::insert_preset_save(track - 1u, slot - 1u, name, final, sizeof final);
+    sh.out().text("ins: psave ").text(w == nullptr ? "started: " : w).text(w == nullptr ? final : "").nl();
+    return;
+  } else if (std::strcmp(sub, "pload") == 0 && a.argc >= 5 && two) {
+    // OS-MODPRESET P3: read the card preset of the insert at (track, slot), resolve it by name and apply it (an insert's is no undo step, D9). The name is the tail arguments joined.
+    char name[40] = {};
+    join_tail(a, 4, name, sizeof name);
+    char w[64] = {};
+    unsigned skipped = 0, dropped = 0;
+    const char* r = appimg::insert_preset_load(track - 1u, slot - 1u, name, w, sizeof w, skipped, dropped);
+    if (r == nullptr) {
+      sh.out().text("ins: pload ok ").text(name);
+      if (skipped != 0u) {
+        sh.out().text(", ").dec(skipped).text(" skipped");
+      }
+      if (dropped != 0u) {
+        sh.out().text(", ").dec(dropped).text(" not sent");
+      }
+      sh.out().nl();
+    } else {
+      sh.out().text("ins: pload ").text(r).nl();
+    }
+    return;
   } else {
-    sh.out().text("usage: ins [list] | bind <1..16> <1..2> <module> (loads it from the card) | unbind <1..16> <1..2> | bypass <1..16> <1..2> on|off\n");
+    sh.out().text(text(txt::ins_1));
     return;
   }
   sh.out().text("ins: ").text(sub).text(" ").text(why == nullptr ? "ok" : why).nl();
@@ -893,17 +986,18 @@ void cmd_mod(shell::Shell& sh, const shell::Args& a) {
     }
     // OS-303PERF: the perf measure doubles the instances' lines, so a listing can reach the limit: say so (the refused stems are listed first and are never what is cut)
     if (appimg::module_line(kMaxLines, line, sizeof line) != 0u) {
-      sh.out().text("mod: more lines than the listing shows (cpu perf off drops the perf lines)\n");
+      sh.out().text(text(txt::mod_1));
     }
     return;
   }
   const char* sub = a.argv[1];
   std::uint32_t slot = 0;
+  std::uint32_t n = 0;  // (preset)
   if (std::strcmp(sub, "load") == 0 && a.argc == 3) {
     const appimg::ModStart r = appimg::start_module_load(a.argv[2]);
     sh.out().text("mod: ").text(a.argv[2]).text(": ").text(appimg::mod_start_name(r)).nl();
     if (r == appimg::ModStart::Started) {
-      log("mod: load started by the console");
+      log(text(txt::mod_2));
     }
   } else if (std::strcmp(sub, "bind") == 0 && a.argc == 4 && parse_dec(a.argv[2], 64u, slot) && slot != 0u) {
     const char* why = appimg::module_bind(slot - 1u, a.argv[3]);
@@ -911,48 +1005,94 @@ void cmd_mod(shell::Shell& sh, const shell::Args& a) {
   } else if (std::strcmp(sub, "note") == 0 && (a.argc == 4 || a.argc == 5) && parse_dec(a.argv[2], 64u, slot) && slot != 0u) {
     std::uint32_t note = 0, vel = 100;
     if (!parse_dec(a.argv[3], 127u, note) || (a.argc == 5 && !parse_dec(a.argv[4], 127u, vel))) {
-      sh.out().text("usage: mod note <1..64> <0..127> [1..127]\n");
+      sh.out().text(text(txt::mod_3));
       return;
     }
-    sh.out().text(appimg::module_audition(slot - 1u, note, vel, true) ? "mod: note queued\n" : "mod: not bound, or the queue is full\n");
+    sh.out().text(appimg::module_audition(slot - 1u, note, vel, true) ? "mod: note queued\n" : text(txt::mod_4));
   } else if (std::strcmp(sub, "off") == 0 && a.argc == 3 && parse_dec(a.argv[2], 64u, slot) && slot != 0u) {
-    sh.out().text(appimg::module_audition(slot - 1u, 0, 0, false) ? "mod: off queued\n" : "mod: not bound, or the queue is full\n");
+    sh.out().text(appimg::module_audition(slot - 1u, 0, 0, false) ? "mod: off queued\n" : text(txt::mod_4));
   } else if (std::strcmp(sub, "notice") == 0 && (a.argc == 2 || a.argc == 3) && (a.argc == 2 || parse_dec(a.argv[2], 1000u, slot))) {
     // OS-012d: the licence notices of the built-in modules (module/builtin.h), kMaxLines lines from line `slot` (0: the first); the next call's number is printed when there is more.
-    const char* p = appimg::module_notices();
-    for (std::uint32_t skip = 0; skip < slot && *p != '\0'; ++skip) {
-      while (*p != '\0' && *p != '\n') {
-        ++p;
-      }
-      p += *p == '\n' ? 1 : 0;
-    }
-    std::uint32_t at = slot;
-    for (; *p != '\0' && at < slot + kMaxLines; ++at) {
-      const char* e = p;
-      while (*e != '\0' && *e != '\n') {
-        ++e;
-      }
-      sh.out().text(p, static_cast<std::size_t>(e - p)).nl();
-      p = *e == '\n' ? e + 1 : e;
-    }
-    if (*p != '\0') {
-      sh.out().text("mod: more: mod notice ").dec(at).nl();
+    // OS-FLASHDIET P1: the text is a deflate stream, decoded as it is printed (appimg::module_notices_page); the shell runs in the main loop.
+    bool more = false;
+    unsigned next = 0;
+    const bool ok = appimg::module_notices_page(
+        slot, kMaxLines,
+        [](void* ctx, const char* text, std::size_t len, bool eol) noexcept {
+          auto& out = *static_cast<shell::Output*>(ctx);
+          if (eol) {
+            out.nl();
+          } else {
+            out.text(text, len);
+          }
+        },
+        &sh.out(), more, next);
+    if (!ok) {
+      sh.out().text(text(txt::mod_5));
+    } else if (more) {
+      sh.out().text("mod: more: mod notice ").dec(next).nl();
     }
   } else if (std::strcmp(sub, "set") == 0 && a.argc == 5 && parse_dec(a.argv[2], 64u, slot) && slot != 0u) {
     std::uint32_t id = 0;
     float value = 0.0f;
     if (!parse_dec(a.argv[3], 31u, id) || !parse_value(a.argv[4], value)) {
-      sh.out().text("usage: mod set <1..64> <parameter 0..31> <value>\n");
+      sh.out().text(text(txt::mod_6));
       return;
     }
-    sh.out().text(appimg::module_set_param(slot - 1u, id, value) ? "mod: queued\n" : "mod: not bound, or the queue is full\n");
+    sh.out().text(appimg::module_set_param(slot - 1u, id, value) ? "mod: queued\n" : text(txt::mod_4));
+  } else if (std::strcmp(sub, "preset") == 0 && a.argc == 4 && parse_dec(a.argv[2], 64u, slot) && slot != 0u && parse_dec(a.argv[3], 32u, n) && n != 0u) {
+    // OS-INSFX-ABI2 A8: factory preset <n> (1-based, the order of the module's table) of the module on instrument <slot>: every parameter written to the project (one undo unit) and sent to the instance.
+    char name[16] = {};
+    unsigned dropped = 0;
+    const char* why = appimg::module_preset(slot - 1u, n, name, sizeof name, dropped);
+    preset_reply(sh, "mod: ", why, name, dropped);
+  } else if (std::strcmp(sub, "presets") == 0 && a.argc == 3) {
+    // OS-MODPRESET P3: the card's presets of the module <stem> (modules/presets/<stem>/), sorted; "+ MORE ON CARD" when the folder holds more than the list's 128.
+    bool more = false;
+    const unsigned count = appimg::module_preset_scan(a.argv[2], more);
+    if (count == 0u) {
+      sh.out().text("mod: no presets of ").text(a.argv[2]).text(" on the card\n");
+      return;
+    }
+    for (unsigned i = 0; i < count; ++i) {
+      sh.out().text("mod: ").text(appimg::module_preset_at(i)).nl();
+    }
+    if (more) {
+      sh.out().text("mod: + MORE ON CARD\n");
+    }
+  } else if (std::strcmp(sub, "psave") == 0 && a.argc >= 4 && parse_dec(a.argv[2], 64u, slot) && slot != 0u) {
+    // OS-MODPRESET P3: the values in force of the module on instrument <slot> as modules/presets/<stem>/<name>.o3mp (the next free "<name> 2" on a taken name); the job's strip words its end. The name is the tail arguments joined.
+    char name[40] = {};
+    join_tail(a, 3, name, sizeof name);
+    char final[40] = {};
+    const char* w = appimg::module_preset_save(slot - 1u, name, final, sizeof final);
+    sh.out().text("mod: psave ").text(w == nullptr ? "started: " : w).text(w == nullptr ? final : "").nl();
+  } else if (std::strcmp(sub, "pload") == 0 && a.argc >= 4 && parse_dec(a.argv[2], 64u, slot) && slot != 0u) {
+    // OS-MODPRESET P3: read the card preset of the module on instrument <slot>, resolve it by name and apply it (one undo unit). The name is the tail arguments joined.
+    char name[40] = {};
+    join_tail(a, 3, name, sizeof name);
+    char w[64] = {};
+    unsigned skipped = 0, dropped = 0;
+    const char* r = appimg::module_preset_load(slot - 1u, name, w, sizeof w, skipped, dropped);
+    if (r == nullptr) {
+      sh.out().text("mod: pload ok ").text(name);
+      if (skipped != 0u) {
+        sh.out().text(", ").dec(skipped).text(" skipped");
+      }
+      if (dropped != 0u) {
+        sh.out().text(", ").dec(dropped).text(" not sent");
+      }
+      sh.out().nl();
+    } else {
+      sh.out().text("mod: pload ").text(r).nl();
+    }
   } else if (std::strcmp(sub, "gov") == 0 && (a.argc == 2 || a.argc == 4)) {
     // OS-GOV: the CPU governor of the module instruments (audio/module_governor.h): its state, and the two knobs for the unit's tuning (runtime only, not saved). The threshold is held to
     // 50..95 % (under 50 the notes starve, over 95 nothing is left for the interrupts); the budget to 10..100 % (10 is the forced-heavy test: it can only mute).
     audio::ModuleVoices* mv = appimg::module_voices();
     std::uint32_t percent = 0;
     if (mv == nullptr) {
-      sh.out().text("mod gov: this image has no module voices\n");
+      sh.out().text(text(txt::mod_7));
       return;
     }
     if (a.argc == 4) {
@@ -960,11 +1100,11 @@ void cmd_mod(shell::Shell& sh, const shell::Args& a) {
       const std::uint32_t lo = thr ? audio::gov::kMinThresholdPercent : audio::gov::kMinBudgetPercent;
       const std::uint32_t hi = thr ? audio::gov::kMaxThresholdPercent : audio::gov::kMaxBudgetPercent;
       if (!thr && std::strcmp(a.argv[2], "budget") != 0) {
-        sh.out().text("usage: mod gov [thr <50..95> | budget <10..100>]\n");
+        sh.out().text(text(txt::mod_8));
         return;
       }
       if (!parse_dec(a.argv[3], 100u, percent) || percent < lo || percent > hi) {
-        sh.out().text(thr ? "mod gov: thr is refused outside 50..95 (percent of the block)\n" : "mod gov: budget is refused outside 10..100 (percent of the block)\n");
+        sh.out().text(thr ? text(txt::mod_9) : text(txt::mod_10));
         return;
       }
       if (thr) {
@@ -975,17 +1115,17 @@ void cmd_mod(shell::Shell& sh, const shell::Args& a) {
     }
     const audio::gov::Snapshot g = mv->governor().snapshot();
     static const char* const kKinds[] = {"none", "drop", "mute"};
-    sh.out().text("mod gov: recent worst render ").dec(g.worst).text(" cycles (").dec(audio::gov::tenths_of_block(g.worst) / 10u).text("%), without the modules ").dec(g.base).text(" (")
+    sh.out().text(text(txt::mod_11)).dec(g.worst).text(" cycles (").dec(audio::gov::tenths_of_block(g.worst) / 10u).text(text(txt::mod_12)).dec(g.base).text(" (")
         .dec(audio::gov::tenths_of_block(g.base) / 10u).text("%), threshold ").dec(g.threshold).text(" (").dec(audio::gov::tenths_of_block(g.threshold) / 10u).text("%), instance budget ")
         .dec(g.budget).text(" (").dec(audio::gov::tenths_of_block(g.budget) / 10u).text("%)\n");
-    sh.out().text("mod gov: new voices admitted ").dec(g.admitted).text(", notes dropped ").dec(g.drops).text(", refused while muted ").dec(g.refused).text(", instances muted ").dec(g.mutes)
+    sh.out().text(text(txt::mod_13)).dec(g.admitted).text(", notes dropped ").dec(g.drops).text(", refused while muted ").dec(g.refused).text(", instances muted ").dec(g.mutes)
         .text("; last ").text(kKinds[static_cast<unsigned>(g.last) % 3u]);
     if (g.last != audio::gov::Event::None) {
       sh.out().text(" on instrument ").dec(g.last_slot + 1u);
     }
     sh.out().nl();
   } else {
-    sh.out().text("usage: mod | mod load <name> | mod bind <1..64> <name> | mod note <1..64> <note> [vel] | mod off <1..64> | mod set <1..64> <id> <value> | mod gov [thr <50..95> | budget <10..100>] | mod notice [line]\n");
+    sh.out().text(text(txt::mod_14));
   }
 }
 
@@ -999,21 +1139,21 @@ void cmd_radio(shell::Shell& sh, const shell::Args& a) {
   }
   const appimg::RadioRetry verdict = a.argc == 2 ? appimg::radio_retry() : appimg::RadioRetry::NoRadio;
   if (a.argc == 2 && verdict == appimg::RadioRetry::NoRadio) {
-    sh.out().text("radio: this image has no radio\n");
+    sh.out().text(text(txt::radio_1));
     return;
   }
   char buf[kTextBuffer];
   const std::size_t n = appimg::radio_report(buf, sizeof buf);
   if (n == 0u) {
-    sh.out().text("radio: this image has no radio\n");
+    sh.out().text(text(txt::radio_1));
     return;
   }
   if (verdict == appimg::RadioRetry::Started) {
-    sh.out().text("radio: power-up started again from the reset; `radio` shows how it went\n");
+    sh.out().text(text(txt::radio_2));
   } else if (verdict == appimg::RadioRetry::TakeRunning) {
-    sh.out().text("radio: retry refused, a take from the radio is armed or recording (the reset would record silence); stop it first. State only:\n");
+    sh.out().text(text(txt::radio_3));
   } else if (verdict == appimg::RadioRetry::NotSelected) {
-    sh.out().text("radio: retry skipped, the radio is not the selected record source (select it on the Record screen first). State only:\n");
+    sh.out().text(text(txt::radio_4));
   }
   send(sh, n, buf);
 }
@@ -1052,16 +1192,16 @@ void run_inject(shell::Shell& sh, InjectParse parsed, const InjectRequest& r, co
     return;
   }
   if (g_tee == nullptr) {
-    sh.out().text("ERR no input: the app has not started\n");
+    sh.out().text(text(txt::run_inject_1));
     return;
   }
   if (!injection_allowed()) {
-    sh.out().text("ERR refused: an fw update is armed or running\n");
+    sh.out().text(text(txt::run_inject_2));
     return;
   }
   const Injector::Result result = g_injector.inject(r, uptime_ms32(), &inject_push, nullptr);
   if (result != Injector::Result::Ok) {
-    sh.out().text(result == Injector::Result::NoRoom ? "ERR too many releases pending, try again\n" : "ERR the input queue is full, try again\n");
+    sh.out().text(result == Injector::Result::NoRoom ? text(txt::run_inject_3) : text(txt::run_inject_4));
     return;
   }
   char line[shell::kLogTextMax + 1];  // the log: every injected input is marked as one (a person at the unit can tell it from a finger)
@@ -1088,13 +1228,13 @@ void run_inject(shell::Shell& sh, InjectParse parsed, const InjectRequest& r, co
 void cmd_key(shell::Shell& sh, const shell::Args& a) {
   InjectRequest r;
   const InjectParse p = parse_key(a.argc, a.argv, &appimg::button_code, r);
-  run_inject(sh, p, r, "key", "unknown button (a name like f1, play, shift, or 0..32)", "key <button> [tap|down|up|hold <ms>]   button by name (f1, play, shift ...) or 0..32");
+  run_inject(sh, p, r, "key", text(txt::key_1), text(txt::key_2));
 }
 
 void cmd_pad(shell::Shell& sh, const shell::Args& a) {
   InjectRequest r;
   const InjectParse p = parse_pad(a.argc, a.argv, r);
-  run_inject(sh, p, r, "pad", "pad is 0..47", "pad <0..47> [tap|down|up] [vel 1..127]");
+  run_inject(sh, p, r, "pad", "pad is 0..47", text(txt::pad_1));
 }
 
 // `enc accel [off | <t1> <t2> [gap_ms]]` (OS-AUDIT-28): the encoder acceleration in lists (app/enc_accel.h). Shows the numbers; with arguments sets them first (not saved: a reset goes back to the defaults).
@@ -1102,27 +1242,27 @@ void cmd_enc_accel(shell::Shell& sh, const shell::Args& a) {
   EncAccelRequest q;
   const InjectParse p = parse_enc_accel(a.argc, a.argv, q);
   if (p == InjectParse::Usage) {
-    sh.out().text("usage: enc accel [off | <t1> <t2> [gap_ms]]   x4 from t1 detents of a run, x8 from t2 (1..255), gap 5..250 ms (default 6 16 60)\n");
+    sh.out().text(text(txt::enc_accel_1));
     return;
   }
   if (p == InjectParse::Unknown) {
-    sh.out().text("ERR need 1 <= t1 <= t2 <= 255 and gap_ms 5..250\n");
+    sh.out().text(text(txt::enc_accel_2));
     return;
   }
   appimg::EncAccelNumbers n{};
   if (q.set) {
     n = appimg::EncAccelNumbers{q.on, q.t1, q.t2, q.gap_ms};
     if (!appimg::enc_accel_set(n)) {
-      sh.out().text("ERR no app: it has not started\n");
+      sh.out().text(text(txt::enc_accel_3));
       return;
     }
   }
   if (!appimg::enc_accel_get(n)) {
-    sh.out().text("ERR no app: it has not started\n");
+    sh.out().text(text(txt::enc_accel_3));
     return;
   }
   if (!n.on) {
-    sh.out().text("enc accel off (a row a detent)\n");
+    sh.out().text(text(txt::enc_accel_4));
     return;
   }
   sh.out().text("enc accel x4 from ").dec(n.t1).text(", x8 from ").dec(n.t2).text(" detents of a run, gap ").dec(n.gap_ms).text(" ms\n");
@@ -1135,7 +1275,7 @@ void cmd_enc(shell::Shell& sh, const shell::Args& a) {
   }
   InjectRequest r;
   const InjectParse p = parse_enc(a.argc, a.argv, r);
-  run_inject(sh, p, r, "encoder", "n is -64..64, not 0", "enc <n>   n detents, -64..64, not 0 (minus = counter-clockwise)");
+  run_inject(sh, p, r, "encoder", "n is -64..64, not 0", text(txt::enc_1));
 }
 
 constexpr std::size_t kStateBuffer = 384;  // the longest line is about 310 characters (msg up to 48, sel up to 40)
@@ -1144,6 +1284,106 @@ void cmd_state(shell::Shell& sh, const shell::Args&) {
   char buf[kStateBuffer];
   const std::size_t n = appimg::state_line(buf, sizeof buf);
   sh.out().text(buf, n).nl();
+}
+
+// OS-BUG-PLAYSTOP: `diag trans` — the transport's cold counters (every refusal reason of SeqTransport::play()/stop()) and the app's and the sequencer's `playing` flags.
+void cmd_trans(shell::Shell& sh, const shell::Args&) {
+  char buf[kStateBuffer];
+  const std::size_t n = appimg::transport_line(buf, sizeof buf);
+  sh.out().text(buf, n).nl();
+}
+
+// OS-MTC A3: `diag mtc` is the time code generator's state; `diag mtc at <order> <step>` the song time of a step by the map (OS-MTC A1) and its cost in cycles (the worst walk of the HIL step).
+void cmd_mtc(shell::Shell& sh, const shell::Args& a) {
+  std::uint32_t order = 0;
+  std::uint32_t step = 0;
+  const bool at = a.argc == 4 && same(a.argv[1], "at") && parse_dec(a.argv[2], 254u, order) && parse_dec(a.argv[3], 127u, step);
+  if (a.argc != 1 && !at) {
+    sh.out().text(text(txt::mtc_1));
+    return;
+  }
+  char buf[kStateBuffer];
+  const std::size_t n = appimg::mtc_line(buf, sizeof buf, at, order, step);
+  sh.out().text(buf, n).nl();
+}
+
+// OS-BUG-SCRATCH: `diag scratch` prints the master scratch's tuning (inertia in ms, the head's reach past the last count, the gate's slope, the anti-alias low-pass); `diag scratch <inertia_ms 5..500>
+// <ahead 0..4> <gate 1..64> <aa 0|1>` sets it. Session only (a reset goes back to the defaults). MAIN context is the single writer (MasterScratch::set_tuning: relaxed atomic aligned 32-bit stores), the render reads.
+void put_hundredths(audio::diag::Text& t, float v) {
+  const std::uint32_t h = static_cast<std::uint32_t>(v * 100.0f + 0.5f);
+  t.dec(h / 100u).chr('.').dec((h / 10u) % 10u).dec(h % 10u);
+}
+
+void cmd_scratch(shell::Shell& sh, const shell::Args& a) {
+  o3os::audio::MasterScratch& s = audio_engine().graph().scratch();
+  if (a.argc != 1) {
+    float ms = 0.0f;
+    float ahead = 0.0f;
+    float gate = 0.0f;
+    std::uint32_t aa = 0;
+    if (a.argc != 5 || !parse_value(a.argv[1], ms) || !parse_value(a.argv[2], ahead) || !parse_value(a.argv[3], gate) || !parse_dec(a.argv[4], 1u, aa) || ms < 5.0f || ms > 500.0f || ahead < 0.0f ||
+        ahead > 4.0f || gate < 1.0f || gate > 64.0f) {
+      sh.out().text(text(txt::scratch_1));
+      return;
+    }
+    s.set_tuning(ms, ahead, gate, aa != 0u);
+  }
+  char buf[kTextBuffer];
+  audio::diag::Text t(buf, sizeof buf);
+  t.str("scratch: inertia ");
+  put_hundredths(t, s.inertia_ms());
+  t.str(" ms, ahead ");
+  put_hundredths(t, s.ahead());
+  t.str(" counts, gate ");
+  put_hundredths(t, s.gate_slope());
+  t.str(", aa ").dec(s.aa() ? 1u : 0u).str(" (not saved)").nl();
+  send(sh, t.size(), buf);
+}
+
+using PtfxLineFn = std::size_t (*)(unsigned n, unsigned i, char* out, std::size_t cap);
+
+// The lines of one `ptfx` answer, line 0 up to `max` or the first empty one (a function's end).
+void ptfx_print(shell::Shell& sh, unsigned max, unsigned n, PtfxLineFn line_fn) {
+  char line[160];
+  for (unsigned i = 0; i < max; ++i) {
+    const std::size_t len = line_fn(n, i, line, sizeof line);
+    if (len == 0u) {
+      break;
+    }
+    sh.out().text(line, len);
+  }
+}
+
+void ptfx_error(shell::Shell& sh, const char* why) { sh.out().text("ERR ptfx: ").text(why).text("\n"); }
+
+// OS-CEPTFX S2c / S3b: `ptfx quarantine` (a read of the boot's quarantine set: at most 16 ids and the closing line, no card access); `ptfx list` scans the card's Effects folder and lists it;
+// `ptfx info <n>` is plugin n's header and parameters; `ptfx run <n>` runs it over the sample in view and its selection (the strip and the Jobs line show the progress; one undo step).
+void cmd_ptfx(shell::Shell& sh, const shell::Args& a) {
+  std::uint32_t n = 0;
+  if (a.argc == 2 && same(a.argv[1], "quarantine")) {  // 16 ids and the closing line: the bound is the set's, never reached by a longer one
+    ptfx_print(sh, 18u, 0u, [](unsigned, unsigned i, char* out, std::size_t cap) { return appimg::ptfx_line(i, out, cap); });
+  } else if (a.argc == 2 && same(a.argv[1], "list")) {
+    if (const char* why = appimg::ptfx_scan()) {
+      ptfx_error(sh, why);
+      return;
+    }
+    ptfx_print(sh, 130u, 0u, [](unsigned, unsigned i, char* out, std::size_t cap) { return appimg::ptfx_list_line(i, out, cap); });  // 128 plugins and the closing line
+  } else if (a.argc == 3 && same(a.argv[1], "info") && parse_dec(a.argv[2], 127u, n)) {
+    ptfx_print(sh, 14u, n, &appimg::ptfx_info_line);  // the header and up to 12 parameters
+  } else if (a.argc == 3 && same(a.argv[1], "run") && parse_dec(a.argv[2], 127u, n)) {
+    if (const char* why = appimg::ptfx_run(n)) {
+      sh.out().text("ERR ptfx: ").text(why);
+      // OS-BUG-PTFXREADY: which of the checks said NOT READY. Only for that refusal: any other one (quarantined, plugin too big) comes before the job and would show a stale reason.
+      if (const char* detail = same(why, "PLUGIN NOT READY") ? appimg::ptfx_run_why() : nullptr) {
+        sh.out().text(" (").text(detail).text(")");
+      }
+      sh.out().text("\n");
+    } else {
+      sh.out().text("ptfx run: started\n");
+    }
+  } else {
+    sh.out().text(text(txt::ptfx_1));
+  }
 }
 
 void cmd_leds(shell::Shell& sh, const shell::Args&) {
@@ -1246,11 +1486,11 @@ void cmd_shot(shell::Shell& sh, const shell::Args& a) {
     --argc;
   }
   if (argc > 3 || (argc >= 2 && !same(a.argv[1], "565") && !same(a.argv[1], "8888")) || (argc == 3 && (!parse_dec(a.argv[2], 4095u, w) || w == 0u))) {
-    sh.out().text("usage: shot [565|8888 [w]] [pclk0]\n");
+    sh.out().text(text(txt::shot_1));
     return;
   }
   if (appimg::screenshot_active()) {  // OS-SCREENSHOT: the same RAM_G region
-    sh.out().text("ERR shot: a screenshot is being saved\n");
+    sh.out().text(text(txt::shot_2));
     return;
   }
   g_shot_port.stop_clock(pclk0);
@@ -1262,10 +1502,10 @@ void cmd_shot(shell::Shell& sh, const shell::Args& a) {
   std::uint32_t region_bytes = 0;
   appimg::shot_region(region, region_bytes);
   if (!g_shot.start(params, region, region_bytes)) {
-    sh.out().text("ERR shot: the RAM_G region cannot hold bands of that width (try a smaller w)\n");
+    sh.out().text(text(txt::shot_3));
     return;
   }
-  log("shot: started by the console");
+  log(text(txt::shot_4));
   sh.start_stream(&shot_stream, nullptr, true);
 }
 
@@ -1278,7 +1518,7 @@ void cmd_voices(shell::Shell& sh, const shell::Args&) {
 }
 
 void cmd_reset(shell::Shell& sh, const shell::Args&) {
-  sh.out().text("resetting (SYSRESETREQ)\n");
+  sh.out().text(text(txt::reset_1));
   sh.out().flush();
   // OS-OUTON: the outputs are open from boot, so the way out is quiet: the amplifier key first, then the codec's outputs and its DAC (two register writes, no ramp to wait for: the DAC
   // ramps down by itself in the codec while the packets below leave), then the reset (reset_chip drops the key again, a no-op here). Idempotent, and plain when the audio never started.
@@ -1304,24 +1544,36 @@ void bench_emit(void* ctx, const char* line, std::size_t n) {
 }
 
 void bench_usage(shell::Shell& sh) {
-  sh.out().text("usage: bench <kernel|all> [blocks 1..4096, default 64] [alias|direct|sram]   |   bench disk reset|clean\n");
+  sh.out().text(bench_text(btxt::b_bench_usage_1));
   for (const bench::KernelInfo& k : bench::kKernelInfo) {
     sh.out().text("  ").text(k.name);
     for (std::size_t len = std::strlen(k.name); len < 13u; ++len) {
       sh.out().chr(' ');
     }
-    sh.out().text(k.help).nl();
+    sh.out().text(bench_text(k.help)).nl();
   }
 }
 
 void cmd_bench(shell::Shell& sh, const shell::Args& a) {
   if (a.argc == 3 && same(a.argv[1], "disk") && same(a.argv[2], "clean")) {  // OS-USBDISK U1d (Q14): removes the write arm's scratch file; a card the Tracker owns only
+#if O3OS_BENCH_ARCHIVE
     bench::disk_clean(&bench_emit, &sh);
+#else
+    // OS-FLASHDIET B1: the disk bench is archived out of this image.
+    char buf[80];
+    sh.out().text(buf, bench::format_archived("disk", buf, sizeof buf));
+#endif
     return;
   }
   if (a.argc == 3 && same(a.argv[1], "disk") && same(a.argv[2], "reset")) {  // OS-USBDISK U1d: opens the window `bench disk` reports (the USB interrupt and the MSC pump passes)
+#if O3OS_BENCH_ARCHIVE
     bench::disk_reset();
-    sh.out().text("BENCH disk window opened (bench disk reads it; within 60 s)\n");
+    sh.out().text(bench_text(btxt::b_bench_1));
+#else
+    // OS-FLASHDIET B1: the disk bench is archived out of this image.
+    char buf[80];
+    sh.out().text(buf, bench::format_archived("disk", buf, sizeof buf));
+#endif
     return;
   }
   if (a.argc < 2 || a.argc > 4) {
@@ -1357,7 +1609,7 @@ void cmd_bench(shell::Shell& sh, const shell::Args& a) {
   sh.out().text("BENCH done\n");
 }
 #else
-void cmd_bench(shell::Shell& sh, const shell::Args&) { sh.out().text("ERR bench is not in this image (build with -DO3OS_BENCH=ON)\n"); }
+void cmd_bench(shell::Shell& sh, const shell::Args&) { sh.out().text(text(txt::bench_1)); }
 #endif
 
 // `cache [on|off|inv]` (OS-PERF3, src/cache.cpp, lmem.h).
@@ -1374,35 +1626,35 @@ void cmd_cache(shell::Shell& sh, const shell::Args& a) {
 #if O3OS_BENCH
       bench::check_coherence(&bench_emit, &sh);  // OS-PERF3: the single-alias rule on the unit (bench.cpp)
 #else
-      sh.out().text("ERR cache check is not in this image (build with -DO3OS_BENCH=ON)\n");
+      sh.out().text(text(txt::cache_1));
 #endif
       return;
     } else {
-      sh.out().text("usage: cache [on|off|inv|check]\n");
+      sh.out().text(text(txt::cache_2));
       return;
     }
     if (!ok) {
-      sh.out().text("ERR the cache command did not finish\n");
+      sh.out().text(text(txt::cache_3));
     }
   } else if (a.argc != 1) {
-    sh.out().text("usage: cache [on|off|inv|check]\n");
+    sh.out().text(text(txt::cache_2));
     return;
   }
   char buf[160];
   audio::diag::Text t(buf, sizeof buf);
   t.str("code cache ").str(cache::enabled() ? "on" : "off").str("  PCCCR ").hex32(cache::control()).str("  PCCRMR ").hex32(cache::region_modes());
-  t.str("  (8 KiB, 2 ways, 16 B lines; flash and the 0x0800_0000 SDRAM alias only)\n");
+  t.str(text(txt::cache_4));
   send(sh, t.size(), buf);
 }
 
 // `power ...` (OS-POWER P1, power/src/power_host_mk66.cpp): the Power switch and the shutdown. The stages are in the diag log as `power: <stage> +N ms` (`log` right after `power off`: the CDC ends at USB off).
 const char* power_refusal_text(power::Refusal why) {
   switch (why) {
-    case power::Refusal::Firmware: return "a firmware update is running";
-    case power::Refusal::Export: return "an export is running (stop it first)";
-    case power::Refusal::Disk: return "the USB disk may be written by the computer (eject it first)";
+    case power::Refusal::Firmware: return text(txt::power_refusal_text_1);
+    case power::Refusal::Export: return text(txt::power_refusal_text_2);
+    case power::Refusal::Disk: return text(txt::power_refusal_text_3);
     case power::Refusal::Running: return "already powering off";
-    case power::Refusal::Held: return "Power is down (or reads pressed: check the polarity with power)";
+    case power::Refusal::Held: return text(txt::power_refusal_text_4);
     case power::Refusal::None: break;
   }
   return "";
@@ -1416,19 +1668,19 @@ void cmd_power(shell::Shell& sh, const shell::Args& a) {
   }
   if (a.argc == 2 && same(a.argv[1], "press")) {
     power::device::inject(power::Inject::Pressed);
-    log("power: switch held by the console");
-    sh.out().text("power: the console holds the switch down (`power release` lets go, `power pin` reads the pin again)\n");
+    log(text(txt::power_1));
+    sh.out().text(text(txt::power_2));
     return;
   }
   if (a.argc == 2 && same(a.argv[1], "release")) {
     power::device::inject(power::Inject::Released);
-    log("power: switch released by the console");
-    sh.out().text("power: the console holds the switch up (`power pin` reads the pin again)\n");
+    log(text(txt::power_3));
+    sh.out().text(text(txt::power_4));
     return;
   }
   if (a.argc == 2 && same(a.argv[1], "pin")) {
     power::device::inject(power::Inject::Real);
-    sh.out().text("power: the hold reads the pin\n");
+    sh.out().text(text(txt::power_5));
     return;
   }
   if ((a.argc == 2 || a.argc == 3) && same(a.argv[1], "off") && (a.argc == 2 || same(a.argv[2], "dry"))) {
@@ -1438,16 +1690,16 @@ void cmd_power(shell::Shell& sh, const shell::Args& a) {
       sh.out().text("ERR power: ").text(power_refusal_text(why)).nl();
       return;
     }
-    sh.out().text(dry ? "power: off dry: the stages 0 to E, USB off, the lights out, then a restart after Power is released\n"
-                      : (power::device::vlpr_off() ? "power: off: the stages 0 to F, USB off, the lights out, then the VLPR off after Power is released (a press boots the unit)\n"
-                                                   : "power: off: the stages 0 to F, USB off, the lights out, then a restart after Power is released (built without the VLPR off)\n"));
+    sh.out().text(dry ? text(txt::power_6)
+                      : (power::device::vlpr_off() ? text(txt::power_7)
+                                                   : text(txt::power_8)));
     return;
   }
-  sh.out().text("usage: power [press|release|pin|off [dry]]\n");
+  sh.out().text(text(txt::power_9));
 }
 
-// Names and help come from command_table.h by enumerator; only the handler is bound here.
-constexpr shell::Command bind(Cmd c, shell::CommandFn run) { return shell::command(info(c).name, info(c).help, run); }
+// Names come from command_table.h by enumerator; only the handler is bound here. The help is a text id there: `help` is not read from the shell's table (cmd_help's help_of() is the one reader).
+constexpr shell::Command bind(Cmd c, shell::CommandFn run) { return shell::command(info(c).name, nullptr, run); }
 constexpr shell::Command kCommands[] = {
     bind(Cmd::Help, &cmd_help),   bind(Cmd::Version, &cmd_version), bind(Cmd::Stage, &cmd_stage), bind(Cmd::Cpu, &cmd_cpu),
     bind(Cmd::Mem, &cmd_mem),     bind(Cmd::Crash, &cmd_crash),     bind(Cmd::Usb, &cmd_usb),     bind(Cmd::Log, &cmd_log),
@@ -1464,6 +1716,10 @@ constexpr shell::Command kCommands[] = {
     bind(Cmd::Guard, &cmd_guard),
     bind(Cmd::Ins, &cmd_ins),
     bind(Cmd::Status, &cmd_status),
+    bind(Cmd::Trans, &cmd_trans),
+    bind(Cmd::Mtc, &cmd_mtc),
+    bind(Cmd::Ptfx, &cmd_ptfx),
+    bind(Cmd::Scratch, &cmd_scratch),
 };
 static_assert(sizeof(kCommands) / sizeof(kCommands[0]) == static_cast<std::size_t>(Cmd::Count), "every command has a handler");
 

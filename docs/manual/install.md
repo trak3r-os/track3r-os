@@ -17,7 +17,7 @@ A release (GitHub, "Releases") has two files:
 - `track3r-os-<version>.ptf`: the update file. It is the device image in Intel HEX form under a `.ptf` name, which is what the Tracker's bootloader flashes. Its name never starts with `Polyend`, so it cannot be mistaken for an official file. For a first install through the reset button you rename your copy on the card (section 1).
 - `SHA256SUMS`: the checksum of the update file. Check the download before using it: `sha256sum -c SHA256SUMS`. The release notes also give the CRC-32 that `o3console.py --update --crc` asks for.
 
-The optional starter content (samples, wavetables, songs, starter projects, the bundled apps, licences) is a separate zip, `track3r-os-<version>.zip`. It is not part of this release. When you have it, unpack it into the root of the card. Its `README.txt` says what goes where.
+The optional starter content (samples, wavetables, songs, starter projects, the bundled apps, effect modules and sine instrument, the factory presets, the thirteen Sample Editor plugins in `Effects/`, licences) is a separate zip, `track3r-os-<version>.zip`. It is not part of this release. When you have it, unpack it into the root of the card. Its `README.txt` says what goes where. Its `modules/importers/` folder holds `tracker.tmod`, the importer module the firmware loads from the card to read MOD, S3M and OctaMED files on the File screen's IMPORT: without it an import of a module says **NO IMPORTER** and changes nothing, so keep the file on the card.
 
 The same image shows its version in Config, INFO (BUILD ID, for example `v0.5.0 (0271ab60bea6)`), on the boot screen, and in the `version` command of the USB `diag` console.
 

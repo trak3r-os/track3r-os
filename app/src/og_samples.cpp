@@ -4,6 +4,7 @@
 #include <o3os/app/wave_math.h>
 
 #include <o3os/core/fast_math.h>
+#include <o3os/audio/wt_contour.h>  // OS-CEWTENV W3a: put_mod makes the contour a WT slot names (wt_make_bound) before the descriptor is staged
 #include <o3os/formats/og.h>
 #include <o3os/model/params.h>
 
@@ -139,10 +140,13 @@ unsigned live_loop_moves(const model::Instrument& before, const model::Instrumen
 
 
 audio::SampleDesc make_sample_desc(const model::Instrument& in, const std::int16_t* pcm, std::uint32_t frames, bool* approximated, std::int16_t* slice_table,
-                                   audio::LevelLaw law, const std::int16_t* side) noexcept {
+                                   audio::LevelLaw law, const std::int16_t* side, audio::FilterMod* grlen) noexcept {
   audio::SampleDesc d;  // length 0: silent
   if (approximated != nullptr) {
     *approximated = false;
+  }
+  if (grlen != nullptr) {
+    *grlen = audio::FilterMod{};  // OS-CEWTENV W5: no length destination unless the instrument is granular with slot 3 bit 0x02
   }
   const model::SamplerParams& p = in.sampler;
   if (pcm == nullptr || frames == 0u) {
@@ -153,6 +157,9 @@ audio::SampleDesc make_sample_desc(const model::Instrument& in, const std::int16
       unsigned from = 0;
       unsigned to = 0;
       slice_points(p, p.selected_slice, from, to);
+      if (in.slice_thru != 0u) {
+        to = 65535u;  // OS-CEPLAYTHRU P2: play through: the slice runs to the end of the sample, not to the next slice point (tracker-ce's slicePlayThru, F4)
+      }
       const std::uint32_t start = at_point(static_cast<std::uint16_t>(from), frames);
       std::uint32_t end = at_point(static_cast<std::uint16_t>(to), frames);
       if (end < start) {
@@ -170,6 +177,7 @@ audio::SampleDesc make_sample_desc(const model::Instrument& in, const std::int16
       d.data = pcm;
       d.length = frames;
       d.beat_slice = true;
+      d.slice_thru = in.slice_thru != 0u ? 1u : 0u;  // OS-CEPLAYTHRU P2: beat_slice_span ends a slice at the sample end with it (the Slice FX, the chop pads and the Amiga voices follow)
       const unsigned n = slice_count_of(p);
       if (n != 0u && slice_table != nullptr) {
         for (unsigned i = 0; i <= n; ++i) {
@@ -243,21 +251,23 @@ audio::SampleDesc make_sample_desc(const model::Instrument& in, const std::int16
   // engine's ring: VoicePool::apply_param) and this rebuild of the descriptor from the project agree field for field (OS-LIVEP). 1.2+ law up to +24 dB (the voices saturate): 50 is unity
   // under it, 100 under the 1.1.14 law.
   namespace ip = audio::inst_param;
-  const auto put = [&d, law](unsigned field, float value) { (void)audio::apply_instrument_param(d, field, value, law); };
-  put(ip::Volume, p.volume);
-  put(ip::Tune, p.tune);
-  put(ip::FineTune, p.fine_tune);
-  put(ip::Panning, p.panning);
-  put(ip::DelaySend, p.delay_send);   // OS-SENDFX: what the note's track sends to the delay and the reverb (Engine: Graph::set_voice_sends)
-  put(ip::ReverbSend, p.reverb_send);
-  put(ip::Glide, p.glide);            // OS-IFX1: the glide time (ms), the overdrive and the bit depth (voices.h GLIDE, OVERDRIVE, BIT DEPTH)
-  put(ip::Overdrive, p.overdrive);
-  put(ip::BitDepth, p.bit_depth);
+  const auto put = [law](audio::SampleDesc& dd, unsigned field, float value) { (void)audio::apply_instrument_param(dd, field, value, law); };
+  put(d, ip::Volume, p.volume);
+  put(d, ip::Tune, p.tune);
+  put(d, ip::FineTune, p.fine_tune);
+  put(d, ip::Panning, p.panning);
+  put(d, ip::DelaySend, p.delay_send);   // OS-SENDFX: what the note's track sends to the delay and the reverb (Engine: Graph::set_voice_sends)
+  put(d, ip::ReverbSend, p.reverb_send);
+  put(d, ip::Glide, p.glide);            // OS-IFX1: the glide time (ms), the overdrive and the bit depth (voices.h GLIDE, OVERDRIVE, BIT DEPTH)
+  put(d, ip::Overdrive, p.overdrive);
+  put(d, ip::BitDepth, p.bit_depth);
   // The envelope fields in the order of ip::EnvEnable ... ip::EnvRelease; the descriptor's `lfo` flag is set first (an LFO slot cannot be enabled as an ADSR).
-  const auto put_envelope = [&put](unsigned slot, const model::Envelope& e) {
-    const float values[ip::kEnvelopeFields] = {e.enable != 0u ? 1.0f : 0.0f, e.amount, static_cast<float>(e.attack), static_cast<float>(e.decay), e.sustain, static_cast<float>(e.release)};
+  const auto put_envelope = [&put](audio::SampleDesc& dd, unsigned slot, const model::Envelope& e) {
+    // OS-CEWTENV W3b (spec F2, A8): slot 3's enable byte is a bit mask (0x01 the wavetable position, 0x02 the granular length): the byte goes down as it is and apply_instrument_param takes bit 0x01; the other slots read non-zero as on.
+    const float enable = slot == kSlotWtPos ? static_cast<float>(e.enable) : (e.enable != 0u ? 1.0f : 0.0f);
+    const float values[ip::kEnvelopeFields] = {enable, e.amount, static_cast<float>(e.attack), static_cast<float>(e.decay), e.sustain, static_cast<float>(e.release)};
     for (unsigned f = 0; f < ip::kEnvelopeFields; ++f) {
-      put(ip::envelope(slot, f), values[f]);
+      put(dd, ip::envelope(slot, f), values[f]);
     }
   };
   // The amp envelope, slot 0 (voices.h AMP ENVELOPE): an ADSR when its loop byte is clear, else (an LFO-based envelope) a tremolo of lfo[0]'s shape, rate (the
@@ -266,24 +276,36 @@ audio::SampleDesc make_sample_desc(const model::Instrument& in, const std::int16
   d.env.lfo = e.loop != 0u;
   d.env.delay = audio::env_units(e.delay);
   d.env.hold = audio::env_units(e.hold);  // 0 from an OG file (the readers drop it): one group at full level
-  put_envelope(0, e);
+  put_envelope(d, 0, e);
   audio::FilterMod& am = d.amp_mod;
   am.lfo = e.loop != 0u;
   am.shape = p.lfo[0].shape;
   am.rate = p.lfo[0].speed;
   am.amount = p.lfo[0].amount;
   am.lfo_amount = p.lfo[0].amount;
+  // OS-CEWTENV W4 (law F7): the amp slot's loop byte 2 (WT Env) or 3 (WT LFO), tested exactly (only 2 and 3 exist), replaces the ADSR / tremolo: the kind, the contour (`shape`, the
+  // slot's lfo[0] shape, kept verbatim), the warps, the sustain, and for the WT Env the duration (the slot's decay in ms, 1 or less: 1,000) and the release (ms, below 50: 50). The
+  // WT LFO's depth is `amount` (lfo[0]'s, above). The warps are baked here as the other slots' are (W3c: the id goes in `delay`, unused by a WT kind; wt_bake makes the contour too, before this
+  // descriptor is staged). Loop 0, 1 or any other byte: today's mapping.
+  if (am.kind != audio::kFmodNone && (e.loop == 2u || e.loop == 3u)) {
+    am.kind = e.loop == 2u ? audio::kFmodWtEnv : audio::kFmodWtLfo;
+    am.wt_bend = p.lfo[0].wt_bend;
+    am.wt_sust = p.lfo[0].wt_sust;
+    am.decay = e.decay;
+    am.release = e.release;
+    am.delay = static_cast<std::uint16_t>(audio::wt_bake(p.lfo[0].shape, p.lfo[0].wt_bend));
+  }
   // The filter (voices.h FILTER): the instrument's type, cutoff and resonance as stored; a disabled one is bypassed by the voices.
-  put(ip::FilterType, p.filter_type);
-  put(ip::FilterEnable, p.filter_enable);
-  put(ip::Cutoff, p.cutoff);
-  put(ip::Resonance, p.resonance);
+  put(d, ip::FilterType, p.filter_type);
+  put(d, ip::FilterEnable, p.filter_enable);
+  put(d, ip::Cutoff, p.cutoff);
+  put(d, ip::Resonance, p.resonance);
   // The modulators of slots 2 (the cutoff, voices.h FILTER MODULATION), 1 (the pan) and 5 (the finetune): enabled, the slot is an LFO when its loop byte is set (an LFO-based envelope:
   // shape, rate and amount from lfo[slot]), else an ADSR; the voices hold every field to range. The instrument's lfo[slot] shape and amount go in whatever the modulator is: the Filter LFO FX
   // (35) plays the cutoff's with its own rate (OS-FU2, voices.h FILTER LFO FX).
-  const auto put_mod = [&](unsigned slot, audio::FilterMod& m) {
+  const auto put_mod = [&](audio::SampleDesc& dd, unsigned slot, audio::FilterMod& m, const model::Envelope* me_override = nullptr) {
     const model::Lfo& l = p.lfo[slot];
-    const model::Envelope& me = p.envelope[slot];
+    const model::Envelope& me = me_override != nullptr ? *me_override : p.envelope[slot];
     m.shape = l.shape;
     m.lfo_amount = l.amount;
     m.lfo = me.loop != 0u;
@@ -293,16 +315,39 @@ audio::SampleDesc make_sample_desc(const model::Instrument& in, const std::int16
     if (m.lfo) {
       m.amount = l.amount;
     }
-    put_envelope(slot, me);
+    put_envelope(dd, slot, me);
+    // OS-CEWTENV W3a: a WT slot (loop 2 WT Env, 3 WT LFO — tested exactly: only 2 and 3 exist, a garbage loop byte is not a WT slot) maps to the WT kinds, with
+    // the contour, the warps and the sustain; the main loop makes the contour (wt_make_bound) before this descriptor is staged, so the render never reads an unmade one. W3b: every slot
+    // that goes through put_mod (cutoff, pan, finetune, the wavetable's and the granular position); the amp slot is not one of them, it has its own mapping above (W4).
+    if ((me.loop == 2u || me.loop == 3u) && m.kind != audio::kFmodNone) {
+      m.kind = me.loop == 2u ? audio::kFmodWtEnv : audio::kFmodWtLfo;
+      m.wt_bend = l.wt_bend;
+      m.wt_sust = l.wt_sust;
+      // OS-CEWTENV W3c (Q3 a): the warps are applied here, once: the contour is made and its warped copy baked (audio::wt_bake: the id goes in `delay`, which a WT kind does not use as an
+      // ADSR delay; 0 when there is no warp, no pool or it is full, and the render then applies the warps live). The main loop makes both before the descriptor is staged.
+      m.delay = static_cast<std::uint16_t>(audio::wt_bake(l.shape, l.wt_bend));
+    }
   };
-  put_mod(kSlotCutoff, d.filter.mod);
-  put_mod(kSlotPan, d.pan_mod);
-  put_mod(kSlotFinetune, d.tune_mod);
+  put_mod(d, kSlotCutoff, d.filter.mod);
+  put_mod(d, kSlotPan, d.pan_mod);
+  put_mod(d, kSlotFinetune, d.tune_mod);
   // OS-GRAN: the position modulator, slot 3 for a wavetable (more than one window) and slot 4 for a granular instrument: one descriptor.
   if (d.granular) {
-    put_mod(kSlotGranPos, d.pos_mod);
+    put_mod(d, kSlotGranPos, d.pos_mod);
+    // OS-CEWTENV W5 (spec F2): on a granular instrument slot 3's enable bit 0x02 is the grain LENGTH destination (bit 0x01 is the wavetable position, meaningless here). Its source is built
+    // like the other slots', through apply_instrument_param on a scratch wavetable descriptor (where slot 3 lands in a FilterMod), with the enable taken from bit 0x02; it goes to the pool's
+    // grlen_bind() array with set_sample()/stage_sample(), not into this descriptor (SRAM_U has no room for another FilterMod a slot).
+    if (grlen != nullptr) {
+      model::Envelope e3 = p.envelope[kSlotWtPos];
+      e3.enable = (e3.enable & 2u) != 0u ? std::uint8_t{1u} : std::uint8_t{0u};
+      audio::SampleDesc sc{};
+      sc.wt_size = 32;     // a scratch wavetable: apply_instrument_param's slot 3 writes its pos_mod
+      sc.wt_windows = 2;
+      put_mod(sc, kSlotWtPos, sc.pos_mod, &e3);
+      *grlen = sc.pos_mod;
+    }
   } else if (d.wt_size != 0u && d.wt_windows > 1u) {
-    put_mod(kSlotWtPos, d.pos_mod);
+    put_mod(d, kSlotWtPos, d.pos_mod);
   }
   // OS-STEREO (c): S is at `side` (the bank's block holds M then S, so side = pcm + even(frames)): the instrument's flag AND S present, for a mode that plays forward (the voices drop it for the rest, set_sample).
   if (side != nullptr && in.stereo != 0u && side > pcm && !d.granular && d.wt_size == 0u && d.loop_mode == 0u && d.length != 0u) {
@@ -523,9 +568,10 @@ void OgSampleLoader::bind(std::uint8_t slot, std::uint32_t frames, std::uint32_t
     return;
   }
   bool approximated = false;
+  audio::FilterMod grlen{};  // OS-CEWTENV W5: the granular length source goes with the descriptor
   audio::SampleDesc desc =
       in != nullptr ? make_sample_desc(*in, arena_ + used_, frames, &approximated, table_samples != 0u ? arena_ + used_ + block : nullptr, law_,
-                                           side ? arena_ + used_ + pcm_samples : nullptr)
+                                           side ? arena_ + used_ + pcm_samples : nullptr, &grlen)
          : audio::SampleDesc{};
   if (desc.length == 0u) {
     settle(slot, SampleProblem::Unusable);
@@ -537,7 +583,7 @@ void OgSampleLoader::bind(std::uint8_t slot, std::uint32_t frames, std::uint32_t
   if (bank_ != nullptr) {
     desc.engine = bank_->engine_for(slot, *in);  // OS-BUG-MODENGINE: the instrument's saved engine (or its AUTO rule) is the load's, as rebind_now gives it
   }
-  voices_->set_sample(slot, desc);
+  voices_->set_sample(slot, desc, desc.granular ? &grlen : nullptr);  // OS-CEWTENV W5: the granular length source (slot 3 bit 0x02) goes with the descriptor
   if (bank_ != nullptr) {
     bank_->adopt(slot, arena_ + used_, frames, block, side ? arena_ + used_ + pcm_samples : nullptr);  // (OS-ARENA-RECLAIM: the slot owns its block; a later load reuses its room)
   }

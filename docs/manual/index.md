@@ -16,7 +16,7 @@ Written by one cheap-model session per chapter, from the rules in `.claude/skill
 | [Cheat sheet](cheat_sheet.md) | the keys on one page: global keys, Pattern editing, the Shift combinations, one line per screen | `panel.md`, `pattern.md`, `instrument.md`, `sample_load.md`, `mixer.md`, `file.md` |
 | [Pattern](pattern.md) | step editing, WATCH / STEP / LIVE recording, pads, TOOLS | `pattern.md` |
 | [Effects in the pattern](fx.md) | the Fx column: effects, their values, the FX list | `pattern.md` |
-| [Fill and tools](pattern_tools.md) | the Fill dialog, and the TOOLS list of apps | `pattern.md` |
+| [Fill and tools](pattern_tools.md) | the Fill dialog, and the TOOLS menu | `pattern.md` |
 | [Export](export.md) | WAV files of the song, a pattern, a block and stems; OG PROJECT (experimental) | `file.md`, `pattern.md` |
 | Song | order list, pattern names | `song.md` |
 | Instrument | sample, MIDI and module instruments, play modes, envelopes, LFO | `instrument.md` |
@@ -33,6 +33,7 @@ Written by one cheap-model session per chapter, from the rules in `.claude/skill
 | [App pages](module_app.md) | what every app page shares: the frame, `F8` BACK, `Play`, the help page | `module_app.md` |
 | [TB-303, FM and Chip: new parameters](module-sounds.md) | the TB-303's MODS page, FM's sixteen algorithms and wide Detune, the Chip's learnable wave and duty | `modules.md` (`QA-MOD-140` to `QA-MOD-156`) |
 | [Step FX on module instruments](module-instrument-fx.md) | which FX a module instrument obeys (short section, to be folded into Instrument and Pattern) | `modules.md` (`QA-MOD-099`) |
+| [Insert effects](insert_effects.md) | the Fold, Env Filter, Phaser and Comp track inserts | insert_effects.md |
 | Config | MIDI, display, SD, USB, pattern settings | `config.md` |
 | [Input test](input_test.md) | the hidden screen that counts every key, pad and turn | `input_test.md` |
 | [Computer tools](computer_tools.md) | the USB console app on a computer (`o3console`): connect, take screenshots, send and install firmware through the documented `fw` path, read the diagnostics (`diag cpu`, `mem`, `sd` ...), inject keys; also in the LLM guide, so an assistant or a tool can drive the unit | `platform/mk66/tools/` (`o3console.py`, `o3hil.py`, `o3audio.py`), `usb/include/.../command_table.h`, `docs/guides/` |

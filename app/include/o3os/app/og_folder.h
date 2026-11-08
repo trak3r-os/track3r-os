@@ -73,6 +73,9 @@ struct OgLoadReport {
   std::uint32_t instruments_superseded = 0;  // an .mti skipped because a .pti of the same slot was there
   std::uint32_t pcm_frames = 0;          // frames the .pti files declare: not loaded by this loader (og_samples.h loads them)
   std::uint32_t files_ignored = 0;       // entries of patterns/ and instruments/ that are not files of those kinds
+  std::uint32_t micromoves_dropped = 0;  // v6 micromove values with no FX column free for them, or with Random value 16 in the other one (OS-CEPAT A10)
+  std::uint32_t values_clamped = 0;      // v6 volume values above 100, read as full volume
+  std::uint32_t ce_fx_cleared = 0;       // OG FX ids 75..127, cleared to (none, 0) by the id map of OS-CEPAT 3.1
   std::uint32_t bytes_read = 0;
   formats::FormatError error = formats::FormatError::None;  // why the load failed, or the first file that did not read
   const char* detail = "";               // the reader's words for it, or the loader's ("NO PROJECT FILE")
@@ -142,8 +145,9 @@ class OgFolderLoader {
 };
 
 // One line that says what a load did, for the log and `diag sd`: "Workspace: v16, 12 patterns, 20 instruments", with ", 2 failed" when files did not
-// read and ", unverified version" when the project file's layout is newer than any seen; "Workspace: FAILED NO PROJECT FILE" when the load failed;
-// "" when none has run. Written into `out` (at most `cap` - 1 characters, always terminated); returns its length. No printf: numbers by hand.
+// read, ", unverified version" when the project file's layout is newer than any seen, and, for a v6 pattern that lost something (OS-CEPAT S2),
+// ", 3 MICRO-MOVES NOT KEPT" and ", n VALUES CHANGED" (clamped volumes and cleared tracker-ce FX together); "Workspace: FAILED NO PROJECT FILE" when
+// the load failed; "" when none has run. Written into `out` (at most `cap` - 1 characters, always terminated); returns its length. No printf: numbers by hand.
 std::size_t describe_load(const OgFolderLoader& loader, char* out, std::size_t cap) noexcept;
 
 }  // namespace o3os::app

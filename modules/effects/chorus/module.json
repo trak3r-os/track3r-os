@@ -1,0 +1,22 @@
+{
+  "name": "Stereo Chorus",
+  "id": "chorus",
+  "kind": "effect",
+  "description": "A stereo chorus insert for a track (a WIDENS effect, ABI 1.12): one delay line of the mid, two taps that swing in opposite directions around the Delay, one to the left and one to the right, so a mono sound gets a stereo image and a stereo voice keeps its own. Period, Depth, Delay and Mix; four factory presets. A stereo effect needs OS-INSFX-ABI2 A4 on the unit.",
+  "state_bytes": 8448,
+  "stereo": "widens",
+  "params": [
+    {"name": "Period", "min": 200, "max": 20000, "default": 1667, "curve": "log", "unit": "ms", "mod": true},
+    {"name": "Depth", "min": 0, "max": 100, "default": 40, "unit": "percent", "mod": true},
+    {"name": "Delay", "min": 5, "max": 25, "default": 12, "unit": "ms", "mod": true},
+    {"name": "Mix", "min": 0, "max": 100, "default": 50, "unit": "percent", "mod": true}
+  ],
+  "presets": [
+    {"name": "Classic", "values": {"Period": 1667, "Depth": 40, "Delay": 12, "Mix": 50}},
+    {"name": "Slow Wide", "values": {"Period": 6667, "Depth": 70, "Delay": 18, "Mix": 60}},
+    {"name": "Vibrato", "values": {"Period": 222, "Depth": 25, "Delay": 6, "Mix": 100}},
+    {"name": "Ensemble", "values": {"Period": 455, "Depth": 30, "Delay": 20, "Mix": 45}}
+  ],
+  "voices": 1,
+  "memory": {"hot_bytes": 1400, "sdram_bytes": 8448}
+}

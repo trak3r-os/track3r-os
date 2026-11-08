@@ -5,6 +5,7 @@
 // place and handed to the USB stream.
 #include "param_access.h"
 
+#include <o3os/app/mixer_actions.h>
 #include <o3os/app/mixer_view.h>
 #include <o3os/app/module_ui.h>
 #include <o3os/app/screens/mixer_screen.h>
@@ -79,16 +80,7 @@ bool reset_fx(ActionContext& ctx, unsigned index) noexcept {
 bool edit_level(ActionContext& ctx, std::uint8_t& level, int detents, bool coarse, unsigned strip, bool master_field, unsigned field) noexcept {
   const unsigned now = level;
   const unsigned next = clamp100(static_cast<int>(now) + (coarse ? detents * kCoarseDetents : detents));
-  if (next == now) {
-    return false;
-  }
-  level = static_cast<std::uint8_t>(next);
-  if (master_field) {
-    tell_master(ctx, field, static_cast<float>(next));
-  } else {
-    tell_strip(ctx, strip, field, static_cast<float>(next));
-  }
-  return true;
+  return set_level(ctx, level, next, strip, master_field, field);
 }
 
 // STEMS: the cursor's source added to (set) or cleared from the cursor's slot (row 1 is S1: row 0 is the OUTPUTS row), and the map handed to the stream. A bit already as asked, no map, the
@@ -199,31 +191,33 @@ bool edit_at_cursor(ActionContext& ctx, core::ActionArg detents, bool coarse) no
   return false;
 }
 
-// ---- the INSERTS page (OS-INSFX S4). The cursor's cell is (row = the track, col = INS A / INS B); the master's row is shown and not assignable (S6). Every refusal is a toast of the Mixer's own.
+// ---- the INSERTS page (OS-INSFX S4). The cursor's cell is (row = the track, col = INS A / INS B); the master's row has one cell (S6: the master insert, dual mono, track 16 slot 0 in the project and the host).
+// Every refusal is a toast of the Mixer's own.
 
 bool insert_refuse(ActionContext& ctx, const char* text) noexcept { return ctx.view.notify.post(core::Severity::Warn, text, "mixer", ViewState::kMessageMs); }
 bool insert_say(ActionContext& ctx, ModuleUi::InsertResult r) noexcept {
   return ctx.view.notify.post(r == ModuleUi::InsertResult::Ok ? core::Severity::Info : core::Severity::Warn, ModuleUi::insert_text(r), "mixer", ViewState::kMessageMs);
 }
 
-// What the insert actions need: the module system, the editor and the cell, or a refusal said.
+// What the insert actions need: the module system, the editor and the cell, or a refusal said. `track` is the project's `where`: 0..15, or 16 for the master's row.
 struct InsertCursor {
   ModuleUi* ui;
   unsigned track;
   unsigned slot;
 };
+InsertCursor insert_cell_of(const ActionContext& ctx, const mixer::Cursor& c) noexcept {
+  const bool master = c.row >= mixer::tracks(ctx.model);
+  return {ctx.model.modules, master ? static_cast<unsigned>(model::kInsertWhereMaster) : c.row, master ? 0u : c.col};
+}
 bool insert_cursor(ActionContext& ctx, InsertCursor& out) noexcept {
   const mixer::Cursor c = mixer::cursor(ctx.model, ctx.view);
-  if (c.row >= mixer::tracks(ctx.model)) {
-    return insert_refuse(ctx, "MASTER INSERT: NOT YET") && false;
-  }
   if (ctx.model.modules == nullptr) {
     return insert_refuse(ctx, "NO MODULE SYSTEM IN THIS BUILD") && false;
   }
   if (ctx.model.project == nullptr || ctx.edit == nullptr) {
     return insert_refuse(ctx, ModuleUi::pick_text(ModuleUi::PickResult::NoProject)) && false;
   }
-  out = {ctx.model.modules, c.row, c.col};
+  out = insert_cell_of(ctx, c);
   return true;
 }
 
@@ -237,7 +231,9 @@ bool insert_open(ActionContext& ctx) noexcept {
   if (project.find_insert(at.track, at.slot) != nullptr) {
     return insert_say(ctx, ModuleUi::InsertResult::Taken);
   }
-  if (project.inserts().count >= model::kMaxInserts) {
+  // OS-INSFX-ABI2 A7: the master's need is the chosen module's (one instance for a stereo effect, two for a mono one), so at the picker's open only the hard floor is refused; the assign says the rest.
+  const unsigned need = at.track == audio::kTracks ? 1u : audio::InsertHost::states_for(at.track * 2u + at.slot);
+  if (at.ui->project_instances(project) + need > model::kMaxInserts) {
     return insert_say(ctx, ModuleUi::InsertResult::Full);
   }
   at.ui->scan_effects(ctx.model.project);
@@ -271,6 +267,22 @@ bool insert_toggle(ActionContext& ctx) noexcept {
 }
 
 }  // namespace
+
+// OS-MIDICCMAP S2: the absolute set of a bus level (mixer_actions.h): the board's copy and the tell to the engine, the same write a turn of the encoder that lands on `value`
+// makes (edit_level above lands here). The CC map's CC 82 on the INPUT strip comes through this; no history, the board has none.
+bool set_level(ActionContext& ctx, std::uint8_t& level, unsigned value, unsigned strip, bool master_field, unsigned field) noexcept {
+  const unsigned next = clamp100(static_cast<int>(value));
+  if (next == level) {
+    return false;
+  }
+  level = static_cast<std::uint8_t>(next);
+  if (master_field) {
+    tell_master(ctx, field, static_cast<float>(next));
+  } else {
+    tell_strip(ctx, strip, field, static_cast<float>(next));
+  }
+  return true;
+}
 
 bool mixer_edit(ActionContext& ctx, core::ActionArg arg) noexcept { return edit_at_cursor(ctx, arg, false); }
 bool mixer_coarse(ActionContext& ctx, core::ActionArg arg) noexcept { return edit_at_cursor(ctx, arg, true); }
@@ -392,6 +404,37 @@ bool mixer_stem_set(ActionContext& ctx, core::ActionArg) noexcept {
   }
   const MixerPage page = mixer::page_of(ctx.view);
   return page == MixerPage::Inserts ? insert_open(ctx) : (page == MixerPage::Stems && stem_cell(ctx, true));
+}
+
+// OS-INSFX S5, Params (Enter) on the INSERTS page: a bound cell opens that insert's generated parameter page (the Params screen with the insert as its target); an unbound cell does not
+// open (NO INSERT HERE). On the other Mixer pages the button keeps its global meaning: the instrument in view's page. Leaving the page (any screen button) comes back here, on the same cell
+// (the Mixer's page and cursor are view state), and clears the target (ParamsScreen::leave).
+bool mixer_params(ActionContext& ctx, core::ActionArg) noexcept {
+  if (ctx.view.screen != ScreenId::Mixer) {
+    return false;
+  }
+  if (mixer::page_of(ctx.view) != MixerPage::Inserts) {
+    ctx.view.params.insert = ParamView::kNoInsert;
+    return navigate_to(screen_registry(), ctx.model, ctx.view, ScreenId::Instrument);
+  }
+  // (the checks of insert_cursor, but on the model: this action is not undoable, so ctx.edit is null here)
+  const mixer::Cursor c = mixer::cursor(ctx.model, ctx.view);
+  if (ctx.model.modules == nullptr) {
+    return insert_refuse(ctx, "NO MODULE SYSTEM IN THIS BUILD");
+  }
+  if (ctx.model.project == nullptr) {
+    return insert_refuse(ctx, ModuleUi::pick_text(ModuleUi::PickResult::NoProject));
+  }
+  const InsertCursor at = insert_cell_of(ctx, c);
+  if (ctx.model.project->find_insert(at.track, at.slot) == nullptr) {
+    return insert_refuse(ctx, "NO INSERT HERE");
+  }
+  ctx.view.params.insert = static_cast<std::uint8_t>(at.track * 2u + at.slot);  // the host's `where` (the master's is 32)
+  ctx.view.page[screen_index(ScreenId::Instrument)] = 0u;
+  ctx.view.params.row = 0;
+  ctx.view.params.discard_pending();
+  (void)navigate_to(screen_registry(), ctx.model, ctx.view, ScreenId::Instrument);
+  return true;
 }
 
 namespace {

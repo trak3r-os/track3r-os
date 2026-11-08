@@ -44,7 +44,7 @@ in the host and QEMU trees as `platform_mk66_pure`; their tests are in `tests/` 
 encoder's detents, the scan, the IS31FL3731 pad LED driver) and the board's input facts (`mk66_input_*_test.cpp`) are in the same library and suites.
 `ctest` in the MK66 tree runs: `mk66_gen_ld_selftest`, `mk66_image_selftest`, `mk66_o3console_selftest` (the host tool for `diag`, OS-006b),
 `mk66_ld` (the generated script against the header), `mk66_image` (the HEX checks), `mk66_flashconfig`,
-`mk66_noinit_guard` (the noinit macros accept what they should and the compiler refuses an initialised object), and for the
+`mk66_noinit_guard` (the noinit macros accept what they should and the compiler refuses an initialised object), `mk66_noinit_layout` (the `.noinit` symbols of the ELF are the layout pinned in `tools/noinit_layout.txt`, OS-GATE-BOOTCRASH), and for the
 audio path `mk66_ramfunc_selftest` and `mk66_ramfunc` (the hot path in SRAM_L calls nothing in flash, see "Audio"), and
 `mk66_dma_owner_selftest` / `mk66_dma_owner` (a source check, also in the host build: only `boot::dma_init()` writes `DMA_CR` and the
 `DCHPRI`s, it is called once from the reset sequence, and the display's eDMA engine writes neither). The audio
@@ -59,7 +59,7 @@ path's pure parts (`audio_config.h`, `sgtl5000.h`, `resources.h`, `diag_report.h
 | SRAM_L (linker region) | `0x1FFF0000` | 48 KiB | `.ramfunc_l`: hot code, copied from flash at reset (the heartbeat LED function, and since OS-005a the audio ISRs and the pipeline: budgeted at 24 KiB, 20 hot kernels + 4 audio HAL/ISR); behind it `.tapmem_l` (NOLOAD, OS-005b review): the audio taps' data, one `audio::TapMem` (the stem pool and ring, the scope, spectrum and meter rings), budgeted at 24 KiB, constructed before `main` (the reset sequence does not clear it) |
 | module slab (reserved) | `0x1FFFC000` | 16 KiB | top of SRAM_L, ADR 0002 / OS-005i; not in the linker region, so nothing else can land there |
 | SRAM_U | `0x20000000` | 192 KiB | `.noinit` (crash block 128 B first), fault stack 512 B, `.dma_rings` (the audio DMA rings, 1 KiB aligned, NOLOAD), `.data`, `.bss`, free (at least 32 KiB, a linker assert), main stack 24 KiB at the top (initial SP `0x20030000`) |
-| SDRAM | `0x70000000` | 16 MiB | the ADR 0013 D7 table, eleven `constexpr` regions summing to exactly 16 MiB; only its last 192 KiB (the slack, `0x70FD0000`) is a linker region (`.noinit_sdram`, attribute `O3OS_SDRAM_NOINIT`) |
+| SDRAM | `0x70000000` | 16 MiB | the ADR 0013 D7 table, eleven `constexpr` regions summing to exactly 16 MiB (OS-CEPTFX S2a merged `file_job` and `lut` into `ptfx`); only its last 192 KiB (the slack, `0x70FD0000`) is a linker region (`.noinit_sdram`, attribute `O3OS_SDRAM_NOINIT`) |
 
 **SDRAM regions (OS-005a; the project and sample-arena rows differ from ADR 0013 D7, see below).**
 
@@ -67,19 +67,19 @@ path's pure parts (`audio_config.h`, `sgtl5000.h`, `resources.h`, `diag_report.h
 |---|---|---:|---|
 | `sample_arena` | `0x70000000` | 10,816 | samples, recordings, edit copies (one arena; a recording is limited to the free space: 125 s when empty) |
 | `delay` | `0x70A90000` | 768 | delay lines |
-| `reverb` | `0x70B50000` | 256 | reverb lines |
+| `reverb` | `0x70B50000` | 192 | reverb lines (the plate's 53,264 B at the start; the rest spare) |
+| `wt_contour` | `0x70B80000` | 64 | OS-CEWTENV W2: the wavetable contour bank (256 x 128 int16), carved out of the reverb region's spare tail |
 | `module_region` | `0x70B90000` | 768 | cold code/data of loaded modules |
-| `project` | `0x70C50000` | 1,920 | the project model arena (the model worst case is 1,934,312 B = 1,888.9 KiB, OS-APPUX S3, E-CFG-03, E-SONG-07 and OS-INSFX S3a) |
+| `project` | `0x70C50000` | 1,920 | the project model arena (the model worst case is 1,934,344 B = 1,888.9 KiB, OS-MIDICCMAP S1's settings raise plus OS-APPUX S3, E-CFG-03, E-SONG-07 and OS-INSFX S3a) |
 | `undo` | `0x70E30000` | 384 | undo journal |
-| `file_job` | `0x70E90000` | 512 | file and job buffers |
-| `lut` | `0x70F10000` | 192 | boot-generated tables |
-| `ui_cache` | `0x70F40000` | 512 | UI cache |
+| `ptfx` | `0x70E90000` | 768 | OS-CEPTFX S2a: the `.ptfx` plugin workspace (image 32 KiB, stack guard 4 KiB, stack 12 KiB, stereo staging 32 KiB, scratch 640 KiB, catalogue/host table/job 16 KiB, spare 32 KiB; accessed only through `core_view()`) |
+| `ui_cache` | `0x70F50000` | 448 | UI cache and the bench's scratch (its first 64 KiB went to `ptfx`) |
 | `diag_log` | `0x70FC0000` | 64 | session log |
 | `slack` | `0x70FD0000` | 192 | 1.2 %, the linker's `.noinit_sdram` window |
 | | | **16,384** | exactly 16 MiB (`static_assert`, `mk66_memmap`, the `mk66_ld` check) |
 
 The orchestrator's correction after OS-004a: ADR 0013 D7 budgeted 1,280 KiB for the project and the model's worst case does not fit, so
-the project region is 1,920 KiB and the sample arena gave up the 640 KiB (11,456 to 10,816 KiB); the slack is unchanged.
+the project region is 1,920 KiB and the sample arena gave up the 640 KiB (11,456 to 10,816 KiB); the slack is unchanged. OS-CEWTENV W2 took the contour bank's 64 KiB out of the reverb region's spare (256 to 192 KiB), so every base after `reverb` is unchanged.
 `mem_map.h` `static_assert`s the region is at least `kModelArenaWorstCaseBytes` (a mirror of `o3os::model::kModelArenaBytes`, which the
 platform layer may not include; `tests/mem_map_model_test.cpp` checks the mirror).
 

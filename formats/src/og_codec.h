@@ -295,6 +295,7 @@ inline bool parse(const std::uint8_t* payload, std::uint32_t len, Parsed& out) n
 namespace patt {
 inline constexpr std::uint32_t kTempoReserve = 16, kSwing = 20;  // the head's f32s, written as 100.0 and 0.0
 inline constexpr std::uint32_t kStep = 6;
+inline constexpr std::uint32_t kStep6 = 8;  // v6 (OS-CEPAT S1): the six v5 bytes, then volume i8, micromove i8
 }  // namespace patt
 
 // ---- instruments (file offsets) ---------------------------------------------------------------------------
@@ -305,7 +306,7 @@ inline constexpr std::uint32_t kActive = 16, kSampleType = 20, kFileName = 21, k
                                kStart = 78, kLoopStart = 80, kLoopEnd = 82, kEnd = 84, kCurrentWindow = 88,
                                kEnvelope = 92, kEnvelopeStride = 20, kLfo = 212, kLfoStride = 8, kCutoff = 260,
                                kResonance = 264, kFilterType = 268, kFilterEnable = 269, kTune = 270, kFineTune = 271,
-                               kVolume = 272, kGlide = 274, kPanning = 276, kDelaySend = 278, kSlices = 280,
+                               kVolume = 272, kGlide = 274, kPanning = 276, kDelaySend = 278, kPlayThru = 279, kSlices = 280,
                                kSliceCount = 376, kSelectedSlice = 377, kGrainLength = 378, kGrainPosition = 380,
                                kGrainShape = 382, kGrainType = 383, kReverbSend = 384, kOverdrive = 385,
                                kBitDepth = 386, kReserved = 387, kCrc = 388;
@@ -340,13 +341,74 @@ inline std::uint8_t instr_to_og(std::uint8_t x) noexcept {
   return x == 0 ? std::uint8_t{0} : static_cast<std::uint8_t>(x - 1);
 }
 
-inline model::Step step_from_og(const std::uint8_t* b) noexcept {
+// The OG id map of OS-CEFXIDS (ADR 0004 amendment 3), applied to every OG pattern version: OG 0..42 are the shared
+// OG ids and stay; 43..74 are tracker-ce FX and are stored as 96..127 (id + kFxCeOffset), where they stay inert
+// until a definition lands and cannot collide with the core FX 43..95; 75..127 hold nothing this OS can name and
+// are cleared to (none, 0), counted in `ce_fx_cleared` (OS-CEPAT S1b, A10); 128..255 are engine FX and stay verbatim.
+inline model::StepFx fx_from_og(std::uint8_t t, std::uint8_t v, std::uint32_t* ce_fx_cleared = nullptr) noexcept {
+  if (t > model::kFxOgLast && t <= model::kFxOgCeLast) {
+    return {static_cast<std::uint8_t>(t + model::kFxCeOffset), v};
+  }
+  if (t > model::kFxOgCeLast && t < model::kFxEngineFirst) {
+    if (ce_fx_cleared != nullptr) ++*ce_fx_cleared;
+    return {model::kFxNone, 0};
+  }
+  return {t, v};
+}
+
+inline model::Step step_from_og(const std::uint8_t* b, std::uint32_t* ce_fx_cleared = nullptr) noexcept {
   model::Step s;
   s.note = note_from_og(b[0]);
   s.instr = instr_from_og(s.note, b[1]);
   s.vol = model::kVolumeUnset;
-  s.fx[0] = {b[2], b[3]};
-  s.fx[1] = {b[4], b[5]};
+  s.fx[0] = fx_from_og(b[2], b[3], ce_fx_cleared);
+  s.fx[1] = fx_from_og(b[4], b[5], ce_fx_cleared);
+  return s;
+}
+
+// The OG ids the v6 columns interact with (ADR 0004: the ids are part of the pattern file; the same constants as
+// seq::fx::kMicroMove and seq::fx::kRandomValue, which formats/ cannot include).
+inline constexpr std::uint8_t kFxMicroMove = 2;    // Micro-move
+inline constexpr std::uint8_t kFxRandomValue = 16;  // Random FX value; with the value 16 it randomises the other column's value
+
+// The v6 step (OS-CEPAT S1, the byte map of docs/specs/OS-CEPAT.md 2.1): eight bytes, bytes 0-5 as v5, then the
+// volume column (byte 6, i8) and the micromove column (byte 7, i8), mapped as section 3.3 says:
+//   volume < 0        -> vol unset (verified parity: -1 is none, tracker-ce@7fd6c2c:core/source/mtSequencer.cpp:477)
+//   volume 0..100     -> floor(v * 127 / 100), the MIDI velocity tracker-ce sends (verified parity,
+//                        tracker-ce@7fd6c2c:core/source/mtSequencer.cpp:2445)
+//   volume 101..127   -> full volume, counted in `values_clamped` (new Community OS behaviour: tracker-ce's editor
+//                        clamps to 100, so it never writes one)
+//   micromove < 0     -> nothing (verified parity)
+//   micromove >= 0    -> FX 2 with the same value in the first free FX column (the placement is new Community OS
+//                        behaviour, Q2 (a)); superseded when a column already holds FX 2 (verified parity:
+//                        tracker-ce@7fd6c2c:core/source/mtSequencer.cpp:471-474, 518-527); dropped and counted in
+//                        `micromoves_dropped` when no column is free or the other one holds Random value 16 (new
+//                        Community OS behaviour: our sequencer would randomise the moved value,
+//                        seq/src/sequencer.cpp:1820-1834). Values 101..127 are kept as stored.
+inline model::Step step_from_og_v6(const std::uint8_t* b, std::uint32_t* micromoves_dropped = nullptr,
+                                   std::uint32_t* values_clamped = nullptr,
+                                   std::uint32_t* ce_fx_cleared = nullptr) noexcept {
+  model::Step s = step_from_og(b, ce_fx_cleared);  // bytes 0-5 as v5, FX through the id map
+  const int volume = static_cast<std::int8_t>(b[6]);
+  if (volume < 0) {
+    s.vol = model::kVolumeUnset;
+  } else if (volume <= 100) {
+    s.vol = static_cast<std::uint8_t>(static_cast<std::uint32_t>(volume) * 127u / 100u);
+  } else {
+    s.vol = model::kVolumeMax;
+    if (values_clamped != nullptr) ++*values_clamped;
+  }
+  const int m = static_cast<std::int8_t>(b[7]);
+  if (m >= 0 && s.fx[0].type != kFxMicroMove && s.fx[1].type != kFxMicroMove) {
+    const int free_slot = s.fx[0].type == model::kFxNone ? 0 : (s.fx[1].type == model::kFxNone ? 1 : -1);
+    if (free_slot < 0) {
+      if (micromoves_dropped != nullptr) ++*micromoves_dropped;
+    } else if (s.fx[1 - free_slot].type == kFxRandomValue && s.fx[1 - free_slot].value == kFxRandomValue) {
+      if (micromoves_dropped != nullptr) ++*micromoves_dropped;  // Random value 16 would randomise the moved value
+    } else {
+      s.fx[free_slot] = {kFxMicroMove, static_cast<std::uint8_t>(m)};
+    }
+  }
   return s;
 }
 
@@ -367,7 +429,10 @@ inline void step_to_og(const model::Step& s, std::uint8_t* out, ExportDrops& dro
     if (type[k] >= model::kFxEngineFirst) {  // engine FX: no OG meaning
       type[k] = value[k] = 0;
       ++drops.engine_fx;
-    } else if (type[k] > model::kFxOgLast) {  // core FX 43..127 (ADR 0004 amendment 1): OG has none, written as none
+    } else if (type[k] >= model::kFxCeFirst) {  // tracker-ce FX 96..127 (ADR 0004 amendment 3): OG has none, written as none
+      type[k] = value[k] = 0;
+      ++drops.ce_fx;
+    } else if (type[k] > model::kFxOgLast) {  // core FX 43..95 (ADR 0004 amendments 1 and 2): OG has none, written as none
       type[k] = value[k] = 0;
       ++drops.core_fx;
     }

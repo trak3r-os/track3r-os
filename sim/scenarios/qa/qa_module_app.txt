@@ -53,14 +53,14 @@ tap f8
 wait 50
 assert state screen=MODULES
 
-# QA-APP-002: an app opened from Pattern F7 TOOLS goes back to Pattern with F8 (the cursor and the block untouched), not to MODULES. Rhythm Gen: nine presses of Down from the top of the TOOLS list; the first launch asks.
+# QA-APP-002: an app opened from Pattern F7 TOOLS (the verb menu's APPS > row) goes back to Pattern with F8 (the cursor and the block untouched), not to MODULES. Rhythm Gen: four presses of Down from the top of the APPS page (OS-TOOLSDEDUP: it lists the tool apps only, no fixed entries); an app that only edits the project starts at once (OS-PTOOLS2 Q9b).
 action nav.screen 0
 wait 20
 tap f7
+pad 15
 wait 20
-tap down 8
-tap f1
-wait 50
+tap up 20
+tap down 4
 tap f1
 wait 100
 assert state screen=APP

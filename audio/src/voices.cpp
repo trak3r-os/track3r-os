@@ -2,6 +2,7 @@
 #include <o3os/audio/voices.h>
 #include <o3os/audio/lfo_sine.h>
 #include <o3os/audio/pitch_ramp.h>
+#include <o3os/audio/wt_contour.h>  // OS-CEWTENV W3a: the WT Env / WT LFO machines evaluate the bound contour bank
 
 #include <o3os/audio/simd.h>
 
@@ -46,15 +47,24 @@ O3OS_AUDIO_INLINE float mod_sustain(float v) noexcept { return v >= 0.0f ? (v <=
 O3OS_AUDIO_INLINE float clamp01(float v) noexcept { return v >= 1.0f ? 1.0f : (v > 0.0f ? v : 0.0f); }  // NaN is 0
 
 // A modulator's descriptor held to range (on load and when it plays): a NaN amount is 0, a NaN sustain is 1, the shape one of
-// the six (a larger one is a triangle), the rate in 0..`max_rate` (28, or the amp table's 23).
+// the six (a larger one is a triangle), the rate in 0..`max_rate` (28, or the amp table's 23). OS-CEWTENV W3a: a WT kind (kFmodWtEnv / kFmodWtLfo) keeps its shape
+// verbatim (the contour 0..255) and holds `wt_sust` to 0..99; a non-WT kind's WT bytes are cleared (they mean nothing there, and the descriptor is canonical).
 void sanitize_mod(FilterMod& fm, unsigned max_rate, bool lfo_only) noexcept {
-  fm.kind = fm.kind > kFmodLfo ? kFmodNone : fm.kind;
+  fm.kind = fm.kind > kFmodWtLfo ? kFmodNone : fm.kind;
   fm.kind = (lfo_only && fm.kind == kFmodEnv) ? kFmodNone : fm.kind;
-  fm.shape = fm.shape > kLfoShapeSine ? 2u : fm.shape;
+  const bool wt = fm.kind == kFmodWtEnv || fm.kind == kFmodWtLfo;
+  fm.shape = (!wt && fm.shape > kLfoShapeSine) ? 2u : fm.shape;
   fm.rate = fm.rate > max_rate ? static_cast<std::uint8_t>(max_rate) : fm.rate;
   fm.amount = mod_amount(fm.amount);
   fm.lfo_amount = fm.kind == kFmodLfo ? fm.amount : mod_amount(fm.lfo_amount);  // an LFO instrument: its amount (OS-FU2)
   fm.sustain = mod_sustain(fm.sustain);
+  if (wt) {
+    fm.wt_sust = fm.wt_sust > 99u ? std::uint8_t{99} : fm.wt_sust;
+    fm.delay = fm.delay > kWtBakeCount ? std::uint16_t{0} : fm.delay;  // OS-CEWTENV W3c: a WT kind's `delay` is the bake id of its warps (0: live)
+  } else {
+    fm.wt_bend = 0;
+    fm.wt_sust = 0;
+  }
 }
 
 // A note's gain with the amp envelope's amount (<= 1.0, set_sample) applied: never past kMaxGain.
@@ -117,9 +127,34 @@ O3OS_AUDIO_INLINE std::uint32_t grain_gain(unsigned shape, unsigned idx) noexcep
 
 }  // namespace
 
+// OS-CEWTENV W5: the granular length modulator's source of a descriptor (slot 3 of a granular instrument, its enable byte's bit 0x02), sanitised like the other modulators and kept only for a
+// granular instrument: a wavetable or plain one ignores the bit (its slot 3 is the position). Kept in the array grlen_bind() gave.
+namespace {
+FilterMod sanitized_grlen(const SampleDesc& d, const FilterMod* grlen) noexcept {
+  FilterMod g{};
+  if (grlen != nullptr && d.granular) {
+    g = *grlen;
+    sanitize_mod(g, kLfoRates - 1u, false);
+  }
+  return g;
+}
+}  // namespace
+
+// OS-CEWTENV W5: binds the granular length modulation's storage (main loop, once): `slot_mods` one FilterMod per sample slot (kDescSlots), `voice_gens` one ModGen per voice (kMaxVoices, 12 x 44 B).
+// Both live in SDRAM on the MK66 (O3OS_SDRAM_NOINIT in the slack window), in a static in a host test; null: the feature is off. See voices.h.
+void grlen_bind(FilterMod* slot_mods, ModGen* voice_gens) noexcept {
+  VoicePool::grlen_mods_ = slot_mods;
+  VoicePool::grlen_gens_ = voice_gens;
+}
+
+// OS-CEWTENV W6a: binds the step FX w and y's storage (main loop, once); null: the two FX do nothing. See voices.h (FxEnvMem).
+void fxe_bind(FxEnvMem* mem) noexcept {
+  VoicePool::fxm_ = mem;
+}
+
 VoicePool::VoicePool() noexcept = default;
 
-void VoicePool::set_sample(unsigned slot, const SampleDesc& desc) noexcept {
+void VoicePool::set_sample(unsigned slot, const SampleDesc& desc, const FilterMod* grlen) noexcept {
   if (slot >= kDescSlots) {
     return;
   }
@@ -127,12 +162,22 @@ void VoicePool::set_sample(unsigned slot, const SampleDesc& desc) noexcept {
     (void)stage_cancel();  // OS-BUG-SLICEPITCH: a descriptor staged for this slot is older than this one: the render must not take it over it
   }
   samples_[slot] = sanitized(desc);
+  if (grlen_mods_ != nullptr) {
+    grlen_mods_[slot] = sanitized_grlen(samples_[slot], grlen);  // OS-CEWTENV W5: with the descriptor, under the same contract
+  }
 }
 
 SampleDesc VoicePool::sanitized(const SampleDesc& desc) noexcept {
   SampleDesc d = desc;
   if (d.data == nullptr || d.length == 0u) {
+    // A silent slot plays nothing, but keeps the three mix fields the engine reads at a note: an SD module's instrument has no PCM, and its PANNING and sends (OS-MODSENDS) live here.
+    const std::uint8_t pan = d.pan > 100u ? std::uint8_t{100} : d.pan;
+    const std::uint8_t delay = d.delay_send > 100u ? std::uint8_t{100} : d.delay_send;
+    const std::uint8_t reverb = d.reverb_send > 100u ? std::uint8_t{100} : d.reverb_send;
     d = SampleDesc{};
+    d.pan = pan;
+    d.delay_send = delay;
+    d.reverb_send = reverb;
   } else if (d.loop_end > d.length || d.loop_start >= d.loop_end || d.loop_end - d.loop_start < 2u) {
     d.loop_start = 0;  // a loop that is not inside the sample, or is shorter than 2 samples, is no loop
     d.loop_end = 0;
@@ -179,6 +224,8 @@ SampleDesc VoicePool::sanitized(const SampleDesc& desc) noexcept {
   sanitize_mod(d.tune_mod, kLfoRates - 1u, false);
   sanitize_mod(d.amp_mod, kAmpLfoRates - 1u, true);   // the amp slot is a tremolo or the plain `env`: never an ADSR here
   sanitize_mod(d.pos_mod, kLfoRates - 1u, false);      // OS-GRAN
+  // OS-CEWTENV W3a review: a WT kind has its machine only where something evaluates it, or it would reach flfo_eval with a stale l_period: cleared to none elsewhere. W3b: the cutoff (filter_run),
+  // pan, finetune and position (mod_block) evaluate it; W4: the amp slot (wt_amp_block, the tremolo's grid) does too, so every slot keeps its WT kind and there is nothing to clear here.
   if (!(d.granular || (d.wt_size != 0u && d.wt_windows > 1u))) {
     d.pos_mod.kind = kFmodNone;  // the position slots move a granular instrument's grain or a wavetable's window (voices.h POSITION MODULATION)
   }
@@ -195,13 +242,14 @@ SampleDesc VoicePool::sanitized(const SampleDesc& desc) noexcept {
 
 // ---- The staged descriptor (voices.h, Staged descriptor) ------------------------------------------------------------------
 
-bool VoicePool::stage_sample(unsigned slot, const SampleDesc& desc, const std::uint16_t* table, unsigned table_words, std::uint16_t* table_dst) noexcept {
+bool VoicePool::stage_sample(unsigned slot, const SampleDesc& desc, const std::uint16_t* table, unsigned table_words, std::uint16_t* table_dst, const FilterMod* grlen) noexcept {
   if (stage_ == nullptr || slot >= kDescSlots || stage_state_.load(std::memory_order_acquire) != 0u || table_words > sizeof stage_->table / sizeof stage_->table[0]) {
     return false;
   }
   StageCell& c = *stage_;
   c.slot = static_cast<std::uint8_t>(slot);
   c.desc = sanitized(desc);
+  c.grlen = sanitized_grlen(c.desc, grlen);  // OS-CEWTENV W5
   c.table_words = static_cast<std::uint16_t>(table != nullptr && table_dst != nullptr ? table_words : 0u);
   c.table_dst = table_dst;
   for (unsigned i = 0; i < c.table_words; ++i) {
@@ -241,6 +289,9 @@ void VoicePool::take_stage() noexcept {
     c.table_dst[i] = c.table[i];
   }
   samples_[slot] = d;
+  if (grlen_mods_ != nullptr) {
+    grlen_mods_[slot] = c.grlen;  // OS-CEWTENV W5: taken with the descriptor, in the same step
+  }
   stage_takes_.store(stage_takes_.load(std::memory_order_relaxed) + 1u, std::memory_order_release);
   stage_state_.store(0, std::memory_order_release);
 }
@@ -627,7 +678,7 @@ void VoicePool::st_start(Voice& v, const SampleDesc& s, bool retrigger) noexcept
     d.res_dec = st_step(d.res);
   }
   const bool want = s.st_off != 0u && s.engine == kEngineModern && v.mode == 0u && !v.filt && (v.drive | v.crush) == 0u && (v.mmask & kMmTrem) == 0u && ((gate_ >> v.track) & 1u) == 0u;
-  if (want && v.st == 0u && st_used_ != (1u << kStMax) - 1u) {
+  if (want && v.st == 0u && static_cast<unsigned>(__builtin_popcount(st_used_)) + st_reserved_ < kStMax) {
     unsigned k = 0;
     while (((st_used_ >> k) & 1u) != 0u) {
       ++k;
@@ -681,11 +732,12 @@ void VoicePool::end_block_st(std::uint32_t fed) noexcept {
 
 // ---- The grain (voices.h GRANULAR). In flash: see the declarations.
 
-// The grain of position `pos` (0..65535) from the descriptor: u16 arithmetic where the position units are u16, in samples counted from the grain's start. Nothing it makes leaves the
-// sample, and gl2 > gl1 whatever the descriptor says.
-void VoicePool::grain_geom(Voice& v, const SampleDesc& s, unsigned pos) noexcept {
+// The grain of position `pos` (0..65535) from the descriptor, `glen` the grain's length in samples (the descriptor's gr_len, or the length modulator's, held to range): u16 arithmetic where the
+// position units are u16, in samples counted from the grain's start. Nothing it makes leaves the sample, and gl2 > gl1 whatever the descriptor says.
+void VoicePool::grain_geom(Voice& v, const SampleDesc& s, unsigned pos, std::uint32_t glen) noexcept {
   const std::uint32_t len = s.length;  // >= 1: a granular note needs a sample
-  const std::uint16_t units = static_cast<std::uint16_t>(static_cast<std::uint32_t>(s.gr_len) * 65535u / len);  // the grain in position units (a u16)
+  const std::uint32_t gl = glen > 65535u ? 65535u : glen;  // gr_len is a u16; the modulated length is held below it (44..44,100)
+  const std::uint16_t units = static_cast<std::uint16_t>(gl * 65535u / len);  // the grain in position units (a u16)
   const std::int32_t half = units / 2;
   const std::int32_t down = static_cast<std::int32_t>(pos) - half;
   const std::int32_t up = static_cast<std::int32_t>(pos) + half;
@@ -719,15 +771,41 @@ void VoicePool::grain_start(Voice& v, const SampleDesc& s) noexcept {
   v.gpos = s.gr_pos;
   v.gnew = s.gr_pos;
   v.gpend = false;
-  grain_geom(v, s, s.gr_pos);
+  grain_geom(v, s, s.gr_pos, gr_base(v, s));
   v.phase = static_cast<std::uint64_t>(v.gstart) << 32;
   v.bwd = s.loop_mode == 1u;
 }
 
-void VoicePool::refresh_grain(Voice& v) noexcept {
+void VoicePool::refresh_grain(Voice& v, std::uint32_t glen) noexcept {
   v.gpos = v.gnew;
   v.gpend = false;
-  grain_geom(v, samples_[v.slot], v.gpos);
+  grain_geom(v, samples_[v.slot], v.gpos, glen);
+}
+
+// OS-CEWTENV W6b (F11): the step FX z of the voice's track, when it holds one, replaces the descriptor's gr_len; the length is held to 44..the sample's length (a short sample caps it).
+std::uint32_t VoicePool::gr_base(const Voice& v, const SampleDesc& s) noexcept {
+  if (fxm_ != nullptr && v.track < kVoiceTracks && fxm_->val[v.track][2] != 0u) {
+    const std::uint32_t len = gran_len_fx_samples(static_cast<std::uint32_t>(fxm_->val[v.track][2] - 1u));
+    const std::uint32_t hi = s.length < 44u ? 44u : s.length;
+    return len > hi ? hi : len;
+  }
+  return s.gr_len;
+}
+
+// OS-CEWTENV W5: the grain length in samples a wrap makes the grain with: while the length modulator runs (kMmLen), the length the last block's evaluation left in the voice's sixth ModGen
+// (F12, already held to 44..max there; held again here against the slot's sample), else the descriptor's gr_len — a granular instrument without bit 0x02 renders exactly as before.
+std::uint32_t VoicePool::grlen_now(const Voice& v) const noexcept {
+  const SampleDesc& s = samples_[v.slot];
+  std::uint32_t hi = s.length < 44100u ? s.length : 44100u;
+  if (hi < 44u) {
+    hi = 44u;
+  }
+  if ((v.mmask & kMmLen) != 0u && grlen_gens_ != nullptr) {
+    const float f = grlen_gens_[static_cast<unsigned>(&v - v_)].e_out;
+    const std::uint32_t len = f >= 1.0f ? static_cast<std::uint32_t>(f) : 0u;  // a NaN is 0
+    return len < 44u ? 44u : (len > hi ? hi : len);
+  }
+  return gr_base(v, s);
 }
 
 // n samples of the grain, the amplitude stepping as run_dir's. `Type`: 0 forward, 1 backward, 2 ping-pong. The position q is the grain's x (Q32.32, from gstart), read with the plain
@@ -750,8 +828,12 @@ O3OS_AUDIO_INLINE std::uint32_t VoicePool::run_gran_t(Voice& v, std::int16_t* ou
   std::int64_t q = static_cast<std::int64_t>(v.phase) - (static_cast<std::int64_t>(start) << 32);
   bool bwd = Type == 1u ? true : (Type == 2u ? v.bwd : false);
   std::int32_t amp = v.amp;
-  const auto reload = [&]() {  // the pending position becomes the grain: its points move, the position in the grain does not
-    refresh_grain(v);
+  // OS-CEWTENV W5: the length modulator's block length takes effect at the first wrap of the block (it is constant within a block, so one rebuild, one pair of divisions, a block a voice, as a position
+  // move is); later wraps of the block rebuild only for a pending position.
+  bool len_pend = (v.mmask & kMmLen) != 0u;
+  const auto reload = [&]() {  // the pending position becomes the grain: its points move, the position in the grain does not; the block's length (grlen_now) comes with it, never mid-grain
+    len_pend = false;
+    refresh_grain(v, grlen_now(v));
     start = v.gstart;
     avail = static_cast<std::int32_t>(v.gavail);
     l1 = static_cast<std::int32_t>(v.gl1);
@@ -777,7 +859,7 @@ O3OS_AUDIO_INLINE std::uint32_t VoicePool::run_gran_t(Voice& v, std::int16_t* ou
       q += inc;
       if (q >= hi) {
         std::int64_t ex = q - hi;
-        if (v.gpend) {
+        if (v.gpend || len_pend) {
           reload();
         }
         const std::int64_t w = hi - lo;
@@ -788,7 +870,7 @@ O3OS_AUDIO_INLINE std::uint32_t VoicePool::run_gran_t(Voice& v, std::int16_t* ou
       q -= inc;
       if (q <= lo) {
         std::int64_t ex = lo - q;
-        if (v.gpend) {
+        if (v.gpend || len_pend) {
           reload();
         }
         const std::int64_t w = hi - lo;
@@ -800,7 +882,7 @@ O3OS_AUDIO_INLINE std::uint32_t VoicePool::run_gran_t(Voice& v, std::int16_t* ou
         q += inc;
         if (q >= hi) {  // the turn at the top: reflect about loop2 - 0.5 and run backward
           const std::int64_t ex = q - hi;
-          if (v.gpend) {
+          if (v.gpend || len_pend) {
             reload();
           }
           q = hi - kOne - ex;
@@ -811,7 +893,7 @@ O3OS_AUDIO_INLINE std::uint32_t VoicePool::run_gran_t(Voice& v, std::int16_t* ou
         q -= inc;
         if (q <= lo) {  // the turn at the bottom: reflect about loop1 + 0.5 and run forward
           const std::int64_t ex = lo - q;
-          if (v.gpend) {
+          if (v.gpend || len_pend) {
             reload();
           }
           q = lo + kOne + ex;
@@ -966,7 +1048,13 @@ void VoicePool::release_voice(Voice& v, bool fade) noexcept {
   for (ModGen& g : v.mg) {
     g.key = false;  // the ADSRs' note is off (a NoteOff, a NoteFade and the stop all end it); an LFO runs on with the voice
   }
+  if ((v.mmask & kMmLen) != 0u && grlen_gens_ != nullptr) {
+    grlen_gen(v).key = false;  // OS-CEWTENV W5: the length ADSR's note is off as well
+  }
   if (v.env_stage == kEnvOff) {
+    if (!fade && v.mg[kMgTrem].kind == kFmodWtEnv) {
+      return;  // OS-CEWTENV W4: the amp WT Env has the release (its own, or the one-shot's end), then the voice stops (wt_amp_block); a fade still fades
+    }
     start_release(v, fade ? kFadeSamples : kReleaseSamples);
   } else if (v.env_stage == kEnvDelay) {
     stop_voice(v);
@@ -1095,7 +1183,7 @@ O3OS_AUDIO_INLINE void VoicePool::post_stages(Voice& v, std::int16_t* block, std
     trem_span(v, block, begin, end - begin);  // OS-MOD
   }
   if (v.filt) {
-    filter_run(v, v.fmod ? &dmod(v, 3u, samples_[v.slot].filter.mod) : nullptr, block, begin, end - begin);
+    filter_run(v, v.fmod ? &cut_mod(v) : nullptr, block, begin, end - begin);
   }
   if ((v.drive | v.crush) != 0u) {
     shape_span(v, block + begin, end - begin);
@@ -1184,9 +1272,11 @@ void VoicePool::filter_apply(Voice& v, const SampleDesc& s, const FilterFx& fx, 
 
 void VoicePool::mod_start(ModGen& g, const FilterMod& m, std::uint32_t step, float kill, unsigned lfo_fx, unsigned rate0) noexcept {
   const bool lfo = lfo_fx != 0u || m.kind == kFmodLfo;  // the Filter LFO FX makes the modulator an LFO whatever the instrument has
-  g.kind = lfo ? kFmodLfo : kFmodEnv;
+  g.kind = lfo_fx != 0u ? kFmodLfo : m.kind;
   g.since = 0;
   g.need = true;
+  g.l_inv = 0.0f;  // OS-CEWTENV W3a: a WT kind's setup (its divisions) runs at its first evaluation, in flash — wt_mod_eval calls wt_mod_start when l_inv is 0; the LFO's branch below makes its own
+  g.l_q = step;    // the note's start step, for the WT LFO's shift at that first evaluation
   if (!lfo) {
     g.stage = kFeDelay;
     g.e_t = 0.0f;
@@ -1285,6 +1375,136 @@ float VoicePool::fenv_eval(ModGen& g, const FilterMod& m) noexcept {
   return g.e_out;
 }
 
+// OS-CEWTENV W3a review: the cutoff modulator's start where a Filter LFO FX (or the layer's FLT LFO) may be on (`lfo_fx`): mod_start then forces the plain LFO kind over a WT slot, and the slot's
+// `shape` is a contour index, which flfo_level would read as the random shape. As before W3a clamped a larger shape to the triangle, the forced LFO takes the triangle: l_ovr 3 (shape 2 + 1), the
+// override flfo_level already prefers over the instrument's shape. Cold: the callers are note_on (the call it already makes, hot), lfo_set_impl, refilter and perf_dest (flash). l_ovr is free on
+// the cutoff's generator (only the finetune's and the tremolo's carry the tracker FX's waveform).
+void VoicePool::cutoff_mod_start(ModGen& g, const FilterMod& m, std::uint32_t step, float kill, unsigned lfo_fx, unsigned rate0) noexcept {
+  mod_start(g, m, step, kill, lfo_fx, rate0);
+  g.l_ovr = (lfo_fx != 0u && m.kind >= kFmodWtEnv) ? std::uint8_t{3u} : std::uint8_t{0u};
+}
+
+// OS-CEWTENV W3a: the start of a WT modulator (flash: the hot mod_start leaves l_inv 0, and the note's first evaluation — wt_mod_eval below — calls this with the start step
+// it left in l_q; the cutoff's rate0 is 0). The WT Env (law F5) plays the contour over the slot's decay (1 ms or less: 1,000 ms); its release is the slot's release (below
+// 50 ms: 50); the note's two divisions make the reciprocals, the evaluations multiply by them. The WT LFO (law F6) takes the LFO's setup: the tempo-synced period, the note's
+// start step's shift.
+void VoicePool::wt_mod_start(ModGen& g, const FilterMod& m, std::uint32_t step, unsigned rate0) noexcept {
+  if (m.kind == kFmodWtEnv) {
+    g.stage = kFeAttack;  // playing toward the sustain point, or the end for a one-shot
+    // (no g.key here: mod_start set it, and a NoteOff that came before the first evaluation must hold — the deferred setup must not undo it)
+    g.e_t = 0.0f;
+    g.e_max = 0.0f;  // the release's start phase, set when the key goes
+    g.e_out = 0.0f;
+    const float dur_ms = m.decay <= 1u ? 1000.0f : static_cast<float>(m.decay);
+    const float dur = dur_ms * kSamplesPerMs;
+    g.l_inv = 1.0f / dur;                          // 1 / the duration in samples
+    g.l_period = static_cast<std::uint32_t>(dur);  // the duration in samples: the one-shot's restart subtracts it, no division at an evaluation
+    const float rel_ms = m.release < 50u ? 50.0f : static_cast<float>(m.release);
+    g.l_rand = 1.0f / (rel_ms * kSamplesPerMs);  // 1 / the release in samples
+    g.l_shift = 0;
+    g.l_q = 0;
+  } else {
+    const std::uint32_t period = static_cast<std::uint32_t>(static_cast<float>(kTicksPerStep) * kLfoRate[m.rate + rate0]);  // truncated in float: 1/3 step is 191
+    g.l_period = period != 0u ? period : 1u;
+    g.l_inv = 1.0f / static_cast<float>(g.l_period);  // the note's one division
+    g.l_shift = (step % 36u) * kTicksPerStep;
+    g.l_q = 0xFFFFFFFFu;
+    g.l_rand = 0.0f;
+  }
+}
+
+// OS-CEWTENV W3a: the WT Env's output after the samples since its last evaluation (law F5, verified parity tracker-ce@7fd6c2c:core/source/mtEnvelopeGenerator.cpp:87-176): the contour
+// (wt_eval_shape, the bound bank) at the phase the time puts it at, x amount. One-shot (`wt_sust` 0): plays to its end whatever the key does, and starts again while the key is held
+// at the end. Sustained: runs to the sustain %, holds while the key is held; the release runs from where it is, phase = start + r (1 - start), output x (1 - r). Flash: it runs only
+// for a WT slot, one evaluation per 16 samples at the most. The state is ModGen's (voices.h): stage kFeAttack playing, kFeSustain the freeze, kFeRelease, kFeOff; e_t samples into the
+// stage, l_inv 1 / duration, l_rand 1 / release, e_max the release's start phase.
+float VoicePool::wtenv_eval(ModGen& g, const FilterMod& m, bool amp) noexcept {
+  const float amt = amp ? 1.0f : m.amount;  // OS-CEWTENV W4 (law F7): the amp's WT Env multiplies the voice by y, no amount
+  const bool sustained = m.wt_sust != 0u;
+  const float s_ph = sustained ? clamp01(static_cast<float>(m.wt_sust) * 0.01f) : 0.0f;
+  float t = g.e_t + static_cast<float>(g.since);
+  g.since = 0;
+  std::uint8_t stage = g.stage;
+  const bool key = g.key;
+  bool end_once = false;  // OS-CEWTENV W3a review: a one-shot with the key off emits its end value once (tracker-ce@7fd6c2c:core/source/mtEnvelopeGenerator.cpp:121-125: y(1) x amount, and only then it stops)
+  for (unsigned guard = 0; guard < 8u && stage != kFeOff; ++guard) {  // playing -> freeze -> release -> off: three changes at the most, a one-shot's restart loops bounded
+    if (stage == kFeAttack) {
+      const float ph = t * g.l_inv;
+      if (sustained && !key) {  // the key went during the play: the release runs from where it is
+        stage = kFeRelease;
+        g.e_max = ph > 1.0f ? 1.0f : ph;
+        t = 0.0f;
+        continue;
+      }
+      if (sustained && ph >= s_ph) {
+        stage = kFeSustain;  // the freeze at the sustain %
+        t = 0.0f;
+        continue;
+      }
+      if (ph >= 1.0f) {
+        if (!sustained && key && !amp) {  // (the amp's one-shot ends with the voice whatever the key does: law F7)
+          t -= static_cast<float>(g.l_period);  // one-shot, key held at the end: it starts again
+          if (t < 0.0f) {
+            t = 0.0f;
+          }
+          continue;
+        }
+        stage = kFeOff;  // the end: a one-shot with the key off plays to here and stops (its end value is emitted once, below)
+        end_once = !sustained && (amp || !key);
+        t = 0.0f;
+        continue;
+      }
+      break;
+    }
+    if (stage == kFeSustain) {
+      if (!key) {  // the key went at the freeze: the release runs from the sustain point
+        stage = kFeRelease;
+        g.e_max = s_ph;
+        t = 0.0f;
+        continue;
+      }
+      break;  // held while the key is
+    }
+    if (stage == kFeRelease) {
+      if (t * g.l_rand >= 1.0f) {
+        stage = kFeOff;
+        t = 0.0f;
+      }
+      break;
+    }
+  }
+  float out;
+  switch (stage) {
+    case kFeAttack: {  // playing: the phase is the time over the duration
+      float ph = t * g.l_inv;
+      ph = ph > 1.0f ? 1.0f : ph;
+      out = wt_eval_slot(m.shape, m.delay, m.wt_bend, ph) * amt;
+      break;
+    }
+    case kFeSustain:  // the freeze: the contour's level at the sustain %
+      out = wt_eval_slot(m.shape, m.delay, m.wt_bend, s_ph) * amt;
+      break;
+    case kFeRelease: {  // phase = start + r (1 - start), output x (1 - r)
+      float r = t * g.l_rand;
+      r = r > 1.0f ? 1.0f : r;
+      float ph = g.e_max + r * (1.0f - g.e_max);
+      ph = ph > 1.0f ? 1.0f : ph;
+      out = wt_eval_slot(m.shape, m.delay, m.wt_bend, ph) * amt * (1.0f - r);
+      break;
+    }
+    default:
+      out = 0.0f;
+      break;
+  }
+  if (end_once) {
+    out = wt_eval_slot(m.shape, m.delay, m.wt_bend, 1.0f) * amt;  // the one-shot's end value, once (the stage is off from the next evaluation on)
+  }
+  g.stage = stage;
+  g.e_t = t;
+  g.e_out = out;
+  return out;
+}
+
 // The LFO's level at the transport's tick count `samples_on` samples into the span: A x the shape of the phase u in the period.
 float VoicePool::flfo_level(ModGen& g, const FilterMod& m, std::uint32_t samples_on) noexcept {
   std::uint64_t tq = tick_q_ + static_cast<std::uint64_t>(samples_on) * tick_rate_q_;
@@ -1319,6 +1539,95 @@ float VoicePool::flfo_eval(ModGen& g, const FilterMod& m, std::uint32_t samples_
   return 2.0f * flfo_level(g, m, samples_on) - m.lfo_amount;
 }
 
+// OS-CEWTENV W3a: the WT LFO's output (law F6, verified parity tracker-ce@7fd6c2c:core/source/mtEnvelopeGenerator.cpp:177-207): the same contour looped at the LFO's
+// tempo-synced rate, at the same phase as the plain LFO (the same clock, the note's start step's shift), the output (2y - 1) x amount, so bipolar. Flash: it runs only for a
+// WT slot, one evaluation per 16 samples at the most.
+float VoicePool::wtlfo_y(ModGen& g, const FilterMod& m, std::uint32_t samples_on) noexcept {
+  std::uint64_t tq = tick_q_ + static_cast<std::uint64_t>(samples_on) * tick_rate_q_;
+  tq = (running_ && tq > kTickMaxQ24) ? kTickMaxQ24 : tq;  // the same clock as flfo_level: the span's start is tick_q_
+  const std::uint32_t x = (tick_steps_ != 0u ? tick_steps_ - 1u : 0u) * kTicksPerStep + static_cast<std::uint32_t>(tq >> 24) + g.l_shift;
+  const std::uint32_t q = x / g.l_period;  // the one division of an evaluation (UDIV)
+  const float u = static_cast<float>(x - q * g.l_period) * g.l_inv;
+  return wt_eval_slot(m.shape, m.delay, m.wt_bend, u);
+}
+
+float VoicePool::wtlfo_eval(ModGen& g, const FilterMod& m, std::uint32_t samples_on) noexcept {
+  const float y = wtlfo_y(g, m, samples_on);
+  return (2.0f * y - 1.0f) * m.amount;
+}
+
+// OS-CEWTENV W4 (law F7, verified parity tracker-ce@7fd6c2c:core/libs/Audio/effect_envelope.cpp:472-602; the control rate is ours): the amp slot's multiplier at the block's grid points, in
+// place of the LFO's (mod_block calls this for a voice whose tremolo generator is a WT kind; trem_span, the walk between the points, is unchanged). WT Env: y of the contour over the slot's decay
+// (wtenv_eval with `amp`: no amount, the one-shot ends), sustained and released by the same machine as the cutoff's; WT LFO: 1 - (1 - y) x depth at the LFO's tempo-synced phase (the amp's
+// rate table), depth the slot's amount. Held to 0..1. The points are evaluated in time order, `since` carrying the samples between them (the last one leaves the rest of the block). The one-shot's
+// end (or a release run out) leaves the generator off with the end value at its grid point and 0 after it: the multiplier walks to 0 in 16 samples (the declick), and the voice stops at the
+// first evaluation that finds it at 0 (stop_voice carries what it last put out, 0 under the multiplier). Called once a block per voice, in flash; one division (UDIV) and at most two (VDIV) per
+// evaluation, none in the sample loop. A gated track (OS-ODD11: post_stages, so trem_span, is skipped there) never walks tcur to 0, so its voice stops at the off stage whatever the multiplier
+// still is (the strip is inaudible: there is no declick to wait for, and the slot frees while muted).
+void VoicePool::wt_amp_block(Voice& v, const FilterMod& m, std::uint32_t begin) noexcept {
+  ModGen& g = v.mg[kMgTrem];
+  if (g.l_inv == 0.0f) {
+    wt_mod_start(g, m, g.l_q, kAmpRateBase);  // the note's first evaluation (mod_start left the mark and the start step)
+  }
+  const bool env = g.kind == kFmodWtEnv;
+  if (env && g.stage == kFeOff && (v.tcur == 0 || ((gate_ >> v.track) & 1u) != 0u)) {
+    for (std::int32_t& t : v.tgt) {
+      t = 0;
+    }
+    v.t0 = 0;
+    stop_voice(v);
+    return;
+  }
+  std::uint32_t at = 0;  // the offset (samples from `begin`) of the last evaluation
+  const auto level = [&](std::uint32_t after) -> std::int32_t {
+    if (after != at) {
+      g.since = static_cast<std::uint16_t>(after - at);
+      at = after;
+    }
+    float l;
+    if (env) {
+      l = wtenv_eval(g, m, true);
+    } else {
+      l = 1.0f - (1.0f - wtlfo_y(g, m, after)) * m.amount;
+    }
+    l = l >= 1.0f ? 1.0f : (l > 0.0f ? l : 0.0f);  // 0..1 (a NaN is 0)
+    return static_cast<std::int32_t>(l * static_cast<float>(kTremOne));
+  };
+  const std::int32_t y0 = level(0);
+  v.t0 = (begin & (kFilterCtl - 1u)) != 0u ? y0 : kTremOne;
+  for (std::uint32_t k = 0; k < kBlock / kFilterCtl; ++k) {
+    const std::uint32_t pos = k * kFilterCtl;
+    v.tgt[k] = pos < begin ? kTremOne : (pos == begin ? y0 : level(pos - begin));
+  }
+  g.since = static_cast<std::uint16_t>(kBlock - begin - at);  // the next evaluation is the next block's first sample
+}
+
+// OS-CEWTENV W3a: the WT kinds' evaluation (flash: called only for a WT slot, behind one compare in the hot filter_run). The note's first evaluation runs the WT setup:
+// l_inv 0 (mod_start's mark) sends it to wt_mod_start, with the note's start step mod_start left in l_q. The ADSR and LFO kinds keep the branch they had.
+float VoicePool::wt_mod_eval(ModGen& g, const FilterMod& m, std::uint32_t samples_on) noexcept {
+  if (g.l_inv == 0.0f) {
+    wt_mod_start(g, m, g.l_q, 0u);  // the cutoff's dispatcher only: its rate0 is 0
+  }
+  if (g.kind == kFmodWtEnv) {
+    return wtenv_eval(g, m);
+  }
+  return VoicePool::wtlfo_eval(g, m, samples_on);
+}
+
+// OS-CEWTENV W3c (Q3 a): the cutoff's WT kinds are not evaluated at every 16th sample (filter_run keeps its 16-sample grid and calls this on it): an evaluation is made at the note's
+// first sample (the setup) and then at the first grid point where 64 or more FILTER samples (`since`, which filter_run adds to) have gone by since the last one; the other grid points hand
+// back the last output (`e_out`). Not block boundaries: a note that starts at a block's start is evaluated once a block, at its first sample, but a note that starts mid-block gets its first
+// re-evaluation 64 to 79 samples after its start and keeps that offset. Pan, finetune and position (mod_block) are once a block and call wt_mod_eval. Flash: the skip costs the call (a `blx`, one compare, a load).
+float VoicePool::wt_cut_eval(ModGen& g, const FilterMod& m, std::uint32_t samples_on) noexcept {
+  if (g.l_inv != 0.0f && g.since < kBlock) {
+    return g.e_out;
+  }
+  const float out = wt_mod_eval(g, m, samples_on);
+  g.since = 0;  // (the WT Env's evaluation took the time already; the WT LFO reads the transport, so this is its mark)
+  g.e_out = out;
+  return out;
+}
+
 // The voice's filter over the n samples of `block` from `pos`, in place (OS-CPUOPT1, C3: one function for the plain filter and the modulated one, so that the three type loops exist once and the modulated
 // span's 16-sample chunks run inside it, the filter state staying in registers from one chunk to the next). `m` null: the whole span is one chunk. `m` set: the cutoff is re-evaluated at every 16th
 // sample of the block (and at the first of a note), by the modulator the instrument has on it, and svf_set_cutoff (which keeps the coefficient while the table index is the same) puts it in.
@@ -1334,7 +1643,8 @@ void VoicePool::filter_run(Voice& v, const FilterMod* m, std::int16_t* block, st
       c = kFilterCtl - phase < left ? kFilterCtl - phase : left;  // up to the next 16th of the block, or the span's end
       if (phase == 0u || g.need) {
         g.need = false;
-        const float mod = g.kind == kFmodEnv ? fenv_eval(g, *m) : flfo_eval(g, *m, done);
+        // OS-CEWTENV W3a: one compare sends the WT kinds (3, 4) to the flash dispatcher; the ADSR and LFO paths take the branch they already had.
+        const float mod = g.kind >= kFmodWtEnv ? wt_cut_eval(g, *m, done) : (g.kind == kFmodEnv ? fenv_eval(g, *m) : flfo_eval(g, *m, done));
         const float sum = v.fbase + mod;
         v.fcut = !(sum >= 0.0f) ? 0.0f : (sum > 1.0f ? 1.0f : sum);  // base + mod held to 0..1 (a NaN is the low end, as svf_set_cutoff takes it)
         svf_set_cutoff(v.svf, v.fcut);
@@ -1443,19 +1753,20 @@ void VoicePool::lfo_set_impl(VoicePool& pool, unsigned track, bool on, unsigned 
     ModGen& g = v.mg[kMgCut];
     const SampleDesc& s = pool.samples_[v.slot];
     const unsigned fx = pool.fx_lfo_[t];
-    const bool was_lfo = v.fmod && g.kind == kFmodLfo;
+    const bool was_lfo = v.fmod && (g.kind == kFmodLfo || (g.kind == kFmodWtLfo && g.l_inv != 0.0f));  // OS-CEWTENV W3a review: a WT LFO whose setup has run is an LFO here too (l_inv 0: its l_period is stale, its first evaluation starts it)
     filter_apply(v, s, pool.fx_filter_[t], fx);  // the base, and whether anything modulates it now
     if (pool.perf_dest(v, 3u, true)) {
       continue;  // OS-PERF-LFO: the layer's FLT LFO has the cutoff modulator (over the FX 35's and the instrument's)
     }
     if (v.fmod) {
-      if (was_lfo && (fx != 0u || s.filter.mod.kind == kFmodLfo)) {
-        const unsigned r = fx != 0u ? fx - 1u : s.filter.mod.rate;  // an LFO runs and an LFO is wanted: its rate moves, its phase is the transport's
+      if (was_lfo && (fx != 0u || s.filter.mod.kind == kFmodLfo || (g.kind == kFmodWtLfo && s.filter.mod.kind == kFmodWtLfo))) {
+        // an LFO runs and an LFO is wanted: its rate moves, its phase is the transport's (a WT LFO keeps its kind whatever LFO is wanted: only its rate moves, as the plain one)
+        const unsigned r = fx != 0u ? fx - 1u : s.filter.mod.rate;
         const std::uint32_t period = static_cast<std::uint32_t>(static_cast<float>(kTicksPerStep) * kLfoRate[r]);
         g.l_period = period != 0u ? period : 1u;
         g.l_inv = 1.0f / static_cast<float>(g.l_period);
       } else {
-        mod_start(g, s.filter.mod, pool.cursor_step_, 0.0f, fx);
+        cutoff_mod_start(g, s.filter.mod, pool.cursor_step_, 0.0f, fx);
       }
     } else {
       g.kind = kFmodNone;
@@ -1475,8 +1786,11 @@ void VoicePool::clock_restart_impl(VoicePool& pool) noexcept {
         continue;
       }
       for (ModGen& g : v.mg) {
-        if (g.kind != kFmodLfo) {
+        if (g.kind != kFmodLfo && g.kind != kFmodWtLfo) {
           continue;
+        }
+        if (g.kind == kFmodWtLfo && g.l_inv == 0.0f) {
+          continue;  // OS-CEWTENV W3a review: its first evaluation has not run (its l_period is stale): the note's start step it holds in l_q starts it
         }
         g.l_shift = (base + g.l_shift) % g.l_period;
         g.l_q = g.l_q == 0xFFFFFFFFu ? g.l_q : 0u;
@@ -1500,8 +1814,11 @@ void VoicePool::resume_phase(VoicePool& pool) noexcept {
       continue;
     }
     for (ModGen& g : v.mg) {
-      if (g.kind != kFmodLfo) {
+      if (g.kind != kFmodLfo && g.kind != kFmodWtLfo) {
         continue;
+      }
+      if (g.kind == kFmodWtLfo && g.l_inv == 0.0f) {
+        continue;  // OS-CEWTENV W3a review: as in clock_restart_impl, its l_period is stale until its first evaluation
       }
       const std::uint32_t p = g.l_period;
       g.l_shift = ((old_base + g.l_shift) % p + p - new_base % p) % p;
@@ -1658,6 +1975,7 @@ bool VoicePool::note_on(unsigned track, unsigned note, unsigned slot, unsigned v
   v.mode = loops ? s.loop_mode : 0u;
   v.bwd = false;
   if (s.granular) {
+    v.track = static_cast<std::uint8_t>(track);  // OS-CEWTENV W6b: grain_start reads the track's step FX z (the assignment below stays, with its reason)
     grain_start(v, s);  // OS-GRAN (flash, once a note)
   }
   const bool filtered_before = retrigger && v.filt;
@@ -1668,7 +1986,7 @@ bool VoicePool::note_on(unsigned track, unsigned note, unsigned slot, unsigned v
     svf_reset(v.svf);  // the state runs on only across a retrigger that filters on both sides
   }
   if (v.fmod) {
-    mod_start(g, s.filter.mod, cursor_step_, kill, fx_lfo_[track]);
+    cutoff_mod_start(g, s.filter.mod, cursor_step_, kill, fx_lfo_[track]);
   } else {
     g.kind = kFmodNone;
   }
@@ -1700,6 +2018,22 @@ void VoicePool::cut(unsigned track) noexcept {
   }
 }
 
+void VoicePool::drop_tails() noexcept {
+  for (Voice& v : v_) {
+    if (v.playing) {
+      continue;
+    }
+    v.resid = 0;
+    v.resid_dec = 0;
+    if (v.st != 0u) {  // OS-STEREO (c): S's own tail; end_block_st gives the block back once it has run out
+      StSide& d = st_[(v.st & kStIdx) - 1u];
+      v.st = static_cast<std::uint8_t>(v.st & ~kStOn);
+      d.res = 0;
+      d.last = 0;
+    }
+  }
+}
+
 void VoicePool::release_all() noexcept {
   for (unsigned i = 0; i < kMaxVoices; ++i) {
     if (v_[i].playing) {
@@ -1719,6 +2053,17 @@ std::uint16_t env_units(std::uint16_t ms) noexcept {
 }
 
 namespace {
+// OS-CEWTENV W3c (review fold): a live edit that takes a slot off WT (SOURCE, or the enable byte) makes it a plain ADSR or LFO: what `delay` (the bake id), the warp and sustain bytes and a contour index in `shape`
+// meant to a WT kind is meaningless there (an ADSR delay of 1..128 ms, a random LFO shape), so they are cleared as sanitize_mod clears them; the rebuild at the next quiet moment brings back the stored ADSR delay.
+void leave_wt(FilterMod& m) noexcept {
+  if (m.kind >= kFmodWtEnv) {
+    m.delay = 0;
+    m.wt_bend = 0;
+    m.wt_sust = 0;
+    m.shape = m.shape > kLfoShapeSine ? std::uint8_t{2} : m.shape;
+  }
+}
+
 // OS-LFOLIVE: a modulation slot's SOURCE (0 Off, 1 Envelope, 2 LFO: the enable and loop bytes together, as model::EnvState reads them) and the LFO's shape, rate and amount, onto the descriptor, as
 // make_sample_desc builds them from the stored fields (put_mod and the amp slot): equal field for field, so that a rebuild after the live edits is what the voices already have. Pure; the voices'
 // side is VoicePool::apply_param. The amount is shared with the ADSR's in the descriptor (FilterMod::amount): switching to the LFO makes it the LFO's (kept in lfo_amount), and the sender
@@ -1741,6 +2086,7 @@ InstApply apply_lfo_field(SampleDesc& d, unsigned e, unsigned f, float value) no
   switch (f) {
     case 0u: {  // SOURCE
       const unsigned src = static_cast<unsigned>(whole(value, 0, 2));
+      leave_wt(m);
       m.lfo = src == 2u;
       if (e == 0u) {  // the amp slot: an LFO is the tremolo (the plain gain), an ADSR the amp envelope; its modulator is never an ADSR
         d.env.lfo = m.lfo;
@@ -1838,13 +2184,20 @@ InstApply apply_instrument_param(SampleDesc& d, unsigned field, float value, Lev
     switch (f) {
       case EnvEnable:  // an LFO slot keeps the plain gain (voices.h AMP ENVELOPE) and is the tremolo (AMP LFO MODULATION)
         a.enable = value != 0.0f && !a.lfo;
+        leave_wt(d.amp_mod);  // OS-CEWTENV W4: a live enable edit takes a WT amp slot off WT as it does the other slots (the rebuild brings it back)
         d.amp_mod.kind = value != 0.0f && a.lfo ? kFmodLfo : kFmodNone;
         break;
       case EnvAmount: a.amount = static_cast<std::int32_t>(clamp01(value) * 65536.0f + 0.5f); break;
       case EnvAttack: a.attack = env_units(ms); break;
-      case EnvDecay: a.decay = env_units(ms); break;
+      case EnvDecay:
+        a.decay = env_units(ms);
+        d.amp_mod.decay = d.amp_mod.kind >= kFmodWtEnv ? ms : d.amp_mod.decay;  // OS-CEWTENV W4: a WT Env's duration, in ms (the next note's)
+        break;
       case EnvSustain: a.sustain = static_cast<std::uint32_t>(clamp01(value) * 1073741823.0f); break;  // level x 1073741823.0; 1.0 is kEnvOne
-      default: a.release = env_units(ms); break;
+      default:
+        a.release = env_units(ms);
+        d.amp_mod.release = d.amp_mod.kind >= kFmodWtEnv ? ms : d.amp_mod.release;  // ... and its release
+        break;
     }
     return InstApply::Applied;
   }
@@ -1865,7 +2218,13 @@ InstApply apply_instrument_param(SampleDesc& d, unsigned field, float value, Lev
   if (mp != nullptr) {
     FilterMod& m = *mp;
     switch (f) {
-      case EnvEnable: m.kind = value == 0.0f ? kFmodNone : (m.lfo ? kFmodLfo : kFmodEnv); break;
+      case EnvEnable: {
+        // OS-CEWTENV W3b (spec F2, A8): slot 3's enable byte is a bit mask, 0x01 the wavetable position (0x02 is the granular length, W5): 0x02 alone is no position modulation. Other slots: any non-zero byte.
+        const bool on = e == 3u ? (whole(value, 0, 255) & 1) != 0 : value != 0.0f;
+        leave_wt(m);
+        m.kind = !on ? kFmodNone : (m.lfo ? kFmodLfo : kFmodEnv);
+        break;
+      }
       case EnvAmount: m.amount = m.lfo ? m.amount : mod_amount(value); break;
       case EnvAttack: m.attack = ms; break;
       case EnvDecay: m.decay = ms; break;
@@ -1940,7 +2299,7 @@ void VoicePool::refilter(Voice& v) noexcept {
   if (!v.fmod) {
     g.kind = kFmodNone;
   } else if (!was_mod || g.kind != (fx_lfo_[t] != 0u ? kFmodLfo : s.filter.mod.kind)) {
-    mod_start(g, s.filter.mod, cursor_step_, 0.0f, fx_lfo_[t]);
+    cutoff_mod_start(g, s.filter.mod, cursor_step_, 0.0f, fx_lfo_[t]);
   } else if (g.kind == kFmodLfo) {
     lfo_rerate(g, fx_lfo_[t] != 0u ? fx_lfo_[t] - 1u : s.filter.mod.rate);  // (the layer's FLT LFO has let go: the Filter LFO FX's or the instrument's speed)
   }
@@ -1985,6 +2344,15 @@ void VoicePool::mods_start(Voice& v, const SampleDesc& s, bool retrigger, unsign
     mod_start(g, *ms.m[k], cursor_step_, kill, 0u, k == 2u ? kAmpRateBase : 0u);
     mask = static_cast<std::uint8_t>(mask | mod_bit(k));
   }
+  if (v.mode == kModeGranular) {  // OS-CEWTENV W5: on a granular instrument slot 3's bit 0x02 drives the grain length (any source kind); a wavetable instrument ignores the bit
+    const FilterMod* gm = grlen_slot(v.slot);
+    if (gm != nullptr && gm->kind != kFmodNone && grlen_gens_ != nullptr) {
+      ModGen& g = grlen_gen(v);
+      mod_start(g, *gm, cursor_step_, 0.0f, 0u, 0u);
+      g.e_out = static_cast<float>(gr_base(v, s));  // the grain starts at the instrument's length; the first block's evaluation moves it at the next wrap
+      mask = static_cast<std::uint8_t>(mask | kMmLen);
+    }
+  }
   v.mmask = mask;
   v.mneed = mask != 0u;
   v.tcur = kTremOne;
@@ -2008,6 +2376,9 @@ void VoicePool::mods_start(Voice& v, const SampleDesc& s, bool retrigger, unsign
     }
   }
   st_start(v, s, retrigger);  // OS-STEREO (c): S for the note, after everything it depends on is settled (the mode, the filter, the shaper, the tremolo); before the tail below (v.playing and v.last are the old note's)
+  if ((((fxe_on_[0] | fxe_on_[1]) >> track) & 1u) != 0u) {
+    fxe_apply(v, s, track, i);  // OS-CEWTENV W6a: the step FX w / y of the track: the copies the tail below and the render read (note_on set v.env from the descriptor, pmask is 0 from the top of this function)
+  }
   // OS-PERF-CPU3: the tail of note_on, here so that note_on (SRAM_L) loses its instructions: last and unconditional (nothing above reads or writes these fields; the early returns of note_on come before the call).
   if (v.env != nullptr) {
     v.releasing = false;
@@ -2425,9 +2796,113 @@ void VoicePool::perf_restore(const PerfSave& in) noexcept {
   }
 }
 
+namespace {
+// OS-CEWTENV W6a (docs/specs/OS-CEWTENV.md 3.7, A7): the step FX w / y. kFxEnvMs is the spec's time table (x and y of the FX w on an amp ADSR); the FX y on a cutoff ADSR uses 8 ms per step (A7).
+constexpr std::uint16_t kFxEnvMs[16] = {0, 5, 12, 25, 45, 80, 140, 240, 400, 650, 1000, 1500, 2200, 3300, 5000, 8000};
+
+// A WT slot's copy for the FX: the WT Env's duration scaled by x (x < 8: 0.05 + 0.95 x / 8; x >= 8: 1 + 3 (x - 8) / 7; integer forms ms (8 + 19 x) / 160 and ms (3 x - 17) / 7; at least 10 ms,
+// at most 65535; the base is `decay`, 1 or less meaning 1,000 ms) and, when y is not 8, the warp X offset y - 8 (the result held to -7..7; the bake id is dropped: the warps apply live).
+void fxe_wt_copy(FilterMod& o, const FilterMod& m, unsigned x, unsigned y) noexcept {
+  o = m;
+  if (m.kind == kFmodWtEnv) {
+    const std::uint32_t base = m.decay <= 1u ? 1000u : m.decay;
+    std::uint32_t ms = x < 8u ? base * (8u + 19u * x) / 160u : base * (3u * x - 17u) / 7u;
+    ms = ms < 10u ? 10u : (ms > 65535u ? 65535u : ms);
+    o.decay = static_cast<std::uint16_t>(ms);
+  }
+  if (y != 8u) {
+    int wx = static_cast<int>(wt_warp_x(m.wt_bend)) + static_cast<int>(y) - 8;
+    wx = wx < -7 ? -7 : (wx > 7 ? 7 : wx);
+    o.wt_bend = wt_pack_warp(static_cast<std::int8_t>(wx), wt_warp_y(m.wt_bend));
+    o.delay = 0;
+  }
+}
+}  // namespace
+
+// OS-CEWTENV W6a: the copies of the step FX w (amp slot) and y (cutoff slot) the voice `v` (index i, track `track`) plays, from the instrument's descriptor `s`; called at the note start (mods_start)
+// and again when the FX starts or ends under a sounding note. First everything the FX may have set is put back (pmask bits 5 and 6, the amp ADSR pointer), then the tracks' FX apply. An LFO slot, an
+// instrument without the slot's ADSR or WT kind: unchanged. The running generators read their parameters live from the copy (fenv_eval, wtenv_eval); a WT Env's duration is read when it starts.
+void VoicePool::fxe_apply(Voice& v, const SampleDesc& s, unsigned track, unsigned i) noexcept {
+  v.pmask = static_cast<std::uint8_t>(v.pmask & ~(kPmFxCut | kPmFxAmp));
+  if (fxm_ == nullptr) {
+    return;  // (fxe_on_ is never set then; ifx_event and mods_start do not get here)
+  }
+  FxEnvMem& m_ = *fxm_;
+  if (v.env == &m_.env[i]) {
+    v.env = s.env.enable ? &s.env : nullptr;
+  }
+  const std::uint16_t bit = static_cast<std::uint16_t>(1u << track);
+  if ((fxe_on_[0] & bit) != 0u) {
+    const unsigned x = m_.val[track][0] >> 4;
+    const unsigned y = m_.val[track][0] & 15u;
+    if (s.env.enable) {
+      AmpEnvelope& e = m_.env[i];
+      e = s.env;
+      e.attack = env_units(kFxEnvMs[x]);
+      e.decay = env_units(kFxEnvMs[y]);
+      e.release = e.decay;
+      if (y <= 6u) {
+        e.sustain = 0;
+      }
+      v.env = &e;
+    } else if (s.amp_mod.kind >= kFmodWtEnv) {
+      fxe_wt_copy(m_.wt[i], s.amp_mod, x, y);
+      v.pmask = static_cast<std::uint8_t>(v.pmask | kPmFxAmp);
+    }
+  }
+  if ((fxe_on_[1] & bit) != 0u) {
+    const unsigned x = m_.val[track][1] >> 4;
+    const unsigned y = m_.val[track][1] & 15u;
+    const FilterMod& m = s.filter.mod;
+    if (m.kind == kFmodEnv) {
+      FilterMod& o = m_.cut[i];
+      o = m;
+      o.attack = static_cast<std::uint16_t>(x == 0u ? 1u : 8u * x);
+      o.decay = static_cast<std::uint16_t>(8u * y);
+      o.release = o.decay;
+      if (y <= 6u) {
+        o.sustain = 0.0f;
+      }
+      v.pmask = static_cast<std::uint8_t>(v.pmask | kPmFxCut);
+    } else if (m.kind >= kFmodWtEnv) {
+      fxe_wt_copy(m_.cut[i], m, x, y);
+      v.pmask = static_cast<std::uint8_t>(v.pmask | kPmFxCut);
+    }
+  }
+}
+
 // A ModSet / ModEnd of the Glide, Overdrive or Bit depth group: the track holds the FX (its value kept) or lets it go. The Glide is read at the next note; the other two reach the voice
-// sounding now (the instrument's value comes back with the ModEnd). Any other group is not the voices'.
+// sounding now (the instrument's value comes back with the ModEnd). The step FX w / y (OS-CEWTENV W6a) are kept the same way and re-applied to the sounding voice. Any other group is not the voices'.
 void VoicePool::ifx_event(unsigned track, unsigned group, unsigned fx_type, unsigned value) noexcept {
+  if (group == kModGroupAmpEnv || group == kModGroupFilterEnv) {
+    const unsigned e = group == kModGroupAmpEnv ? 0u : 1u;
+    const std::uint16_t ebit = static_cast<std::uint16_t>(1u << track);
+    if (fx_type == (e == 0u ? kFxAmpEnv : kFxFilterEnv)) {
+      if (fxm_ == nullptr) {
+        return;  // no fxe_bind(): the FX do nothing
+      }
+      fxm_->val[track][e] = static_cast<std::uint8_t>(value > 255u ? 255u : value);
+      fxe_on_[e] = static_cast<std::uint16_t>(fxe_on_[e] | ebit);
+    } else {
+      fxe_on_[e] = static_cast<std::uint16_t>(fxe_on_[e] & ~ebit);
+    }
+    const unsigned i = find(track);
+    if (i != kNone && v_[i].playing) {
+      fxe_apply(v_[i], samples_[v_[i].slot], track, i);
+    }
+    return;
+  }
+  if (group == kModGroupGranLen) {  // OS-CEWTENV W6b: the step FX z holds the track's grain length (F11), SDRAM word fxm_->val[track][2] = value + 1, read by gr_base
+    if (fxm_ == nullptr) {
+      return;  // no fxe_bind(): the FX does nothing
+    }
+    fxm_->val[track][2] = fx_type == kFxGranLen ? static_cast<std::uint8_t>((value > 100u ? 100u : value) + 1u) : 0u;
+    const unsigned i = find(track);
+    if (i != kNone && v_[i].playing && v_[i].mode == kModeGranular) {
+      v_[i].gpend = true;  // the grain takes the new length at its next wrap (gnew == gpos while nothing is pending, so the position does not move)
+    }
+    return;
+  }
   unsigned k;
   unsigned type;
   switch (group) {
@@ -2463,7 +2938,11 @@ void VoicePool::move_position(Voice& v, const SampleDesc& s, float mod) noexcept
     v.gpend = v.gnew != v.gpos;
   } else if (s.wt_windows > 1u) {
     const std::int64_t last = static_cast<std::int64_t>(s.wt_windows) - 1;
-    std::int64_t win = static_cast<std::int64_t>(s.wt_pos) + static_cast<std::int64_t>(mod * static_cast<float>(s.wt_windows));
+    const float windows = static_cast<float>(s.wt_windows);
+    const float lim = 2.0f * windows;  // wt_windows is frames / wt_size <= 2^27, so +-lim fits an int32 and the [0, last] clamp below lands as it does without it
+    float prod = mod * windows;
+    prod = prod < -lim ? -lim : (prod > lim ? lim : prod);  // (no float -> int64 conversion: that one pulls __aeabi_f2lz and its double helpers)
+    std::int64_t win = static_cast<std::int64_t>(s.wt_pos) + static_cast<std::int32_t>(prod);
     win = win < 0 ? 0 : (win > last ? last : win);
     v.data = s.data + (win - static_cast<std::int64_t>(s.wt_pos)) * static_cast<std::int64_t>(s.wt_size);
   }
@@ -2481,7 +2960,7 @@ void VoicePool::gate_cut(Voice& v, std::uint32_t n) noexcept {
   }
   g.since = static_cast<std::uint16_t>(g.since + n);  // below kBlock + kBlock before the add: no wrap
   if (g.since >= kBlock) {
-    (void)fenv_eval(g, samples_[v.slot].filter.mod);
+    (void)fenv_eval(g, cut_mod(v));
   }
   g.need = true;  // the first span after the gate evaluates afresh
 }
@@ -2551,7 +3030,7 @@ void VoicePool::mod_block(Voice& v, const SampleDesc& s, std::uint32_t begin) no
   }
   if ((v.mmask & kMmPan) != 0u) {
     ModGen& g = v.mg[kMgPan];
-    const float mod = g.kind == kFmodEnv ? fenv_eval(g, s.pan_mod) : flfo_eval(g, dmod(v, 1u, s.pan_mod), 0u);
+    const float mod = g.kind >= kFmodWtEnv ? wt_mod_eval(g, s.pan_mod, 0u) : (g.kind == kFmodEnv ? fenv_eval(g, s.pan_mod) : flfo_eval(g, dmod(v, 1u, s.pan_mod), 0u));  // OS-CEWTENV W3b: one compare for the WT kinds
     g.since = ahead;
     const int pan = static_cast<int>(s.pan) + static_cast<int>(mod * 100.0f);
     pan_val_[v.track < kVoiceTracks ? v.track : 0u] = static_cast<std::uint8_t>(pan < 0 ? 0 : (pan > 100 ? 100 : pan));
@@ -2559,18 +3038,39 @@ void VoicePool::mod_block(Voice& v, const SampleDesc& s, std::uint32_t begin) no
   }
   if ((v.mmask & kMmTune) != 0u) {
     ModGen& g = v.mg[kMgTune];
-    const float mod = g.kind == kFmodEnv ? fenv_eval(g, s.tune_mod) : flfo_eval(g, dmod(v, 2u, s.tune_mod), 0u);
+    const float mod = g.kind >= kFmodWtEnv ? wt_mod_eval(g, s.tune_mod, 0u) : (g.kind == kFmodEnv ? fenv_eval(g, s.tune_mod) : flfo_eval(g, dmod(v, 2u, s.tune_mod), 0u));
     g.since = ahead;
     const int fine = static_cast<int>(s.fine_tune) + static_cast<int>(mod * 100.0f);
     repitch(v, s, fine < -100 ? -100 : (fine > 100 ? 100 : fine));
   }
   if ((v.mmask & kMmPos) != 0u) {  // OS-GRAN: the wavetable's window or the granular position (voices.h POSITION MODULATION)
     ModGen& g = v.mg[kMgPos];
-    const float mod = g.kind == kFmodEnv ? fenv_eval(g, s.pos_mod) : flfo_eval(g, dmod(v, 4u, s.pos_mod), 0u);
+    const float mod = g.kind >= kFmodWtEnv ? wt_mod_eval(g, s.pos_mod, 0u) : (g.kind == kFmodEnv ? fenv_eval(g, s.pos_mod) : flfo_eval(g, dmod(v, 4u, s.pos_mod), 0u));
     g.since = ahead;
     move_position(v, s, mod);
   }
-  if ((v.mmask & kMmTrem) != 0u) {  // the tremolo's multiplier at the block's grid points (a point before the span's start is not used), and at the span's first sample
+  if ((v.mmask & kMmLen) != 0u) {  // OS-CEWTENV W5 (F12): the grain length, once a block, from any source kind; the new length applies at the grain's next wrap (run_gran_t), never mid-grain
+    const FilterMod* mp = grlen_slot(v.slot);
+    if (mp == nullptr || mp->kind == kFmodNone || grlen_gens_ == nullptr) {
+      v.mmask = static_cast<std::uint8_t>(v.mmask & ~kMmLen);  // the slot's length source went off with the descriptor
+      v.gpend = true;  // ... and the grain goes back to the descriptor's gr_len at its next wrap (gnew == gpos while nothing is pending, so the position does not move)
+    } else {
+      ModGen& g = grlen_gen(v);
+      const float mod = g.kind >= kFmodWtEnv ? wt_mod_eval(g, *mp, 0u) : (g.kind == kFmodEnv ? fenv_eval(g, *mp) : flfo_eval(g, *mp, 0u));
+      g.since = ahead;
+      std::uint32_t hi = s.length < 44100u ? s.length : 44100u;  // max = min(sample length, 44,100)
+      if (hi < 44u) {
+        hi = 44u;
+      }
+      float len = static_cast<float>(gr_base(v, s)) + mod * static_cast<float>(hi - 44u);  // length = base + mod x (max - 44)
+      len = len < 44.0f ? 44.0f : (len > static_cast<float>(hi) ? static_cast<float>(hi) : len);  // held to 44..max (a NaN lands at 44)
+      g.e_out = len;  // the length the next wrap makes the grain with (every evaluator above writes e_out as its output and never reads it back, so it is free to hold this)
+    }
+  }
+  if ((v.mmask & kMmTrem) != 0u && v.mg[kMgTrem].kind >= kFmodWtEnv) {  // OS-CEWTENV W4: the amp slot's WT Env / WT LFO (it never turns off: the walk to 0 at the end is the voice's)
+    wt_amp_block(v, (v.pmask & kPmFxAmp) != 0u ? fxm_->wt[static_cast<unsigned>(&v - v_)] : s.amp_mod, begin);  // OS-CEWTENV W6a: the step FX w's copy of the slot
+    v.mmask = static_cast<std::uint8_t>(v.mmask & ~kMmTremOff);
+  } else if ((v.mmask & kMmTrem) != 0u) {  // the tremolo's multiplier at the block's grid points (a point before the span's start is not used), and at the span's first sample
     ModGen& g = v.mg[kMgTrem];
     const FilterMod& m = dmod(v, 0u, s.amp_mod);
     const bool on = g.kind == kFmodLfo;  // (OS-PERF-LFO: the generator's kind, not the descriptor's: the layer's tremolo runs over an amp slot that is Off or an envelope; remod and mods_start keep the two equal otherwise)
@@ -2695,12 +3195,15 @@ bool VoicePool::perf_dest(Voice& v, unsigned d, bool live) noexcept {
   {
     // A slot that is Off or an ADSR plays its stored shape and amount; one that stores nothing audible (an old project, an OG file: 0 or a negative amount, a NaN) plays kPerfLfoMod (a triangle at 50 %).
     const FilterMod& sm = dest_mod(samples_[v.slot], d);
-    const bool fallback = sm.kind != kFmodLfo && !(sm.lfo_amount >= kPerfLfoMinAmount);
+    // OS-CEWTENV W3b: a WT slot (pan, finetune, position) has a contour in `shape`, which the plain LFO would read as the random shape: the layer's LFO over it plays kPerfLfoMod (the cutoff's, W3a: l_ovr 3)
+    const bool fallback = (d != 3u && sm.kind >= kFmodWtEnv) || (sm.kind != kFmodLfo && !(sm.lfo_amount >= kPerfLfoMinAmount));
     v.pmask = fallback ? static_cast<std::uint8_t>(v.pmask | (1u << d)) : static_cast<std::uint8_t>(v.pmask & ~(1u << d));
   }
   const std::uint8_t bit = d == 3u ? std::uint8_t{0} : mod_bit(ds.k);
   if (live && g.kind == kFmodLfo && (d == 3u || (v.mmask & bit) != 0u)) {
     lfo_rerate(g, static_cast<unsigned>(idx));
+  } else if (d == 3u) {
+    cutoff_mod_start(g, dest_mod(samples_[v.slot], d), cursor_step_, 0.0f, static_cast<unsigned>(idx) + 1u);  // the FLT LFO over a WT cutoff slot: the triangle (voices.h)
   } else {
     mod_start(g, dest_mod(samples_[v.slot], d), cursor_step_, 0.0f, static_cast<unsigned>(idx) + 1u);
     v.mmask = static_cast<std::uint8_t>(v.mmask | bit);
@@ -2878,7 +3381,9 @@ bool VoicePool::apply_param(unsigned slot, unsigned field, float value, std::uin
     return apply_position(slot, field, value);
   }
   SampleDesc empty;  // an empty slot has no descriptor to keep: the field is only checked, and set_sample() builds the slot from the project when audio is bound
-  SampleDesc& d = samples_[slot].length != 0u ? samples_[slot] : empty;
+  // OS-MODSENDS: except the mix fields, which a silent slot keeps (an SD module's instrument has no PCM; the engine reads them where its note starts).
+  const bool mix = field == inst_param::Panning || field == inst_param::DelaySend || field == inst_param::ReverbSend;
+  SampleDesc& d = samples_[slot].length != 0u || mix ? samples_[slot] : empty;
   const InstApply r = apply_instrument_param(d, field, value, law_);
   if (r != InstApply::Applied || samples_[slot].length == 0u) {
     return r != InstApply::Unknown;

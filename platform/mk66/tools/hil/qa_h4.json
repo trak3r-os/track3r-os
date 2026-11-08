@@ -48,7 +48,7 @@
    ],
    "gap": 0.3,
    "if_state": {
-    "overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|FILL|PLAY_MODE|TOOLS|EXPORT_PROGRESS)$"
+    "overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|FILL|PLAY_MODE|TOOLS|VERB_MENU|EXPORT_PROGRESS)$"
    },
    "note": "(a leftover overlay is put away: F8 is Back)"
   },
@@ -78,9 +78,21 @@
   },
   {
    "state": {
-    "overlay": "TOOLS"
+    "overlay": "VERB_MENU"
    },
    "within": 3
+  },
+  {
+   "pad": 15,
+   "note": "pad 16 (APPS >): the verb menu's APPS page"
+  },
+  {
+   "keys": [
+    "up"
+   ],
+   "gap": 0.1,
+   "repeat": 20,
+   "note": "the cursor to the top (the list remembers the row it was left on)"
   },
   {
    "shot": "qa_mod_091_tools",
@@ -229,9 +241,21 @@
   },
   {
    "state": {
-    "overlay": "TOOLS"
+    "overlay": "VERB_MENU"
    },
    "within": 3
+  },
+  {
+   "pad": 15,
+   "note": "pad 16 (APPS >): the verb menu's APPS page"
+  },
+  {
+   "keys": [
+    "up"
+   ],
+   "gap": 0.1,
+   "repeat": 20,
+   "note": "the cursor to the top (the list remembers the row it was left on)"
   },
   {
    "say": "MANUAL STEP: move the list's cursor to SMFEXPORT with Down (the list may keep its cursor from the first launch; the position depends on the apps on the card); the run goes on after the wait"

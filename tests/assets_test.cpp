@@ -5,6 +5,7 @@
 #include <doctest/doctest.h>
 
 #include <o3os/app/pattern_data.h>
+#include <o3os/core/inflate.h>
 #include <o3os/eve/display_list_builder.h>
 #include <o3os/model/fx_table.h>
 #include <o3os/platform/host/fakes.h>
@@ -34,9 +35,9 @@ constexpr std::size_t kPlenty = 1u << 20;  // a recording cap that nothing here 
 
 unsigned cell_of(char ch) { return static_cast<unsigned>(ch) - 32u; }
 
-// Pixel (x, y) of a glyph of the Data face.
-bool glyph_bit(const ui::FontFace& f, char ch, unsigned x, unsigned y) {
-  const std::uint8_t b = f.bitmap[cell_of(ch) * f.stride * f.cell_h + y * f.stride + x / 8];
+// Pixel (x, y) of a glyph of a face's inflated bitmap (ui::face_bitmap; OS-FLASHDIET A4: the faces are stored deflated).
+bool glyph_bit(const std::uint8_t* bitmap, const ui::FontFace& f, char ch, unsigned x, unsigned y) {
+  const std::uint8_t b = bitmap[cell_of(ch) * f.stride * f.cell_h + y * f.stride + x / 8];
   return ((b >> (7 - x % 8)) & 1u) != 0;
 }
 bool tile_bit(const std::uint8_t* tile, unsigned stride, unsigned x, unsigned y) {
@@ -132,43 +133,73 @@ TEST_CASE("assets: the RAM_G map is word aligned, ordered, below 1 MB, and the h
   CHECK(kRamGHexHi == kRamGHexLo + 128u * kHexTileBytes);
 }
 
+TEST_CASE("assets: every face's deflated stream inflates byte for byte to the raw bitmap (OS-FLASHDIET A4)") {
+  for (unsigned i = 0; i < ui::kFontCount; ++i) {
+    const ui::Font font = static_cast<ui::Font>(i);
+    const ui::FontFace& f = ui::font_face(font);
+    CHECK(f.bitmap_bytes == f.glyph_count * f.stride * f.cell_h);
+    CHECK(f.z_size < f.bitmap_bytes);  // every face compresses
+    CHECK(reinterpret_cast<std::uintptr_t>(f.z) % hal::kUploadAlign == 0);  // declared alignas(4) by the generator
+    std::vector<std::uint8_t> want(f.bitmap_bytes);
+    CHECK_MESSAGE(ui::face_bitmap(font, want.data(), want.size()), "face " << i << " through face_bitmap");
+    CHECK_FALSE(ui::face_bitmap(font, want.data(), want.size() - 1));  // a cap below bitmap_bytes is refused
+    // The same stream through a fresh core::Inflater, read in chunks of 1, 7, 64 and 4096 bytes: byte-equal.
+    for (const std::size_t chunk : {std::size_t{1}, std::size_t{7}, std::size_t{64}, std::size_t{4096}}) {
+      core::Inflater inf;
+      inf.begin(f.z, f.z_size, f.bitmap_bytes);
+      std::vector<std::uint8_t> got(f.bitmap_bytes, 0xEE);
+      std::size_t at = 0;
+      while (at < f.bitmap_bytes && !inf.done() && !inf.failed()) {
+        at += inf.read(got.data() + at, std::min(chunk, f.bitmap_bytes - at));
+      }
+      CHECK_MESSAGE(inf.done(), "face " << i << " chunk " << chunk << ": not done");
+      CHECK_MESSAGE(!inf.failed(), "face " << i << " chunk " << chunk << ": failed");
+      CHECK_MESSAGE(at == f.bitmap_bytes, "face " << i << " chunk " << chunk << ": produced " << at);
+      CHECK_MESSAGE(got == want, "face " << i << " chunk " << chunk << ": the inflated bytes differ");
+    }
+  }
+}
+
 TEST_CASE("assets: a composed tile is the glyphs side by side, pixel for pixel") {
   const ui::FontFace& data = ui::font_face(ui::kTileFont);
+  std::uint8_t face_px[ui::kFaceScratchBytes];
+  CHECK(ui::face_bitmap(ui::kTileFont, face_px, sizeof face_px));
   std::uint8_t tile[ui::kNoteTileBytes];
   std::memset(tile, 0xEE, sizeof(tile));
-  ui::compose_tile(data, "7F", 2, tile);
+  ui::compose_tile(data, face_px, "7F", 2, tile);
   for (unsigned y = 0; y < 20; ++y) {
     for (unsigned x = 0; x < 20; ++x) {
-      CHECK(tile_bit(tile, 3, x, y) == (x < 10 ? glyph_bit(data, '7', x, y) : glyph_bit(data, 'F', x - 10, y)));
+      CHECK(tile_bit(tile, 3, x, y) == (x < 10 ? glyph_bit(face_px, data, '7', x, y) : glyph_bit(face_px, data, 'F', x - 10, y)));
     }
     CHECK((tile[y * 3 + 2] & 0x0F) == 0);  // the 4 pad bits of the third byte are clear
   }
-  ui::compose_tile(data, "C#4", 3, tile);
+  ui::compose_tile(data, face_px, "C#4", 3, tile);
   for (unsigned y = 0; y < 20; ++y) {
     for (unsigned x = 0; x < 30; ++x) {
       const char ch = "C#4"[x / 10];
-      CHECK(tile_bit(tile, 4, x, y) == glyph_bit(data, ch, x % 10, y));
+      CHECK(tile_bit(tile, 4, x, y) == glyph_bit(face_px, data, ch, x % 10, y));
     }
     CHECK((tile[y * 4 + 3] & 0x03) == 0);  // 2 pad bits
   }
   // One glyph, and a character the face does not have (it is '?', like text()).
-  ui::compose_tile(data, "A", 1, tile);
+  ui::compose_tile(data, face_px, "A", 1, tile);
   for (unsigned y = 0; y < 20; ++y) {
     for (unsigned x = 0; x < 10; ++x) {
-      CHECK(tile_bit(tile, 2, x, y) == glyph_bit(data, 'A', x, y));
+      CHECK(tile_bit(tile, 2, x, y) == glyph_bit(face_px, data, 'A', x, y));
     }
   }
-  ui::compose_tile(data, "\x01", 1, tile);
+  ui::compose_tile(data, face_px, "\x01", 1, tile);
   for (unsigned y = 0; y < 20; ++y) {
     for (unsigned x = 0; x < 10; ++x) {
-      CHECK(tile_bit(tile, 2, x, y) == glyph_bit(data, '?', x, y));
+      CHECK(tile_bit(tile, 2, x, y) == glyph_bit(face_px, data, '?', x, y));
     }
   }
   // Too many cells for the accumulator, or nothing to draw: the output is left alone.
   std::memset(tile, 0x5A, sizeof(tile));
-  ui::compose_tile(data, "ABCD", 4, tile);
-  ui::compose_tile(data, "A", 0, tile);
-  ui::compose_tile(data, nullptr, 1, tile);
+  ui::compose_tile(data, face_px, "ABCD", 4, tile);
+  ui::compose_tile(data, face_px, "A", 0, tile);
+  ui::compose_tile(data, face_px, nullptr, 1, tile);
+  ui::compose_tile(data, nullptr, "A", 1, tile);
   for (const std::uint8_t b : tile) {
     CHECK(b == 0x5A);
   }
@@ -306,17 +337,27 @@ TEST_CASE("assets: on the simulator's display everything lands in RAM_G where th
   auto raster = std::make_unique<sim::EveRaster>();
   sim::RasterDisplay display(*raster);
   CHECK(sim::load_assets(display) == hal::UploadResult::Ok);
+  // OS-FLASHDIET A4: the RAM_G bytes after upload_assets equal the old raw faces, byte for byte: each face inflated
+  // through face_bitmap (the streams the generator made of the very bitmaps it used to emit raw).
+  std::uint8_t face_px[ui::kFaceScratchBytes];
   for (unsigned i = 0; i < ui::kFontCount; ++i) {
-    const ui::FontFace& f = ui::font_face(static_cast<ui::Font>(i));
-    CHECK(std::memcmp(raster->ram_g() + f.ram_g_addr, f.bitmap, f.bitmap_bytes) == 0);
+    const ui::Font font = static_cast<ui::Font>(i);
+    const ui::FontFace& f = ui::font_face(font);
+    std::vector<std::uint8_t> px(f.bitmap_bytes);
+    CHECK_MESSAGE(ui::face_bitmap(font, px.data(), px.size()), "face " << i);
+    CHECK(std::memcmp(raster->ram_g() + f.ram_g_addr, px.data(), f.bitmap_bytes) == 0);
   }
+  const ui::FontFace& data = ui::font_face(ui::kTileFont);
+  CHECK(ui::face_bitmap(ui::kTileFont, face_px, sizeof face_px));
   const ui::IconBitmap icons = ui::icon_bitmap();
   CHECK(std::memcmp(raster->ram_g() + ui::kRamGIcons, icons.bytes, icons.size) == 0);
-  const ui::BootLogo logo = ui::boot_logo();  // OS-003f: in its own region of the RAM_G map, behind the wave slots
-  CHECK(std::memcmp(raster->ram_g() + ui::plot::kRamGBootLogo, logo.bytes, logo.size) == 0);
+  // OS-003f / OS-FLASHDIET A5: in its own region of the RAM_G map, behind the wave slots, inflated from its stream.
+  std::uint8_t logo_px[ui::kBootLogoBytes];
+  CHECK(ui::boot_logo_bitmap(logo_px, sizeof logo_px));
+  CHECK(std::memcmp(raster->ram_g() + ui::plot::kRamGBootLogo, logo_px, ui::kBootLogoBytes) == 0);
   // Hex tile 0xA5 is in the second handle's range, at the same offset from the start of the first.
   std::uint8_t want[ui::kHexTileBytes];
-  ui::compose_tile(ui::font_face(ui::kTileFont), "A5", 2, want);
+  ui::compose_tile(data, face_px, "A5", 2, want);
   CHECK(std::memcmp(raster->ram_g() + ui::kRamGHexLo + 0xA5u * ui::kHexTileBytes, want, sizeof(want)) == 0);
   CHECK(std::memcmp(raster->ram_g() + ui::kRamGHexHi + (0xA5u - 128u) * ui::kHexTileBytes, want, sizeof(want)) == 0);
   // Every note tile, the ones the second handle draws included, is where its handle points (they continue one another in RAM_G).
@@ -324,19 +365,21 @@ TEST_CASE("assets: on the simulator's display everything lands in RAM_G where th
     char text[4];
     ui::note_tile_text(c, text);
     std::uint8_t note[ui::kNoteTileBytes];
-    ui::compose_tile(ui::font_face(ui::kTileFont), text, 3, note);
+    ui::compose_tile(data, face_px, text, 3, note);
     const std::uint32_t at = c < ui::kNoteTilesPerHandle ? ui::bitmap_set(ui::Tiles::Notes).ram_g + c * ui::kNoteTileBytes
                                                          : ui::notes_hi_set().ram_g + (c - ui::kNoteTilesPerHandle) * ui::kNoteTileBytes;
     CHECK_MESSAGE(std::memcmp(raster->ram_g() + at, note, sizeof(note)) == 0, "note tile " << c);
   }
   // The FX name tiles (OS-AUDIT E-PAT-03): the Micro face's three letters, where the MicroFx set points; a type without a name is composed as "???".
+  const ui::FontFace& micro = ui::font_face(ui::kMicroTileFont);
+  CHECK(ui::face_bitmap(ui::kMicroTileFont, face_px, sizeof face_px));
   for (unsigned t = 0; t < ui::kFxTiles; ++t) {
     char text[4];
     if (!ui::fx_tile_text(t, text)) {
       std::strcpy(text, "???");
     }
     std::uint8_t tile[ui::kFxTileBytes];
-    ui::compose_tile(ui::font_face(ui::kMicroTileFont), text, 3, tile);
+    ui::compose_tile(micro, face_px, text, 3, tile);
     CHECK_MESSAGE(std::memcmp(raster->ram_g() + ui::kRamGMicroFx + t * ui::kFxTileBytes, tile, sizeof(tile)) == 0, "FX name tile " << t);
   }
   CHECK(raster->ram_g()[ui::kRamGEnd] == 0);  // the one after the end is not touched: zero

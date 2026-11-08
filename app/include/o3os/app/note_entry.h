@@ -9,18 +9,16 @@
 // preference, see pad_layer.h). Pure data, main loop only, no heap.
 
 #include <o3os/core/scales.h>
+#include <o3os/model/project_state.h>
 
 #include <cstdint>
 #include <type_traits>
 
 namespace o3os::app {
 
-// The twelve scales the panel offers, as indices into the 40 masks of core/scales.h, so no second table of masks: Chromatic, Major, Minor, Dorian, Phrygian, Lydian, Mixolydian,
-// Pent. maj, Pent. min, Blues (Blues Min), Harm. minor, Whole tone.
+// The twelve scales the panel's pad row 2 offers, in the panel's pad order; the model's map (model::kNotePanelScales, the same twelve as the official indices) says which pad is
+// which. The names come from the one table of core::kScaleNames (OS-SCALES28 Q4c): no second name table here.
 inline constexpr unsigned kNoteScales = 12;
-inline constexpr std::uint8_t kNoteScaleOg[kNoteScales] = {1, 3, 2, 4, 8, 5, 10, 19, 18, 16, 12, 24};
-inline constexpr char kNoteScaleNames[kNoteScales][12] = {"Chromatic", "Major",     "Minor",     "Dorian",    "Phrygian",    "Lydian",
-                                                          "Mixolydian", "Pent. maj", "Pent. min", "Blues",     "Harm. minor", "Whole tone"};
 inline constexpr char kRootNames[12][3] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
 
 inline constexpr unsigned kEntryOctaves = 10;   // OCTAVE 0..9
@@ -29,14 +27,15 @@ inline constexpr std::uint8_t kNoNote = 0xFF;
 
 struct NoteEntry {
   std::uint8_t root = 0;     // the pitch class 0..11 (C..B)
-  std::uint8_t scale = 0;    // 0..kNoteScales-1
+  std::uint8_t scale = 0;    // 0..model::kNoteScaleMax (38): the official scale numbering (OS-SCALES28); the panel's pad row 2 goes through model::kNotePanelScales
   std::uint8_t octave = 3;   // 0..9; with the C root, the 36 (C-3) that the pad board always started at
   std::uint8_t lock = 0;     // SCALE LOCK: 0 off, 1 on. The pads of the NOTES mode lay out the scale and the pads and the MIDI keyboard snap to it
 
-  std::uint8_t og_scale() const noexcept { return kNoteScaleOg[scale < kNoteScales ? scale : 0u]; }
-  const char* scale_name() const noexcept { return kNoteScaleNames[scale < kNoteScales ? scale : 0u]; }
+  // OS-SCALES28: the core table's index of the scale (the official index + 1; core index 0 is "No scale", not offered here), and the one name table's name for it (Q4c).
+  std::uint8_t core_scale() const noexcept { return scale <= model::kNoteScaleMax ? static_cast<std::uint8_t>(scale + 1u) : 1u; }
+  const char* scale_name() const noexcept { return core::kScaleNames[core_scale()]; }
   const char* root_name() const noexcept { return kRootNames[root < 12u ? root : 0u]; }
-  bool in_scale(unsigned note) const noexcept { return core::is_in_scale(static_cast<std::uint8_t>(note), root, og_scale()); }
+  bool in_scale(unsigned note) const noexcept { return core::is_in_scale(static_cast<std::uint8_t>(note), root, core_scale()); }
   bool is_root(unsigned note) const noexcept { return note % 12u == root; }
   // The lowest pad of the NOTES board: the root in the octave (a note number, 0..kEntryMaxNote).
   unsigned board_root() const noexcept {
@@ -56,7 +55,7 @@ struct NoteEntry {
         return note + d;
       }
     }
-    return note;  // unreachable: the root is in every scale and no gap is wider than 3 semitones (Harm. minor, Pent.)
+    return note;  // unreachable: the root is in every scale and no gap is wider than 4 semitones (Hirajoshi, In sen, Iwato, Kumoi, Indian)
   }
   // The next in-scale note above (dir > 0) or below `note` (0..127); `note` itself when there is none (the end of the range).
   unsigned next(unsigned note, int dir) const noexcept {

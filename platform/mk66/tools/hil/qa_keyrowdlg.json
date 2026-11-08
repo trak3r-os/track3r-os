@@ -191,13 +191,14 @@
    "within": 3
   },
   {
-   "say": "QA-GLB-119: the Navigator (Shift + Pattern): F1 GO, F7 CLOSE, F8 GO; with Shift held F1..F6 read '-'."
+   "say": "QA-GLB-119: the Navigator (Song + Pattern chord): F1 GO, F7 CLOSE, F8 GO; GO and CLOSE only, F2..F6 read '-'."
   },
   {
    "keys": [
-    "+shift",
-    "pattern",
-    "-shift"
+    "+song",
+    "+pattern",
+    "-pattern",
+    "-song"
    ],
    "gap": 0.4
   },

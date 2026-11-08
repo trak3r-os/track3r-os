@@ -313,7 +313,7 @@ TEST_CASE("rec micro: write_note puts the value in FX 2 only when it is free; RE
 TEST_CASE("rec micro: the two device settings are appended rows 20 and 21, Off by default, two choices each") {
   CHECK(ds::RecMicro == 20u);
   CHECK(ds::RecVelocity == 21u);
-  CHECK(ds::kCount == 26u);
+  CHECK(ds::kCount == 30u);  // 29 before OS-MTC B3 appended MTC IN, 27 before OS-MTC A3 appended MTC OUT and MTC START, 26 before OS-MIDICCMAP S1 appended CC MAP
   model::Settings d;
   d.init(core::ParamKind::Device);
   CHECK(d.get(ds::RecMicro) == 0.0f);
@@ -328,7 +328,7 @@ TEST_CASE("rec micro: the two device settings are appended rows 20 and 21, Off b
 TEST_CASE("rec: the two device settings are appended rows whose defaults are Off and Nearest step") {
   CHECK(ds::RecPoly == 14u);
   CHECK(ds::RecQuantize == 15u);
-  CHECK(ds::kCount == 26u);  // (23 until E-CFG-03 appended TRANSPORT IN and OUT; 18 until OS-METRO appended two rows, 20 until OS-RECMICRO, 22 until OS-PADOFFSET did)
+  CHECK(ds::kCount == 30u);  // 29 before OS-MTC B3 appended MTC IN, 27 before OS-MTC A3 appended MTC OUT and MTC START, 26 before OS-MIDICCMAP S1 appended CC MAP (23 until E-CFG-03 appended TRANSPORT IN and OUT; 18 until OS-METRO appended two rows, 20 until OS-RECMICRO, 22 until OS-PADOFFSET did)
   model::Settings d;
   d.init(core::ParamKind::Device);
   CHECK(d.get(ds::RecPoly) == 0.0f);

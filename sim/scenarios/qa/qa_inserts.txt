@@ -1,7 +1,9 @@
-# OS-INSFX S4 (docs/specs/OS-INSFX.md): the Mixer's INSERTS page, docs/qa/catalogue/mixer.md (QA-MIX-058..069). One `snap qa_ins_NNN` per row with a visible result; the goldens are keyed qa_inserts/qa_ins_NNN.
-# The simulator has no insert host (no sound side to bind to): the page shows the project's records (name, bypass mark), the picker lists the card's modules/effects (apps on: biquad, chorus; the project also names
+# OS-INSFX S4 + S5 + S7 (docs/specs/OS-INSFX.md): the Mixer's INSERTS page, the insert's generated parameter page (Enter = Params on a bound cell) and MIDI Learn on its rows, docs/qa/catalogue/mixer.md
+# (QA-MIX-058..077, 081..083). One `snap qa_ins_NNN` per row with a visible result; the goldens are keyed qa_inserts/qa_ins_NNN.
+# The simulator has no insert host (no sound side to bind to): the page shows the project's records (name, bypass mark), the picker lists the card's modules/effects (apps on: biquad, chorus, widen; the project also names
 # "reverb", which the card lacks), and an assign says NO SOUND IN THIS BUILD. The cost, the OVER BUDGET flag and the live binds are the doctests' (tests/mixer_inserts_test.cpp) and the unit's (qa_inserts.json).
-# The document (fill_insert_project): T1 INS A biquad, T1 INS B reverb (bypassed), T3 INS A biquad; twelve tracks.
+# The document (fill_insert_project): T1 INS A biquad, T1 INS B reverb (bypassed), T3 INS A biquad; twelve tracks. S5: "reverb" is native in the sim's module set (sim_apps.cpp), so T1 INS B's
+# parameter page is generated from it; biquad is a card file only, not loaded. OS-INSFX-ABI2 A5: "widen" is a native WIDENS effect with a card file, so the picker lists it Loaded and its line is marked ST.
 
 document inserts
 card e2e_card
@@ -10,6 +12,9 @@ wait 20
 
 # QA-MIX-058: F6 on the Mixer opens the INSERTS page: a grid of the tracks and MASTER by INS A and INS B, the module name in each cell, a bypassed one marked; the soft key row reads MIXER ... INSERTS BYPASS SOLO.
 tap master
+wait 20
+# QA-MIX-111 (OS-MIXINS): on the MIXER page a small accent dot follows the name of each track with an insert: T1 (two inserts) and T3; T2 and the rest have none.
+snap qa_ins_028
 tap f6
 wait 20
 snap qa_ins_001
@@ -20,8 +25,13 @@ tap insert
 wait 20
 snap qa_ins_002
 
-# QA-MIX-066: picking the greyed module says MODULE MISSING and binds nothing; the picker closes.
-tap down 2
+# ---- OS-INSFX-ABI2 A5: the ST mark on the picker line (docs/specs/OS-INSFX-ABI2.md A5) -----------------------------------------------------------------------
+
+# QA-MIX-089: the picker's line for a stereo effect is marked ST (widen, the native WIDENS one: a card file and in the set, so Loaded): ST before its cost; the mono ones (biquad, chorus) carry no mark.
+snap qa_ins_023
+
+# QA-MIX-066: picking the greyed module says MODULE MISSING and binds nothing; the picker closes. (reverb is the list's last line: the card's files sort first, the project-named one is appended)
+tap down 3
 tap f1
 wait 20
 snap qa_ins_003
@@ -41,11 +51,14 @@ wait 20
 snap qa_ins_005
 wait 2500
 
-# QA-MIX-068: on the MASTER row the cells are shown and not assignable: Insert says MASTER INSERT: NOT YET.
+# QA-MIX-068 (OS-INSFX S6; OS-INSFX-ABI2 A7 now): the MASTER row has one cell, the master insert. With three inserts in the project (the document has T1 A, T1 B and T3 A) the picker
+# still opens (A7: a stereo effect on the master is ONE instance, so one free record is room enough; a mono module would take two and is refused at the pick). In a build without the
+# sound side the pick says NO SOUND IN THIS BUILD and the picker closes.
 tap down 12
 tap insert
 wait 20
 snap qa_ins_006
+tap f1
 wait 2500
 
 # QA-MIX-064: Delete on an insert removes it (T1 INS A): the cell is empty again.
@@ -54,6 +67,19 @@ tap delete
 wait 20
 snap qa_ins_007
 wait 2500
+
+# QA-MIX-084 (OS-INSFX S6): with room (two inserts left), Insert on the MASTER row's cell opens the picker for the master insert (INSERT MASTER).
+tap down 12
+tap insert
+wait 20
+snap qa_ins_021
+
+# QA-MIX-084: picking a card module for the master in a build without the sound side says NO SOUND IN THIS BUILD (on the unit it binds two instances, L and R: qa_inserts.json); the cell stays empty.
+tap f1
+wait 20
+snap qa_ins_022
+wait 2500
+tap up 12
 
 # QA-MIX-062: F7 BYPASS toggles the insert of the cell: T1 INS B was bypassed, F7 makes it live (the mark goes); F7 again bypasses it.
 tap right
@@ -71,3 +97,92 @@ tap left
 tap f7
 wait 20
 snap qa_ins_010
+
+# ---- OS-INSFX S5: the generated parameter page of an insert (QA-MIX-073..077) ---------------------------------------------------------------------------
+
+# QA-MIX-073: Enter (Params) on a bound cell (T1 INS B, reverb) opens that insert's page: the strip says T1 B, the rows are the module's four parameters, the key row its page.
+tap right
+tap params
+wait 20
+snap qa_ins_011
+
+# QA-MIX-074: the encoder edits the row under the cursor (CUTOFF): the value goes into the record's blob (the simulator has no insert host, so no ParamChange is sent) and the page shows it.
+encoder +10
+wait 20
+snap qa_ins_012
+
+# QA-MIX-075: Delete puts the row back to its default, and F8 UNDO says NOTHING TO UNDO HERE (an insert's edits are not journalled, D9).
+tap delete
+wait 20
+snap qa_ins_013
+tap f8
+wait 20
+snap qa_ins_014
+wait 2500
+
+# QA-MIX-076: an unbound cell does not open: Exit to the Mixer first, move to T2 INS A (empty), Params says NO INSERT HERE and stays on the INSERTS page.
+tap master
+wait 2500
+tap down
+tap left
+tap params
+wait 20
+snap qa_ins_015
+wait 2500
+
+# QA-MIX-077: Enter again on the bound cell (T1 INS B), then Exit (the Mixer's button) returns to the INSERTS page on the same cell.
+tap up
+tap right
+tap params
+wait 20
+tap master
+wait 20
+snap qa_ins_016
+
+# OS-INSKEYS (QA-MIX-108..110): F6 is PARAMS on the INSERTS page and BACK on the insert's page. Straight after the Exit of QA-MIX-077 (the cursor on T1 INS B), F6 opens the page, F7 does nothing there, and F6 BACK returns to the same cell.
+snap qa_ins_024
+tap f6
+wait 20
+snap qa_ins_025
+tap f7
+wait 20
+snap qa_ins_026
+tap f6
+wait 2500
+snap qa_ins_027
+
+# ---- OS-INSFX S7: MIDI Learn on an insert's parameter (QA-MIX-081..083) -------------------------------------------------------------------------------------
+
+# QA-MIX-081: the Learn chord (Vol + Fx) on an insert's page opens Learn on the row under the cursor: TARGET names the insert's parameter (MODE of reverb, the first row), NOT BOUND.
+tap params
+wait 20
+press vol
+press fx
+release fx
+release vol
+wait 20
+snap qa_ins_017
+
+# QA-MIX-081: a control change binds to that row (CC 21, pickup); the list shows the binding with the insert as its owner (FX 01B: track 1, INS B).
+midicc 1 21 64
+wait 20
+snap qa_ins_018
+
+# QA-MIX-082: F2 makes it a jump, the chord closes Learn, and the controller then moves the insert's parameter: the value on the page and in the record's blob follows it (the simulator has no host: no ParamChange).
+tap f2
+press vol
+press fx
+release fx
+release vol
+midicc 1 21 127
+wait 20
+snap qa_ins_019
+
+# QA-MIX-083: F1 in Learn unbinds the target: the overlay reads NOT BOUND and the list is empty again.
+press vol
+press fx
+release fx
+release vol
+tap f1
+wait 20
+snap qa_ins_020

@@ -1,0 +1,61 @@
+# OS-SONG3 S4 (docs/specs/OS-SONG3.md section 3.4 point 1; new Community OS behaviour, no format change): PREVIEW, F1 in a lane of the Song screen's TIMELINE page. QA-SNG-202..206, docs/qa/catalogue/song.md. Goldens are keyed qa_song_preview/<snap>.
+# The slot's pattern loops with only the rectangle's tracks sounding, through the project's solo path (the track flags, plain and restored when the audition ends); F1 again, Stop and leaving the screen end it.
+document
+audio on
+wait 20
+tap song
+tap song
+assert state screen=SONG page=1
+
+# QA-SNG-202: the cursor in a lane (track 1) with a rectangle over tracks 1..3 (Shift + Down): the key row's F1 reads PREVIEW in a lane (on the block row and on the LIST it stays PLAY PAT), the band over the lanes, the cursor's cell framed.
+tap down
+press shift
+tap down 2
+release shift
+snap qa_sng_202
+
+# QA-SNG-203: F1 PREVIEW: the cursor slot's pattern loops (playing, play_pattern is the slot's) with only the rectangle's tracks soloed (their flags carry kTrackSolo = 2, the others 0).
+tap f1
+wait 500
+assert state playing=1 play_pattern=1
+assert model track.0.flags=2
+assert model track.1.flags=2
+assert model track.2.flags=2
+assert model track.3.flags=0
+assert model track.4.flags=0
+snap qa_sng_203
+
+# QA-SNG-204: F1 again ends the audition: the transport stops and the solo set is the one from before (no track soloed).
+tap f1
+wait 100
+assert state playing=0
+assert model track.0.flags=0
+assert model track.1.flags=0
+assert model track.2.flags=0
+snap qa_sng_204
+
+# QA-SNG-205: Stop ends it too: F1 begins again, the Play key stops, the flags are back to 0.
+tap f1
+wait 500
+assert state playing=1
+assert model track.1.flags=2
+tap play
+wait 100
+assert state playing=0
+assert model track.0.flags=0
+assert model track.1.flags=0
+assert model track.2.flags=0
+snap qa_sng_205
+
+# QA-SNG-206: leaving the Song screen ends it as well: F1 begins, the Pattern key takes the screen away, the flags are back to 0 (the transport keeps playing the slot's pattern).
+tap f1
+wait 500
+assert state playing=1
+assert model track.2.flags=2
+tap pattern
+wait 50
+assert state screen=PATTERN
+assert model track.0.flags=0
+assert model track.1.flags=0
+assert model track.2.flags=0
+snap qa_sng_206

@@ -113,7 +113,7 @@ class Engine {
   void request_test_stall(std::uint32_t cycles) noexcept { stall_cycles_.store(cycles < kMaxTestStallCycles ? cycles : kMaxTestStallCycles, std::memory_order_relaxed); }
 
   // TEST HOOK (OS-ODD11): the tracks the voice gate (VoicePool GATE) may act on; 0 turns it off, so a test can render the same scene with and without it.
-  void set_voice_gate_mask(std::uint16_t mask) noexcept { gate_off_ = static_cast<std::uint16_t>(~mask); }
+  void set_voice_gate_mask(std::uint16_t mask) noexcept { gate_off_ = gate_user_ = static_cast<std::uint16_t>(~mask); }
 
   // The hal::audio::BlockCallback of this engine.
   hal::audio::BlockCallback callback() noexcept { return hal::audio::BlockCallback{&Engine::trampoline, this}; }
@@ -167,6 +167,7 @@ class Engine {
   // OS-INSFX S1: the block's end for the modules and the inserts, in flash (it replaces the direct block_done call of render_block: one flash call a block, as before). param_route is the graph's param hook:
   // ParamKind::Insert goes to the insert host, every other kind to the event source's hook.
   O3OS_AUDIO_COLD void block_end(const std::uint32_t (&stage_cycles)[hal::audio::kStageCount]) noexcept;
+  O3OS_AUDIO_COLD void publish_clock(std::uint64_t sample) noexcept;  // OS-INSFX-ABI2 A3: the event source's clock as of `sample` into module::g_clock (flash; once a block, never in play_block)
   O3OS_AUDIO_COLD static bool param_route(void* self, const ParamChange& change) noexcept;
   O3OS_AUDIO_COLD void tracker_event(const SeqEvent& e) noexcept;  // OS-COREFX: the tracker FX processor's events (TrackerFx::takes), in flash: dispatch() keeps one call
   // The export's ParamChange hook (main loop, while the engine is the export's): the export's sequencer takes the change, and so does the live one, which is parked and would otherwise never see a
@@ -213,6 +214,7 @@ class Engine {
   std::uint32_t seq_cycles_ = 0;      // render only: this block's cycles in the event source, and in the voices (added to the report)
   std::uint32_t voice_cycles_ = 0;
   std::uint16_t gate_off_ = 0;         // OS-ODD11: the tracks the gate may not act on (set_voice_gate_mask); zero, so the Engine stays in .bss
+  std::uint16_t gate_user_ = 0;        // OS-INSFX-ABI2 A6: the part of gate_off_ that set_voice_gate_mask wrote; block_end makes gate_off_ = gate_user_ | the key mask (a muted key track still renders)
   std::uint16_t side_fed_ = 0;         // OS-STEREO (c), render only: the tracks (bit t) that Graph::feed_side was given S for in the last block
   std::atomic<bool> tone_target_{false};
   std::atomic<std::uint32_t> left_only_blocks_{kToneLeftOnlyBlocks};

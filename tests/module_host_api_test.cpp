@@ -1174,6 +1174,6 @@ TEST_CASE("audio tap (H2a): an app of ABI 1.3 and the tap-less io members: a 1.3
   CHECK(offsetof(o3m_io_api, export_open) == offsetof(o3m_io_api, tap_levels) + sizeof(void*));  // OS-H4 (1.7): appended after the tap's
   CHECK(offsetof(o3m_io_api, get_transport) == offsetof(o3m_io_api, export_status) + sizeof(void*));  // OS-APPUX S3 (1.10): appended after the export members
   CHECK(sizeof(o3m_io_api) == offsetof(o3m_io_api, stop_note) + sizeof(void*));
-  CHECK(offsetof(o3m_host, io) + sizeof(void*) == sizeof(o3m_host));  // and the host table did not grow at all
+  CHECK(offsetof(o3m_host, io) + sizeof(void*) == offsetof(o3m_host, get_clock));  // and nothing before get_clock moved (1.12 appended get_clock and track_level)
   r.mods->ui.app_exit();
 }

@@ -237,6 +237,31 @@ TEST_CASE("offline engine: while the request stands a live block is silence that
   CHECK(script.calls == 2u);
 }
 
+// STATUS latent (aa): a note that sounds when the export takes the engine is cut, and the cut leaves a declick residual that fades over the next block. That tail belongs to the live render,
+// so it must not be in the file: the first block of an export of a project is the same whatever the pads were doing (two exports give the same bits).
+TEST_CASE("offline engine: a live note that sounds when the export takes the engine leaves no declick tail in the export's first block") {
+  Rig& r = make_rig();
+  Script live_script;
+  live_script.offset = 0;
+  r.engine.attach_events(r.source_of(live_script));
+  for (int b = 0; b < 4; ++b) {
+    r.live_block();  // the scripted note of block 2 sounds (DC 9000 a sample)
+  }
+  CHECK(r.pool.voices_in_use() == 1u);
+  r.engine.offline_request();
+  Script export_script;  // its note starts in block 2: block 0 is silence
+  r.engine.offline_enter(r.source_of(export_script));
+  std::vector<std::int16_t> first;
+  r.offline_block(&first);
+  std::int32_t peak = 0;
+  for (std::int16_t v : first) {
+    peak = std::max<std::int32_t>(peak, v < 0 ? -v : v);
+  }
+  CHECK(peak == 0);
+  CHECK(r.pool.voices_in_use() == 0u);
+  r.engine.offline_leave();
+}
+
 TEST_CASE("offline engine: the stems tap and the input feed are put away and come back; enter without a request, a second enter and a leave without one do nothing") {
   Rig& r = make_rig();
   Script script;

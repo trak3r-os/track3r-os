@@ -202,7 +202,7 @@ constexpr TokenName kTokenNames[] = {
     {ui::Color::Empty, "Empty"},       {ui::Color::Instr, "Instr"},           {ui::Color::Vol, "Vol"},
     {ui::Color::Fx, "Fx"},             {ui::Color::Sel, "Sel"},               {ui::Color::SelText, "SelText"},
     {ui::Color::Accent, "Accent"},     {ui::Color::AccentText, "AccentText"}, {ui::Color::Play, "Play"},
-    {ui::Color::PlayText, "PlayText"},   {ui::Color::Rec, "Rec"},
+    {ui::Color::PlayText, "PlayText"},   {ui::Color::Rec, "Rec"},       {ui::Color::SelDim, "SelDim"},
 };
 static_assert(sizeof(kTokenNames) / sizeof(kTokenNames[0]) == ui::kColorCount, "every token is named");
 

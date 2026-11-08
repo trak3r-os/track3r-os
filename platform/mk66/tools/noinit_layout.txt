@@ -1,0 +1,7 @@
+# The pinned layout of .noinit (what survives a reset). Checked by `check_image.py noinit` (OS-GATE-BOOTCRASH).
+# A change here is a change of what an older image leaves in RAM for the next one: say in the commit what it does to
+# the crash record and the power record. Regenerate with `check_image.py noinit ELF --nm NM --expect THIS-FILE --write`.
+start 0x20000000
+end   0x200000A0
+object 0x20000000 0x0080 o3os::platform::mk66::(anonymous namespace)::g_block
+object 0x20000080 0x001C o3os::platform::mk66::power::device::(anonymous namespace)::g_rec

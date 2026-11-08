@@ -14,6 +14,7 @@
 #include <o3os/app/recorder.h>
 #include <o3os/app/sample_bank.h>
 #include <o3os/app/peak_job.h>
+#include <o3os/app/ptfx_job.h>
 #include <o3os/app/screens/overlay.h>
 #include <o3os/app/sample_edit_job.h>
 #include <o3os/app/governor_watch.h>
@@ -55,6 +56,7 @@ enum class CardEvent : std::uint8_t {
 };
 
 class SaveService;
+class MetroSync;  // app/metro_sync.h (OS-METRO, OS-RECCOUNT RC2): the platform's sync of the device METRO to the engine
 
 // The application: one base screen (the registry in screens/screen.h: Pattern and Song today) with at most one overlay
 // over it (Learn, the Navigator, or the notification strip), over static demo data. It talks to the world only through
@@ -150,6 +152,11 @@ class App {
     session_.attach(editor);
     model_.project = editor != nullptr ? &editor->project() : nullptr;  // the parameter screens and the Pattern screen read it (Model::project)
     state_.song.ask = SongAsk{};  // a question about the old document is over (OS-SONGMAP)
+    {
+      bool restore = false;
+      (void)state_.song.preview.end(restore);  // OS-SONG3 S4: a running PREVIEW audition is over with the old document, without restoring into the new one (nothing is left soloed after a load)
+    }
+    state_.params.insert = ParamView::kNoInsert;  // OS-INSFX S5: an insert parameter page is over too: the new project has no such insert (a load, F3 NEW, the simulator's reset all attach the document here)
     sync_pattern();
     dirty_ = true;
     watch_document();
@@ -232,6 +239,10 @@ class App {
     wire_app_export();
   }
 
+  // OS-RECCOUNT RC2: the platform's MetroSync (app/metro_sync.h, stepped once a pass over the device settings and the engine's ring): the App sets and clears its count-in
+  // override while a Record count-in runs, so the click sounds even with METRO Off. nullptr detaches it (no override then). It must outlive the App.
+  void attach_metro_sync(MetroSync* sync) noexcept { metro_sync_ = sync; }
+
   // The firmware update path (OS-FWCONFIG, hal/firmware.h): what F8 UPDATE on Config's INFO page asks for. nullptr detaches it (the key then does nothing and the INFO page labels none). The App never
   // names the card's writer, the pin or the hand-over: the port is the whole contract. It must outlive the App.
   void attach_firmware(hal::firmware::FirmwareSink* sink) noexcept {
@@ -252,6 +263,24 @@ class App {
 
   // The engine's transport (OS-005d): what the Play button asks to play or stop. nullptr detaches it (the action is then Disabled).
   void attach_transport(TransportSink* sink) noexcept { transport_ = sink; }
+  // OS-CEPTFX S3b: runs one plugin over the sample in view, from the Sample edit selection or the whole, with the bank's PtfxJob (SampleBankMem: SDRAM, no SRAM here). nullptr when it
+  // started (the job ends through report_jobs and commits as one undo unit), else the strip text of the refusal (nothing changed).
+  const char* run_ptfx(const PtfxJob::Plugin& plugin) noexcept;
+  // The refusal run_ptfx would give for the screen, the sample and another job (nullptr: none), so the platform asks before it loads the plugin's code from the card.
+  // OS-CEPTFX S4c: a `generator` (the plugin's flag) needs no sample: on an empty slot it makes one.
+  const char* ptfx_refusal(bool generator = false) const noexcept;
+  // Which check made the last run_ptfx say PLUGIN NOT READY ("host", "plugin", "stereo", "scratch"), else nullptr: the console appends it to its reply (the strip keeps one text).
+  const char* ptfx_not_ready_why() noexcept;
+  // Gives up a plugin run in progress (nothing is committed). The platform calls it before it rescans or unloads the catalogue or loads a project: the job reads the plugin's image.
+  void cancel_ptfx() noexcept;
+  bool ptfx_busy() const noexcept { return edit_ptfx_; }  // a plugin run is in progress: the image, the scratch and the catalogue are in use
+  // OS-CEPTFX S4b: what F1 APPLY on the PLUGINS page calls (the platform's or the simulator's: the App cannot load code from the card). `index` is the listing entry, `values` the page's 12 A15 values;
+  // it loads the plugin and calls run_ptfx: nullptr when the job started, else the strip text of the refusal. No runner: the strip says the plugins run on the tracker.
+  using PtfxRunner = const char* (*)(void* ctx, unsigned index, const float* values) noexcept;
+  void attach_ptfx_runner(PtfxRunner runner, void* ctx) noexcept {
+    ptfx_runner_ = runner;
+    ptfx_runner_ctx_ = ctx;
+  }
   // Where the sequencer is (OS-009b): the lock-free word the render publishes at every block (audio/play_position.h). The App reads it once a pass; the Pattern
   // screen shows the step of the pattern that plays as a bar, Browse takes the cursor along, the strip says the tempo the sequencer uses. nullptr detaches it.
   void attach_play_position(const audio::PlayPosition* position) noexcept {
@@ -274,6 +303,8 @@ class App {
   void disk_notice(const char* text, std::uint32_t ttl_ms, bool warn = false) noexcept;
   // OS-SCREENSHOT: the strip's word for Shift + Power (NO SCREENSHOT: <why>, SCREENSHOT SAVED: <name>, SCREENSHOT FAILED), source "shot", rewritten in place. Main loop only.
   void shot_notice(const char* text, std::uint32_t ttl_ms, bool warn = false) noexcept;
+  // OS-CEWTENV W8: the strip's one load report of the user contours (wt_user.h wt_user_notice), source "wtenv", rewritten in place. Main loop only.
+  void wtenv_notice(const char* text, std::uint32_t ttl_ms, bool warn = false) noexcept;
   // OS-KEYROWDLG S3: the boot disk's key row (every key RESTART, AGAIN? while the computer may still be writing, blank while the restart waits); Off in every other mode. The platform tells it with the
   // strip, once a pass (a change is a redraw, no change costs a compare). Main loop only.
   void set_disk_keys(DiskKeys keys) noexcept;
@@ -286,6 +317,8 @@ class App {
   // choice (Q4, RAM only) and does not change while the card is out (EJECT THE CARD TO CHANGE IT), changing hands or a request waits (THE CARD IS CHANGING HANDS: WAIT). Main loop only.
   void set_disk_state(ViewState::DiskView::Phase phase, bool claims_busy, bool audio, bool writable) noexcept;
   ViewState::DiskView::Request take_disk_request() noexcept;
+  // OS-MTC B3: the chase's status for the Config MIDI page's MTC IN row (ViewState::MtcView); the platform tells it every pass. Main loop only.
+  void set_mtc_status(std::uint8_t state, std::uint8_t code, std::uint32_t time) noexcept;
   bool disk_read_only() const noexcept { return state_.disk.read_only; }
   // OS-STATUSLED: the Config > DISPLAY STATUS LED row's session choice (RAM only, not saved: BLINK at every boot). The platform copies it
   // to its LED flag each pass (appimg::pass, app_main.cpp) and drives the status LED with it; a fault code still shows with OFF. Main loop only.
@@ -410,9 +443,13 @@ class App {
   void poll_theme() noexcept;    // the device setting THEME moved (Config, a Learn binding, the settings file): the screen's theme follows
   void poll_pad_offset() noexcept;  // the device setting PAD OFFSET moved (OS-PADOFFSET: Config, a Learn binding, the settings file): the NOTES board is laid out again
   void poll_peaks() noexcept;    // the waveform of the sample in view, built when it is not the cache's
+  void apply_ptfx() noexcept;    // OS-CEPTFX S4b: F1 APPLY on the PLUGINS page (SampleEditState::plug_apply), after poll_ptfx has read the plugin's header
   void finish_slice(core::SlotState state) noexcept;
   void poll_sedit() noexcept;  // the Sample edit screen's request: an effect, as a job into a spare buffer
+  void poll_ptfx() noexcept;   // OS-CEPTFX S4a: the PLUGINS page's card work (the Effects scan as a quiet job, the header of the plugin in view), never in a key handler or the render
+  void stop_ptfx_scan() noexcept;
   bool finish_edit(core::SlotState state) noexcept;  // true: it told the user there was nothing to do, which replaces the job's DONE
+  bool finish_generated(std::uint32_t frames) noexcept;  // OS-CEPTFX S4c: a generator's take on an empty slot becomes the slot's sample and the instrument `Gen NN` (true: it said so, which replaces DONE)
   void poll_samples() noexcept;  // the bank's handover to the voices, once a pass
   void sync_project_state() noexcept;   // runtime -> project: the mixer, the Perform slots, the running app's parameters (OS-004d), the session state (OS-PERSIST2)
   void apply_project_state() noexcept;  // project -> runtime, after a load: the mixer and the Perform slots, the session state (note entry, mute modes, scenes, send effects)
@@ -471,6 +508,7 @@ class App {
   Model model_;
   ViewState state_;
   core::GestureRecognizer gestures_{kModifierButtons};
+  std::uint8_t enc_keys_ = 0;  // OS-ENCLEARN (main loop only): bit 0 = Instr down, bit 1 = Vol down, bit 2 = the pair went down and the encoder stays swallowed until both are up; from the raw button events (a context change makes the gesture layer forget a consumed key; this does not)
   std::uint64_t tap_pads_ = 0;  // OS-PATTEMPO: the pads taken as tempo taps and still down (bit n = pad n): their release is taken too
   TrackFlash flash_;  // the TRACKS pads' note flash (OS-PADS-A), polled once a pass
   core::ContextChain last_chain_;  // the chain the gesture layer last saw: a change resets it
@@ -483,6 +521,7 @@ class App {
   TransportSink* transport_ = nullptr;
   ProjectSink* project_ = nullptr;
   SaveService* saves_ = nullptr;
+  MetroSync* metro_sync_ = nullptr;  // OS-RECCOUNT RC2: the platform's MetroSync (attach_metro_sync): the count-in override is set and cleared here
   hal::firmware::FirmwareSink* firmware_ = nullptr;  // OS-FWCONFIG
   PatternClip clip_;  // OS-PATCOPY: the pattern clipboard (14 KB: the App is built in SDRAM on the device)
   SongClip song_clip_;  // OS-SONGMAP: the song clip, the Song map's cells (28 KB, SDRAM as the pattern clipboard)
@@ -543,6 +582,7 @@ class App {
   unsigned peaks_slot_ = SampleBank::kSlots;
   std::uint32_t peaks_version_ = 0;
   int edit_slot_ = -1;               // its job slot, -1 when it is not running
+  bool edit_ptfx_ = false;           // OS-CEPTFX S3b: the edit in progress is a plugin run (the bank's ptfx_job): finish_edit stages its result (main loop only)
   unsigned edit_target_ = 0;         // the instrument slot it reads
   std::uint32_t edit_version_ = 0;   // the version of that sample it started on: a result for another one is thrown away
   std::int16_t* edit_dst_ = nullptr; // the buffer it writes
@@ -565,6 +605,10 @@ class App {
   std::uint64_t aud_zero_ms_ = 0;    // when the tail was last zeroed (main loop only): the next chunk grows with the time since, so a slow pass cannot let the head overtake the zeros
   bool og_watch_ = false;  // an OG export was started and its end has not been worded yet (poll_og)
   int files_slot_ = -1;   // its job slot, -1 when it is not in the runner
+  int ptfx_slot_ = -1;    // OS-CEPTFX S4a: the PLUGINS page's Effects scan (the bank page's catalogue), -1 when it is not in the runner
+  std::uint32_t ptfx_seen_ = 0;  // the catalogue's state and count at the last poll_ptfx(): a change is a redraw
+  PtfxRunner ptfx_runner_ = nullptr;  // OS-CEPTFX S4b: F1 APPLY's runner (attach_ptfx_runner), with its context; set once at start
+  void* ptfx_runner_ctx_ = nullptr;
   std::uint32_t files_seen_ = 0;  // the listing's generation and state at the last follow_files(): a change is a redraw and a cursor to fit
   DirScan::State files_state_seen_ = DirScan::State::Idle;
   int shown_percent_[core::JobRunner::kSlots] = {-1, -1, -1, -1};

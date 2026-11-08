@@ -298,11 +298,11 @@ TEST_CASE("law: one Reader used for two loads in a row cannot carry the first fi
 
 TEST_CASE("law: the unknown pool of an older build holds the chunk next to every other chunk and a full OG import") {
   // docs/formats/o3-project.md section 10: a build older than this one keeps LAW as an unknown chunk (3 payload bytes) with the state chunks (1,152 in five chunks), the session chunks (348 in four)
-  // and the OG chunks OGPM (at most 970) and OGPN (at most 12,822): 15,295 of 16,384 bytes in 12 of 16 chunks.
+  // and the OG chunks OGPM (at most 970) and OGPN (at most 12,822): 15,296 of 16,384 bytes in 12 of 16 chunks (OS-SCALES28: the NOTE 1.1 chunk is 8 bytes).
   constexpr std::size_t law_max = 3;
-  constexpr std::size_t session_max = 7 + 19 + 295 + 27;
+  constexpr std::size_t session_max = 8 + 19 + 295 + 27;
   constexpr std::size_t state_max = 20 + 27 + 25 + 99 + 981;
-  CHECK(law_max + session_max + state_max + 970u + 12822u == 15295u);
+  CHECK(law_max + session_max + state_max + 970u + 12822u == 15296u);
   CHECK(law_max + session_max + state_max + 970u + 12822u <= kUnknownPoolBytes);
   CHECK(1u + 4u + 5u + 2u == 12u);
   CHECK(1u + 4u + 5u + 2u <= kMaxUnknownChunks);

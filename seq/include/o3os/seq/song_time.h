@@ -42,6 +42,12 @@ struct SongPoint {
   std::uint16_t order;       // Song mode: the position in the order list; Pattern mode: audio::PlayPosition::kNoOrder
   std::uint8_t pattern;      // the pattern id
   std::uint16_t step;        // the step in the pattern, 0..len-1
+  // OS-MTC B3 (the chase starts a run AT this step, so it needs the state the step's own row will change, not the one after): the tempo and swing in force before this step's row FX run, and the
+  // swing pair's parity (true: the step is the second of its pair, so the run's first step lasts the odd factor). Added after `capped`; every field above is as A1 had it.
+  std::uint32_t tempo_in_x100;
+  std::uint8_t swing_in;
+  bool odd;
+  bool past_end;             // song_position_at with loop = false: the walk reached the end of the order list before `samples` (the fields are the last step walked; not a match)
   bool capped;               // NOT a match: the walk hit kWalkCap (the fields are the last step walked) or the target is one the song never plays
                              // (the fields echo the request, time 0). Callers must check `capped` before using the point (seeking, anchoring): a capped
                              // answer is never a position of the song.
@@ -58,7 +64,9 @@ SongPoint song_time_at(const model::Project& project, PlayMode mode, std::uint32
 // The first step that starts at or after `samples`, with its exact time and state. The walk is the same one; Song mode loops the order
 // list, Pattern mode loops the pattern named by `order` (the pattern id, as in song_time_at). A time past what kWalkCap steps reach
 // answers the last step walked, `capped`.
-SongPoint song_position_at(const model::Project& project, PlayMode mode, std::uint32_t order, core::Q32 samples) noexcept;
+SongPoint song_position_at(const model::Project& project, PlayMode mode, std::uint32_t order, core::Q32 samples, bool loop = true) noexcept;
+// OS-MTC B3: `loop` false is the chase's walk (Q9 a: a time past the end of the song is silence, the unit waits for the master to locate back): the walk does not loop the order list (only the end of the
+// list ends it, an Order jump back is the song's flow); a time at or past the end of the last slot answers `past_end`. Pattern mode loops the pattern whatever `loop` says (Q10).
 
 // The map's classification of the Row FX of kFxInfo (seq/fx.h): does the type move the timeline? Every Row FX must be known to the map, so
 // that a new one fails the guard test (tests/seq_song_time_test.cpp) until the map says what it does to time.

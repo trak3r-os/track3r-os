@@ -1,0 +1,251 @@
+# OS-QA: twelve rows of docs/qa/catalogue/instrument.md that had no simulator proof, proven with asserts only (no `snap` here, so this scenario needs no golden). The document is the kit
+# of the card e2e_pro (generated into <build>/sim/cards by the e2e_pro_fixture target, found with --cards), opened through File as in e2e/e2e_pro_session.txt:
+# instruments 1 SINE (a forward loop), 2 SAW, 3 PLUCK (a one shot of 11025 frames at 44,100 Hz), 4 HAT, 49 SYNTH (MIDI, channel 3); the slots 5..48 are free; every sample instrument is at the
+# defaults (volume 50) except that the kit has no amplitude envelope (SOURCE of the volume destination is Off) and instruments 1 and 2 loop. The state line's keys used below: screen=,
+# instrument=, overlay=, sel= (the entry under the cursor of Sample load, spaces as _), msg= (the last strip text, spaces as _); the model's inst.<n>.name, inst.<n>.<row> and digest.
+# What a line proves is the model and the card as the asserts read them; the sound, the arena and the pictures are not read here (each row's Sim cell says what stays open).
+
+document
+wait 20
+card e2e_pro
+wait 20
+tap file
+wait 300
+assert state screen=FILE sel=Kit
+tap f1
+wait 1500
+assert state screen=PATTERN msg=PROJECT_Kit_OPENED
+assert model inst.1.name=SINE
+assert model inst.2.name=SAW
+assert model inst.3.name=PLUCK
+assert model inst.4.name=HAT
+assert model inst.49.name=SYNTH
+tap params
+assert state screen=INSTRUMENT
+
+# QA-INS-028: on a free slot (5) the chooser's F3 PASTE with nothing copied says so, and the project is the one it was.
+action instrument.select 5
+assert state screen=INSTRUMENT instrument=5
+mark model q028
+tap f3
+assert state msg=NOTHING_TO_PASTE:_SHIFT+F2_COPIES
+assert model digest=@q028
+
+# QA-INS-043: Shift + F2 COPY. A free slot has nothing to copy; a sample instrument (3) and a MIDI instrument (49) say COPIED with their number; a copy is not an edit of the project.
+press shift
+tap f2
+release shift
+assert state msg=NOTHING_TO_COPY
+action instrument.select 3
+mark model q043
+press shift
+tap f2
+release shift
+assert state msg=INS_03_COPIED
+assert model digest=@q043
+# instrument.select reaches 1..48 only (what a pad can reach), so the MIDI slot 49 is stepped to with Shift + F7 (the next instrument in use: 4, then 49).
+action instrument.used 1
+action instrument.used 1
+assert state instrument=49
+press shift
+tap f2
+release shift
+assert state msg=INS_49_COPIED
+assert model digest=@q043
+
+# QA-INS-044: PASTE into a free slot. The clipboard takes instrument 1 (SINE, forward loop); Shift + F3 on the free slot 5 pastes it as one undo unit; F8 empties the slot again (the project is the
+# one marked), Shift + F8 puts the copy back. The chooser's F3 pastes into a second free slot (6) the same way.
+action instrument.select 1
+assert model inst.1.play_mode=1
+press shift
+tap f2
+release shift
+assert state msg=INS_01_COPIED
+action instrument.select 5
+mark model q044
+press shift
+tap f3
+release shift
+assert state msg=INS_05_PASTED_-_F8_UNDO
+assert model inst.5.name=SINE
+assert model inst.5.play_mode=1
+assert model inst.1.name=SINE
+tap f8
+assert model digest=@q044
+press shift
+tap f8
+release shift
+assert model inst.5.name=SINE
+assert model inst.5.play_mode=1
+action instrument.select 6
+tap f3
+assert state msg=INS_06_PASTED_-_F8_UNDO
+assert model inst.6.name=SINE
+assert model inst.6.play_mode=1
+
+# QA-INS-045: PASTE over a used slot. Shift + F3 on instrument 4 (HAT) puts the copy there as one undo unit (REPLACED); F8 gives HAT back (the project is the one marked), Shift + F8 the copy again.
+action instrument.select 4
+assert model inst.4.play_mode=0
+mark model q045
+press shift
+tap f3
+release shift
+assert state msg=INS_04_REPLACED_-_F8_UNDO
+assert model inst.4.name=SINE
+assert model inst.4.play_mode=1
+tap f8
+assert model inst.4.name=HAT
+assert model inst.4.play_mode=0
+assert model digest=@q045
+press shift
+tap f8
+release shift
+assert model inst.4.name=SINE
+tap f8
+assert model digest=@q045
+
+# QA-INS-052: Shift + F5 SAVE on instrument 3 (PLUCK) writes instruments/PLUCK.pti on the card: 392 bytes plus twice the 11025 frames, and no _o3save.tmp left behind.
+action instrument.select 3
+press shift
+tap f5
+release shift
+wait 1500
+assert file instruments/PLUCK.pti exists
+assert file instruments/PLUCK.pti size=22442
+assert file instruments/_o3save.tmp absent
+
+# QA-INS-056: the chooser's F5 LOAD on a free slot (7) opens Sample load on the .pti files of instruments/ (the one just saved is the only entry).
+action instrument.select 7
+assert state screen=INSTRUMENT instrument=7
+mark model q057
+tap f5
+wait 500
+assert state screen=SAMPLE_LOAD sel=PLUCK.pti
+
+# QA-INS-057: F1 loads the file into slot 7, in one undo unit: the Instrument screen is back on the slot with the instrument; F8 empties the slot (the project is the one marked), Shift + F8 loads it again.
+tap f1
+wait 2000
+assert state screen=INSTRUMENT instrument=7
+assert model inst.7.name=PLUCK
+tap f8
+assert model digest=@q057
+press shift
+tap f8
+release shift
+assert model inst.7.name=PLUCK
+
+# QA-INS-053: saving the same instrument again never replaces the file: the second is `PLUCK 2.pti`, the first is still there.
+action instrument.select 3
+press shift
+tap f5
+release shift
+wait 1500
+assert file "instruments/PLUCK 2.pti" exists
+assert file "instruments/PLUCK 2.pti" size=22442
+assert file instruments/PLUCK.pti size=22442
+assert file instruments/_o3save.tmp absent
+
+# QA-INS-051: Shift + F1 NAME opens the keyboard over the name; the pads type "demo" and F8 keeps it as one undo unit; F8 gives PLUCK back (the project is the one marked), Shift + F8 the new name.
+# The same name again records nothing (the next F8 still undoes the rename). A free slot (8) says NO INSTRUMENT TO NAME and opens nothing.
+action instrument.select 3
+mark model q051
+press shift
+tap f1
+release shift
+assert state overlay=TEXT_ENTRY
+pad 26
+pad 14
+pad 42
+pad 20
+tap f8
+assert state overlay=~^(NONE|NOTIFY)$ msg=INS_03_RENAMED_-_F8_UNDO
+assert model inst.3.name=demo
+press shift
+tap f1
+release shift
+assert state overlay=TEXT_ENTRY
+tap f8
+tap f8
+assert model inst.3.name=PLUCK
+assert model digest=@q051
+press shift
+tap f8
+release shift
+assert model inst.3.name=demo
+tap f8
+assert model inst.3.name=PLUCK
+action instrument.select 8
+press shift
+tap f1
+release shift
+assert state msg=NO_INSTRUMENT_TO_NAME
+assert state overlay=~^(NONE|NOTIFY)$
+
+# QA-INS-085: an encoder sweep on one row is one undo unit. VOLUME of instrument 2 (VOICE page, 50 at the start): 30 clicks 5 ms apart are one unit (one F8 takes all of it back, Shift + F8 puts it back);
+# 1600 ms later 10 more clicks are another unit (F8 takes back only those); Delete (the default) is a unit of its own. The FILTER page's CUTOFF and the unit's own 1500 ms stay open.
+action instrument.select 2
+tap f2
+assert model inst.2.volume=50
+mark model q085
+encoder -1 x30 every 5
+assert model inst.2.volume=20
+tap f8
+assert model inst.2.volume=50
+assert model digest=@q085
+press shift
+tap f8
+release shift
+assert model inst.2.volume=20
+mark model q085a
+wait 1600
+encoder -1 x10 every 5
+assert model inst.2.volume=10
+tap delete
+assert model inst.2.volume=50
+tap f8
+assert model inst.2.volume=10
+tap f8
+assert model inst.2.volume=20
+assert model digest=@q085a
+tap f8
+assert model inst.2.volume=50
+assert model digest=@q085
+
+# QA-INS-032 and QA-INS-041: Shift + Delete INIT on instrument 1 (SINE) after edits to VOLUME, to the volume destination's SOURCE and to the cutoff destination's SOURCE and LFO SHAPE. Every one is back at
+# its default, the name and the sample stay, the strip says INIT, a second press says ALREADY AT THE DEFAULTS, and one F8 gives every edit back.
+action instrument.select 1
+tap f2
+assert model inst.1.play_mode=1
+assert model inst.1.volume=50
+encoder -10
+assert model inst.1.volume=40
+tap f4
+assert model inst.1.mod0.source=0
+tap f4 2
+assert model inst.1.mod2.source=0
+assert model inst.1.mod2.lfo_shape=2
+encoder +2
+assert model inst.1.mod2.source=2
+tap down
+encoder +1
+assert model inst.1.mod2.lfo_shape=3
+mark model q032
+press shift
+tap delete
+release shift
+assert state msg=INS_01_INIT_-_F8_UNDO
+assert model inst.1.name=SINE
+assert model inst.1.volume=50
+assert model inst.1.play_mode=0
+assert model inst.1.mod0.source=1
+assert model inst.1.mod2.source=0
+assert model inst.1.mod2.lfo_shape=2
+press shift
+tap delete
+release shift
+assert state msg=ALREADY_AT_THE_DEFAULTS
+tap f8
+assert model digest=@q032
+assert model inst.1.volume=40
+assert model inst.1.play_mode=1
+assert model inst.1.mod2.source=2

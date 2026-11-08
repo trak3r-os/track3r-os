@@ -87,8 +87,8 @@ TEST_CASE("scratch: a still platter is silence, the entry is the live mix runnin
   std::vector<float> out;
   CHECK(t.arm(1.0f));
   CHECK_FALSE(t.bypass);
-  t.run(200, 0, sine, out);  // (OS-SCRATCH: the entry rate 1 runs down over the 25 ms inertia: under 0.001 after about 120 blocks)
-  for (std::size_t i = 200u * kB - 64u; i < out.size(); ++i) CHECK(out[i] == 0.0f);  // exactly silent
+  t.run(400, 0, sine, out);  // (OS-SCRATCH: the entry rate 1 runs down over the 70 ms inertia: under 0.001 after about 340 blocks)
+  for (std::size_t i = 400u * kB - 64u; i < out.size(); ++i) CHECK(out[i] == 0.0f);  // exactly silent
   CHECK(t.s.rate() == 0.0f);
   CHECK(t.s.lag() > 3000.0f);  // the sequencer ran underneath: the head fell behind
   // the first block is the live mix itself (rate 1 at the entry), then it falls away
@@ -102,7 +102,7 @@ TEST_CASE("scratch: one turn of the platter is 1.8 s of audio") {
   t.run(1500, 0, ramp, out);  // 2.2 s of history, the platter held
   const float p0 = t.head();
   t.run(24, 4, ramp, out);  // 96 counts, spread over 24 blocks
-  t.run(300, 0, ramp, out);  // let the inertia (25 ms) and the position debt settle
+  t.run(500, 0, ramp, out);  // let the inertia (70 ms) and the position debt settle
   const float turned = t.head() - p0;
   CHECK(std::fabs(turned - 1.8f * 44117.65f) < 1.5f * MasterScratch::kFramesPerCount);  // OS-SCRATCH: the head follows the hand to within one and a half counts (the velocity is an estimate)
   CHECK(t.s.rate() == 0.0f);
@@ -128,7 +128,8 @@ TEST_CASE("scratch: the head never passes the write head and never reads what wa
   Rig t;
   std::vector<float> out;
   CHECK(t.arm(1.0f));
-  t.run(200, 0, ramp, out);
+  t.s.set_tuning(70.0f, 1.0f, 32.0f, false);  // OS-BUG-SCRATCH: the head's frames are read plain here (the anti-alias filter has its own tests)
+  t.run(400, 0, ramp, out);
   out.clear();
   t.run(100, 16, ramp, out);  // far faster than real time forwards: the head sticks to the write head
   CHECK(t.s.lag() == 0.0f);
@@ -388,7 +389,7 @@ TEST_CASE("scratch: the lag keeps its fraction - a long hold, then a rate near 1
   CHECK(std::fabs(lag1 - lag0 - expected) < 4.0);  // (frames; 0.1 % of the 441,000 would be 441)
 }
 
-// ---- OS-SCRATCH: the velocity from the time between counts, the 25 ms inertia, the Hermite read ----
+// ---- OS-SCRATCH: the velocity from the time between counts, the 70 ms inertia (OS-BUG-SCRATCH), the Hermite read ----
 
 namespace {
 // One block with `counts` already added to the scripted counter, nothing played: returns the rate at its end.
@@ -402,13 +403,13 @@ float step_rate(Rig& t, int counts) {
 // A scratch ready for a rate test: armed, the entry (rate 1) run down to the still hand.
 void settle_still(Rig& t) {
   CHECK(t.arm(1.0f));
-  for (unsigned b = 0; b < 200; ++b) step_rate(t, 0);
+  for (unsigned b = 0; b < 400; ++b) step_rate(t, 0);  // (the 70 ms inertia: the entry rate 1 is under 0.001 after about 340 blocks)
   CHECK(t.s.rate() == 0.0f);
 }
 float lin(std::uint32_t n) { return 2e-5f * static_cast<float>(n); }  // rising for 83,000 frames up to 1.66 (the ring keeps +-2.0)
 }  // namespace
 
-TEST_CASE("scratch: the platter's rate follows a steady hand by a one-pole of 25 ms") {
+TEST_CASE("scratch: the platter's rate follows a steady hand by a one-pole of 70 ms") {
   Rig t;
   settle_still(t);
   // 2 counts every block from now on: the target is 2 x kCountRate once two events are seen (block 1 is a lone event: two counts in 8 blocks).
@@ -417,20 +418,20 @@ TEST_CASE("scratch: the platter's rate follows a steady hand by a one-pole of 25
   unsigned b63 = 0;
   float r = 0.0f;
   std::vector<float> trace;
-  for (unsigned b = 1; b <= 120; ++b) {
+  for (unsigned b = 1; b <= 400; ++b) {
     r = step_rate(t, 2);
     trace.push_back(r);
     if (b63 == 0 && r >= 0.632f * target) b63 = b;
     peak = std::fmax(peak, r);
   }
-  // 25 ms is 17.2 blocks; the first block's target is only a quarter count a block, so the 63 % point is a block or two later
-  CHECK(b63 >= 17);
-  CHECK(b63 <= 21);
+  // 70 ms is 48.2 blocks; the first block's target is only a quarter count a block, so the 63 % point is a block or two later
+  CHECK(b63 >= 48);
+  CHECK(b63 <= 54);
   CHECK(r == doctest::Approx(target).epsilon(0.01));  // settled to 1 % after 7 time constants
   CHECK(peak <= target * 1.001f);                      // no overshoot
   for (std::size_t i = 1; i < trace.size(); ++i) CHECK(trace[i] >= trace[i - 1] - 1e-4f);  // monotonic
   // the step of one block is the one-pole's own: (target - r) x kInertia
-  CHECK(trace[40] - trace[39] == doctest::Approx((target - trace[39]) * MasterScratch::kInertia).epsilon(0.02));
+  CHECK(trace[120] - trace[119] == doctest::Approx((target - trace[119]) * MasterScratch::kInertia).epsilon(0.02));
 }
 
 TEST_CASE("scratch: a slow turn (one count every 14 blocks) is a steady rate, not pulses; a stop is a curve") {
@@ -438,9 +439,9 @@ TEST_CASE("scratch: a slow turn (one count every 14 blocks) is a steady rate, no
   settle_still(t);
   float lo = 1e9f, hi = -1e9f;
   float r = 0.0f;
-  for (unsigned b = 1; b <= 800; ++b) {
+  for (unsigned b = 1; b <= 1000; ++b) {
     r = step_rate(t, b % 14u == 0u ? 1 : 0);
-    if (b > 400) {
+    if (b > 600) {
       lo = std::fmin(lo, r);
       hi = std::fmax(hi, r);
     }
@@ -451,7 +452,7 @@ TEST_CASE("scratch: a slow turn (one count every 14 blocks) is a steady rate, no
   // the hand stops: the rate falls without a step and ends exactly 0
   float worst = 0.0f;
   float prev = r;
-  for (unsigned b = 1; b <= 400; ++b) {
+  for (unsigned b = 1; b <= 800; ++b) {
     r = step_rate(t, 0);
     worst = std::fmax(worst, std::fabs(r - prev));
     CHECK(r <= prev + 1e-6f);  // never speeds up again
@@ -467,7 +468,7 @@ TEST_CASE("scratch: a lone count is a nudge, not a carry-on: the head moves by a
   const float n0 = static_cast<float>(t.n);
   const float lag0 = t.s.lag();
   step_rate(t, 1);
-  for (unsigned b = 0; b < 400; ++b) step_rate(t, 0);
+  for (unsigned b = 0; b < 800; ++b) step_rate(t, 0);
   const float moved = (static_cast<float>(t.n) - n0) - (t.s.lag() - lag0);  // the head's travel in the source: the frames of time elapsed less the lag gained
   CHECK(moved > 0.3f * MasterScratch::kFramesPerCount);
   CHECK(moved < 1.5f * MasterScratch::kFramesPerCount);
@@ -578,6 +579,7 @@ struct TapeRef {
   // OS-SCRATCH-IDLE: the same mirror for a Platter run (`platter`): the rate at the end of each block is the real stage's (`r1_ext`, set before block()), the read is the 4-point Hermite of the Platter.
   bool platter = false;
   float r1_ext = 0.0f;
+  bool c1_gate = false;  // the real stage is in the backspin (Spin): its gate is C1's slope, not the hand's
   TapeRef(const std::int16_t* r, std::uint32_t c, std::uint32_t ramp) : ring(r), cap(c), len(ramp != 0u ? ramp : 1u) {}
   bool retarget(std::uint32_t ramp) {  // set_mode(3)
     if (ph != Ph::Tape || ramp == 0u) return false;
@@ -638,7 +640,8 @@ struct TapeRef {
         w = f >= MasterScratch::kReleaseSamples ? 0.0f : 1.0f - static_cast<float>(f) / static_cast<float>(MasterScratch::kReleaseSamples);
       }
       const float mag = rr < 0.0f ? -rr : rr;
-      const float g = mag * MasterScratch::kGateSlope < 1.0f ? mag * MasterScratch::kGateSlope : 1.0f;
+      const float slope = platter && ph == Ph::Tape && !c1_gate ? MasterScratch::kPlatterGate : MasterScratch::kGateSlope;  // OS-BUG-SCRATCH: only the hand itself (the Platter phase) has the steeper gate; the release keeps C1's
+      const float g = mag * slope < 1.0f ? mag * slope : 1.0f;
       float hl = 0.0f;
       if (g > 0.0f && w > 0.0f) {
         std::uint32_t j = idx0 + i + cap - static_cast<std::uint32_t>(li);
@@ -732,7 +735,7 @@ TEST_CASE("scratch: TAPE STOP, modes 2 and 3, is the C1 linear path in 8 scenari
 }
 
 TEST_CASE("scratch: SCR off after a hand that stopped dead releases (no backspin); right after a flick it spins; neither clicks") {
-  // The latch needs the hand's own target too: the 25 ms inertia keeps the head's rate beyond kSpinMin for about 30 blocks after a hand that stopped dead.
+  // The latch needs the hand's own target too: the 70 ms inertia keeps the head's rate beyond kSpinMin for about 100 blocks after a hand that stopped dead.
   struct Case { unsigned still; MasterScratch::Phase want; };
   const Case cases[] = {{10, MasterScratch::Phase::Spin}, {40, MasterScratch::Phase::Release}};
   for (const Case& c : cases) {
@@ -767,17 +770,23 @@ TEST_CASE("scratch: a reversal after a flick follows the new direction at once -
   std::vector<float> out;
   CHECK(t.arm(1.0f));
   for (unsigned b = 1; b <= 800; ++b) t.block(b % 14u == 0u ? 1 : 0, sine, out);  // forwards at about 0.9, so the head has room to go back
-  t.run(150, 0, sine, out);                                                      // the hand rests: rate 0
+  t.run(600, 0, sine, out);                                                      // the hand rests: rate 0 (the 70 ms inertia takes about 465 blocks to come to rest from a rate of 1)
   CHECK(t.s.rate() == 0.0f);
   t.run(1, 16, sine, out);  // one fast block forwards: a clamped flick, about 8 counts of the hand not yet played
   float peak = t.head();
-  float rate16 = 0.0f;
-  for (unsigned b = 1; b <= 24; ++b) {  // straight back, one count in 3 blocks (a target of about -4)
+  float prev = t.s.rate();
+  unsigned rising = 0;
+  float rate_end = 0.0f;
+  for (unsigned b = 1; b <= 120; ++b) {  // straight back, one count in 3 blocks (a target of about -4)
     t.block(b % 3u == 0u ? -1 : 0, sine, out);
     peak = std::fmax(peak, t.head());
-    if (b == 16) rate16 = t.s.rate();
+    const float r = t.s.rate();
+    if (b >= 3u && b <= 40u && r >= prev) ++rising;  // from the first count back the target is negative: the rate only falls (the inertia carries it through 0 in about 40 blocks)
+    prev = r;
+    rate_end = r;
   }
-  CHECK(rate16 < -0.3f);  // (with the debt kept the target stayed 0 until the hand had come back about 8 counts: the rate was still +1.3 here, and the head had not left its peak at block 24)
+  CHECK(rising == 0u);  // (with the debt kept the target stayed forwards until the hand had come back about 8 counts: the rate rose for 24 blocks)
+  CHECK(rate_end < -0.3f);
   CHECK(t.head() < peak - 0.5f * MasterScratch::kFramesPerCount);
 }
 
@@ -787,13 +796,13 @@ TEST_CASE("scratch: a reversal after a flick follows the new direction at once -
 TEST_CASE("scratch: a still hand takes the shortcut - the output and the lag are those of the per-sample loop, moving, still and moving again") {
   const auto hf = [](std::uint32_t n) { return 0.5f * std::sin(6.2831853f * 3000.0f * static_cast<float>(n) / 44117.65f); };
   const auto hand = [](unsigned b) -> int {
-    if (b < 150u) return 0;                                                            // the entry runs down to the still hand
-    if (b < 450u) return b % 4u == 0u ? (((b - 150u) / 40u) % 2u != 0u ? -1 : 1) : 0;  // baby scratch, forth and back
-    if (b == 550u) return 16;                                                          // a clamped flick, then the rest
-    if (b >= 960u && b < 1160u) return b % 14u == 0u ? 1 : 0;                          // a slow crawl
+    if (b < 500u) return 0;                                                            // the entry runs down to the still hand (70 ms inertia: about 465 blocks)
+    if (b < 800u) return b % 4u == 0u ? (((b - 500u) / 40u) % 2u != 0u ? -1 : 1) : 0;  // baby scratch, forth and back
+    if (b == 900u) return 16;                                                          // a clamped flick, then the rest
+    if (b >= 1500u && b < 1700u) return b % 14u == 0u ? 1 : 0;                         // a slow crawl
     return 0;
   };
-  constexpr unsigned kExit = 1500;
+  constexpr unsigned kExit = 2400;
   for (const bool small : {false, true}) {
     CAPTURE(small);
     Rig big;
@@ -803,6 +812,7 @@ TEST_CASE("scratch: a still hand takes the shortcut - the output and the lag are
     CHECK(t.arm(1.0f));
     TapeRef ref(t.ring, t.frames, 1u);
     ref.platter = true;
+    t.s.set_tuning(70.0f, 1.0f, 32.0f, false);  // OS-BUG-SCRATCH: the mirror is the plain Hermite read (the anti-alias filter has its own tests)
     double worst = 0.0;
     unsigned lag_mismatch = 0, shortcuts = 0;
     float prev_rate = 1.0f;
@@ -831,7 +841,7 @@ TEST_CASE("scratch: a still hand takes the shortcut - the output and the lag are
     CHECK(t.s.idle());
     CHECK(lag_mismatch == 0u);
     CHECK(worst < 1e-4);
-    CHECK(shortcuts > 400u);  // the entry's run-down, the rests: the shortcut was really taken (471 blocks)
+    CHECK(shortcuts > 150u);  // the rests after the flick and the crawl: the shortcut was really taken
     if (small) CHECK(sm.guards_intact());
   }
 }
@@ -879,6 +889,7 @@ struct Ab {
     CHECK(rig.arm(mode, ramp));
     ref = TapeRef(rig.ring, rig.frames, mode == 1.0f ? 1u : ramp);
     ref.platter = mode == 1.0f;
+    if (ref.platter) rig.s.set_tuning(70.0f, 1.0f, 32.0f, false);  // OS-BUG-SCRATCH: the mirror is the plain Hermite read: the anti-alias filter is off here (its own tests are below)
     pending_exit = false;
   }
   void end() {  // SCR off
@@ -910,6 +921,7 @@ struct Ab {
       if (rig.s.phase() != MasterScratch::Phase::Spin) ref.end();
     }
     ref.r1_ext = rig.s.rate();
+    ref.c1_gate = ref.platter && rig.s.phase() != MasterScratch::Phase::Platter;  // the mirror's Tape is the Platter run or the backspin; the stage's phase tells which
     ref.block(src, want);
     if (ref.platter && ref.ph == Ph::Tape && rig.s.phase() == MasterScratch::Phase::Release) ref.begin_release();  // the brake ran out at the end of this block
     bool zero = true;
@@ -944,21 +956,21 @@ const char* const kScenarioName[kScenarios] = {"a session: moves, rests, flick, 
                                                "a second SCR on after still blocks, and an abort", "mode 3 on a still TAPE STOP", "hand during the entry run-down", "the source changes while still"};
 
 // The golden hashes (FNV-1a of the output bits, the lag and the rate per block), [scenario][0: 2.5 s ring, 1: 0.1 s ring]. The count-to-frames constant depends on the engine rate, so there is one table per rate
-// (the TAPE STOP scenario, 5, does not use the hand and is the same in both). Taken from the stage as it was before OS-SCRATCH-IDLE (44,117.647 Hz); the 44,100 Hz ones from the shortcut build, whose output and
-// lag the mirror above proves equal to the old loop's block by block (the rate comes from code the shortcut does not touch).
+// (the TAPE STOP scenario, 5, does not use the hand and is the same in both). Re-pinned by OS-BUG-SCRATCH (70 ms inertia, ahead 1.0, gate 32, hold, history 8; the mirror above proves the output and lag equal to
+// the per-sample loop's block by block, the AA off); scenario 5 (TAPE STOP) is unchanged since OS-SCRATCH.
 const std::uint32_t kGolden44100[kScenarios][2] = {
-    {1965166587u, 3627531582u}, {1545068169u, 378663213u}, {3378564202u, 1803743284u}, {1775006273u, 2575286930u},
-    {103584817u, 2361629913u},  {2869605565u, 2419989626u}, {2095055159u, 3381989057u}, {969949334u, 2190340346u},
+    {1488614164u, 2173584279u}, {1597031248u, 519270040u}, {1523201487u, 3671769802u}, {1837440325u, 3672386063u},
+    {556121543u, 3811330824u},  {2869605565u, 2419989626u}, {4044944161u, 2305099546u}, {688836319u, 2242029564u},
 };
 const std::uint32_t kGolden44117[kScenarios][2] = {
-    {3832745138u, 396687635u}, {1149866845u, 875452330u}, {3062018105u, 1744043633u}, {2236512669u, 3243546291u},
-    {4118497325u, 55759758u},  {2869605565u, 2419989626u}, {3045348819u, 782146683u},  {4087706656u, 1672857940u},
+    {4145799046u, 2457319228u}, {998214598u, 4080138003u}, {357598975u, 3609520682u}, {1172007437u, 2667607913u},
+    {773679203u, 2383339796u}, {2869605565u, 2419989626u}, {1224983638u, 2434263861u}, {3951884472u, 2024838510u},
 };
 
 // A flick backwards after a forward crawl, then the hand rests for `rest` blocks and SCR goes off.
 void flick_and_end(Ab& ab, unsigned rest, bool want_spin) {
   ab.arm(1.0f);
-  ab.run(200, 0, mixed);  // the entry runs down to the still hand
+  ab.run(400, 0, mixed);  // the entry runs down to the still hand
   ab.crawl(300, 1, mixed);
   ab.run(30, -2, mixed);
   ab.run(rest, 0, mixed);
@@ -995,18 +1007,18 @@ void play(unsigned which, Ab& ab) {
       flick_and_end(ab, 40, false);
       break;
     case 3:
-      flick_and_end(ab, 300, false);  // the head has come to rest: the exit is taken from the shortcut
+      flick_and_end(ab, 600, false);  // the head has come to rest: the exit is taken from the shortcut
       CHECK(ab.still_blocks > 60u);
       break;
     case 4:
       ab.arm(1.0f);
-      ab.run(200, 0, mixed);
+      ab.run(400, 0, mixed);
       ab.end();
       ab.run(8, 0, mixed);
       CHECK(rig.s.idle());
       ab.arm(1.0f);  // a second SCR on, the ring holds the first run's frames
       ab.run(3, 0, mixed);
-      ab.run(150, 0, mixed);
+      ab.run(400, 0, mixed);
       ab.block(1, mixed);
       ab.block(1, mixed);
       ab.run(100, 0, mixed);
@@ -1039,9 +1051,9 @@ void play(unsigned which, Ab& ab) {
       ab.arm(1.0f);
       unsigned zero_run = 0;
       int sign = 1;
-      for (unsigned b = 0; b < 700u; ++b) {
+      for (unsigned b = 0; b < 1400u; ++b) {
         int c = 0;
-        if ((b >= 4u && b < 8u) || (b >= 52u && b < 53u)) c = 1;  // hand movement while the entry runs down (rate 1 -> 0 takes about 120 blocks)
+        if ((b >= 4u && b < 8u) || (b >= 52u && b < 53u)) c = 1;  // hand movement while the entry runs down (rate 1 -> 0 takes about 340 blocks)
         if (b >= 30u && b < 34u) c = -1;
         if (b >= 100u && zero_run == 5u) {  // a count 5 blocks after the head has come to rest: the first block after a still one
           c = sign;
@@ -1055,15 +1067,15 @@ void play(unsigned which, Ab& ab) {
     }
     case 7:
       ab.arm(1.0f);
-      ab.run(200, 0, tri);
+      ab.run(400, 0, tri);
       ab.run(60, 0, noise);  // the mix changes while the head is held ...
       ab.run(40, 0, quiet);
       ab.run(40, 0, step);
       ab.run(30, 0, mixed);
       for (unsigned b = 0; b < 80u; ++b) ab.block(b % 3u == 0u ? -1 : 0, noise);  // ... and the hand walks back through the changes
-      ab.run(100, 0, tri);
+      ab.run(600, 0, tri);
       for (unsigned b = 0; b < 60u; ++b) ab.block(b % 2u == 0u ? 1 : 0, quiet);
-      ab.run(100, 0, mixed);
+      ab.run(600, 0, mixed);
       ab.end();
       ab.run(12, 0, mixed);
       CHECK(rig.s.idle());
@@ -1079,6 +1091,7 @@ TEST_CASE("scratch: the standstill shortcut is bit-exact - output, lag and rate 
   for (unsigned which = 0; which < kScenarios; ++which) {
     for (const bool small : {false, true}) {
       CAPTURE(kScenarioName[which]);
+      CAPTURE(which);
       CAPTURE(small);
       Rig big;
       SmallRig sm;
@@ -1247,4 +1260,194 @@ TEST_CASE("scratch: the ring write is the float clamp and round of before, for e
       CHECK(buf[2u * kSmall + 1u] == 0x5A5A);
     }
   }
+}
+
+// OS-BUG-SCRATCH ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+// "The scratch sounds bad": the head stopped between two counts of a slow hand, the gate turned the rate dips into amplitude buzz, 25 ms of inertia let the detent rate be heard, and a rate above 1 aliased.
+namespace {
+// The count of block `b` (1-based) of a hand at a steady speed of one count in `blocks_per_count` blocks (a fractional period: the difference of the running floor).
+int steady_hand(unsigned b, float blocks_per_count) {
+  const auto pos = [&](unsigned k) { return static_cast<unsigned>(static_cast<float>(k) / blocks_per_count); };
+  return static_cast<int>(pos(b) - pos(b - 1u));
+}
+float peak_of(const std::vector<float>& v, std::size_t from, std::size_t to) {
+  float p = 0.0f;
+  for (std::size_t i = from; i < to; ++i) p = std::fmax(p, std::fabs(v[i]));
+  return p;
+}
+float rms_of(const std::vector<float>& v, std::size_t from) {
+  double acc = 0.0;
+  for (std::size_t i = from; i < v.size(); ++i) acc += static_cast<double>(v[i]) * static_cast<double>(v[i]);
+  return static_cast<float>(std::sqrt(acc / static_cast<double>(v.size() - from)));
+}
+std::uint32_t bits32(float f) {
+  std::uint32_t u;
+  std::memcpy(&u, &f, sizeof u);
+  return u;
+}
+}  // namespace
+
+TEST_CASE("scratch: a steady slow hand (one count every 14 blocks) never stops the head between two counts") {
+  Rig t;
+  std::vector<float> out;
+  CHECK(t.arm(1.0f));
+  t.run(400, 0, sine, out);  // the entry runs down to the still hand
+  out.clear();
+  unsigned silent = 0, stopped = 0;
+  for (unsigned b = 1; b <= 400; ++b) {
+    t.block(b % 14u == 0u ? 1 : 0, sine, out);
+    if (b > 28u) {  // the first count is a nudge (a lone event), from the second on the hand is steady
+      if (peak_of(out, out.size() - kB, out.size()) == 0.0f) ++silent;
+      if (t.s.rate() <= 0.0f) ++stopped;
+    }
+  }
+  CHECK(silent == 0u);
+  CHECK(stopped == 0u);
+}
+
+TEST_CASE("scratch: a hand at 1x (one count every 12.9 blocks) plays at a rate within 15 % of 1; a held hand is silent") {
+  Rig t;
+  std::vector<float> out;
+  CHECK(t.arm(1.0f));
+  t.run(400, 0, sine, out);
+  float lo = 1e9f, hi = -1e9f;
+  for (unsigned b = 1; b <= 800; ++b) {
+    t.block(steady_hand(b, MasterScratch::kCountRate), sine, out);
+    if (b > 500u) {
+      lo = std::fmin(lo, t.s.rate());
+      hi = std::fmax(hi, t.s.rate());
+    }
+  }
+  CHECK(lo > 0.85f);
+  CHECK(hi < 1.15f);
+  // the hand is held: the rate runs to exactly 0 and the output is exact silence
+  out.clear();
+  t.run(900, 0, sine, out);
+  CHECK(t.s.rate() == 0.0f);
+  for (std::size_t i = out.size() - 4u * kB; i < out.size(); ++i) CHECK(out[i] == 0.0f);
+}
+
+TEST_CASE("scratch: a bursty detent hand (4 counts over 3 blocks, every 52 blocks: 1x on average) plays within 15 % of 1") {
+  Rig t;
+  std::vector<float> out;
+  CHECK(t.arm(1.0f));
+  t.run(400, 0, sine, out);
+  float lo = 1e9f, hi = -1e9f;
+  for (unsigned b = 0; b < 1200; ++b) {
+    const unsigned k = b % 52u;
+    t.block(k == 0u ? 2 : (k < 3u ? 1 : 0), sine, out);
+    if (b > 500u) {
+      lo = std::fmin(lo, t.s.rate());
+      hi = std::fmax(hi, t.s.rate());
+    }
+  }
+  CAPTURE(lo);
+  CAPTURE(hi);
+  CHECK(lo > 0.85f);
+  CHECK(hi < 1.15f);
+}
+
+TEST_CASE("scratch: the anti-alias engages without a step - a hand speeding up from 1x to 3x has no jump in the output") {
+  const auto tone = [](std::uint32_t n) { return 0.5f * std::sin(6.2831853f * 1000.0f * static_cast<float>(n) / 44117.65f); };
+  float worst[2] = {0.0f, 0.0f};
+  for (unsigned on = 0; on < 2u; ++on) {
+    Rig t;
+    std::vector<float> out;
+    CHECK(t.arm(1.0f));
+    t.s.set_tuning(70.0f, 1.0f, 32.0f, on != 0u);
+    t.run(1000, 0, tone, out);
+    out.clear();
+    float acc = 0.0f;  // counts owed, in counts: the speed climbs 1x -> 3x over 600 blocks
+    unsigned given = 0;
+    float max_rate = 0.0f;
+    for (unsigned b = 0; b < 800; ++b) {
+      const float x = b < 600u ? static_cast<float>(b) / 600.0f : 1.0f;
+      acc += (1.0f + 2.0f * x) / MasterScratch::kCountRate;
+      const unsigned due = static_cast<unsigned>(acc);
+      t.block(static_cast<int>(due - given), tone, out);
+      given = due;
+      max_rate = std::fmax(max_rate, t.s.rate());
+    }
+    CHECK(max_rate > 1.5f);
+    for (std::size_t i = 4u * kB; i < out.size(); ++i) worst[on] = std::fmax(worst[on], std::fabs(out[i] - out[i - 1u]));
+  }
+  // a 1 kHz tone of 0.5 read at 3.3x steps by 2 pi 1000 3.3 / 44100 * 0.5 = 0.24 at most; a switch at 1.2 would add a step on top
+  CAPTURE(worst[0]);
+  CAPTURE(worst[1]);
+  CHECK(worst[1] < 0.3f);
+  CHECK(worst[1] <= worst[0] + 0.01f);
+}
+
+TEST_CASE("scratch: a reversal of a steady hand turns the head round at once - the rate falls from the first count back") {
+  Rig t;
+  std::vector<float> out;
+  CHECK(t.arm(1.0f));
+  t.run(1000, 0, sine, out);
+  for (unsigned b = 1; b <= 500; ++b) t.block(steady_hand(b, MasterScratch::kCountRate), sine, out);
+  const float before = t.s.rate();
+  CHECK(before > 0.85f);
+  // the first count back (the rate has not had time to follow: it must fall, not stay)
+  t.block(-1, sine, out);
+  CHECK(t.s.rate() < before - 0.02f);
+  for (unsigned k = 0; k < 150u; ++k) t.block(-steady_hand(k + 1u, MasterScratch::kCountRate), sine, out);
+  CHECK(t.s.rate() < -0.7f);
+  CHECK(t.s.rate() > -1.15f);
+}
+
+TEST_CASE("scratch: the anti-alias low-pass is exactly off at a rate of 1 or less, and takes the top off above it") {
+  // at |rate| <= 1: aa on and aa off give the same bits (a crawl of 0.92 after the entry's run-down)
+  std::vector<float> o[2];
+  for (unsigned on = 0; on < 2u; ++on) {
+    Rig t;
+    CHECK(t.arm(1.0f));
+    t.s.set_tuning(70.0f, 1.0f, 32.0f, on != 0u);
+    CHECK(t.s.aa() == (on != 0u));
+    for (unsigned k = 1; k <= 1400u; ++k) t.block(k > 400u && k % 14u == 0u ? 1 : 0, sine, o[on]);
+  }
+  CHECK(o[0].size() == o[1].size());
+  unsigned diff = 0;
+  for (std::size_t i = 0; i < o[0].size() && i < o[1].size(); ++i) {
+    if (bits32(o[0][i]) != bits32(o[1][i])) ++diff;
+  }
+  CHECK(diff == 0u);
+  // above 1: a 15 kHz tone at a rate of about 4.3 aliases down; the filter removes most of it
+  const auto hf = [](std::uint32_t n) { return 0.5f * std::sin(6.2831853f * 15000.0f * static_cast<float>(n) / 44117.65f); };
+  float rms[2] = {0.0f, 0.0f};
+  for (unsigned on = 0; on < 2u; ++on) {
+    Rig t;
+    std::vector<float> out;
+    CHECK(t.arm(1.0f));
+    t.s.set_tuning(70.0f, 1.0f, 32.0f, on != 0u);
+    t.run(1000, 0, hf, out);
+    out.clear();
+    for (unsigned b = 1; b <= 500; ++b) t.block(b % 3u == 0u ? 1 : 0, hf, out);
+    CHECK(t.s.rate() > 3.0f);
+    rms[on] = rms_of(out, out.size() - 100u * kB);
+    for (float v : out) CHECK(std::fabs(v) < 1.0f);
+  }
+  CHECK(rms[0] > 0.1f);           // (off: the aliased tone is at full size)
+  CHECK(rms[1] < 0.5f * rms[0]);  // (on: the top is gone)
+}
+
+TEST_CASE("scratch: set_tuning has the documented defaults, clamps its inputs and survives NaN") {
+  MasterScratch s;
+  CHECK(s.inertia_ms() == doctest::Approx(70.0f).epsilon(0.01));
+  CHECK(s.ahead() == 1.0f);
+  CHECK(s.gate_slope() == 32.0f);
+  CHECK(s.aa());
+  s.set_tuning(1000.0f, 9.0f, 100.0f, false);
+  CHECK(s.inertia_ms() == doctest::Approx(500.0f).epsilon(0.01));
+  CHECK(s.ahead() == 4.0f);
+  CHECK(s.gate_slope() == 64.0f);
+  CHECK_FALSE(s.aa());
+  s.set_tuning(0.0f, -1.0f, 0.0f, true);
+  CHECK(s.inertia_ms() == doctest::Approx(5.0f).epsilon(0.01));
+  CHECK(s.ahead() == 0.0f);
+  CHECK(s.gate_slope() == 1.0f);
+  CHECK(s.aa());
+  const float nan = std::nanf("");
+  s.set_tuning(nan, nan, nan, true);
+  CHECK(s.inertia_ms() == doctest::Approx(5.0f).epsilon(0.01));
+  CHECK(s.ahead() == 0.0f);
+  CHECK(s.gate_slope() == 1.0f);
 }

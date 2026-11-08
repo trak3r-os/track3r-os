@@ -40,6 +40,12 @@ class MemCard final : public hs::Storage, public hs::StorageWriter {
   bool short_readback = false;                    // a Temp reads one byte short
   hs::Status open_status = hs::Status::Ok;        // open() answers this when it is not Ok
   std::string read_fault;                         // read() of this file (its key: lower case) fails with Io; empty: none
+  std::size_t read_cap = ~std::size_t{0};         // read() gives at most this many bytes a call (a partial read; 0 gives none: an end of file)
+  std::size_t read_over = 0;                      // read() reports this many bytes more than it gave (a backend that over-reports)
+  bool seek_fault = false;                        // seek() fails with Io
+  std::string size_fault;                         // size() of this file (its key: lower case) fails with Io; empty: none
+  std::size_t readdir_fail_at = ~std::size_t{0};  // the readdir call with this index (counted from 0) fails once with Io; default: never
+  std::size_t readdir_calls = 0;                  // readdir calls so far
   std::size_t ops = 0;                            // mutating calls so far
   int open_handles = 0;                           // files open() gave and close() has not taken back (a job that ends or is cancelled must leave none)
   std::size_t exists_calls = 0;                   // exists() lookups so far (a directory lookup each on a real card)
@@ -152,7 +158,8 @@ class MemCard final : public hs::Storage, public hs::StorageWriter {
     if (temp && short_readback && size != 0) {
       --size;
     }
-    const std::size_t n = read_pos_ >= size ? 0 : (size - read_pos_ < max ? size - read_pos_ : max);
+    const std::size_t cap = max < read_cap ? max : read_cap;
+    const std::size_t n = read_pos_ >= size ? 0 : (size - read_pos_ < cap ? size - read_pos_ : cap);
     if (n != 0) {
       std::memcpy(dst, it->second.data() + read_pos_, n);
       if (temp && corrupt_readback && read_pos_ <= 7 && read_pos_ + n > 7) {
@@ -160,16 +167,19 @@ class MemCard final : public hs::Storage, public hs::StorageWriter {
       }
     }
     read_pos_ += n;
-    got = n;
+    got = n + read_over;
     return hs::Status::Ok;
   }
   hs::Status seek(hs::FileHandle, std::uint32_t offset) noexcept override {
+    if (seek_fault) {
+      return hs::Status::Io;
+    }
     read_pos_ = offset;
     return hs::Status::Ok;
   }
   hs::Status size(hs::FileHandle, std::uint32_t& out) const noexcept override {
     const auto it = files.find(read_path_);
-    if (it == files.end()) {
+    if (it == files.end() || (!size_fault.empty() && read_path_ == size_fault)) {
       return hs::Status::Io;
     }
     std::size_t s = it->second.size();
@@ -211,6 +221,9 @@ class MemCard final : public hs::Storage, public hs::StorageWriter {
     return hs::Status::Ok;
   }
   hs::Status readdir(hs::DirHandle, hs::DirEntry& out) noexcept override {
+    if (readdir_calls++ == readdir_fail_at) {
+      return hs::Status::Io;
+    }
     if (list_pos_ >= listing_.size()) {
       return hs::Status::End;
     }

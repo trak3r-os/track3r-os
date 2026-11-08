@@ -1,0 +1,37 @@
+# docs/qa/catalogue/song.md: two rows that had no simulator proof, asserts only (no `snap`, so no golden).
+# A row claims only what an assert here checks; the rest stays under "open" in the catalogue cell.
+
+# QA-SNG-012 (OS-DELREPEAT): a held Delete removes one slot. A song of four slots, the cursor on the last
+# one; Delete is held for 1.5 s of simulated time (long enough for key repeats) and the list is three slots,
+# not fewer. The same for F4 held.
+document
+tap song
+tap f3
+tap f3
+tap f3
+assert model order.len=4
+press delete
+wait 1500
+release delete
+wait 20
+assert model order.len=3
+press f4
+wait 1500
+release f4
+wait 20
+assert model order.len=2
+
+# QA-SNG-063 (OS-SONG1): the Pattern button on Song opens the pattern of the cursor slot. ADD SLOT then the
+# encoder gives each new slot the next pattern; the cursor goes up two slots and Pattern shows that slot's pattern.
+tap song
+tap f3
+encoder 1
+tap f3
+encoder 1
+tap f3
+encoder 1
+assert model order.len=5
+tap up 2
+tap pattern
+assert state screen=PATTERN
+assert state pattern=~^[0-9]+$

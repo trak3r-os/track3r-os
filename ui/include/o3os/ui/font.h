@@ -57,15 +57,18 @@ constexpr FontGeometry font_geometry(Font font) noexcept {
 // One face: a contiguous L1 bitmap of `glyph_count` cells, cell n = character first_char + n.
 //   * L1: 1 bit per pixel, most significant bit = leftmost pixel, `stride` bytes per row, `cell_h` rows;
 //     cell n starts at BITMAP_SOURCE + n * stride * cell_h (FT81x Programmer's Guide section 4.20).
-//   * The platform places `bitmap` at `ram_g_addr` in RAM_G before the first frame with ui::upload_assets() (assets.h),
-//     in chunks of at most 4 KB; the renderer then binds it to bitmap handle `handle` at the start of every frame.
-// The table lives in flash (.rodata); the bitmaps are declared word aligned (the generator emits the alignas and a
-// static_assert, ADR 0011).
+//   * The platform places the inflated bitmap at `ram_g_addr` in RAM_G before the first frame with ui::upload_assets()
+//     (assets.h), in chunks of at most 4 KB; the renderer then binds it to bitmap handle `handle` at the start of every frame.
+// OS-FLASHDIET A4: the bitmap is stored in flash as `z`, a raw-deflate stream of the L1 bytes (made at build time by
+// tools/deflate_pack.py with the 4 KiB window). The table lives in .rodata; the streams are declared word aligned (the
+// generator emits the alignas and a static_assert, ADR 0011). The raw pixels are read with face_bitmap(); the upload
+// inflates them.
 struct FontFace {
-  const std::uint8_t* bitmap;
-  std::uint16_t bitmap_bytes;
-  std::uint32_t ram_g_addr;  // 4-byte aligned
-  std::uint8_t handle;       // FT81x bitmap handle, 1..4 (assets.h)
+  const std::uint8_t* z;       // the raw-deflate stream of the bitmap, word aligned (the generator emits the alignas and a static_assert, ADR 0011)
+  std::uint16_t z_size;       // the stream's bytes
+  std::uint16_t bitmap_bytes;  // the bitmap's raw bytes: stride * cell_h * glyph_count
+  std::uint32_t ram_g_addr;   // 4-byte aligned
+  std::uint8_t handle;        // FT81x bitmap handle, 1..4 (assets.h)
   std::uint8_t cell_w;
   std::uint8_t cell_h;
   std::uint8_t stride;
@@ -77,5 +80,10 @@ struct FontFace {
 
 // Defined by the generated font_data.cpp (build tree), not by a hand-written source.
 const FontFace& font_face(Font font) noexcept;
+
+// Inflates a face's bitmap into dst (cap at least bitmap_bytes) and returns true; false when it does not fit or the
+// stream fails. For the few readers of the raw pixels (the tile composer in assets.cpp, the simulator's gallery,
+// tests): main loop only, through the one shared decoder (assets.h asset_inflater()), synchronously in one call.
+bool face_bitmap(Font font, std::uint8_t* dst, std::size_t cap) noexcept;
 
 }  // namespace o3os::ui

@@ -40,6 +40,12 @@ struct SampleEditState {
 
   std::int16_t fx[kFxCount] = {0, 1000, 7, -18, 40, 100, 100, -1, 0};  // the FX page's values, in kFxParams' units
   std::uint8_t fx_sel = 0;  // the FX page's row
+  // OS-CEPTFX S4a: the PLUGINS page's view state (the plugin's values and strings are in PtfxPage, SDRAM): the listing index in view, the parameter row, the focus (0 the list, 1 the parameters) and a RESCAN asked.
+  std::uint8_t plug_sel = 0;
+  std::uint8_t plug_param = 0;
+  std::uint8_t plug_focus = 0;
+  bool plug_scan = false;
+  bool plug_apply = false;  // OS-CEPTFX S4b: F1 APPLY asked (the App's pass runs the picked plugin: a key never touches the card)
 
   std::uint32_t first = 0;  // the window: `span` frames from `first`; 0 is the whole sample
   std::uint32_t span = 0;
@@ -58,6 +64,7 @@ struct SampleEditState {
   std::uint16_t ready_period = 0;
   std::uint8_t ready_slot = 0;
   bool ready_stereo = false;  // OS-STEREO (d): the staged buffer is M then S (S at staged + even(staged_frames)): sample.commit swaps both in
+  bool ready_plug = false;    // OS-CEPTFX S4c: the buffer is a plugin's result: sample.commit reads the bank's PtfxJob for the points (generator, Add Silence) and the WAVETABLE mode
   std::uint32_t ready_a = 0;  // the range it was made over
   std::uint32_t ready_b = 0;
   std::int16_t* staged = nullptr;

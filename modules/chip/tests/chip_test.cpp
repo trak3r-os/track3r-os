@@ -51,7 +51,7 @@ TEST_CASE("chip: the descriptor is valid as the loader reads it and says what mo
   CHECK(std::string(m.name) == "Chip");
   CHECK(m.kind == O3M_KIND_INSTRUMENT);
   CHECK(m.abi_major == O3M_ABI_MAJOR);
-  CHECK(m.abi_minor == 8u);  // it declares views and, as a built-in module, ABI 1.8 (module.json): pitch, pages and labels, and a version in its header
+  CHECK(m.abi_minor == 13u);  // it declares views and, as a built-in module, ABI 1.13 (module.json): pitch, pages and labels, a version in its header and O3M_FX_RATE (OS-MODRATE S5)
   CHECK(m.param_count == CHIP_PARAM_COUNT);
   CHECK(m.view_count == CHIP_VIEW_COUNT);
   CHECK(m.state_bytes == sizeof(chip::Voice));
@@ -543,13 +543,13 @@ TEST_CASE("chip: the packed .tmod passes the loader's checks, relocates, reads b
   CHECK(t.relocation == Status::Ok);
   CHECK(t.descriptor == Status::Ok);
   CHECK(t.h.kind == O3M_KIND_INSTRUMENT);
-  CHECK(t.h.abi_minor == 8u);
-  CHECK(t.h.module_version == O3M_VERSION(1, 0, 0));  // o3m_add_module(... VERSION 1.0.0)
+  CHECK(t.h.abi_minor == 13u);
+  CHECK(t.h.module_version == O3M_VERSION(1, 1, 0));  // o3m_add_module(... VERSION 1.1.0): OS-CECHIP C2, so that a card copy of 1.0.0 does not shadow the built-in module
   CHECK(t.h.param_count == CHIP_PARAM_COUNT);
   CHECK(t.h.view_count == CHIP_VIEW_COUNT);
   CHECK(t.h.state_bytes <= CHIP_STATE_BYTES);
   CHECK(t.h.hot_size <= 3072u);  // the SRAM_L slab (14 KiB) is shared by every loaded module: the oscillator loops are the whole of it
-  CHECK(t.h.image_size - t.h.hot_size <= 6144u);
+  CHECK(t.h.image_size - t.h.hot_size <= 12544u);  // OS-CECHIP C5: the packer reports the cold section as 12,016 B (8,768 B at C3); this test checks image minus hot; 12,544 is 4.4 % above. The spec expected about 12,000 B for the .tmod with all eight waves
   MESSAGE("chip.tmod: " << t.file_bytes << " B file, hot " << t.h.hot_size << " B, cold " << (t.h.image_size - t.h.hot_size) << " B, state " << t.h.state_bytes << " B");
 }
 
@@ -827,7 +827,7 @@ TEST_CASE("chip: the descriptor exports pitch, four named pages and labels for W
       CHECK((std::strlen(m.labels[i].names[v]) >= 1u && std::strlen(m.labels[i].names[v]) < O3M_LABEL_NAME_MAX));
     }
   }
-  CHECK(m.labels[CHIP_PARAM_WAVE].count == 4u);
+  CHECK(m.labels[CHIP_PARAM_WAVE].count == 12u);  // OS-CECHIP C2: waves 4..11
   CHECK(std::string(m.labels[CHIP_PARAM_WAVE].names[1]) == "TRIANGLE");
   CHECK(m.labels[CHIP_PARAM_DUTY].count == 4u);
   CHECK(m.labels[CHIP_PARAM_VOLUME].count == 0u);

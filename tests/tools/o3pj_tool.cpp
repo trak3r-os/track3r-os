@@ -2,9 +2,10 @@
 // Command-line helper for the C++ <-> Python round trip of the native project format (ctest project_python,
 // driven by tests/o3project_roundtrip.py). Not part of the OS.
 //
-//   o3pj_tool gen empty|small|maximal|settings|state|midi13|persist2|og|og17|law|insx OUT  write a fixture project (empty = the default project; state = the project-level
+//   o3pj_tool gen empty|small|maximal|settings|state|midi13|persist2|scales|lfosine|stereo|wt|playthru|modrate|og|og17|law|insx OUT  write a fixture project (empty = the default project; state = the project-level
 //                                       state of OS-004d: MIDI, USBS, MIXR, PERF, APPM and instruments with a playback engine; persist2 = the session
-//                                       state of OS-PERSIST2: NOTE, MUTE, SCEN, SNFX; og = what the OG
+//                                       state of OS-PERSIST2: NOTE, MUTE, SCEN, SNFX; scales = the persist2 fixture with a NOTE 1.1 chunk (OS-SCALES28: Hirajoshi, SCALE LOCK on); lfosine = the small project with a Sine LFO, so INST 1.4; stereo = the small project with the stereo flag, so INST 1.5;
+//                                       wt = the small project with WT slots, so INST 1.6 (OS-CEWTENV W1); playthru = the small project with the play-thru flag, so INST 1.7 (OS-CEPLAYTHRU P1); modrate = the small project with the module RATE 2 on instrument 50, so INST 1.8 (OS-MODRATE S3); og =what the OG
 //                                       readers make of a synthetic OG project, with its OGPM and OGPN chunks; og17 = the same
 //                                       from a project v17, whose OGPM chunk is 1.1: it carries the byte at 0x80C; law = the og fixture with the volume
 //                                       law 1, so with the LAW chunk of OS-BUG-PASTE24; insx = the persist2 fixture with three inserts, so with the INSX chunk of OS-INSFX S3a)
@@ -19,6 +20,9 @@
 //                                       on step 1 of each track, or without them (`off`, the control of the CPU run). No samples
 //   o3pj_tool gen lfostep23|lfostep24|lfostep33|lfostep36|lfostepoff OUT  (OS-PERF-LFO-STEP) 12 sampler tracks (one-shot, wavetable, granular) with the step FX 23, 24, 33 or 36 on every note step,
 //                                       or none (`off`, the control of the CPU run); the kit's WAVs go in a `samples/` folder beside OUT
+//   o3pj_tool gen midisync|midisync-song|midisync-load OUT  (OS-MIDISYNC) the songs of the MIDI clock bench: one MIDI track (instrument 49, channel 1, USB) with a note on every step, the note naming
+//                                       the step (36 + step; the song: 3 patterns, 36 + 16 * (pattern - 1) + step); `-load` adds the Dense8 sampler tracks (and their WAVs in `samples/`) so the CPU is real
+//   o3pj_tool gen mtc-tempo OUT        (OS-MTC A2) the MTC test song: the `midisync-song` (3 patterns, note naming every step) with a Tempo FX in slot 2 step 1 (value 70 = 140 BPM; the value is BPM / 2, docs/formats/med.md 3.5), Tempo fine in slot 3 step 1 (132 = +1.00 BPM), Swing in slot 2 step 2 (50, straight) and Break in slot 3 step 2
 //   o3pj_tool resave IN OUT            load a file and save it again (exit 1 with the error on failure)
 //   o3pj_tool dump IN                   print the loaded project as text (same format as `o3project.py dump`)
 //   o3pj_tool limits                    print the limits table (same format as `o3project.py limits`)
@@ -132,8 +136,8 @@ void dump(const Project& p) {
     print_hex("name", in->name, len_of(in->name, kInstrumentNameMax));
     std::printf(" ");
     print_hex("path", in->sample_path, len_of(in->sample_path, kSamplePathMax));
-    std::printf(" rate=%u engine=%u blob=%u/%08x m13=%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u stereo=%u\n", in->sample_rate, in->engine, in->param_len, formats::crc32(in->params, in->param_len), in->midi_velocity,
-                in->midi_program, in->midi_out, in->midi_pb_range, in->midi_offset, in->midi_cc[0], in->midi_cc[1], in->midi_cc[2], in->midi_cc[3], in->midi_cc[4], in->midi_cc[5], in->vel_sens, in->stereo);
+    std::printf(" rate=%u engine=%u blob=%u/%08x m13=%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u mod_rate=%u stereo=%u play_thru=%u\n", in->sample_rate, in->engine, in->param_len, formats::crc32(in->params, in->param_len), in->midi_velocity,
+                in->midi_program, in->midi_out, in->midi_pb_range, in->midi_offset, in->midi_cc[0], in->midi_cc[1], in->midi_cc[2], in->midi_cc[3], in->midi_cc[4], in->midi_cc[5], in->vel_sens, in->rate, in->stereo, in->slice_thru);
     const SamplerParams& s = in->sampler;
     std::printf("  sampler %u %u %u %u %d %d %u %u %u %u %u %u %u %u %u %u | %u %u %u %u %u %u %u %u | %u | %08x %08x",
                 s.sample_type, s.play_mode, s.filter_type, s.filter_enable, s.tune, s.fine_tune, s.volume,
@@ -145,7 +149,7 @@ void dump(const Project& p) {
                   bits(e.sustain), e.release, e.loop, e.enable);
     }
     for (const Lfo& l : s.lfo) {
-      std::printf(" | lfo %u %u %08x", l.shape, l.speed, bits(l.amount));
+      std::printf(" | lfo %u %u %08x wt=%u,%u", l.shape, l.speed, bits(l.amount), l.wt_bend, l.wt_sust);
     }
     std::printf(" | slices");
     for (std::uint16_t v : s.slices) {
@@ -315,7 +319,11 @@ void limits() {
       {"inst_version_midi", formats::native::kInstVersionMidi},
       {"inst_version_lfo_sine", formats::native::kInstVersionLfoSine},
       {"inst_version_stereo", formats::native::kInstVersionStereo},
+      {"inst_version_wt", formats::native::kInstVersionWt},
+      {"inst_version_playthru", formats::native::kInstVersionPlayThru},
+      {"inst_version_modrate", formats::native::kInstVersionRate},
       {"state_version_fx", formats::native::kStateVersionFx},
+      {"state_version_play_order", formats::native::kStateVersionPlayOrder},
       {"apps_version_v11", formats::state_chunks::kAppsVersionV11},
       {"midi_ports", kMidiPorts},
       {"midi_cc_slots", kMidiCcSlots},
@@ -324,6 +332,8 @@ void limits() {
       {"mix_strips", kMixStrips},
       {"perf_slots", kPerfSlots},
       {"max_perf_fx", kPerfFxMax},
+      {"perf_play_mode_max_v11", kPerfPlayModeMaxV11},
+      {"perf_play_mode_max", kPerfPlayModeMax},
       {"max_app_param_sets", kMaxAppParamSets},
       {"app_param_sets_v10", kAppParamSetsV10},
       {"app_params_bytes_max", kAppParamsBytesMax},
@@ -660,6 +670,114 @@ void fill_lfostep(Project& p, std::uint8_t fx) {
   }
 }
 
+// OS-MIDISYNC: the songs of the MIDI clock bench (platform/mk66/tools/hil/midi_clock_tool.py `sync`). One MIDI instrument (slot 49, channel 1, out to USB) on one track plays a note on EVERY step of
+// `patterns` 16-step patterns in Song order, and the note of a step names it: MIDI note 36 + 16 * (pattern - 1) + step, so the tool knows which step it heard whatever happened to the clock. With `load` the
+// song is the Dense8 recipe (fill_heavy: 4 Modern + 2 Paula sampler voices, TB-303, FM, the send FX and the limiter on, about 86 % of the block on the unit) with the MIDI track as a ninth track.
+constexpr std::uint8_t kSyncNoteBase = 36;
+void fill_midisync(Project& p, unsigned patterns, bool load) {
+  unsigned track = 0;
+  if (load) {
+    fill_heavy(p, kDense8);
+    track = kDense8.modern + kDense8.amiga + 2u;
+    must(p.set_name("MidiSync Load", 13));
+    must(p.set_active_tracks(static_cast<std::uint8_t>(track + 1u)));
+  } else {
+    char name[24];
+    std::snprintf(name, sizeof name, patterns == 1u ? "MidiSync" : "MidiSync Song");
+    p.reset();
+    must(p.set_name(name, std::strlen(name)));
+    must(p.set_tempo_x100(12000));
+    must(p.set_default_pattern_length(16));
+    must(p.set_active_tracks(1));
+    must(p.set_master(MasterSettings{90, 100, 60, 60, kMasterLimiter}));
+  }
+  Instrument in;
+  init_instrument(in, InstrumentKind::Midi);
+  std::strcpy(in.name, "SYNC");
+  in.midi_channel = 1;
+  in.midi_out = kMidiOutUsb;
+  must(p.set_instrument(48, in));
+  must(p.set_track_name(track, "Sync", 4));
+  for (unsigned pat = 1; pat <= patterns; ++pat) {
+    if (pat != 1u || !load) {  // the load song has pattern 1 and its order slot already (fill_heavy)
+      must(p.create_pattern(pat, 16));
+      must(p.append_order(pat));
+    }
+    for (unsigned k = 0; k < 16u; ++k) {
+      Step st = kEmptyStep;
+      st.instr = 49;  // slot 48 + 1
+      st.note = static_cast<std::uint8_t>(kNoteFirst + kSyncNoteBase + 16u * (pat - 1u) + k);
+      must(p.set_step(pat, track, k, st));
+    }
+  }
+}
+
+// OS-MTC A2: the test song for the MTC listen and analyse tool: the `midisync-song` (3 patterns) with a Tempo FX at slot 2 step 1 (140 BPM), a Tempo fine in slot 3,
+// a Swing FX in slot 2 and a Break in slot 3; the Sync track (instrument 49, channel 1, USB) plays a note on every step, the note naming the step (36 + 16*(pattern-1) + step).
+// The step layout and FX numbers are docs/formats/o3-project.md (note, instrument, volume, FX 1 type/value, FX 2 type/value; the types of ADR 0004) and the values are the
+// ones docs/formats/med.md gives them: Tempo 15 = BPM / 2 (PAR-082), Tempo fine 44 = 128 + 4 x BPM delta, Swing 17 = 25..75 (straight at 50), Break 13 ends the pattern.
+void fill_mtctempo(Project& p) {
+  p.reset();
+  must(p.set_name("MTC Tempo", 9));
+  must(p.set_tempo_x100(12000));
+  must(p.set_swing(50));
+  must(p.set_default_pattern_length(16));
+  must(p.set_active_tracks(1));
+  must(p.set_master(MasterSettings{90, 100, 60, 60, kMasterLimiter}));
+  // The Sync instrument (slot 49, channel 1, USB out)
+  Instrument in;
+  init_instrument(in, InstrumentKind::Midi);
+  std::strcpy(in.name, "SYNC");
+  in.midi_channel = 1;
+  in.midi_out = kMidiOutUsb;
+  must(p.set_instrument(48, in));
+  must(p.set_track_name(0, "Sync", 4));
+  // Create 3 patterns and add them to the song order
+  for (unsigned pat = 1; pat <= 3u; ++pat) {
+    must(p.create_pattern(pat, 16));
+    must(p.append_order(pat));
+  }
+  // Fill all patterns with notes naming their steps
+  for (unsigned pat = 1; pat <= 3u; ++pat) {
+    for (unsigned k = 0; k < 16u; ++k) {
+      Step st = kEmptyStep;
+      st.instr = 49;  // slot 48 + 1
+      st.note = static_cast<std::uint8_t>(kNoteFirst + kSyncNoteBase + 16u * (pat - 1u) + k);
+      must(p.set_step(pat, 0, k, st));
+    }
+  }
+  // Add the timing FX as per the spec (docs/specs/OS-MTC.md A2), with the values docs/formats gives the types:
+  // - Tempo FX 15 in slot 2 step 1, value 70 = 140 BPM (the value is BPM / 2, below 40 BPM reads as 40; docs/formats/med.md 3.5)
+  // - Tempo fine FX 44 in slot 3 step 1, value 132 = 128 + 4 x 1, so +1.00 BPM (adds (v - 128) / 4 BPM; docs/formats/med.md section 4)
+  // - Swing FX 17 in slot 2 step 2, value 50 (25..75, straight at 50)
+  // - Break FX 13 in slot 3 step 2, value 1 (ends the pattern at this step, so the song loops from slot 3 back to slot 1)
+  Step st;
+  // Pattern 2, step 1: Tempo FX 15 at 140 BPM (value 70 = 140 / 2)
+  st = kEmptyStep;
+  st.instr = 49;
+  st.note = static_cast<std::uint8_t>(kNoteFirst + kSyncNoteBase + 16u * (2u - 1u) + 1);
+  st.fx[0] = StepFx{15, 70};
+  must(p.set_step(2, 0, 1, st));
+  // Pattern 3, step 1: Tempo fine FX 44, value 132 = +1.00 BPM ((132 - 128) / 4)
+  st = kEmptyStep;
+  st.instr = 49;
+  st.note = static_cast<std::uint8_t>(kNoteFirst + kSyncNoteBase + 16u * (3u - 1u) + 1);
+  st.fx[0] = StepFx{44, 132};
+  must(p.set_step(3, 0, 1, st));
+  // Pattern 2, step 2: Swing FX 17, value 50 (straight)
+  st = kEmptyStep;
+  st.instr = 49;
+  st.note = static_cast<std::uint8_t>(kNoteFirst + kSyncNoteBase + 16u * (2u - 1u) + 2);
+  st.fx[0] = StepFx{17, 50};
+  must(p.set_step(2, 0, 2, st));
+  // Pattern 3, step 2: Break FX 13, value 1 (break to the next order slot: the song loops to slot 1)
+  st = kEmptyStep;
+  st.instr = 49;
+  st.note = static_cast<std::uint8_t>(kNoteFirst + kSyncNoteBase + 16u * (3u - 1u) + 2);
+  st.fx[0] = StepFx{13, 1};
+  must(p.set_step(3, 0, 2, st));
+}
+
 // The suffix of `gen lfostepNN`: the step FX it holds (23, 24, 33, 36), 0 for `off`; -1 for anything else.
 int lfostep_fx(const char* suffix) {
   if (std::strcmp(suffix, "off") == 0) {
@@ -755,8 +873,36 @@ int main(int argc, char** argv) {
       in.stereo = 1;
       in.sampler.lfo[2].shape = 5;
       (void)a.project.set_instrument(0, in);
+    } else if (std::strcmp(argv[2], "wt") == 0) {
+      // OS-CEWTENV W1: the small project with WT slots on instrument 0 (slot 2 loop 2 WT Env, contour 37, bend 0x9C, sust 40; slot 4 loop 3 WT LFO, contour 200) and a non-zero WT byte on a loop-0 slot, so INST 1.6; both sides read and write 1.6 alike.
+      test::fill_small(a.project);
+      model::Instrument in = *a.project.instrument(0);
+      in.sampler.envelope[2].loop = 2;
+      in.sampler.lfo[2].shape = 37;
+      in.sampler.lfo[2].wt_bend = 0x9C;
+      in.sampler.lfo[2].wt_sust = 40;
+      in.sampler.envelope[4].loop = 3;
+      in.sampler.lfo[4].shape = 200;
+      in.sampler.lfo[4].wt_bend = 0x17;
+      in.sampler.lfo[4].wt_sust = 99;
+      in.sampler.lfo[1].wt_sust = 7;  // a WT byte without a WT loop: 1.6 too (the writer's gate is a loop of exactly 2 or 3 or a non-zero byte; the byte itself writes as 0, the loop is not a WT slot)
+      (void)a.project.set_instrument(0, in);
+    } else if (std::strcmp(argv[2], "playthru") == 0) {
+      // OS-CEPLAYTHRU P1: the small project with the play-thru flag on instrument 0, so INST 1.7 (the 1.6 layout whole and the flag after the twelve WT bytes); the other instruments stay as they were.
+      test::fill_small(a.project);
+      model::Instrument in = *a.project.instrument(0);
+      in.slice_thru = 1;
+      (void)a.project.set_instrument(0, in);
+    } else if (std::strcmp(argv[2], "modrate") == 0) {
+      // OS-MODRATE S3: the small project with the module RATE 2 on its Module instrument (slot 50), so INST 1.8 (the 1.7 layout whole and the RATE after the play-thru byte); the other instruments stay as they were.
+      test::fill_small(a.project);
+      model::Instrument in = *a.project.instrument(50);
+      in.rate = 2;
+      (void)a.project.set_instrument(50, in);
     } else if (std::strcmp(argv[2], "persist2") == 0) {
       test::fill_persist2(a.project);
+    } else if (std::strcmp(argv[2], "scales") == 0) {
+      test::fill_scales(a.project);  // OS-SCALES28: the persist2 fixture with Hirajoshi (26) as the scale, so a NOTE 1.1 chunk
     } else if (std::strcmp(argv[2], "insx") == 0) {
       test::fill_inserts(a.project);  // OS-INSFX S3a: the persist2 fixture and three inserts, so with the INSX chunk
     } else if (std::strcmp(argv[2], "kit") == 0) {
@@ -772,6 +918,14 @@ int main(int argc, char** argv) {
       fill_moddrive(a.project, static_cast<unsigned>(argv[2][8] - '0'), argv[2][9] == '\0');
     } else if (std::strncmp(argv[2], "lfostep", 7) == 0 && lfostep_fx(argv[2] + 7) >= 0) {
       fill_lfostep(a.project, static_cast<std::uint8_t>(lfostep_fx(argv[2] + 7)));
+    } else if (std::strcmp(argv[2], "midisync") == 0) {
+      fill_midisync(a.project, 1, false);
+    } else if (std::strcmp(argv[2], "midisync-song") == 0) {
+      fill_midisync(a.project, 3, false);
+    } else if (std::strcmp(argv[2], "midisync-load") == 0) {
+      fill_midisync(a.project, 1, true);
+    } else if (std::strcmp(argv[2], "mtc-tempo") == 0) {
+      fill_mtctempo(a.project);
     } else if (std::strcmp(argv[2], "law") == 0) {
       // OS-BUG-PASTE24: an OG project below version 7 saved native: its OGPM and OGPN chunks and the LAW chunk (law 1, the 1.1.14 table).
       if (!gen_og(a, 16u)) {
@@ -783,7 +937,7 @@ int main(int argc, char** argv) {
         return fail("gen: the synthetic OG project did not import");
       }
     } else {
-      return fail("gen: empty, small, maximal, settings, state, midi13, persist2, lfosine, kit, heavy, dense10, dense8, moddrive1|4|8[off], lfostep23|24|33|36|off, og, og17, law or insx");
+      return fail("gen: empty, small, maximal, settings, state, midi13, persist2, scales, lfosine, stereo, wt, playthru, modrate, kit, heavy, dense10, dense8, moddrive1|4|8[off], lfostep23|24|33|36|off, midisync, midisync-song, midisync-load, mtc-tempo, og, og17, law or insx");
     }
     std::vector<std::uint8_t> out;
     if (test::save(a.project, out) != formats::native::Progress::Done) {
@@ -793,7 +947,7 @@ int main(int argc, char** argv) {
       return fail("gen: cannot write the output");
     }
     if (std::strcmp(argv[2], "kit") == 0 || std::strcmp(argv[2], "heavy") == 0 || std::strcmp(argv[2], "dense10") == 0 ||
-        std::strcmp(argv[2], "dense8") == 0 || std::strncmp(argv[2], "lfostep", 7) == 0) {  // the WAVs beside it, in <folder of OUT>/samples (the build makes the folder)
+        std::strcmp(argv[2], "dense8") == 0 || std::strncmp(argv[2], "lfostep", 7) == 0 || std::strcmp(argv[2], "midisync-load") == 0) {  // the WAVs beside it, in <folder of OUT>/samples (the build makes the folder)
       std::string dir = argv[3];
       const std::size_t slash = dir.find_last_of('/');  // none: OUT is in the working directory, not in the root
       dir = (slash == std::string::npos ? std::string(".") : dir.substr(0, slash)) + "/samples";
@@ -825,5 +979,5 @@ int main(int argc, char** argv) {
     }
     return write_file(argv[3], out) ? 0 : fail("resave: cannot write the output");
   }
-  return fail("usage: o3pj_tool gen empty|small|maximal|settings|state|midi13|persist2|kit|heavy|dense10|dense8|og|og17|law|insx OUT | resave IN OUT | dump IN | limits");
+  return fail("usage: o3pj_tool gen empty|small|maximal|settings|state|midi13|persist2|scales|kit|heavy|dense10|dense8|og|og17|law|insx OUT | resave IN OUT | dump IN | limits");
 }

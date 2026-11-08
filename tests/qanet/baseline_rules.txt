@@ -9,3 +9,21 @@
 
 # Mixer STEMS Delete and Shift+Delete are destructive and ask first (the undo policy of 2026-10-22, docs/specs/OS-UNDOGRP.md D11; the walk's demo document has no stem map, so the rule is proved by the self-test of rules_test.cpp, not by a run). The rest of the Mixer (levels, mutes, solos, a reset of one level) is exempt: no undo, no question.
 
+
+# Found by OS-QANET gaps (engine-on states, 2026-11-06), put to the maintainer: the mute mode of a pad, Perform LATCH and scene STORE change the document with no undo unit.
+R1 | track.mute_mode | PadsTracks tap pad [audio on] | document changed with no question and no undo unit | new
+R1 | track.mute_mode 1 | PadsTracks tap pad [audio on] | document changed with no question and no undo unit | new
+R1 | track.mute_mode 2 | PadsTracks tap pad [audio on] | document changed with no question and no undo unit | new
+R1 | track.mute_mode 3 | PadsTracks tap pad [audio on] | document changed with no question and no undo unit | new
+R1 | track.mute_mode 4 | PadsTracks tap pad [audio on] | document changed with no question and no undo unit | new
+R1 | track.mute_mode 5 | PadsTracks tap pad [audio on] | document changed with no question and no undo unit | new
+R1 | track.mute_mode 6 | PadsTracks tap pad [audio on] | document changed with no question and no undo unit | new
+R1 | track.mute_mode 7 | PadsTracks tap pad [audio on] | document changed with no question and no undo unit | new
+R1 | track.mute_mode 8 | PadsTracks tap pad [audio on] | document changed with no question and no undo unit | new
+R1 | track.mute_mode 9 | PadsTracks tap pad [audio on] | document changed with no question and no undo unit | new
+R1 | track.mute_mode 10 | PadsTracks tap pad [audio on] | document changed with no question and no undo unit | new
+R1 | track.mute_mode 11 | PadsTracks tap pad [audio on] | document changed with no question and no undo unit | new
+R1 | perform.key 5 | Perform tap F6 [audio on] | document changed with no question and no undo unit | new
+R1 | perform.key 256 | Perform tap F1 +Shift [audio on] | document changed with no question and no undo unit | new
+R1 | perform.key 257 | Perform tap F2 +Shift [audio on] | document changed with no question and no undo unit | new
+R1 | perform.key 258 | Perform tap F3 +Shift [audio on] | document changed with no question and no undo unit | new

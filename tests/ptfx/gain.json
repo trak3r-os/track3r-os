@@ -1,0 +1,9 @@
+{
+  "name": "gain",
+  "author": "track3r-os",
+  "flags": [],
+  "scratch": 0,
+  "params": [
+    { "label": "Gain", "type": "d", "min": 0, "max": 8, "default": 2, "step": 1, "unit": "x" }
+  ]
+}

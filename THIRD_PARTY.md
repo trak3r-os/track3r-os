@@ -12,11 +12,16 @@ else, the Riedel EVE library included, is host-only.
 | Terminus | 4.49.1 | `third_party/fonts/terminus/ter-u20b.bdf`, `ter-u32b.bdf`, `OFL.TXT`, `AUTHORS` | SIL Open Font License 1.1, (c) 2020 Dimitar Toshkov Zhekov, Reserved Font Name "Terminus Font" | the Data (10x20) and Display (16x32) faces, bold weight; the 10x20 face is also what the pattern grid's hex-pair and note tiles are composed from at boot |
 | FatFs | R0.15a (22 November 2024) | `third_party/fatfs/{ff.c,ff.h,ffunicode.c,diskio.h,LICENSE.txt}` byte-identical; `ffconf.h` is **ours** (six options changed, below); `CMakeLists.txt` ours | ChaN's licence: BSD-style, one condition (keep the copyright notice and the disclaimer in redistributed source), binary form needs nothing; (C) 2024 ChaN; compatible with GPL-3.0-or-later | the SD card's file system (`platform/mk66/storage`), read-only; compiled into the MK66 image and into the host and QEMU test builds |
 | Riedel EmbeddedVideoEngine (FT800-FT813) | tag 5.0.9 (commit `26ecdbf58413e1c7ea3ca6eab338ecdb55e68e4c`, released 2025-08-30) | `third_party/eve-riedel/{LICENSE,EVE.h,EVE_commands.h,EVE_commands.c,EVE_config.h}` | MIT, (c) 2016-2024 Rudolph Riedel | the host test oracle of the FT812 display driver (`tests/eve_riedel_test.cpp`, built by `third_party/eve-riedel/CMakeLists.txt` for the host only); **not linked into any image** |
-| Open303 | commit `52f8614966cd` (github.com/maddanio/open303, a mirror of the SourceForge project; last commit 2019-09-17) | `third_party/open303/` (38 files byte-identical, the DSP core: `rosic_Open303`, `rosic_TeeBeeFilter`, the filters, envelopes and wavetable classes, their headers and `License.txt`), `modules/tb303/LICENSE-Open303.txt` | MIT, (c) 2009 Robin Schmidt (www.rs-met.com) | (1) the double-precision ORACLE of the TB-303 module's float port: built for the host only (`third_party/open303/CMakeLists.txt`), never linked into an image; (2) the module `modules/tb303` is a reimplementation of its algorithms and constants (credit and licence in the file header of `tb303_dsp.h` and in `LICENSE-Open303.txt`), shipped as a `.tmod` file on the SD card **and, since OS-012d, as bytes inside the firmware image** (`modules/builtin`): the MIT notice (copyright line, permission text, disclaimer) is in the image as the string `kBuiltinNotices` (`modules/builtin/NOTICES.txt` + `LICENSE-Open303.txt`, printed by `diag mod notice`) and the INFO page lists it among the licences |
+| Open303 | commit `52f8614966cd` (github.com/maddanio/open303, a mirror of the SourceForge project; last commit 2019-09-17) | `third_party/open303/` (38 files byte-identical, the DSP core: `rosic_Open303`, `rosic_TeeBeeFilter`, the filters, envelopes and wavetable classes, their headers and `License.txt`), `modules/tb303/LICENSE-Open303.txt` | MIT, (c) 2009 Robin Schmidt (www.rs-met.com) | (1) the double-precision ORACLE of the TB-303 module's float port: built for the host only (`third_party/open303/CMakeLists.txt`), never linked into an image; (2) the module `modules/tb303` is a reimplementation of its algorithms and constants (credit and licence in the file header of `tb303_dsp.h` and in `LICENSE-Open303.txt`), shipped as a `.tmod` file on the SD card **and, since OS-012d, as bytes inside the firmware image** (`modules/builtin`): the MIT notice (copyright line, permission text, disclaimer) is in the image as the text `kBuiltinNotices` (`modules/builtin/NOTICES.txt` + `LICENSE-Open303.txt`; since OS-FLASHDIET P1 a deflate stream that `diag mod notice` inflates and prints, the text unchanged) and the INFO page lists it among the licences |
 | pt2-clone | commit `18954f23c3d0ebd8583e61b65fe4507ae8aff4bd` (github.com/8bitbubsy/pt2-clone, master on 2026-10-12) | `third_party/pt2-clone/{LICENSE,pt2_paula.c,pt2_paula.h,pt2_blep.c,pt2_blep.h,pt2_rcfilters.c,pt2_rcfilters.h}` byte-identical; `pt2_header.h`, `pt2_audio.h`, `CMakeLists.txt` are **ours** (stubs for the original's GUI headers); `pt2_period_table.inc` is lines 101-192 of `src/pt2_tables.c` verbatim | BSD-3-Clause, (c) 2010-2026 Olav Sorensen (LICENSE read in full, 3 clauses; the BLEP code is "by aciddose, written for this project" and so under the same notice) | (1) the ORACLE of the Paula model (`audio/paula.h`): built for the host only (`third_party/pt2-clone/CMakeLists.txt`), never linked into an image; (2) the DATA of `audio/src/paula_tables.cpp` (the 16 x 36 ProTracker period table and the 257-point minBLEP step) is in the firmware image, so its notice is reproduced in that file's header, as clause 2 asks of a binary |
+| Polyend Tracker Community Edition, CHIP synth engine (OS-CECHIP C1) | commit `7fd6c2c3002a8f690b5341c486ba69606077b513` (github.com/polyend/tracker-ce, 2026-11-04) | `third_party/tracker-ce-chip/{ChiptuneSynthVoice.cpp,LICENSE}` byte-identical (SHA-256 in `PROVENANCE.md`; ctest `cechip_oracle_sha`); `CMakeLists.txt`, `check_sha256.cmake`, `PROVENANCE.md` and the shim `tests/support/cechip_shim/` and wrapper `tests/support/cechip_ref.*` are **ours** | MIT with a no-commercial-clone clause for the complete application (upstream `LICENSE` Parts 1 and 2), (c) 2020-2026 Polyend Sp. z o.o. and Polyend Tracker Community Edition Contributors; the maintainer approved this component 2026-11-05 | (1) the ORACLE of the CHIP waves that `modules/chip` gains (OS-CECHIP): the vendored files are built for the host only (`third_party/tracker-ce-chip/CMakeLists.txt`), never linked into an image; (2) since slice C2 the module `modules/chip` carries a PORT of the engine (`modules/chip/chip_ce.h`: waves 4..11: the pulse family and the chord tables from C2, SID, noise, Super Square, FM Bell and Chip Drum from C4 and C5), shipped as bytes inside the firmware image (`modules/builtin`): the MIT notice, with Part 2's conditions, is `modules/chip/LICENSE-tracker-ce.txt` in `kBuiltinNotices` and the header of `chip_ce.h`; no vendored file and no `synth/lib/*.a` is in the image |
+| Polyend Tracker Community Edition, `.ptfx` SDK and six example plugins (OS-PTFXPACK P1) | commit `7fd6c2c3002a8f690b5341c486ba69606077b513` (github.com/polyend/tracker-ce, 2026-11-04) | `modules/ptfx/sdk/tracker_plugin.h` and `modules/ptfx/{add_silence,analog_kick_gen,chiptune_gen,multimode_filter,stereo_delay,stereo_to_mono}/<name>.c` (from `editor-fx-sdk/` and `editor-fx-sdk/effects/` at that commit), `modules/ptfx/LICENSE-tracker-ce.txt`; **our** change is one notice block at the top of each file (SPDX line, provenance, the MIT text, the pointer to Part 2), the file after the line `---- end of the notice` is byte-identical (SHA-256 in `tools/testdata/testdata_manifest.json`, checked by ctest `ptfx_pack`); `modules/ptfx/CMakeLists.txt`, `tools/ptfx_pack.py` and `tests/ptfx_pack_test.py` are ours | MIT with a no-commercial-clone clause for the complete application (upstream `LICENSE` Parts 1 and 2; Part 2 1(b) expressly permits `.ptfx` plugins built with the SDK), (c) 2020-2026 Polyend Sp. z o.o. and Polyend Tracker Community Edition Contributors; the maintainer approved these six plugins 2026-11-08 | built as `.ptfx` files for the SD card's `Effects/` folder by the `o3_ptfx` target (host build, Arm toolchain), copied into the SD content zip by `tools/release/make_starter.py`; no `.ptfx` is committed and none is linked into any firmware image |
+| Polyend Tracker Community Edition, six Sample Editor effects rebuilt as `.ptfx` (OS-PTFXPACK P2) | commit `7fd6c2c3002a8f690b5341c486ba69606077b513` (github.com/polyend/tracker-ce, 2026-11-04) | the algorithms of `core/effector/mtEffect{Overdrive,Delay,Bitcrusher,Chorus,Flanger,Limiter}.cpp` (parameter ranges: `mtSampleEditorEngine.cpp`), written anew in C as `modules/ptfx/{overdrive,delay,bitcrusher,chorus,flanger,limiter}/<name>.c` against the SDK header; each file's notice lists what is the original's and what is changed | MIT (upstream `LICENSE` Part 1 covers `core/`; Part 2 conditions apply, see the P1 row), (c) 2020-2026 Polyend Sp. z o.o. and Polyend Tracker Community Edition Contributors for the algorithms, (c) 2026 the track3r-os contributors for the port; the maintainer approved these components 2026-11-08 | built as `.ptfx` files for the SD card's `Effects/` folder like the P1 plugins; no `.ptfx` is committed and none is linked into any firmware image |
+| Polyend Tracker Community Edition, three-band EQ rebuilt as `.ptfx` (OS-PTFXPACK P3) | commit `7fd6c2c3002a8f690b5341c486ba69606077b513` (github.com/polyend/tracker-ce, 2026-11-04) | the algorithm of `core/effector/mtEffectEQ.cpp/.h` (parameter ranges: `mtSampleEditorEngine.cpp`, `eqParams`), written anew in C as `modules/ptfx/eq3/eq3.c` against the SDK header; the file's notice lists what is the original's and what is changed | MIT (upstream `LICENSE` Part 1 covers `core/`; Part 2 conditions apply, see the P1 row), (c) 2020-2026 Polyend Sp. z o.o. and Polyend Tracker Community Edition Contributors for the algorithm, (c) 2026 the track3r-os contributors for the port; the maintainer approved this component 2026-11-08 | built as a `.ptfx` file for the SD card's `Effects/` folder like the P1 and P2 plugins; no `.ptfx` is committed and none is linked into any firmware image |
 
-Built-in modules (OS-012d): the image also carries the `.tmod` files of `modules/chip` and `modules/fm`, this project's own code (MIT, Copyright (c) 2026 the track3r-os authors, the module SDK's terms; no
-third-party code, no licence gate). Their notice is the first paragraph of `kBuiltinNotices`. All three are distributable inside the GPL-3.0-or-later image (MIT is compatible); each stays a separate
+Built-in modules (OS-012d): the image also carries the `.tmod` files of `modules/chip` and `modules/fm`, this project's own code (MIT, Copyright (c) 2026 the track3r-os authors, the module SDK's terms), except
+that Chip (OS-CECHIP C2) is no longer free of third-party code: its waves 4..11 are a port of tracker-ce's CHIP engine (`modules/chip/chip_ce.h`, MIT plus tracker-ce's notice and Part 2's conditions, below). Their
+notice is the first paragraph of `kBuiltinNotices` (deflated in the image, printed by `diag mod notice`), which also carries `modules/chip/LICENSE-tracker-ce.txt`. All three are distributable inside the GPL-3.0-or-later image (MIT is compatible); each stays a separate
 `.tmod` that the loader reads, not a part linked into the core.
 
 Project-owned assets (not third-party): `ui/assets/boot_logo.png`, the boot logo (also the logo at the top of the README), was made by the maintainer for track3r-os and is licensed GPL-3.0-or-later like the rest of the repository.
@@ -259,6 +264,44 @@ Written from scratch, no third-party code, data or formula note (OS-INSFX-FX1): 
 a one-pole DC blocker, a dry/wet mix and an output level). Nothing was ported or transcribed from any clipper design, app note or library: the shaper, the blocker and the smoothing are this module's own, and its oracle
 (`modules/effects/drive/tests/drive_test.cpp`) is an independent double-precision model written in the test. The module's source is GPL-3.0-or-later like the rest of this repository (the SDK header it includes is MIT).
 
+Written from scratch, no third-party code, data or formula note (OS-INSFX-FX1): the SD effect module `modules/effects/crush` (bit-depth and sample-rate reduction: a dead-zone quantiser, a sample-and-hold driven by a 32-bit phase accumulator,
+a dry/wet mix and an output level). Nothing was ported or transcribed from any bit-crusher design, app note or library; the "add and subtract 1.5 * 2^23" rounding is the textbook float trick and is not code of any source. Its oracle
+(`modules/effects/crush/tests/crush_test.cpp`) is an independent double-precision model written in the test. The module's source is GPL-3.0-or-later like the rest of this repository (the SDK header it includes is MIT).
+
+Written from scratch, no third-party code, data or formula note (OS-INSFX-FX1): the SD effect module `modules/effects/fold` (a wavefolder: a triangle fold with a level-compensated drive and a symmetry offset, a one-pole tone low-pass,
+a normalised one-pole DC blocker, a dry/wet mix and an output level). Nothing was ported or transcribed from any wavefolder design, app note or library: a triangle wave folded by reflection at +-1 is textbook geometry, and the
+"add and subtract 1.5 * 2^25" rounding is the float trick (the 2^23 one of the CRUSH module scaled to multiples of 4), not code of any source. Its oracle (`modules/effects/fold/tests/fold_test.cpp`) is an independent double-precision
+model written in the test (the fold by fmod). The module's source is GPL-3.0-or-later like the rest of this repository (the SDK header it includes is MIT).
+
+Written from scratch, no third-party code, data or formula note (OS-INSFX-FX2 X4 and X5): the SD effect module `modules/effects/autopan` (a stereo auto-pan: an LFO on the side with the linear law `S' = S + p M`, a sine from two
+parabolas and one correction step, a triangle, a square through a one-pole, the phase from the host's beat; and the HEADPHONE mode: the far ear delayed by up to 0.6 ms and darkened by a one-pole low-pass that follows the pan).
+Nothing was ported or transcribed from any auto-panner, binaural or HRTF code, data set or library: the mid and side decomposition and the parabolic sine are textbook, and the HEADPHONE mode only takes the **idea** of the
+spherical-head model (an interaural time difference and a head-shadow level-and-tone difference between the ears) with its own constants (0.6 ms, 20 kHz to 1.8 kHz), no code or data. Its oracle
+(`modules/effects/autopan/tests/autopan_test.cpp`) is an independent double-precision model written in the test. The module's source is GPL-3.0-or-later like the rest of this repository (the SDK header it includes is MIT).
+
+Written from scratch, no third-party code or data (OS-INSFX-FX1): the SD effect module `modules/effects/envfilter` (ENV FILTER: an envelope follower driving the cutoff of a state-variable filter, a dry/wet mix). The filter is the topology-preserving
+(trapezoidal) state-variable structure, a published one (Zavalishin, "The Art of VA Filter Design", the TPT SVF), written here from its equations: the structure is the only thing taken, and no code of any library, note or plug-in. The follower,
+the sweep law, the polynomials for log2, 2^x and tan, the smoothing and the mode weights are the module's own. Its oracle (`modules/effects/envfilter/tests/envfilter_test.cpp`) is an independent double-precision model written in the test.
+The module's source is GPL-3.0-or-later like the rest of this repository (the SDK header it includes is MIT).
+
+Written from scratch, no third-party code, data or formula note (OS-INSFX-FX1): the SD effect module `modules/effects/phaser` (a phaser: first-order all-pass sections in the normalised lattice form, the bilinear coefficient with a Pade [3/2] tan, a
+sine-like LFO from a smoothed triangle, a feedback that is scaled and clamped, a dry/wet mix). Nothing was ported or transcribed from any phaser design, app note or library; the all-pass section, the bilinear transform and the Pade approximant of tan are textbook mathematics,
+not code of any source. Its oracle (`modules/effects/phaser/tests/phaser_test.cpp`) is an independent double-precision model written in the test, plus an exact response from `std::tan` and complex arithmetic. The module's source is GPL-3.0-or-later like the rest of this repository (the SDK header it includes is MIT).
+
+Written from scratch, no third-party code, data or formula note (OS-INSFX-FX1): the SD effect module `modules/effects/comp` (a compressor with a TRANSIENT mode: a peak-follower compressor with a soft knee, a transient shaper from a fast and a slow
+envelope follower, a make-up gain and a dry/wet mix folded into one gain). Nothing was ported or transcribed from any compressor or transient-shaper design, app note or library; the log2 and exp2 polynomials were fitted for this module and the
+"add and subtract 1.5 * 2^23" rounding is the textbook float trick, code of no source. Its oracle (`modules/effects/comp/tests/comp_test.cpp`) is a double-precision model of the same structure written again in the test (it checks the float arithmetic, not the design; law tests check the design). The module's source is
+GPL-3.0-or-later like the rest of this repository (the SDK header it includes is MIT).
+
+Written from scratch, no third-party code, data or formula note (OS-INSFX-FX2): the SD effect module `modules/effects/pingpong` (a tempo-synced stereo echo: a stereo line of int16 words rounded toward zero, a one-pole low-pass and high-pass in the feedback, a
+cross-fade of two taps on the words, a mono-sum-preserving width). Nothing was ported or transcribed from any delay design, app note or library; the ping-pong arrangement, the one-pole filters and the cross-fade are textbook mathematics, and the structure of this OS's own
+send delay (`audio/include/o3os/audio/send_delay.h`) was followed as a fact (the rules, not its code). Its oracle (`modules/effects/pingpong/tests/pingpong_test.cpp`) is an independent double-precision model written in the test. The module's source is GPL-3.0-or-later like the rest of this repository (the SDK header it includes is MIT).
+Written from scratch, no third-party code, data or formula note (OS-INSFX-FX2): the SD effect module `modules/effects/wide` (WIDE: a stereo widener, a delayed and high-passed copy of the mid added to the side). The widening idea (a short delay of the mid, added to the side so that the mono sum cancels it, Lauridsen's trick) is a textbook one; nothing was ported or transcribed from any widener, plug-in, app note or library, and the one-pole high-pass, the ring and the cross-fade are the module's own. Its oracle (`modules/effects/wide/tests/wide_test.cpp`) is a double-precision model of the same law written again in the test over a plain history array. The module's source is GPL-3.0-or-later like the rest of this repository (the SDK header it includes is MIT).
+Written from scratch, no third-party code, data or formula note (OS-INSFX-FX2): the SD effect module `modules/effects/chorus` (a stereo chorus: one delay line of the mid, two linearly interpolated taps swung in opposite
+directions by a sine-like LFO, a dry/wet crossfade of the mid that keeps the input's side). Nothing was ported or transcribed from any chorus design, app note or library: a modulated delay line read with linear interpolation
+is textbook DSP, and the parabolic sine is the usual two-term approximation, not code of any source. Its oracle (`modules/effects/chorus/tests/chorus_test.cpp`) is an independent double-precision model written in the test.
+The module's source is GPL-3.0-or-later like the rest of this repository (the SDK header it includes is MIT).
+
 ## pt2-clone's Paula (OS-005h)
 
 `audio/paula.h` re-implements the model of pt2-clone's Paula emulator (period-based sample-and-hold, minBLEP band limiting, the Amiga 500 / 1200 RC filters and the LED
@@ -296,3 +339,167 @@ libxmp; the file contains no libxmp code. The tarball read was `https://api.gith
 ## Dattorro's plate reverberator, as a reference (OS-SENDFX)
 
 `audio/send_reverb.h` follows the structure of the plate in J. Dattorro, "Effect Design, Part 1: Reverberator and Other Filters", J. Audio Eng. Soc. 45(9), 1997 (after Griesinger's work): four input allpasses, a two-branch tank with modulated allpasses, damping, and the output taps. The paper is a reference only: no code of it or of any implementation is taken, the delay lengths and tap offsets are the paper's published numbers as the author remembers them (to be audited against the paper), and the code is our own. Mutable Instruments' Clouds reverb (MIT) was read for the topology only and nothing of it is used.
+
+## Polyend Tracker Community Edition: the wavetable contour bank (OS-CEWTENV W2)
+
+`audio/include/o3os/audio/wt_contour.h` and `audio/src/wt_contour.cpp` are a port of one component of the Polyend Tracker Community
+Edition firmware (tracker-ce, github.com/polyend/tracker-ce, commit `7fd6c2c`): `core/source/mtWavetableEnvelopes.cpp` and its
+header — the 256 procedural wavetable contours (0..127 factory, 128..255 user fallbacks) and the warp law of `evalWavetableEnvelopeFloat`
+(nibble decode, warp X on the phase, warp Y on the level, -7 on Y inverts, 128-point linear interpolation). The port keeps the maths
+identical and rewrites the code in this tree's style (C++17, float, no double, no allocation, no exceptions); the component's `.wav`
+contour loader is not ported (slice W8) and nothing else of tracker-ce is taken. The maintainer approved this one component for this
+item (OS-CEWTENV Q1 a, 2026-11-05); the upstream licence also restricts a wholesale commercial clone of the complete application
+(upstream `LICENSE` Part 2), which this port is not. No file of this component is in this repository (the CHIP engine's file is vendored as a test oracle, below), and the
+component's provenance is pinned by the golden `tests/data/wt_contour_golden.h` (made once from the upstream code; the procedure is
+in `tests/audio_wt_contour_test.cpp`'s header).
+
+The component's copyright line and MIT permission notice, copied exactly from tracker-ce@7fd6c2c `LICENSE`:
+
+> Copyright (c) 2020-2026 Polyend Sp. z o.o. and Polyend Tracker Community Edition Contributors
+>
+> Permission is hereby granted, free of charge, to any person obtaining a copy
+> of this software and associated documentation files (the "Software"), to deal
+> in the Software without restriction, including without limitation the rights
+> to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+> copies of the Software, and to permit persons to whom the Software is
+> furnished to do so, subject to the following conditions:
+>
+> The above copyright notice, this permission notice, and the conditions in
+> Part 2 shall be included in all copies or substantial portions of the Software.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+> IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+> FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+> AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+> LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+> OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+> THE SOFTWARE.
+
+The conditions of Part 2 of the same `LICENSE`, which its MIT notice requires in every copy, copied exactly (they restrict the
+complete Tracker application, and Part 2 section 1(c) expressly permits reusing an individual component like this one):
+
+> PART 2: WHOLESALE COMMERCIAL CLONE RESTRICTION & EXPRESS PERMISSIONS
+> ================================================================================
+>
+> 1. What Is Expressly Permitted (Commercial & Non-Commercial):
+>    (a) Music Production, Live Performance & Content Creation:
+>        Using the firmware to compose, record, produce, perform, distribute,
+>        broadcast, or monetize music, albums, sample packs, paid live
+>        performances ("gigs"), courses, or monetized video/streaming content
+>        is EXPRESSLY PERMITTED without restriction.
+>    (b) Selling `.ptfx` Sample Editor Plugins:
+>        Building, distributing, and selling `.ptfx` Sample Editor plugins built
+>        with `editor-fx-sdk/` (commercially or non-commercially) is EXPRESSLY
+>        PERMITTED under the pure MIT License in Part 1.
+>    (c) Reusing Code, Drivers, DSP, and Open Synth Engines in Other Projects:
+>        Reusing, modifying, or incorporating individual components, drivers,
+>        DSP algorithms, UI helpers, SDKs, or open-source C++ synth engines
+>        (such as `core/synth/engines/`) into your own open-source or commercial
+>        software (e.g., VST/AU/CLAP plugins, iOS/desktop apps) or original
+>        hardware products (e.g., Eurorack modules, standalone instruments that
+>        are not clones of the Polyend Tracker) is EXPRESSLY PERMITTED under the
+>        MIT License in Part 1.
+>
+> 2. What Is Prohibited (No Wholesale Commercial Clones):
+>    Notwithstanding the permissions in Part 1, you may NOT:
+>    (a) Commercial Hardware Clones:
+>        Manufacture, distribute, or sell a commercial hardware product that is
+>        preloaded with, designed primarily to run, or marketed to use the
+>        complete Polyend Tracker firmware/application (or a substantially
+>        unmodified or re-skinned derivative of the complete firmware/application);
+>    (b) Commercial Software Clones / Ports:
+>        Sell, license for a fee, or commercially distribute the complete Polyend
+>        Tracker application/firmware (or a direct port or substantially
+>        unmodified derivative of the integrated Tracker sequencer, UI, and
+>        workflow as a whole) as a paid standalone software application, paid
+>        plugin, or paid mobile/desktop app;
+>    (c) Selling Firmware Builds:
+>        Sell or charge a fee for downloading or obtaining compiled `.ptf`
+>        firmware images or source distributions of the Polyend Tracker firmware;
+>    (d) Trademark & Trade Dress:
+>        Nothing in this License grants any right to use the "Polyend" or
+>        "Polyend Tracker" trade names, trademarks, service marks, logos, boot
+>        screens, or hardware trade dress in connection with any third-party
+>        commercial product.
+
+## Polyend Tracker Community Edition: the custom play orders (OS-PERFMODES M1)
+
+The custom play orders of `core/source/playModeDefs.h` — the twenty tables C1..C20 of 128 entries (step to play, FX option), 2,560 numbers — are taken
+from the Polyend Tracker Community Edition firmware (tracker-ce, github.com/polyend/tracker-ce, commit `7fd6c2c`) as an approved MIT component, data
+only (maintainer decision Q1 a, 2026-11-05): `tools/gen_play_orders.py` reads them from a checkout of that commit (given by its root) and writes
+`seq/src/play_orders_data.inc`, which is committed (CI never runs the generator; no file of this component is in this repository). The MK66 image carries the
+numbers only in a deflate-packed form (OS-FLASHDIET P4: `tools/play_orders_pack.py` writes a blob into the build tree from that same `.inc`, and the firmware
+inflates it into SDRAM at boot); it is the same data, under the same notice.
+No code or comment of tracker-ce is copied, only the numbers. tracker-ce's copyright notice for this component, from `LICENSE` at that commit:
+
+> Copyright (c) 2020-2026 Polyend Sp. z o.o. and Polyend Tracker Community Edition Contributors
+
+## Polyend Tracker Community Edition: the CHIP synth engine, as a test oracle (OS-CECHIP C1)
+
+`third_party/tracker-ce-chip/ChiptuneSynthVoice.cpp` is `core/synth/engines/ChiptuneSynthVoice.cpp` of the Polyend Tracker Community Edition firmware
+(tracker-ce, github.com/polyend/tracker-ce, commit `7fd6c2c3002a8f690b5341c486ba69606077b513`), the CHIP synth engine, an approved MIT component (maintainer
+decision, 2026-11-05), vendored **byte for byte** next to a byte-for-byte copy of that commit's whole `LICENSE` (Parts 1 to 3, whose Part 2 conditions its MIT
+notice requires in every copy). The file's SHA-256 and the licence's are in `third_party/tracker-ce-chip/PROVENANCE.md` and are checked by ctest
+`cechip_oracle_sha`. It is **only a test oracle**: a static library `cechip_oracle` built for the host with the unit tests (C++20 for that target, no warnings and
+no UBSan on the original's file, `-ffp-contract=off`), never linked into any firmware target (slice C1 adds 0 bytes to an image). The headers the file includes
+(`config.h`, `ChiptuneSynthVoice.h`, `PolySynth/sdk/SynthVoiceSDK.h`) are **ours**, written from the facts of `docs/specs/OS-CECHIP.md` in
+`tests/support/cechip_shim/`; no file of tracker-ce's SDK is vendored or copied, and `synth/lib/*.a` (proprietary, Part 3 of the licence) and every other file of
+tracker-ce are not used. The port itself (OS-CECHIP C2 onwards: `modules/chip/chip_ce.h`, the pulse family, the parameters 20..29 and Chord of `chip_dsp.h`, the tracker-ce chord tables) is
+Chip's code: waves 4..11 of the Chip module, MIT, with the notice in the header of `chip_ce.h`, in `modules/chip/LICENSE-tracker-ce.txt` (Parts 1 and 2 of the licence, verbatim) and in
+`kBuiltinNotices` (`diag mod notice`); Chip stays a separate `.tmod`. The upstream licence
+also restricts a wholesale commercial clone of the complete Tracker application (Part 2), which neither this oracle nor Chip is.
+
+The copyright line and MIT permission notice, copied exactly from tracker-ce@7fd6c2c `LICENSE` (the same text as in the two sections above; Part 2 is in the vendored
+`third_party/tracker-ce-chip/LICENSE`):
+
+> Copyright (c) 2020-2026 Polyend Sp. z o.o. and Polyend Tracker Community Edition Contributors
+>
+> Permission is hereby granted, free of charge, to any person obtaining a copy
+> of this software and associated documentation files (the "Software"), to deal
+> in the Software without restriction, including without limitation the rights
+> to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+> copies of the Software, and to permit persons to whom the Software is
+> furnished to do so, subject to the following conditions:
+>
+> The above copyright notice, this permission notice, and the conditions in
+> Part 2 shall be included in all copies or substantial portions of the Software.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+> IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+> FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+> AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+> LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+> OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+> THE SOFTWARE.
+
+## Polyend Tracker Community Edition: the `.ptfx` SDK header and six example plugins (OS-PTFXPACK P1)
+
+`modules/ptfx/sdk/tracker_plugin.h` is `editor-fx-sdk/tracker_plugin.h`, and `modules/ptfx/<name>/<name>.c` are `editor-fx-sdk/effects/<name>.c` for Add Silence
+(`add_silence`), Analog Kick Gen, Chiptune Voice Gen, Multi-Mode Filter, Stereo Delay and Stereo to Mono, of the Polyend Tracker Community Edition firmware (tracker-ce,
+github.com/polyend/tracker-ce, commit `7fd6c2c3002a8f690b5341c486ba69606077b513`). They are an approved MIT component (maintainer decision, 2026-11-08, `CLAUDE.md`
+hard rule 1): upstream `LICENSE` Part 1 covers `editor-fx-sdk/` and Part 2 1(b) expressly allows plugins built with this SDK. What is **taken**: the seven files
+as they are. What is **changed**: each file gets a notice block in front (the SPDX line, where the file comes from, the copyright line, the MIT permission text and the
+pointer to Part 2), ended by the line `// ---- end of the notice: ...`; everything after that line is byte for byte upstream's (ctest `ptfx_pack` hashes it against
+`tools/testdata/testdata_manifest.json`). `modules/ptfx/LICENSE-tracker-ce.txt` is Parts 1 and 2 of the upstream licence, verbatim, as for Chip. **Not used**:
+`ptfx_builder.py` (ours is `tools/ptfx_pack.py`, whose payload and parameter bytes are identical to the official builder's for these six files; it also writes the
+`PTFX_AUTHOR` into the header, which the official builder leaves blank), every other tracker-ce file and `synth/lib/*.a` (proprietary, Part 3). The built `.ptfx` files
+are build products (`build-os-host/modules/ptfx/`), copied into the SD content zip by `tools/release/make_starter.py`; none is in git and none is in a firmware image. The
+upstream licence also restricts a wholesale commercial clone of the complete Tracker application (Part 2), which a set of effect plugins is not.
+
+The copyright line and MIT permission notice are the ones quoted in the sections above, from tracker-ce@7fd6c2c `LICENSE`.
+
+## Polyend Tracker Community Edition: six Sample Editor effects rebuilt as `.ptfx` (OS-PTFXPACK P2)
+
+Overdrive, Delay, Bitcrusher, Chorus, Flanger and Limiter of the Sample Editor of tracker-ce (commit `7fd6c2c3002a8f690b5341c486ba69606077b513`, `core/effector/`) exist
+here as `modules/ptfx/<name>/<name>.c`, one file each, so that they run through the `.ptfx` plugin path (OS-CEPTFX) on the unit. They are an approved MIT component
+(maintainer decision, 2026-11-08, `CLAUDE.md` hard rule 1; upstream `LICENSE` Part 1 covers the `core/` DSP algorithms). What is **taken**: the signal paths, constants and parameter
+ranges of the six effects, with the original's quirks. What is **ours**: the C files themselves, written against `tracker_plugin.h` (the original is C++ working on whole selections
+in the edit pool; a plugin sees blocks), so none is a copy. Each file starts with the SPDX line, the provenance, the copyright lines of the original and of this port, the MIT text
+and a list of what is the original's and every change (for example: Delay as a recursive comb with the original's voice delays and gains and its tail asked from the host; Chorus
+and Flanger process every frame instead of whole groups of 128; Flanger wraps the tap index fully and uses the host `sinf`; Bitcrusher and Limiter keep their state across blocks; the
+Length knobs are in ms because the SDK has no display multiplier). **Not used**: the other `core/effector/` effects (OS-CEPTFX S3 decides them one by one), `synth/lib/*.a`
+(proprietary, Part 3). `modules/ptfx/LICENSE-tracker-ce.txt` is the upstream licence text as for P1. The built `.ptfx` files are build products; none is in git or in a firmware image.
+
+## Polyend Tracker Community Edition: the three-band EQ rebuilt as `.ptfx` (OS-PTFXPACK P3)
+
+The three-band EQ of the Sample Editor of tracker-ce (commit `7fd6c2c3002a8f690b5341c486ba69606077b513`, `core/effector/mtEffectEQ.cpp/.h`) exists here as `modules/ptfx/eq3/eq3.c`, run through the `.ptfx` plugin path (OS-CEPTFX). It is an approved MIT component (maintainer decision, 2026-11-08, `CLAUDE.md` hard rule 1; upstream `LICENSE` Part 1 covers `core/`). What is **taken**: the three-band signal path (the Regalia-Mitra equaliser filter the original cites), its level map, bandwidth rule and parameter ranges. What is **ours**: the C file, written against `tracker_plugin.h`; its notice lists the changes (a band at 0 dB is skipped instead of the original's level-equals-1 test, flat defaults, single precision, state reset per run). **Not used**: the other `core/effector/` effects. Wavetable Smoother, Cut and Time-stretch are not rebuilt: a plugin sees one block at a time and cannot give them what they need (see `tools/release/README.md`). `synth/lib/*.a` is never used. `modules/ptfx/LICENSE-tracker-ce.txt` is the upstream licence text as for P1. The built `.ptfx` file is a build product; none is in git or in a firmware image.

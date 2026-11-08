@@ -1,0 +1,16 @@
+{
+  "name": "Example Ducker",
+  "id": "example_key",
+  "kind": "effect",
+  "description": "A sidechain ducker (ABI 1.12): its Key parameter names another track, and the track it sits on is turned down by that track's level (gain = 1 - Depth x level), with an Attack and a Release. Stereo-capable. The key is the track's block peak, before its fader and mute (a muted kick still keys).",
+  "state_bytes": 64,
+  "stereo": "capable",
+  "params": [
+    {"name": "Depth", "min": 0, "max": 100, "default": 80, "unit": "percent"},
+    {"name": "Key", "type": "key"},
+    {"name": "Attack", "min": 1, "max": 200, "default": 5, "curve": "log", "unit": "ms"},
+    {"name": "Release", "min": 10, "max": 2000, "default": 150, "curve": "log", "unit": "ms"}
+  ],
+  "voices": 1,
+  "memory": {"hot_bytes": 300, "sdram_bytes": 0}
+}

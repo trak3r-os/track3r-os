@@ -1,0 +1,32 @@
+{
+  "name": "Comp",
+  "id": "comp",
+  "kind": "effect",
+  "abi": "1.12",
+  "stereo": "capable",
+  "description": "A compressor insert for a track with a TRANSIENT mode: a soft-knee feed-forward compressor (threshold, ratio, attack, release) or a transient shaper (attack and sustain emphasis from a fast and a slow envelope follower), a make-up gain, a dry/wet mix, and a view of the transfer law. Stereo-capable (one linked gain). The Key parameter (OFF, T1..T16) makes it a sidechain compressor: the detector reads that track's level (COMP mode; TRANSIENT ignores it).",
+  "state_bytes": 160,
+  "params": [
+    {"name": "Threshold", "min": -60, "max": 0, "default": -18, "unit": "db", "mod": true},
+    {"name": "Ratio", "min": 1, "max": 20, "default": 4, "curve": "log", "mod": true},
+    {"name": "Attack", "min": 0.1, "max": 100, "default": 10, "curve": "log", "unit": "ms", "mod": true},
+    {"name": "Release", "min": 10, "max": 1000, "default": 120, "curve": "log", "unit": "ms", "mod": true},
+    {"name": "Makeup", "min": -24, "max": 24, "default": 0, "unit": "db", "mod": true},
+    {"name": "Mix", "min": 0, "max": 100, "default": 100, "unit": "percent", "mod": true},
+    {"name": "Mode", "min": 0, "max": 1, "default": 0, "type": "int"},
+    {"name": "Punch", "min": -100, "max": 100, "default": 0, "unit": "percent", "mod": true},
+    {"name": "Sustain", "min": -100, "max": 100, "default": 0, "unit": "percent", "mod": true},
+    {"name": "Key", "type": "key"}
+  ],
+  "presets": [
+    {"name": "DUCK T1", "values": {"Key": 1, "Threshold": -40, "Ratio": 20, "Attack": 1, "Release": 180}},
+    {"name": "PUMP T1", "values": {"Key": 1, "Threshold": -30, "Ratio": 8, "Attack": 1, "Release": 500}},
+    {"name": "GLUE", "values": {"Threshold": -18, "Ratio": 2, "Attack": 30, "Release": 300}},
+    {"name": "PUNCH", "values": {"Attack": 25, "Release": 120, "Mode": 1, "Punch": 100}}
+  ],
+  "views": [
+    {"name": "Curve", "min_size": [120, 80], "preferred_size": [380, 140]}
+  ],
+  "voices": 1,
+  "memory": {"hot_bytes": 2000, "sdram_bytes": 0}
+}

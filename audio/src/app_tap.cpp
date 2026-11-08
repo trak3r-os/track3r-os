@@ -44,7 +44,9 @@ float AppTap::linear_rms(const Levels& l) noexcept {
   if (l.frames == 0u) {
     return 0.0f;
   }
-  return std::sqrt(static_cast<float>(l.sumsq) / static_cast<float>(l.frames)) * (1.0f / 32768.0f);  // (a float sum of squares: 24 bits of mantissa are plenty for a level meter)
+  // the 64-bit sum as its two 32-bit halves (each half a single FPU conversion; a uint64 -> float one would call __aeabi_ul2f)
+  const float sq = static_cast<float>(static_cast<std::uint32_t>(l.sumsq >> 32)) * 4294967296.0f + static_cast<float>(static_cast<std::uint32_t>(l.sumsq));
+  return std::sqrt(sq / static_cast<float>(l.frames)) * (1.0f / 32768.0f);  // (a float sum of squares: 24 bits of mantissa are plenty for a level meter)
 }
 
 bool AppTap::levels_since(std::uint32_t& cursor, Levels& out) const noexcept {

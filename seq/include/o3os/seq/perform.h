@@ -101,11 +101,11 @@ struct PerfFxInfo {
   const char* const* labels;  // the names of the values 0..max for a labelled FX, else nullptr
 };
 
-// The slot labels (sample playback, stutter, pattern play mode and pattern length), except the play mode's: its stored value 0..3 is seq::TrackPlayMode 0..3 (PerfTrack in
-// sequencer.cpp), so each label names the mode that runs (OS-BUG-PERFMODE; custom orders are not built).
+// The slot labels (sample playback, stutter, pattern play mode and pattern length), except the play mode's: its stored value 0..23 is seq::TrackPlayMode 0..23 (PerfTrack in
+// sequencer.cpp), so each label names the mode that runs: 0..3 FWD, BACK, PING, RND (OS-BUG-PERFMODE) and 4..23 the custom play orders C1..C20 (OS-PERFMODES M2, M4).
 inline constexpr const char* kPerfLabelsPlayback[2] = {">>>", "<<<"};
 inline constexpr const char* kPerfLabelsStutter[16] = {"OFF", "16", "12", "8", "6", "4", "3", "2", "1", "1/2", "1/3", "1/4", "1/6", "1/8", "1/12", "1/16"};
-inline constexpr const char* kPerfLabelsPlayMode[4] = {"FWD", "BACK", "PING", "RND"};
+inline constexpr const char* kPerfLabelsPlayMode[24] = {"FWD", "BACK", "PING", "RND", "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10", "C11", "C12", "C13", "C14", "C15", "C16", "C17", "C18", "C19", "C20"};
 inline constexpr const char* kPerfLabelsLength[9] = {"---", "1", "2", "4", "8", "16", "32", "64", "128"};
 
 // The ranges of the LFO speeds: 23 (amp envelope) and 28 (other envelopes).
@@ -128,7 +128,7 @@ inline constexpr PerfFxInfo kPerfFxInfo[kPerfFxCount] = {
     {"FLT LFO", -28, 28, FxGroup::LfoFilter, {PerfFx::None, PerfFx::None}, true, nullptr},
     {"POS LFO", -28, 28, FxGroup::LfoPosition, {PerfFx::None, PerfFx::None}, true, nullptr},
     {"STUTTER", 0, 15, FxGroup::None, {PerfFx::None, PerfFx::None}, true, kPerfLabelsStutter},
-    {"PLAYMODE", 0, 3, FxGroup::None, {PerfFx::None, PerfFx::None}, true, kPerfLabelsPlayMode},
+    {"PLAYMODE", 0, 23, FxGroup::None, {PerfFx::None, PerfFx::None}, true, kPerfLabelsPlayMode},  // OS-PERFMODES M4: 4..23 are the custom play orders C1..C20 (seq::TrackPlayMode, play_orders.h)
     {"PAT LEN", 0, 8, FxGroup::None, {PerfFx::None, PerfFx::None}, true, kPerfLabelsLength},
     // OS-PERFFX P1: the value is how many bits are taken away (16 - bits: 1 is 15 bits, 15 is 1 bit); 0 ends the FX, which is the clean sound. No labels: the screen shows the number.
     {"BITDEPTH", 0, 15, FxGroup::BitDepth, {PerfFx::None, PerfFx::None}, true, nullptr},
@@ -190,15 +190,25 @@ class PerformBank {
   std::uint16_t affected_mask() const noexcept { return affected_; }
   bool edit() const noexcept { return edit_; }
   unsigned edit_slot() const noexcept { return edit_slot_; }
-  // The slot's FX is on: a row but 0 is selected and its value is not 0 (what the pads' LEDs and the screen's highlight show).
-  bool active(unsigned slot) const noexcept { return slot < kPerfSlots && slots_[slot].row != 0u && live_[slot] != 0; }
+  // The slot's FX is on: a row but 0 is selected and its value is not 0 (what the pads' LEDs and the screen's highlight show); a slot in CC mode
+  // (OS-MIDICCMAP S3) is on when its live value is not 0, whatever its row.
+  bool active(unsigned slot) const noexcept {
+    return slot < kPerfSlots && live_[slot] != 0 && (slots_[slot].row != 0u || ((cc_mask_ >> slot) & 1u) != 0u);
+  }
+  // OS-MIDICCMAP S3 (3.4): the slot is driven by a mapped CC (51..62). A runtime bit, never stored: state() and the scenes do not see it.
+  bool cc_mode(unsigned slot) const noexcept { return slot < kPerfSlots && ((cc_mask_ >> slot) & 1u) != 0u; }
 
   // ---- the live side. Each updates the slots, then reconciles with the engine (apply); true when something the screen shows changed.
   // A pad (0..47) went down / up: slot pad % 12, row pad / 12.
   bool pad_down(unsigned pad, CommandSink& out) noexcept;
   bool pad_up(unsigned pad, CommandSink& out) noexcept;
-  // The encoder: `detents` on the value of every slot that is held and not on row 0 (stored too in the EDIT state).
+  // The encoder: `detents` on the value of every slot that is held and not on row 0 (stored too in the EDIT state); a held slot in CC mode is turned as for a row.
   bool turn(int detents, CommandSink& out) noexcept;
+  // OS-MIDICCMAP S3 (3.4): a mapped CC 51..62 on the slot (`v` the CC value 0..127): the slot enters CC mode, its live value becomes its place in its
+  // FX's range (min + v * (max - min) / 127, the official law of F5), the slots holding the same FX end (exclude) and apply() sends it to the affected
+  // tracks. The stored row and values are untouched, so the PERF chunk and the scenes never see CC mode. A slot with no FX ignores it.
+  // CC mode ends on: a pad of that slot, RESET (all_off), leaving the screen (turn_off), a scene recall, change_fx, paste_slot, swap_slots of that slot, load_slots.
+  bool set_cc(unsigned slot, unsigned v, CommandSink& out) noexcept;
   // A track button: the track joins or leaves the layer.
   bool toggle_track(unsigned track, CommandSink& out) noexcept;
   // Entering the mode: the live values are the stored ones again, nothing is held.
@@ -257,6 +267,7 @@ class PerformBank {
   Slot slots_[kPerfSlots];
   std::int16_t live_[kPerfSlots];
   std::uint16_t held_;
+  std::uint16_t cc_mask_;  // OS-MIDICCMAP S3: bit s, slot s is in CC mode (runtime only, never stored; 2 B of SRAM)
   std::uint16_t affected_;
   bool edit_;
   std::uint8_t edit_slot_;

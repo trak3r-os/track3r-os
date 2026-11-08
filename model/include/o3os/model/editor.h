@@ -133,6 +133,9 @@ class Editor {
   Status set_active_tracks_state(std::uint32_t count) noexcept;
   Status set_master(const MasterSettings& value) noexcept;
   Status set_track(std::uint32_t slot, const TrackSlot& value) noexcept;
+  // OS-SONG3 S4 (PREVIEW): the track's flags written plain (Project::set_track_flags_plain): no undo record, and the generation does not move, so the Editor never reads the change
+  // as one behind its back (check_sync would reset the history) and the save layer does not call it unsaved work.
+  void set_track_flags_plain(std::uint32_t slot, std::uint8_t flags) noexcept { project_.set_track_flags_plain(slot, flags); }
   Status set_track_name(std::uint32_t slot, const char* text, std::size_t len) noexcept;
 
   Status append_order(std::uint32_t pattern_id) noexcept;

@@ -504,3 +504,443 @@ TEST_CASE("granular: a grain takes the sample's rate factor: 88,200 Hz at the ro
     }
   }
 }
+
+// ---- OS-CEWTENV W5: the granular length destination (slot 3's enable bit 0x02 on a granular instrument, spec F12) -----------------------------------------------
+namespace {
+
+// This test binary's grlen storage, bound once (on the unit it is O3OS_SDRAM_NOINIT in the SDRAM slack window, app_main.cpp; voices.h grlen_bind).
+audio::FilterMod g_w5_slot_mods[audio::kDescSlots];
+audio::ModGen g_w5_voice_gens[audio::kMaxVoices];
+struct W5Bind {
+  W5Bind() { audio::grlen_bind(g_w5_slot_mods, g_w5_voice_gens); }
+};
+const W5Bind g_w5_bind{};
+
+// An ADSR length source at `amount` from its first evaluation (every stage 0, sustain 1: the sustain holds sustain x amount).
+audio::FilterMod len_adsr(float amount) {
+  audio::FilterMod m{};
+  m.kind = audio::kFmodEnv;
+  m.amount = amount;
+  m.sustain = 1.0f;
+  return m;
+}
+
+}  // namespace
+
+namespace o3os::audio {
+// The test's view of the pool's private state (voices.h friend): the voice's grain fields and mmask, the bound grlen arrays.
+struct GranLenW5Test {
+  static const VoicePool::Voice& voice(VoicePool& p, unsigned i) { return p.v_[i]; }
+  static bool len_on(VoicePool& p, unsigned i) { return (p.v_[i].mmask & VoicePool::kMmLen) != 0u; }
+  static float gen_e_out(unsigned i) { return g_w5_voice_gens[i].e_out; }
+  static const FilterMod* slot_mod(const VoicePool& p, unsigned slot) { return p.grlen_slot(slot); }
+  static unsigned voice_of(VoicePool& p, unsigned track) { return p.find(track); }
+};
+}  // namespace o3os::audio
+
+// F12: length = base + mod x (max - 44), max = min(sample length, 44,100), held to 44..max; the new length applies at the grain's next wrap, never mid-grain.
+TEST_CASE("grlen W5: slot 3 bit 0x02 drives the grain length by F12, held within the grain and applied at the next wrap") {
+  const std::uint32_t L = 20000;  // max = min(20000, 44100) = 20000
+  const std::int16_t* pcm = fill(L, Fill::Ramp);
+  VoicePool& p = pool_a();
+  Cfg c;
+  c.len = L;
+  c.gr_len = 441;
+  c.pos = 10000;
+  c.shape = 0;
+  c.type = 0;
+  c.note = 60;  // the root: inc 1
+  c.kind = Fill::Ramp;
+  SampleDesc d = desc_over(pcm, c);
+  const audio::FilterMod half = len_adsr(0.5f);
+  p.set_sample(0, d, &half);  // length = 441 + 0.5 x (20000 - 44) = 10419
+  const audio::FilterMod* sm = o3os::audio::GranLenW5Test::slot_mod(p, 0);
+  REQ(sm != nullptr);
+  CHECK(sm->kind == audio::kFmodEnv);
+  REQ(p.note_on(0, 60, 0, audio::kVelocityDefault));
+  const unsigned vi = o3os::audio::GranLenW5Test::voice_of(p, 0);
+  CHECK(o3os::audio::GranLenW5Test::len_on(p, vi));
+  const auto& v = o3os::audio::GranLenW5Test::voice(p, vi);
+  const Geom base = ref_geom(L, 441, 10000);
+  CHECK(v.gstart == static_cast<std::uint32_t>(base.start));  // the note starts on the instrument's own grain length
+  CHECK(v.gl1 == static_cast<std::uint32_t>(base.l1));
+  CHECK(v.gl2 == static_cast<std::uint32_t>(base.l2));
+  std::vector<std::int16_t> out;
+  render(p, out, kBlk);  // one block: the modulator has been evaluated once (mneed), the grain has not wrapped (441 samples at inc 1)
+  CHECK(std::abs(o3os::audio::GranLenW5Test::gen_e_out(vi) - 10419.0f) < 0.5f);  // base + mod x (max - 44)
+  CHECK(v.gl1 == static_cast<std::uint32_t>(base.l1));  // held within the grain: the block's length has not moved it yet
+  CHECK(v.gl2 == static_cast<std::uint32_t>(base.l2));
+  render(p, out, 30 * kBlk);  // many wraps now
+  const Geom want = ref_geom(L, 10419, 10000);
+  CHECK(v.gstart == static_cast<std::uint32_t>(want.start));  // applied at a wrap, not before
+  CHECK(v.gl1 == static_cast<std::uint32_t>(want.l1));
+  CHECK(v.gl2 == static_cast<std::uint32_t>(want.l2));
+  p.cut(0);
+}
+
+TEST_CASE("grlen W5: the length is held to 44..max (an amount of 1 clamps to the sample, -1 to 44)") {
+  const std::uint32_t L = 20000;
+  const std::int16_t* pcm = fill(L, Fill::Ramp);
+  for (const float amount : {1.0f, -1.0f}) {
+    VoicePool& p = pool_a();
+    Cfg c;
+    c.len = L;
+    c.gr_len = 441;
+    c.pos = 10000;
+    c.note = 60;
+    c.kind = Fill::Ramp;
+    SampleDesc d = desc_over(pcm, c);
+    const audio::FilterMod lm = len_adsr(amount);
+    p.set_sample(0, d, &lm);
+    REQ(p.note_on(0, 60, 0, audio::kVelocityDefault));
+    const unsigned vi = o3os::audio::GranLenW5Test::voice_of(p, 0);
+    std::vector<std::int16_t> out;
+    render(p, out, kBlk);
+    const float want = amount >= 0.0f ? 20000.0f : 44.0f;  // 441 + 1 x (20000 - 44) = 20397 > max: max; 441 - 19956 < 44: 44
+    CHECK(std::abs(o3os::audio::GranLenW5Test::gen_e_out(vi) - want) < 0.5f);
+    p.cut(0);
+  }
+}
+
+// ---- OS-CEWTENV W6b: the step FX z (model id 98, group kModGroupGranLen), the grain length by F11 -------------------------------------------------------------------
+namespace {
+
+// This test binary's FX storage for the FX z (voices.h fxe_bind; on the unit it is SDRAM, app_main.cpp).
+audio::FxEnvMem g_w6b_mem;
+struct W6bBind {
+  W6bBind() { audio::fxe_bind(&g_w6b_mem); }
+};
+const W6bBind g_w6b_bind{};
+
+void z_fx(VoicePool& p, unsigned value) { p.fx_event(0, audio::kModGroupGranLen, audio::kFxGranLen, value); }
+void z_end(VoicePool& p) { p.fx_event(0, audio::kModGroupGranLen, 0u, 0u); }
+
+// A note of a granular instrument (length L, descriptor grain length 441, position 10000) with z = `value` set before it (value > 100: none): the grain's geometry at the note start.
+void z_start_geom(std::uint32_t L, unsigned value, unsigned want_len) {
+  const std::int16_t* pcm = fill(L, Fill::Ramp);
+  VoicePool& p = pool_a();
+  p.cut(0);
+  Cfg c;
+  c.len = L;
+  c.gr_len = 441;
+  c.pos = 10000 < L ? 10000 : L / 2;
+  c.note = 60;
+  c.kind = Fill::Ramp;
+  p.set_sample(0, desc_over(pcm, c));
+  if (value <= 100u) {
+    z_fx(p, value);
+  }
+  REQ(p.note_on(0, 60, 0, audio::kVelocityDefault));
+  const unsigned vi = o3os::audio::GranLenW5Test::voice_of(p, 0);
+  const auto& v = o3os::audio::GranLenW5Test::voice(p, vi);
+  const Geom g = ref_geom(L, want_len, c.pos);
+  CHECK(v.gstart == static_cast<std::uint32_t>(g.start));
+  CHECK(v.gl1 == static_cast<std::uint32_t>(g.l1));
+  CHECK(v.gl2 == static_cast<std::uint32_t>(g.l2));
+  p.cut(0);
+  z_end(p);
+}
+
+}  // namespace
+
+// F11: 0 is 44 samples, 50 is 4410 (100 ms), 100 is 44100 (1 s), held to the sample's length.
+TEST_CASE("grlen W6b: the FX z maps 0 / 50 / 100 to 44 / 4410 / 44100 samples and a short sample holds it") {
+  CHECK(audio::gran_len_fx_samples(0) == 44u);
+  CHECK(audio::gran_len_fx_samples(50) == 4410u);
+  CHECK(audio::gran_len_fx_samples(100) == 44100u);
+  CHECK(audio::gran_len_fx_samples(255) == 44100u);
+  z_start_geom(20000, 101, 441);    // no z: the descriptor's own length
+  z_start_geom(20000, 0, 44);
+  z_start_geom(20000, 50, 4410);
+  z_start_geom(20000, 100, 20000);  // 44100 held to the 20000-sample sample
+  z_start_geom(1000, 50, 1000);     // 4410 held to 1000
+  z_start_geom(1000, 0, 44);
+}
+
+// A live z reaches the sounding grain at its next wrap; its end puts the descriptor's length back.
+TEST_CASE("grlen W6b: a z set while the note sounds acts at the next grain wrap, and the ModEnd restores the descriptor's length") {
+  const std::uint32_t L = 20000;
+  const std::int16_t* pcm = fill(L, Fill::Ramp);
+  VoicePool& p = pool_a();
+  p.cut(0);
+  Cfg c;
+  c.len = L;
+  c.gr_len = 441;
+  c.pos = 10000;
+  c.note = 60;
+  c.kind = Fill::Ramp;
+  p.set_sample(0, desc_over(pcm, c));
+  REQ(p.note_on(0, 60, 0, audio::kVelocityDefault));
+  const unsigned vi = o3os::audio::GranLenW5Test::voice_of(p, 0);
+  const auto& v = o3os::audio::GranLenW5Test::voice(p, vi);
+  z_fx(p, 50);
+  CHECK(v.gl1 == static_cast<std::uint32_t>(ref_geom(L, 441, 10000).l1));  // not mid-grain
+  std::vector<std::int16_t> out;
+  render(p, out, 40 * kBlk);
+  const Geom z50 = ref_geom(L, 4410, 10000);
+  CHECK(v.gstart == static_cast<std::uint32_t>(z50.start));
+  CHECK(v.gl2 == static_cast<std::uint32_t>(z50.l2));
+  z_end(p);
+  render(p, out, 40 * kBlk);
+  const Geom back = ref_geom(L, 441, 10000);
+  CHECK(v.gstart == static_cast<std::uint32_t>(back.start));
+  CHECK(v.gl2 == static_cast<std::uint32_t>(back.l2));
+  p.cut(0);
+}
+
+TEST_CASE("grlen W6b: a non-granular instrument ignores the FX z (the render is bit-identical)") {
+  const std::uint32_t L = 4000;
+  const std::int16_t* pcm = fill(L, Fill::Wave);
+  const SampleDesc plain{pcm, L, 0, L, 65536};
+  VoicePool& a = pool_a();
+  a.cut(0);
+  a.set_sample(0, plain);
+  REQ(a.note_on(0, 60, 0, audio::kVelocityDefault));
+  std::vector<std::int16_t> oa;
+  render(a, oa, 12 * kBlk);
+  a.cut(0);
+  VoicePool& b = pool_b();
+  b.cut(0);
+  b.set_sample(0, plain);
+  z_fx(b, 20);
+  REQ(b.note_on(0, 60, 0, audio::kVelocityDefault));
+  std::vector<std::int16_t> ob;
+  render(b, ob, 12 * kBlk);
+  CHECK(oa == ob);
+  b.cut(0);
+  z_end(b);
+}
+
+TEST_CASE("grlen W5: a wavetable instrument ignores bit 0x02, and a granular one without the bit renders bit-identically") {
+  // a wavetable of four 256-frame windows (each a ramp of its own level, so a window change is audible)
+  static std::int16_t wtpcm[4 * 256];
+  for (unsigned w = 0; w < 4; ++w) {
+    for (unsigned i = 0; i < 256; ++i) {
+      wtpcm[w * 256 + i] = static_cast<std::int16_t>((w + 1) * 1000 + i);
+    }
+  }
+  SampleDesc wd{wtpcm, 256, 0, 256, 65536};
+  wd.wt_size = 256;
+  wd.wt_windows = 4;
+  wd.wt_pos = 0;
+  VoicePool& a = pool_a();
+  a.set_sample(0, wd);  // no grlen: as before W5
+  REQ(a.note_on(0, 60, 0, audio::kVelocityDefault));
+  std::vector<std::int16_t> oa;
+  render(a, oa, 8 * kBlk);
+  VoicePool& b = pool_b();
+  const audio::FilterMod full = len_adsr(1.0f);
+  b.set_sample(0, wd, &full);  // bit 0x02 on a wavetable: ignored (the slot's source is cleared for a non-granular descriptor)
+  const audio::FilterMod* sm = o3os::audio::GranLenW5Test::slot_mod(b, 0);
+  REQ(sm != nullptr);
+  CHECK(sm->kind == audio::kFmodNone);
+  REQ(b.note_on(0, 60, 0, audio::kVelocityDefault));
+  const unsigned vi = o3os::audio::GranLenW5Test::voice_of(b, 0);
+  CHECK_FALSE(o3os::audio::GranLenW5Test::len_on(b, vi));
+  std::vector<std::int16_t> ob;
+  render(b, ob, 8 * kBlk);
+  CHECK(oa == ob);
+  a.cut(0);
+  b.cut(0);
+  // a granular instrument without the bit: a grlen source of kind none changes nothing either
+  const std::uint32_t L = 20000;
+  const std::int16_t* pcm = fill(L, Fill::Wave);
+  Cfg c;
+  c.len = L;
+  c.gr_len = 300;
+  c.pos = 20000;
+  c.note = 60;
+  SampleDesc gd = desc_over(pcm, c);
+  audio::FilterMod none_mod{};
+  a.set_sample(0, gd);
+  REQ(a.note_on(0, 60, 0, audio::kVelocityDefault));
+  std::vector<std::int16_t> ga;
+  render(a, ga, 40 * kBlk);
+  b.set_sample(0, gd, &none_mod);
+  REQ(b.note_on(0, 60, 0, audio::kVelocityDefault));
+  std::vector<std::int16_t> gb;
+  render(b, gb, 40 * kBlk);
+  CHECK(ga == gb);
+  const unsigned gi = o3os::audio::GranLenW5Test::voice_of(b, 0);
+  CHECK_FALSE(o3os::audio::GranLenW5Test::len_on(b, gi));
+  a.cut(0);
+  b.cut(0);
+}
+
+// Review fold: a pool whose grlen storage was never bound (every other test binary, the qemu and bench mains) plays a granular note without touching the arrays.
+TEST_CASE("grlen W5: a granular note on a pool with no grlen_bind plays and ignores a length source") {
+  struct Unbind {  // the file's binding comes back at the end of the test
+    Unbind() { audio::grlen_bind(nullptr, nullptr); }
+    ~Unbind() { audio::grlen_bind(g_w5_slot_mods, g_w5_voice_gens); }
+  } unbound;
+  const std::uint32_t L = 20000;
+  const std::int16_t* pcm = fill(L, Fill::Wave);
+  Cfg c;
+  c.len = L;
+  c.gr_len = 300;
+  c.pos = 20000;
+  c.note = 60;
+  SampleDesc gd = desc_over(pcm, c);
+  const audio::FilterMod full = len_adsr(1.0f);
+  VoicePool& a = pool_a();
+  a.set_sample(0, gd);
+  REQ(a.note_on(0, 60, 0, audio::kVelocityDefault));
+  std::vector<std::int16_t> oa;
+  render(a, oa, 40 * kBlk);
+  VoicePool& b = pool_b();
+  b.set_sample(0, gd, &full);  // a source with no storage to keep it in: dropped
+  CHECK(o3os::audio::GranLenW5Test::slot_mod(b, 0) == nullptr);
+  REQ(b.note_on(0, 60, 0, audio::kVelocityDefault));
+  CHECK_FALSE(o3os::audio::GranLenW5Test::len_on(b, o3os::audio::GranLenW5Test::voice_of(b, 0)));
+  std::vector<std::int16_t> ob;
+  render(b, ob, 40 * kBlk);
+  CHECK(oa == ob);
+  a.cut(0);
+  b.cut(0);
+}
+
+// Review fold: the staged descriptor carries the length source (StageCell::grlen) and the render takes it with the descriptor at the next begin_block.
+TEST_CASE("grlen W5: stage_sample carries the length source and take_stage keeps it with the descriptor") {
+  static audio::StageCell cell;
+  const std::uint32_t L = 20000;
+  const std::int16_t* pcm = fill(L, Fill::Ramp);
+  Cfg c;
+  c.len = L;
+  c.gr_len = 441;
+  c.pos = 10000;
+  c.note = 60;
+  c.kind = Fill::Ramp;
+  SampleDesc d = desc_over(pcm, c);
+  VoicePool& p = pool_a();
+  p.set_sample(0, d);  // no source yet
+  REQ(o3os::audio::GranLenW5Test::slot_mod(p, 0) != nullptr);
+  CHECK(o3os::audio::GranLenW5Test::slot_mod(p, 0)->kind == audio::kFmodNone);
+  p.bind_stage(&cell);
+  const audio::FilterMod half = len_adsr(0.5f);
+  REQ(p.stage_sample(0, d, nullptr, 0, nullptr, &half));
+  CHECK(cell.grlen.kind == audio::kFmodEnv);
+  CHECK(o3os::audio::GranLenW5Test::slot_mod(p, 0)->kind == audio::kFmodNone);  // not taken before the render
+  std::vector<std::int16_t> out;
+  render(p, out, kBlk);  // begin_block takes it
+  CHECK(o3os::audio::GranLenW5Test::slot_mod(p, 0)->kind == audio::kFmodEnv);
+  REQ(p.note_on(0, 60, 0, audio::kVelocityDefault));
+  CHECK(o3os::audio::GranLenW5Test::len_on(p, o3os::audio::GranLenW5Test::voice_of(p, 0)));
+  p.cut(0);
+  REQ(p.stage_sample(0, d, nullptr, 0, nullptr, nullptr));  // a descriptor staged without a source clears it
+  render(p, out, kBlk);
+  CHECK(o3os::audio::GranLenW5Test::slot_mod(p, 0)->kind == audio::kFmodNone);
+  p.bind_stage(nullptr);
+}
+
+// Review fold: any source kind, here an LFO (bipolar), reaches the length; and clearing the source mid-note sends the grain back to gr_len at its next wrap.
+TEST_CASE("grlen W5: an LFO source drives the length, and clearing the source returns the grain to gr_len") {
+  const std::uint32_t L = 20000;
+  const std::int16_t* pcm = fill(L, Fill::Ramp);
+  Cfg c;
+  c.len = L;
+  c.gr_len = 441;
+  c.pos = 10000;
+  c.shape = 0;
+  c.note = 60;
+  c.kind = Fill::Ramp;
+  SampleDesc d = desc_over(pcm, c);
+  audio::FilterMod lm{};
+  lm.kind = audio::kFmodLfo;
+  lm.shape = 0;  // reverse saw: not at its midpoint at the start
+  lm.rate = 0;
+  lm.amount = 0.5f;
+  lm.lfo_amount = 0.5f;
+  VoicePool& p = pool_a();
+  p.set_sample(0, d, &lm);
+  REQ(o3os::audio::GranLenW5Test::slot_mod(p, 0)->kind == audio::kFmodLfo);
+  REQ(p.note_on(0, 60, 0, audio::kVelocityDefault));
+  const unsigned vi = o3os::audio::GranLenW5Test::voice_of(p, 0);
+  CHECK(o3os::audio::GranLenW5Test::len_on(p, vi));
+  std::vector<std::int16_t> out;
+  render(p, out, 40 * kBlk);
+  const float e = o3os::audio::GranLenW5Test::gen_e_out(vi);
+  CHECK(e >= 44.0f);
+  CHECK(e <= 20000.0f);
+  CHECK(std::abs(e - 441.0f) > 1.0f);  // the LFO moved it off the base
+  const auto& v = o3os::audio::GranLenW5Test::voice(p, vi);
+  const Geom want = ref_geom(L, static_cast<unsigned>(e), 10000);
+  // the grain was built at a wrap a few blocks back, so the LFO may have moved on a little since: near, not equal, and far from the base
+  const Geom base0 = ref_geom(L, 441, 10000);
+  CHECK(std::abs(static_cast<int>(v.gl2) - static_cast<int>(want.l2)) <= 200);
+  CHECK(v.gl2 != static_cast<std::uint32_t>(base0.l2));
+  // the source goes off (a live edit: the slot's descriptor re-set with no 0x02): the grain is rebuilt with gr_len at its next wrap
+  p.set_sample(0, d);
+  render(p, out, 400 * kBlk);  // far more than a grain (about 8200 frames): at least one wrap
+  CHECK_FALSE(o3os::audio::GranLenW5Test::len_on(p, vi));
+  const Geom base = ref_geom(L, 441, 10000);
+  CHECK(v.gl1 == static_cast<std::uint32_t>(base.l1));
+  CHECK(v.gl2 == static_cast<std::uint32_t>(base.l2));
+  p.cut(0);
+}
+
+// Review fold: the length ADSR's key follows the NoteOff, so its release runs (the length falls back toward the base) while the voice's own release sounds.
+TEST_CASE("grlen W5: a NoteOff releases the length ADSR") {
+  const std::uint32_t L = 20000;
+  const std::int16_t* pcm = fill(L, Fill::Ramp);
+  Cfg c;
+  c.len = L;
+  c.gr_len = 441;
+  c.pos = 10000;
+  c.note = 60;
+  c.kind = Fill::Ramp;
+  SampleDesc d = desc_over(pcm, c);
+  audio::FilterMod lm = len_adsr(0.5f);
+  lm.release = 1000;  // ms: a slow release, so each block moves it a little
+  VoicePool& p = pool_a();
+  p.set_sample(0, d, &lm);
+  REQ(p.note_on(0, 60, 0, audio::kVelocityDefault));
+  const unsigned vi = o3os::audio::GranLenW5Test::voice_of(p, 0);
+  std::vector<std::int16_t> out;
+  render(p, out, 4 * kBlk);
+  const float held = o3os::audio::GranLenW5Test::gen_e_out(vi);
+  CHECK(std::abs(held - 10419.0f) < 0.5f);  // the sustain
+  p.note_off(0);
+  render(p, out, 2 * kBlk);  // the voice's own release is 256 samples
+  CHECK(p.voices_in_use() == 1u);
+  const float after = o3os::audio::GranLenW5Test::gen_e_out(vi);
+  CHECK(after < held - 0.5f);  // released: falling
+  CHECK(after >= 441.0f);
+  p.cut(0);
+}
+
+// Review fold: a voice that had the length modulator and is reused by a note of a non-granular instrument carries nothing over.
+TEST_CASE("grlen W5: a voice reused by a non-granular note renders as a fresh one") {
+  const std::uint32_t L = 20000;
+  const std::int16_t* pcm = fill(L, Fill::Wave);
+  Cfg c;
+  c.len = L;
+  c.gr_len = 441;
+  c.pos = 10000;
+  c.note = 60;
+  SampleDesc gd = desc_over(pcm, c);
+  const audio::FilterMod full = len_adsr(1.0f);
+  SampleDesc pd{pcm, L, 0, 0, 65536};  // plain
+  VoicePool& a = pool_a();
+  a.set_sample(0, gd, &full);
+  REQ(a.note_on(0, 60, 0, audio::kVelocityDefault));
+  const unsigned vi = o3os::audio::GranLenW5Test::voice_of(a, 0);
+  REQ(o3os::audio::GranLenW5Test::len_on(a, vi));
+  std::vector<std::int16_t> out;
+  render(a, out, 10 * kBlk);
+  a.cut(0);
+  render(a, out, 8 * kBlk);  // the cut's residual fades out before the comparison
+  a.set_sample(0, pd);
+  REQ(a.note_on(0, 60, 0, audio::kVelocityDefault));
+  const unsigned vj = o3os::audio::GranLenW5Test::voice_of(a, 0);
+  CHECK_FALSE(o3os::audio::GranLenW5Test::len_on(a, vj));
+  std::vector<std::int16_t> oa;
+  render(a, oa, 20 * kBlk);
+  VoicePool& b = pool_b();
+  b.set_sample(0, pd);
+  REQ(b.note_on(0, 60, 0, audio::kVelocityDefault));
+  std::vector<std::int16_t> ob;
+  render(b, ob, 20 * kBlk);
+  CHECK(oa == ob);
+  a.cut(0);
+  b.cut(0);
+}

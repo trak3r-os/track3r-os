@@ -18,7 +18,11 @@ descriptor) and the relocations the linker kept (--emit-relocs). It writes the f
 (hot, then cold), the table of the image offsets of every 32-bit absolute address (R_ARM_ABS32). It REFUSES, naming the cause:
 a writable global, a constructor, an undefined symbol (a libc or libgcc call), an absolute symbol, a relocation of any other
 kind than an absolute word or a PC-relative one inside one section (a movw/movt pair, a call from the hot code to the cold
-code), and a descriptor the loader would refuse. The loader checks all of it again: this tool is a convenience, not a gate.
+code), and a descriptor the loader would refuse. Kind 3 (an importer, OS-FLASHDIET I1) packs with its rules: it must declare
+ABI 1.11 (the minor that published the kind), its descriptor carries the importer table (o3m_entry.importer, checked here like
+the loader checks it), and the header's word 44 is written with the importer layout tag -- 0 for every other kind. A module of ABI 1.12 (OS-INSFX-ABI2) has the
+fourth descriptor tail (render_st, fx_flags, factory presets, the KEY parameter flag), checked here with the loader's rules. From 1.13 (OS-MODRATE) an instrument may set O3M_FX_RATE in fx_flags (the rule is per kind and minor, like the loader's). The loader
+checks all of it again: this tool is a convenience, not a gate.
 
 --version X.Y.Z (ABI 1.2, OS-MODVER) is the module's own version, written to the header's module_version word as major << 16 | minor << 8 | patch (major 0..65535, minor and
 patch 0..255; no leading zeros). The default, 0.0.0, is "unversioned" (the word is 0). The OS prefers a card copy to the built-in module of the same name only when the card copy's
@@ -30,6 +34,7 @@ declare ABI 1.3, 1.4 for audio_tap or 1.7 for export_files (module.json: "capabi
 and any name it does not know. The OS lends a table only for a capability the file asks for.
 """
 import argparse
+import math
 import re
 import struct
 import subprocess
@@ -42,20 +47,34 @@ from pathlib import Path
 MAGIC = 0x444D334F
 HEADER_SIZE = 64
 TARGET_ARMV7EM = 1
-ABI_MAJOR, ABI_MINOR = 1, 10
+ABI_MAJOR, ABI_MINOR = 1, 13
 VERSION_ABI_MINOR = 2             # the ABI minor that put the module version in the header (o3m_file_header::module_version, byte 36)
 CAPS_ABI_MINOR = 3                # the ABI minor that put the capability mask in the header (reserved2[0], byte 40; apps only)
+IMPORTER_ABI_MINOR = 11           # OS-FLASHDIET I1: the ABI minor that published kind 3 and made word 44 the importer layout tag
+STEREO_ABI_MINOR = 12             # OS-INSFX-ABI2 A1: the ABI minor that published render_st, fx_flags, the factory presets and the KEY flag (the descriptor is 100 bytes from minor 12)
 CAPS = {"midi_in": 1, "read_project": 2, "audio_tap": 4, "edit_project": 8, "export_files": 16, "play_notes": 64}  # O3M_CAP_* of ABI 1.3, audio_tap of 1.4, export_files of 1.7 and play_notes of 1.10 (the bits of later slices are assigned in o3module.h and refused until their minor)
 CAPS_ABI_1_4 = 4                  # the capability bits that need ABI 1.4 in the file
 CAPS_ABI_1_7 = 16                 # the capability bits that need ABI 1.7 in the file (export_files)
 CAPS_ABI_1_10 = 64                # the capability bits that need ABI 1.10 in the file (play_notes)
 CAPS_FIELD = 15                   # index of the capability word (reserved2[0]) in the unpacked header
+TAG_FIELD = 16                    # index of word 44 (reserved2[1]) in the unpacked header: the importer layout tag, kind 3 only
 KIND_INSTRUMENT, KIND_EFFECT, KIND_IMPORTER, KIND_APP = 1, 2, 3, 4
 HEADER = struct.Struct("<IHHBBBBIIIIIHHI2II3I")  # ... param_count, view_count, module_version (byte 36), reserved2 x2, image_crc (48), reserved3 x3
 assert HEADER.size == HEADER_SIZE
 VERSION_FIELD, CRC_FIELD = 14, 17                 # indexes of module_version and image_crc in the unpacked header
 DESC = struct.Struct("<16I")      # o3m_module on a 32-bit target (the last two words: the views' table and the view count, ABI 1.1); 64 bytes up to ABI 1.7
 DESC_EXT = struct.Struct("<4I")   # ABI 1.8: pitch, pages, page_count, labels, appended (the descriptor is 80 bytes from minor 8: o3module.h O3M_MODULE_SIZE)
+DESC_IMP = struct.Struct("<I")    # ABI 1.11: importer, the importer kind's table, appended (the descriptor is 84 bytes from minor 11)
+DESC_FX = struct.Struct("<4I")    # ABI 1.12: render_st, fx_flags, presets, preset_count, appended (the descriptor is 100 bytes from minor 12)
+PRESET = struct.Struct("<III")    # o3m_preset on a 32-bit target: name, values, count
+PRESETS_MAX, PRESET_NAME_MAX = 32, 16
+FX_WIDENS = 1                     # O3M_FX_WIDENS, an effect's fx_flags bit (ABI 1.12)
+FX_RATE = 2                       # O3M_FX_RATE, an instrument's fx_flags bit (ABI 1.13, OS-MODRATE): render() is correct at half and quarter sample rate
+RATE_ABI_MINOR = 13               # the ABI minor that defined FX_RATE
+PARAM_KEY = 32                    # O3M_PARAM_KEY (ABI 1.12): an effect's INT parameter 0..16, the sidechain key; at most two a module
+IMPORTER = struct.Struct("<8I")   # o3m_importer on a 32-bit target: size, formats, format_count, begin, step, read_pcm, report, close
+FORMAT = struct.Struct("<I")      # o3m_format_desc: the extension string
+IMPORTER_FORMATS_MAX, EXT_MAX = 8, 8
 PAGE = struct.Struct("<II")       # o3m_page: name, first_param
 LABELS = struct.Struct("<II")     # o3m_labels: names, count
 PAGES_MAX, PAGE_PARAMS_MAX, PAGE_NAME_MAX, LABELS_MIN, LABELS_MAX, LABEL_NAME_MAX = 4, 8, 8, 2, 16, 12
@@ -67,6 +86,18 @@ KEYS_ABI_MINOR = 9
 VIEWS_MAX = 8
 NAME_MAX, PARAM_NAME_MAX, PARAMS_MAX = 24, 16, 32
 MAX_IMAGE, MAX_STATE = 256 * 1024, 256 * 1024
+
+# ---- OS-FLASHDIET I1/I2: the importer layout tag (model/include/o3os/model/import_layout.h) -----------------------------------
+# The tag is the hash model::kImportLayoutTag computes over the import-facing model layout (the arena, Project and the structs the importer
+# writes). It lives in model/import_layout_tag.txt, checked in next to the header: this file (and o3m_gen.py) read it as the default, so a
+# layout change is one edit there. ctest o3m_layout_tag_pin (host builds) prints model::kImportLayoutTag with a host-compiled one-liner
+# (tools/o3m_layout_tag.cpp) and holds the file to it, and tests/module_importer_test.cpp holds the built tracker.tmod's word 44 to the C++
+# constant. The fallback pin is for --self-test without the repository beside the script.
+_TAG_FILE = Path(__file__).resolve().parent.parent / "model" / "import_layout_tag.txt"
+try:
+    IMPORT_LAYOUT_TAG = int(_TAG_FILE.read_text().strip(), 0)
+except OSError:
+    IMPORT_LAYOUT_TAG = 0x21022380  # pinned fallback (see above)
 
 # ---- ELF ------------------------------------------------------------------------------------------------------------------
 SHT_PROGBITS, SHT_SYMTAB, SHT_STRTAB, SHT_RELA, SHT_NOBITS, SHT_REL = 1, 2, 3, 4, 8, 9
@@ -167,6 +198,34 @@ def read_cstr(image, addr, limit, what):
     return image[addr:end].decode("latin-1")
 
 
+def check_importer_table(image, base, hot_size, image_size, imp_p):
+    """OS-FLASHDIET I1/I2: o3m_entry.importer (a link address), checked like the loader checks it: the table inside the cold part, its size exact,
+    the format list 1..IMPORTER_FORMATS_MAX entries inside the image with printable extensions, and begin, step, read_pcm, report and close Thumb
+    functions inside the image (a missing function refuses the file). Every address is checked with a 0 <= lower bound: a pointer below the image's
+    base would otherwise wrap negative and pass the `< image_size` test (review note 3)."""
+    i_off = imp_p - base
+    if not hot_size <= i_off or i_off % 4 or i_off + IMPORTER.size > image_size:  # (a negative i_off fails hot_size <= i_off too)
+        raise PackError("o3m_entry.importer is misplaced")
+    size, formats_p, format_count, begin_p, step_p, read_pcm_p, report_p, close_p = IMPORTER.unpack_from(image, i_off)
+    if size != IMPORTER.size:
+        raise PackError("the importer's table size is %d, sizeof(o3m_importer) is %d" % (size, IMPORTER.size))
+    if not (1 <= format_count <= IMPORTER_FORMATS_MAX) or formats_p == 0:
+        raise PackError("o3m_importer.format_count %d: 1..%d formats, and a table when there are any" % (format_count, IMPORTER_FORMATS_MAX))
+    f_off = formats_p - base
+    if not hot_size <= f_off or f_off % 4 or f_off + FORMAT.size * format_count > image_size:
+        raise PackError("o3m_importer.formats is misplaced")
+    for i in range(format_count):
+        ext_p = struct.unpack_from("<I", image, f_off + FORMAT.size * i)[0]
+        if not 0 <= ext_p - base < image_size:
+            raise PackError("the extension of format %d points outside the image" % i)
+        ext = read_cstr(image, ext_p - base, EXT_MAX, "the extension of format %d" % i)
+        if not ext or any(ord(c) < 32 or ord(c) > 126 for c in ext):
+            raise PackError("the extension of format %d is empty or not printable ASCII" % i)
+    for label, ptr in (("begin", begin_p), ("step", step_p), ("read_pcm", read_pcm_p), ("report", report_p), ("close", close_p)):
+        if ptr == 0 or not (ptr & 1) or not 0 <= (ptr & ~1) - base < image_size:
+            raise PackError("o3m_importer.%s is missing or not a Thumb function inside the image" % label)
+
+
 def link_to_physical_check(value, hot_size, image_size):
     return value < hot_size or value <= image_size
 
@@ -199,8 +258,9 @@ def format_version(version):
     return "unversioned" if version == 0 else "%d.%d.%d" % (version >> 16, (version >> 8) & 0xFF, version & 0xFF)
 
 
-def pack_elf(data, version=0, caps=0):
-    """Returns (file bytes, info dict). `version` is the module version word (parse_version), 0 = unversioned; `caps` the capability mask (parse_caps). Raises PackError with the cause."""
+def pack_elf(data, version=0, caps=0, layout_tag=IMPORT_LAYOUT_TAG):
+    """Returns (file bytes, info dict). `version` is the module version word (parse_version), 0 = unversioned; `caps` the capability mask (parse_caps);
+    `layout_tag` is written to header word 44 for kind 3 only (OS-FLASHDIET: the build passes --layout-tag-file, printed from model::kImportLayoutTag). Raises PackError with the cause."""
     elf = Elf(data)
     hot, cold = elf.section(".o3m_hot"), elf.section(".o3m_cold")
     if cold is None or cold.type != SHT_PROGBITS or cold.size == 0:
@@ -302,13 +362,15 @@ def pack_elf(data, version=0, caps=0):
     # pointer outside the image has been refused above.
     if abi_major != ABI_MAJOR or abi_minor > ABI_MINOR:
         raise PackError("module ABI %d.%d, this packer's SDK is %d.%d" % (abi_major, abi_minor, ABI_MAJOR, ABI_MINOR))
-    desc_size = DESC.size + (DESC_EXT.size if abi_minor >= 8 else 0)  # the descriptor's size is per minor (o3module.h O3M_MODULE_SIZE): 64 bytes up to 1.7, 80 from 1.8
+    desc_size = DESC.size + (DESC_EXT.size if abi_minor >= 8 else 0) + (DESC_IMP.size if abi_minor >= IMPORTER_ABI_MINOR else 0) + (DESC_FX.size if abi_minor >= STEREO_ABI_MINOR else 0)  # per minor (o3module.h O3M_MODULE_SIZE): 64 up to 1.7, 80 from 1.8, 84 from 1.11, 100 from 1.12
     if struct_size != desc_size:
         raise PackError("o3m_entry.struct_size is %d, the SDK's o3m_module of ABI 1.%d is %d bytes (a module built against another header, or a hand-written sizeof instead of O3M_MODULE_SIZE?)" % (
             struct_size, abi_minor, desc_size))
     if desc_off + desc_size > image_size:
         raise PackError("o3m_entry is misplaced")
     pitch_p, pages_p, page_count, labels_p = DESC_EXT.unpack_from(image, desc_off + DESC.size) if abi_minor >= 8 else (0, 0, 0, 0)
+    imp_p = DESC_IMP.unpack_from(image, desc_off + DESC.size + DESC_EXT.size)[0] if abi_minor >= IMPORTER_ABI_MINOR else 0
+    fx_render_p, fx_flags, presets_p, preset_count = DESC_FX.unpack_from(image, desc_off + DESC.size + DESC_EXT.size + DESC_IMP.size) if abi_minor >= STEREO_ABI_MINOR else (0, 0, 0, 0)
     if version and abi_minor < VERSION_ABI_MINOR:
         raise PackError("a module version needs ABI 1.%d and the module declares ABI %d.%d (module.json: \"abi\": \"1.%d\", then regenerate; by hand: build against SDK 1.%d)" % (
             VERSION_ABI_MINOR, abi_major, abi_minor, VERSION_ABI_MINOR, VERSION_ABI_MINOR))
@@ -340,10 +402,21 @@ def pack_elf(data, version=0, caps=0):
         for label, ptr, optional in (("view_draw", ui_draw, False), ("enter", ui_enter, True), ("input", ui_input, True), ("exit", ui_exit, True), ("keys", ui_keys, True)):
             if ui_size != ui_expect or (ptr == 0 and not optional) or (ptr != 0 and (not (ptr & 1) or not ((ptr & ~1) - base) < image_size)):
                 raise PackError("o3m_entry.ui.%s is missing or not a Thumb function inside the image (or ui.struct_size is wrong: it is O3M_UI_SIZE(minor), %d bytes for ABI 1.%d)" % (label, ui_expect, abi_minor))
-    if kind not in (KIND_INSTRUMENT, KIND_EFFECT) and not (kind == KIND_APP and abi_minor >= 1):
-        raise PackError("module kind %d is not an instrument, an effect or (ABI 1.1) an app" % kind)
+    if kind not in (KIND_INSTRUMENT, KIND_EFFECT, KIND_IMPORTER) and not (kind == KIND_APP and abi_minor >= 1):
+        raise PackError("module kind %d is not an instrument, an effect, an importer or (ABI 1.1) an app" % kind)
     if kind == KIND_APP and view_count == 0:
         raise PackError("an app has no view: o3m_entry.view_count is 0 (an app is its view)")
+    if kind == KIND_IMPORTER:  # OS-FLASHDIET I1: the importer kind is published at ABI 1.11, with its table in the descriptor
+        if abi_minor < IMPORTER_ABI_MINOR:
+            raise PackError("an importer (kind 3) needs ABI 1.%d and the module declares ABI %d.%d (module.json: \"abi\": \"1.11\", then regenerate)" % (
+                IMPORTER_ABI_MINOR, abi_major, abi_minor))
+        if param_count or view_count:
+            raise PackError("an importer (kind 3, OS-FLASHDIET I1) has no parameters and no views: it serves files, it is not heard or seen")
+        if imp_p == 0:
+            raise PackError("an importer (kind 3) needs o3m_entry.importer: the importer's table (o3m_importer)")
+        check_importer_table(image, base, hot_size, image_size, imp_p)
+    elif imp_p != 0:
+        raise PackError("o3m_entry.importer is set: the importer's table is kind 3's (NULL in every other kind)")
     if state_bytes == 0 or state_bytes > MAX_STATE:
         raise PackError("state_bytes %d is out of range (1..%d)" % (state_bytes, MAX_STATE))
     if param_count > PARAMS_MAX:
@@ -353,8 +426,8 @@ def pack_elf(data, version=0, caps=0):
         raise PackError("the module name is empty or not printable ASCII")
     for i, ptr in enumerate((init_p, render_p, set_param_p, note_on_p, note_off_p, shutdown_p)):
         label = ("init", "render", "set_param", "note_on", "note_off", "shutdown")[i]
-        if kind == KIND_APP and 1 <= i <= 4 and ptr == 0:
-            continue  # an app makes no sound: render, set_param, note_on and note_off may be NULL
+        if kind in (KIND_APP, KIND_IMPORTER) and 1 <= i <= 4 and ptr == 0:
+            continue  # an app or an importer makes no sound: render, set_param, note_on and note_off may be NULL
         if ptr == 0 or not (ptr & 1) or not ((ptr & ~1) - base) < image_size:
             raise PackError("o3m_entry.%s is missing or not a Thumb function inside the image" % label)
     names = []
@@ -412,15 +485,53 @@ def pack_elf(data, version=0, caps=0):
                 if not text or any(ord(c) < 32 or ord(c) > 126 for c in text):
                     raise PackError("label %d of parameter '%s' is empty or not printable" % (v, info["name"]))
 
+    # ABI 1.12 (OS-INSFX-ABI2 A1): the fourth tail, like the loader checks it (module/src/image.cpp fx_ok). Below 1.12 the four members are not read and a KEY bit is not honoured.
+    if abi_minor >= STEREO_ABI_MINOR:
+        if fx_render_p and (kind != KIND_EFFECT or not (fx_render_p & 1) or not 0 <= (fx_render_p & ~1) - base < image_size):
+            raise PackError("o3m_entry.render_st is set on a module that is not an effect, or is not a Thumb function inside the image (the stereo render is an effect's)")
+        # Like module/include/o3os/module/image.h fx_flags_allowed: WIDENS for an effect (and it needs render_st), RATE for an instrument of 1.13 or later.
+        allowed = FX_WIDENS if kind == KIND_EFFECT else (FX_RATE if kind == KIND_INSTRUMENT and abi_minor >= RATE_ABI_MINOR else 0)
+        if fx_flags & ~allowed or (fx_flags & FX_WIDENS and not fx_render_p):
+            raise PackError("o3m_entry.fx_flags %#x: an effect may set O3M_FX_WIDENS (1, with render_st), an instrument of ABI 1.13 O3M_FX_RATE (2); nothing else is defined" % fx_flags)
+        keys = 0
+        for i, info in enumerate(param_info):
+            if info["flags"] & PARAM_KEY:
+                keys += 1
+                if kind != KIND_EFFECT or not (info["flags"] & PARAM_INT) or info["min"] != 0 or info["max"] != 16 or keys > 2:
+                    raise PackError("parameter '%s' is O3M_PARAM_KEY: an effect's INT parameter with min 0 and max 16, at most two a module" % info["name"])
+        if (presets_p == 0) != (preset_count == 0) or preset_count > PRESETS_MAX:
+            raise PackError("o3m_entry.presets / preset_count: 0..%d presets, a table exactly when there are presets" % PRESETS_MAX)
+        if preset_count:
+            if kind not in (KIND_INSTRUMENT, KIND_EFFECT) or param_count == 0:
+                raise PackError("factory presets are an instrument's or an effect's with parameters (an app and an importer carry none)")
+            t_off = presets_p - base
+            if t_off < hot_size or t_off % 4 or t_off + PRESET.size * preset_count > image_size:
+                raise PackError("o3m_entry.presets is misplaced")
+            for k in range(preset_count):
+                pname_p, values_p, count = PRESET.unpack_from(image, t_off + PRESET.size * k)
+                v_off = values_p - base
+                if not 1 <= count <= param_count or v_off < hot_size or v_off % 4 or v_off + 4 * count > image_size:
+                    raise PackError("preset %d: 1..%d values (one a parameter in order), and a value table inside the image" % (k, param_count))
+                if not 0 <= pname_p - base < image_size:
+                    raise PackError("the name of preset %d points outside the image" % k)
+                pname = read_cstr(image, pname_p - base, PRESET_NAME_MAX, "the name of preset %d" % k)
+                if not pname or any(ord(c) < 32 or ord(c) > 126 for c in pname):
+                    raise PackError("preset %d has an empty or non-printable name" % k)
+                for i in range(count):
+                    value = struct.unpack_from("<f", image, v_off + 4 * i)[0]
+                    if not math.isfinite(value) or not (param_info[i]["min"] <= value <= param_info[i]["max"]):
+                        raise PackError("preset '%s': value %d (%g) is outside [%g, %g] of parameter '%s'" % (pname, i, value, param_info[i]["min"], param_info[i]["max"], param_info[i]["name"]))
+
     body = image + b"".join(struct.pack("<I", o) for o in reloc_offsets)
     fields = [MAGIC, HEADER_SIZE, TARGET_ARMV7EM, kind, abi_major, abi_minor, 0, hot_size, image_size, desc_off, state_bytes,
-              len(reloc_offsets), param_count, view_count, version, caps, 0, 0, 0, 0, 0]
+              len(reloc_offsets), param_count, view_count, version, caps, layout_tag if kind == KIND_IMPORTER else 0, 0, 0, 0, 0]
+    # (word 44, fields[TAG_FIELD]: the importer layout tag for kind 3 only (OS-FLASHDIET I1/I2); 0 for every other kind, as the loader requires)
     crc = zlib.crc32(body, zlib.crc32(HEADER.pack(*fields))) & 0xFFFFFFFF  # the header with its CRC field zero, then the body
     fields[CRC_FIELD] = crc
     header = HEADER.pack(*fields)
     info = {"name": name, "kind": kind, "hot": hot_size, "cold": cold.size, "relocs": len(reloc_offsets), "state": state_bytes,
             "params": names, "views": view_count, "size": len(header) + len(body), "abi": (abi_major, abi_minor), "version": version, "param_info": param_info,
-            "state_bytes": state_bytes, "caps": caps}
+            "state_bytes": state_bytes, "caps": caps, "layout_tag": layout_tag if kind == KIND_IMPORTER else 0}
     return header + body, info
 
 
@@ -470,16 +581,25 @@ def build(args):
     return elf_path
 
 
+def layout_tag_arg(args):
+    """OS-FLASHDIET: the layout tag of word 44: --layout-tag-file (the build's printed model::kImportLayoutTag) or --layout-tag, else the pinned default."""
+    if getattr(args, "layout_tag_file", None):
+        return int(Path(args.layout_tag_file).read_text().strip(), 0)
+    if getattr(args, "layout_tag", None) is not None:
+        return args.layout_tag
+    return IMPORT_LAYOUT_TAG
+
+
 def cmd_build(args):
     elf_path = build(args)
     if args.hot_at is not None or args.cold_at is not None:
         Path(args.out).write_bytes(raw_image(elf_path.read_bytes()))
         return 0
-    return write_pack(elf_path.read_bytes(), args.out, args.version, args.caps)
+    return write_pack(elf_path.read_bytes(), args.out, args.version, args.caps, layout_tag_arg(args))
 
 
-def write_pack(elf_bytes, out, version=0, caps=0):
-    blob, info = pack_elf(elf_bytes, version, caps)
+def write_pack(elf_bytes, out, version=0, caps=0, layout_tag=IMPORT_LAYOUT_TAG):
+    blob, info = pack_elf(elf_bytes, version, caps, layout_tag)
     Path(out).write_bytes(blob)
     print("o3m_pack: %s: %s, %d B file: hot %d B, cold %d B, %d relocations, state %d B, %d parameters, %s%s" % (
         out, info["name"], info["size"], info["hot"], info["cold"], info["relocs"], info["state"], len(info["params"]), format_version(version),
@@ -648,6 +768,78 @@ def build_synthetic(mutate=None, rels=None, extra_sections=(), symbols_extra=(),
     return make_elf(sections, symbols, cold_rels() if rels is None else rels, **kw)
 
 
+def good_module_importer():
+    """A synthetic importer (kind 3, ABI 1.11, OS-FLASHDIET I1/I2): hot 16 bytes; cold (image offsets from 16): the 84-byte descriptor at 0,
+    the importer's table at 84 (32 bytes, eight words), three format entries at 116, strings from 128 (Imp, mod, s3m, med). No parameters, no views,
+    no sound entries (render, set_param, note_on, note_off are 0, as an importer's may be)."""
+    hot = bytes(range(HOT_LEN))
+    cold = bytearray(160)
+    a = HOT_LEN
+    cold[0:64] = DESC.pack(1, IMPORTER_ABI_MINOR, KIND_IMPORTER, 84, a + 128, 64, 0, 0, 0x01, 0, 0, 0, 0, 0x09, 0, 0)
+    cold[64:80] = DESC_EXT.pack(0, 0, 0, 0)
+    cold[80:84] = DESC_IMP.pack(a + 84)
+    cold[84:116] = IMPORTER.pack(IMPORTER.size, a + 116, 3, 0x01, 0x03, 0x05, 0x07, 0x09)
+    cold[116:128] = struct.pack("<3I", a + 132, a + 136, a + 140)
+    for at, text in ((128, b"Imp"), (132, b"mod"), (136, b"s3m"), (140, b"med")):
+        cold[at:at + len(text)] = text
+    return hot, bytes(cold)
+
+
+def cold_rels_importer():
+    a = HOT_LEN
+    # the descriptor's pointers (name, init, shutdown, importer), the table's formats pointer, the three extensions
+    return [(".o3m_cold", a + 16, R_ARM_ABS32, 2), (".o3m_cold", a + 32, R_ARM_ABS32, 3), (".o3m_cold", a + 44, R_ARM_ABS32, 3),
+            (".o3m_cold", a + 80, R_ARM_ABS32, 2), (".o3m_cold", a + 88, R_ARM_ABS32, 2),
+            (".o3m_cold", a + 116, R_ARM_ABS32, 2), (".o3m_cold", a + 120, R_ARM_ABS32, 2), (".o3m_cold", a + 124, R_ARM_ABS32, 2)]
+
+
+def build_synthetic_importer(mutate=None, rels=None, **kw):
+    hot, cold = good_module_importer()
+    cold = bytearray(cold)
+    if mutate:
+        mutate(cold)
+    sections = [(".o3m_hot", SHT_PROGBITS, 6, 0, hot), (".o3m_cold", SHT_PROGBITS, 6, HOT_LEN, bytes(cold))]
+    symbols = [("", 0, 0, 3, 1), ("o3m_entry", HOT_LEN, 84, (1 << 4) | 1, 2), ("fn", 1, 2, (1 << 4) | 2, 1)]
+    return make_elf(sections, symbols, cold_rels_importer() if rels is None else rels, **kw)
+
+
+def good_module_fx():
+    """A synthetic effect of ABI 1.12 (OS-INSFX-ABI2 A1): the 100-byte descriptor with the fourth tail (render_st in the hot part, WIDENS, one preset), two parameters (0..1 and a KEY, INT 0..16, 17 values
+    named by no label). Cold offsets: descriptor 0, parameters 100 and 120, the preset 140, its two values 152, strings from 172 (Fx, P0, Key, Pre)."""
+    hot = bytes(range(HOT_LEN))
+    cold = bytearray(192)
+    a = HOT_LEN
+    cold[0:64] = DESC.pack(1, STEREO_ABI_MINOR, KIND_EFFECT, 100, a + 172, 64, 2, a + 100, 0x01, 0x03, 0x05, 0x07, 0x09, 0x0B, 0, 0)
+    cold[64:80] = DESC_EXT.pack(0, 0, 0, 0)
+    cold[80:84] = DESC_IMP.pack(0)
+    cold[84:100] = DESC_FX.pack(0x0D, FX_WIDENS, a + 140, 1)
+    cold[100:120] = PARAM.pack(a + 176, 0.0, 1.0, 0.5, 0)
+    cold[120:140] = PARAM.pack(a + 180, 0.0, 16.0, 0.0, PARAM_INT | PARAM_KEY)
+    cold[140:152] = PRESET.pack(a + 184, a + 152, 2)
+    cold[152:160] = struct.pack("<ff", 0.25, 3.0)
+    for at, text in ((172, b"Fx"), (176, b"P0"), (180, b"Key"), (184, b"Pre")):
+        cold[at:at + len(text)] = text
+    return hot, bytes(cold)
+
+
+def cold_rels_fx():
+    a = HOT_LEN
+    rels = [(".o3m_cold", a + off, R_ARM_ABS32, 2) for off in (16, 28, 92, 100, 120, 140, 144)]  # the name, the parameters, the presets, the parameters' names, the preset's name and values
+    rels += [(".o3m_cold", a + 32 + 4 * i, R_ARM_ABS32, 3) for i in range(6)]                    # init .. shutdown
+    rels += [(".o3m_cold", a + 84, R_ARM_ABS32, 3)]                                               # render_st
+    return rels
+
+
+def build_synthetic_fx(mutate=None, rels=None, **kw):
+    hot, cold = good_module_fx()
+    cold = bytearray(cold)
+    if mutate:
+        mutate(cold)
+    sections = [(".o3m_hot", SHT_PROGBITS, 6, 0, hot), (".o3m_cold", SHT_PROGBITS, 6, HOT_LEN, bytes(cold))]
+    symbols = [("", 0, 0, 3, 1), ("o3m_entry", HOT_LEN, 100, (1 << 4) | 1, 2), ("fn", 1, 2, (1 << 4) | 2, 1)]
+    return make_elf(sections, symbols, cold_rels_fx() if rels is None else rels, **kw)
+
+
 def self_test():
     failures = []
 
@@ -746,7 +938,7 @@ def self_test():
     expect_refused("label too long", build_synthetic_18(mutate=lambda c: c.__setitem__(slice(136, 144), b"Abcdefgh")), "label")
     expect_refused("labels table past the image", build_synthetic_18(mutate=poke(76, 5000)), "outside the image")
     expect_refused("abi major", build_synthetic(mutate=poke(0, 2)), "module ABI")
-    expect_refused("abi minor", build_synthetic(mutate=poke(4, 11)), "module ABI")
+    expect_refused("abi minor", build_synthetic(mutate=poke(4, ABI_MINOR + 1)), "module ABI")
     expect_ok("abi 1.1", build_synthetic(mutate=poke(4, 1)))
     expect_ok("abi 1.2", build_synthetic(mutate=poke(4, 2)))
     expect_ok("abi 1.3", build_synthetic(mutate=poke(4, 3)))
@@ -804,7 +996,90 @@ def self_test():
             pass
     expect_refused("caps on an instrument", build_synthetic(mutate=poke(4, 3)), "an app's", 0, 1)
     expect_refused("caps below ABI 1.3", build_synthetic(mutate=poke(4, 2)), "an app's", 0, 1)
-    expect_refused("kind", build_synthetic(mutate=poke(8, 3)), "kind")
+    expect_refused("kind", build_synthetic(mutate=poke(8, 5)), "kind")
+    expect_refused("kind 3 below ABI 1.11 (the importer kind is published at 1.11)", build_synthetic_importer(mutate=lambda c: (poke(4, 10)(c), poke(12, 80)(c))), "needs ABI 1.11")
+    imp = expect_ok("kind 3, an importer (OS-FLASHDIET I1: ABI 1.11, the importer's table, word 44 the layout tag)", build_synthetic_importer())
+    if imp:
+        h = HEADER.unpack_from(imp[0])
+        if h[TAG_FIELD] != IMPORT_LAYOUT_TAG or imp[1]["layout_tag"] != IMPORT_LAYOUT_TAG:
+            failures.append("importer: word 44 is %#x, the tag is %#x" % (h[TAG_FIELD], IMPORT_LAYOUT_TAG))
+        if h[3] != KIND_IMPORTER or h[5] != IMPORTER_ABI_MINOR:
+            failures.append("importer: header kind/abi %r" % (h[3:6],))
+        if not _TAG_FILE.exists() and IMPORT_LAYOUT_TAG != 0x21022380:
+            failures.append("the fallback layout tag pin is %#x, not 0x21022380" % IMPORT_LAYOUT_TAG)
+    imp2 = expect_ok("kind 3 with --layout-tag", build_synthetic_importer())
+    if imp2:
+        blob2, info2 = pack_elf(build_synthetic_importer(), 0, 0, 0x12345678)
+        if HEADER.unpack_from(blob2)[TAG_FIELD] != 0x12345678 or info2["layout_tag"] != 0x12345678:
+            failures.append("--layout-tag: word 44 is %#x, not 0x12345678" % HEADER.unpack_from(blob2)[TAG_FIELD])
+    # word 44 is 0 for every other kind, at every minor
+    for label, elf in (("the good module", build_synthetic()), ("a 1.8 module", build_synthetic_18()), ("an app", build_synthetic_app())):
+        got_kind = expect_ok(label, elf)
+        if got_kind and HEADER.unpack_from(got_kind[0])[TAG_FIELD] != 0:
+            failures.append("%s: word 44 is %#x, not 0" % (label, HEADER.unpack_from(got_kind[0])[TAG_FIELD]))
+    expect_refused("an instrument with an importer table", build_synthetic_importer(mutate=poke(8, KIND_INSTRUMENT)), "kind 3's")
+    for label, mut, fragment in (
+        ("an importer with no table", poke(80, 0), "importer"),
+        ("an importer with a wrong table size", lambda c: struct.pack_into("<I", c, 84, 20), "table size"),
+        ("an importer with no formats", lambda c: struct.pack_into("<I", c, 88, 0), "format_count"),
+        ("an importer with too many formats", lambda c: struct.pack_into("<I", c, 92, 9), "format_count"),
+        ("an importer with the formats in the hot part", lambda c: struct.pack_into("<I", c, 88, 4), "misplaced"),
+        ("an importer with a missing function (begin)", lambda c: struct.pack_into("<I", c, 84 + 12, 0), "begin"),
+        ("an importer with a missing function (report)", lambda c: struct.pack_into("<I", c, 84 + 24, 0), "report"),
+        ("an importer with a missing function (close)", lambda c: struct.pack_into("<I", c, 84 + 28, 0), "close"),
+        ("an importer with a non-Thumb function", lambda c: struct.pack_into("<I", c, 84 + 16, 4), "Thumb"),
+        ("an importer with a function below the image's base (review note 3: the 0 <= bound)", lambda c: struct.pack_into("<I", c, 84 + 12, 0xFFFFFFFC | 1), "begin"),
+        ("an importer with an extension below the image's base", lambda c: struct.pack_into("<I", c, 116, 0xFFFFFFFC), "outside the image"),
+        ("an importer with an unterminated extension", lambda c: c.__setitem__(slice(132, 144), b"m" * 12), "NUL-terminated"),
+    ):
+        expect_refused(label, build_synthetic_importer(mutate=mut), fragment)
+    # ABI 1.12 (OS-INSFX-ABI2 A1): the 100-byte descriptor and its fourth tail
+    fx = expect_ok("abi 1.12 effect (render_st, WIDENS, a preset, a KEY parameter)", build_synthetic_fx())
+    if fx:
+        h = HEADER.unpack_from(fx[0])
+        if h[5] != STEREO_ABI_MINOR or h[3] != KIND_EFFECT or fx[1]["abi"] != (1, 12) or fx[1]["params"] != ["P0", "Key"]:
+            failures.append("abi 1.12: header %r info %r" % (h, fx[1]))
+    expect_ok("1.12 with no tail at all (a mono effect with no presets)", build_synthetic_fx(mutate=lambda c: c.__setitem__(slice(84, 100), DESC_FX.pack(0, 0, 0, 0)), rels=[r for r in cold_rels_fx() if r[1] not in (HOT_LEN + 84, HOT_LEN + 92)]))
+    expect_ok("1.12 instrument with presets and no render_st", build_synthetic_fx(mutate=lambda c: (poke(8, KIND_INSTRUMENT)(c), poke(84, 0)(c), poke(88, 0)(c), poke(120 + 16, 2)(c))))
+    inst = lambda c: (poke(8, KIND_INSTRUMENT)(c), poke(84, 0)(c), poke(120 + 16, 2)(c))
+    expect_ok("1.13 instrument with O3M_FX_RATE (OS-MODRATE)", build_synthetic_fx(mutate=lambda c: (inst(c), poke(4, 13)(c), poke(88, FX_RATE)(c))))
+    expect_refused("O3M_FX_RATE on a 1.12 instrument", build_synthetic_fx(mutate=lambda c: (inst(c), poke(88, FX_RATE)(c))), "fx_flags")
+    expect_refused("O3M_FX_RATE on an effect", build_synthetic_fx(mutate=lambda c: poke(88, FX_RATE | FX_WIDENS)(c)), "fx_flags")
+    expect_refused("O3M_FX_WIDENS on a 1.13 instrument", build_synthetic_fx(mutate=lambda c: (inst(c), poke(4, 13)(c), poke(88, FX_WIDENS)(c))), "fx_flags")
+    expect_ok("1.11 module: the 1.12 members are not read, a KEY bit is not honoured",
+              build_synthetic_fx(mutate=lambda c: (poke(4, 11)(c), poke(12, 84)(c), poke(8, KIND_INSTRUMENT)(c))))
+    expect_refused("1.12 with the 1.11 size", build_synthetic_fx(mutate=poke(12, 84)), "struct_size")
+    expect_refused("1.11 with the 1.12 size", build_synthetic_fx(mutate=poke(4, 11)), "struct_size")
+    expect_refused("module ABI above the packer's", build_synthetic_fx(mutate=poke(4, ABI_MINOR + 1)), "module ABI")
+    for label, mut, fragment in (
+        ("render_st not a Thumb function", poke(84, 0x0C), "render_st"),
+        ("render_st on an instrument", poke(8, KIND_INSTRUMENT), "render_st"),
+        ("an unknown fx_flags bit", poke(88, 3), "fx_flags"),
+        ("WIDENS without render_st", lambda c: (poke(84, 0)(c), poke(88, FX_WIDENS)(c)), "fx_flags"),
+        ("a KEY with a range of 0..8", lambda c: struct.pack_into("<f", c, 120 + 8, 8.0), "O3M_PARAM_KEY"),
+        ("a KEY with a range of 1..16", lambda c: (struct.pack_into("<f", c, 120 + 4, 1.0), struct.pack_into("<f", c, 120 + 12, 1.0)), "O3M_PARAM_KEY"),
+        ("a KEY that is not INT", poke(120 + 16, PARAM_KEY), "O3M_PARAM_KEY"),
+        ("a KEY on an instrument", lambda c: (poke(8, KIND_INSTRUMENT)(c), poke(84, 0)(c), poke(88, 0)(c)), "O3M_PARAM_KEY"),
+        ("two KEYs are legal", lambda c: (struct.pack_into("<f", c, 100 + 8, 16.0), poke(100 + 16, PARAM_INT | PARAM_KEY)(c)), None),
+        ("presets with no count", poke(96, 0), "presets / preset_count"),
+        ("a count with no presets", lambda c: poke(92, 0)(c), "presets / preset_count"),
+        ("33 presets", poke(96, 33), "presets / preset_count"),
+        ("a preset table in the hot part", poke(92, 4), "misplaced"),
+        ("a preset with no values", poke(148, 0), "preset 0"),
+        ("a preset with more values than parameters", poke(148, 3), "preset 0"),
+        ("a preset value table in the hot part", poke(144, 4), "preset 0"),
+        ("a preset value above its range", lambda c: struct.pack_into("<f", c, 152, 1.5), "is outside"),
+        ("a preset value below its range", lambda c: struct.pack_into("<f", c, 156, -1.0), "is outside"),
+        ("a NaN preset value", lambda c: struct.pack_into("<f", c, 152, float("nan")), "is outside"),
+        ("an infinite preset value", lambda c: struct.pack_into("<f", c, 156, float("inf")), "is outside"),
+        ("a preset with an empty name", lambda c: c.__setitem__(184, 0), "empty or non-printable"),
+        ("a preset with an unterminated name", lambda c: c.__setitem__(slice(184, 192), b"A" * 8), "NUL-terminated"),
+        ("a preset name of 16 characters", lambda c: (poke(140, HOT_LEN + 172)(c), c.__setitem__(slice(172, 188), b"A" * 16)), "NUL-terminated"),
+    ):
+        if fragment is None:  # an accepted shape (two KEYs; the third is refused by the C++ tests, which have a three-parameter fixture)
+            expect_ok(label, build_synthetic_fx(mutate=mut))
+        else:
+            expect_refused(label, build_synthetic_fx(mutate=mut), fragment)
     expect_refused("app of ABI 1.0", build_synthetic(mutate=poke(8, 4)), "kind")
     expect_refused("app with no view", build_synthetic(mutate=lambda c: (poke(4, 1)(c), poke(8, 4)(c))), "an app has no view")
     expect_refused("state 0", build_synthetic(mutate=poke(20, 0)), "state_bytes")
@@ -888,11 +1163,15 @@ def main(argv):
     b.add_argument("--cold-at", type=lambda v: int(v, 0))
     b.add_argument("--version", type=version_arg, default=0, help="the module's version X.Y.Z (default 0.0.0: unversioned); needs a module that declares ABI 1.2")
     b.add_argument("--caps", type=caps_arg, default=0, help="an app's capabilities, comma separated (midi_in, read_project, edit_project, audio_tap, export_files); needs an app that declares ABI 1.3 (audio_tap 1.4, export_files 1.7)")
+    b.add_argument("--layout-tag", type=lambda v: int(v, 0), default=None, help="OS-FLASHDIET: the importer layout tag for header word 44 of a kind 3 file (default: --layout-tag-file, else the pinned IMPORT_LAYOUT_TAG)")
+    b.add_argument("--layout-tag-file", default=None, help="a file holding the tag printed from model::kImportLayoutTag (the build writes it)")
     p = sub.add_parser("pack")
     p.add_argument("--elf", required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--version", type=version_arg, default=0, help="the module's version X.Y.Z (default 0.0.0: unversioned)")
     p.add_argument("--caps", type=caps_arg, default=0, help="an app's capabilities, comma separated (midi_in, read_project, edit_project)")
+    p.add_argument("--layout-tag", type=lambda v: int(v, 0), default=None, help="OS-FLASHDIET: the importer layout tag for word 44 of a kind 3 file (default: --layout-tag-file, else the pinned IMPORT_LAYOUT_TAG)")
+    p.add_argument("--layout-tag-file", default=None, help="a file holding the tag printed from model::kImportLayoutTag")
     r = sub.add_parser("raw")
     r.add_argument("--elf", required=True)
     r.add_argument("--out", required=True)
@@ -903,7 +1182,7 @@ def main(argv):
         if args.cmd == "build":
             return cmd_build(args)
         if args.cmd == "pack":
-            return write_pack(Path(args.elf).read_bytes(), args.out, args.version, args.caps)
+            return write_pack(Path(args.elf).read_bytes(), args.out, args.version, args.caps, layout_tag_arg(args))
         if args.cmd == "raw":
             Path(args.out).write_bytes(raw_image(Path(args.elf).read_bytes()))
             return 0

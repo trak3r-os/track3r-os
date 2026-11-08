@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <o3os/module/loader.h>
 
+#include <o3os/model/import_layout.h>
+
 #include <cstring>
 
 namespace o3os::module {
@@ -17,6 +19,63 @@ bool copy_text(char* dst, std::size_t cap, const char* src) noexcept {
   }
   dst[n] = '\0';
   return src[n] == '\0';
+}
+
+// A printable ASCII string of 1..limit-1 characters (a native entry's pointers are real ones).
+bool text_ok(const char* text, std::size_t limit) noexcept {
+  if (text == nullptr) {
+    return false;
+  }
+  for (std::size_t i = 0; i < limit; ++i) {
+    if (text[i] == '\0') {
+      return i != 0u;
+    }
+    if (static_cast<unsigned char>(text[i]) < 0x20u || static_cast<unsigned char>(text[i]) > 0x7Eu) {
+      return false;
+    }
+  }
+  return false;
+}
+
+// ABI 1.12 (OS-INSFX-ABI2 A1): the rules read_desc applies to a file's fourth tail (image.cpp fx_ok), on a native entry: render_st an effect's only, fx_flags O3M_FX_WIDENS alone and with render_st, the KEY flag an
+// effect's INT parameter 0..16 with no label entry (at most two), the presets an instrument's or an effect's with parameters only (Q8 a: an app and an importer carry them zero), at most 32, a name of 1..15
+// printable characters and 1..param_count finite values inside their parameters' ranges. Called for a module that declares 1.12 or above, after the shape of the parameter table is known to be sound.
+bool native_fx_ok(const o3m_module& e) noexcept {
+  if ((e.render_st != nullptr && e.kind != O3M_KIND_EFFECT) || (e.fx_flags & ~fx_flags_allowed(e.kind, e.abi_minor)) != 0u || ((e.fx_flags & O3M_FX_WIDENS) != 0u && e.render_st == nullptr)) {
+    return false;
+  }
+  std::uint32_t keys = 0;
+  for (std::uint32_t i = 0; i < e.param_count; ++i) {
+    const o3m_param& q = e.params[i];
+    if ((q.flags & O3M_PARAM_KEY) != 0u && (e.kind != O3M_KIND_EFFECT || (q.flags & O3M_PARAM_INT) == 0u || q.min != 0.0f || q.max != 16.0f || ++keys > 2u ||
+                                           (e.labels != nullptr && (e.labels[i].names != nullptr || e.labels[i].count != 0u)))) {
+      return false;
+    }
+  }
+  if ((e.presets == nullptr) != (e.preset_count == 0u) || e.preset_count > O3M_PRESETS_MAX) {
+    return false;
+  }
+  if (e.preset_count == 0u) {
+    return true;
+  }
+  if ((e.kind != O3M_KIND_INSTRUMENT && e.kind != O3M_KIND_EFFECT) || e.param_count == 0u) {
+    return false;
+  }
+  for (std::uint32_t k = 0; k < e.preset_count; ++k) {
+    const o3m_preset& pr = e.presets[k];
+    if (!text_ok(pr.name, O3M_PRESET_NAME_MAX) || pr.values == nullptr || pr.count < 1u || pr.count > e.param_count) {
+      return false;
+    }
+    for (std::uint32_t i = 0; i < pr.count; ++i) {
+      const float v = pr.values[i];
+      std::uint32_t bits;
+      std::memcpy(&bits, &v, sizeof bits);
+      if ((bits & 0x7F800000u) == 0x7F800000u || !(v >= e.params[i].min && v <= e.params[i].max)) {  // (NaN and infinity first: read as bits, safe under any float flags)
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 }  // namespace
@@ -110,8 +169,47 @@ int ModuleSet::find(const char* name) const noexcept {
   return -1;
 }
 
+int ModuleSet::find_importer(const char* name) const noexcept {
+  if (name == nullptr) {
+    return -1;
+  }
+  for (unsigned i = 0; i < importer_count_; ++i) {
+    if (std::strcmp(importers_[i].name, name) == 0) {
+      return static_cast<int>(i);
+    }
+  }
+  return -1;
+}
+
+bool ModuleSet::drop_importer(const char* name) noexcept {
+  const int at = find_importer(name);
+  if (at < 0) {
+    return false;
+  }
+  const LoadedModule m = importers_[static_cast<unsigned>(at)];  // (the rollback marks are read before the table shifts)
+  for (unsigned i = static_cast<unsigned>(at); i + 1u < importer_count_; ++i) {
+    importers_[i] = importers_[i + 1u];
+  }
+  --importer_count_;
+  if (!m.native_entry) {  // a native entry owns no arena memory; a loaded file's hot part goes back to the mark its load began from
+    hot_.rollback(m.hot_mark);
+  }
+  return true;
+}
+
 bool ModuleSet::add(const LoadedModule& m) noexcept {
-  if (count_ >= kMaxModules || find(m.name) >= 0 || !is_stem(m.name)) {
+  if (!is_stem(m.name)) {
+    return false;
+  }
+  if (m.header.kind == O3M_KIND_IMPORTER) {
+    // OS-FLASHDIET I1: an importer (kind 3) is held apart from the playable modules: it does not count against kMaxModules and find() never returns it, so it never binds to a track.
+    if (importer_count_ >= kMaxImporters || find_importer(m.name) >= 0 || find(m.name) >= 0) {
+      return false;
+    }
+    importers_[importer_count_++] = m;
+    return true;
+  }
+  if (count_ >= kMaxModules || find(m.name) >= 0 || find_importer(m.name) >= 0) {
     return false;
   }
   mods_[count_++] = m;
@@ -119,15 +217,21 @@ bool ModuleSet::add(const LoadedModule& m) noexcept {
 }
 
 bool ModuleSet::add_native(const char* name, const o3m_module& entry, std::uint32_t caps) noexcept {
+  const bool importer = entry.kind == O3M_KIND_IMPORTER && entry.abi_minor >= kImporterAbiMinor;  // OS-FLASHDIET I1: kind 3 from ABI 1.11, with its table
   if (!is_stem(name) || entry.abi_major != kOsAbiMajor || entry.abi_minor > kOsAbiMinor || entry.struct_size != O3M_MODULE_SIZE(entry.abi_minor) ||
-      (entry.kind != O3M_KIND_INSTRUMENT && entry.kind != O3M_KIND_EFFECT && !(entry.kind == O3M_KIND_APP && entry.abi_minor >= 1u && entry.view_count != 0u)) ||
+      !(entry.kind == O3M_KIND_INSTRUMENT || entry.kind == O3M_KIND_EFFECT || (entry.kind == O3M_KIND_APP && entry.abi_minor >= 1u && entry.view_count != 0u) ||
+        (importer && entry.importer != nullptr)) ||
       entry.init == nullptr || entry.shutdown == nullptr ||
-      (entry.kind != O3M_KIND_APP && (entry.render == nullptr || entry.set_param == nullptr || entry.note_on == nullptr || entry.note_off == nullptr)) ||
+      (!(entry.kind == O3M_KIND_APP || importer) && (entry.render == nullptr || entry.set_param == nullptr || entry.note_on == nullptr || entry.note_off == nullptr)) ||
+      (importer && (entry.param_count != 0u || entry.view_count != 0u || entry.ui != nullptr)) ||  // (an importer has no parameters and no views)
       entry.state_bytes == 0u || entry.state_bytes > kMaxStateBytes ||
       (entry.abi_minor >= kPitchAbiMinor && ((entry.pages == nullptr) != (entry.page_count == 0u) || entry.page_count > O3M_PAGES_MAX || (entry.param_count == 0u && entry.labels != nullptr))) ||  // (1.8: the page table and the label table are the module's own; the shape is checked, tests/module_builtin_test.cpp holds the built-in ones to every limit)
       entry.param_count > kMaxParams || (entry.param_count != 0u && entry.params == nullptr) || entry.view_count > kMaxViews || (entry.view_count == 0u) != (entry.ui == nullptr) || (entry.ui != nullptr && entry.ui->view_draw == nullptr) ||
       (caps != 0u && (entry.kind != O3M_KIND_APP || entry.abi_minor < 3u || (caps & ~static_cast<std::uint32_t>(entry.abi_minor >= 10u ? O3M_CAPS_ABI_1_10 : (entry.abi_minor >= 7u ? O3M_CAPS_ABI_1_7 : (entry.abi_minor >= 4u ? O3M_CAPS_ABI_1_4 : O3M_CAPS_ABI_1_3)))) != 0u))) {
     return false;
+  }
+  if (entry.abi_minor >= kStereoAbiMinor && !native_fx_ok(entry)) {
+    return false;  // (the 1.12 members: render_st, fx_flags, presets and the KEY flag, like read_desc's fourth tail)
   }
   LoadedModule m;
   (void)copy_text(m.name, sizeof m.name, name);
@@ -141,6 +245,7 @@ bool ModuleSet::add_native(const char* name, const o3m_module& entry, std::uint3
   m.header.param_count = static_cast<std::uint16_t>(entry.param_count);
   m.header.view_count = static_cast<std::uint16_t>(entry.view_count);
   m.header.reserved2[0] = caps;  // OS-H1: the capabilities a file would have asked for
+  m.header.reserved2[1] = importer ? model::kImportLayoutTag : 0u;  // OS-FLASHDIET I1: word 44 is the tag in a kind 3 file
   m.desc.abi_major = entry.abi_major;
   m.desc.abi_minor = entry.abi_minor;
   m.desc.kind = entry.kind;
@@ -149,12 +254,13 @@ bool ModuleSet::add_native(const char* name, const o3m_module& entry, std::uint3
   m.desc.param_count = entry.param_count;
   m.desc.view_count = entry.view_count;
   m.entry = &entry;
+  m.native_entry = true;  // OS-FLASHDIET I2: a native entry owns no arena memory (drop_importer leaves the arenas alone for it)
   return add(m);
 }
 
 // ---- the loader -------------------------------------------------------------------------------------------------------------
 
-bool ModuleLoader::begin(hal::storage::Storage& storage, ModuleSet& set, const char* stem, SyncFn sync) noexcept {
+bool ModuleLoader::begin(hal::storage::Storage& storage, ModuleSet& set, const char* stem, SyncFn sync, bool importer) noexcept {
   if (state_ == State::Running) {
     status_ = Status::Busy;
     return false;
@@ -170,6 +276,7 @@ bool ModuleLoader::begin(hal::storage::Storage& storage, ModuleSet& set, const c
   storage_ = &storage;
   set_ = &set;
   sync_ = sync;
+  want_importer_ = importer;  // OS-FLASHDIET I1/I2: the importer scan looks in modules/importers/ only; every other caller skips it (a project that names an importer's stem never loads it)
   (void)copy_text(stem_, sizeof stem_, stem);
   mod_ = LoadedModule{};
   (void)copy_text(mod_.name, sizeof mod_.name, stem);
@@ -200,6 +307,7 @@ void ModuleLoader::use_builtin(Status why) noexcept {
   from_flash_ = true;
   flash_pos_ = 0;
   file_size_ = builtin_->size;
+  inflater_.begin(builtin_->z, builtin_->z_size, builtin_->size - sizeof(o3m_file_header));  // OS-FLASHDIET A3: the rest of the file comes from the stream
   read_ = pos_ = crc_ = 0;
   status_ = Status::Ok;
   phase_ = Phase::Header;  // the state stays Running: the next step() reads the built-in header
@@ -232,10 +340,23 @@ void ModuleLoader::cancel() noexcept {
 }
 
 bool ModuleLoader::read_some(void* dst, std::size_t want, std::size_t& got) noexcept {
-  if (from_flash_) {  // the same stepped read, from the image
+  if (from_flash_) {  // the same stepped read, from the image: the header raw, the rest inflated (OS-FLASHDIET A3)
     const std::size_t left = builtin_->size - flash_pos_;
-    const std::size_t n = want < left ? want : left;
-    std::memcpy(dst, builtin_->data + flash_pos_, n);
+    std::size_t n = want < left ? want : left;
+    if (flash_pos_ < sizeof(o3m_file_header)) {
+      const std::size_t hleft = sizeof(o3m_file_header) - flash_pos_;
+      if (n > hleft) {
+        n = hleft;
+      }
+      std::memcpy(dst, builtin_->data + flash_pos_, n);
+    } else {
+      n = inflater_.read(static_cast<std::uint8_t*>(dst), n);
+      if (inflater_.failed()) {
+        fail(Status::BadCrc);  // the image's own stream is broken (the tests inflate every built-in byte for byte)
+        // A built-in stream is fixed at build time: only a broken image can corrupt it, so this is reported as BadCrc and the stem quarantined like any bad file.
+        return false;
+      }
+    }
     flash_pos_ += static_cast<std::uint32_t>(n);
     got = n;
     return true;
@@ -268,9 +389,15 @@ bool ModuleLoader::read_full(void* dst, std::size_t want, std::size_t& got) noex
 
 void ModuleLoader::open_file() noexcept {
   char path[24 + kStemMax + 8];
-  static constexpr const char* kDirs[] = {"modules/instruments/", "modules/effects/", "modules/apps/"};
+  // OS-FLASHDIET I1/I2 (review note 1): modules/importers/ is searched only when the caller is the importer scan (`want_importer_`); a project that names an
+  // importer's stem must not load the importer, so the playable directories are searched without it and the first directory that has the stem wins as before.
+  static constexpr const char* kPlayableDirs[] = {"modules/instruments/", "modules/effects/", "modules/apps/"};
+  static constexpr const char* kImporterDir = "modules/importers/";
+  const char* const* dirs = want_importer_ ? &kImporterDir : kPlayableDirs;
+  const unsigned dir_count = want_importer_ ? 1u : 3u;
   bool found = false;
-  for (const char* dir : kDirs) {
+  for (unsigned d = 0; d < dir_count && !found; ++d) {
+    const char* dir = dirs[d];
     std::size_t n = 0;
     for (const char* c = dir; *c != '\0'; ++c) {
       path[n++] = *c;
@@ -448,7 +575,7 @@ void ModuleLoader::finish() noexcept {
     fail(Status::BadCrc);
     return;
   }
-  const Status d = read_desc(h, mod_.place, mod_.desc, &mod_.ext);
+  const Status d = read_desc(h, mod_.place, mod_.desc, &mod_.ext, &mod_.imp);
   if (d != Status::Ok) {
     fail(d);
     return;
@@ -466,6 +593,7 @@ void ModuleLoader::finish() noexcept {
   mod_.builtin = from_flash_;
   mod_.card_status = from_flash_ ? card_status_ : Status::Ok;
   mod_.card_version = from_flash_ && card_status_ == Status::Older ? card_version_ : 0u;
+  mod_.hot_mark = hot_mark_;  // OS-FLASHDIET I2: what drop_importer rolls the hot arena back to
   if (!set_->add(mod_)) {
     fail(Status::NoMemory);  // the set is full or the name is taken (fail() closes the file)
     return;

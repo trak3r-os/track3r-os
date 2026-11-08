@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <o3os/module/image.h>
 
+#include <o3os/model/import_layout.h>
+
 #include <cstring>
 
 namespace o3os::module {
@@ -147,6 +149,100 @@ bool labels_ok(const o3m_file_header& h, const Placement& p, const Desc32& d, co
   return true;
 }
 
+// ABI 1.11 (OS-FLASHDIET I1/I2): the importer's table (kind 3's `importer` member). `at` is its address: the table (eight words) wholly inside the image, size exact, the format list
+// 1..O3M_IMPORTER_FORMATS_MAX entries inside the image with every extension a string of at most O3M_EXT_MAX - 1 characters, and begin, step, read_pcm, report and close all Thumb code inside
+// the image (a missing function refuses the file). Zero is no table: refused for kind 3, required to be zero for every other kind (checked by the caller).
+bool importer_table_ok(const o3m_file_header& h, const Placement& p, std::uint32_t at) noexcept {
+  if (at == 0u || (at & 3u) != 0u) {
+    return false;
+  }
+  const std::uint8_t* table = resolve(h, p, at, sizeof(Importer32));
+  if (table == nullptr) {
+    return false;
+  }
+  Importer32 t;
+  std::memcpy(&t, table, sizeof t);
+  if (t.size != sizeof(Importer32) || t.format_count == 0u || t.format_count > O3M_IMPORTER_FORMATS_MAX || t.formats == 0u) {
+    return false;
+  }
+  if (!code_ok(h, p, t.begin) || !code_ok(h, p, t.step) || !code_ok(h, p, t.read_pcm) || !code_ok(h, p, t.report) || !code_ok(h, p, t.close)) {
+    return false;
+  }
+  const std::uint8_t* formats = (t.formats & 3u) == 0u ? resolve(h, p, t.formats, t.format_count * static_cast<std::uint32_t>(sizeof(Format32))) : nullptr;
+  if (formats == nullptr) {
+    return false;
+  }
+  for (std::uint32_t i = 0; i < t.format_count; ++i) {
+    std::uint32_t ext;
+    std::memcpy(&ext, formats + i * sizeof(Format32), sizeof ext);
+    if (!string_ok(h, p, ext, O3M_EXT_MAX)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// A float that is neither NaN nor infinite (no <cmath>: the bits).
+bool finite_f(float v) noexcept {
+  std::uint32_t bits;
+  std::memcpy(&bits, &v, sizeof bits);
+  return (bits & 0x7F800000u) != 0x7F800000u;
+}
+
+// ABI 1.12 (OS-INSFX-ABI2 A1): the fourth descriptor tail, checked after the parameters (their ranges are valid by then). render_st is Thumb code and an effect's only; fx_flags knows O3M_FX_WIDENS alone,
+// and WIDENS needs render_st; at most two parameters carry O3M_PARAM_KEY, each an effect's INT parameter 0..16 (a label entry for 0..16 cannot pass labels_ok, so a KEY has none); the preset table is zero
+// exactly when its count is, only for an instrument or an effect that has parameters (Q8 a: an app and an importer carry it zero), at most O3M_PRESETS_MAX entries, each a name of 1..15 printable
+// characters and 1..param_count finite values inside their parameters' ranges (a preset sets every parameter, the rest take their default).
+// Called for a module that declares 1.12 or above only: below it the four members are not read and a KEY bit is not honoured (a 1.11 module with bit 32 in its flags loads as before).
+bool fx_ok(const o3m_file_header& h, const Placement& p, const Desc32& d, const DescFx32& t) noexcept {
+  if (t.render_st != 0u && (h.kind != O3M_KIND_EFFECT || !code_ok(h, p, t.render_st))) {
+    return false;
+  }
+  if ((t.fx_flags & ~fx_flags_allowed(h.kind, h.abi_minor)) != 0u || ((t.fx_flags & O3M_FX_WIDENS) != 0u && t.render_st == 0u)) {  // (OS-MODRATE S2: RATE is an instrument's, from 1.13)
+    return false;
+  }
+  std::uint32_t keys = 0;
+  for (std::uint32_t i = 0; i < d.param_count; ++i) {
+    Param32 q;
+    if (!read_param(h, p, d, i, q)) {
+      return false;
+    }
+    if ((q.flags & O3M_PARAM_KEY) != 0u && (h.kind != O3M_KIND_EFFECT || (q.flags & O3M_PARAM_INT) == 0u || q.min != 0.0f || q.max != 16.0f || ++keys > 2u)) {
+      return false;
+    }
+  }
+  if ((t.presets == 0u) != (t.preset_count == 0u) || t.preset_count > O3M_PRESETS_MAX) {
+    return false;
+  }
+  if (t.preset_count == 0u) {
+    return true;
+  }
+  if ((h.kind != O3M_KIND_INSTRUMENT && h.kind != O3M_KIND_EFFECT) || d.param_count == 0u) {
+    return false;
+  }
+  const std::uint8_t* at = (t.presets & 3u) == 0u ? resolve(h, p, t.presets, t.preset_count * static_cast<std::uint32_t>(sizeof(Preset32))) : nullptr;
+  if (at == nullptr) {
+    return false;
+  }
+  for (std::uint32_t k = 0; k < t.preset_count; ++k) {
+    Preset32 e;
+    std::memcpy(&e, at + k * sizeof(Preset32), sizeof e);
+    const std::uint8_t* values = e.count >= 1u && e.count <= d.param_count && (e.values & 3u) == 0u ? resolve(h, p, e.values, e.count * 4u) : nullptr;
+    if (values == nullptr || !string_ok(h, p, e.name, O3M_PRESET_NAME_MAX)) {
+      return false;
+    }
+    for (std::uint32_t i = 0; i < e.count; ++i) {
+      float v;
+      Param32 q;
+      std::memcpy(&v, values + 4u * i, sizeof v);
+      if (!read_param(h, p, d, i, q) || !finite_f(v) || !(v >= q.min && v <= q.max)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 }  // namespace
 
 Status check_header(const o3m_file_header& h, std::uint32_t file_bytes) noexcept {
@@ -162,8 +258,9 @@ Status check_header(const o3m_file_header& h, std::uint32_t file_bytes) noexcept
   if (h.target != O3M_TARGET_ARMV7EM) {
     return Status::BadTarget;
   }
-  if (h.kind != O3M_KIND_INSTRUMENT && h.kind != O3M_KIND_EFFECT && !(h.kind == O3M_KIND_APP && h.abi_minor >= 1u)) {
-    return Status::BadKind;
+  if (h.kind != O3M_KIND_INSTRUMENT && h.kind != O3M_KIND_EFFECT && !(h.kind == O3M_KIND_APP && h.abi_minor >= 1u) &&
+      !(h.kind == O3M_KIND_IMPORTER && h.abi_minor >= kImporterAbiMinor)) {
+    return Status::BadKind;  // (the importer kind is published at ABI 1.11, OS-FLASHDIET I1)
   }
   if (h.abi_major != kOsAbiMajor) {
     return Status::AbiMajor;
@@ -171,8 +268,17 @@ Status check_header(const o3m_file_header& h, std::uint32_t file_bytes) noexcept
   if (h.abi_minor > kOsAbiMinor) {
     return Status::AbiMinor;
   }
-  if (h.flags != 0u || (h.abi_minor < kVersionAbiMinor && h.module_version != 0u) || h.reserved2[1] != 0u || !all_zero(h.reserved3, 3)) {
+  if (h.flags != 0u || (h.abi_minor < kVersionAbiMinor && h.module_version != 0u) || !all_zero(h.reserved3, 3)) {
     return Status::BadReserved;
+  }
+  if (h.kind == O3M_KIND_IMPORTER) {
+    // OS-FLASHDIET I1: word 44 is the importer layout tag, defined for kind 3 only (from ABI 1.11, which the kind check above already required). A kind 3 file
+    // built against another step layout is refused here, before anything is placed: the version lock.
+    if (h.reserved2[1] != model::kImportLayoutTag) {
+      return Status::LayoutMismatch;
+    }
+  } else if (h.reserved2[1] != 0u) {
+    return Status::BadReserved;  // (the tag's word is reserved and zero in every other kind, at every minor)
   }
   if (h.reserved2[0] != 0u && (h.kind != O3M_KIND_APP || (h.reserved2[0] & ~caps_known(h.abi_minor)) != 0u)) {
     // a capability request: only an app of ABI 1.3 or later may make one. A bit that is published ABI but that this OS does not grant (export_files, midi_out) is a clean
@@ -238,12 +344,14 @@ const std::uint8_t* resolve(const o3m_file_header& h, const Placement& p, std::u
   return locate(h, p, addr, length, out) ? out : nullptr;
 }
 
-Status read_desc(const o3m_file_header& h, const Placement& p, Desc32& out, DescExt32* ext) noexcept {
+Status read_desc(const o3m_file_header& h, const Placement& p, Desc32& out, DescExt32* ext, DescImp32* imp, DescFx32* fx) noexcept {
   std::memset(&out, 0, sizeof out);
   DescExt32 tail{};
+  DescImp32 imp_tail{};
+  DescFx32 fx_tail{};
   // The descriptor is at its link address in the cold part, which has been relocated to cold_addr.
   const std::uint32_t hot = h.hot_size;
-  const std::uint32_t size = desc_size(h.abi_minor);  // the declared minor's descriptor: 64 bytes up to 1.7, 80 from 1.8 (the members past 64 are not read below it)
+  const std::uint32_t size = desc_size(h.abi_minor);  // the declared minor's descriptor: 64 bytes up to 1.7, 80 from 1.8, 84 from 1.11, 100 from 1.12 (the members past each size are not read below it)
   if (h.desc_offset < hot || h.image_size - h.desc_offset < size) {
     return Status::BadDescriptor;
   }
@@ -251,8 +359,20 @@ Status read_desc(const o3m_file_header& h, const Placement& p, Desc32& out, Desc
   if (size > sizeof(Desc32)) {
     std::memcpy(&tail, p.cold_mem + (h.desc_offset - hot) + sizeof(Desc32), sizeof tail);
   }
+  if (size > sizeof(Desc32) + sizeof(DescExt32)) {
+    std::memcpy(&imp_tail, p.cold_mem + (h.desc_offset - hot) + sizeof(Desc32) + sizeof(DescExt32), sizeof imp_tail);
+  }
+  if (size > sizeof(Desc32) + sizeof(DescExt32) + sizeof(DescImp32)) {
+    std::memcpy(&fx_tail, p.cold_mem + (h.desc_offset - hot) + sizeof(Desc32) + sizeof(DescExt32) + sizeof(DescImp32), sizeof fx_tail);
+  }
   if (ext != nullptr) {
     *ext = tail;
+  }
+  if (imp != nullptr) {
+    *imp = imp_tail;
+  }
+  if (fx != nullptr) {
+    *fx = fx_tail;
   }
   if (out.struct_size != size || out.abi_major != h.abi_major || out.abi_minor != h.abi_minor || out.kind != h.kind ||
       out.state_bytes != h.state_bytes || out.param_count != h.param_count || out.param_count > kMaxParams) {
@@ -263,6 +383,17 @@ Status read_desc(const o3m_file_header& h, const Placement& p, Desc32& out, Desc
   }
   if (h.kind == O3M_KIND_APP && out.view_count == 0u) {
     return Status::BadDescriptor;  // an app is its view
+  }
+  if (h.kind == O3M_KIND_IMPORTER) {
+    // OS-FLASHDIET I1: an importer serves files, it is not heard or seen: no parameters, no views, and a sound entry of its own is optional (as an app's).
+    if (out.param_count != 0u || out.view_count != 0u || out.ui != 0u) {
+      return Status::BadDescriptor;
+    }
+    if (!importer_table_ok(h, p, imp_tail.importer)) {
+      return Status::BadDescriptor;
+    }
+  } else if (imp_tail.importer != 0u) {
+    return Status::BadDescriptor;  // (the importer's table is kind 3's; NULL in every other kind)
   }
   if (out.ui != 0u) {  // the views' table: checked for every module, so that none with a bad one is ever loaded (called only for ABI 1.1 and up)
     Ui32 ui;
@@ -286,7 +417,7 @@ Status read_desc(const o3m_file_header& h, const Placement& p, Desc32& out, Desc
   }
   const std::uint32_t fns[] = {out.init, out.render, out.set_param, out.note_on, out.note_off, out.shutdown};
   for (std::uint32_t i = 0; i < 6; ++i) {
-    const bool optional = h.kind == O3M_KIND_APP && i >= 1u && i <= 4u;  // an app has no sound: render, set_param, note_on, note_off may be NULL
+    const bool optional = (h.kind == O3M_KIND_APP || h.kind == O3M_KIND_IMPORTER) && i >= 1u && i <= 4u;  // an app and an importer make no sound: render, set_param, note_on, note_off may be NULL
     if (!(optional && fns[i] == 0u) && !code_ok(h, p, fns[i])) {
       return Status::BadDescriptor;
     }
@@ -295,7 +426,7 @@ Status read_desc(const o3m_file_header& h, const Placement& p, Desc32& out, Desc
     return Status::BadDescriptor;
   }
   if (out.param_count == 0u) {
-    return out.params == 0u && tail.page_count == 0u && tail.pages == 0u && tail.labels == 0u ? Status::Ok : Status::BadDescriptor;  // (no parameters: no pages, no labels)
+    return out.params == 0u && tail.page_count == 0u && tail.pages == 0u && tail.labels == 0u && (h.abi_minor < kStereoAbiMinor || fx_ok(h, p, out, fx_tail)) ? Status::Ok : Status::BadDescriptor;  // (no parameters: no pages, no labels, no presets)
   }
   if ((out.params & 3u) != 0u || resolve(h, p, out.params, out.param_count * static_cast<std::uint32_t>(sizeof(Param32))) == nullptr) {
     return Status::BadDescriptor;
@@ -306,7 +437,7 @@ Status read_desc(const o3m_file_header& h, const Placement& p, Desc32& out, Desc
       return Status::BadDescriptor;  // (a NaN fails the comparisons)
     }
   }
-  return pages_ok(h, p, out, tail) && labels_ok(h, p, out, tail) ? Status::Ok : Status::BadDescriptor;
+  return pages_ok(h, p, out, tail) && labels_ok(h, p, out, tail) && (h.abi_minor < kStereoAbiMinor || fx_ok(h, p, out, fx_tail)) ? Status::Ok : Status::BadDescriptor;
 }
 
 bool read_param(const o3m_file_header& h, const Placement& p, const Desc32& d, std::uint32_t index, Param32& out) noexcept {

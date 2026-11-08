@@ -1,0 +1,101 @@
+Polyend Tracker Community Edition License
+(MIT License with Wholesale Commercial Clone Restriction)
+
+Copyright (c) 2020-2026 Polyend Sp. z o.o. and Polyend Tracker Community Edition Contributors
+
+================================================================================
+PART 1: SOURCE CODE, SDKs, OPEN SYNTH ENGINES & MODULES (MIT LICENSE)
+================================================================================
+
+All source code, headers, SDKs, open-source synthesizer engines, DSP modules,
+drivers, utilities, and documentation in this repository — including:
+  - `.ptfx` Sample Editor Plugin SDK (`editor-fx-sdk/`)
+  - Open Synth SDK headers (`synth/include/PolySynth/` and `synth/include/PolySynth/sdk/`)
+  - Open-source C++ synthesizer engines (`core/synth/engines/`, including `CHIP`)
+  - Hardware abstraction layers, drivers, audio libraries, and utilities (`platforms/`, `util/`, `core/libs/`)
+  - Individual classes, DSP algorithms, UI widgets, and source modules in `core/`
+
+are licensed under the standard MIT License below, subject only to the
+Wholesale Commercial Clone Restriction in Part 2 with respect to the complete
+integrated Polyend Tracker application/firmware as a whole, and Part 3 with
+respect to the precompiled binary archives in `synth/lib/`.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice, this permission notice, and the conditions in
+Part 2 shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+================================================================================
+PART 2: WHOLESALE COMMERCIAL CLONE RESTRICTION & EXPRESS PERMISSIONS
+================================================================================
+
+1. What Is Expressly Permitted (Commercial & Non-Commercial):
+   (a) Music Production, Live Performance & Content Creation:
+       Using the firmware to compose, record, produce, perform, distribute,
+       broadcast, or monetize music, albums, sample packs, paid live
+       performances ("gigs"), courses, or monetized video/streaming content
+       is EXPRESSLY PERMITTED without restriction.
+   (b) Selling `.ptfx` Sample Editor Plugins:
+       Building, distributing, and selling `.ptfx` Sample Editor plugins built
+       with `editor-fx-sdk/` (commercially or non-commercially) is EXPRESSLY
+       PERMITTED under the pure MIT License in Part 1.
+   (c) Reusing Code, Drivers, DSP, and Open Synth Engines in Other Projects:
+       Reusing, modifying, or incorporating individual components, drivers,
+       DSP algorithms, UI helpers, SDKs, or open-source C++ synth engines
+       (such as `core/synth/engines/`) into your own open-source or commercial
+       software (e.g., VST/AU/CLAP plugins, iOS/desktop apps) or original
+       hardware products (e.g., Eurorack modules, standalone instruments that
+       are not clones of the Polyend Tracker) is EXPRESSLY PERMITTED under the
+       MIT License in Part 1.
+
+2. What Is Prohibited (No Wholesale Commercial Clones):
+   Notwithstanding the permissions in Part 1, you may NOT:
+   (a) Commercial Hardware Clones:
+       Manufacture, distribute, or sell a commercial hardware product that is
+       preloaded with, designed primarily to run, or marketed to use the
+       complete Polyend Tracker firmware/application (or a substantially
+       unmodified or re-skinned derivative of the complete firmware/application);
+   (b) Commercial Software Clones / Ports:
+       Sell, license for a fee, or commercially distribute the complete Polyend
+       Tracker application/firmware (or a direct port or substantially
+       unmodified derivative of the integrated Tracker sequencer, UI, and
+       workflow as a whole) as a paid standalone software application, paid
+       plugin, or paid mobile/desktop app;
+   (c) Selling Firmware Builds:
+       Sell or charge a fee for downloading or obtaining compiled `.ptf`
+       firmware images or source distributions of the Polyend Tracker firmware;
+   (d) Trademark & Trade Dress:
+       Nothing in this License grants any right to use the "Polyend" or
+       "Polyend Tracker" trade names, trademarks, service marks, logos, boot
+       screens, or hardware trade dress in connection with any third-party
+       commercial product.
+
+================================================================================
+PART 3: PRECOMPILED SYNTH & DSP BINARIES (`synth/lib/`) & THIRD-PARTY CODE
+================================================================================
+
+1. Precompiled Binary Libraries (`synth/lib/libPolySynth.a` & `libPolyDSP.a`):
+   The precompiled static archives `synth/lib/libPolySynth.a` and
+   `synth/lib/libPolyDSP.a` contain Polyend's proprietary factory synthesizer
+   and DSP engines (`ACD`, `FAT`, `VAP`, `WTFM`, `PERC`, and `PolyDSP`). They
+   are governed by `synth/lib/LICENSE-PROPRIETARY.txt`, which permits free use
+   in authentic Polyend hardware as well as personal, hobbyist, and DIY
+   non-commercial projects, while prohibiting embedding those precompiled
+   binaries into commercial third-party hardware or software products.
+
+2. Third-Party Components:
+   Third-party libraries and components listed in `NOTICE.md` remain governed
+   by their respective original licenses.

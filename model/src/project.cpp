@@ -83,10 +83,10 @@ void fill_empty(Pattern& p) noexcept {
 // Declared, not left to the compiler (ADR 0011): the arena is the same size on the 64-bit host and on the
 // MK66. Worst case, everything full: 128 patterns x 14,384 B = 1,841,152 B, 64 instruments x 720 B = 46,080 B (OS-STEREO step 2: the stereo byte, +4 B each),
 // the 16 KiB unknown-chunk pool, and 15,728 B of header, tracks, song, tables and generation counters (2,520 B) and, since OS-002d,
-// the parameters' generations (3,224 x 4 B), their epoch and the project's settings block (348 B; 388 B since OS-006e made room for 24 fields): 13,248 B (13,288), and, since OS-PERSIST2, the session state: 341 B (+3 of padding), and, since OS-APPUX S3, twelve app parameter sets of 164 B instead of six (+984 B).
+// the parameters' generations (3,224 x 4 B), their epoch and the project's settings block (348 B; 388 B since OS-006e made room for 24 fields; 428 B since OS-MIDICCMAP S1 raised it to 32): 13,248 B (13,288), and, since OS-PERSIST2, the session state: 341 B (+3 of padding), and, since OS-APPUX S3, twelve app parameter sets of 164 B instead of six (+984 B).
 static_assert(sizeof(Pattern) * kMaxPatterns == 1841152, "pattern pool size");
 static_assert(sizeof(Instrument) * kMaxInstruments == 46080, "instrument pool size");
-static_assert(kModelArenaBytes == 1934312, "ModelArena size changed: update docs/formats/o3-project.md, docs/architecture/os-tree.md and the mirror in platform/mk66 mem_map.h");
+static_assert(kModelArenaBytes == 1934344, "ModelArena size changed: update docs/formats/o3-project.md, docs/architecture/os-tree.md and the mirror in platform/mk66 mem_map.h");
 
 void Project::reset(bool keep_instruments) noexcept {
   order_depth_ = 0;  // E-SONG-07: a reset never runs inside a bracket, and at boot the arena is raw SDRAM; the epoch and the op count are never rewound (a stale value would look like "no change")
@@ -300,6 +300,13 @@ Status Project::set_track(std::uint32_t slot, const TrackSlot& value) noexcept {
   ++tracks_generation_;
   touch();
   return Status::Ok;
+}
+
+void Project::set_track_flags_plain(std::uint32_t slot, std::uint8_t flags) noexcept {
+  if (slot >= kMaxTracks) {
+    return;
+  }
+  tracks_[slot].flags = static_cast<std::uint8_t>(flags & kTrackFlagsMask);  // (no touch(): the generation must not move, or the save layer would call this unsaved work)
 }
 
 Status Project::set_track_name(std::uint32_t slot, const char* text, std::size_t len) noexcept {
@@ -635,6 +642,10 @@ Status Project::set_instrument(std::uint32_t index, const Instrument& value) noe
   std::memset(slot.sample_path + n, 0, kSamplePathMax + 1 - n);
   std::memset(slot.params + value.param_len, 0, kModuleParamBytes - value.param_len);
   std::memset(slot.reserved, 0, sizeof slot.reserved);
+  // OS-CEPLAYTHRU P1, review fold: the canonical form clamps the flag to 0..1 and keeps it on a Sample instrument only — the native writer stores it only for one, so on any other kind it would vanish on save. validate_instrument still accepts the flag on any kind: an OG file with byte 279 set on a non-Sample instrument loads and reads 0.
+  slot.slice_thru = value.kind == InstrumentKind::Sample && value.slice_thru <= kInstSliceThruMax ? value.slice_thru : std::uint8_t{0};
+  // OS-MODRATE S3: the RATE is a Module instrument's; the native writer stores it only for one, so on any other kind it would vanish on save. A value past kInstRateMax is refused by validate_instrument.
+  slot.rate = value.kind == InstrumentKind::Module ? value.rate : std::uint8_t{0};
   ++instrument_generation_[index];
   touch();
   return Status::Ok;
@@ -1003,6 +1014,10 @@ bool module_param_of(core::ParamId id, unsigned& slot, unsigned& index) noexcept
 }  // namespace
 
 bool Project::has_param(core::ParamId id) const noexcept {
+  if (core::param_kind(id) == core::ParamKind::Insert) {  // OS-INSFX S7: an insert's parameter, a float of its INSX record's blob (it exists while the record's `n` reaches it)
+    const InsertRecord* rec = core::insert_param_valid(id) ? find_insert(core::param_index(id) / 2u, core::param_index(id) % 2u) : nullptr;
+    return rec != nullptr && core::param_field(id) < rec->n;
+  }
   unsigned mslot = 0, mindex = 0;
   if (module_param_of(id, mslot, mindex)) {  // a Module instrument whose blob holds the value
     const Instrument& in = instruments_[mslot];
@@ -1025,6 +1040,9 @@ bool Project::has_param(core::ParamId id) const noexcept {
 }
 
 float Project::get_param(core::ParamId id) const noexcept {
+  if (core::param_kind(id) == core::ParamKind::Insert) {  // OS-INSFX S7
+    return has_param(id) ? find_insert(core::param_index(id) / 2u, core::param_index(id) % 2u)->param[core::param_field(id)] : 0.0f;
+  }
   unsigned mslot = 0, mindex = 0;
   if (module_param_of(id, mslot, mindex)) {
     float v = 0.0f;
@@ -1049,6 +1067,18 @@ float Project::get_param(core::ParamId id) const noexcept {
 std::uint32_t Project::param_generation(core::ParamId id) const noexcept {
   if (core::param_kind(id) == core::ParamKind::Project) {
     return settings_.generation(core::param_field(id));
+  }
+  if (core::param_kind(id) == core::ParamKind::Insert) {
+    // OS-INSFX S7: an insert's parameter keeps no counter (a Project member would move sizeof(Project), which the importer's layout tag hashes). Its generation is the bits of its value plus the
+    // load epoch: any change by anyone else (the page, a load) is a different value, and the CC's own write is read back, so a Learn binding (Pickup) is caught again after another writer and
+    // two controllers on two parameters of one insert do not make each other re-catch. A value put back where it was is unchanged for Learn too (nothing to catch up with).
+    float v = 0.0f;
+    if (has_param(id)) {
+      v = get_param(id);
+    }
+    std::uint32_t bits = 0;
+    std::memcpy(&bits, &v, sizeof bits);
+    return param_epoch_ + bits;
   }
   unsigned mslot = 0, mindex = 0;
   if (module_param_of(id, mslot, mindex)) {
@@ -1117,6 +1147,9 @@ Status Project::set_param(core::ParamId id, float value) noexcept {
   }
   if (!param_store(owner, f, value)) {
     return Status::BadValue;
+  }
+  if (core::param_kind(id) == core::ParamKind::Instrument && (core::param_field(id) == instrument_param::mod(3, instrument_param::ModSource) || core::param_field(id) == instrument_param::PlayMode)) {
+    wt_slot_follow_mode(*static_cast<Instrument*>(owner));  // OS-CEWTENV W7b: slot 3's enable bit follows the play mode
   }
   if (param_load(owner, f) != before || (f.store == ParamStore::EnvState && std::memcmp(raw_before, static_cast<const unsigned char*>(owner) + f.offset, sizeof raw_before) != 0)) {
     // A parameter that got here exists, so its slot does; the test only tells the compiler what the lookup guarantees (GCC at -O3 cannot

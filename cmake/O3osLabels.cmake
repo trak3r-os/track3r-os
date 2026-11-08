@@ -25,6 +25,7 @@ set(O3OS_LABEL_RULES
   "^(layers|layers_selftest|wiring_audit|wiring_audit_selftest|unit_cover)$" "static"
   "^(keytext|keytext_selftest)$" "static,app"  # OS-KEYROWDLG S4: the key names of app/ against the key tables
   "^hil_scenarios_sync$" "static,platform"  # OS-CLEANUP: the HIL scenarios of platform/mk66/tools/hil/ against what gen_hil.py writes (tests/hil_scenarios_sync_test.py)
+  "^(midi_clock_tool_selftest|mtc_send_python)$" "platform,python"  # OS-MIDISYNC M1: the clock bench tool's self-test (platform/mk66/tools/hil/midi_clock_tool.py --self-test): a change of the tool (scope: platform python, tools/ci.sh) runs it; OS-MTC B1: mtc_send_python is the master's frame maths (tests/mtc_send_test.py)
   "^sim_project_drift$" "static,platform"  # OS-E2E-1b: SimProject against platform/mk66/src/app_main.cpp's load sequence (tests/sim_project_drift_test.py)
   "^qa_cover$" "static"                 # OS-E2E-3: the QA catalogue gate (tools/qa_cover.py --check); a catalogue edit maps to this label
   "^qa_cover_selftest$" "static,python" # its self-test: python, and static so that a change of the tool alone (scope map: static) runs it
@@ -64,9 +65,12 @@ set(O3OS_LABEL_RULES
   "^(fingerprint_guard_selftest|update_audio_fingerprints_selftest)$" "static,python"  # OS-E2E-4: the two tools' self-tests
   "^(font|icon|logo)_convert" "app"
   "^e2e_((card|pro)_)?fixture_fresh$" "app,formats,python"  # OS-E2E-1b, OS-E2E-13, J2: the generated cards of the journeys (tests/e2e_card_fixture_test.py, e2e_pro_fixture_test.py, e2e_og_fixture_test.py): a sim, format or python change runs them
-  "^(project_python|heavy_song_python|hil_songs_python|med_python|med_import_python|med_openmpt|mod_python|modimp_openmpt)$" "formats,python"
+  "^(project_python|preset_python|heavy_song_python|hil_songs_python|midisync_songs_python|mtc_tempo_song_python|med_python|med_import_python|med_openmpt|mod_python|modimp_openmpt)$" "formats,python"  # the o3pj_tool-generated songs and their python checks (OS-MTC A2: mtc_tempo_song_python is the mtc-tempo song's); OS-MODPRESET P2: preset_python is tools/o3preset.py against the O3MP fixture
   "^corefx_openmpt$" "formats,seq,audio,python"  # OS-COREFX: importer -> sequencer -> engine against libopenmpt
-  "^(med_python_selftest|mod_python_selftest|manual_tools_selftest|manual_tables_selftest|o3merge_selftest|starter_python|testdata_python|e2e_report_selftest|qa_sheet_python_selftest)$" "python"
+  "^(med_python_selftest|mod_python_selftest|manual_tools_selftest|manual_tables_selftest|o3merge_selftest|starter_python|modpreset_packs|testdata_python|ptfx_fixtures|ptfx_pack|e2e_report_selftest|qa_sheet_python_selftest)$" "python"
+  "^deflate_pack_selftest$" "core,python"   # OS-FLASHDIET A2: the deterministic raw-deflate encoder's self-test (tools/deflate_pack.py --self-test): a change of the tool (scope map: tools/*.py -> python) or of core runs it
+  "^text_pack_selftest$" "platform,python"  # OS-FLASHDIET P5: the platform text packer's self-test (tools/text_pack.py --self-test; it also parses platform/mk66/text/*_text.txt)
+  "^cechip_" "audio"  # OS-CECHIP C1: the CHIP oracle (tests/cechip_oracle_smoke_test.cpp; third_party/tracker-ce-chip)
   "^o3m_.*_test$" "audio"
   "^o3m_" "python"
   "^ring_tsan$" "core"
@@ -75,9 +79,10 @@ set(O3OS_LABEL_RULES
   "^song_order_tsan$" "seq,model"  # E-SONG-07: the order list's edit journal (Project::snapshot_order) against a writer thread
   # The QEMU suites (tests/CMakeLists.txt o3os_target_suite): by the library that the suite tests.
   "^qemu_(core|jobs)$" "core"
+  "^qemu_ptfx_host_math$" "core"        # OS-CEPTFX S2: the .ptfx host-table math (core/ptfx_math.h) and the shared sin/cos (core/fast_math.h)
   "^qemu_(wav|wav_sample|wavetable_import|iff_sample|formats_.*)$" "formats"
-  "^qemu_(model_undo|params|params_model|pattern_rules|dir_index)$" "model"
-  "^qemu_(usb|usb_device|usb_return|mk66|platform|probe|probe_stack)$" "platform"
+  "^qemu_(model_undo|params|params_model|pattern_rules|pattern_verbs|dir_index)$" "model"
+  "^qemu_(usb|usb_device|usb_return|mk66|platform|probe|probe_stack|ptfx_gate)$" "platform"
   "^qemu_(audio.*|module_.*)$" "audio"
   "^qemu_(midi|seq|seq_model|metro_sync)$" "seq"
   "^qemu_(eve|plot|boot)$" "app"

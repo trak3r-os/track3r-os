@@ -76,6 +76,8 @@ The simulator has no recorder, so its scenario `record_walk.txt` checks only the
 | Key row | `F1` to `F8`. Under a loop review the whole row changes. |
 | Shift row | The labels drawn while `Shift` is held. See the table under "Keys on this screen". |
 
+The strip also carries a small chip for each of these that is switched on, after the STATE field: **MONITOR**, **REC** (**ARMED** while the take only waits for its start), **OVERDUB** (**UNDO** while a layer is being undone) and **LOOP** (the LOOP row is on, or a loop is under review). A chip that is off is not drawn, so a quick look at the top of the screen tells you what the next take will do.
+
 ## More tasks
 
 ### Record a sample
@@ -100,9 +102,9 @@ While the take records, **MEM** in the top bar reads 100 %, because the take hol
 The card beside the rows shows **TIME LEFT**, the longest take you can still make: before the take it is the free sample memory in seconds, while the take records it counts down, and at zero the take ends (**THE SAMPLE MEMORY FILLED: THE TAKE ENDED**). It is gone under the review, and a loop does not show it, because a loop is as long as its bars. This is new in track3r-os; the official firmware does not show a maximum. <!-- QA-REC-043 -->
 
 ### Count a take in
-<!-- sync: src=app/src/screens/record_screen.cpp,app/src/record_actions.cpp,app/include/o3os/app/record_view.h,app/include/o3os/app/recorder.h,app/src/recorder.cpp,app/src/app.cpp qa=QA-REC-063,QA-REC-064,QA-REC-065,QA-REC-066,QA-REC-067,QA-REC-068 -->
+<!-- sync: src=app/src/screens/record_screen.cpp,app/src/record_actions.cpp,app/include/o3os/app/record_view.h,app/include/o3os/app/recorder.h,app/src/recorder.cpp,app/src/app.cpp qa=QA-REC-063,QA-REC-064,QA-REC-065,QA-REC-066,QA-REC-067,QA-REC-068,QA-REC-069,QA-REC-070 -->
 
-New in track3r-os: the official firmware counts in only from Config. <!-- og: new --> <!-- QA-REC-063 QA-REC-064 QA-REC-065 QA-REC-066 QA-REC-067 QA-REC-068 -->
+New in track3r-os: the official firmware counts in only from Config. <!-- og: new --> <!-- QA-REC-063 QA-REC-064 QA-REC-065 QA-REC-066 QA-REC-067 QA-REC-068 QA-REC-069 QA-REC-070 -->
 
 The **COUNT-IN** row, the last row of every page right after **LOOP**, sets **OFF**, **1 BAR**, **2 BARS** or **4 BARS** (`Delete` is **OFF**, `Shift` + the encoder moves two choices). It applies to a bar-aligned take only: **LOOP** on, or **START ON** **BAR**. **FREE**, **STEP**, **PATTERN** and **LEVEL** ignore it, and so does the **OVERDUB** (it keeps Config's count-in).
 
@@ -110,6 +112,8 @@ The **COUNT-IN** row, the last row of every page right after **LOOP**, sets **OF
 2. Press `F1`. With the transport stopped, the transport starts the pattern at once (not Config's count-in: the row replaces it for this take) and the strip counts the wait down: **RECORDING IN 4.. 3.. 2.. 1..**. With the transport running, the take waits for the next bar first.
 3. After N bars of music the take records, from the first step of the next bar, to the sample: from stop, from the first step of bar N+1; running, from the boundary after the next bar plus N bars.
 4. A **Stop** or `F1` during the count-in gives the take up, as during any wait.
+
+The count-in clicks even with **METRO** **Off** in Config: while it runs the metronome sounds on **MAIN** at the device's **METRO VOL** (the setting itself does not change), and when the count-in ends the engine gets the setting back; the click is never in the take. <!-- QA-REC-069 QA-REC-070 -->
 
 The row is dim while a take is armed or recording. It is a runtime setting only: nothing is stored, and a restart puts it back to **OFF**. With the row **OFF**, everything is exactly as before.
 

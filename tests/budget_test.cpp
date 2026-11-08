@@ -111,7 +111,9 @@ TEST_CASE("budget: no state has an exception: every worst case is held to the st
       // (OS-009b: 1300 became 1320 for the M and S chips of the header, two words each, which the marks of the worst case now draw on five tracks.)
       // (OS-PADS-A: 1320 became 1325 and 1650 1665 for the Shift picker's key row: the inverted chip of the mode that stays and the dim colour pass of the reserved keys.)
       // (OS-AUDIT E-PAT-03: 1325 became 1420 translate for the FX names of the 5-track zoom, which draw a name tile and a Micro value instead of a glyph and a Data pair: 1419 translate, 1645 vtx2f; the vtx2f cap holds, the standard 1792 holds at 1711 in the worst screen.)
-      CHECK_MESSAGE(pattern->words <= (translate ? 1420u : 1665u), theme << (translate ? " translate: " : " vtx2f: ") << pattern->words);
+      // (OS-PTOOLS2 S1: 1420 became 1465 translate and 1665 1710 vtx2f for the block hint of the info line, one text of up to 60 characters, a word each: 1459 / 1701 measured, the standard 1792 holds.)
+      // (OS-SELTINT: 1465 became 1530 translate and 1710 1775 vtx2f for the three-rectangle block rows over several tracks (a dim run, the cursor's track, a dim run): 1522 / 1768 measured, the standard 1792 holds.)
+      CHECK_MESSAGE(pattern->words <= (translate ? 1530u : 1775u), theme << (translate ? " translate: " : " vtx2f: ") << pattern->words);
       // The test is not vacuous: the worst case is a real sweep (every instrument, every window, two contents), and
       // really the biggest frame of its screen.
       CHECK(pattern->variants > 500u);
@@ -125,14 +127,15 @@ TEST_CASE("budget: no state has an exception: every worst case is held to the st
       }
       // OS-ZOOM: the zoomed grids are budgeted states of their own (3 contents x marks x block x 3 cursor tracks), above the default level's worst because more fields are drawn: 8 tracks of Note, Instr
       // and Vol cost more than 5 tracks (an empty instrument or volume is two glyph words, a note past G10 three), 12 tracks of Note alone less. Pinned, with a few words of room, so a change shows here
-      // long before the 1792 budget does: measured 1403 / 1605 words at 8 tracks and 1158 / 1417 at 12 (translate / VERTEX2F).
+      // long before the 1792 budget does: measured 1403 / 1605 words at 8 tracks and 1158 / 1417 at 12 (translate / VERTEX2F); with the block hint of OS-PTOOLS2 S1 1441 / 1659 and 1197 / 1472.
       const sim::BudgetRow* zoom8 = find_row(rows, "pattern", "zoom8", theme, translate);
       const sim::BudgetRow* zoom12 = find_row(rows, "pattern", "zoom12", theme, translate);
       CHECK((zoom8 != nullptr && zoom12 != nullptr));
       if (zoom8 != nullptr && zoom12 != nullptr) {
         CHECK((zoom8->budgeted && zoom12->budgeted && zoom8->variants == 36u && zoom12->variants == 36u));
-        CHECK_MESSAGE(zoom8->words <= (translate ? 1410u : 1612u), theme << (translate ? " translate: " : " vtx2f: ") << zoom8->words);
-        CHECK_MESSAGE(zoom12->words <= (translate ? 1165u : 1425u), theme << (translate ? " translate: " : " vtx2f: ") << zoom12->words);
+        // (OS-SELTINT: 1450 / 1670 became 1545 / 1765 at 8 tracks and 1205 / 1480 1300 / 1580 at 12: 1537 / 1758 and 1293 / 1572 measured.)
+        CHECK_MESSAGE(zoom8->words <= (translate ? 1545u : 1765u), theme << (translate ? " translate: " : " vtx2f: ") << zoom8->words);
+        CHECK_MESSAGE(zoom12->words <= (translate ? 1300u : 1580u), theme << (translate ? " translate: " : " vtx2f: ") << zoom12->words);
       }
       const sim::BudgetRow* typical = find_row(rows, "pattern", "typical", theme, translate);
       CHECK(typical != nullptr);
@@ -236,10 +239,12 @@ TEST_CASE("budget: the Song screen and every overlay over the Pattern and Song s
     const char* state;
   };
   const Want wanted[] = {
-      {"song", "typical"},           {"song", "arrangement"},         {"song", "worst"},
+      {"song", "typical"},           {"song", "worst"},
       {"song", "document_map"},      {"song", "document_ask"},        {"overlay", "song_tools"},   {"overlay", "song_tools_form"},   {"overlay", "song_tools_bridge"},   {"overlay", "song_tools_worst"},   // OS-SONGMAP, OS-SONG-BUILD
       {"song", "document_map_empty"}, {"song", "document_map_16"},    {"song", "document_map_churn"},   // OS-BUG-SONGMAPCUR: the empty cells' ticks, 12 and 16 tracks, the dearest sweep
       {"song", "timeline"},          {"song", "timeline_worst"},  // OS-SONG-TIMELINE
+      {"song", "timeline_edit"},     {"song", "timeline_edit_worst"},  // OS-SONG3 S2: the editable TIMELINE
+      {"song", "timeline_edit_worst_dim"},  // OS-SONG3 S3 review fold: the same sweep with alternating muted tracks (the worst run count)
       {"overlay", "pattern_learn"},  {"overlay", "pattern_learn_worst"},
       {"overlay", "pattern_navigator"}, {"overlay", "pattern_navigator_worst"},
       {"overlay", "pattern_notify"}, {"overlay", "pattern_notify_worst"},

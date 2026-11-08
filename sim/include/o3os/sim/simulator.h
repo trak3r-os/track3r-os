@@ -97,7 +97,7 @@ class Simulator final : private platform::host::CardClock {
   // `tb303` (OS-E2E-9, `document tb303`): fill_tb303_project() (the document of the TB-303 journey: a module instrument and an acid line, demo_project.h).
   // `inserts` (OS-INSFX S4, `document inserts`): fill_insert_project(): the demo with three insert records (the Mixer INSERTS page; with `apps on` the picker lists the card's modules/effects).
   // `sound` (OS-E2E-2, `document sound`): fill_sound_project() instead of the demo (the document of the audio journeys: an empty pattern and four neutral instruments, demo_project.h).
-  void open_document(bool with_bindings = false, bool with_new = false, unsigned tracks = 0, bool sound = false, bool tb303 = false, bool inserts = false);
+  void open_document(bool with_bindings = false, bool with_new = false, unsigned tracks = 0, bool sound = false, bool tb303 = false, bool inserts = false, bool events = false);  // (OS-MIDIREC S1: `document events`)
   // OS-E2E-1b (scenario `card <fixture-dir>`, `card pull`, `card insert`): the simulator gets a card. open_card() copies the fixture folder into a fresh scratch directory (removed when the simulator ends, so
   // a `--twice` run starts clean), mounts it as the card of the app (the File screen lists it), gives the app the card's write side (File's SAVE, SAVE AS, EXPORT write there, through the real path guard),
   // the sample memory and bank, and a project loader that opens what the card holds (sim_project.h: File > OPEN and NEW work). It needs a document (`document` first: the loader replaces it), and a relative
@@ -109,6 +109,9 @@ class Simulator final : private platform::host::CardClock {
   // OS-E2E J2 (scenario `card copy <from> <to>`): the user took the card to a computer and copied a folder to another place (an EXPORT's OG folder into Projects/, to open it): <from> is a folder of the
   // card, <to> does not exist yet and its parent does; both are plain relative paths. Only while the card is pulled (a computer does it), the guard of the writes does not see it; `card insert` follows.
   bool card_copy(const std::string& from, const std::string& to, std::string& error);
+  // OS-CEPTFX S4a (scenario `card ptfx`): writes seven synthetic header-only plugins into Effects/ of the card folder (a chorus with a list parameter, a generator, a wavetable generator, a mono tool, one with
+  // twelve parameters, a refused one of a future version, one with a name too long), so the PLUGINS page of Sample edit has something to list. Not a FAT image. The files are made in code: no binary is committed.
+  bool card_ptfx(std::string& error);
   // OS-QANET D2 (scenario `card slow <bytes-per-ms> <latency-us> [<write-bytes-per-ms>]` and `card slow off`; o3sim --card-rate, --card-latency, --card-write-rate): the slow-card model
   // (platform/host/slow_card.h) over the card the app sees: every call of the app, the loader, the apps and the screenshot charges its time to the simulated clock in the pass where it
   // happens, and the audio engine goes on rendering through the stretched pass (one block a millisecond of the clock, as the unit's ISR does while the main loop waits for a sector). A zero rate is

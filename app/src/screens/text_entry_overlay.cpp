@@ -31,6 +31,7 @@ const char* title_of(TextEntryView::Target target) noexcept {
     case TextEntryView::Target::Track: return "TRACK NAME";
     case TextEntryView::Target::Pattern: return "PATTERN NAME";
     case TextEntryView::Target::Project: return "PROJECT NAME";
+    case TextEntryView::Target::Preset: return "PRESET NAME";  // OS-MODPRESET P4
     case TextEntryView::Target::None: break;
   }
   return "TEXT";

@@ -148,14 +148,14 @@ Size: about 1.4 KB of code, paid once by the first slice that links it (A3).
 
 ### 3.3 One encoder: `tools/deflate_pack.py`
 
-Deterministic and in the repository (Python standard library only): greedy-lazy LZ77 over a 4 KiB window, dynamic Huffman blocks with lengths limited to 15 (and 7 for the code-length code), a stored block when it is smaller. It does not call Python's zlib to make bytes (F7: its output changes with the zlib library, which would break the reproducible-image gate between machines); it uses `zlib.decompress` only in its self-test. Target: within 4 % of zlib level 9 on the assets above. A small `emit_cpp` helper writes a word-aligned `const` array plus `raw_size` and `z_size`.
+Deterministic and in the repository (Python standard library only): greedy-lazy LZ77 over a 4 KiB window, dynamic Huffman blocks with lengths limited to 15 (and 7 for the code-length code), a stored block when it is smaller. It does not call Python's zlib to make bytes (F7: its output changes with the zlib library, which would break the reproducible-image gate between machines); it uses `zlib.decompress` only in its self-test. Target: within 4 % of zlib level 9 on the assets above, a ratio the self-test measures and reports while the samples stay pinned to an absolute byte budget, so the gate does not depend on the build machine's zlib. A small `emit_cpp` helper writes a word-aligned `const` array plus `raw_size` and `z_size`.
 
 ### 3.4 Consumers (phase 1)
 
 - **Built-in modules (A3):** `o3m_embed.py` keeps each file's 64-byte header raw (so `builtin_header` and `prefers_card` still read it in place) and deflates the rest. `BuiltinModule` gains `z` and `z_size`; `size` stays the file's size. The loader's `read_some` for a built-in reads the header from `data` and then from its own `Inflater` (held in the loader: a load is stepped across passes, so it cannot share a decoder). The `.tmod` CRC and every loader check run as before on the inflated bytes.
 - **Faces (A4):** the font generator emits each face compressed (the icon face stays raw); `FontFace::bitmap` becomes `z` / `z_size` / `bitmap_bytes`, and `face_bitmap(Font, uint8_t* dst, size_t cap)` inflates a face for the few readers (the tile composer, the simulator's gallery, tests). `upload_assets` inflates each face through the staging chunk (4 KB at most per upload, word-aligned as now); the tiles of a face are composed from a 4 KiB face scratch (the 10x20 face is 3,800 B, the largest the tiles use).
 - **Boot logo (A5):** `logo_convert.py` emits the compressed logo (the committed generated file stays committed, and `logo_convert_fresh` still regenerates and compares it); `boot_logo()` returns `z`, `z_size`, `size`; the upload inflates it like a face.
-- **Help (A6, A7):** the pages move from the C++ table to a text file `app/help/pages.txt` (format in A6) that `tools/help_pack.py` packs into one stream plus a page index (offset of each page in the inflated text). `help_page(index)` keeps its signature: it inflates the page into a 4 KiB page buffer (text plus a 64-entry `HelpLine` table) only when the index differs from the last call (a one-entry cache); the decode skips to the page's offset. Worst case (the last page) inflates the whole 19 KB.
+- **Help (A6, A7):** the pages move from the C++ table to a text file `app/help/pages.txt` (format in A6) that `tools/help_pack.py` packs into one stream plus a page index (offset of each page in the inflated text) and the page titles into a flash array, `kHelpBlobTitles` (deviation, recorded here and at A6: the titles stay out of the stream, so the largest page fits the 4 KiB page buffer). `help_page(index)` keeps its signature: it inflates the page into a 4 KiB page buffer (the title pointer, a 64-entry `HelpLine` table and the page's strings; the title itself is `kHelpBlobTitles[index]`, in flash) only when the index differs from the last call (a one-entry cache); the decode skips to the page's offset. Worst case (the last page) inflates the whole 19 KB.
 - **RAM:** one `Inflater` shared by the UI assets and the help (both decode synchronously in one call, never across passes): 5.3 KiB; the face scratch 4 KiB; the help page buffer 4 KiB; all three in SDRAM_STATIC (`O3OS_SDRAM_NOINIT`), +13.3 KiB (160,384 -> about 174,000 of 196,608 B). The loader's `Inflater` lives in the module system object (64 KiB block in the module region) if `sizeof(ModuleSystem)` leaves room (its static_assert says), else in SDRAM_STATIC (+5.3 KiB more).
 - **Time:** inflating is about 20 to 40 cycles a byte: boot +2 to 5 ms (21 KB of assets), a built-in module load +1 to 3 ms, a help page change at most about 4 ms. Render CPU: 0.
 
@@ -211,7 +211,7 @@ Proof for every slice: the content bytes of both images before and after (`arm-n
 
 **A1 — `core::Inflater`** (S, Level B). Files: `core/include/o3os/core/inflate.h`, `core/src/inflate.cpp` (new), `core/CMakeLists.txt`, `tests/core_inflate_test.cpp` (new), test fixtures generated at configure time by a Python script with `zlib.compress(..., wbits=-12)` (stored, fixed and dynamic blocks; empty input; 1-byte input; 64 KiB of random bytes; a run of 10 KB of one byte; the image's own font bytes if present). Acceptance: 3.2. Host tests: every fixture inflates to its source, byte for byte, through `read` in chunks of 1, 7, 64 and 4096 bytes and through `skip`; truncated, over-long, bad block type, bad Huffman table and distance-over-4-KiB streams end `failed()` with no write past `dst + n` (ASan); `done()` only at exactly `raw_size`. QA rows, manual: none. Budget: flash 0 until a consumer links it, then about 1.4 KB; SRAM 0 (the object lives where its owner puts it).
 
-**A2 — `tools/deflate_pack.py`** (S, Level B, tooling). Files: `tools/deflate_pack.py` (new), a `ctest` that runs `--self-test`, `docs/toolchain.md` (one paragraph: why our own encoder). Acceptance: 3.3; the self-test round-trips random and fixed inputs through `zlib.decompress(data, -12)`, checks that no distance exceeds 4,096 and that two runs give identical bytes, and that the total over a built-in sample (a text, a bitmap, a code blob, all in the test) is within 4 % of zlib level 9. A1's test gains a fixture made by this encoder. Budget: no firmware.
+**A2 — `tools/deflate_pack.py`** (S, Level B, tooling). Files: `tools/deflate_pack.py` (new), a `ctest` that runs `--self-test`, `docs/toolchain.md` (one paragraph: why our own encoder). Acceptance: 3.3; the self-test round-trips random and fixed inputs through `zlib.decompress(data, -12)`, checks that no distance exceeds 4,096, that two runs give identical bytes, that the length-limited code lengths stay complete (Kraft sum 1) within their limit, and that the total over a built-in sample (a text, a bitmap, a code blob, all in the test) stays within a pinned absolute byte budget (the zlib level 9 ratio is only reported). A1's test gains a fixture made by this encoder, and the self-test's `--check-fixture` step re-makes it and compares it byte for byte with the committed bytes. Budget: no firmware.
 
 **A3 — Built-in modules compressed** (S, Level B). Files: `tools/o3m_embed.py` (raw header, deflated rest, `raw_size`), `module/include/o3os/module/builtin.h` (`z`, `z_size`; `data` is the header), `module/include/o3os/module/loader.h` and `module/src/loader.cpp` (`read_some` from the `Inflater` after the header; `use_builtin` begins it), `platform/mk66/src/app_main.cpp` (only if the loader's decoder needs a home outside `ModuleSystem`), `tests/module_builtin_test.cpp` (+ a test: each built-in inflates to the byte-exact `.tmod` the build made), the other tests that read `kBuiltinModules[i].data` as a whole file (use a helper). Acceptance: the four modules load and run as before (their host tests, `module_builtin_run_test`, the QEMU goldens unchanged); a card copy still wins only when newer. `tools/ci.sh qemu` before merge (a module path). Unit check: load TB-303, chip, FM and SID on the unit (`mod load`), play the demo, `mod` lists them, no `boot: previous run crashed`. Budget: flash -12.7 KB (bench and release); SDRAM +5.3 KiB in the module system or SDRAM_STATIC; render CPU 0; a load +1 to 3 ms.
 
@@ -219,7 +219,7 @@ Proof for every slice: the content bytes of both images before and after (`arm-n
 
 **A5 — Boot logo compressed** (S, Level B). Files: `tools/logo_convert.py`, `ui/src/boot_logo_data.cpp` (regenerated), `ui/include/o3os/ui/boot_logo.h`, `ui/src/assets.cpp`, `tests/boot_screen_test.cpp`, `tests/boot_screen_pixels_test.cpp`, `tests/display_boot_test.cpp`. Acceptance: `logo_convert_fresh` passes on the regenerated file; the boot screen goldens are byte-identical. Unit check: the logo shows at boot as before. Budget: flash -3.4 KB.
 
-**A6 — Help pages as a packed text** (S, Level B). Files: `app/help/pages.txt` (new; made once from `help_text.cpp` by a throw-away script; format: `== <title>` starts a page; `| <text>` a paragraph line (key nullptr); an empty line a blank line; `<key>\t<text>` a key line, `<key>\t` a section label, `\t<text>` a continuation), `tools/help_pack.py` (new: parse, validate ASCII and widths as `help_test` does, pack with A2, emit the stream and the page index), `app/CMakeLists.txt` (generate `help_blob.cpp` into the build tree), `app/include/o3os/app/help_blob.h` (`help_blob_page(index, HelpPageBuf&)`), `app/src/help_blob.cpp`, `tests/help_blob_test.cpp`. Acceptance: for every page, `help_blob_page` gives the same title, line count and, line by line, the same key (nullptr against `""` kept apart) and text as `help_page()` from the old table. Nothing live changes. Budget: flash 0 in the image (the blob is not referenced yet; host only).
+**A6 — Help pages as a packed text** (S, Level B). Files: `app/help/pages.txt` (new; made once from `help_text.cpp` by a throw-away script; format: `== <title>` starts a page; `| <text>` a paragraph line (key nullptr); an empty line a blank line; `<key>\t<text>` a key line, `<key>\t` a section label, `\t<text>` a continuation), `tools/help_pack.py` (new: parse, validate ASCII and widths as `help_test` does, pack with A2, emit the stream, the page index and the page titles, and fail the build when the page count is not `kHelpPages`), `app/CMakeLists.txt` (generate `help_blob.cpp` into the build tree), `app/include/o3os/app/help_blob.h` (`help_blob_page(index, HelpPageBuf&)`; deviation from 3.4, recorded here: the page titles live in the flash array `kHelpBlobTitles`, outside the stream, so the largest page's strings fit the 4 KiB page buffer — the title pointer, a 64-entry `HelpLine` table and the strings), `app/src/help_blob.cpp`, `tests/help_blob_test.cpp`. Acceptance: for every page, `help_blob_page` gives the same title, line count and, line by line, the same key (nullptr against `""` kept apart) and text as `help_page()` from the old table. Nothing live changes. Budget: flash 0 in the image (the blob is not referenced yet; host only).
 
 **A7 — Help served from the packed stream** (S, Level B). Files: `app/src/help_text.cpp` (the tables go; `help_page` and `help_page_of` stay, `help_page` decodes with the one-entry cache), `app/include/o3os/app/help_text.h` (comment: where the text lives, the page buffer's lifetime: valid until a call with another index), `tests/help_blob_test.cpp` (the parity part becomes a golden of the old text, kept as test data), docs: `docs/specs/OS-HELP.md` (one line: the authoring file is `app/help/pages.txt`). Acceptance: `help_test` unchanged and green; the help overlay goldens byte-identical. Unit check: open the help on Pattern, Song and Mixer and turn three pages. Budget: flash -14.4 KB; SDRAM_STATIC +4 KiB (page buffer).
 
@@ -295,7 +295,135 @@ A1 and A2 first (parallel), then A3, A4, A6 (parallel; A5 after A4, A7 after A6)
 - B1. Start with: `platform/mk66/CMakeLists.txt:113-121`, `platform/mk66/src/bench.cpp:488-565` (`voice_st`), `:919-1256` (`cpuopt`, `looper`), `:1537-1725` (`diskbench` and its USB counters), `:1735-1750` (the dispatch), `platform/mk66/include/o3os/platform/mk66/bench_report.h:24-55`.
   - Unit check: the bench image answers the four archived kernels with the message; `diag bench all` otherwise as before.
 - I0. Start with: `modules/CMakeLists.txt:56-145` (`o3m_add_module`), `tools/o3m_pack.py:19` and `:438-443` (what is refused, the flags), `formats/CMakeLists.txt:17-40`, `formats/mod/include/o3os/formats/mod/import.h:110` (`Importer`) and `formats/med/include/o3os/formats/med/import.h:36`. Record here: image, state, relocations, shim symbols.
+  - Recorded at I0 (28c96f25, `o3m_pack` line of the host CI build): `tracker.tmod` packs — file 60,188 B = 64-byte header + image 55,472 B (hot 0 B, cold 55,472 B) + 1,163 relocations x 4; state 40,008 B; 0 parameters, 0 views; kind 3, ABI 1.10, unversioned; the host `.so` (`o3m_tracker_host`) builds. Shim symbols the packer required: `memcpy`, `memmove`, `memset`, `memcmp`, `strlen`, `strcmp`, `strncpy` (the first pack's only undefined libc name) and the `__aeabi_` block-copy names, `__aeabi_lmul`, `__aeabi_llsl`/`__aeabi_llsr`/`__aeabi_lasr`, `__aeabi_uldivmod` (RTABI r0:r1/r2:r3 convention, a trampoline over a shift-subtract divider; the importers divide 64-bit in `div_round`). The only non-shim undefined symbol was `core::log2_fast`, fixed by compiling `core/src/fast_math.cpp` into the module. No writable global, no constructor, no movw/movt and no hot/cold crossing was refused; nothing in the importer sources had to change. Image note for I3: 55.5 KB is above the 45..50 KB estimate (the whole model closure stays linked), so I3's -40.6 KB must be re-measured on the map.
+  - Recorded at I2 (this slice): the importer table of ABI 1.11 is refined within the unreleased kind 3 (begin gains the file window / arena / options arguments; report and close are appended after read_pcm), the layout tag now covers the whole import-facing model layout (ModelArena, Project with every member offset, TrackSlot, Pattern, Step, Instrument and its SamplerParams, plus a manual version) and lives in model/import_layout_tag.txt, held to model::kImportLayoutTag by ctest o3m_layout_tag_pin; modules/importers/ is searched only by the importer scan; the proxy (app::ModuleImport) loads the importer at the first step after Settle, runs it, serves read_pcm from it and unloads it at close, with the 3.6 messages (NO IMPORTER / IMPORTER FOR OTHER FIRMWARE at begin, NO MODULE MEMORY / IMPORTER DAMAGED after the reset).
+  - The shim is now covered by a host test: its portable half lives in `modules/importers/tracker/libc_shim.h` (the `.cpp` keeps the extern "C" names and the target-only `__aeabi_uldivmod` trampoline) and `tests/module_shim_test.cpp` (ctest `unit_rest`, like the module tests) checks the 64-bit helpers, `udiv64_impl`, memmove overlap both ways and strncpy padding against native 64-bit arithmetic; the shift-subtract divider, the `s >= 32` branches of `__aeabi_llsl`/`__aeabi_llsr` and `1ull << 40` were wrong before it.
 - I1. Start with: `module/sdk/o3module.h:95-110` (kinds) and `:750-840` (descriptor; the file header, `reserved2[1]` at offset 44), `module/include/o3os/module/image.h:52-100`, `module/src/image.cpp:174` (where `reserved2[1]` is refused today), `module/sdk/README.md` section 10.
 - I2, I3. Start with: `app/include/o3os/app/module_import.h:6-20` (the phases) and `:80-160`, `app/src/module_import.cpp:278-320` (`probe`, `begin`) and `:128-145` (the strip), `platform/mk66/src/app_main.cpp:1105` and `:1169`, `formats/mod/src/module.cpp:91` (`sniff_kind`), `tools/release/starter_manifest.json:4`, `tools/release/make_starter.py:140-142` and `:267-283` (`collect_modules`).
   - Unit check: imports with and without the file.
 - Report per slice: the two images' content bytes before and after, SRAM_L, SRAM_U, SDRAM_STATIC, the tests run, and the unit check left.
+
+## 10. Phase 3 (measured on dev c6dc82ee)
+
+Why: flash is full again. Evidence labels in this section: **measured** (read from the linked image, the map or a throwaway build), **estimated** (computed from a measured size and a zlib estimate; the glue code is a guess), **open research question**. Approved specs still to come need 25-35 KB (OS-CEPTFX S2-S6 about 9.5, OS-CEWTENV W3b/W4, OS-MTC about 9, OS-PERFMODES 3.3, OS-MIDICCMAP 2.3, OS-MIDIBEND 1.5). Target of this phase: at least 32 KB recovered in both images, no render CPU cost, no visible behaviour change.
+
+### 10.1 Content bytes (measured)
+
+Content bytes = `.text` + `.ARM.exidx` + `.init_array` + `.ramfunc_l` + `.data` (the same rule as 2.1).
+
+| Image | Content bytes | Of 1,048,576 | Free |
+|---|---|---|---|
+| release | 1,016,252 (992 KB) | 96.9 % | 32,324 |
+| bench (`-DO3OS_BENCH=ON`) | 1,038,556 (1014 KB) | 99.0 % | 10,020 |
+
+The bench image is 22,304 B larger. The bench-only symbols total 16,471 B (`bench::run` 2,444, `run_kernels` 2,198, `check_coherence` 2,088, `run_insert` 1,252, `run_burst` 1,080, `run_insert_st` 1,036, `run_voice` 960, `run_tb303` 760, and smaller ones). Every candidate below is in code common to both images, so both gain the same amount; the bench image is the binding one (10 KB free).
+
+### 10.2 Flash by library (measured, release; the map's per-object sizes)
+
+| Library | Total | Note |
+|---|---|---|
+| app | 421,337 | code 375,544, const 45,785 |
+| audio | 127,116 | code 97,666, const 5,302 |
+| image_objects | 77,402 | code 72,368 (bench: 94,685) |
+| platform_mk66_pure | 50,836 | |
+| seq | 41,840 | |
+| model | 40,843 | |
+| formats | 38,622 | |
+| o3m_builtin | 38,517 | all const (CHIP, SID, FM, TB-303 images) |
+| ui | 24,617 | |
+| midi | 14,700 | |
+| usb | 13,483 | |
+| fatfs | 12,417 | |
+| core | 10,578 | |
+| module | 8,798 | |
+| libm | 7,168 | new since I3 (pulled by `audio/src/wt_contour.cpp`) |
+| formats_wav | 3,920 | |
+| libgcc, libc_nano, eve | 1,092, 887, 154 | |
+| merged strings pool | 80,315 | pre-merge 99,837; bench 85,353 |
+
+The sum of the areas is 1,014,660 B; the 1.6 KB gap to the content bytes is alignment padding (not itemised). `.ramfunc_l` is 0x6918 B and audio SRAM_L 24,148 B (untouched by this phase).
+
+### 10.3 The 40 largest symbols (measured, release)
+
+ParamsScreen::render 11,048 / app::kBuiltinTable 10,912 / z_chip::kchip 9,208 / z_sid::ksid 9,164 / kHelpBlobStream 8,568 / MixerScreen::render 8,556 / PerformScreen::render 8,128 / module::kBuiltinNotices 7,125 / z_tb303::ktb303 6,712 / app::kActions 6,640 / FileScreen::render 6,052 / z_fm::kfm 5,968 / appimg::pass 5,708 / ConfigScreen::render 5,424 / SongScreen::render 5,368 / RecordScreen::render 4,628 / WaveScreen::render 4,536 / appimg::start_app 4,444 / SampleLoadScreen::render 4,424 / ui::k_boot_logo_z 4,148 / App::run_once 3,952 / PatternView::draw 3,708 / SampleEditScreen::render 3,620 / MasterScratch::process 3,596 / draw_song_timeline 2,576 / model::events::plan 2,432 / EventsOverlay::render 2,396 / LoopPlayer::serve 2,276 / SendReverb::run 2,214 / play_orders_data::kEntries 2,176 / SendDelay::process 2,170 / console::cmd_mod 2,132 / state_chunks::decode 2,020 / ModuleUi::launch_app 1,964 / USB0_IRQHandler 1,948 / native::Writer::build_piece 1,852 / ViewState::ViewState 1,836 / __ieee754_powf 1,812 / apply_instrument_param 1,796 / SaveService::SaveService 1,740. Next: Graph::recompute_strip 1,732, __kernel_rem_pio2f 1,684. In the bench image `bench::run`, `run_kernels` and `check_coherence` replace the last three.
+
+Already compressed or incompressible (no gain): `kHelpBlobStream`, `ui::k_boot_logo_z`, the font blobs, `kHalfSine`, the four built-in `.tmod` images (they are the engines themselves; R6 would move them to the card, which Q3 keeps in flash).
+
+### 10.4 What grew since the I3 baseline (measured; bench, 908 KB on 5d3e75df, now 1,014 KB)
+
+| Area | Growth (B) | Main cause |
+|---|---|---|
+| app | +39,958 | screens, dialogs (PTOOLS2, PERFMODES, SONG), console |
+| seq | +11,292 | play orders, events, perform |
+| o3m_builtin | +10,667 | CHIP engine and the notices |
+| model | +10,664 | |
+| audio | +9,050 | |
+| image_objects | +8,222 | bench kernels |
+| libm | +7,080 | 88 to 7,168, new from `wt_contour` |
+| midi | +6,060 | |
+| strings pool | +5,013 | |
+| formats | +2,206 | |
+| core, module, platform_mk66_pure | +484, +492, +182 | |
+
+The growth is about 111 KB, spread over many features: no single regression to undo. The levers are therefore the same four as in phases 1 and 2 (data to a deflate blob, template and constructor dedupe, -O3 to -O2, fewer strings), applied to what has been added since.
+
+### 10.5 Candidates (all new Community OS behaviour, invisible)
+
+Each saving is for both images (common code). **m** = measured, **e** = estimated. "Unit check" is what the tester repeats on the unit; every slice also reports its two images' content bytes.
+
+| Id | What | Saving | Basis | Risk | Level | CPU | Unit check |
+|---|---|---|---|---|---|---|---|
+| P1 | `module::kBuiltinNotices` (7,125 B, the licence notices behind `mod notice`) as a deflate blob, inflated into a main-loop buffer for the line paging | about 4.3 KB | deflate 7,122 to 2,538 (m); glue (e) | low: console only | B | none (main loop, on demand) | `mod notice` pages and the line count match |
+| P2 | `append_fx_value<N>` as one instance (two of 1,484 B each; the callers pass different `N`) plus a non-template core under `append_uint<N>` (59 instances, 2,594 B), `append_dec<N>` (27, 1,234 B) and `FixedString<N>::append(const char*)` (64, 768 B) | 1.4 (m) + 2.0 (e) = about 3.4 KB | sizes from the map | low: output compared by the existing host tests and goldens | B | none (UI text, main loop) | none beyond the goldens |
+| P3 | The FX name and description table of the step popup (`FxText kFx[...]`, 5,378 B) as a blob, read through a page cache like the help blob | about 3.3 KB | deflate 5,378 to 1,843 (m); glue (e) | low | B | none | the FX picker names and descriptions on Pattern |
+| P4 | `play_orders_data::kEntries` (2,176 B, uint16) deflated, inflated once at boot into SDRAM | about 1.3 KB | deflate 2,176 to 681 (m); glue (e) | low: the data goes through the same accessor | B | none (boot, about 0.2 ms, e) | the PLAY MODE list on Perform |
+| P5 | Console strings (11,578 B in `console.cpp`) and the two help tables (`command_table.h` 2,558 B, `bench_report.h` 1,987 B) as one text blob | about 5 KB | deflate 11,769 to 5,647 (m); glue (e) | medium: two host tests read the help strings and must still pass | B | none (console) | `help`, `help <cmd>` and `diag bench` usage text |
+| P6 | `app::kBuiltinTable` (682 entries x 16 B = 10,912 B) deflated at build time and inflated at boot into SDRAM_STATIC (it uses 135,136 of 196,608 B) | about 6.9 KB | deflate 10,912 to 3,746 (m); glue (e) | medium: the boot order, and the constexpr checks stay on the host table | B | none (one inflate at boot, about 1-2 ms for 11 KB, open question 3.4) | every key family on the unit |
+| P6b | fallback of P6: pack `Binding` from 16 to 12 B (u16 action index, i16 argument) | about 2.7 KB | e | medium: touches the `static_assert(sizeof == 16)` and every user | B | none | as P6 |
+| P7 | The three biggest constructors (R4): `ViewState::ViewState` 1,836 B, `SaveService::SaveService` 1,740 B, `SampleBankMem::SampleBankMem` 1,352 B (default member initialisers expanded inline; zero-fill and a table-driven init instead) | about 2 KB | e (unmeasured: objdump first) | low | B | none (boot) | boot and a save |
+| P8 | Boot, config and diag strings (`app_main.cpp` 5,858 B, `config_screen` 2,807 B, `diag_text` 2,511 B) through the P5 blob | about 3 KB | e, lower confidence (deflate 7,355 to 3,044 and 2,818 to 1,512) | medium: strings are used by pointer, so each needs a lookup | B | none | Config, diag and boot messages |
+| P9 | R1: `-O3` to `-O2` on `send_reverb` (9,100 to 6,258), `send_delay` (4,462 to 2,678) and `master_scratch` (5,796 to 3,528); `loop_player`, `master_limiter`, `master_kill_eq` and `master_dj_filter` gain 0.1-1.2 KB each and stay at `-O3` | about 6.9 KB (all seven at `-Os`: 12.7 KB, at `-O2`: 8.7 KB) | file sizes (m, throwaway builds); CPU **unmeasured** | high: the audio path | **C** | **unknown, to measure**; OS-CPUOPT1 found `-Os` made a bad inner loop for the loop player | the bench rows `delay`, `reverb`, `reverb_full`, `limiter`, `limiter_q`, `dj`, `worst`, `stages`, `strips`, plus `diag cpu` with the DJ scratch and a loop on; any row more than 1 % worse reverts that file |
+
+Measured and dropped:
+
+- `-Oz` gives a byte-identical ELF to `-Os` on this GCC (m): no gain.
+- Replacing libm `powf`/`sinf`/`cosf`/`expf` (about 5.5 KB: `ef_pow` 1,992, `kf_rem_pio2` 1,884, `ef_rem_pio2` 1,648, `ef_exp` 596 and others): the `wt_contour` golden (`tests/audio_wt_contour_test.cpp`) compares CRCs and spot values bit for bit and pins the tracker-ce parity. Excluded unless the maintainer accepts a new golden.
+- 64-bit division (`_udivmoddi4` 928, `_aeabi_ldivmod` 811): the callers are widespread; not worth a slice.
+- `kActions` packing (about 0.4 KB), bench kernels to a `.tmod` (they use the DWT and engine internals): not feasible.
+- `play_orders` and `kDevice` (1,200 B, deflates to 395: about 0.8 KB) as a P4 add-on if a slice is short.
+
+Reserves (not recommended now): R2 LTO, the one big lever (literature 5-10 % of code), parked by Q4 a and blocked by F9 (the link fails with "Unknown destination type (ARM/Thumb)"); R6 SID/FM to the card (Q3 keeps built-ins in flash: a maintainer decision, Level C); R7 sample readers to the importer module (Level C, a format reader); outlining shared draw idioms of the screens' `render` functions (about 62 KB of code; 2-4 KB, e, needs a spike).
+
+### 10.6 Recommended order
+
+Cheapest and safest first, all Level B except the last. Cumulative saving (e = estimated):
+
+| Step | Slice | Saving | Cumulative |
+|---|---|---|---|
+| 1 | P2 template dedupe | 3.4 KB | 3.4 |
+| 2 | P1 notices blob | 4.3 KB | 7.7 |
+| 3 | P3 FX text blob | 3.3 KB | 11.0 |
+| 4 | P4 play orders | 1.3 KB | 12.3 |
+| 5 | P5 console and help text blob | 5.0 KB | 17.3 |
+| 6 | P6 `kBuiltinTable` | 6.9 KB | 24.2 |
+| 7 | P7 constructors | 2.0 KB | 26.2 |
+| 8 | P8 boot, config and diag strings | 3.0 KB | 29.2 |
+| 9 | P9 R1 on three audio files (Level C, after the bench rows) | 6.9 KB | 36.1 |
+
+Steps 1-8 give about 29.2 KB (e), short of 32 KB; P9 reaches 36.1 KB. Without P9 the target needs the 0.8 KB `kDevice` add-on plus a screen-outlining spike, or LTO. Decision for the maintainer: accept P9 (needs the bench rows on the unit, no render cost proven by measurement), or open the LTO question again. Steps 1-4 (12.3 KB, all Level B, no hardware risk) are enough for OS-MIDIBEND, OS-MIDICCMAP and OS-PERFMODES 3.3; OS-MTC and OS-CEPTFX need steps 5-9.
+
+Rules that hold for every slice: no change to a persistent format, no golden regenerated, nothing new in the render path, an ISR or SRAM_L, no official-firmware material; each blob uses the shared `ui::asset_inflater()` from the main loop only, and a slice that cannot show its two images' content bytes lower is dropped. The inflate time on the unit stays an **open research question** (3.4) until the first blob slice is measured.
+
+### 10.7 State for implementer (phase 3)
+
+- Common: the blob pattern is `app/src/help_blob.cpp` (a one-entry page cache, a 4 KiB page buffer, `Inflater::begin/skip/read`), `tools/help_pack.py` and `tools/deflate_pack.py` (the encoder, raw deflate, 4 KiB window), the custom command in `app/CMakeLists.txt:10-25`, and `ui::asset_inflater()` (`ui/include/o3os/ui/assets.h:223`, main loop only). Measure as in section 9; the estimates above used zlib level 9, raw deflate, `wbits -12`.
+- P2. Start with: `app/include/o3os/app/fx_text.h:58` (`append_fx_value<N>`), its callers `app/src/fill_view.cpp:221` and `app/src/pattern_screen.cpp:208` and `:230`, `app/include/o3os/app/text_format.h:44` and `:60` (`append_dec`, `append_uint`), `core/include/o3os/core/fixed_string.h`. Count instances with `nm -C --size-sort` on the map before and after. Unit check: none.
+- P1. Start with: `module/include/o3os/module/builtin.h:75` (`kBuiltinNotices`), `tools/o3m_embed.py:75` (emits it as a `cpp_string`), `platform/mk66/src/app_main.cpp:2415` (`module_notices()`), `platform/mk66/usb/src/console.cpp:1000-1012` (`mod notice [line]` skips N lines and prints at most `kMaxLines`). The pager needs the raw text in a buffer: inflate on demand into a main-loop buffer, not a static one. Unit check: `mod notice` and `mod notice 20`.
+- P3. Start with: `app/src/screens/step_popup_overlay.cpp:30-36` (`struct FxText`, `kFx[model::fx::kPickerCount]`), `app/src/help_blob.cpp` for the page cache. Unit check: open the FX picker on Pattern and scroll all rows. As built: the FX text is cached in `app::FxTextCache` (0.9 KB, SDRAM on the MK66 image like the help page buffer): all names decoded once, the last description keyed by index, so a redraw does not restart the stream.
+- P4. Start with: `seq/src/play_orders.cpp:17` (`play_orders_data::kEntries`), `seq/include/o3os/seq/play_orders.h`; inflate into SDRAM at boot next to the other boot-time tables; the host build keeps the plain table. Unit check: the PLAY MODE list on Perform. As built (c3c0be66): the render (`Sequencer::advance_tracks`) now reads one uint16 of the table from SDRAM per step per custom-order track instead of from flash; negligible (the same pattern as `g_seq_order`), and the table is written once at boot before the render starts (single writer); a failed unpack logs `boot: play orders FAILED` and the accessor answers step 1, option 0.
+- P5. Start with: `platform/mk66/usb/src/console.cpp:183-194` (`cmd_help`), `:1460` and `:1609` (`bind`), `platform/mk66/usb/include/o3os/platform/mk66/usb/command_table.h` (`kCommandInfo`, 40 entries), `platform/mk66/include/o3os/platform/mk66/bench_report.h:26` (27 entries), `tests/mk66_usb_text_test.cpp:263-283` and `tests/mk66_bench_report_test.cpp:20` (they read the help strings and must keep passing). The 96 strings of 40 or more characters hold 7,224 of the 11,578 B and deflate to about 3,260: move those first, keep short strings in place. Unit check: `help`, `help bind`, `diag bench` with no argument.
+- P6. Start with: `app/src/bindings.cpp:1284` (`kBuiltinTable`, constexpr `join3(kBase, kTracksRows, kVerbPads)`), `core/include/o3os/core/binding.h:61` (the 16 B `static_assert`). The cross build has no host-tool step: compile the table into a cross OBJECT target, `objcopy -O binary --only-section=.rodata.<symbol>`, pack with `deflate_pack.py`, inflate into SDRAM_STATIC at boot before the first binding lookup; the host keeps the constexpr table and its tests. Check the order of `SDRAM_STATIC` users in `docs/architecture/` first. Unit check: one key per family (Pattern, Song, Mixer, Perform, Tracks, Verb pads) and a full-screen walk.
+- P7. Start with: `app/include/o3os/app/view_state.h:169` (`ViewState::ViewState`, `mode[...] = kPatternDefaultMode` and many initialisers), `app/include/o3os/app/sample_bank.h:107` (`SampleBankMem`), `app/include/o3os/app/save_service.h:244` (`SaveService`). Run `arm-none-eabi-objdump -d` on the constructor first and keep only what shrinks; drop the slice if the gain is under 1 KB. Unit check: boot and one save.
+- P8. Start with the strings of `platform/mk66/src/app_main.cpp`, `app/src/screens/config_screen.cpp`, `platform/mk66/usb/src/diag_text.cpp` (sizes in 10.5); reuse the P5 text blob and its lookup. Unit check: Config screen, diag screen, boot messages.
+- P9. Start with: `audio/CMakeLists.txt:46-52` (`set_source_files_properties(... COMPILE_OPTIONS "-O3")` under `if(O3OS_CROSS)`), `docs/architecture/cpu-budget.md`, `platform/mk66/include/o3os/platform/mk66/bench_report.h:22` (the `Kernel` enum: delay, reverb, reverb_full, limiter, limiter_q, dj, worst, stages, strips). Take a baseline of every row on the unit before the change, change one file at a time, repeat the rows; `master_scratch` and `loop_player` have no row of their own: use `worst` and `diag cpu` with the DJ scratch and a loop on. Level C: a risk review plus one independent review, and the tester's numbers go into the commit message.
+- Report per slice: the two images' content bytes before and after (the P-slice's own delta), SRAM_L, SRAM_U, SDRAM_STATIC, the tests run, and the unit check left.

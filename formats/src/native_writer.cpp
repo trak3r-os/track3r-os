@@ -40,8 +40,20 @@ std::size_t song_size(const Project& p) noexcept { return kSongFixed + p.song_le
 // (OS-INSTUI S8b + S9). The version is the smallest one that holds what the instrument has, so a project that never used the newer fields is the file it was.
 // 1.4 (OS-LFOSINE: the 1.3 layout, whole) for an instrument with a Sine LFO.
 // 1.5 (OS-STEREO step 2: the 1.3 layout, whole, and the stereo byte) for a Sample instrument with the stereo flag; it covers a Sine LFO too (1.5 is above the 1.4 gate).
+// 1.6 (OS-CEWTENV W1: the 1.5 layout, whole, and the twelve WT bytes) for an instrument with a WT slot (a loop of 2 or 3) or a non-zero WT byte; it covers 1.5 and 1.4 too (1.6 is above their gates).
+// 1.7 (OS-CEPLAYTHRU P1: the 1.6 layout, whole, and the play-thru flag) for a Sample instrument with the flag set; it covers 1.6, 1.5 and 1.4 too (1.7 is above their gates).
 // `stereo`: the flag as it is to be written (Writer::begin's mask may hold it back: the flag is saved only with its side file, OS-STEREO (b)).
+// 1.8 (OS-MODRATE S3: the 1.7 layout, whole, and the module RATE byte) for a Module instrument with a rate other than FULL; it covers 1.7 .. 1.4 too.
 std::uint16_t inst_version(const Instrument& in, bool stereo) noexcept {
+  if (in.kind == model::InstrumentKind::Module && in.rate != 0) {
+    return kInstVersionRate;
+  }
+  if (in.kind == model::InstrumentKind::Sample && in.slice_thru != 0) {
+    return kInstVersionPlayThru;
+  }
+  if (model::inst_uses_wt(in)) {
+    return kInstVersionWt;
+  }
   if (stereo && in.kind == model::InstrumentKind::Sample) {
     return kInstVersionStereo;
   }
@@ -54,7 +66,7 @@ std::uint16_t inst_version(const Instrument& in, bool stereo) noexcept {
 std::size_t inst_size(const Instrument& in, bool stereo) noexcept {
   const std::uint16_t v = inst_version(in, stereo);
   return kInstFixed + text_len(in.name, model::kInstrumentNameMax) + text_len(in.sample_path, model::kSamplePathMax) + in.param_len + kInstRate + (v >= kInstVersionEngine ? kInstEngine : 0) +
-         (v >= kInstVersionMidi ? kInstMidi : 0) + (v >= kInstVersionStereo ? kInstStereo : 0);
+         (v >= kInstVersionMidi ? kInstMidi : 0) + (v >= kInstVersionStereo ? kInstStereo : 0) + (v >= kInstVersionWt ? kInstWt : 0) + (v >= kInstVersionPlayThru ? kInstPlayThru : 0) + (v >= kInstVersionRate ? kInstModRate : 0);
 }
 
 void put_header(Enc& e, std::uint32_t id, std::size_t payload) noexcept {
@@ -380,6 +392,19 @@ bool Writer::build_piece() noexcept {
         }
         if (version >= kInstVersionStereo) {
           e.u8(stereo ? std::uint8_t{1} : std::uint8_t{0});
+        }
+        if (version >= kInstVersionWt) {  // OS-CEWTENV W1: the twelve WT bytes after the stereo byte, wt_bend and wt_sust of the six slots in slot order; a slot whose loop is not 2 or 3 (only 2 and 3 are WT) writes zeros, as the reader reads them back
+          for (unsigned i = 0; i < model::kLfos; ++i) {
+            const bool wt = model::is_wt_loop(in.sampler.envelope[i].loop);
+            e.u8(wt ? in.sampler.lfo[i].wt_bend : std::uint8_t{0});
+            e.u8(wt ? in.sampler.lfo[i].wt_sust : std::uint8_t{0});
+          }
+        }
+        if (version >= kInstVersionPlayThru) {  // OS-CEPLAYTHRU P1: the play-thru flag after the WT bytes, only for a Sample instrument with it set
+          e.u8(in.slice_thru);
+        }
+        if (version >= kInstVersionRate) {  // OS-MODRATE S3: the module RATE after the play-thru byte (1.8 is a Module instrument's, so the play-thru byte before it is 0 there)
+          e.u8(in.rate);
         }
         put_pad(e, payload);
         ++cursor_;

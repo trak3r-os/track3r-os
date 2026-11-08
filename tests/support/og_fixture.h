@@ -74,20 +74,20 @@ inline void header(Bytes& b, char m0, char m1, unsigned type, const std::uint8_t
 
 struct PatternSpec {
   std::uint8_t version = 5;
-  unsigned tracks = 12;                                   // 8 or 12
+  unsigned tracks = 12;                                   // 8, 12 or 16 (16: tracker-ce's v5, 12,336 B)
   char magic[2] = {'K', 'S'};
   std::uint8_t fw[4] = {1, 9, 0, 1};                      // header bytes 4-7
   std::uint8_t pad[2] = {0, 0};                           // header bytes 14-15 (junk in real files)
   std::uint8_t head_tail[12] = {0, 0, 0xC8, 0x42, 0, 0, 0, 0, 0, 0, 0, 0};  // bytes 16-27: 100.0f, 0.0f, reserved
-  std::uint8_t length[12] = {};                           // the length byte of each track: its last step index
-  std::uint8_t step[12][128][6] = {};                     // note (i8), instrument, FX1 type, value, FX2 type, value
+  std::uint8_t length[16] = {};                           // the length byte of each track: its last step index
+  std::uint8_t step[16][128][6] = {};                     // note (i8), instrument, FX1 type, value, FX2 type, value
 };
 
 inline PatternSpec empty_pattern(unsigned tracks, unsigned version = 5) {
   PatternSpec p;
   p.tracks = tracks;
   p.version = static_cast<std::uint8_t>(version);
-  for (unsigned t = 0; t < 12; ++t) {
+  for (unsigned t = 0; t < 16; ++t) {
     p.length[t] = 31;
     for (unsigned s = 0; s < 128; ++s) p.step[t][s][0] = 0xFF;  // -1: empty
   }
@@ -105,7 +105,7 @@ inline PatternSpec rich_pattern(unsigned tracks, unsigned version, std::uint32_t
     x ^= x << 5;
     return x;
   };
-  static const std::uint8_t lengths[12] = {31, 15, 63, 127, 31, 0, 47, 31, 95, 31, 7, 31};
+  static const std::uint8_t lengths[16] = {31, 15, 63, 127, 31, 0, 47, 31, 95, 31, 7, 31, 63, 31, 15, 31};
   for (unsigned t = 0; t < tracks; ++t) {
     p.length[t] = lengths[t];
     for (unsigned s = 0; s < 128; ++s) {
@@ -134,7 +134,7 @@ inline PatternSpec rich_pattern(unsigned tracks, unsigned version, std::uint32_t
 }
 
 inline Bytes pattern_bytes(const PatternSpec& p) {
-  const std::size_t len = p.tracks == 8 ? 6184 : 9260;
+  const std::size_t len = 28 + 769u * p.tracks + 4;  // 6,184 (8 tracks), 9,260 (12), 12,336 (16, tracker-ce's v5)
   Bytes b(len, 0);
   header(b, p.magic[0], p.magic[1], 2, p.fw, p.version, static_cast<std::uint32_t>(len));
   b[14] = p.pad[0];
@@ -162,6 +162,99 @@ inline std::uint8_t usage_byte(const PatternSpec& p) {
     }
   }
   return m;
+}
+
+// ---- v6 patterns (OS-CEPAT S1, the byte map of docs/specs/OS-CEPAT.md 2.1; tracker-ce@7fd6c2c:core/source/
+// mtSequencer.h:282-336, cited as facts, no code taken) ------------------------------------------------------
+//
+// A 16-byte header (magic 2, type u16, firmware [4], structure version [4] at offset 8, size u16 at offset 12, two
+// padding bytes), then tempo f32, swing f32 and 4 reserved bytes (a 28-byte head), then n rows of one length byte
+// plus 128 steps of 8 bytes, then a CRC-32 over everything before it. A step is note i8, instrument u8, fx[2] (type
+// u8, value u8), volume i8, micromove i8; -1 means none for both columns. n is 8, 12 or 16 and the size field says
+// the whole file: 28 + n * 1,025 + 4.
+
+struct PatternSpec6 {
+  std::uint8_t version = 6;
+  unsigned tracks = 16;                                   // 8, 12 or 16
+  char magic[2] = {'K', 'S'};
+  std::uint8_t fw[4] = {1, 9, 0, 1};                      // header bytes 4-7
+  std::uint8_t pad[2] = {0, 0};                           // header bytes 14-15
+  std::uint8_t head_tail[12] = {0, 0, 0xC8, 0x42, 0, 0, 0, 0, 0, 0, 0, 0};  // bytes 16-27: 100.0f, 0.0f, reserved
+  std::uint8_t length[16] = {};                           // the length byte of each track: its last step index
+  std::uint8_t step[16][128][8] = {};                     // note (i8), instrument, FX1 type, value, FX2 type, value, volume (i8), micromove (i8)
+};
+
+inline PatternSpec6 empty_pattern6(unsigned tracks, unsigned version = 6) {
+  PatternSpec6 p;
+  p.tracks = tracks;
+  p.version = static_cast<std::uint8_t>(version);
+  for (unsigned t = 0; t < 16; ++t) {
+    p.length[t] = 31;
+    for (unsigned s = 0; s < 128; ++s) {
+      p.step[t][s][0] = 0xFF;  // -1: empty note
+      p.step[t][s][6] = 0xFF;  // -1: no volume
+      p.step[t][s][7] = 0xFF;  // -1: no micromove
+    }
+  }
+  return p;
+}
+
+// Notes of every kind, instruments, FX types of every class of the id map, and volume and micromove values of every
+// range (negative, 0..100, above 100), on steps with and without FX columns. Deterministic in `seed`.
+inline PatternSpec6 rich_pattern6(unsigned tracks, unsigned version, std::uint32_t seed) {
+  PatternSpec6 p = empty_pattern6(tracks, version);
+  std::uint32_t x = seed * 2654435761u + 1;
+  auto rnd = [&x]() {
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    return x;
+  };
+  static const std::uint8_t lengths[16] = {31, 15, 63, 127, 31, 0, 47, 31, 95, 31, 7, 31, 63, 31, 15, 31};
+  static const std::int8_t volumes[8] = {-1, -2, 0, 1, 50, 100, 101, 127};
+  static const std::int8_t moves[6] = {-1, -2, 0, 50, 100, 127};
+  for (unsigned t = 0; t < tracks; ++t) {
+    p.length[t] = lengths[t];
+    for (unsigned s = 0; s < 128; ++s) {
+      std::uint8_t* st = p.step[t][s];
+      const std::uint32_t r = rnd();
+      switch (r % 9) {
+        case 0: st[0] = static_cast<std::uint8_t>(rnd() % 128); st[1] = static_cast<std::uint8_t>(rnd() % 64); break;
+        case 1: st[0] = 0xFC; st[1] = 0; break;                                       // off, no instrument
+        case 2: st[0] = 0xFD; st[1] = static_cast<std::uint8_t>(1 + rnd() % 20); break;  // cut
+        case 3: st[0] = 0xFE; st[1] = static_cast<std::uint8_t>(rnd() % 50); break;       // fade
+        case 4: st[0] = static_cast<std::uint8_t>(0x80 + rnd() % 120); st[1] = 3; break;  // other negatives
+        default: break;                                                                   // empty
+      }
+      if (r % 3 == 0) {
+        st[2] = static_cast<std::uint8_t>(rnd() % 128);  // any type: 0..42 shared, 43..74 tracker-ce, 75..127 cleared
+        st[3] = static_cast<std::uint8_t>(rnd());
+      }
+      if (r % 5 == 0) {
+        st[4] = static_cast<std::uint8_t>(rnd() % 128);
+        st[5] = static_cast<std::uint8_t>(rnd());
+      }
+      if (r % 4 == 0) st[6] = static_cast<std::uint8_t>(volumes[rnd() % 8]);
+      if (r % 4 == 1) st[7] = static_cast<std::uint8_t>(moves[rnd() % 6]);
+    }
+  }
+  return p;
+}
+
+inline Bytes pattern6_bytes(const PatternSpec6& p) {
+  const std::size_t len = 28 + 1025u * p.tracks + 4;
+  Bytes b(len, 0);
+  header(b, p.magic[0], p.magic[1], 2, p.fw, p.version, static_cast<std::uint32_t>(len));
+  b[14] = p.pad[0];
+  b[15] = p.pad[1];
+  for (unsigned i = 0; i < 12; ++i) b[16 + i] = p.head_tail[i];
+  for (unsigned t = 0; t < p.tracks; ++t) {
+    const std::size_t base = 28 + 1025u * t;
+    b[base] = p.length[t];
+    std::memcpy(&b[base + 1], p.step[t], 1024);
+  }
+  seal(b);
+  return b;
 }
 
 // ---- project.mt (PAR-006) ----------------------------------------------------------------------------------
@@ -352,7 +445,7 @@ inline Bytes instrument_head(const InstrumentSpec& s) {
   if (!s.canonical) {
     std::uint32_t x = 0x9E3779B9u;
     for (std::size_t i = 14; i < 16; ++i) b[i] = static_cast<std::uint8_t>(x >> i);
-    b[17] = 7; b[18] = 9; b[53] = 5; b[66] = 3; b[77] = 1; b[86] = 2; b[273] = 4; b[279] = 6;
+    b[17] = 7; b[18] = 9; b[53] = 5; b[66] = 3; b[77] = 1; b[86] = 2; b[273] = 4;  // (279 is the play-thru flag now, OS-CEPLAYTHRU P1: it stays 0 here)
     p32(b, 56, 0x2000ABCDu);   // a live RAM pointer
     p32(b, 68, 77);            // wavetable window number
     b[72] = 'a'; b[73] = 'b';

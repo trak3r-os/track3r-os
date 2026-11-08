@@ -67,11 +67,13 @@ constexpr bool led_on(std::uint8_t pulses, std::uint32_t ms) noexcept {
 // timer, so the volatile flag needs no critical section.
 inline volatile bool g_heartbeat_on = true;
 
-// OS-STATUSLED: the LED level with the STATUS LED option in force: with the heartbeat off (`heartbeat_on` false) pattern 0 keeps the LED
-// dark, while a fault code (pulses >= 1, the sticky codes that replace the heartbeat) still shows.
+// OS-STATUSLED: the LED level with the STATUS LED option in force: with the heartbeat off (`heartbeat_on` false) the heartbeat
+// (pattern 0) and the over-budget code (kAudioOverBudget, 12: no fault, a render over the load governor's share) keep the LED dark,
+// while a fault code (any other pulses >= 1, the sticky codes that replace the heartbeat) still shows. With the heartbeat on nothing
+// changes: code 12 keeps blinking as before.
 constexpr bool led_on_status(std::uint8_t pulses, std::uint32_t ms, bool heartbeat_on) noexcept {
-  if (pulses == 0u) {
-    return heartbeat_on && led_on(0u, ms);
+  if (!heartbeat_on && (pulses == 0u || pulses == kAudioOverBudget)) {
+    return false;
   }
   return led_on(pulses, ms);
 }

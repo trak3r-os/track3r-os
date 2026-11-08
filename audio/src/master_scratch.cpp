@@ -111,6 +111,8 @@ bool MasterScratch::set_mode(float mode, std::uint32_t ramp_samples) noexcept {
   back_age_ = 255;
   fade_ = 0;
   hermite_ = mode == 1.0f;  // OS-SCRATCH: only the Platter reads with the Hermite; the TAPE STOP's output is the C1 linear one
+  aa_l_ = 0.0f;             // OS-BUG-SCRATCH: the anti-alias low-pass starts at rest (it follows the read while bypassed)
+  aa_r_ = 0.0f;
   blk_ = 0;
   n_ev_ = 0;
   dir_ = 0;
@@ -163,6 +165,15 @@ void MasterScratch::write_block(const float* left, const float* right) noexcept 
   }
 }
 
+// OS-BUG-SCRATCH: main context. Out-of-range values (and NaN) are clamped; the inertia is stored as the per-block one-pole coefficient (no libm). Each store is one relaxed atomic.
+void MasterScratch::set_tuning(float inertia_ms, float ahead, float gate_slope, bool aa) noexcept {
+  const auto clamp = [](float v, float lo, float hi) { return v >= lo ? (v <= hi ? v : hi) : lo; };  // NaN fails the first compare: lo
+  inertia_.store(inertia_for_ms(clamp(inertia_ms, 5.0f, 500.0f)), std::memory_order_relaxed);
+  ahead_.store(clamp(ahead, 0.0f, 4.0f), std::memory_order_relaxed);
+  gate_.store(clamp(gate_slope, 1.0f, 64.0f), std::memory_order_relaxed);
+  aa_.store(aa, std::memory_order_relaxed);
+}
+
 // OS-SCRATCH: the hand's rate for the coming block, from the TIME between count events (in blocks), not the counts of one block. `hand` is this block's count difference (clamped). Render only.
 float MasterScratch::platter_target(int hand) noexcept {
   ++blk_;
@@ -197,8 +208,8 @@ float MasterScratch::platter_target(int hand) noexcept {
     v = static_cast<float>(sum) / static_cast<float>(ev_blk_[0] - ev_blk_[n_ev_ - 1u]);
   }
   const std::uint32_t age = n_ev_ != 0u ? blk_ - ev_blk_[0] : 0u;
-  if (age > 1u) {  // no count for `age` blocks: the hand is slower than one count in that time
-    const float cap = 1.0f / static_cast<float>(age);
+  if (age > 1u) {  // no count for `age` blocks: the hand is slower than one count in kHold times that (OS-BUG-SCRATCH: a steady hand's estimate holds across the gap between two counts)
+    const float cap = kHold / static_cast<float>(age);
     v = v > cap ? cap : (v < -cap ? -cap : v);
   }
   const float dirf = static_cast<float>(dir_);
@@ -211,8 +222,10 @@ float MasterScratch::platter_target(int hand) noexcept {
     mag += (owed - kFramesPerCount) * kPull;
     mag = mag > lim ? lim : mag;
   }
-  const float room = (owed + kAhead * kFramesPerCount) * (1.0f / static_cast<float>(kBlock));  // the rate that spends exactly what the head may still play
-  mag = mag > room ? (room > 0.0f ? room : 0.0f) : mag;  // never further ahead of the hand than kAhead (a lone count does not carry on)
+  const float reach = ahead_.load(std::memory_order_relaxed);  // main writes (set_tuning), read once a block
+  const float ahead = n_ev_ > 1u || reach < kLoneAhead ? reach : kLoneAhead;  // a lone count keeps the nudge reach; a steady hand (two events or more) gets the whole kAhead
+  const float room = (owed + ahead * kFramesPerCount) * (1.0f / static_cast<float>(kBlock));  // the rate that spends exactly what the head may still play
+  mag = mag > room ? (room > 0.0f ? room : 0.0f) : mag;  // never further ahead of the hand than `ahead` (a lone count does not carry on)
   tgt = mag * dirf;
   debt_ -= tgt * static_cast<float>(kBlock);
   debt_ = debt_ > kDebtMax ? kDebtMax : (debt_ < -kDebtMax ? -kDebtMax : debt_);
@@ -232,7 +245,7 @@ float MasterScratch::next_rate() noexcept {
       }
       hand = hand > kMaxHand ? kMaxHand : (hand < -kMaxHand ? -kMaxHand : hand);
       const float tgt = platter_target(hand);
-      r1 = rate_ + (tgt - rate_) * kInertia;
+      r1 = rate_ + (tgt - rate_) * inertia_.load(std::memory_order_relaxed);
       if (tgt == 0.0f && r1 < 0.001f && r1 > -0.001f) {
         r1 = 0.0f;
       }
@@ -311,6 +324,14 @@ void MasterScratch::process(float* left, float* right, std::uint32_t n) noexcept
   float lag_f = lag_f_;
   const std::int32_t ring_lim = static_cast<std::int32_t>(cap_ - kBlock - 2u);  // the block is written whole before it is read: the oldest kBlock frames of a full ring are already this block's
   const bool releasing = phase_ == Phase::Release;
+  // OS-BUG-SCRATCH: the tuning, read once a block. The gate's slope is the tuned one only for the SCR hand itself (Platter phase, Hermite); Spin, Release and the TAPE STOP keep the C1 one. The anti-alias low-pass runs only on a Hermite read at
+  // |rate| > 1 (coefficient min(1, kAaCut / the block's larger end rate)); otherwise it is bypassed and its state follows the read, so the output is the unfiltered one bit for bit and the filter engages without a step.
+  const float slope = (hermite_ && phase_ == Phase::Platter) ? gate_.load(std::memory_order_relaxed) : kGateSlope;
+  const float rmax = (r0 < 0.0f ? -r0 : r0) > (r1 < 0.0f ? -r1 : r1) ? (r0 < 0.0f ? -r0 : r0) : (r1 < 0.0f ? -r1 : r1);
+  const float aa_a = rmax > 1.0f ? (kAaCut < rmax ? kAaCut / rmax : 1.0f) : 1.0f;
+  const bool aa_on = hermite_ && aa_a < 1.0f && aa_.load(std::memory_order_relaxed);
+  float aa_l = aa_l_;
+  float aa_r = aa_r_;
   // OS-SCRATCH-IDLE: a head at a standstill (the rate was 0 and stays 0, no release fade) has the gate g = 0 for all 64 frames: the output is exact silence and only the lag moves (1 frame a frame). The
   // per-sample loop below would compute exactly that, at about 90 cycles a frame; this does the same lag arithmetic without the read, the gate and the mix. (Only a non-finite input differs: it would stay NaN.)
   const bool still = !releasing && r0 == 0.0f && r1 == 0.0f;
@@ -320,6 +341,8 @@ void MasterScratch::process(float* left, float* right, std::uint32_t n) noexcept
       right[i] = 0.0f;
     }
     still_lag(cap_, before, ring_lim, lag_i, lag_f);
+    aa_l = 0.0f;  // the read is 0 at a standstill: the filter state follows it
+    aa_r = 0.0f;
   }
   for (std::uint32_t i = 0, n_play = still ? 0u : kBlock; i < n_play; ++i, rr += dr) {
     const std::int32_t lag_max = read_limit(before + i + 1u, ring_lim);
@@ -333,7 +356,7 @@ void MasterScratch::process(float* left, float* right, std::uint32_t n) noexcept
       w = f >= kReleaseSamples ? 0.0f : 1.0f - static_cast<float>(f) / static_cast<float>(kReleaseSamples);
     }
     const float mag = rr < 0.0f ? -rr : rr;
-    const float g = mag * kGateSlope < 1.0f ? mag * kGateSlope : 1.0f;
+    const float g = mag * slope < 1.0f ? mag * slope : 1.0f;
     float hl = 0.0f;
     float hr = 0.0f;
     if (g > 0.0f && w > 0.0f) {
@@ -357,6 +380,15 @@ void MasterScratch::process(float* left, float* right, std::uint32_t n) noexcept
         hr = static_cast<float>(ring_[2u * j + 1u]) * a + static_cast<float>(ring_[2u * k + 1u]) * b;
       }
     }
+    if (aa_on) {
+      aa_l += aa_a * (hl - aa_l);
+      aa_r += aa_a * (hr - aa_r);
+      hl = aa_l;
+      hr = aa_r;
+    } else {
+      aa_l = hl;
+      aa_r = hr;
+    }
     left[i] = left[i] * (1.0f - w) + hl * w;
     right[i] = right[i] * (1.0f - w) + hr * w;
     advance_lag(lag_i, lag_f, 1.0f - rr);
@@ -368,6 +400,8 @@ void MasterScratch::process(float* left, float* right, std::uint32_t n) noexcept
   }
   lag_i_ = lag_i;
   lag_f_ = lag_f;
+  aa_l_ = aa_l;
+  aa_r_ = aa_r;
   rate_ = r1;
   if (releasing) {
     fade_ += kBlock;

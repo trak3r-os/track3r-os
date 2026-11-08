@@ -1,0 +1,39 @@
+# QA rows of docs/qa/catalogue/sample_edit.md proven with asserts only (no snap, so no golden): the strip text each key says
+# (msg= of the state line, spaces as _) on the card e2e_og, whose instrument 1 is a sample of 200 frames. A strip text is
+# what is asserted; the audio, the buffer bytes and the waveform are not (open in each row).
+document
+card e2e_og
+wait 300
+tap file
+wait 300
+tap f1
+wait 800
+tap sampleedit
+wait 3000
+assert state screen=SAMPLE_EDIT
+
+# QA-SED-013: Shift + F3 flips the AMIGA 8-bit option and says so on the strip (OFF at first, so ON, then OFF again); it converts nothing.
+mark model sed
+press shift
+tap f3
+release shift
+assert state msg=AMIGA:_8-BIT_ON
+press shift
+tap f3
+release shift
+assert state msg=AMIGA:_8-BIT_OFF
+assert model digest=@sed
+
+# QA-SED-002: F2 on a selection-free sample (Delete clears it) runs the normalise: the strip says it is done, or that there is nothing to do.
+tap delete
+tap f2
+wait 500
+assert state msg=~NORMALISE
+assert state msg=~DONE
+
+# QA-SED-003, the centred branch only: this sample has no DC offset, so Shift + F4 says NO DC OFFSET TO REMOVE. The removal itself is tests/sample_dsp_test.cpp.
+press shift
+tap f4
+release shift
+wait 500
+assert state msg=~^NO.DC.OFFSET

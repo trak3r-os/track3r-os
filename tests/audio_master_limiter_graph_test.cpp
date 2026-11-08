@@ -325,7 +325,8 @@ TEST_CASE("limiter in the graph (OS-DJ A3c): the kill EQ and the DJ filter sit a
   g.install_master_limiter(lim);
   CHECK(kMasterChain[2].id == MasterStage::Eq);
   CHECK(kMasterChain[3].id == MasterStage::Bass);
-  CHECK(kMasterChain[4].id == MasterStage::Limiter);
+  CHECK(kMasterChain[4].id == MasterStage::Insert);  // OS-INSFX S6: the master insert, also ahead of the limiter
+  CHECK(kMasterChain[5].id == MasterStage::Limiter);
   CHECK_FALSE(g.master_stage_active(MasterStage::Eq));  // installed, bypassed: nothing runs at rest
   CHECK_FALSE(g.master_stage_active(MasterStage::Bass));
 }

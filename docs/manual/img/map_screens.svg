@@ -50,7 +50,7 @@
 <text class="h" x="30" y="378">No screen button:</text>
 <rect class="n" x="30" y="394" width="260" height="104" rx="8"/>
 <text class="t m" x="160" y="428">Modules</text>
-<text class="t r" x="160" y="458">Navigator: Shift + Pattern,</text>
+<text class="t r" x="160" y="458">Navigator: Song + Pattern,</text>
 <text class="t r" x="160" y="480">choose it, then press F8</text>
 <rect class="n" x="304" y="394" width="260" height="104" rx="8"/>
 <text class="t m" x="434" y="428">Input test</text>

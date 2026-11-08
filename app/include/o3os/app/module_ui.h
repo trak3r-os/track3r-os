@@ -48,11 +48,13 @@
 // Contexts: main loop only. No heap: the catalogs, the state of the running app and the view host (about 6 KB) and, since OS-H3A, an app's edit group (about 26 KB) are members; on the MK66 the object lives in the module
 // region (SDRAM), not in SRAM_U.
 
+#include <o3os/app/param_set.h>
 #include <o3os/audio/app_tap.h>
 #include <o3os/audio/insert_host.h>
 #include <o3os/audio/module_voices.h>
 #include <o3os/audio/play_position.h>
 #include <o3os/core/param.h>
+#include <o3os/formats/preset.h>
 #include <o3os/hal/clock.h>
 #include <o3os/hal/storage.h>
 #include <o3os/midi/monitor.h>
@@ -80,19 +82,54 @@ struct ParamScratch {
 
 // The descriptor of a module parameter as the standard controls take it. False for a descriptor no control can show (an empty range). Pure. `labels` (OS-INSTUI S10, ABI 1.8: the module's entry for this
 // parameter, or null): an INT parameter whose values have names is an enumeration, its value text the label (names[round(value - min)]); an entry that does not fit the range is ignored.
-bool describe_module_param(const o3m_param& p, ParamScratch& out, const o3m_labels* labels = nullptr) noexcept;
+// `key_ok` (OS-INSFX-ABI2 A6): the parameter belongs to an effect of ABI 1.12 or above, so its O3M_PARAM_KEY flag is honoured: the value reads OFF, T1 .. T16 (the key track) and MIDI Learn never binds it.
+bool describe_module_param(const o3m_param& p, ParamScratch& out, const o3m_labels* labels = nullptr, bool key_ok = false) noexcept;
 
 // The descriptor of any parameter id: the model's table for the built-in ones, the module's for a module parameter (Model::modules). nullptr when there is none.
 // `scratch` must outlive the use of the result.
 const core::ParamDesc* describe_param(const Model& model, core::ParamId id, ParamScratch& scratch) noexcept;
 // Whether `id` is a module parameter (Instrument kind, field kModuleFirst + i).
 bool is_module_param(core::ParamId id) noexcept;
+// OS-INSFX S5: whether `id` is an insert's parameter (Insert kind, index = the host's `where` track * 2 + slot (the master's is 32: S6), field = the module's parameter).
+bool is_insert_param(core::ParamId id) noexcept;
 // OS-INSTUI S8a: whether `id` is the MIDI page's CHANNEL (the virtual field instrument_param::MidiChannel of an instrument slot; describe_param answers it, the tables do not).
 bool is_midi_channel_param(core::ParamId id) noexcept;
 // OS-STEREO step 2: whether `id` is the source page's STEREO choice (the virtual field instrument_param::PlayStereo of an instrument slot; describe_param answers it, the tables do not).
 bool is_play_stereo_param(core::ParamId id) noexcept;
+// OS-CEPLAYTHRU P2: whether `id` is the source page's PLAY THRU choice (the virtual field instrument_param::PlayThru of an instrument slot, a row in the slice modes only; describe_param answers it, the tables do not).
+bool is_play_thru_param(core::ParamId id) noexcept;
+// OS-CEWTENV W7a: whether `id` is one of the MOD page's WT fields (the virtual fields instrument_param::wt(e, f), 0x90..0xAD: WAVE, DURATION, WARP X, WARP Y, SUSTAIN of a slot; describe_param answers them).
+bool is_wt_param(core::ParamId id) noexcept;
+// OS-MODRATE S2: whether `id` is the MIX page's RATE choice (the virtual field instrument_param::ModuleRate of an instrument slot; describe_param answers it, the tables do not).
+bool is_module_rate_param(core::ParamId id) noexcept;
+
+// OS-INSFX S5: the target of the generated parameter page: an instrument slot, or an insert (a bound cell of the Mixer's INSERTS page). `slot` is the instrument slot (0..63), or the insert
+// host's `where` (track * 2 + slot, 0..31) when `insert` is set. The implicit constructor from an unsigned keeps an instrument slot where a target is expected (the pages and the tests say a slot).
+struct ParamTarget {
+  bool insert = false;
+  unsigned slot = 0;
+  constexpr ParamTarget() noexcept = default;
+  constexpr ParamTarget(unsigned instrument_slot) noexcept : insert(false), slot(instrument_slot) {}
+  static constexpr ParamTarget of_insert(unsigned where) noexcept {
+    ParamTarget t;
+    t.insert = true;
+    t.slot = where;
+    return t;
+  }
+  unsigned track() const noexcept { return insert ? slot / 2u : 0u; }        // an instrument slot: 0
+  unsigned ins_slot() const noexcept { return insert ? slot % 2u : 0u; }     // an instrument slot: 0 (INS A)
+  bool master() const noexcept { return insert && slot == audio::InsertHost::kMasterWhere; }  // OS-INSFX S6: the master's insert (key 32)
+};
 
 inline constexpr unsigned kModuleCatalogMax = 16;
+
+// OS-MODPRESET P3: the card's preset folders and file rule — the rows of hal/save_guard.h for modules/presets/<stem>/<name>.o3mp. This layer does not include the guard (rule 8 of
+// tools/check_layers.py: the card's write contract is the save layer's), so the names are spelled here as the scan spells "modules/instruments"; save_service.cpp asserts them equal.
+inline constexpr char kPresetModulesDir[] = "modules";
+inline constexpr char kPresetsDir[] = "presets";
+inline constexpr char kPresetSuffix[] = ".o3mp";
+inline constexpr std::size_t kPresetNameMax = 30;  // the guard's kPresetNameMax: the stem of a .o3mp Target
+inline constexpr std::size_t kPresetPathCap = 96;  // the guard's kPathCap
 
 struct CatalogEntry {
   enum class State : std::uint8_t {
@@ -163,27 +200,86 @@ class ModuleUi {
   // The project's modules were cleared (module::ModuleSet::clear): nothing here may point into them any more. Stops the running app without calling it.
   void reset() noexcept;
 
-  // ---- the slot's module (Instrument page) ---------------------------------------------------------------------------------------------
-  // The module of a Module instrument that is loaded and bound to a voice instance: its descriptor, and its index in the set. nullptr otherwise (the instrument is muted
-  // or not a module's).
-  const o3m_module* bound_module(const model::Project& project, unsigned slot, int* set_index = nullptr) const noexcept;
+  // ---- the target's module (Instrument page; OS-INSFX S5: an insert cell too) ------------------------------------------------------------
+  // The module of a Module instrument that is loaded and bound to a voice instance, or of an insert record (INSX) that is loaded: its descriptor, and its index in the set.
+  // nullptr otherwise (the instrument is muted or not a module's; the insert has no record or its module is not loaded). `target`: an instrument slot, or an insert (of_insert).
+  const o3m_module* bound_module(const model::Project& project, ParamTarget target, int* set_index = nullptr) const noexcept;
   // Parameters of that module (0 when it is none), the descriptor of one, its default.
-  unsigned param_count(const model::Project& project, unsigned slot) const noexcept;
-  // OS-INSTUI S10 (ABI 1.8): the params pages the slot's module declares (its o3m_page table; only a module of ABI 1.8 has one): how many (0: it declares none, the page makes pages of eight called
+  unsigned param_count(const model::Project& project, ParamTarget target) const noexcept;
+  // OS-INSTUI S10 (ABI 1.8): the params pages the target's module declares (its o3m_page table; only a module of ABI 1.8 has one): how many (0: it declares none, the page makes pages of eight called
   // "1-8" ...), and page k's name, first parameter and parameter count (held to 1..8 and to the module's parameters).
-  unsigned page_table_count(const model::Project& project, unsigned slot) const noexcept;
-  bool page_at(const model::Project& project, unsigned slot, unsigned k, const char*& name, unsigned& first, unsigned& count) const noexcept;
-  bool describe(const model::Project& project, unsigned slot, unsigned index, ParamScratch& out) const noexcept;
-  // Views the page may draw for the slot: 0 for a module without views, one whose views are blocked, or one that is not bound.
-  unsigned view_count(const model::Project& project, unsigned slot) const noexcept;
+  unsigned page_table_count(const model::Project& project, ParamTarget target) const noexcept;
+  bool page_at(const model::Project& project, ParamTarget target, unsigned k, const char*& name, unsigned& first, unsigned& count) const noexcept;
+  bool describe(const model::Project& project, ParamTarget target, unsigned index, ParamScratch& out) const noexcept;
+  // Views the page may draw for the target: 0 for a module without views, one whose views are blocked, or one that is not bound (an insert without a host instance has none).
+  unsigned view_count(const model::Project& project, ParamTarget target) const noexcept;
   // A new page is being drawn: the words of the module views drawn so far in the frame are forgotten. The views of one page share module::kViewMaxWords (the frame buffer is one
   // and the page's own words are in it too); the page calls this once before its first view.
   void begin_view_frame() noexcept { view_words_ = 0; }
-  // Draws view `view` of the slot's module in `area` of the frame in progress (the canvas is `area`, clamped to the legal sizes). False: nothing drawn (blanked, blocked, no
+  // Draws view `view` of the target's module in `area` of the frame in progress (the canvas is `area`, clamped to the legal sizes). False: nothing drawn (blanked, blocked, no
   // module, area too small). A budget overrun blocks and quarantines the module.
-  bool draw_slot_view(ui::Renderer& r, const model::Project& project, unsigned slot, unsigned view, const ui::Rect& area) noexcept;
-  // A parameter value to the module's instance (the render applies it at its next block start). False when the slot has no instance or the ring is full.
-  bool send_param(unsigned slot, unsigned index, float value) noexcept;
+  bool draw_slot_view(ui::Renderer& r, const model::Project& project, ParamTarget target, unsigned view, const ui::Rect& area) noexcept;
+  // A parameter value to the target's instance (the render applies it at its next block start; an insert: ParamChange{Insert} through the host). False when there is no instance or the ring is full.
+  bool send_param(ParamTarget target, unsigned index, float value) noexcept;
+  // OS-INSFX-ABI2 A8 (docs/specs/OS-INSFX-ABI2.md section 3.6), factory presets: the named parameter sets the target's module declares (ABI 1.12 o3m_preset; an older module, an app and a module that
+  // lists none have none). factory_preset builds set `n` (the values the preset gives, in the module's parameter order; the loader checked the table), false when there is no such preset or the
+  // target is not a bound module; factory_presets fills out[0..cap) with the first ones and answers how many.
+  unsigned preset_count(const model::Project& project, ParamTarget target) const noexcept;
+  bool factory_preset(const model::Project& project, ParamTarget target, unsigned n, ParamSet& out) const noexcept;
+  unsigned factory_presets(const model::Project& project, ParamTarget target, ParamSet* out, unsigned cap) const noexcept;
+  // The same of a module the caller already holds (bound_module): a path that needs the count and the set looks the target up once. Null: none.
+  static unsigned preset_count(const o3m_module* m) noexcept;
+  static bool factory_preset(const o3m_module* m, unsigned n, ParamSet& out) noexcept;
+  enum class PresetResult : std::uint8_t {
+    Ok,
+    NoModule,  // the target is not a bound module (an instrument slot with no instance, an insert with no record or whose module is not loaded)
+    Rejected,  // a parameter has no usable descriptor (nothing is written), or the project refused the write
+  };
+  // Writes every parameter of the target's module from `set` (a given value held to the descriptor, clamped and rounded as the page does, any other parameter its default: ParamSet::resolve) and tells
+  // the instance. An INSTRUMENT: inside one undo unit of the SOUND ring (it nests under an action's own), a short blob extended first; the instance is told the values that moved (as the page's write does:
+  // at most 32, one block's drain); undo puts every value back. A write the project refuses midway answers Rejected, but the values already written are still sent, so the instance
+  // never disagrees with the project. An INSERT: into its INSX record (Editor::set_insert) and the host (InsertHost::set_param, every parameter, with the binding's generation):
+  // not an undo step (OS-INSFX D9). Main loop only. `dropped` (optional) is
+  // set to how many values reached no instance (none bound, or the ring full: the values are in the project, the next change or a rebind catches up; an insert with an instance keeps a value the host
+  // could not send, dirty, and retries it, so that is not counted).
+  PresetResult apply_preset(model::Editor& editor, ParamTarget target, const ParamSet& set, unsigned* dropped = nullptr) noexcept;
+  static const char* preset_text(PresetResult r) noexcept;  // upper case, for the notification strip
+
+  // ---- the card's presets (OS-MODPRESET P3, docs/specs/OS-MODPRESET.md section 4) --------------------------------------------------------------
+  static constexpr unsigned kCardPresetListMax = 128;
+  enum class CardPreset : std::uint8_t {
+    Ok,           // resolved into the set; `skipped` counts the entry names no parameter has
+    NoCard,       // no card mounted
+    NotFound,     // no such file (no folder, or a name the guard refuses)
+    NoModule,     // the target is not a bound module
+    OtherModule,  // the file is of another module or kind: "PRESET OF <STEM>"
+    Damaged,      // Truncated, BadMagic, BadCrc or Malformed: "PRESET DAMAGED"
+    NewerMajor,   // the MPST major is above 1: "NEWER PRESET FORMAT"
+    TooBig,       // over kMaxFileBytes, refused before a byte is read
+  };
+  // Lists modules/presets/<stem>/ (main loop, the F7 pattern: opendir / readdir, at most 256 entries): the .o3mp files' names without the suffix that the guard takes as a Target, sorted
+  // case-insensitively, at most kCardPresetListMax; `more` is set when the folder held more (the list says "+ MORE ON CARD"). Rescanned on every call. Returns the count; no card or no folder: 0.
+  unsigned scan_presets(const char* stem, bool& more) noexcept;
+  unsigned card_preset_count() const noexcept { return card_preset_count_; }
+  const char* card_preset_at(unsigned i) const noexcept { return i < card_preset_count_ ? card_preset_list_[i] : nullptr; }
+  const char* card_preset_module() const noexcept { return card_preset_file_.module; }  // the module stem of the file read_preset last read (for "PRESET OF <STEM>")
+  // Reads modules/presets/<stem>/<name>.o3mp (main loop, synchronous: one cluster, as the settings file) and resolves it by name (Q5 a) against the module `m` (`kind` its O3M_KIND_*): the
+  // file's size is checked first (over kMaxFileBytes: TooBig, no byte read), then it is read whole into the member buffer and decoded; each entry matches the first parameter of that name
+  // (ASCII case-insensitive) not yet matched, the value clamped to the range and rounded for an INT as the page does, an unknown name counted in `skipped`. `out` gets source Card, the preset's
+  // name and the mask of the matched parameters; apply_preset then writes it (unmatched parameters take their defaults). A file of another module or kind, a damaged one, a newer major or an
+  // oversize one is refused without touching `out`.
+  CardPreset read_preset(const char* stem, unsigned kind, const o3m_module* m, const char* name, ParamSet& out, unsigned& skipped) noexcept;
+  CardPreset read_preset(const model::Project& project, ParamTarget target, const char* name, ParamSet& out, unsigned& skipped) noexcept {
+    const o3m_module* m = bound_module(project, target);
+    if (m == nullptr) {
+      return CardPreset::NoModule;
+    }
+    return read_preset(module_name_of(project, target), target.insert ? O3M_KIND_EFFECT : O3M_KIND_INSTRUMENT, m, name, out, skipped);
+  }
+  static const char* card_preset_text(CardPreset r) noexcept;  // upper case, for the notification strip
+  // The values in force of the target's bound module as a file (A-2): every parameter of the descriptor, in descriptor order, named from the module; the instrument's blob (a short tail as the
+  // defaults), or the insert record's floats (the missing tail as the defaults). False when the target is not a bound module (nothing is written).
+  bool capture_preset(const model::Project& project, ParamTarget target, formats::preset::Preset& out) noexcept;
   // OS-GOV (audio/module_governor.h): what the render measured of the slot's instance. The cycles of ONE voice for a whole block (0: never measured, or not bound; governor_watch.h
   // append_voice_cost says it as a percent), and whether the safety net muted the instance (it stays muted until a note after the cool-down, or a reload).
   std::uint32_t voice_cost(unsigned slot) const noexcept { return voices_ != nullptr ? voices_->voice_cost(slot) : 0u; }
@@ -196,10 +292,14 @@ class ModuleUi {
   // once-a-pass sync_slots would close that gate at the next pass; a slot marked here is left open instead while the project's slot is free (no instrument); a slot that gets an instrument follows the project from then on, for good (the mark is dropped); the marks go when the project is replaced (diag_clear). Main loop only.
   void diag_keep_open(unsigned slot) noexcept { diag_slots_ |= slot < 64u ? (std::uint64_t{1} << slot) : 0u; }
   void diag_clear() noexcept { diag_slots_ = 0; }
+  // OS-MODRATE (docs/specs/OS-MODRATE.md): the RATE of an instrument module, 0 FULL, 1 = 1/2, 2 = 1/4, is the instrument's own byte (model::Instrument::rate, saved with it, undoable: the params page
+  // writes it through the Editor). The instance follows within a few blocks: sync_slots (called by a project load, undo and redo and once a pass) drives audio::ModuleVoices::set_rate until it is Done.
+  // rate_capable: the slot's bound module declares O3M_FX_RATE (ABI >= 1.13, instrument) and so shows the MIX page's RATE row. Main loop only.
+  bool rate_capable(const model::Project& project, unsigned slot) const noexcept;
   // The same for a module of the picker, by its stem: the largest measured cost among the bound instances of that module (0: none measured, or the module is not loaded).
   std::uint32_t voice_cost_of(const char* stem) const noexcept;
-  // The module name of the slot's instrument for the page ("tb303"), or "" when it is not a Module instrument.
-  static const char* module_name_of(const model::Project& project, unsigned slot) noexcept;
+  // The module name of the target's instrument or insert record for the page ("tb303"), or "" when it is none.
+  static const char* module_name_of(const model::Project& project, ParamTarget target) noexcept;
 
   // ---- the engine picker -----------------------------------------------------------------------------------------------------------------
   // Reads modules/instruments/, adds the built-in instrument modules (module/builtin.h: there with no card) and the project's missing modules (`project` may be null; a module that only an insert record names is an effect: not listed here). Entries are sorted by name.
@@ -213,18 +313,26 @@ class ModuleUi {
 
   // ---- the effect inserts (OS-INSFX S4, docs/specs/OS-INSFX.md) ----------------------------------------------------------------------------
   // The one path from a screen or the console to the insert host and the project's INSX records (Editor::set_insert / clear_insert: not an undo step, D9; MODR is never pruned). Main loop only.
-  // `track` 0..15 and `slot` 0 or 1 (INS A / INS B); the host's key is track * 2 + slot. Without the host (attach_inserts: a bare ModuleUi, the simulator) only the records are edited by remove and bypass.
+  // `track` 0..15 and `slot` 0 or 1 (INS A / INS B), or the master (OS-INSFX S6: `track` 16 = model::kInsertWhereMaster, `slot` 0; two instances, dual mono); the host's key is track * 2 + slot. Without the host (attach_inserts: a bare ModuleUi, the simulator) only the records are edited by remove and bypass.
   void attach_inserts(audio::InsertHost& host) noexcept { inserts_ = &host; }
   bool has_inserts() const noexcept { return inserts_ != nullptr; }
+  // OS-INSFX S5: whether the host holds an instance at the insert's `where` (track * 2 + slot). A parameter change sent to a bound instance is kept (in the host blob, dirty, retried by flush_params); only with none bound is it a drop.
+  bool insert_bound(unsigned where) const noexcept { return inserts_ != nullptr && inserts_->bound(where); }
   void scan_effects(const model::Project* project) noexcept;  // modules/effects/, the built-in effects and the modules an INSX record of the project names that the card lacks (greyed)
   unsigned effect_count() const noexcept { return eff_count_; }
   const CatalogEntry* effect_at(unsigned i) const noexcept { return i < eff_count_ ? &eff_[i] : nullptr; }
   // The measured cost of an insert of the module (cycles of a block, the largest of its bound instances; 0: none measured, or none bound): the picker's figure.
   std::uint32_t insert_cost_of(const char* stem) const noexcept;
+  // OS-INSFX-ABI2 A5: the module is a stereo effect (its shape is not Mono, so the INSERTS cell and the picker line mark it ST). False: mono, or not loaded.
+  bool effect_st(const char* stem) const noexcept;
+  // OS-INSFX-ABI2 A7: the instances the project's INSX records take in the host: model::insert_instances counts a master record 2 (dual mono), but a stereo module on the master is ONE instance (when the module is
+  // loaded and its shape is known; the file alone cannot say).
+  std::uint32_t project_instances(const model::Project& p) const noexcept;
   // What the page shows of the cell (track, slot): the host's instance there. False: none bound there (a record whose module is missing, or an empty cell). `bypass` is the user's own, `forced` a net's (OVER BUDGET).
   struct InsertCell {
     bool bypass;
     bool forced;
+    bool st;          // OS-INSFX-ABI2 A5: the insert is a stereo effect (ST on the page)
     std::uint32_t cost;  // cycles of a block, 0 never measured
   };
   bool insert_cell(unsigned track, unsigned slot, InsertCell& out) const noexcept;
@@ -232,14 +340,14 @@ class ModuleUi {
     Ok,
     OnComputer,    // the card is the computer's: no module is loaded from it
     NoHost,        // no insert host in this build
-    BadWhere,      // not a track insert cell (the master's is S6)
+    BadWhere,      // not an insert cell (a track 0..15 with slot 0 or 1, or the master: track 16, slot 0)
     NoEntry,
     Missing,       // the module is not on the card
     Quarantined,
     LoadFailed,
     NotEffect,     // an instrument or an app
     NotRunnable,   // loaded, but this build cannot call it
-    Full,          // the host or the project holds its four inserts
+    Full,          // the host or the project holds its four insert instances (the master's insert is two)
     NoCpu,         // admission refused it (the CPU governor)
     NoRoom,        // the module memory or the module table is full
     Taken,         // an insert is there already (delete it first)
@@ -294,6 +402,11 @@ class ModuleUi {
   // OS-APPUX S3: the OS parameter column (the page's list of the declared rows, edited with Shift + the arrows and Shift + the encoder) belongs to an app that declares rows and was built below ABI 1.10. An
   // app of 1.10 draws its own rows in the grammar of modules/apps/common/o3m_edit.h and declares them as storage (set_own_param): it gets no column, and every Shift key reaches its input().
   bool app_os_column() const noexcept { return app_param_count() != 0u && app_minor_ < 10u; }
+  // OS-PTOOLS2 S6: the running app runs in the TOOLS panel. Opt-in, by a host-side list of file stems (no ABI change; modules/apps/common/o3m_edit.h's draw_page lays the page out): an app of ABI 1.10
+  // that declares 1..kPanelRows rows AND whose page adds nothing the panel lacks (the host draws the declared rows, the target is the block, the app's answer line is drawn under them). Today only
+  // HUMANIZE; MUTATE and MORPH keep their page (their INSTRUMENT target row and a count line), TAPCALC and SMFEXPORT theirs (a tap pad; a file name and a progress).
+  static constexpr unsigned kPanelRows = 6;
+  bool app_panel_fits() const noexcept;
   bool app_describe(unsigned index, ParamScratch& out) const noexcept;
   float app_param(unsigned index) const noexcept { return index < o3m_params_max ? app_values_[index] : 0.0f; }
   // Sets an app parameter (clamped to its descriptor) and tells the app (its set_param, under the time budget). True when the value changed.
@@ -309,8 +422,12 @@ class ModuleUi {
   std::uint64_t buttons_down = 0;
   std::uint64_t pads_down = 0;
   std::uint64_t frame_ms = 0;
-  // The page body: view 0 of the app in `area`. False: nothing drawn (stopped, no area).
-  bool draw_app_view(ui::Renderer& r, const ui::Rect& area) noexcept;
+  // The page body: view 0 of the app in `area`. False: nothing drawn (stopped, no area). `paint` false (OS-PTOOLS2 S6, the TOOLS panel): the app's draw runs, so that what it feeds from its draws
+  // (the key labels, a file writer's slices) goes on, and its record is not replayed: the host draws the declared rows.
+  bool draw_app_view(ui::Renderer& r, const ui::Rect& area, bool paint = true) noexcept;
+  // OS-PTOOLS2 S6: the answer line of the page the last draw_app_view recorded (an app drawn with modules/apps/common/o3m_edit.h's draw_page: a refusal, or the result), copied into `out` (`cap` bytes,
+  // always terminated). False: the page says none.
+  bool app_answer(char* out, unsigned cap) const noexcept;
   void app_exit() noexcept;
 
   // ---- the host calls of the running app (OS-H1; the table functions in module_ui.cpp call these) ----------------------------------------------------------------------------------
@@ -458,6 +575,11 @@ class ModuleUi {
   // OS-KEYROWDLG S5 (ABI 1.9): the running app's 16 labels (F1..F8, then Shift + F1..F8), 7 characters and a NUL each: 128 bytes in this object (SDRAM). Main loop only.
   module::ViewHost::KeyLabels keys_ = {};  // the 16 labels as the OS copied them (ViewHost::call_keys)
   bool keys_declared_ = false;
+  // OS-MODPRESET P3 (this object lives in SDRAM, F10: SRAM 0): the list of the last scan_presets (128 names of 32 bytes), the file read by read_preset and its 1,025-byte buffer.
+  char card_preset_list_[kCardPresetListMax][32] = {};
+  unsigned card_preset_count_ = 0;
+  formats::preset::Preset card_preset_file_{};
+  std::uint8_t card_preset_buf_[formats::preset::kMaxFileBytes + 1] = {};
   // OS-H1: the running app's host table and what its calls need.
   o3m_host app_host_{};
   o3m_io_api io_{};

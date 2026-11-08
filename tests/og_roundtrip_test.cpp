@@ -315,6 +315,163 @@ TEST_CASE("og roundtrip: the bytes Export normalises are exactly the ones nobody
   CHECK(out.pamd == in.pamd);  // the PAMD file is carried verbatim, junk and all: nothing in it is normalised
 }
 
+TEST_CASE("og roundtrip: a v6 pattern goes through the native format unchanged, the micro-move in FX 2 (OS-CEPAT S1)") {
+  // a rich 16-track v6 pattern, and one crafted step that shows where the micromove lands
+  PatternSpec6 spec = rich_pattern6(16, 6, 61);
+  spec.step[0][0][0] = 60; spec.step[0][0][1] = 5;
+  for (unsigned k = 2; k < 6; ++k) spec.step[0][0][k] = 0;  // free FX columns for the micromove
+  spec.step[0][0][6] = 100; spec.step[0][0][7] = 50;
+  const Bytes in = pattern6_bytes(spec);
+  CHECK(in.size() == 16432);
+  model::ModelArena& a = arena(0);
+  a.project.reset();  // the arenas are shared between test cases
+  {
+    static og_ns::PatternReader pattern;
+    formats::ReadParams p;
+    p.index = 3;
+    NEED(run_reader(pattern, in, a, p) == Progress::Done);
+    NEED(pattern.import_report().tracks == 16);
+  }
+  CHECK(a.project.check_invariants());
+  const model::Pattern* pa = a.project.pattern(3);
+  NEED(pa != nullptr);
+  CHECK(pa->steps[0][0].vol == 127);                            // 100 -> floor(100 * 127 / 100)
+  CHECK(pa->steps[0][0].fx[0].type == 2);                       // the micromove, as FX 2
+  CHECK(pa->steps[0][0].fx[0].value == 50);
+
+  // v6 -> model -> .o3pj -> model is equal, every track and every step
+  const Bytes nat = native_bytes(a.project);
+  model::ModelArena& b = arena(1);
+  b.project.reset();
+  {
+    formats::native::Reader r;
+    MemorySource src(nat);
+    r.begin(src, b);
+    while (r.step(4096) == Progress::Running) {}
+    NEED(r.progress() == Progress::Done);
+  }
+  CHECK(native_digest(a.project) == native_digest(b.project));
+  const model::Pattern* pb = b.project.pattern(3);
+  NEED(pb != nullptr);
+  for (unsigned t = 0; t < model::kMaxTracks; ++t) {
+    CHECK(pa->track_length[t] == pb->track_length[t]);
+    CHECK(std::memcmp(pa->steps[t], pb->steps[t], sizeof pa->steps[t]) == 0);
+  }
+}
+
+TEST_CASE("og roundtrip: a v6 pattern exported to v5 loses only what is counted (OS-CEPAT S1)") {
+  PatternSpec6 spec = empty_pattern6(12, 6);
+  auto set = [&spec](unsigned s, std::uint8_t note, std::uint8_t instr, std::uint8_t t0, std::uint8_t v0,
+                     std::uint8_t t1, std::uint8_t v1, std::int8_t vol, std::int8_t m) {
+    std::uint8_t* st = spec.step[0][s];
+    st[0] = note; st[1] = instr;
+    st[2] = t0; st[3] = v0; st[4] = t1; st[5] = v1;
+    st[6] = static_cast<std::uint8_t>(vol);
+    st[7] = static_cast<std::uint8_t>(m);
+  };
+  set(0, 60, 5, 0, 0, 0, 0, 100, -1);    // vol -> FX 18 in the free slot
+  set(1, 60, 5, 4, 50, 0, 0, 50, 100);   // m -> FX 2 in slot 1; vol: no slot left, dropped
+  set(2, 60, 5, 2, 33, 0, 0, -1, 100);   // FX 2 already there: m superseded
+  set(3, 60, 5, 4, 50, 5, 60, -1, 100);  // no free slot: m dropped (counted on import)
+  set(4, 60, 5, 16, 16, 0, 0, -1, 100);  // Random value 16 in the other slot: m dropped (counted)
+  set(5, 0xFF, 0, 0, 0, 0, 0, 50, -1);   // vol on a no-note step: still exported as FX 18
+  set(6, 60, 5, 43, 8, 0, 0, -1, -1);    // OG 43 -> model 96: dropped as ce_fx on export
+  const Bytes in = pattern6_bytes(spec);
+  model::ModelArena& a = arena(0);
+  a.project.reset();  // the arenas are shared between test cases
+  og_ns::ImportReport rep;
+  {
+    static og_ns::PatternReader pattern;
+    formats::ReadParams p;
+    p.index = 1;
+    NEED(run_reader(pattern, in, a, p) == Progress::Done);
+    rep = pattern.import_report();
+  }
+  CHECK(rep.micromoves_dropped == 2);  // steps 3 and 4
+  CHECK(rep.values_clamped == 0);
+
+  Bytes out;
+  {
+    static og_ns::PatternWriter w;
+    formats::WriteParams p;
+    p.index = 1;
+    NEED(run_writer(w, a.project, out, p) == Progress::Done);
+    const og_ns::ExportDrops& d = w.export_report().drops;
+    CHECK(d.volume_as_fx18 == 2);   // steps 0 and 5
+    CHECK(d.volume_dropped == 1);   // step 1
+    CHECK(d.ce_fx == 1);            // step 6: model 96
+    CHECK(d.tracks_beyond_12 == 0);
+    CHECK(d.core_fx == 0);
+    CHECK(d.engine_fx == 0);
+  }
+  CHECK(out.size() == 9260);  // Export still writes v5, 12 tracks
+  auto at = [&out](unsigned s) { return &out[29 + 6 * s]; };
+  auto eq = [](const std::uint8_t* p, std::initializer_list<std::uint8_t> v) {
+    return std::equal(v.begin(), v.end(), p);
+  };
+  CHECK(eq(at(0), {60, 5, 18, 100, 0, 0}));    // vol 100 -> FX 18 = 100
+  CHECK(eq(at(1), {60, 5, 4, 50, 2, 100}));     // m as FX 2; vol dropped
+  CHECK(eq(at(2), {60, 5, 2, 33, 0, 0}));       // superseded: the FX column wins
+  CHECK(eq(at(3), {60, 5, 4, 50, 5, 60}));      // m dropped on import, nothing to write
+  CHECK(eq(at(4), {60, 5, 16, 16, 0, 0}));      // Random 16 stays, m was dropped
+  CHECK(eq(at(5), {255, 0, 18, 50, 0, 0}));     // vol 50 -> floor(50*127/100)=63 -> FX 18 = 50
+  CHECK(eq(at(6), {60, 5, 0, 0, 0, 0}));        // tracker-ce FX: written as none, counted
+  // the export reads back, and what it loses is exactly the counted items: vol (unset in v5, FX 18 instead)
+  // and the dropped micro-moves; a second export is byte-identical
+  model::ModelArena& b = arena(1);
+  b.project.reset();
+  {
+    static og_ns::PatternReader pattern;
+    formats::ReadParams p;
+    p.index = 1;
+    NEED(run_reader(pattern, out, b, p) == Progress::Done);
+  }
+  const model::Pattern* pa = a.project.pattern(1);
+  const model::Pattern* pb = b.project.pattern(1);
+  NEED(pa != nullptr && pb != nullptr);
+  for (unsigned t = 0; t < model::kMaxTracks; ++t) CHECK(pa->track_length[t] == pb->track_length[t]);
+  for (unsigned s = 0; s < 128; ++s) {
+    const model::Step& x = pa->steps[0][s];
+    const model::Step& y = pb->steps[0][s];
+    CHECK(x.note == y.note);
+    CHECK(x.instr == y.instr);
+    CHECK(y.vol == model::kVolumeUnset);  // v5 has no volume column
+    if (s == 0) {
+      CHECK(y.fx[0].type == 18);
+      CHECK(y.fx[0].value == 100);
+      CHECK(y.fx[1].type == 0);
+    }
+    if (s == 1) {
+      CHECK(y.fx[0].type == 4);
+      CHECK(y.fx[0].value == 50);
+      CHECK(y.fx[1].type == 2);
+      CHECK(y.fx[1].value == 100);
+    }
+    if (s == 5) {
+      CHECK(y.fx[0].type == 18);
+      CHECK(y.fx[0].value == 50);
+    }
+    if (s == 6) {  // ce_fx dropped
+      CHECK(y.fx[0].type == 0);
+      CHECK(y.fx[1].type == 0);
+    }
+    if (s == 2 || s == 3 || s == 4) {
+      CHECK(y.fx[0].type == x.fx[0].type);
+      CHECK(y.fx[0].value == x.fx[0].value);
+      CHECK(y.fx[1].type == x.fx[1].type);
+      CHECK(y.fx[1].value == x.fx[1].value);
+    }
+  }
+  Bytes out2;
+  {
+    static og_ns::PatternWriter w;
+    formats::WriteParams p;
+    p.index = 1;
+    NEED(run_writer(w, b.project, out2, p) == Progress::Done);
+  }
+  CHECK(out2 == out);
+}
+
 TEST_CASE("og roundtrip: older projects are exported as v16 with what the older version held") {
   // 1.1 (v6), 1.4 (v12) and 1.6 (v14) projects with 8-track patterns of versions 1, 3 and 4
   struct Case { unsigned project; unsigned pattern; };

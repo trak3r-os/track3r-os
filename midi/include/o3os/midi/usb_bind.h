@@ -36,6 +36,7 @@ namespace o3os::midi {
 
 // The message bytes of one USB-MIDI event word (USB-MIDI 1.0 table 4-1): the number written to `out` (0..3): 0 for the reserved code index numbers 0 and 1
 // (miscellaneous, cable events), 1 for 0x5 (single-byte system common, SysEx ends with one byte) and 0xF (single byte), 2 for 0x2, 0x6, 0xC, 0xD, 3 for the rest.
+// Exception: CIN 0x2 with the status byte F2 (the SPP is a three-byte message even when a host packs it with the two-byte code index) takes 3.
 // The cable number (the high nibble of the first byte of the word) is ignored: the device has one port.
 std::uint32_t usb_event_bytes(std::uint32_t event, std::uint8_t out[3]) noexcept;
 

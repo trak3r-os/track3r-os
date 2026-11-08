@@ -6,3 +6,50 @@ tap performance
 press shift
 snap qa_prf_001
 release shift
+
+# OS-MIDICCMAP S3 (docs/specs/OS-MIDICCMAP.md, section 4 S3): the fixed CC map's Perform slots, CC 51..62, gated by the CC MAP device setting (Config > MIDI, after IN CHANNEL; Off by default).
+# The simulator wires the slot bank only with the engine (`audio on`), so this block runs the sound document.
+# QA-PRF-206: on the Perform slot page with CC MAP On and track 1 ON, `midicc 1 51 127` puts slot 1 (VOLUME, -100..100) in CC mode at +100 (min + cc * (max - min) / 127, written at once):
+# its selected cell is tagged CC and no pad of the slot is lit.
+document sound
+audio on
+wait 30
+tap config
+tap f1
+tap up 16
+tap down 10
+encoder 1
+tap pattern
+tap performance
+press shift
+pad 0
+release shift
+wait 100
+midicc 1 51 127
+wait 100
+snap qa_prf_206
+
+# QA-PRF-207: a pad of the slot ends its CC mode: pad 12 (slot 1, row 1) selects the row as today, the pad is lit and the cell shows the row's stored value (-25) again.
+pad 12
+wait 100
+snap qa_prf_207
+
+# OS-PERFMODES M4 (docs/specs/OS-PERFMODES.md, QA-PRF-215): PLAYMODE on the Perform screen reads C1..C20 (the values 4..23), next to FWD, BACK, PING and RND.
+# QA-PRF-215: in EDIT the first slot's FX walks down the list to PLAYMODE (the list wraps past OVERDRV; track 1 is still ON from QA-PRF-206), and the encoder turns the held row 4
+# from RND (3) to C1 (4) and then to C20 (23).
+tap rec
+tap down
+tap down
+tap down
+tap down
+tap down
+pad 36 down
+wait 100
+encoder 1
+wait 100
+snap qa_prf_215
+encoder 19
+wait 100
+snap qa_prf_215_c20
+pad 36 up
+tap rec

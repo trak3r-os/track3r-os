@@ -158,7 +158,7 @@ TEST_CASE("fm: the descriptor is valid as the loader reads it and says what modu
   CHECK(set.add_native("fm", m));
   CHECK(std::string(m.name) == "FM");
   CHECK(m.kind == O3M_KIND_INSTRUMENT);
-  CHECK(m.abi_minor == 8u);  // ABI 1.8 (module.json): pitch, pages and labels, and a version
+  CHECK(m.abi_minor == 13u);  // ABI 1.13 (module.json; RATE flag, OS-MODRATE): pitch, pages and labels, and a version
   CHECK(m.param_count == FM_PARAM_COUNT);
   CHECK(m.param_count == 32u);
   CHECK(m.view_count == 2u);
@@ -610,7 +610,7 @@ TEST_CASE("fm: the packed .tmod passes the loader's checks, relocates, reads bac
   CHECK(t.relocation == Status::Ok);
   CHECK(t.descriptor == Status::Ok);
   CHECK(t.h.kind == O3M_KIND_INSTRUMENT);
-  CHECK(t.h.abi_minor == 8u);
+  CHECK(t.h.abi_minor == 13u);
   CHECK(t.h.module_version == O3M_VERSION(1, 0, 0));  // o3m_add_module(... VERSION 1.0.0)
   CHECK(t.h.param_count == FM_PARAM_COUNT);
   CHECK(t.h.view_count == 2u);

@@ -27,6 +27,8 @@ UNIT_NOT_WIRED = {}
 AUDIO_TEST_LEAVES_OUT = {
     "attach_transport", "attach_preview", "attach_audio_load", "attach_samples", "attach_param_ring", "attach_mix",
     "attach_perform", "attach_recorder", "attach_saves", "attach_play_position", "attach_modules", "attach_scratch",  # (OS-DJ C1: the scratch stage is told through the param ring, which that image does not have)
+    "attach_ptfx_runner",  # (OS-CEPTFX S4b: the plugin run needs the module system and the sample bank, which that image does not give the App)
+    "attach_metro_sync",  # (OS-RECCOUNT RC2: that image never steps g_metro_sync — sync_metro() is under the same #if — so the override would go nowhere)
 }
 
 HOOK = r"(?:attach_\w+|set_build_info)"

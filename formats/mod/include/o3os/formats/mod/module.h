@@ -181,6 +181,10 @@ std::uint32_t tagged_mod_min_bytes(const std::uint8_t* head, std::size_t n) noex
 // table does not fit) of 1,024 bytes each, and the samples, the last one allowed to be short. open() reads such a file as a 4-channel M.K. module with 15 samples (Variant::St15).
 bool is_soundtracker15(const std::uint8_t* head, std::size_t n, std::uint32_t file_size) noexcept;
 
+// The tag at 1,080 of a MOD: the variant and the channel count; false when it is none this reader takes. One copy only, in the probe side
+// (formats/src/tracker_sniff.cpp, the image's formats library): the reader here (formats_tracker) calls it from there.
+bool mod_tag(const std::uint8_t* t, Variant& v, std::uint8_t& channels) noexcept;
+
 // The Paula period of ProTracker's table at finetune 0 for the 36 notes C-1 .. B-3: index 0..35.
 extern const std::uint16_t kPeriodTable[36];
 

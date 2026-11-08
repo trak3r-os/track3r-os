@@ -9,6 +9,7 @@
 
 #include <o3os/audio/graph.h>
 #include <o3os/audio/graph_params.h>
+#include <o3os/audio/insert_host.h>
 #include <o3os/audio/voices.h>
 #include <o3os/core/param.h>
 #include <o3os/model/limits.h>
@@ -65,8 +66,15 @@ static_assert(static_cast<unsigned>(o3os::seq::FxGroup::DelaySend) == o3os::audi
 static_assert(static_cast<unsigned>(o3os::seq::FxGroup::Tune) == o3os::audio::kModGroupTune && o3os::audio::kModGroupTune == 21u,
               "the voices read the sequencer's Tune group, the Perform screen's TUNE (OS-PERFFX P5); the groups appended to the enum keep every number before them");
 static_assert(static_cast<unsigned>(o3os::seq::FxGroup::Position) == o3os::audio::kModGroupPosition && o3os::audio::kModGroupPosition == 9u &&
-                  static_cast<unsigned>(o3os::seq::FxGroup::SampleEnd) == o3os::audio::kModGroupSampleEnd && o3os::audio::kModGroupSampleEnd == 22u && o3os::seq::kFxGroupCount == 23u,
+                  static_cast<unsigned>(o3os::seq::FxGroup::SampleEnd) == o3os::audio::kModGroupSampleEnd && o3os::audio::kModGroupSampleEnd == 22u && o3os::seq::kFxGroupCount == 26u,
               "the voices read the sequencer's Position and Sample end groups, the Perform screen's SMP POS and SMP END (OS-PERFFX P7)");
+static_assert(static_cast<unsigned>(o3os::seq::FxGroup::AmpEnvFx) == o3os::audio::kModGroupAmpEnv && o3os::audio::kModGroupAmpEnv == 23u &&
+                  static_cast<unsigned>(o3os::seq::FxGroup::FilterEnvFx) == o3os::audio::kModGroupFilterEnv && o3os::audio::kModGroupFilterEnv == 24u &&
+                  o3os::seq::fx::kAmpEnvFx == o3os::audio::kFxAmpEnv && o3os::audio::kFxAmpEnv == 96 && o3os::seq::fx::kFilterEnvFx == o3os::audio::kFxFilterEnv && o3os::audio::kFxFilterEnv == 97,
+              "the voices read the sequencer's step FX w and y groups and model ids 96, 97 (OS-CEWTENV W6a)");
+static_assert(static_cast<unsigned>(o3os::seq::FxGroup::GranLenFx) == o3os::audio::kModGroupGranLen && o3os::audio::kModGroupGranLen == 25u &&
+                  o3os::seq::fx::kGranLenFx == o3os::audio::kFxGranLen && o3os::audio::kFxGranLen == 98,
+              "the voices read the sequencer's step FX z group and model id 98 (OS-CEWTENV W6b)");
 static_assert(static_cast<unsigned>(o3os::seq::FxGroup::Reverse) == o3os::audio::kModGroupReverse && o3os::audio::kModGroupReverse == 8u && o3os::seq::fx::kReverse == o3os::audio::kFxReverse,
               "the voices read the sequencer's Reverse group and FX number, the Perform screen's PLAYBACK and the step FX 26 (OS-PERF-REVERSE)");
 static_assert(o3os::seq::fx::kFilterLfo == o3os::audio::kFxFilterLfo, "the voices read the sequencer's Filter LFO FX number (OS-FU5)");
@@ -115,6 +123,13 @@ static_assert(ia::kLfoFirst == im::kModFirst && ia::kLfoStride == im::kModStride
 static_assert(o3os::audio::kLfoShapeSine == o3os::model::kLfoShapeSine && o3os::audio::kLfoShapeCount == o3os::model::kLfoShapeCount && o3os::model::kLfoShapeCount == o3os::model::kLfoShapeSine + 1u,
               "the LFO shapes (OS-LFOSINE: 0..5, Sine last) the voices take are the model's");
 static_assert(o3os::model::kMaxOutputBus == 16, "the Bus field's range (16) is the model's kMaxOutputBus");
+// OS-INSFX S7: the ids of an insert's parameters. ParamKind::Insert is kind 6 (seven kinds); the id's index is `where * 2 + slot` of the project's INSX record, so a track's two slots are 0..31
+// (the audio side's instance key `where`, below InsertHost::kWhere = 2 * tracks) and the master's insert (record where 16, slot 0) is 32; the field is the module's parameter below O3M_PARAMS_MAX, the
+// blob's and the host's width.
+static_assert(o3os::core::kParamKindCount == 7 && static_cast<unsigned>(o3os::core::ParamKind::Insert) == 6, "OS-INSFX D13: Insert is the new kind 6, old readers skip those LRNB entries");
+static_assert(o3os::core::kInsertIdFields == o3os::model::kInsertParamsMax && o3os::core::kInsertIdFields == o3os::audio::InsertHost::kParams, "an insert parameter id's field is the INSX blob's and the host's width (O3M_PARAMS_MAX)");
+static_assert(o3os::core::kInsertIdMaster == 2u * o3os::model::kInsertWhereMaster, "the master insert is the id index of record where 16, slot 0");
+static_assert(o3os::core::insert_param_index(o3os::model::kInsertWhereMaster, 0) == o3os::core::kInsertIdMaster && o3os::core::insert_param_index(15, 1) == 31u, "track * 2 + slot, and the master's 32");
 
 }  // namespace
 

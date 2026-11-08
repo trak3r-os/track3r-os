@@ -1,16 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "screens_app.h"
 
+#include <o3os/app/events_view.h>
 #include <o3os/app/input_test.h>
 #include <o3os/app/key_prompt.h>
 #include <o3os/app/model.h>
+#include <o3os/app/screens/overlay.h>
 #include <o3os/app/screens/pattern_screen.h>
 #include <o3os/app/screens/scene.h>
 #include <o3os/app/screens/screen.h>
 #include <o3os/app/song_data.h>
 #include <o3os/app/song_tools_view.h>
 #include <o3os/app/view_state.h>
+#include <o3os/model/event_list.h>
 #include <o3os/model/project.h>
+#include <o3os/sim/demo_project.h>
 
 #include <cstring>
 #include <memory>
@@ -25,9 +29,8 @@ using app::OverlayId;
 using app::ScreenId;
 using app::ViewState;
 
-constexpr unsigned kPageOrder = 0;
-constexpr unsigned kPageArrangement = 1;
-constexpr unsigned kPageTimeline = 2;
+constexpr unsigned kPageList = 0;  // OS-SONG3 S1: the Song screen has two pages, LIST (ORDER and ARRANGEMENT folded) and TIMELINE
+constexpr unsigned kPageTimeline = 1;
 
 // ---- content ---------------------------------------------------------------------------------------------------
 
@@ -84,11 +87,7 @@ ViewState song_view(unsigned page, int pos, const Model& model) {
   return v;
 }
 
-void draw_song_typical(ui::Renderer& r, unsigned) { scene(r, demo_model(), song_view(kPageOrder, 0, demo_model())); }
-
-void draw_song_arrangement(ui::Renderer& r, unsigned) {
-  scene(r, demo_model(), song_view(kPageArrangement, 8, demo_model()));
-}
+void draw_song_typical(ui::Renderer& r, unsigned) { scene(r, demo_model(), song_view(kPageList, 0, demo_model())); }
 
 // Both pages, a cursor at the top, in the middle, past the first window and at the far end; the play marker on the cursor's
 // row, on another visible row and out of the window.
@@ -173,14 +172,9 @@ void song_doc_queued(ViewState& v) {
 
 void draw_song_document(ui::Renderer& r, unsigned) {
   SongDoc& d = song_doc(false);
-  ViewState v = song_doc_view(kPageOrder, 5);
+  ViewState v = song_doc_view(kPageList, 5);
   song_doc_queued(v);
   scene(r, d.model, v);
-}
-
-void draw_song_document_arrangement(ui::Renderer& r, unsigned) {
-  SongDoc& d = song_doc(false);
-  scene(r, d.model, song_doc_view(kPageArrangement, 12));
 }
 
 // The dearest: both pages, every cell filled and the queued slot lit, over the dearest song positions.
@@ -209,7 +203,7 @@ ViewState song_doc_map_view(unsigned page, int pos, int cells, int slots, int tr
 // A rectangle of 4 slots x 3 tracks over the typical document, the jump waiting on slot 11 (outside the rectangle: a flashing slot on a selected row is Play on Sel, which the contrast table has no pair for).
 void draw_song_document_map(ui::Renderer& r, unsigned) {
   SongDoc& d = song_doc(false);
-  ViewState v = song_doc_map_view(kPageOrder, 5, 12, 4, 3);
+  ViewState v = song_doc_map_view(kPageList, 5, 12, 4, 3);
   song_doc_queued(v);
   v.play.queued = 11;
   scene(r, d.model, v);
@@ -271,15 +265,15 @@ ViewState song_doc_map_at(unsigned page, int pos, int cells, int track) {
   return v;
 }
 
-// The last track of a 12-track song that uses 8, on the Order page, and of a 16-track song that uses 10, on the Arrangement page (the map at the right edge of the screen).
+// The last track of a 12-track song that uses 8, and of a 16-track song that uses 10 (where the 12-lane window has scrolled to tracks 5-16).
 void draw_song_document_map_empty(ui::Renderer& r, unsigned) {
   SongDoc& d = song_doc_sparse(0);
-  scene(r, d.model, song_doc_map_at(kPageOrder, 5, 12, 12));
+  scene(r, d.model, song_doc_map_at(kPageList, 5, 12, 12));
 }
 
 void draw_song_document_map_16(ui::Renderer& r, unsigned) {
   SongDoc& d = song_doc_sparse(1);
-  scene(r, d.model, song_doc_map_at(kPageArrangement, 5, 16, 16));
+  scene(r, d.model, song_doc_map_at(kPageList, 5, 16, 16));
 }
 
 // The dearest of the ticks: 16 tracks of notes, FX only and empty cells side by side (a colour change at every cell), the cursor on the last track, both pages, over the dearest song positions, with and without the Shift layer.
@@ -294,7 +288,7 @@ void draw_song_document_map_churn(ui::Renderer& r, unsigned variant) {
 // The question of 1.6 up: its text on the strip and the key row marking F1 ALL and F2 UNIQUE.
 void draw_song_document_ask(ui::Renderer& r, unsigned) {
   SongDoc& d = song_doc(false);
-  ViewState v = song_doc_map_view(kPageOrder, 5, 12, 1, 1);
+  ViewState v = song_doc_map_view(kPageList, 5, 12, 1, 1);
   v.song.ask.live = true;
   v.song.ask.shared = 1;
   v.song.ask.first = 2;
@@ -366,6 +360,133 @@ void draw_song_timeline_worst(ui::Renderer& r, unsigned variant) {
   scene(r, d.model, v);
 }
 
+// OS-SONG3 S2: the editable TIMELINE. The typical one is the 12-track document with the cursor in lane 2 of slot 12 and a rectangle of 4 slots x 3 tracks selected (the slots run to the right of the cursor, the
+// tracks from lane 2). The dearest is the sweep of the timeline's, with the rectangle over every slot of the window and every lane (the second AccentText pass of the note map, the band, the cursor's cell) and the cursor's
+// cell: both ends of the song, the playhead on and off.
+void draw_song_timeline_edit(ui::Renderer& r, unsigned) {
+  SongDoc& d = song_doc(false);
+  ViewState v = song_doc_map_view(kPageTimeline, 12, 12, 4, 3);
+  scene(r, d.model, v);
+}
+
+void draw_song_timeline_edit_worst(ui::Renderer& r, unsigned variant) {
+  SongDoc& d = song_doc_short();
+  const unsigned tracks = variant / 4 + 1u;
+  (void)d.arena->project.set_active_tracks(tracks);
+  const int cells = tracks < 12u ? static_cast<int>(tracks) : 12;
+  ViewState v = song_doc_map_view(kPageTimeline, variant % 2 == 0 ? 0 : 20, cells, 1, cells);
+  v.song.select(39);  // the range from the cursor to the last slot: every slot of the window is in it
+  if (variant / 2 % 2 == 1) {
+    song_play_at(v, variant % 2 == 0 ? 3 : 22, 2, 9);
+  }
+  scene(r, d.model, v);
+}
+
+// OS-SONG3 S3 (review fold): the timeline_worst sweep with alternating tracks muted, the worst count of unmuted runs (6 of 12 lanes), so the note map's Text pass is sectioned the most. The full-window selection
+// stays in timeline_edit_worst: with it the dim sweep would need a eighth map section and not fit the standard. The mute flags are cleared again after the frame: song_doc_short() is shared with the sweeps above.
+// The top bit of the variant (variant / 8) is the shared mark's own worst case (OS-SONG3 S3): the song truncated to 32 slots, so the blocks are wide enough for the number and the `*` together, and every slot on
+// pattern 1, so every block of the window wears the mark. Both are restored after the frame, like the flags.
+void draw_song_timeline_edit_worst_dim(ui::Renderer& r, unsigned variant) {
+  SongDoc& d = song_doc_short();
+  const unsigned sweep = variant % 64u;             // bits 0..5: the sweep of timeline_worst (bit 0 the cursor's end, bit 1 the playhead, bits 2..5 the track count 1..16)
+  const bool marks_worst = variant / 64u != 0u;      // bit 6: the shared mark's worst case on top
+  const unsigned tracks = sweep / 4 + 1u;
+  (void)d.arena->project.set_active_tracks(tracks);
+  ViewState v = song_doc_view(kPageTimeline, sweep % 2 == 0 ? 0 : 20);
+  if (sweep / 2 % 2 == 1) {
+    song_play_at(v, sweep % 2 == 0 ? 3 : 22, 2, 9);
+  }
+  model::Project& p = d.arena->project;
+  for (unsigned t = 0; t < model::kMaxTracks; ++t) {
+    const model::TrackSlot* ts = p.track(t);
+    if (ts != nullptr) {
+      model::TrackSlot copy = *ts;
+      copy.flags = t % 2u == 0u ? model::kTrackMute : 0u;
+      (void)p.set_track(t, copy);
+    }
+  }
+  std::uint8_t saved_order[40];
+  if (marks_worst) {
+    for (unsigned i = 0; i < 40u; ++i) {
+      saved_order[i] = static_cast<std::uint8_t>(p.order(i));
+      (void)p.set_order(i, 1u);
+    }
+    for (unsigned i = 39u; i >= 32u; --i) {
+      (void)p.remove_order(i);
+    }
+  }
+  scene(r, d.model, v);
+  if (marks_worst) {
+    for (unsigned i = 32u; i < 40u; ++i) {
+      (void)p.insert_order(i, saved_order[i]);
+    }
+    for (unsigned i = 0; i < 40u; ++i) {
+      (void)p.set_order(i, saved_order[i]);  // all 40, not only the re-inserted tail: the sweep shares song_doc_short() with timeline_worst and timeline_edit_worst, whose frames would otherwise lose their colour changes
+    }
+  }
+  for (unsigned t = 0; t < model::kMaxTracks; ++t) {
+    const model::TrackSlot* ts = p.track(t);
+    if (ts != nullptr && ts->flags != 0u) {
+      model::TrackSlot copy = *ts;
+      copy.flags = 0u;
+      (void)p.set_track(t, copy);
+    }
+  }
+}
+
+// OS-SONG3 S3 (review fold, the combined sweep): everything dear at once — the full-window selection (the rectangle over every slot of the window and every lane: the band, the cursor's cell and the second
+// AccentText pass of the note map), alternating muted tracks (the most unmuted runs) and the shared mark on every block (32 slots on one pattern). 128 variants as the dim sweep's. It is not a worst-case state:
+// it is held to the chip's 2048-word list only, not the 1792 standard (the combination may cost more; the budget table reports its words and the review says so rather than trim a feature).
+void draw_song_timeline_edit_worst_all(ui::Renderer& r, unsigned variant) {
+  SongDoc& d = song_doc_short();
+  const unsigned sweep = variant % 64u;
+  const bool marks_worst = variant / 64u != 0u;
+  const unsigned tracks = sweep / 4 + 1u;
+  (void)d.arena->project.set_active_tracks(tracks);
+  const int cells = tracks < 12u ? static_cast<int>(tracks) : 12;
+  ViewState v = song_doc_map_view(kPageTimeline, sweep % 2 == 0 ? 0 : 20, cells, 1, cells);
+  v.song.select(39);  // the range from the cursor to the last slot: every slot of the window is in it
+  if (sweep / 2 % 2 == 1) {
+    song_play_at(v, sweep % 2 == 0 ? 3 : 22, 2, 9);
+  }
+  model::Project& p = d.arena->project;
+  for (unsigned t = 0; t < model::kMaxTracks; ++t) {
+    const model::TrackSlot* ts = p.track(t);
+    if (ts != nullptr) {
+      model::TrackSlot copy = *ts;
+      copy.flags = t % 2u == 0u ? model::kTrackMute : 0u;
+      (void)p.set_track(t, copy);
+    }
+  }
+  std::uint8_t saved_order[40];
+  if (marks_worst) {
+    for (unsigned i = 0; i < 40u; ++i) {
+      saved_order[i] = static_cast<std::uint8_t>(p.order(i));
+      (void)p.set_order(i, 1u);
+    }
+    for (unsigned i = 39u; i >= 32u; --i) {
+      (void)p.remove_order(i);
+    }
+  }
+  scene(r, d.model, v);
+  if (marks_worst) {
+    for (unsigned i = 32u; i < 40u; ++i) {
+      (void)p.insert_order(i, saved_order[i]);
+    }
+    for (unsigned i = 0; i < 40u; ++i) {
+      (void)p.set_order(i, saved_order[i]);
+    }
+  }
+  for (unsigned t = 0; t < model::kMaxTracks; ++t) {
+    const model::TrackSlot* ts = p.track(t);
+    if (ts != nullptr && ts->flags != 0u) {
+      model::TrackSlot copy = *ts;
+      copy.flags = 0u;
+      (void)p.set_track(t, copy);
+    }
+  }
+}
+
 // ---- the overlays ---------------------------------------------------------------------------------------------------
 
 ViewState pattern_view(int row, int moves) {
@@ -403,7 +524,7 @@ void draw_pattern_notify(ui::Renderer& r, unsigned) {
 }
 
 void draw_song_notify(ui::Renderer& r, unsigned) {
-  ViewState v = song_view(kPageOrder, 3, demo_model());
+  ViewState v = song_view(kPageList, 3, demo_model());
   notice(v, core::Severity::Info, "F1 PLAY PAT", "ui");
   scene(r, demo_model(), v);
 }
@@ -537,7 +658,7 @@ void song_tools_state(ViewState& v, unsigned tool, unsigned row, bool extreme) {
 
 void draw_song_tools(ui::Renderer& r, unsigned) {
   SongDoc& d = song_doc(false);
-  ViewState v = song_doc_map_view(kPageOrder, 5, 12, 4, 3);
+  ViewState v = song_doc_map_view(kPageList, 5, 12, 4, 3);
   song_tools_state(v, 0, 0, false);
   scene(r, d.model, v);
 }
@@ -545,7 +666,7 @@ void draw_song_tools(ui::Renderer& r, unsigned) {
 // OS-SONG-BUILD: the dialog on FORM, its three rows and the plan in the footer.
 void draw_song_tools_form(ui::Renderer& r, unsigned) {
   SongDoc& d = song_doc(false);
-  ViewState v = song_doc_map_view(kPageOrder, 5, 12, 4, 3);
+  ViewState v = song_doc_map_view(kPageList, 5, 12, 4, 3);
   song_tools_state(v, static_cast<unsigned>(app::SongTool::Form), 1, false);
   scene(r, d.model, v);
 }
@@ -553,7 +674,7 @@ void draw_song_tools_form(ui::Renderer& r, unsigned) {
 // OS-SONG-BRIDGE: the dialog on BRIDGE, its SLOTS row and the plan in the footer.
 void draw_song_tools_bridge(ui::Renderer& r, unsigned) {
   SongDoc& d = song_doc(false);
-  ViewState v = song_doc_map_view(kPageOrder, 5, 12, 4, 3);
+  ViewState v = song_doc_map_view(kPageList, 5, 12, 4, 3);
   song_tools_state(v, static_cast<unsigned>(app::SongTool::Bridge), 1, false);
   scene(r, d.model, v);
 }
@@ -572,6 +693,86 @@ void draw_song_tools_worst(ui::Renderer& r, unsigned variant) {
   song_doc_queued(v);
   song_tools_state(v, tool, row, extreme);
   scene(r, d.model, v);
+}
+
+// ---- the EVENTS overlay (OS-MIDIREC S1b/S1c) ---------------------------------------------------------------------------
+//
+// The document of `document events` (demo_project.cpp), with the overlay opened the way events_open opens it: the scope from the
+// view's selection and cursor, the cursor on the first row at or after the grid cursor's step. The typical state is the cursor's
+// track; the sweep takes every window of the dearest base under it, the cursor on every field of the row (the boxed field), the
+// block scopes (the TRK column), the three filters (S1c) and the play marker (3.7, S1c), and the empty list.
+
+struct EventsDoc {
+  std::unique_ptr<model::ModelArena> arena;
+  Model model;
+};
+
+EventsDoc& events_doc() {
+  static EventsDoc d;
+  if (!d.arena) {
+    d.arena = std::make_unique<model::ModelArena>();
+    std::memset(d.arena.get(), 0, sizeof(model::ModelArena));
+    fill_events_project(d.arena->project);
+    d.model.project = &d.arena->project;
+    d.model.undo_depth = 12;
+  }
+  return d;
+}
+
+// The view of the list open on `v` (the base view's cursor, window and selection): the scope, the cursor's start and the field.
+void events_view_state(ViewState& v, unsigned pattern, unsigned field, model::events::Filter filter) {
+  EventsDoc& d = events_doc();
+  const model::Pattern* pat = d.arena->project.pattern(pattern);
+  v.screen = ScreenId::Pattern;
+  v.edit.pattern = static_cast<std::uint8_t>(pattern);
+  v.overlay = OverlayId::Events;
+  if (pat == nullptr) {
+    return;
+  }
+  namespace ev = model::events;
+  v.events.scope = app::events_scope_of(*pat, v.edit, v.pattern.row(), v.pattern.track());
+  v.events.filter = filter;
+  v.events.field = static_cast<std::uint8_t>(field % 8u);
+  v.events.cursor = app::events_start_cursor(*pat, ev::env_of(d.arena->project), v.events.scope, v.events.filter, v.pattern.row());
+  v.events.top = v.events.cursor >= app::kEventsRows ? v.events.cursor - app::kEventsRows + 1u : 0u;
+}
+
+void draw_events(ui::Renderer& r, unsigned) {
+  EventsDoc& d = events_doc();
+  ViewState v = pattern_view(0, 0);  // the cursor on track 1, step 1
+  events_view_state(v, 1, 0, model::events::Filter::All);
+  scene(r, d.model, v);
+}
+
+constexpr unsigned kEventsFieldVariants = 8;     // the cursor on every field (the valid ones of the row are boxed)
+constexpr unsigned kEventsFilterVariants = 3;    // S1c: ALL, NOTES, CC (the header count and the F1 label follow)
+constexpr unsigned kEventsPlayVariants = 2;      // S1c: the play marker off / on (3.7)
+constexpr unsigned kEventsWorstVariants = kWindows * kEventsFieldVariants * kEventsFilterVariants * kEventsPlayVariants;
+
+// The dearest sweep: every window of the dearest base (the document with the block gives the TRK column), the cursor on every
+// field, every filter, the play marker on and off, and the last window's variants on the empty pattern (the empty list).
+void draw_events_worst(ui::Renderer& r, unsigned variant) {
+  EventsDoc& d = events_doc();
+  const unsigned field = variant % kEventsFieldVariants;
+  variant /= kEventsFieldVariants;
+  const unsigned filter = variant % kEventsFilterVariants;
+  variant /= kEventsFilterVariants;
+  const bool playing = variant % kEventsPlayVariants != 0;
+  variant /= kEventsPlayVariants;
+  const bool empty = variant >= kWindows - 1u;
+  if (empty) {
+    variant = kWindows - 1u;
+  }
+  const Window w = window_of(variant);
+  ViewState view = window_view(w);
+  const unsigned pattern = empty ? 2u : 1u;
+  events_view_state(view, pattern, field, static_cast<model::events::Filter>(filter));
+  if (playing) {  // the play marker (3.7): the sequencer on a step of the pattern on show
+    view.play.playing = true;
+    view.play.pattern = static_cast<std::uint8_t>(pattern);
+    view.play.step = 8u;
+  }
+  scene(r, d.model, view);
 }
 
 // ---- the Pattern screen's choosers (OS-009 P1a.1) -----------------------------------------------------------------------
@@ -609,6 +810,30 @@ void draw_pattern_chooser_worst(ui::Renderer& r, unsigned variant) {
   const Window w = window_of(variant);
   ViewState v = window_view(w);
   v.overlay = id;
+  scene(r, window_model(w), v);
+}
+
+// ---- the F7 verb menu (OS-PTOOLS2 S3) -------------------------------------------------------------------------------------
+//
+// The menu open over the Pattern screen the way verb_open opens it: the cursor stays where the last open left it. The typical state is the cursor on the first
+// verb over a document; the sweep takes every window of the dearest base with the cursor on each of the sixteen verbs.
+
+void draw_verb_menu(ui::Renderer& r, unsigned) {
+  ViewState v = pattern_view(3, 6);
+  v.mode[app::screen_index(ScreenId::Pattern)] = static_cast<std::uint8_t>(app::PatternMode::Edit);
+  v.overlay = OverlayId::VerbMenu;
+  scene(r, pattern_doc_model(0, false), v);
+}
+
+constexpr unsigned kVerbMenuWorstVariants = kWindows * app::kVerbCount;
+
+void draw_verb_menu_worst(ui::Renderer& r, unsigned variant) {
+  const unsigned cursor = variant % app::kVerbCount;
+  variant /= app::kVerbCount;
+  const Window w = window_of(variant);
+  ViewState v = window_view(w);
+  v.overlay = OverlayId::VerbMenu;
+  v.verb_menu.cursor = static_cast<std::uint8_t>(cursor);
   scene(r, window_model(w), v);
 }
 
@@ -687,13 +912,11 @@ const ScreenState kInputTestStates[2] = {
 };
 
 // Every state is held to the standard budget in every theme and both modes: the typical ones are one-variant worst cases.
-const ScreenState kSongStates[14] = {
+const ScreenState kSongStates[16] = {
     {"typical", true, 1, kBudgetWords, draw_song_typical},
-    {"arrangement", true, 1, kBudgetWords, draw_song_arrangement, false},
     {"worst", true, kSongWorstVariants, kBudgetWords, draw_song_worst},
     // OS-SONG1: over a document, with the track map of each row and a queued jump blinking.
     {"document", true, 1, kBudgetWords, draw_song_document},
-    {"document_arrangement", true, 1, kBudgetWords, draw_song_document_arrangement},
     {"document_worst", true, 8, kBudgetWords, draw_song_document_worst, false},
     // OS-SONGMAP: the cursor in the track map with a rectangle selected, the dearest of it (16 tracks, 16 slots), and the question's key row.
     {"document_map", true, 1, kBudgetWords, draw_song_document_map},
@@ -706,11 +929,18 @@ const ScreenState kSongStates[14] = {
     // OS-SONG-TIMELINE: the TIMELINE page playing, and the dearest sweep (the thumbnail cap, four variants).
     {"timeline", true, 1, kBudgetWords, draw_song_timeline_document},
     {"timeline_worst", true, 64, kBudgetWords, draw_song_timeline_worst, false},
+    // OS-SONG3 S2: the TIMELINE as an editing grid: the cursor's cell and a rectangle, and the dearest sweep of it.
+    {"timeline_edit", true, 1, kBudgetWords, draw_song_timeline_edit},
+    {"timeline_edit_worst", true, 64, kBudgetWords, draw_song_timeline_edit_worst, false},
+    // OS-SONG3 S3 (review fold): the same sweep with alternating tracks muted (the worst run count of unmuted lanes); the top variant bit truncates the song to 32 slots on one pattern, the shared mark's worst case (every block wide enough for number and `*`).
+    {"timeline_edit_worst_dim", true, 128, kBudgetWords, draw_song_timeline_edit_worst_dim, false},
+    // OS-SONG3 S3 (review fold): the combined sweep — the full-window selection, alternating mutes and the shared marks together. Not a worst-case state: held to the chip's 2048 only, not the 1792 standard.
+    {"timeline_edit_worst_all", false, 128, 0, draw_song_timeline_edit_worst_all, false},
 };
 
-// The `_worst` sweeps (and the arrangement page, which the song scenario shows) are measured but not rendered to the
+// The `_worst` sweeps are measured but not rendered to the
 // gallery: the typical states are what is looked at.
-const ScreenState kOverlayStates[16] = {
+const ScreenState kOverlayStates[20] = {
     {"pattern_learn", true, 1, kBudgetWords, draw_learn},
     {"pattern_learn_worst", true, kWindows, kBudgetWords, draw_learn_worst, false},
     {"pattern_navigator", true, 1, kBudgetWords, draw_navigator},
@@ -729,6 +959,12 @@ const ScreenState kOverlayStates[16] = {
     {"song_tools_form", true, 1, kBudgetWords, draw_song_tools_form},
     {"song_tools_bridge", true, 1, kBudgetWords, draw_song_tools_bridge},
     {"song_tools_worst", true, kSongToolsVariants, kBudgetWords, draw_song_tools_worst, false},
+    // OS-MIDIREC S1b: the EVENTS overlay over the Pattern screen.
+    {"events", true, 1, kBudgetWords, draw_events},
+    {"events_worst", true, kEventsWorstVariants, kBudgetWords, draw_events_worst, false},
+    // OS-PTOOLS2 S3: the F7 verb menu over the Pattern screen (its own budget state).
+    {"pattern_verb_menu", true, 1, kBudgetWords, draw_verb_menu},
+    {"pattern_verb_menu_worst", true, kVerbMenuWorstVariants, kBudgetWords, draw_verb_menu_worst, false},
 };
 
 }  // namespace o3os::sim

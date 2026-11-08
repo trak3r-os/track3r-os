@@ -239,6 +239,9 @@ const qanet::ActionEntry* entry_of(const std::vector<qanet::ActionEntry>& table,
   return nullptr;
 }
 
+// The scenario lines of a reach for this walk: its `steps`, else the `rules` reach of a context that only this walk reaches (nullptr: not reached).
+const char* reach_steps(const qanet::ContextReach& r) noexcept { return r.steps != nullptr ? r.steps : r.rules; }
+
 const qanet::ContextReach* reach_of(const std::vector<qanet::ContextReach>& table, app::Context c) {
   for (const qanet::ContextReach& r : table) {
     if (r.context == c) {
@@ -272,7 +275,7 @@ std::vector<Row> rows_of(const core::BindingView& view, const app::ActionTable& 
     if (b.arg_from == core::ArgFrom::Value) {
       arg = 1;
     } else if (b.arg_from == core::ArgFrom::InputId) {
-      arg = 0;
+      arg = b.arg;  // the argument of a press of pad 0: the binding adds the input's id (core::binding_arg), so a binding with an offset (instrument.select on a pad: +1) is run with its offset, not with 0
     }
     const std::string key = std::to_string(b.context) + "/" + def->name + "/" + std::to_string(arg);
     auto it = index.find(key);
@@ -301,10 +304,17 @@ void walk_row(const Row& row, const qanet::State& state, const qanet::ContextRea
   }() + " [" + state.name + "]";
   Spec spec;
   spec.doc = state.doc;
-  spec.base = reach.base;
-  spec.reach = reach.steps != nullptr ? reach.steps : "";
+  spec.base = std::string(reach.base) + state.base;
+  spec.reach = reach_steps(reach) != nullptr ? reach_steps(reach) : "";
   spec.pre = state.pre;
   spec.steps = state.steps;
+  if (std::string(state.base).find("audio on") != std::string::npos && spec.reach.find("apps on") != std::string::npos) {
+    const std::string note = std::string(reach.name) + ": the state [" + state.name + "] has the engine on and this context's reach has `apps on` (the simulator refuses the pair)";
+    if (std::find(report.not_exercised.begin(), report.not_exercised.end(), note) == report.not_exercised.end()) {
+      report.not_exercised.push_back(note);
+    }
+    return;
+  }
 
   std::unique_ptr<sim::Simulator> s;
   std::string error;
@@ -448,7 +458,7 @@ Report walk(const core::BindingView& view, const std::string& card_dir, bool gap
       report.setup_errors.push_back("no entry in context_reach() for the context " + std::to_string(static_cast<unsigned>(row.context)) + " of " + row.action);
       continue;
     }
-    if (reach->steps == nullptr) {
+    if (reach_steps(*reach) == nullptr) {
       if (skipped.insert(reach->name).second) {
         report.not_exercised.push_back(std::string(reach->name) + ": " + reach->skip);
       }
@@ -1122,13 +1132,13 @@ TEST_CASE("qanet rules: every context reach brings its own context into the chai
   std::set<unsigned> seen;
   for (const qanet::ContextReach& r : qanet::context_reach()) {
     CHECK_MESSAGE(seen.insert(static_cast<unsigned>(r.context)).second, "twice in context_reach(): " << std::string(r.name));
-    if (r.steps == nullptr) {
+    if (reach_steps(r) == nullptr) {
       CHECK_MESSAGE((r.skip != nullptr && r.skip[0] != 0), std::string(r.name) << ": skipped without a reason");
       continue;
     }
     Spec spec;
     spec.base = r.base;
-    spec.reach = r.steps;
+    spec.reach = reach_steps(r);
     std::unique_ptr<sim::Simulator> s;
     std::string error;
     const bool ok = prepare(s, spec, card.dir.path(), error);

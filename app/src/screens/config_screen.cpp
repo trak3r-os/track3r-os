@@ -61,7 +61,7 @@ Rows rows_of(const ViewState& view) noexcept {
     // E-CFG-03: the MIDI page puts TRANSPORT IN and OUT (ids 23, 24, appended) right after CLOCK MODE
     namespace ds = model::device_setting;
     static constexpr std::uint16_t kPatternOrder[] = {ds::RecPoly, ds::RecQuantize, ds::RecMicro, ds::RecVelocity, ds::MetroMode, ds::MetronomeVolume, ds::CountIn, ds::PadOffset, ds::PatSwitch};
-    static constexpr std::uint16_t kMidiOrder[] = {ds::ClockIn, ds::ClockSync, ds::ClockMode, ds::TransportIn, ds::TransportOut, ds::MidiInPort, ds::MidiOutPort, ds::MidiInChannel, ds::MidiOutChannel};
+    static constexpr std::uint16_t kMidiOrder[] = {ds::ClockIn, ds::ClockSync, ds::ClockMode, ds::TransportIn, ds::TransportOut, ds::MtcOut, ds::MtcStart, ds::MtcIn, ds::MidiInPort, ds::MidiOutPort, ds::MidiInChannel, ds::CcMap, ds::MidiOutChannel};  // OS-MIDICCMAP S1: CC MAP after IN CHANNEL
     const std::uint16_t* const kOrder = page == kPagePattern ? kPatternOrder : kMidiOrder;
     const unsigned order_n = page == kPagePattern ? sizeof kPatternOrder / sizeof kPatternOrder[0] : sizeof kMidiOrder / sizeof kMidiOrder[0];
     const auto rank = [kOrder, order_n](std::uint16_t field) {
@@ -299,6 +299,41 @@ void ConfigScreen::render(const Model& model, const ViewState& view, Renderer& r
           r.text(card_x, cell_y(3), "FX1 + FX2: bind a controller", Color::TextDim, Face::Label);
           r.text(card_x, cell_y(4), "Host stream to the outputs", Color::TextDim, Face::Label);
           r.text(card_x, cell_y(5), "100 = as sent; not captured", Color::TextDim, Face::Label);
+        } else if (field == model::device_setting::MtcOut) {  // OS-MTC A3: not learnable (a controller must not start a time code), so no controller line
+          r.text(card_x, cell_y(3), "Off, or 24, 25, 30 fps", Color::TextDim, Face::Label);
+          r.text(card_x, cell_y(4), "Time code for Logic and DAWs", Color::TextDim, Face::Label);
+          r.text(card_x, cell_y(5), "MTC has no tempo: set it there", Color::TextDim, Face::Label);
+        } else if (field == model::device_setting::MtcIn) {  // OS-MTC B3: not learnable; the first line is the chase's status (the platform tells it every pass)
+          const ViewState::MtcView& mv = view.mtc;
+          core::FixedString<40> st;
+          if (mv.state >= 2u) {
+            static constexpr const char* const kStateName[] = {"", "WAITING", "READING", "ARMED", "LOCKED", "FREEWHEEL", "MTC RATE", "PAST END"};
+            static constexpr const char* const kFps[] = {"24", "25", "29.97", "30"};
+            char tx[12];
+            for (unsigned k = 0; k < 4u; ++k) {  // hh:mm:ss:ff, two digits each (the platform packs them a byte each, hours highest)
+              const unsigned v = (mv.time >> (24u - 8u * k)) & 0xFFu;
+              tx[3u * k] = static_cast<char>('0' + (v / 10u) % 10u);
+              tx[3u * k + 1u] = static_cast<char>('0' + v % 10u);
+              tx[3u * k + 2u] = k < 3u ? ':' : '\0';
+            }
+            st.assign("MTC ");
+            st.append(tx);
+            st.append(" ");
+            st.append(kFps[mv.code & 3u]);
+            st.append(" ");
+            st.append(kStateName[mv.state < 8u ? mv.state : 7u]);
+          } else if (mv.state == 1u) {
+            st.assign("MTC WAITING");
+          } else {
+            st.assign("Off, DIN or USB");
+          }
+          r.text(card_x, cell_y(3), st.c_str(), Color::TextDim, Face::Label);
+          r.text(card_x, cell_y(4), mv.state >= 3u && mv.state <= 5u ? "MTC IN: FOLLOWING" : "The master owns Play and Stop", Color::TextDim, Face::Label);
+          r.text(card_x, cell_y(5), "Clock follow off, MTC OUT muted", Color::TextDim, Face::Label);
+        } else if (field == model::device_setting::MtcStart) {
+          r.text(card_x, cell_y(3), "Hour of the song's first step", Color::TextDim, Face::Label);
+          r.text(card_x, cell_y(4), "01: Logic's bar 1 at 01:00:00:00", Color::TextDim, Face::Label);
+          r.text(card_x, cell_y(5), "00 for a project from 00:00:00:00", Color::TextDim, Face::Label);
         } else {
           r.text(card_x, cell_y(3), "FX1 + FX2: bind a controller", Color::TextDim, Face::Label);
           if (field == model::device_setting::RecPoly) {  // what the choice means

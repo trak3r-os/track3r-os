@@ -67,13 +67,14 @@ tap fx
 action step.fx_type 40
 encoder 12
 assert model pat.1.2.2.fx1=40:36
-# T4 HAT: the Fill dialog (F4), TYPE EVERY N with N 2: a note on every second step.
+# T4 HAT: the Fill dialog (F4), TYPE EVERY N with N 2: a note on every second step of the selected track (OS-PTOOLS2 S3c: Shift + Up at step 1 selects the track, the selection is the fill's target).
 action cursor.track 1
 action cursor.jump_fraction 0
 action instrument.select 4
 tap note
+action select.column_all
 tap f4
-tap down 3
+tap down 2
 tap right
 tap f1
 assert model pat.1.3.0.instr=4
@@ -95,10 +96,9 @@ assert model pat.1.0.2.note=68
 assert model pat.1.1.0.note=65
 assert model pat.1.1.2.note=68
 
-# 3. PAT-OPS: DUPLICATE x2 (F7 TOOLS, the second entry) repeats the four steps into eight; the second half then gets its own first note (F-5 on T1, step 5).
+# 3. PAT-OPS: DUPLICATE x2 (the verb menu's pad 10) repeats the four steps into eight; the second half then gets its own first note (F-5 on T1, step 5).
 tap f7
-tap down 1
-tap f1
+pad 9
 assert state msg=~DUPLICATED
 assert model pat.1.4.4.note=61
 assert model pat.1.2.6.fx1=40:36
@@ -130,7 +130,7 @@ assert model pat.2.0.0.note=66
 assert model pat.2.0.2.note=70
 assert model pat.1.0.0.note=61
 
-# 5. Pattern 3 is another copy, SHRUNK /2 (F7, the fourth entry: the even steps only: four steps), with the Tempo FX (15, value x 2 BPM) on the first step of T4.
+# 5. Pattern 3 is another copy, SHRUNK /2 (F7, the verb menu's pad 12: the even steps only: four steps), with the Tempo FX (15, value x 2 BPM) on the first step of T4.
 press f1
 wait 450
 pad 0
@@ -143,8 +143,7 @@ release f1
 wait 10
 assert state pattern=3 msg=~PATTERN_03_REPLACED_BY_01
 tap f7
-tap down 3
-tap f1
+pad 11
 assert state msg=SHRUNK:_4_STEPS
 action cursor.jump_fraction 0
 action cursor.track 3

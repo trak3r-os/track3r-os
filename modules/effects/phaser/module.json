@@ -1,0 +1,21 @@
+{
+  "name": "Phaser",
+  "id": "phaser",
+  "kind": "effect",
+  "abi": "1.2",
+  "description": "A phaser insert for a track: 4 to 6 first-order all-pass stages swept by a sine LFO (the period in ms, the depth in octaves, the centre frequency), a feedback around the chain that cannot blow up, and a dry/wet mix, with a view of the notch curve. One mono instance.",
+  "state_bytes": 128,
+  "params": [
+    {"name": "Stages", "min": 4, "max": 6, "default": 4, "type": "int"},
+    {"name": "Period", "min": 100, "max": 20000, "default": 2000, "curve": "log", "unit": "ms", "mod": true},
+    {"name": "Depth", "min": 0, "max": 100, "default": 60, "unit": "percent", "mod": true},
+    {"name": "Centre", "min": 100, "max": 4000, "default": 800, "curve": "log", "unit": "hz", "mod": true},
+    {"name": "Feedback", "min": -90, "max": 90, "default": 35, "unit": "percent", "mod": true},
+    {"name": "Mix", "min": 0, "max": 100, "default": 50, "unit": "percent", "mod": true}
+  ],
+  "views": [
+    {"name": "Notches", "min_size": [120, 80], "preferred_size": [380, 140]}
+  ],
+  "voices": 1,
+  "memory": {"hot_bytes": 1700, "sdram_bytes": 0}
+}

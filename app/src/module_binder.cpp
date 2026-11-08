@@ -114,14 +114,14 @@ bool ModuleBinder::named_by_instrument(unsigned module_index) const noexcept {
   return false;
 }
 
-// ... or by a (non-master) insert record, when the binder owns the inserts.
+// ... or by an insert record (a track's or, from OS-INSFX S6, the master's), when the binder owns the inserts.
 bool ModuleBinder::named_by_insert(unsigned module_index) const noexcept {
   if (inserts_ == nullptr) {
     return false;
   }
   const model::InsertState& s = project_->inserts();
   for (std::uint32_t i = 0; i < s.count; ++i) {
-    if (s.rec[i].where != model::kInsertWhereMaster && s.rec[i].module == module_index) {
+    if (s.rec[i].module == module_index) {
       return true;
     }
   }
@@ -233,29 +233,29 @@ void ModuleBinder::bind_insert_next() noexcept {
   const model::InsertState& list = project_->inserts();
   while (cursor_ < list.count) {
     const model::InsertRecord& r = list.rec[cursor_++];
-    if (r.where == model::kInsertWhereMaster) {
-      ++report_.inserts_master;  // S6 binds the master's
-      continue;
-    }
+    const auto skipped = [this](const model::InsertRecord& rec) {  // (a master record that is skipped is also counted apart: the report says "master unbound")
+      ++report_.inserts_skipped;
+      report_.inserts_master += rec.where == model::kInsertWhereMaster ? 1u : 0u;
+    };
     const model::ModuleRef* ref = project_->module(r.module);
     const int idx = ref != nullptr ? set_->find(ref->name) : -1;
     if (idx < 0) {
-      ++report_.inserts_skipped;  // the module's own problem is in the list already (NotFound, Refused ...)
+      skipped(r);  // the module's own problem is in the list already (NotFound, Refused ...)
       continue;
     }
     const unsigned where = r.where;
     const module::LoadedModule& m = *set_->at(static_cast<unsigned>(idx));
     if (m.header.kind != O3M_KIND_EFFECT) {
       note(Kind::WrongKind, where, ref->name, module::Status::BadKind, ModuleVoices::Bind::Ok, true, r.slot);
-      ++report_.inserts_skipped;
+      skipped(r);
       return;
     }
     if (m.entry == nullptr) {
       note(Kind::NotRunnable, where, ref->name, module::Status::Ok, ModuleVoices::Bind::Ok, true, r.slot);
-      ++report_.inserts_skipped;
+      skipped(r);
       return;
     }
-    const unsigned key = where * 2u + r.slot;  // the host's key: track * 2 + slot
+    const unsigned key = where * 2u + r.slot;  // the host's key: track * 2 + slot (the master, where 16 slot 0: 32; its instances count of the cap: two for a mono module, one for a stereo one (A7), so the last records of a full file may be skipped)
     const std::uint8_t* blob = reinterpret_cast<const std::uint8_t*>(r.param);
     const std::uint32_t blob_len = 4u * r.n;
     const std::uint16_t fault = module::fault_id(ref->name);
@@ -263,23 +263,26 @@ void ModuleBinder::bind_insert_next() noexcept {
     bool took = false;
     audio::InsertHost::Bind b = inserts_->bind(key, *m.entry, fault, nullptr, blob, blob_len, true);  // a free record that held this module keeps its state block
     if (b == audio::InsertHost::Bind::NeedState) {
-      std::uint8_t* mem = nullptr;
-      std::uint32_t addr = 0;
-      if (!set_->take_state(m.entry->state_bytes, mem, addr)) {
-        note(Kind::NoRoom, where, ref->name, module::Status::NoMemory, ModuleVoices::Bind::Ok, true, r.slot);
-        ++report_.inserts_skipped;
-        return;
+      std::uint8_t* mem[2] = {nullptr, nullptr};  // (the master's dual mono pair has two blocks; A7: a stereo module takes one)
+      for (unsigned k = 0; k < audio::InsertHost::instances_for(key, *m.entry); ++k) {
+        std::uint32_t addr = 0;
+        if (!set_->take_state(m.entry->state_bytes, mem[k], addr)) {
+          set_->state_rollback(mark);
+          note(Kind::NoRoom, where, ref->name, module::Status::NoMemory, ModuleVoices::Bind::Ok, true, r.slot);
+          skipped(r);
+          return;
+        }
+        std::memset(mem[k], 0, m.entry->state_bytes);
       }
       took = true;
-      std::memset(mem, 0, m.entry->state_bytes);
-      b = inserts_->bind(key, *m.entry, fault, mem, blob, blob_len, true);
+      b = inserts_->bind(key, *m.entry, fault, mem[0], blob, blob_len, true, mem[1]);
     }
     if (b != audio::InsertHost::Bind::Ok) {
       if (took) {
         set_->state_rollback(mark);
       }
       note(Kind::BindFailed, where, ref->name, module::Status::Ok, ModuleVoices::Bind::Ok, true, r.slot, b);
-      ++report_.inserts_skipped;
+      skipped(r);
       return;
     }
     if ((r.flags & model::kInsertFlagBypass) != 0u) {
@@ -342,7 +345,11 @@ std::size_t describe_module_problem(const ModuleProblem& p, char* out, std::size
   t.str("mod: ");
   if (p.slot != kModuleProblem) {
     if (p.insert) {
-      t.str("insert track ").dec(static_cast<std::uint32_t>(p.slot) + 1u).str(" slot ").dec(static_cast<std::uint32_t>(p.islot) + 1u).str(" skipped: ");
+      if (p.slot == model::kInsertWhereMaster) {  // OS-INSFX S6: the master's one insert
+        t.str("insert master skipped: ");
+      } else {
+        t.str("insert track ").dec(static_cast<std::uint32_t>(p.slot) + 1u).str(" slot ").dec(static_cast<std::uint32_t>(p.islot) + 1u).str(" skipped: ");
+      }
     } else {
       t.str("instrument ").dec(static_cast<std::uint32_t>(p.slot) + 1u).str(" muted: ");
     }

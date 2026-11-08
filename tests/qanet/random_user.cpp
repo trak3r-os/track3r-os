@@ -78,21 +78,28 @@
 // (UndoJournal::dropped_units) and holds only the fixture's own; rule 1 holds at every insert, and the undo reaches exactly what was kept (depth() units, back to the digest the oldest kept unit was made from), a
 // further undo changes nothing, redo gives the document back. The sample-edit cap: sedit.run effects on the Sample edit screen past SampleBank::kHistory; rule 1 judges every edit (a change outside the history's
 // own slot is not credited by the full history: rules.cpp unit_recorded), the history holds kHistory steps, and undo / redo walk the kept versions of the audio (the oldest dropped). Findings are `exhaust_<fixture>`.
+// The voice pool (seeds 8, 9 mod 16) and the folder of 2000 files (seeds 10, 11) run on a simulator of their own, after the others: `document sound` with the engine (the test bank's looped sine) for 13 to 16 pads held at once,
+// released in a random order, and a card made at test time (ScratchCard: 2000 files in one folder) for Sample load. See exh_voice_pool and exh_big_folder for what they judge. They are not in --exhaust-all (the walk's three);
+// `--exhaust --exhaust-only voice_pool|big_folder` runs one (any seed, `--steps 1` is enough: the walk is not theirs), self-test --exhaust-fresh-selftest.
 #include <o3os/app/actions.h>
 #include <o3os/app/app.h>
 #include <o3os/app/bindings.h>
 #include <o3os/app/buttons.h>
+#include <o3os/app/dir_index.h>
 #include <o3os/app/dir_scan.h>
 #include <o3os/app/model.h>
 #include <o3os/app/sample_bank.h>
 #include <o3os/app/screens/pattern_screen.h>
 #include <o3os/app/state_line.h>
+#include <o3os/audio/live_notes.h>
+#include <o3os/audio/voices.h>
 #include <o3os/core/binding.h>
 #include <o3os/hal/storage.h>
 #include <o3os/model/editor.h>
 #include <o3os/model/project.h>
 #include <o3os/sim/scenario.h>
 #include <o3os/sim/scenario_assert.h>
+#include <o3os/sim/sim_audio.h>
 #include <o3os/sim/simulator.h>
 
 #include "audio_probe.h"
@@ -101,6 +108,7 @@
 #include "selection_ops.h"
 
 #include <sys/wait.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <cctype>
@@ -411,13 +419,101 @@ struct Options {
   unsigned min_exhaust = 0;    // B8: the run fails when fewer fixtures than this reached their limit and ended in their checks
   bool exhaust_all = false;    // B8: every fixture on every seed (the short run), and not the seeds each is assigned to
   bool exhaust_selftest = false;  // B8: each fixture reaches its limit, and a defect planted at the limit is found
+  bool exhaust_fresh_selftest = false;  // B8: the same for the fixtures that run on a simulator of their own (the voice pool, the folder of 2000)
   bool plant_exhaust = false;  // self-test: at the limit a unit goes unrecorded (the undo cap: the ring's count does not move; the sample-edit cap: the pattern changes with the edit)
   int exhaust_only = -1;       // self-test: only this fixture (index into kExhaustNames), whatever the seed
 };
 
 // B8: the fixtures. The invariant of a finding is `exhaust_<name>`.
-constexpr unsigned kExhaustCount = 3;
-constexpr const char* kExhaustNames[kExhaustCount] = {"undo_cap", "sedit_cap", "sedit_switch"};
+constexpr unsigned kExhaustCount = 5;
+constexpr const char* kExhaustNames[kExhaustCount] = {"undo_cap", "sedit_cap", "sedit_switch", "voice_pool", "big_folder"};
+constexpr unsigned kFixtureFirstFresh = 3;  // the fixtures from this one on run on a simulator of their own (the walk's is dropped): they come last
+
+// B8 big_folder: the card of the fixture, made at test time in a scratch directory and never committed (the generated card of B1 has one folder of 600 files; the listing holds kMaxEntries = 256).
+// A tiny valid WAV (16-bit mono, 48 frames): the listing probes the header of every .wav it lists (tag_stereo), and a load from the full listing must read one.
+std::string tiny_wav(unsigned n) {
+  constexpr unsigned kFrames = 48;
+  std::string data;
+  for (unsigned i = 0; i < kFrames; ++i) {
+    const int v = static_cast<int>((i * (n % 7u + 1u) * 700u) % 8000u) - 4000;
+    data.push_back(static_cast<char>(v & 0xFF));
+    data.push_back(static_cast<char>((v >> 8) & 0xFF));
+  }
+  const auto le32 = [](std::uint32_t x) {
+    std::string s;
+    for (unsigned k = 0; k < 4; ++k) {
+      s.push_back(static_cast<char>((x >> (8 * k)) & 0xFF));
+    }
+    return s;
+  };
+  const auto le16 = [](std::uint32_t x) {
+    std::string s;
+    s.push_back(static_cast<char>(x & 0xFF));
+    s.push_back(static_cast<char>((x >> 8) & 0xFF));
+    return s;
+  };
+  std::string fmt = le16(1) + le16(1) + le32(22050) + le32(44100) + le16(2) + le16(16);
+  std::string body = "WAVEfmt " + le32(static_cast<std::uint32_t>(fmt.size())) + fmt + "data" + le32(static_cast<std::uint32_t>(data.size())) + data;
+  return "RIFF" + le32(static_cast<std::uint32_t>(body.size())) + body;
+}
+
+// The scratch card of big_folder: `big/` holds kBigFiles files in all: `wavs` of them .wav, the rest .txt files and hidden "._" files (the listing skips those); `small/` holds three .wav. Removed when it goes out of scope.
+constexpr unsigned kBigFiles = 2000;
+constexpr unsigned kBigJunk = 400;  // 200 .txt and 200 hidden
+struct ScratchCard {
+  std::filesystem::path root;
+  ScratchCard() = default;
+  ScratchCard(const ScratchCard&) = delete;
+  ScratchCard& operator=(const ScratchCard&) = delete;
+  ~ScratchCard() { remove(); }
+  void remove() {
+    std::error_code ec;
+    if (!root.empty()) {
+      std::filesystem::remove_all(root, ec);
+    }
+    root.clear();
+  }
+  static bool put(const std::filesystem::path& file, const std::string& bytes) {
+    std::ofstream out(file, std::ios::binary);
+    out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    return static_cast<bool>(out);
+  }
+  bool make(std::uint64_t seed, unsigned wavs, std::string& error) {
+    std::error_code ec;
+    root = std::filesystem::temp_directory_path(ec) / ("o3_qanet_big_" + std::to_string(static_cast<long>(::getpid())) + "_" + std::to_string(static_cast<unsigned long long>(seed)));
+    std::filesystem::remove_all(root, ec);
+    if (!std::filesystem::create_directories(root / "big", ec) || !std::filesystem::create_directories(root / "small", ec)) {
+      error = "no scratch directory for the card";
+      return false;
+    }
+    char name[40];
+    for (unsigned i = 0; i < wavs; ++i) {
+      std::snprintf(name, sizeof name, "s%04u.wav", i);
+      if (!put(root / "big" / name, tiny_wav(i))) {
+        error = "a file could not be written";
+        return false;
+      }
+    }
+    for (unsigned i = 0; i < kBigJunk / 2u; ++i) {
+      std::snprintf(name, sizeof name, "n%04u.txt", i);
+      bool ok = put(root / "big" / name, "not audio\n");
+      std::snprintf(name, sizeof name, "._s%04u.wav", i);
+      ok = put(root / "big" / name, "hidden") && ok;
+      if (!ok) {
+        error = "a file could not be written";
+        return false;
+      }
+    }
+    for (unsigned i = 0; i < 3; ++i) {
+      std::snprintf(name, sizeof name, "a%u.wav", i);
+      if (!put(root / "small" / name, tiny_wav(i))) {
+        error = "a file could not be written";
+        return false;
+      }
+    }
+    return true;
+  }
+};
 
 // B5: the relations, in the order the walk cycles through them (the start of the cycle is the seed's). The invariant of a finding is `meta_<name>`.
 constexpr unsigned kMetaCount = 5;
@@ -1897,14 +1993,15 @@ class Run {
   void exhaust_step() {
     const unsigned s = static_cast<unsigned>(seed_ % 16u);
     for (unsigned fx = 0; fx < kExhaustCount; ++fx) {
-      const bool mine = fx == 0u ? (s == 3u || s == 5u || s == 7u) : (s == 4u || s == 6u);  // (the switch runs with the sample-edit cap)
-      if (opt_.exhaust_only >= 0 ? opt_.exhaust_only != static_cast<int>(fx) : !(opt_.exhaust_all || mine)) {
+      const bool mine = fx == 0u ? (s == 3u || s == 5u || s == 7u) : fx <= 2u ? (s == 4u || s == 6u) : fx == 3u ? (s == 8u || s == 9u) : (s == 10u || s == 11u);  // (the switch runs with the sample-edit cap)
+      // --exhaust-only names one (any seed); --exhaust-all is the walk's three (the short run); the voice pool and the folder of 2000 run on the seeds they are assigned to in a long run by hand, or through --exhaust-only.
+      if (opt_.exhaust_only >= 0 ? opt_.exhaust_only != static_cast<int>(fx) : !(opt_.exhaust_all ? fx < kFixtureFirstFresh : mine)) {
         continue;
       }
       input_ = std::string("exhaust ") + kExhaustNames[fx];
       exh_name_ = kExhaustNames[fx];
       exh_card();
-      const bool reached = fx == 0u ? exh_undo_cap() : fx == 1u ? exh_sedit_cap() : exh_sedit_switch();
+      const bool reached = fx == 0u ? exh_undo_cap() : fx == 1u ? exh_sedit_cap() : fx == 2u ? exh_sedit_switch() : fx == 3u ? exh_voice_pool() : exh_big_folder();
       if (reached) {
         ++stats_.exh_ok[fx];
       } else {
@@ -2214,6 +2311,329 @@ class Run {
     return exh_no("no effect on the second slot changed its audio");
   }
 
+
+  // ---- B8: the two fixtures that run on a simulator of their own ----
+  // The voice pool needs a sustained sound (the generated card's WAVs end in a few milliseconds) and the folder of 2000 needs a card of its own, so each drops the walk's simulator for a fresh one and drives it with the
+  // walk's own inputs (tap, wait, act, pad): the invariants of check() judge it too (a stuck job, an open directory, an empty listing). They come after the other fixtures (they run last: the walk's state is gone).
+  bool exh_fresh(const std::string& card, bool sound, bool audio, std::string& error) {
+    sim_ = std::make_unique<sim::Simulator>();
+    sim_->set_scenario_dir(std::string());
+    sim_->step();
+    sim_->open_document(false, false, 0, sound);
+    if (!card.empty() && !sim_->open_card(card, error)) {
+      return false;
+    }
+    if (audio && !sim_->audio_on(error)) {
+      return false;
+    }
+    history_.clear();
+    snap_valid_ = false;
+    in_unit_ = false;
+    unit_active_ = false;
+    pending_begin_ = false;
+    tapped_ = false;
+    shift_held_ = false;
+    files_generation_ = 0;
+    listing_stale_ = false;
+    posts_seen_ = 0;
+    busy_ticks_ = 0;
+    scan_idle_ticks_ = 0;
+    no_card_ticks_ = 0;
+    last_screen_.clear();
+    last_msg_.clear();
+    last_keys_.clear();
+    new_pending_ = false;
+    checked_at_ = ticks_;
+    ticks_ += 1;
+    return true;
+  }
+
+  // A pad goes down or up as the scenario's `pad <n> down` and `pad <n> up` (held: the next inputs come while it is).
+  void exh_pad(unsigned pad, bool down) {
+    input_ = std::string("pad ") + std::to_string(pad) + (down ? " down" : " up");
+    rec(input_);
+    if (down) {
+      sim_->pad_down(pad);
+    } else {
+      sim_->pad_up(pad);
+    }
+    tick();
+  }
+
+  // The voice pool saturated by held pads. `document sound` with the engine: instrument 1 is the test bank's looped sine, so a held pad sounds for ever. 13 to 16 different pads of the NOTES mode are held, one after the other
+  // (past kLiveMax = 12 notes held and kMaxVoices = 12 voices: the live note past the limit cuts the oldest, live_notes.h), then released in a random order, one lost on purpose when --plant-exhaust (a lost key-up).
+  // Judged: each pad up to the twelfth starts a voice of its own; past the limit the pool stays at 12 in use (never more) and its published peak is 12; a pad pressed again does not take another voice; once every pad is released
+  // the pool is quiet within a second (no voice stuck: a held pad must not outlive its release); a pad after that sounds again and goes quiet at its release.
+  bool exh_voice_pool() {
+    constexpr unsigned fx = 3;
+    constexpr unsigned kPool = audio::kMaxVoices;
+    constexpr unsigned kPads = 36;  // three octaves of the NOTES mode
+    std::string error;
+    if (!exh_fresh(std::string(), true, true, error)) {
+      return exh_no("a simulator with the engine could not be made: " + error);
+    }
+    audio::VoicePool& voices = sim_->audio()->voices();
+    wait(20);
+    if (field(state_line(), "screen") != "PATTERN" || field(state_line(), "pads") != "NOTES" || voices.voices_in_use() != 0u) {
+      return exh_no("the sound document is not on the Pattern screen with the NOTES pads and a quiet pool (" + state_line() + ")");
+    }
+    const bool planted = opt_.plant_exhaust;
+    const std::string mark = planted ? " (planted)" : std::string();
+    const unsigned n = kPool + 1u + exh_rng_.below(4);  // 13..16 pads
+    unsigned pool[kPads];
+    for (unsigned i = 0; i < kPads; ++i) {
+      pool[i] = i;
+    }
+    for (unsigned i = 0; i < n; ++i) {  // n different pads, in a random order
+      std::swap(pool[i], pool[i + exh_rng_.below(kPads - i)]);
+    }
+    const std::vector<unsigned> pads(pool, pool + n);
+    for (unsigned k = 0; k < n; ++k) {
+      exh_pad(pads[k], true);
+      wait(k == kPool ? 40u : 6u);  // (the pad past the limit cuts the oldest: its declick ends before the count is read)
+      const unsigned in_use = voices.voices_in_use();
+      const unsigned want = k + 1u < kPool ? k + 1u : kPool;
+      if (in_use != want) {
+        exh_fail(fx, "with " + std::to_string(k + 1u) + " pads held (pad " + std::to_string(pads[k]) + " last) " + std::to_string(in_use) + " voices are in use, the pool of " + std::to_string(kPool) + " should have " + std::to_string(want) + mark, "in_use");
+        return true;
+      }
+      ++stats_.exh_units;
+    }
+    const audio::VoicePool::VoiceSnapshot snap = voices.voice_snapshot();
+    if (snap.peak != kPool || snap.in_use != kPool) {
+      exh_fail(fx, "with " + std::to_string(n) + " pads held the pool published " + std::to_string(snap.in_use) + " in use and a peak of " + std::to_string(snap.peak) + ", both should be " + std::to_string(kPool) + mark, "peak");
+      return true;
+    }
+    exh_pad(pads[n - 1], true);  // the newest pad again: a held key retriggers its own voice
+    wait(20);
+    if (voices.voices_in_use() != kPool) {
+      exh_fail(fx, "pressing the held pad " + std::to_string(pads[n - 1]) + " again leaves " + std::to_string(voices.voices_in_use()) + " voices in use, not " + std::to_string(kPool) + mark, "retrigger");
+      return true;
+    }
+    std::vector<unsigned> order = pads;
+    for (unsigned i = n; i > 1; --i) {
+      std::swap(order[i - 1], order[exh_rng_.below(i)]);
+    }
+    for (const unsigned p : order) {
+      if (planted && p == pads[n - 1]) {
+        continue;  // the planted defect: this pad's key-up is lost
+      }
+      exh_pad(p, false);
+      wait(1);
+    }
+    unsigned waited = 0;
+    while (voices.voices_in_use() != 0u && waited < 1000u) {
+      wait(20);
+      waited += 20u;
+    }
+    if (voices.voices_in_use() != 0u) {
+      exh_fail(fx, std::to_string(voices.voices_in_use()) + " voices are still in use " + std::to_string(waited) + " ms after all " + std::to_string(n) + " pads were released" + mark, "stuck");
+      return true;
+    }
+    exh_pad(pads[0], true);  // the pool still works
+    wait(20);
+    if (voices.voices_in_use() != 1u) {
+      exh_fail(fx, "a pad pressed after the pool was saturated and released starts " + std::to_string(voices.voices_in_use()) + " voices, not 1" + mark, "reuse");
+      return true;
+    }
+    exh_pad(pads[0], false);
+    for (waited = 0; voices.voices_in_use() != 0u && waited < 1000u; waited += 20u) {
+      wait(20);
+    }
+    if (voices.voices_in_use() != 0u || voices.voice_snapshot().in_use != 0u) {
+      exh_fail(fx, "the last pad's voice is still in use " + std::to_string(waited) + " ms after its release" + mark, "reuse_stuck");
+    }
+    return true;
+  }
+
+  // A folder of 2000 files. The card is made here (ScratchCard): `big/` with 2000 files (1600 .wav, 200 .txt, 200 hidden), `small/` with three. Sample load goes into it. The listing holds kMaxEntries = 256 (dir_index.h): it
+  // must be Done within the scan bound, hold exactly 256 entries, every one a visible .wav file, sorted, and say it is truncated (the screen's "list full"); the cursor runs the 256 rows and stops at both ends (Down 300 times, Up 300
+  // times, Jump end); a file of the last row loads; up to the root the listing is the root's, whole and not truncated; into `small` it is three files and not truncated (the full flag does not outlive the folder); `big` again and
+  // RESCAN give the same 256. No directory handle stays open (check()). --plant-exhaust: the folder holds 200 .wav instead of 1600, a listing that lost entries.
+  bool exh_big_folder() {
+    constexpr unsigned fx = 4;
+    constexpr unsigned kCap = app::DirIndex::kMaxEntries;
+    constexpr unsigned kWavs = kBigFiles - kBigJunk;
+    const bool planted = opt_.plant_exhaust;
+    const std::string mark = planted ? " (planted)" : std::string();
+    std::string error;
+    ScratchCard card;
+    if (!card.make(seed_, planted ? 200u : kWavs, error)) {
+      return exh_no(error);
+    }
+    if (!exh_fresh(card.root.string(), false, false, error)) {
+      return exh_no("the card could not be opened: " + error);
+    }
+    card.remove();  // the simulator copied it
+    const auto scan = [&]() { return sim_->app().model().files; };
+    // Ticks until the listing has ended (Done or a failure) and no card job runs.
+    const auto scan_end = [&]() {
+      unsigned t = 0;
+      for (; t < kScanBoundTicks + 200u; t += 10u) {
+        const app::DirScan* const f = scan();
+        if (f != nullptr && f->state() != app::DirScan::State::Scanning && f->state() != app::DirScan::State::Idle && !sim_->app().card_jobs_busy()) {
+          break;
+        }
+        wait(10);
+      }
+      return t;
+    };
+    const auto pos = [&]() { return sim_->app().state().wav.list.pos(); };
+    const auto at_root = [&]() {
+      const app::DirScan* const f = scan();
+      return f != nullptr && (std::strcmp(f->folder(), "") == 0 || std::strcmp(f->folder(), "/") == 0);
+    };
+    const auto describe = [&]() { return field(state_line(), "screen") + " folder '" + (scan() != nullptr ? scan()->folder() : "?") + "' sel '" + field(state_line(), "sel") + "'"; };
+    tap(app::Button::Pattern);
+    tap(app::Button::SampleLoad);
+    wait(100);
+    if (field(state_line(), "screen") != "SAMPLE_LOAD") {
+      return exh_no("the Sample load screen was not reached (" + describe() + ")");
+    }
+    for (unsigned i = 0; i < 4u; ++i) {
+      scan_end();
+      if (at_root()) {
+        break;
+      }
+      (void)act("sample.up");
+    }
+    scan_end();
+    if (!at_root()) {
+      return exh_no("the Sample load screen did not go up to the card's root (" + describe() + ")");
+    }
+    // The listing of a folder, judged against what it must hold: `files` listed .wav files, `folders` folders.
+    const auto judge = [&](const char* where, unsigned folders, unsigned files, bool full) {
+      const app::DirScan* const f = scan();
+      if (f == nullptr || f->state() != app::DirScan::State::Done) {
+        exh_fail(fx, std::string(where) + ": the scan did not end in Done (" + describe() + ")" + mark, std::string("state_") + where);
+        return false;
+      }
+      const app::DirIndex& ix = f->index();
+      const unsigned want = std::min(folders + files, kCap);
+      if (ix.count() != want || f->truncated() != full || ix.full() != full) {
+        exh_fail(fx, std::string(where) + ": the listing holds " + std::to_string(ix.count()) + " entries" + (f->truncated() ? ", truncated" : ", not truncated") + "; the folder has " + std::to_string(folders) + " folders and " + std::to_string(files) + " listed files: " + std::to_string(want) + (full ? ", truncated" : ", whole") + " expected" + mark, std::string("count_") + where);
+        return false;
+      }
+      for (unsigned i = 0; i < ix.count(); ++i) {
+        const std::string name = ix.name(i);
+        const bool wav = name.size() > 4u && name.compare(name.size() - 4u, 4u, ".wav") == 0;
+        if (name.empty() || name[0] == '.' || (!ix.is_dir(i) && !wav)) {
+          exh_fail(fx, std::string(where) + ": entry " + std::to_string(i) + " '" + name + "' is a name the filter must not list" + mark, std::string("entry_") + where);
+          return false;
+        }
+        if (i > 0u && app::DirIndex::compare(ix.is_dir(i - 1u), ix.name(i - 1u), ix.is_dir(i), name.c_str()) >= 0) {
+          exh_fail(fx, std::string(where) + ": entries " + std::to_string(i - 1u) + " '" + ix.name(i - 1u) + "' and " + std::to_string(i) + " '" + name + "' are not in order" + mark, std::string("order_") + where);
+          return false;
+        }
+      }
+      return true;
+    };
+    // The cursor goes to the entry called `name` of the listing (a few Down or Up presses: the folders are first).
+    const auto go_to = [&](const char* name) {
+      for (unsigned i = 0; i < 8u; ++i) {
+        if (field(state_line(), "sel") == name) {
+          return true;
+        }
+        tap(app::Button::Down);
+      }
+      for (unsigned i = 0; i < 8u; ++i) {
+        if (field(state_line(), "sel") == name) {
+          return true;
+        }
+        tap(app::Button::Up);
+      }
+      return field(state_line(), "sel") == name;
+    };
+    if (!judge("root", 2u, 0u, false)) {
+      return true;
+    }
+    if (!go_to("big")) {
+      return exh_no("the cursor did not reach the folder big (" + describe() + ")");
+    }
+    (void)act("sample.enter");
+    const unsigned took = scan_end();
+    stats_.exh_units += took;
+    if (took >= kScanBoundTicks) {
+      exh_fail(fx, "the listing of the folder of " + std::to_string(kBigFiles) + " files took " + std::to_string(took) + " ticks (bound " + std::to_string(kScanBoundTicks) + ")" + mark, "scan_time");
+      return true;
+    }
+    if (!judge("big", 0u, kWavs, true)) {
+      return true;
+    }
+    const unsigned rows = scan()->index().count();
+    if (pos() != 0) {
+      exh_fail(fx, "entering the folder puts the cursor on row " + std::to_string(pos()) + ", not the first" + mark, "enter_cursor");
+      return true;
+    }
+    for (unsigned i = 0; i < 300u; ++i) {
+      tap(app::Button::Down);
+    }
+    if (pos() != static_cast<int>(rows) - 1) {
+      exh_fail(fx, "after 300 presses of Down the cursor is on row " + std::to_string(pos()) + " of " + std::to_string(rows) + mark, "cursor_down");
+      return true;
+    }
+    for (unsigned i = 0; i < 300u; ++i) {
+      tap(app::Button::Up);
+    }
+    if (pos() != 0) {
+      exh_fail(fx, "after 300 presses of Up the cursor is on row " + std::to_string(pos()) + ", not the first" + mark, "cursor_up");
+      return true;
+    }
+    (void)act("cursor.jump_end");
+    if (pos() != static_cast<int>(rows) - 1) {
+      exh_fail(fx, "Jump end puts the cursor on row " + std::to_string(pos()) + " of " + std::to_string(rows) + mark, "jump_end");
+      return true;
+    }
+    // A file of the last row loads (the name's place in the pool is the path the card has).
+    const Extra before = extra_of(*sim_);
+    const std::string last = scan()->index().name(rows - 1u);
+    tap(app::Button::F1);
+    if (sim_->project() != nullptr && sim_->project()->instrument(0) != nullptr) {
+      wait(50);
+      tap(app::Button::F1);  // (REPLACE? answered)
+    }
+    bool loaded = false;
+    for (unsigned i = 0; i < 40u && !loaded; ++i) {
+      wait(100);
+      loaded = extra_of(*sim_).slots_used() > before.slots_used();
+    }
+    if (!loaded) {
+      exh_fail(fx, "F1 on the last row of the full listing ('" + last + "') loaded nothing (" + describe() + ", msg " + field(state_line(), "msg") + ")" + mark, "load_last");
+      return true;
+    }
+    // Up to the root: a whole listing again (the full flag is the folder's).
+    (void)act("sample.up");
+    scan_end();
+    if (!at_root() || !judge("root_again", 2u, 0u, false)) {
+      if (!at_root()) {
+        exh_fail(fx, "F2 from the full listing did not go up to the root (" + describe() + ")" + mark, "up");
+      }
+      return true;
+    }
+    if (!go_to("small")) {
+      return exh_no("the cursor did not reach the folder small (" + describe() + ")");
+    }
+    (void)act("sample.enter");
+    scan_end();
+    if (!judge("small", 0u, 3u, false)) {
+      return true;
+    }
+    (void)act("sample.up");
+    scan_end();
+    if (!go_to("big")) {
+      return exh_no("the cursor did not reach the folder big again (" + describe() + ")");
+    }
+    (void)act("sample.enter");
+    scan_end();
+    if (!judge("big_again", 0u, kWavs, true)) {
+      return true;
+    }
+    (void)act("sample.rescan");
+    wait(50);
+    scan_end();
+    judge("rescan", 0u, kWavs, true);
+    return true;
+  }
 
   void card_step() {
     std::string error;
@@ -3211,18 +3631,20 @@ std::string meta_shortfall(const Options& o, unsigned meta_total, unsigned tuned
 // B8's proof. Each fixture reaches its limit in a clean walk's seeds and finds nothing (the undo cap: the ring dropped units and the undo reached what was kept; the sample-edit cap: the history held kHistory steps
 // after more edits than that), and a defect planted at the limit is found: at the undo cap a unit that goes unrecorded; at the sample-edit cap a side effect on the pattern that the full history used to credit as
 // an undo unit (the blind spot, rules.cpp unit_recorded: the same defect planted before B8 passed).
-int exhaust_selftest(const Options& base) {
+// The fixtures [first, end): the walk's three with 3 seeds each (--exhaust-selftest), or the two that run on a simulator of their own with one seed each (--exhaust-fresh-selftest: the walk is not theirs, a seed only
+// draws the pads, and each run costs seconds).
+int exhaust_selftest(const Options& base, unsigned first, unsigned end, std::uint64_t seeds) {
   int bad = 0;
   std::string error;
   Options o = base;
   o.exhaust = true;
-  o.steps = 24;
-  for (unsigned fx = 0; fx < kExhaustCount; ++fx) {
+  o.steps = first >= kFixtureFirstFresh ? 1 : 24;
+  for (unsigned fx = first; fx < end; ++fx) {
     Options one = o;
     one.exhaust_only = static_cast<int>(fx);
     unsigned ok = 0;
     std::string clean;
-    for (std::uint64_t seed = 1; seed <= 3; ++seed) {
+    for (std::uint64_t seed = 1; seed <= seeds; ++seed) {
       std::vector<Finding> f;
       Run r(one, seed);
       if (!r.start(error)) {
@@ -3237,7 +3659,7 @@ int exhaust_selftest(const Options& base) {
         }
       }
     }
-    std::printf("selftest exhaust: %s reached its limit %u times in 3 seeds\n", kExhaustNames[fx], ok);
+    std::printf("selftest exhaust: %s reached its limit %u times in %llu seeds\n", kExhaustNames[fx], ok, static_cast<unsigned long long>(seeds));
     bad += expect(ok >= 1u, (std::string("the fixture ") + kExhaustNames[fx] + " reaches its limit").c_str());
     bad += expect(clean.empty(), (std::string("the unplanted fixture ") + kExhaustNames[fx] + " finds nothing broken").c_str());
     if (!clean.empty()) {
@@ -3247,7 +3669,7 @@ int exhaust_selftest(const Options& base) {
     p.plant_exhaust = true;
     const std::string inv = std::string("exhaust_") + kExhaustNames[fx];
     bool hit = false;
-    for (std::uint64_t seed = 1; seed <= 3 && !hit; ++seed) {
+    for (std::uint64_t seed = 1; seed <= seeds && !hit; ++seed) {
       std::vector<Finding> f;
       Run r(p, seed);
       if (!r.start(error)) {
@@ -3255,10 +3677,10 @@ int exhaust_selftest(const Options& base) {
       }
       r.go(f);
       for (const Finding& x : f) {
-        hit = hit || (x.invariant == inv && x.why.find("(planted)") != std::string::npos && x.why.compare(0, 2, "R1") == 0);
+        hit = hit || (x.invariant == inv && x.why.find("(planted)") != std::string::npos && (fx >= kFixtureFirstFresh || x.why.compare(0, 2, "R1") == 0));
       }
     }
-    bad += expect(hit, (std::string("a defect planted at the limit of ") + kExhaustNames[fx] + " is found by rule 1").c_str());
+    bad += expect(hit, (std::string("a defect planted at the limit of ") + kExhaustNames[fx] + (fx >= kFixtureFirstFresh ? " is found" : " is found by rule 1")).c_str());
   }
   return bad == 0 ? 0 : 1;
 }
@@ -3491,6 +3913,20 @@ int main(int argc, char** argv) {
       o.exhaust_all = true;
     } else if (a == "--exhaust-selftest") {
       o.exhaust_selftest = true;
+    } else if (a == "--exhaust-fresh-selftest") {
+      o.exhaust_fresh_selftest = true;
+    } else if (a == "--exhaust-only") {
+      const std::string name = next();
+      o.exhaust_only = -1;
+      for (unsigned k = 0; k < kExhaustCount; ++k) {
+        if (name == kExhaustNames[k]) {
+          o.exhaust_only = static_cast<int>(k);
+        }
+      }
+      if (o.exhaust_only < 0) {
+        std::fprintf(stderr, "o3_qanet_random_user: --exhaust-only: no fixture called '%s'\n", name.c_str());
+        return 2;
+      }
     } else if (a == "--plant-exhaust") {
       o.plant_exhaust = true;
     } else if (a == "--meta-selftest") {
@@ -3561,8 +3997,11 @@ int main(int argc, char** argv) {
   if (o.meta_selftest) {
     return meta_selftest(o);
   }
+  if (o.exhaust_fresh_selftest) {
+    return exhaust_selftest(o, kFixtureFirstFresh, kExhaustCount, 1);
+  }
   if (o.exhaust_selftest) {
-    return exhaust_selftest(o);
+    return exhaust_selftest(o, 0, kFixtureFirstFresh, 3);
   }
   if (o.shrink_selftest) {
     return shrink_selftest(o);

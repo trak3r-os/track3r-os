@@ -104,3 +104,18 @@ snap qa_mix_035
 # QA-MIX-036 (F6): INSERTS on the Mixer (OS-INSFX S4; it was unbound). The press opens the INSERTS page from the MASTER FX page; the page itself is qa_inserts.txt.
 tap f6
 snap qa_mix_036
+
+# OS-MIDICCMAP S2 (docs/specs/OS-MIDICCMAP.md, section 4 S2): the fixed CC map, gated by the CC MAP device setting (Config > MIDI, after IN CHANNEL; Off by default).
+# QA-MIX-078: CC MAP On, then `midicc 1 71 64` on the Pattern screen sets track 1's level to 50 (64 * 100 / 127, written at once); the Mixer's T1 column shows 50.
+document
+tap config
+tap f1
+tap up 16
+tap down 10
+encoder 1
+tap pattern
+midicc 1 71 64
+wait 3000
+tap master
+tap f1
+snap qa_mix_078

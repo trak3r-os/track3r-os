@@ -7,9 +7,8 @@ press shift
 snap qa_sng_001
 release shift
 
-# QA-SNG-002 (OS-SHIFTROW): Shift + F2 jumps the order list's cursor to a quarter of the list.
+# QA-SNG-002 (OS-SHIFTROW): Shift + F2 jumps the order list's cursor to a quarter of the list. (OS-SONG3 S1: the Song screen is still on LIST, its first page, from QA-SNG-001.)
 document
-tap song
 press shift
 tap f2
 release shift
@@ -181,11 +180,10 @@ tap delete
 tap down
 snap qa_sng_038
 
-# OS-BUG-SONGMAPCUR: QA-SNG-047, the map draws a cell for every active track while the cursor is in it. 16 active tracks over the demo pattern, which uses the first 12: the cursor on track 16 (the Arrangement page: its map ends at the edge of the screen) sits at the end of a map 16 cells wide, tracks 13 to 15 are faint ticks.
+# OS-BUG-SONGMAPCUR: QA-SNG-047, the map draws a cell for every active track while the cursor is in it. 16 active tracks over the demo pattern, which uses the first 12: the cursor on track 16 (OS-SONG3 Q8: the LIST draws 12 lanes, so the window has scrolled to tracks 5 to 16 and the TRACKS caption says so) sits at the end of the window, track 16 under the cursor.
 document tracks 16
 tap pattern
 wait 3000
-tap song
 tap song
 tap right 16
 snap qa_sng_047
@@ -213,9 +211,8 @@ snap qa_sng_050
 tap up
 snap qa_sng_051
 
-# QA-SNG-052: the Arrangement page keeps the second ink of the PAT tiles and the count on its info line (the cursor back on slot 0, pattern 1, held by slots 0 and 1).
+# QA-SNG-052: the LIST (which folded the ARRANGEMENT page in, OS-SONG3 S1) has the second ink of the PAT tiles and the count on its info line next to the bars in all (the cursor back on slot 0, pattern 1, held by slots 0 and 1).
 tap up 2
-tap song
 snap qa_sng_052
 tap song
 tap song
@@ -355,7 +352,6 @@ snap qa_sng_062
 document
 audio on
 wait 20
-tap song
 tap f3
 encoder 1
 tap f3
@@ -366,8 +362,9 @@ tap up 2
 tap play
 wait 100
 assert state playing=1 order=1
-tap up
+action cursor.home
 tap f3
+wait 20
 assert model order.len=5
 assert state order=2 play_pattern=2
 wait 20

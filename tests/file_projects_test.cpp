@@ -1227,3 +1227,40 @@ TEST_CASE("boot open: a last project that cannot load is refused and the strip s
   auto bare = std::make_unique<app::App>(rig.input, rig.clock, rig.display);
   CHECK_FALSE(bare->boot_open("Projects/broken", true));
 }
+
+// OS-BUG-LATENT-1106: the toast of a project that was replaced did not leave the strip with it. QA-INS-281 (a Kit card opened after instrument 2 of the first project said BEAT SLICE: NO SLICES) showed
+// that one over instrument 3 of the new project, which has three slices: the text was true when it was posted, about a project that is gone.
+TEST_CASE("open: news posted about the project that is replaced does not outlive the load; the strip says OPENED alone") {
+  Rig rig;
+  rig.add_project("alpha");
+  rig.open_file_screen();
+  rig.cursor_to("alpha");
+  rig.project.last_folder.clear();
+  auto& notify = const_cast<core::NotifyQueue&>(rig.app->state().notify);
+  CHECK(notify.post(core::Severity::Info, "BEAT SLICE: NO SLICES, AUTO OR EVEN ON WAVE", "playmode", app::ViewState::kMessageMs));
+  rig.tap(Button::F1);
+  rig.project.is_busy = false;
+  rig.pass();
+  CHECK(rig.message() == "PROJECT alpha OPENED");
+  CHECK(notify.size() == 1u);  // nothing of the old project is queued behind it either
+}
+
+// OS-PTOOLS2 S2 review fold: as NEW (save_app_test.cpp): F6 REPEAT does not carry project A's last fill or TOOLS apply over to project B.
+TEST_CASE("open: the last fill and the last TOOLS apply (what F6 repeats) do not outlive the project that is replaced") {
+  Rig rig;
+  rig.add_project("alpha");
+  rig.open_file_screen();
+  rig.cursor_to("alpha");
+  rig.project.last_folder.clear();
+  auto& view = const_cast<app::ViewState&>(rig.app->state());
+  view.fill.valid = true;
+  view.verb_menu.last_verb = app::VerbMenuView::LastVerb::Tool;
+  view.verb_menu.tool_last.amount = 12;
+  rig.tap(Button::F1);
+  rig.project.is_busy = false;
+  rig.pass();
+  CHECK(rig.message() == "PROJECT alpha OPENED");
+  CHECK_FALSE(rig.app->state().fill.valid);
+  CHECK(rig.app->state().verb_menu.last_verb == app::VerbMenuView::LastVerb::None);
+  CHECK(rig.app->state().verb_menu.tool_last.amount == 0);
+}

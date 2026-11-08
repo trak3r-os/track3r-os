@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstring>
 #include <initializer_list>
+#include <string>
 #include <thread>
 
 #include "support/need.h"
@@ -755,4 +756,298 @@ TEST_CASE("song order sync: a locate to a slot after a delete plays it once even
   }
   CHECK(threes == 1u);  // the located slot, once
   CHECK(four);
+}
+
+// ---- OS-SONG3 S7: loop a range of slots --------------------------------------------------------------------------------------------------------------------------
+// The patterns of these songs are all different (1..N), so the pattern of a landing names its slot as well as the position does.
+
+namespace {
+
+bool loop_cmd(Rig& r, std::uint32_t first, std::uint32_t last, std::uint32_t stamp = 0) {
+  return r.s().commands().push(seq::Command{seq::Command::Kind::SetLoop, static_cast<std::uint8_t>(first), static_cast<std::uint16_t>(last), stamp});
+}
+
+// The positions of the landings after `from`, as a string of digits ("123423"). The run's own start (slot 0) is not among them: a Pattern event is made at a pattern's end, and a run begins without one.
+std::string slots_from(const Rig& r, std::uint32_t from) {
+  std::string s;
+  for (std::uint32_t i = from; r.next(i) != nullptr; ++i) {
+    s += static_cast<char>('0' + r.next(i)->order);
+  }
+  return s;
+}
+
+std::uint32_t loop_first(Rig& r) { return r.s().play_position().read().loop_first; }
+std::uint32_t loop_last(Rig& r) { return r.s().play_position().read().loop_last; }
+
+}  // namespace
+
+TEST_CASE("song loop: the song returns to the first slot of the range after its last one, and never ends") {
+  Rig r;
+  r.song({1, 2, 3, 4, 5, 6});
+  r.s().set_song_loop(false);  // the loop is not the song's own: with the song's loop off it still goes round, and no SongEnd stops it
+  r.s().play_song(0);
+  r.block();
+  r.s().set_loop(2, 4);
+  CHECK(r.s().looping());
+  r.to(at_step(4 * 10));
+  CHECK(r.s().playing());
+  CHECK(slots_from(r, 0) == "123423423");
+  CHECK(loop_first(r) == 2u);
+  CHECK(loop_last(r) == 4u);
+}
+
+TEST_CASE("song loop: a range that ends the list loops without the SongEnd, one slot is a range") {
+  Rig r;
+  r.song({1, 2, 3, 4});
+  r.s().play_song(0);
+  r.block();
+  r.s().set_loop(2, 3);
+  r.to(at_step(4 * 9));
+  CHECK(slots_from(r, 0) == "12323232");
+  Rig q;
+  q.song({1, 2, 3, 4});
+  q.s().play_song(0);
+  q.block();
+  q.s().set_loop(1, 1);
+  q.to(at_step(4 * 6));
+  CHECK(slots_from(q, 0) == "11111");
+}
+
+TEST_CASE("song loop: SetLoop is a command, and a range past the list, upside down or kNoJump is no loop") {
+  Rig r;
+  r.song({1, 2, 3, 4});
+  r.s().play_song(0);
+  r.block();
+  CHECK(loop_cmd(r, 1, 2));
+  r.block();
+  CHECK(loop_first(r) == 1u);
+  CHECK(loop_last(r) == 2u);
+  CHECK(loop_cmd(r, 1, 4));  // past the list (4 slots)
+  r.block();
+  CHECK_FALSE(r.s().looping());
+  CHECK(loop_first(r) == audio::PlayPosition::kNoOrder);
+  CHECK(loop_cmd(r, 1, 2));
+  r.block();
+  CHECK(r.s().looping());
+  CHECK(loop_cmd(r, 0, seq::kNoJump));  // the cancel
+  r.block();
+  CHECK_FALSE(r.s().looping());
+  CHECK(loop_cmd(r, 3, 1));  // upside down
+  r.block();
+  CHECK_FALSE(r.s().looping());
+  CHECK(loop_first(r) == audio::PlayPosition::kNoOrder);
+  CHECK(loop_last(r) == audio::PlayPosition::kNoOrder);
+}
+
+TEST_CASE("song loop: set while the song plays before the range, the song enters it by itself and loops from its last slot") {
+  Rig r;
+  r.song({1, 2, 3, 4, 5, 6});
+  r.s().play_song(0);
+  r.to(at_step(1));
+  CHECK(loop_cmd(r, 3, 4));
+  r.to(at_step(4 * 8));
+  CHECK(slots_from(r, 0) == "1234343");
+  // and set while it plays past the range, it waits: the song goes on to its end and round to the range
+  Rig q;
+  q.song({1, 2, 3, 4, 5, 6});
+  q.s().play_song(0);
+  q.to(at_step(4 * 5 + 1));  // slot 5
+  CHECK(loop_cmd(q, 1, 2));
+  q.to(at_step(4 * 12));
+  CHECK(slots_from(q, 0) == "12345012121");
+}
+
+TEST_CASE("song loop: a live jump out of the range leaves the loop, a live jump inside it keeps it") {
+  Rig r;
+  r.song({1, 2, 3, 4, 5, 6});
+  r.s().play_song(0);
+  r.block();
+  r.s().set_loop(2, 4);
+  r.to(at_step(4 * 3 + 1));  // slot 3
+  CHECK(queue(r, 0, r.s().jump_stamp()));  // the Rec jump to slot 0
+  r.to(at_step(4 * 12));
+  CHECK(slots_from(r, 0) == "12301234501");  // slot 3 finishes, the song jumps to 0 and walks the whole list: no wrap at 4 any more
+  CHECK_FALSE(r.s().looping());
+  CHECK(loop_first(r) == audio::PlayPosition::kNoOrder);
+
+  Rig q;
+  q.song({1, 2, 3, 4, 5, 6});
+  q.s().play_song(0);
+  q.block();
+  q.s().set_loop(2, 4);
+  q.to(at_step(4 * 3 + 1));  // slot 3
+  CHECK(queue(q, 2, q.s().jump_stamp()));  // a jump inside it
+  q.to(at_step(4 * 9));
+  CHECK(slots_from(q, 0) == "12323423");  // slot 3 finishes, the jump to 2 stays in the range: 3, 4, then round to 2
+  CHECK(q.s().looping());
+}
+
+TEST_CASE("song loop: an Order jump or a queued pattern that leaves the range ends the loop") {
+  Rig r;
+  r.song({1, 2, 3, 4, 5, 6});
+  r.s().play_song(0);
+  r.block();
+  r.s().set_loop(2, 4);
+  r.to(at_step(4 * 2 + 1));
+  r.s().queue_pattern(8);  // the sequential switch: Pattern mode, the song is left
+  r.to(at_step(4 * 5));
+  CHECK_FALSE(r.s().looping());
+  CHECK(loop_first(r) == audio::PlayPosition::kNoOrder);
+}
+
+TEST_CASE("song loop: a stop, a new start and a pattern start end the loop") {
+  Rig r;
+  r.song({1, 2, 3, 4, 5, 6});
+  r.s().play_song(0);
+  r.block();
+  r.s().set_loop(1, 2);
+  CHECK(r.s().looping());
+  r.s().stop();
+  r.block();
+  CHECK_FALSE(r.s().playing());
+  CHECK_FALSE(r.s().looping());
+  r.s().play_song(0);
+  r.block();
+  CHECK_FALSE(r.s().looping());
+  r.s().set_loop(1, 2);
+  r.s().play_song(0);  // a Play while it loops: the loop is not kept
+  CHECK_FALSE(r.s().looping());
+  r.s().set_loop(1, 2);
+  r.s().play_pattern(3);
+  CHECK_FALSE(r.s().looping());
+}
+
+TEST_CASE("song loop: a slot deleted inside the loop shrinks it") {
+  Rig r;
+  r.song({1, 2, 3, 4, 5, 6});
+  r.s().play_song(0);
+  r.block();
+  r.s().set_loop(2, 4);
+  r.to(at_step(4 * 2 + 1));  // slot 2
+  CHECK(r.p().remove_order(3) == model::Status::Ok);  // [1 2 3 5 6]: the loop is slots 2..3
+  r.block();
+  CHECK(loop_first(r) == 2u);
+  CHECK(loop_last(r) == 3u);
+  r.to(at_step(4 * 8));
+  CHECK(slots_from(r, 0) == "1232323");
+  // the first slot of the range deleted: the one that slid in is the first; the last one: the one before the hole is the last
+  CHECK(r.p().remove_order(2) == model::Status::Ok);  // [1 2 5 6]
+  r.block();
+  CHECK(loop_first(r) == 2u);
+  CHECK(loop_last(r) == 2u);
+  CHECK(r.p().remove_order(2) == model::Status::Ok);  // [1 2 6]: the range's last slot, the only one left
+  r.block();
+  CHECK_FALSE(r.s().looping());
+  CHECK(loop_first(r) == audio::PlayPosition::kNoOrder);
+}
+
+TEST_CASE("song loop: deleting the playing last slot of the loop sends the song back to the first") {
+  Rig r;
+  r.song({1, 2, 3, 4, 5});
+  r.s().play_song(0);
+  r.block();
+  r.s().set_loop(1, 3);
+  r.to(at_step(4 * 3 + 1));  // slot 3, the loop's last
+  CHECK(r.p().remove_order(3) == model::Status::Ok);  // [1 2 3 5]: the loop is slots 1..2, the playing slot is gone
+  r.block();
+  CHECK(loop_last(r) == 2u);
+  const std::uint32_t m = r.mark();
+  r.to(at_step(4 * 8));
+  const std::string s = slots_from(r, m);
+  CHECK(s.substr(0, 3) == "121");  // the rest of the deleted slot's pattern, then the loop from its first slot
+}
+
+TEST_CASE("song loop: an insert inside the range grows it, below it shifts it, past its end leaves it") {
+  Rig r;
+  r.song({1, 2, 3, 4, 5});
+  r.s().play_song(0);
+  r.block();
+  r.s().set_loop(2, 3);
+  CHECK(r.p().insert_order(3, 9) == model::Status::Ok);  // inside (at the last slot's index): [1 2 3 9 4 5], 2..4
+  r.block();
+  CHECK(loop_first(r) == 2u);
+  CHECK(loop_last(r) == 4u);
+  CHECK(r.p().insert_order(0, 9) == model::Status::Ok);  // below: shifts, 3..5
+  r.block();
+  CHECK(loop_first(r) == 3u);
+  CHECK(loop_last(r) == 5u);
+  CHECK(r.p().insert_order(6, 9) == model::Status::Ok);  // past its end: no change
+  r.block();
+  CHECK(loop_first(r) == 3u);
+  CHECK(loop_last(r) == 5u);
+}
+
+TEST_CASE("song loop: a move that touches the range ends the loop, one outside it leaves the range alone") {
+  Rig r;
+  r.song({1, 2, 3, 4, 5, 6, 7});
+  r.s().play_song(0);
+  r.block();
+  r.s().set_loop(2, 4);
+  CHECK(r.p().move_order(0, 1) == model::Status::Ok);  // below the range: the moved-over span [0,1] is outside 2..4
+  r.block();
+  CHECK(r.s().looping());
+  CHECK(loop_first(r) == 2u);
+  CHECK(loop_last(r) == 4u);
+  CHECK(r.p().move_order(5, 6) == model::Status::Ok);  // above it: the span [5,6] is outside too
+  r.block();
+  CHECK(r.s().looping());
+  CHECK(loop_first(r) == 2u);
+  CHECK(loop_last(r) == 4u);
+  // a move inside the range that remapping only the ends used to keep (first <= last after it, 2..4 -> 2..3) changes which slots lie between the ends: the loop is over
+  CHECK(r.p().move_order(3, 5) == model::Status::Ok);
+  r.block();
+  CHECK_FALSE(r.s().looping());
+  CHECK(loop_first(r) == audio::PlayPosition::kNoOrder);
+  CHECK(loop_last(r) == audio::PlayPosition::kNoOrder);
+  // any other move that touches the range ends it too: a slot from outside into the range's first place, one from below into it
+  r.s().set_loop(2, 4);
+  CHECK(r.p().move_order(6, 2) == model::Status::Ok);
+  r.block();
+  CHECK_FALSE(r.s().looping());
+  r.s().set_loop(2, 4);
+  CHECK(r.p().move_order(0, 3) == model::Status::Ok);
+  r.block();
+  CHECK_FALSE(r.s().looping());
+}
+
+TEST_CASE("song loop: a clear or a load of the list ends the loop") {
+  Rig r;
+  r.song({1, 2, 3, 4});
+  r.s().play_song(0);
+  r.block();
+  r.s().set_loop(1, 2);
+  CHECK(r.p().clear_order() == model::Status::Ok);
+  r.block();
+  CHECK_FALSE(r.s().looping());
+}
+
+TEST_CASE("song loop: a range authored against the list before an edit follows the edit, one authored against a list the render lacks is refused") {
+  Rig r;
+  r.song({1, 2, 3, 4, 5});
+  r.s().play_song(0);
+  r.block();
+  const std::uint32_t stamp = r.s().jump_stamp();  // the app's list as it was when the range was chosen
+  CHECK(r.p().insert_order(0, 9) == model::Status::Ok);  // an edit lands before the command is read: it carries the range along
+  CHECK(loop_cmd(r, 1, 2, stamp));
+  r.block();
+  CHECK(loop_first(r) == 2u);
+  CHECK(loop_last(r) == 3u);
+  // a stamp from the future: the list that range was authored against is not the render's yet
+  CHECK(loop_cmd(r, 1, 2, r.s().jump_stamp() + 1u));
+  r.block();
+  CHECK_FALSE(r.s().looping());
+}
+
+TEST_CASE("song loop: deleting the playing slot past the range does not send the song into the loop") {
+  Rig r;
+  r.song({1, 2, 3, 4, 5, 6});
+  r.s().play_song(0);
+  r.to(at_step(4 * 3 + 1));  // slot 3, past the range that is set now
+  CHECK(loop_cmd(r, 1, 2));
+  r.block();
+  CHECK(r.p().remove_order(3) == model::Status::Ok);  // [1 2 3 5 6]: the slot that slid into place plays after the rest of this pattern
+  r.block();
+  const std::uint32_t m = r.mark();
+  r.to(at_step(4 * 11));
+  CHECK(slots_from(r, m) == "3401212");  // 3 and 4, the song's own end round to 0, then the loop from its first slot
 }

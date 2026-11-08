@@ -273,7 +273,7 @@ Result for Pad Count: `Pad Count, 828 B file: hot 0 B, cold 704 B, 15 relocation
 ### 2.8 Install and run
 
 1. Copy `padcount.tmod` to `/modules/apps/padcount.tmod` on the card. The file name without `.tmod` is the module's name: at most 31 characters, none of `/ \ : * ? " < > |`.
-2. Put the card in the Tracker. Hold Shift + Pattern for the Navigator, pick MODULES, move to the app, press **F1**. Exit with **F8** (BACK; **F7 + F8** also works, and is the way out of a hung app).
+2. Put the card in the Tracker. Press Shift + Pattern for the list of module apps and press **F1** on yours (or press Song + Pattern together for the Navigator, pick MODULES, move to the app, press **F1**). Exit with **F8** (BACK; **F7 + F8** also works, and is the way out of a hung app).
 3. `diag mod` on the USB console lists the loaded modules, the memory in use and the quarantine. Its `mod load <name>` searches `instruments/`, `effects/` and then `apps/` (the loader's order), so it loads and checks an app file too; it never launches it (`mod bind` refuses an app) and **MODULES, F1 is the only way to launch**. Whether `diag mod` also lists a launched app is [unverified]; the MODULES screen shows its state.
 
 ### 2.9 Versioning and the ABI rules

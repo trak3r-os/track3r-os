@@ -17,6 +17,8 @@
 //           it kept from before the export (a MIDI link: the bytes the interrupts stamped meanwhile, the clock loop's phase, the parsers' state: their stamps are of a time that is gone).
 //   stop_live (OS-EXPNOTE) optional: called by Engine::offline_enter on the live source, in the main loop with the render parked: the notes the source holds outside the engine's table (a MIDI link: the
 //           pads on a MIDI instrument, taken by `live`) are ended NOW (their note-offs sent), `*count` says how many, and the return is the first as a held-note word (live_notes.h; kHeldNone: none).
+//   clock   (OS-INSFX-ABI2 A3) optional: the playhead as of `sample`, the first sample of the NEXT block, asked once a block at the block boundary (Engine::block_end, in flash; an export block asks
+//           at its start): the tempo that plays, the beat (Q16.16, counted from step 0 of the pattern that plays) and the flags. It never runs inside play_block. Without it get_clock says "no sequencer".
 //   buffer  the events' memory (kMaxEventsPerBlock events: 2.3 KB), owned by the caller (it is SRAM_U on the MK66), so that the Engine itself stays small.
 
 #include <o3os/audio/events.h>
@@ -27,6 +29,13 @@
 
 namespace o3os::audio {
 
+// What `clock` fills (OS-INSFX-ABI2 A3). `flags` are the module ABI's o3m_clock flags (O3M_CLOCK_PLAYING 1, STARTED 2, WRAPPED 4); `beat_q16` is the playhead in beats (4 steps) in Q16.16; `tempo_x100` is BPM x 100.
+struct ClockPos {
+  std::uint32_t flags;
+  std::uint32_t beat_q16;
+  std::uint32_t tempo_x100;
+};
+
 struct EventSource {
   using StepFn = std::uint32_t (*)(void* self, std::uint64_t block_start, std::uint32_t n, SeqEvent* out, std::uint32_t cap) noexcept;
   using ParamFn = bool (*)(void* self, const core::ParamChange& change) noexcept;
@@ -34,6 +43,7 @@ struct EventSource {
   using LiveFn = bool (*)(void* self, const LiveEvent& e) noexcept;
   using ResumeFn = void (*)(void* self) noexcept;
   using StopLiveFn = std::uint32_t (*)(void* self, std::uint32_t* count) noexcept;
+  using ClockFn = ClockPos (*)(void* self, std::uint64_t sample) noexcept;
 
   void* self = nullptr;
   StepFn step = nullptr;
@@ -42,6 +52,7 @@ struct EventSource {
   LiveFn live = nullptr;
   ResumeFn resume = nullptr;
   StopLiveFn stop_live = nullptr;
+  ClockFn clock = nullptr;
   SeqEvent* buffer = nullptr;
   std::uint32_t capacity = 0;
 };

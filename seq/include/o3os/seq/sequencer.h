@@ -86,8 +86,9 @@
 //
 // REAL TIME. step() does bounded work: the microsteps that fall inside the block (at most n / 6 + 1: the fastest microstep, 800 BPM at double time with the widest swing, is
 // 6.5 samples) for up to 16 tracks each, no allocation, no I/O, no double, no loops over the pattern except the roll-length look-ahead (at most 128 reads, and only
-// for a volume roll). The state is about 8 KiB (the pending-event queue is 6 KiB of it); it lives in the render's RAM, not in the model arena.
+// for a volume roll). clock_at() (OS-INSFX-ABI2 A3, below) is one 64-bit division and a few compares, once a block, from the engine's block boundary. The state is about 8 KiB (the pending-event queue is 6 KiB of it); it lives in the render's RAM, not in the model arena.
 
+#include <o3os/audio/event_source.h>
 #include <o3os/audio/events.h>
 #include <o3os/audio/play_position.h>
 #include <o3os/audio/smoothing.h>
@@ -96,6 +97,7 @@
 #include <o3os/core/ring.h>
 #include <o3os/midi/clock_dll.h>
 #include <o3os/midi/in.h>
+#include <o3os/midi/mtc.h>
 #include <o3os/midi/timed_queue.h>
 #include <o3os/model/project.h>
 #include <o3os/seq/control.h>
@@ -132,7 +134,11 @@ enum class MuteQuant : std::uint8_t { Bar = 1, Pattern = 2 };
 inline constexpr std::uint32_t kStepsPerBar = 16;
 
 enum class PlayMode : std::uint8_t { Pattern = 0, Song = 1 };
-enum class TrackPlayMode : std::uint8_t { Forward = 0, Backward = 1, PingPong = 2, Random = 3 };  // the play modes of this OS (the official manual's custom orders are not built, official-manual-map)
+// The play modes of this OS: 0..3 as before; 4..23 are the custom play orders C1..C20 of the official firmware (OS-PERFMODES M2, docs/specs/OS-PERFMODES.md 3.2;
+// the tables are seq/play_orders.h's). The command's mask is 0x1F; a value above 23 is Forward.
+enum class TrackPlayMode : std::uint8_t { Forward = 0, Backward = 1, PingPong = 2, Random = 3, Custom1 = 4, Custom20 = 23 };
+inline constexpr bool is_custom(TrackPlayMode m) noexcept { return static_cast<std::uint8_t>(m) >= static_cast<std::uint8_t>(TrackPlayMode::Custom1); }
+inline constexpr unsigned custom_order(TrackPlayMode m) noexcept { return static_cast<unsigned>(m) - static_cast<unsigned>(TrackPlayMode::Custom1); }  // 0..19, C1..C20
 
 // The sequencer's own ParamChange ids: kind Project, engine fields from 0x200 (the model's tables stop at 0x100; core/param.h). Values in the units shown.
 namespace seq_param {
@@ -164,10 +170,15 @@ struct Command {
     MuteQuant,      // a track, b boundary (MuteQuant::Bar / Pattern), c the track's effective mute until then (0 or 1): the project's flag is already the new one
     MuteCancel,     // a track: the deferred toggle is cancelled (the second press)
     QueueJump,      // b order position (kNoJump: cancel), c the stamp (Sequencer::jump_stamp(); 0: none): the song goes there at the end of the current pattern (OS-SONG1)
+    SetLoop,        // a first slot, b last slot (kNoJump: no loop), c the stamp (Sequencer::jump_stamp(); 0: none): the song loops those slots (OS-SONG3 S7, Sequencer::set_loop)
     PerfRate,       // a 0 normal, 1 half time, 2 double time (OS-PERF2): the step rate, applied at the next step boundary
     SwitchPattern,  // a pattern id 1..255 (OS-PATSWITCH): the playing pattern becomes it at the next step boundary, on the same row; the pattern already playing withdraws a switch that waits
     ReleasePattern, // a pattern id 1..255 (OS-BUG-PASTEHANG): the pattern was rewritten under the run; at the next step boundary the tracks that play it end what they still sound (switch_release)
     QueueTrackPattern,  // b pattern id 0..255 (0: back to the song's), c mask of tracks (bit t: track t) (E-PERF-07): see Sequencer::queue_track_pattern
+    MtcAnchor,      // a the stamp of the request it answers (Sequencer::mtc_request()), c the song time of that position, whole samples (OS-MTC A3; the main loop's app::MtcSync)
+    SetTrackPattern,  // b pattern id 0..255 (0: back to the song's), c mask of tracks (bit t: track t) (OS-PERFREMIX R1): see Sequencer::set_track_pattern
+    ChaseState,     // OS-MTC B3, the main loop's answer to a chase request, first half: a bit 0 the swing pair's parity (1: the step is the second of its pair), b swing 25..75, c tempo x100 before the step's own FX
+    ChaseStart,     // OS-MTC B3, second half: a the stamp of the request it answers (Sequencer::ChaseAnswer), b order << 7 | step (0xFFFF: the time is past the song's end), c the song time of that step, whole samples
   };
   Kind kind;
   std::uint8_t a;
@@ -194,9 +205,12 @@ struct Position {
 // E-SONG-07: the render's copy of the song list (`cur`) and the scratch an edit is read into (`next`), 656 B. On the target (O3OS_SEQ_ORDER_EXTERNAL) the store is the caller's, in SDRAM:
 // SRAM_U has no room for it (the 32 KiB free floor of ADR 0013 D7), and the list is read once a pattern end and once an edit, as the render already reads the project from SDRAM. A sequencer
 // without a store plays an empty song. On the host the store is inside the sequencer.
+// The same store holds the Perform layer's values (`perf`, 800 B: ControlTable::PerfStore, OS-CEWTENV W6a SRAM_U recovery), so the store is 1,456 B; attach_order_store attaches both, and a
+// sequencer without a store has no Perform layer.
 struct OrderStore {
   model::OrderSnapshot cur;
   model::OrderSnapshot next;
+  ControlTable::PerfStore perf;
 };
 
 class Sequencer {
@@ -213,6 +227,9 @@ class Sequencer {
     std::uint32_t start_lead = 0;   // samples between a play() and the first step; with MIDI out on, a block gives SPP and the start byte room to go first
     bool pattern_once = false;      // Pattern mode: the transport stops at the end of the pattern instead of looping it (the export's: OS-WAVEXP; a Song's end is song_loop)
     std::uint16_t pattern_stop = 0; // with pattern_once: the transport stops at the start of this step of the pattern (the export of a selection: the row after its last one); 0: at the pattern's end
+    bool emit_mtc = false;          // OS-MTC A3: MIDI Time Code events (MidiMtcQf, MidiMtcFull) at mtc_fps; false in the offline export (docs/specs/OS-MTC.md 3.1)
+    std::uint8_t mtc_fps = 0;       // 24, 25 or 30 (anything else: no time code)
+    std::uint8_t mtc_hour = 1;      // MTC START: the hour of the time code at the song's first step, 0..23
     std::uint16_t order_stop = 0;   // Song mode: the transport stops where the song would go on to this order position or past it (the export of a range of slots: the position after the last one; OS-SONGSHARE S5); 0: at the end of the list
   };
 
@@ -229,6 +246,7 @@ class Sequencer {
     std::uint32_t commands = 0;
     std::uint32_t fx_ignored = 0;       // FX that were inert or ignored by a rule (Order jump out of range, ...)
     std::uint32_t queue_dropped = 0;    // E-SONG-07: the queued jumps that a delete of their slot or an overflow of the edit journal cancelled
+    std::uint32_t chase_dropped = 0;    // OS-MTC B3: the main loop's transport and position commands the chase's run dropped
   };
 
   using OrderStoreType = OrderStore;
@@ -244,6 +262,50 @@ class Sequencer {
 
   // ---- the main loop's side --------------------------------------------------------------------------------------------
   CommandRing& commands() noexcept { return cmds_; }
+
+  // OS-MTC A3 (docs/specs/OS-MTC.md 3.3): the position whose song time the generator waits for, one word the render writes (the one writer) and the main loop reads once a pass:
+  // stamp (bits 24..31, 0 = none yet) | order position (16..23, 0xFF in Pattern mode) | pattern id (8..15) | step (0..7). The answer is a MtcAnchor command carrying the stamp.
+  std::uint32_t mtc_request() const noexcept { return mtc_req_.load(std::memory_order_relaxed); }
+  const midi::mtc::Generator& mtc() const noexcept { return mtc_gen_; }
+
+  // ---- OS-MTC B3, the chase (docs/specs/OS-MTC.md 4.3, 4.4; new Community OS behaviour) ---------------------------------------------------------------
+  // The main loop's answer to a chase request (MidiLink publishes it, app::ChaseSync answers it): the first step at or after the master's time, its song time and the state there. Two commands
+  // (ChaseState, ChaseStart) fill it; MidiLink reads it in the render context (chase_answer()), checks the stamp and either starts the run (chase_go) or asks again.
+  struct ChaseAnswer {
+    std::uint32_t song_samples = 0;  // the step's song time from the song start, whole samples
+    std::uint32_t tempo_x100 = 0;    // the tempo before the step's own FX
+    std::uint16_t pos = 0;           // order << 7 | step; kChasePastEnd: the time is past the song's end
+    std::uint8_t stamp = 0;          // the request it answers (1..255; 0: no answer waits)
+    std::uint8_t swing = 0;          // 25..75
+    std::uint8_t flags = 0;          // bit 0: the step is the second of its swing pair (ChaseState), bit 1: ChaseState arrived
+  };
+  static constexpr std::uint16_t kChasePastEnd = 0xFFFFu;
+  const ChaseAnswer& chase_answer() const noexcept { return chase_ans_; }
+  void chase_take() noexcept { chase_ans_.stamp = 0; }  // the answer was read (valid or stale)
+  // Starts the run of that answer (the state of chase_answer(): the step, the tempo and swing before it, the pair's parity) at the timeline sample `origin`, in `mode` (Pattern mode: `pattern_id`), at the next block
+  // start. `rate_q16` is the song's speed against the sample clock at the start (65536 = 1.0: the master's rate). A run in progress is restarted. The run is the chase's: the main loop's Play, Stop, Resume, Locate and jump
+  // commands are dropped until it ends (the master owns the transport, Q8 a), and the song's end stops it instead of looping (Q9 a). No Start of ours on the clock out is early: `origin` is at least a block away.
+  void chase_go(std::uint64_t origin, PlayMode mode, std::uint32_t pattern_id, std::uint32_t rate_q16) noexcept;
+  // The chase ends the run (the master stopped or moved): a stop that ignores the main loop's filter; also cancels a start that waits.
+  void chase_stop() noexcept;
+  // The run is the chase's (a start waits or it plays). Cleared by every end of a run.
+  bool chase_run() const noexcept { return chase_run_; }
+  // The speed of the song against the sample clock, Q16 (65536 = 1.0), applied at the next step boundary (every step's samples per tick are divided by it, so swing and the clock out keep their ratios). Limits
+  // 0.94 .. 1.06; the default, 1.0, changes nothing (the determinism tests hold). The chase's controller sets it once a step.
+  void set_rate_trim(std::uint32_t rate_q16) noexcept {
+    trim_q16_ = rate_q16 < kTrimMin ? kTrimMin : (rate_q16 > kTrimMax ? kTrimMax : rate_q16);
+  }
+  std::uint32_t rate_trim() const noexcept { return trim_q16_; }
+  static constexpr std::uint32_t kTrimOne = 65536u;
+  static constexpr std::uint32_t kTrimMin = 61604u;  // 0.94
+  static constexpr std::uint32_t kTrimMax = 69468u;  // 1.06
+  // The phase of the chased run, one pair per step (render context): the run reaches the song time `chase_map()` (Q32 samples from the song start, the step's end in the map's own untrimmed arithmetic) at the
+  // timeline sample `chase_end()`; `chase_steps()` counts the pairs (it moves once a step). The controller compares the pair with the master's time at that sample.
+  std::uint32_t chase_steps() const noexcept { return chase_steps_; }
+  std::uint64_t chase_end() const noexcept { return chase_end_; }
+  core::Q32 chase_map() const noexcept { return chase_map_; }
+  // OS-MTC B3, a full frame while stopped: the cursor goes to `order` (kNoOrder in Pattern mode) and `step` of the pattern, nothing plays (a later Play, Continue or Resume starts from the main loop's own choice).
+  void chase_locate(std::uint32_t order, std::uint32_t step) noexcept;
 
   // ---- the render's side -----------------------------------------------------------------------------------------------
   // The project the sequencer plays (read-only): MidiLink::live_event looks up the kind and channel of the instrument a pad plays (OS-INSTUI S2b), as send_note_on does.
@@ -296,6 +358,13 @@ class Sequencer {
   // The stamp a QueueJump command carries in `c`: the count of order-list edits the app's position was authored against, plus one (0 is "no stamp").
   std::uint32_t jump_stamp() const noexcept { return project_.order_ops() + 1u; }
   void set_song_loop(bool on) noexcept { cfg_.song_loop = on; }
+  // OS-SONG3 S7 (new Community OS behaviour; Song mode only): the slots `first`..`last` of the order list loop: where the song would go on from `last` to the next slot, it goes back to `first` (no SongEnd). Two bytes and a
+  // compare once a pattern end, in the render context like the rest of the list's positions: an edit of the list moves the two ends with the journal (an insert inside grows the range, a delete of a slot inside shrinks it, one
+  // that takes every slot, or a move that parts the ends, ends the loop), a live jump or an Order jump FX that lands outside it, a queued pattern and a switch to Pattern mode leave it, and a stop, play_song() and play_pattern()
+  // end it. A loop set while the song plays outside the range waits: the song enters it on its own (or by a jump) and loops from its last slot. `last` past the list, first > last or last == kNoJump: no loop. `stamp` as queue_jump's:
+  // a position authored against a list this copy does not have yet, or older than the journal, is refused (no loop). The main loop reads what holds through play_position().read().loop_first / loop_last.
+  void set_loop(std::uint32_t first, std::uint32_t last, std::uint32_t stamp = 0) noexcept;
+  bool looping() const noexcept { return loop_first_ <= loop_last_; }
   bool playing() const noexcept { return playing_; }
   PlayMode mode() const noexcept { return mode_; }
 
@@ -306,6 +375,10 @@ class Sequencer {
   // follows pins it: a landed override at once. A landed override stays until a queue of pattern 0 lands or the run ends (a stop, a restart, a resume); PerfTrack ignores the pattern of such a track.
   // A track that cannot reach its own loop end (Random, or longer than the song's pattern, which load_tracks restarts first) lands at the song pattern's end instead.
   void queue_track_pattern(std::uint32_t mask, std::uint32_t pattern_id) noexcept;
+  // OS-PERFREMIX R1: the same, at once. The tracks of `mask` read source pattern `pattern_id` (0: the song's) from the next step on, while playing (ignored when stopped); a wait is replaced,
+  // no FX end (parity: the official change at once cancels none), the track keeps its place, and a track past the new pattern's length rejoins at the song's step modulo that length (read_row).
+  // A non-zero pattern is an override like a landed queue (PerfTrack leaves it alone; a stop, a restart and a resume end it); 0 is the song's again. Render context, a loop over the tracks.
+  void set_track_pattern(std::uint32_t mask, std::uint32_t pattern_id) noexcept;
   // (The track's override and its wait go to the screen through play_position().track_pattern(t), once a block.)
   void set_perf_stutter(std::uint32_t track, std::uint32_t value) noexcept;
   // The performance layer's tempo override (BPM x 100, 0 none). It stays until it is cleared (the Perform screen owns it) and wins over the Tempo FX, as the performance
@@ -358,6 +431,14 @@ class Sequencer {
   std::uint32_t tempo_x100() const noexcept;       // what plays: nominal_tempo_x100() at the step rate (half / double time)
   std::uint32_t nominal_tempo_x100() const noexcept;  // in force before the rate: the performance override, the FX tempo, the smoothed project tempo (or the master's clock)
   std::uint32_t swing() const noexcept;            // in force
+  // OS-INSFX-ABI2 A3, the module clock (get_clock; new Community OS behaviour). The playhead as of `sample` (the first sample of the next block: the engine asks once a block, at the block boundary, after
+  // step() has run the block that ends there): the tempo that plays, the beat in Q16.16 and the flags (o3m_clock: PLAYING 1, STARTED 2, WRAPPED 4). The beat counts from step 0 of the pattern that plays
+  // (Q5 a): step n of a pattern is exactly n / 4, the fraction inside a step is linear in the step's length (swing, a Tempo FX and half or double time are already in it, so the beat is piecewise linear in
+  // the sample), 0 while stopped. It is extrapolated from the step that runs (or, in the tail between a step's last microstep and the next one's first, the step that just ran), so it never reads a row and a
+  // pattern wrap shows one block after it (the first block that starts past the boundary). STARTED: a run began since the last call (it is set by the first call that sees it playing, once). WRAPPED: the beat
+  // is lower than the previous call's (a pattern's end, a restart, a jump back). A count-in holds the start point's beat. Under an external clock the beat moves on the master's microstep grid. While stopped
+  // the tempo is the project's (the smoother's), without the Perform override or the step rate. Not const: it keeps the last beat and the STARTED latch. Render context, flash, no allocation, no double.
+  audio::ClockPos clock_at(std::uint64_t sample) noexcept;
   const ControlTable& control() const noexcept { return ctl_; }
   const Stats& stats() const noexcept { return stats_; }
   Rng& rng() noexcept { return rng_; }
@@ -365,6 +446,7 @@ class Sequencer {
   struct TrackState {
     // cursor
     std::uint8_t pos = 0;           // 0-based step in its pattern
+    std::uint8_t ord = 0;           // OS-PERFMODES M2 (F5): the track's step count since its loop start, kept in every mode; a custom mode walks its order over it
     bool back = false;              // ping-pong: going down
     std::uint8_t len = 1;           // its length in steps, as of the pattern it plays
     // the row, as copied at the row's first microstep
@@ -405,12 +487,20 @@ class Sequencer {
     std::uint8_t perf_pending = 0;  // a source pattern to switch to at the track's own loop end
     bool perf_pending_set = false;
     bool perf_q = false;            // E-PERF-07: perf_pattern / perf_pending belong to QueueTrackPattern (PerfTrack leaves them), until the run ends
+    bool rejoin = false;            // OS-PERFREMIX R1: set_track_pattern: if the next row is past the new pattern's length, the track rejoins at the song's step modulo it (read_row clears it)
     std::uint8_t perf_len = 0;      // 0: the pattern's track length
     TrackPlayMode perf_mode = TrackPlayMode::Forward;
     std::uint8_t perf_stutter = 0;
     std::uint8_t pattern_id = 0;    // the pattern this track reads now
     std::uint8_t sent_ports = 0;    // OS-INSTUI S8b: the route of the MIDI note last sent (audio::kRoutePorts bits, the delay in ms): its off goes the same way, whatever the instrument is by then
     std::uint8_t sent_delay_ms = 0;
+    // OS-CECHANCE C1 (docs/specs/OS-CECHANCE.md 3.1): the Chance conditions' state of the track. 6 B a track: the pass counter is modulo 27,720, the least common
+    // multiple of 2..12, so every N + M cycle stays continuous forever (A1).
+    std::uint16_t ch_pass = 0;   // passes of the pattern the track reads (applied at the next row), modulo 27720
+    bool ch_last = true;         // the last Chance result (starts true)
+    bool ch_pass_new = false;    // a pass ended at the last step boundary, applied at the next row
+    std::uint8_t ch_pat = 0;     // the pattern id the count belongs to
+    std::uint8_t ch_rnd = 0;     // rows since the last pass in Random mode
   };
 
   // OS-PFX: what Chord 14 and Arp 21 make of the note that started, and the chord's MIDI notes that sound. Apart from TrackState, which every track walks on every microstep: this is
@@ -438,6 +528,13 @@ class Sequencer {
   std::uint32_t song_at(std::uint32_t pos) const noexcept { return store_ != nullptr && pos < store_->cur.len ? store_->cur.list[pos] : 0u; }
   void begin_run(PlayMode mode, std::uint32_t order_pos, std::uint32_t pattern_id, std::uint32_t from_step, bool resuming) noexcept;
   void end_run(bool emit_stop, std::uint64_t at) noexcept;
+  // OS-MTC A3 (render context): the run's time code (midi/mtc.h Generator). mtc_land: the song cursor starts a segment at the timeline sample `at` (a run start, a locate, the song's loop, a live
+  // jump), `pre` the song time before it in samples (a count-in, <= 0): at the song's first step the generator anchors at once, anywhere else it asks the main loop (mtc_req_) and stays silent
+  // until the answer. mtc_answer takes the MtcAnchor command; mtc_end a stop (one full frame) or a restart; mtc_emit runs the generator for the block.
+  void mtc_land(std::uint64_t at, std::int64_t pre) noexcept;
+  void mtc_answer(std::uint32_t stamp, std::uint32_t song_samples) noexcept;
+  void mtc_end(bool emit_stop, std::uint64_t at) noexcept;
+  void mtc_emit() noexcept;
   void reset_tracks() noexcept;
   void load_tracks(std::uint32_t from_step, bool loop = false) noexcept;
   void land_track_queue(std::uint32_t t, std::uint64_t at) noexcept;  // E-PERF-07: track t's queued source pattern becomes its own (the caller sets the track's pattern, length and position)
@@ -453,10 +550,13 @@ class Sequencer {
   void begin_step(std::uint64_t at) noexcept;
   void finish_step() noexcept;
   void end_step() noexcept;
+  void land_locate() noexcept;  // a pending locate (an SPP or a locate_row while playing) lands: the song cursor goes to the located position
   std::uint64_t micro_time_raw(std::uint64_t m) const noexcept;
   core::Q32 played_spt() const noexcept;            // samples per tick at the nominal tempo and the step rate
+  core::Q32 trimmed(core::Q32 spt) const noexcept;  // OS-MTC B3: the same at the chase's rate trim (spt / rate); the identity at 1.0
   static constexpr std::uint32_t micro_per_clock(std::uint8_t rate) noexcept { return rate == 1u ? kMicrostepsPerClock / 2u : (rate == 2u ? kMicrostepsPerClock * 2u : kMicrostepsPerClock); }
   std::uint64_t next_follow_clock() const noexcept;
+  bool follow_unsettled() const noexcept;
   std::uint64_t next_micro_time() noexcept;
   std::uint64_t step_boundary_time() const noexcept;
   void rebase() noexcept;
@@ -608,6 +708,13 @@ class Sequencer {
   std::uint32_t swing_param_ = 0;      // 0: none (the ParamChange)
   std::uint32_t ticks_per_step_ = kDefaultTicksPerStep;
   std::uint32_t perf_pattern_len_ = 0;
+  // OS-INSFX-ABI2 A3 (8 B: clock_at's own state, render context): the step whose first microstep ran last (kClkNone: none since the run began), the flags below, the beat clock_at gave last (Q16.16).
+  static constexpr std::uint16_t kClkNone = 0xFFFFu;
+  static constexpr std::uint8_t kClkStarted = 1u;  // begin_run ran and clock_at has not told yet
+  static constexpr std::uint8_t kClkFlat = 2u;     // that step is one of the count-in's: the beat holds the start point's
+  std::uint32_t clk_last_ = 0;
+  std::uint16_t clk_idx_ = kClkNone;
+  std::uint8_t clk_bits_ = 0;
   std::uint8_t rate_ = 0;              // the step rate: 0 normal, 1 half time, 2 double time (render context; the command ring is its one writer)
   std::uint8_t micro_per_clock_ = kMicrostepsPerClock;  // follow mode: the microsteps a master clock spans, as of the step rate at the last step boundary
   std::uint16_t silent_ = 0;           // bit per track: its MIDI notes are held back (refresh_silence)
@@ -622,7 +729,28 @@ class Sequencer {
   core::SQ32 follow_offset_ = 0;
   std::uint64_t follow_base_tick_ = 0;
   std::uint64_t last_follow_abs_ = 0;
+  bool follow_held_ = false;           // the next microstep waited for a real clock (follow_unsettled), so its time is taken again when it is released (OS-MIDISYNC 07)
   bool ext_start_ = false;             // the pending start or continue is the master's (apply(TransportEvent)): its clock number is follow_base_tick_ (OS-005c2)
+
+  // OS-MTC A3
+  midi::mtc::Generator mtc_gen_;
+  std::atomic<std::uint32_t> mtc_req_{0};  // mtc_request(): the render is the one writer
+  std::uint8_t mtc_stamp_ = 0;             // the last stamp issued (1..255, wraps over 0)
+  std::uint8_t mtc_wait_stamp_ = 0;        // the stamp the generator waits for (0: none)
+  std::uint8_t loop_first_ = 0xFF;         // OS-SONG3 S7: the looped slots of the order list (the render's copy); loop_first_ > loop_last_ is no loop. The two bytes sit in the padding before mtc_wait_at_
+  std::uint8_t loop_last_ = 0;
+  std::uint64_t mtc_wait_at_ = 0;          // the timeline sample the awaited position starts at
+  std::int64_t mtc_wait_pre_ = 0;          // the song time before it, samples (<= 0)
+
+  // OS-MTC B3, the chase (render context; the command ring is the main loop's one way in)
+  ChaseAnswer chase_ans_{};                // the main loop's answer, filled by ChaseState + ChaseStart
+  std::uint64_t chase_end_ = 0;            // before the run begins: its first sample (chase_go); then the sample at which the step that runs ends
+  core::Q32 chase_map_ = 0;                // before the run begins: the first step's song time; then the song time at the end of the step that runs (untrimmed)
+  std::uint32_t chase_steps_ = 0;          // pairs published
+  std::uint32_t trim_q16_ = kTrimOne;      // set_rate_trim, read at every step boundary
+  bool chase_run_ = false;                 // the run is the chase's (or one waits): chase_go .. end_run
+  bool pending_chase_ = false;             // chase_go waits for the next block start
+  bool chase_odd_ = false;                 // the swing pair's parity the chased run starts with
 
   Stats stats_{};
   audio::PlayPosition published_;      // written at the end of step(), the one writer; read by the main loop

@@ -5,6 +5,8 @@
 #include <o3os/app/frame.h>
 #include <o3os/app/key_prompt.h>
 #include <o3os/app/module_ui.h>
+#include <o3os/app/screens/overlay.h>
+#include <o3os/app/screens/pattern_screen.h>
 #include <o3os/app/text_format.h>
 #include <o3os/core/fixed_string.h>
 #include <o3os/ui/components.h>
@@ -148,6 +150,7 @@ void ModulesScreen::render(const Model& model, const ViewState& view, Renderer& 
 
 void ModuleAppScreen::leave(const Model& model, ViewState& view) const noexcept {
   view.modules.app_keys = false;
+  view.modules.panel = false;  // (OS-PTOOLS2 S6: the TOOLS panel hosting a small app closes with it)
   if (model.modules != nullptr) {
     model.modules->app_exit();
   }
@@ -171,6 +174,26 @@ void ModuleAppScreen::render(const Model& model, const ViewState& view, Renderer
   const Frame f = make_frame(t, kFrameRows);
   const auto hidden = [&](const Rect& rect) { return covers(covered, rect.x, rect.y, rect.w, rect.h); };
   ModuleUi* mu = model.modules;
+  if (view.modules.panel) {  // OS-PTOOLS2 S6: a small tool app runs in the TOOLS panel beside the narrowed Pattern grid (the app's own page is not drawn); its F-key row is the app's (ViewState::overlay_keys)
+    kPatternScreen.render(model, view, r, ui::Rect{0, 0, 0, 0});
+    if (mu != nullptr && !mu->app_stopped()) {
+      (void)mu->draw_app_view(r, Rect{0, f.pane.y, ui::kScreenW, f.pane.h}, false);  // the app's draw still runs (its key labels, a writer's slices); only the host's rows are painted
+    }
+    draw_tools_app_panel(model, view, r);
+    r.panel(f.keys, Color::Chrome);
+    if (mu != nullptr && mu->app_keys_declared()) {
+      const bool shifted = view.shift;
+      const char* row[8];
+      for (unsigned i = 0; i < 8u; ++i) {
+        const char* label = mu->app_key_label(i, shifted);
+        row[i] = i == 7u ? (shifted ? "" : kModuleAppSoftKeys[7]) : (label[0] != '\0' ? label : "-");
+      }
+      ui::soft_keys(r, f.keys, row, 8);
+    } else {
+      ui::soft_keys(r, f.keys, kModuleAppSoftKeys, 8);
+    }
+    return;
+  }
   const unsigned params = mu != nullptr && mu->app_os_column() ? mu->app_param_count() : 0u;  // (an app of ABI 1.10 draws its own rows: no OS column)
   const int cursor = view.modules.app_row < static_cast<int>(params) ? view.modules.app_row : 0;
   const int cell_w = t.geometry(Face::Data).cell_w;

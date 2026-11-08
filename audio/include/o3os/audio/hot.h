@@ -29,9 +29,11 @@
 // per block per strip/voice that changed. Per-sample and per-block kernels stay O3OS_AUDIO_HOT. On the host and on QEMU the macro is empty.
 // Named exceptions to the call rate (a flash call on the per-block path, each with its rate): VoicePool::shape_span (once a span a sampler voice that shapes; calls shape_pcm), and, OS-BUG-MODDRIVE,
 // Engine::shape_modules (once a block, only while some track holds the Overdrive or Bit depth FX or the layer's rows: the gate is one inline test of VoicePool::shape_mask) with VoicePool::shape_track
-// and VoicePool::shape_pcm (once each per shaped module track in that call). OS-STEREO (c): VoicePool::render_voice_st (once per span of a voice that holds a side block; the stereo loops, S's tail and
+// and VoicePool::shape_pcm (once each per shaped module track in that call). OS-CEWTENV room: TestTone::generate and TestTone::generate_noise (flash; once a block per strip whose test tone is audible: the O3OS_AUDIO_TEST image, or a console
+// test-source ParamChange; Graph::render pays one `blx` while the tone is faded in, and nothing in a release image), and Graph::script_tone (at a change of the tone script's target only). OS-STEREO (c): VoicePool::render_voice_st (once per span of a voice that holds a side block; the stereo loops, S's tail and
 // the calls below it are flash), VoicePool::end_block_st (once a block while a voice holds a block or the last block fed one), Engine::feed_sides (the same condition) and kernel::gain_pan_st (once per track that has S
-// in the block); nothing is called while no voice is stereo.
+// in the block); nothing is called while no voice is stereo. OS-MODRATE: ModuleVoices::render_rated (once per segment of an instrument module whose RATE is not FULL: the hold expansion; a FULL instance pays one
+// byte test in render()).
 #if defined(O3OS_AUDIO_RAMFUNC) && O3OS_AUDIO_RAMFUNC
 #define O3OS_AUDIO_COLD [[gnu::noinline, gnu::long_call]]
 #else

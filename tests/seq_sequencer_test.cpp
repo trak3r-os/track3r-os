@@ -7,6 +7,7 @@
 #include <doctest/doctest.h>
 
 #include <o3os/seq/perform.h>
+#include <o3os/seq/play_orders.h>
 #include <o3os/seq/sequencer.h>
 
 #include <cmath>
@@ -393,7 +394,7 @@ TEST_CASE("seq: the velocity FX, the random one, Chance and the random FX are th
   CHECK(g_col.nth(EventKind::NoteOn, 4)->ev.a == 60);
   // a velocity FX makes no voice event on a step with a note: it is the note's velocity
   CHECK(g_col.count(EventKind::ModSet) == 0u);
-  // Chance: 100 always plays; 0 almost never; the same run again is the same run
+  // Chance (OS-CECHANCE C1, Q1 a: a draw in 0..99 below the value plays): 100 always plays; 0 never; 50 about half; the same run again is the same run
   pattern16(12000);
   for (std::uint32_t k = 0; k < 16; ++k) {
     CHECK(p.set_step(1, 0, k, make_step(60, 1, fx::kChance, 100)) == model::Status::Ok);
@@ -407,7 +408,7 @@ TEST_CASE("seq: the velocity FX, the random one, Chance and the random FX are th
     g_col.run(s2, 0, at_us(16 * 8, 0), 64);
     if (pass == 0) {
       CHECK(g_col.count(EventKind::NoteOn, 0) == 16u * 8u);
-      CHECK(g_col.count(EventKind::NoteOn, 1) < 12u);                  // 1 % of 128
+      CHECK(g_col.count(EventKind::NoteOn, 1) == 0u);                   // 0 never plays
       CHECK(g_col.count(EventKind::NoteOn, 2) > 40u);                  // about half of 128
       CHECK(g_col.count(EventKind::NoteOn, 2) < 90u);
       h1 = g_col.hash;
@@ -1761,22 +1762,229 @@ TEST_CASE("seq E-PERF-07: a pattern switch and a song step do not undo a landed 
   }
 }
 
-// OS-BUG-PERFMODE: the label the Perform screen shows for each stored play mode value names the mode the sequencer runs for it. The command is the one the Perform bank sends
-// (perf_command), with the track narrowed to 4 steps of the pattern's 8 (the length byte; the bank leaves it to the song) so that the four orders differ.
+// OS-PERFREMIX R1: SetTrackPattern, a track's pattern at once. Pattern 1 (the song's, 16 steps), 3 (16 steps) and 4 (8 steps); track 2 reads 61+k, 101+k and 81+k, every step with a Panning FX, so that
+// a change that ended the track's FX would show as a ModEnd (a note step without the FX would end it by itself).
+namespace {
+
+void remix_project() {
+  fresh_project(4, 4);
+  model::Project& p = seq_project();
+  CHECK(p.set_tempo_x100(24000) == model::Status::Ok);
+  CHECK(p.create_pattern(1, 16) == model::Status::Ok);
+  CHECK(p.create_pattern(3, 16) == model::Status::Ok);
+  CHECK(p.create_pattern(4, 8) == model::Status::Ok);
+  for (std::uint32_t k = 0; k < 16; ++k) {
+    CHECK(p.set_step(1, 2, k, make_step(static_cast<std::uint8_t>(61 + k), 1, fx::kPanning, 75)) == model::Status::Ok);
+    CHECK(p.set_step(3, 2, k, make_step(static_cast<std::uint8_t>(101 + k), 1, fx::kPanning, 75)) == model::Status::Ok);
+  }
+  for (std::uint32_t k = 0; k < 8; ++k) {
+    CHECK(p.set_step(4, 2, k, make_step(static_cast<std::uint8_t>(81 + k), 1, fx::kPanning, 75)) == model::Status::Ok);
+  }
+}
+
+bool set_tracks(seq::Sequencer& s, std::uint32_t mask, std::uint32_t pattern) {
+  return s.commands().push(seq::Command{seq::Command::Kind::SetTrackPattern, 0, static_cast<std::uint16_t>(pattern), mask});
+}
+
+// One render of the first scenario (a switch on step 5), for the determinism check: the hash of every event.
+std::uint64_t remix_render_hash() {
+  remix_project();
+  seq::Sequencer& s = make();
+  s.play_pattern(1);
+  g_col.run(s, 0, song_us(5, 10), 64);
+  CHECK(set_tracks(s, 0x4u, 3));
+  g_col.run(s, song_us(5, 10), song_us(40), 64);
+  return g_col.hash;
+}
+
+}  // namespace
+
+TEST_CASE("seq OS-PERFREMIX R1: a track switched to another pattern on step 5 plays that pattern's next row, its FX go on, the word shows it with no wait bit") {
+  remix_project();
+  seq::Sequencer& s = make();
+  s.play_pattern(1);
+  g_col.run(s, 0, song_us(5, 10), 64);
+  CHECK(set_tracks(s, 0x4u, 3));
+  g_col.run(s, song_us(5, 10), song_us(36), 64);
+  for (std::uint32_t i = 0; i < 6; ++i) {
+    CHECK_MESSAGE(note_at(2, i) == 61 + static_cast<int>(i), i);  // the song's pattern up to the step that was playing
+  }
+  for (std::uint32_t i = 6; i < 16; ++i) {
+    CHECK_MESSAGE(note_at(2, i) == 101 + static_cast<int>(i), i);  // pattern 3 from row 6: the place is kept
+  }
+  for (std::uint32_t i = 16; i < 32; ++i) {
+    CHECK_MESSAGE(note_at(2, i) == 85 + static_cast<int>(i), i);  // the song's pattern restarts: the override stays, row 0 again
+  }
+  CHECK(g_col.count(EventKind::ModEnd, 2) == 0u);  // no FX end (the official change at once cancels none)
+  CHECK(s.play_position().track_pattern(2) == 3u);
+  CHECK(s.play_position().track_pattern(1) == 0u);  // only the masked track
+  // the control: the queue at the track's loop end does end the FX
+  remix_project();
+  seq::Sequencer& q = make();
+  q.play_pattern(1);
+  g_col.run(q, 0, song_us(1, 10), 64);
+  CHECK(queue_tracks(q, 0x4u, 3));
+  g_col.run(q, song_us(1, 10), song_us(20), 64);
+  CHECK(g_col.count(EventKind::ModEnd, 2) >= 1u);
+}
+
+TEST_CASE("seq OS-PERFREMIX R1: a track switched to a shorter pattern rejoins at the song's step modulo its length") {
+  remix_project();
+  seq::Sequencer& s = make();
+  s.play_pattern(1);
+  g_col.run(s, 0, song_us(12, 10), 64);
+  CHECK(set_tracks(s, 0x4u, 4));  // 8 steps, on step 12
+  g_col.run(s, song_us(12, 10), song_us(40), 64);
+  for (std::uint32_t i = 0; i < 13; ++i) {
+    CHECK_MESSAGE(note_at(2, i) == 61 + static_cast<int>(i), i);
+  }
+  CHECK(note_at(2, 13) == 81 + (13 % 8));  // (12 + 1) % 8 = 5
+  CHECK(note_at(2, 14) == 81 + (14 % 8));
+  CHECK(note_at(2, 15) == 81 + (15 % 8));
+  for (std::uint32_t i = 16; i < 32; ++i) {
+    CHECK_MESSAGE(note_at(2, i) == 81 + static_cast<int>(i % 8), i);  // the track's own 8-step loop
+  }
+  CHECK(g_col.count(EventKind::ModEnd, 2) == 0u);
+}
+
+TEST_CASE("seq OS-PERFREMIX R1: a change at once replaces a wait; pattern 0 sends the track back to the song at once; PLAYMODE keeps the override") {
+  remix_project();
+  seq::Sequencer& s = make();
+  s.play_pattern(1);
+  g_col.run(s, 0, song_us(1, 10), 64);
+  CHECK(queue_tracks(s, 0x4u, 3));  // a wait for pattern 3 at the loop end (step 16)
+  g_col.run(s, song_us(1, 10), song_us(3, 10), 64);
+  CHECK(s.play_position().track_pattern(2) == (0x10000u | (3u << 8)));
+  CHECK(set_tracks(s, 0x4u, 4));  // replaces it
+  g_col.run(s, song_us(3, 10), song_us(5, 10), 64);
+  CHECK(s.play_position().track_pattern(2) == 4u);  // no wait bit
+  CHECK(note_at(2, 4) == 81 + 4);
+  CHECK(set_tracks(s, 0x4u, 3));
+  const seq::Command playmode{seq::Command::Kind::PerfTrack, 2, 0, static_cast<std::uint32_t>(seq::TrackPlayMode::Forward) << 8};
+  CHECK(s.commands().push(playmode));  // the PLAYMODE FX sends pattern 0 with its mode: the override stays
+  g_col.run(s, song_us(5, 10), song_us(9, 10), 64);
+  CHECK(s.play_position().track_pattern(2) == 3u);
+  CHECK(note_at(2, 8) == 101 + 8);
+  CHECK(set_tracks(s, 0x4u, 0));  // back to the song's pattern, at once
+  g_col.run(s, song_us(9, 10), song_us(14, 10), 64);
+  CHECK(s.play_position().track_pattern(2) == 0u);
+  CHECK(note_at(2, 10) == 61 + 10);
+  CHECK(note_at(2, 13) == 61 + 13);
+}
+
+TEST_CASE("seq OS-PERFREMIX R1: ignored while stopped, for a pattern past 255 and for a mask past the tracks; Stop ends it") {
+  remix_project();
+  seq::Sequencer& s = make();
+  CHECK(set_tracks(s, 0x4u, 3));  // stopped: nothing
+  s.play_pattern(1);
+  g_col.run(s, 0, song_us(5, 10), 64);
+  CHECK(s.play_position().track_pattern(2) == 0u);
+  CHECK(note_at(2, 4) == 61 + 4);
+  CHECK(set_tracks(s, 0x4u, 300));
+  CHECK(set_tracks(s, 0xFFFF0000u, 3));
+  g_col.run(s, song_us(5, 10), song_us(8, 10), 64);
+  CHECK(note_at(2, 7) == 61 + 7);
+  CHECK(s.play_position().track_pattern(2) == 0u);
+  CHECK(set_tracks(s, 0x4u, 3));
+  g_col.run(s, song_us(8, 10), song_us(10, 10), 64);
+  CHECK(s.play_position().track_pattern(2) == 3u);
+  CHECK(s.commands().push(seq::Command{seq::Command::Kind::Stop, 0, 0, 0}));
+  g_col.run(s, song_us(10, 10), song_us(11, 10), 64);
+  CHECK(s.play_position().track_pattern(2) == 0u);
+  s.play_pattern(1);
+  const std::uint64_t base = song_us(11, 10);
+  g_col.n = 0;
+  g_col.run(s, base, base + song_us(17), 64);
+  for (std::uint32_t i = 0; i < g_col.count(EventKind::NoteOn, 2); ++i) {
+    CHECK(g_col.nth(EventKind::NoteOn, i, 2)->ev.a < 100);  // the song's pattern again, never pattern 3's
+  }
+  CHECK(g_col.count(EventKind::NoteOn, 2) >= 16u);
+}
+
+// A change drained on the last row of the track's own loop: advance_tracks wraps on the length read for the pattern left, so the new pattern's length has to be taken at the command (the fold of
+// the R1 review). Pattern 1 (16 steps) holds track 2 as an 8-step loop (61+k); pattern 3 holds it 16 steps long (101+k); pattern 6 holds it 3 steps long (121+k).
+namespace {
+
+void lastrow_project() {
+  fresh_project(4, 4);
+  model::Project& p = seq_project();
+  CHECK(p.set_tempo_x100(24000) == model::Status::Ok);
+  CHECK(p.create_pattern(1, 16) == model::Status::Ok);
+  CHECK(p.create_pattern(3, 16) == model::Status::Ok);
+  CHECK(p.create_pattern(6, 16) == model::Status::Ok);
+  for (std::uint32_t k = 0; k < 8; ++k) {
+    CHECK(p.set_step(1, 2, k, make_step(static_cast<std::uint8_t>(61 + k))) == model::Status::Ok);
+  }
+  for (std::uint32_t k = 0; k < 16; ++k) {
+    CHECK(p.set_step(3, 2, k, make_step(static_cast<std::uint8_t>(101 + k))) == model::Status::Ok);
+  }
+  for (std::uint32_t k = 0; k < 3; ++k) {
+    CHECK(p.set_step(6, 2, k, make_step(static_cast<std::uint8_t>(121 + k))) == model::Status::Ok);
+  }
+  CHECK(p.set_track_length(1, 2, 8) == model::Status::Ok);
+  CHECK(p.set_track_length(6, 2, 3) == model::Status::Ok);
+}
+
+}  // namespace
+
+TEST_CASE("seq OS-PERFREMIX R1: a change drained on the last row of the track's loop keeps its place on a longer pattern and rejoins on a shorter one") {
+  // longer target: step 7 is the last row of the 8-step loop; the track goes on with row 8 of pattern 3 (it must not wrap to row 0)
+  lastrow_project();
+  seq::Sequencer& s = make();
+  s.play_pattern(1);
+  g_col.run(s, 0, song_us(7, 10), 64);
+  CHECK(set_tracks(s, 0x4u, 3));
+  g_col.run(s, song_us(7, 10), song_us(20), 64);
+  for (std::uint32_t i = 0; i < 8; ++i) {
+    CHECK_MESSAGE(note_at(2, i) == 61 + static_cast<int>(i), i);
+  }
+  for (std::uint32_t i = 8; i < 16; ++i) {
+    CHECK_MESSAGE(note_at(2, i) == 101 + static_cast<int>(i), i);
+  }
+  CHECK(note_at(2, 16) == 101);  // the song's pattern restarts: row 0 again
+  // shorter target (3 steps): the next step is the song's step 8 modulo 3 = row 2, then the track's own loop
+  lastrow_project();
+  seq::Sequencer& r = make();
+  r.play_pattern(1);
+  g_col.run(r, 0, song_us(7, 10), 64);
+  CHECK(set_tracks(r, 0x4u, 6));
+  g_col.run(r, song_us(7, 10), song_us(14), 64);
+  const int want[6] = {123, 121, 122, 123, 121, 122};  // steps 8..13
+  for (std::uint32_t i = 0; i < 6; ++i) {
+    CHECK_MESSAGE(note_at(2, 8 + i) == want[i], i);
+  }
+}
+
+TEST_CASE("seq OS-PERFREMIX R1: two renders with a change at once are identical") {
+  const std::uint64_t h1 = remix_render_hash();
+  const std::uint64_t h2 = remix_render_hash();
+  CHECK(h1 == h2);
+  CHECK(h1 != 0xCBF29CE484222325ull);
+}
+
+// OS-BUG-PERFMODE / OS-PERFMODES M4: the label the Perform screen shows for each stored play mode value names the mode the sequencer runs for it. The command is the one the Perform
+// bank sends (perf_command), with the track narrowed to 4 steps of the pattern's 8 (the length byte; the bank leaves it to the song) so that the orders differ. 0..3 are FWD, BACK,
+// PING, RND; 4..23 are the custom play orders C1..C20 (the note played is the order's entry modulo the track's length, as seq_playorder_test.cpp checks step by step).
 TEST_CASE("seq: each Perform play mode label names the order the sequencer plays") {
   struct Mode {
     const char* label;
-    const std::uint8_t* first8;  // the notes of the first 8 steps; nullptr: the random order (inside the track, and not one of the others)
+    const std::uint8_t* first8;  // the notes of the first 8 steps; nullptr: the random order or a custom order (its notes come from play_order_entry below)
   };
   static const std::uint8_t kFwd[8] = {20, 21, 22, 23, 20, 21, 22, 23};
   static const std::uint8_t kBack[8] = {23, 22, 21, 20, 23, 22, 21, 20};
   static const std::uint8_t kPing[8] = {20, 21, 22, 23, 22, 21, 20, 21};
   const Mode modes[4] = {{"FWD", kFwd}, {"BACK", kBack}, {"PING", kPing}, {"RND", nullptr}};
-  CHECK(seq::perf_info(seq::PerfFx::PatternPlayMode).max == 3);
-  for (int v = 0; v <= 3; ++v) {
+  CHECK(seq::perf_info(seq::PerfFx::PatternPlayMode).max == 23);  // OS-PERFMODES M4: 0..23 (FWD, BACK, PING, RND, C1..C20)
+  for (int v = 0; v <= 23; ++v) {
     char text[8];
     (void)seq::perf_value_text(seq::PerfFx::PatternPlayMode, v, text);
-    CHECK_MESSAGE(std::strcmp(text, modes[v].label) == 0, v);
+    if (v < 4) {
+      CHECK_MESSAGE(std::strcmp(text, modes[v].label) == 0, v);
+    } else {
+      char want[16];  // room for any int: the Arm build's -Wformat-truncation counts it
+      std::snprintf(want, sizeof want, "C%d", v - 3);
+      CHECK_MESSAGE(std::strcmp(text, want) == 0, v);
+    }
     song_project();
     for (std::uint32_t k = 0; k < 8; ++k) {
       CHECK(seq_project().set_step(2, 0, k, make_step(static_cast<std::uint8_t>(20 + k))) == model::Status::Ok);
@@ -1790,14 +1998,22 @@ TEST_CASE("seq: each Perform play mode label names the order the sequencer plays
     g_col.run(s, 0, song_us(16), 64);
     std::uint8_t got[16];
     for (std::uint32_t i = 0; i < 16; ++i) {
-      NEED(g_col.nth(EventKind::NoteOn, i, 0) != nullptr);
-      got[i] = g_col.nth(EventKind::NoteOn, i, 0)->ev.a;
+      // the note the track starts on step i (by its time, as seq_playorder_test.cpp's note_at: a roll of the order repeats notes and would shift nth())
+      const Rec* r = nullptr;
+      for (std::uint32_t k = 0; k < g_col.n; ++k) {
+        if (g_col.rec[k].ev.kind == EventKind::NoteOn && g_col.rec[k].ev.track == 0 && g_col.rec[k].t == song_us(i)) {
+          r = &g_col.rec[k];
+          break;
+        }
+      }
+      NEED(r != nullptr);
+      got[i] = r->ev.a;
     }
-    if (modes[v].first8 != nullptr) {
+    if (v < 4 && modes[v].first8 != nullptr) {
       for (std::uint32_t i = 0; i < 8; ++i) {
         CHECK_MESSAGE(got[i] == modes[v].first8[i], v);
       }
-    } else {
+    } else if (v < 4) {
       bool same[3] = {true, true, true};
       for (std::uint32_t i = 0; i < 16; ++i) {
         CHECK(got[i] >= 20);
@@ -1807,6 +2023,13 @@ TEST_CASE("seq: each Perform play mode label names the order the sequencer plays
         }
       }
       CHECK_FALSE((same[0] || same[1] || same[2]));
+    } else {
+      // C1..C20: the notes are the order's entries over the track's 4 steps (the note of the pattern's row the entry names, modulo the length)
+      for (std::uint32_t i = 0; i < 16; ++i) {
+        const seq::PlayOrderEntry e = seq::play_order_entry(static_cast<unsigned>(v - 4), i % 4u);
+        const unsigned msg = static_cast<unsigned>(v) * 100u + i;
+        CHECK_MESSAGE(got[i] == 20 + static_cast<int>((e.step - 1u) % 4u), msg);
+      }
     }
   }
 }

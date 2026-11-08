@@ -20,11 +20,11 @@
 
 namespace o3os::sim {
 
-// The Song screen: typical (its first page), arrangement (the second), worst (a sweep), over a document with the track map (OS-SONG1), and (OS-SONGMAP) with the cursor in the map, its dearest case and the question up.
-extern const ScreenState kSongStates[14];
+// The Song screen: typical (its first page, LIST: the ORDER and ARRANGEMENT pages folded, OS-SONG3 S1), worst (a sweep), over a document with the track map (OS-SONG1), and (OS-SONGMAP) with the cursor in the map, its dearest case and the question up.
+extern const ScreenState kSongStates[16];  // (+ OS-SONG3 S3 review fold: timeline_edit_worst_all, the combined sweep)
 // The overlays: Learn, the Navigator and a notification over the Pattern screen, a notification over the Song screen.
 // Each has a typical state and a `_worst` sweep over the dearest content under it. Since OS-009 P1a.1 also the three choosers of the Pattern screen; since OS-SONGMAP the Song screen's TOOLS dialog.
-extern const ScreenState kOverlayStates[16];
+extern const ScreenState kOverlayStates[20];  // (+ OS-MIDIREC S1b: the EVENTS overlay; + OS-PTOOLS2 S3: the F7 verb menu, typical and the worst sweep)
 
 // The generated parameter page (Instrument PARAMS, OS-002d): the four pages typical, the cutoff envelope, Learn over the filter page, no project,
 // and `worst`, the sweep of every page, row, content, controller tag and overlay (screens_params.cpp).

@@ -28,10 +28,13 @@
 #include <o3os/hal/audio.h>
 #include <o3os/model/editor.h>
 #include <o3os/model/params.h>
+#include <o3os/module/loader.h>
 #include <o3os/platform/host/fakes.h>
 #include <o3os/platform/mk66/disk_share.h>
 #include <o3os/ui/renderer.h>
 #include <o3os/ui/theme.h>
+
+#include <dlfcn.h>
 
 #include <algorithm>
 #include <cmath>
@@ -623,6 +626,35 @@ TEST_CASE("new: F3 asks which new project (ALL or KEEP INSTRUMENTS) even with no
   rig.new_project(true);
   CHECK(rig.message() == "NO DOCUMENT TO REPLACE");
   CHECK(rig.card.log.empty());  // the card is never touched
+}
+
+// OS-BUG-LATENT-1106: as an OPEN (file_projects_test.cpp): the news of the project that NEW replaces goes with it.
+TEST_CASE("new: news posted about the project that is replaced does not outlive the reset; the strip says NEW PROJECT alone") {
+  Rig rig;
+  auto& notify = const_cast<core::NotifyQueue&>(rig.app->state().notify);
+  rig.new_project();
+  CHECK(notify.post(core::Severity::Info, "BEAT SLICE: NO SLICES, AUTO OR EVEN ON WAVE", "playmode", app::ViewState::kMessageMs));
+  rig.project.is_busy = false;
+  rig.pass();
+  CHECK(rig.message() == "NEW PROJECT");
+  CHECK(notify.size() == 1u);
+}
+
+// OS-PTOOLS2 S2 review fold: F6 REPEAT is the session's, not the project's. A NEW clears the last fill and the last TOOLS apply, or F6 on the new project would re-run project A's TRANSPOSE.
+TEST_CASE("new: the last fill and the last TOOLS apply (what F6 repeats) do not outlive the project that is replaced") {
+  Rig rig;
+  auto& view = const_cast<app::ViewState&>(rig.app->state());
+  view.fill.valid = true;
+  view.verb_menu.last_verb = app::VerbMenuView::LastVerb::Tool;
+  view.verb_menu.tool_last.tool = app::PTool::Transpose;
+  view.verb_menu.tool_last.amount = 12;
+  rig.new_project();
+  rig.project.is_busy = false;
+  rig.pass();
+  CHECK(rig.message() == "NEW PROJECT");
+  CHECK_FALSE(rig.app->state().fill.valid);
+  CHECK(rig.app->state().verb_menu.last_verb == app::VerbMenuView::LastVerb::None);
+  CHECK(rig.app->state().verb_menu.tool_last.amount == 0);
 }
 
 TEST_CASE("new: the question can be cancelled: another key, a move, leaving the screen or a wait change nothing; F1 is OPEN again afterwards (OS-NEWKEEP)") {
@@ -2104,33 +2136,58 @@ TEST_CASE("save samples: an imported MOD plays on the Amiga engine after the imp
   m.patterns[0][{0, 0}] = test::modimp::note(12, 1);
   rig.card.put("MOD/kc_test.mod", test::modimp::build(m));
   app::ModuleImport import;
-  NEED(import.begin(rig.card, "MOD/kc_test.mod", test::arena(1), app::ImportEngine::Auto) == app::ModuleImport::Start::Started);
-  for (unsigned i = 0; i < 100000 && import.state() == app::ModuleImport::State::Running; ++i) {
-    (void)import.step(16384);
+  // OS-FLASHDIET I3: the import runs through the importer module (the image links no importer any more); the host tests register the
+  // tracker host object as a native importer entry, as the simulator does. The module host (mset / mloader) lives in a scope of its own:
+  // it is destroyed before the .so is closed — the set's destructor runs the native entry's code, which must not run after dlclose.
+  void* tracker_so = dlopen(O3M_TRACKER_HOST_SO, RTLD_NOW | RTLD_LOCAL);
+  NEED(tracker_so != nullptr);
+  {
+    module::ModuleSet mset;
+    module::ModuleLoader mloader;
+    std::vector<std::uint8_t> mhot(8 * 1024 + 64), mcold(192 * 1024 + 64);
+    // OS-BUG-IMPFLAKE: the arenas' base is a fixed 32-bit address, not the truncated heap pointer (under ASLR that can put
+    // addr + size past 4 GiB or off the 64-byte alignment, and Arena::init then refuses the arena); the buffers are 64 bytes
+    // larger so their base aligns up into them.
+    std::uint8_t* const hot_mem = reinterpret_cast<std::uint8_t*>((reinterpret_cast<std::uintptr_t>(mhot.data()) + 63u) & ~std::uintptr_t{63u});
+    std::uint8_t* const cold_mem = reinterpret_cast<std::uint8_t*>((reinterpret_cast<std::uintptr_t>(mcold.data()) + 63u) & ~std::uintptr_t{63u});
+    mset.hot().init(hot_mem, 0x20000000u, static_cast<std::uint32_t>(mhot.size() - static_cast<std::size_t>(hot_mem - mhot.data())));
+    mset.cold().init(cold_mem, 0x30000000u, static_cast<std::uint32_t>(mcold.size() - static_cast<std::size_t>(cold_mem - mcold.data())));
+    const o3m_module* tracker_entry = tracker_so != nullptr ? static_cast<const o3m_module*>(dlsym(tracker_so, "o3m_entry")) : nullptr;
+    NEED(tracker_entry != nullptr);
+    NEED(mset.add_native("tracker", *tracker_entry));
+    import.set_module_host(&mset, &mloader, nullptr, "tracker");
+    NEED(import.begin(rig.card, "MOD/kc_test.mod", test::arena(1), app::ImportEngine::Auto) == app::ModuleImport::Start::Started);
+    for (unsigned i = 0; i < 100000 && import.state() == app::ModuleImport::State::Running; ++i) {
+      (void)import.step(16384);
+    }
+    NEED(import.state() == app::ModuleImport::State::Done);
+    audio::VoicePool& pool = make_pool();  // (make() builds the pool again: one call)
+    app::OgSampleLoader loader;
+    NEED(loader.begin_feed(import, test::arena(1).project, pool, rig.memory.data(), static_cast<std::uint32_t>(rig.memory.size()), audio::LevelLaw::Og12, &rig.bank));
+    for (unsigned i = 0; i < 100000 && loader.state() == app::OgSampleLoader::State::Running; ++i) {
+      (void)loader.step(16384);
+    }
+    NEED(loader.state() == app::OgSampleLoader::State::Done);
+    import.samples_done(loader.report());
+    const model::Instrument* in = test::arena(1).project.instrument(0);
+    NEED(in != nullptr);
+    CHECK(in->engine == model::kInstEngineAuto);                            // the importer writes AUTO for a module sample ...
+    CHECK((in->sample_rate == 8287u || in->sample_rate == 8363u));          // ... at a Paula rate
+    CHECK(pool.sample(0).engine == audio::kEngineAmiga);                    // right after the import
+    save_as(rig, "Imported");
+    NEED(rig.card.has("Projects/Imported/project.o3pj"));
+    Reopened re;
+    reopen(rig, "Projects/Imported", re);
+    const model::Instrument* back = re.arena->project.instrument(0);
+    NEED(back != nullptr);
+    CHECK(back->engine == model::kInstEngineAuto);
+    CHECK(re.voices->sample(0).length != 0u);
+    CHECK(re.voices->sample(0).engine == audio::kEngineAmiga);              // and after a save and reload
+    import.close();
+  }  // mset / mloader die here, while the .so is still mapped
+  if (tracker_so != nullptr) {
+    dlclose(tracker_so);
   }
-  NEED(import.state() == app::ModuleImport::State::Done);
-  audio::VoicePool& pool = make_pool();  // (make() builds the pool again: one call)
-  app::OgSampleLoader loader;
-  NEED(loader.begin_feed(import, test::arena(1).project, pool, rig.memory.data(), static_cast<std::uint32_t>(rig.memory.size()), audio::LevelLaw::Og12, &rig.bank));
-  for (unsigned i = 0; i < 100000 && loader.state() == app::OgSampleLoader::State::Running; ++i) {
-    (void)loader.step(16384);
-  }
-  NEED(loader.state() == app::OgSampleLoader::State::Done);
-  import.samples_done(loader.report());
-  const model::Instrument* in = test::arena(1).project.instrument(0);
-  NEED(in != nullptr);
-  CHECK(in->engine == model::kInstEngineAuto);                            // the importer writes AUTO for a module sample ...
-  CHECK((in->sample_rate == 8287u || in->sample_rate == 8363u));          // ... at a Paula rate
-  CHECK(pool.sample(0).engine == audio::kEngineAmiga);                    // right after the import
-  save_as(rig, "Imported");
-  NEED(rig.card.has("Projects/Imported/project.o3pj"));
-  Reopened re;
-  reopen(rig, "Projects/Imported", re);
-  const model::Instrument* back = re.arena->project.instrument(0);
-  NEED(back != nullptr);
-  CHECK(back->engine == model::kInstEngineAuto);
-  CHECK(re.voices->sample(0).length != 0u);
-  CHECK(re.voices->sample(0).engine == audio::kEngineAmiga);              // and after a save and reload
 }
 
 // OS-SAVEABORT: an Open (or a New) while a save runs used to replace the document under it; the platform's end of the load dropped the save's plan, and the first save of a new

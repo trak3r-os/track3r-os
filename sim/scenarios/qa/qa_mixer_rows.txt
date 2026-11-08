@@ -1,0 +1,19 @@
+# OS-QA: row of docs/qa/catalogue/mixer.md proven with asserts only (no `snap` here, so this scenario needs no golden). The Mixer keeps no state the model or the state line can read, so a row below claims
+# only what the strip text (msg=) and the screen say; what a key does to the mix itself stays open in the row's Sim cell.
+
+document
+wait 500
+tap master
+wait 20
+assert state screen=MIXER
+wait 3000
+
+# QA-MIX-037: on the MASTER FX page (F3) the cursor starts on VOLUME, not a bus row: F7 (MUTE) there answers DRY, REVERB OR DELAY ROW and F8 (SOLO) answers TRACKS ONLY. A labelled key always answers.
+tap f3
+wait 20
+assert state screen=MIXER
+tap f7
+assert state msg=~DRY.*REVERB_OR_DELAY_ROW
+wait 3000
+tap f8
+assert state msg=~TRACKS_ONLY

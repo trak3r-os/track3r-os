@@ -37,7 +37,7 @@ constexpr Row reserved(std::uint8_t lo, std::uint8_t hi, std::uint8_t start) noe
 constexpr Row remapped(std::uint8_t lo, std::uint8_t hi, std::uint8_t start) noexcept { return Row{Support::Remapped, lo, hi, start}; }
 
 inline constexpr unsigned kTypeCount = 43;    // table size (ids 0-42); not the picker length
-inline constexpr unsigned kPickerCount = 60;  // entries of the FX picker: the first 34, then Swing and Gate Length (OS-CFGWIRE), then Chord, Arp, Tune, Slide up, Slide down (OS-PFX), then Overdrive and Bit Depth (OS-IFX1), then the five tracker FX of CF1 and the six of CF2 and Channel pan, and the five of CF3 (OS-COREFX)
+inline constexpr unsigned kPickerCount = 63;  // entries of the FX picker: the first 34, then Swing and Gate Length (OS-CFGWIRE), then Chord, Arp, Tune, Slide up, Slide down (OS-PFX), then Overdrive and Bit Depth (OS-IFX1), then the five tracker FX of CF1 and the six of CF2 and Channel pan, and the five of CF3 (OS-COREFX), then w, y and z (OS-CEWTENV W6b)
 // OS-COREFX: the tracker FX, ADR 0004 amendment 2 (new Community OS behaviour; the OG ids end at 42 and 43..45 are the importer's core FX that the editor does not offer yet). Ids 46..50 in the order of
 // seq/fx.h: Arpeggio, Volume slide, Fine volume slide, Fine porta up, Fine porta down. Their rows are a table of their own so that kRows holds exactly the ids of the OG file format, row for row.
 inline constexpr unsigned kCoreFirst = 46;
@@ -50,7 +50,7 @@ inline constexpr Row kRows[kTypeCount] = {
     executes(0, 0, 0),       //  1 Off
     executes(0, 100, 0),     //  2 Micro-move
     executes(0, 53, 1),      //  3 Roll
-    executes(0, 100, 0),     //  4 Chance
+    executes(0, 174, 0),     //  4 Chance (OS-CECHANCE C2: 0..100 a probability, 101..174 the conditions of ADR 0004 amendment 4, kChanceMax below)
     executes(0, 100, 0),     //  5 Random Note
     executes(0, 47, 0),      //  6 Random Instrument
     executes(0, 100, 0),     //  7 Random Volume
@@ -102,6 +102,7 @@ inline constexpr std::uint8_t kPickerOrder[kPickerCount] = {
     51, 52, 53, 54, 55, 56,  // Pan slide, Vibrato waveform, Tremolo waveform, Glissando, Retrigger, Tremor: appended (OS-COREFX CF2)
     57,                      // Channel pan: appended (OS-COREFX)
     58, 59, 60, 61, 62,      // Channel volume, Channel volume slide, Global volume, Global volume slide, Panbrello: appended (OS-COREFX CF3)
+    96, 97, 98,              // w (amp envelope), y (cutoff envelope), z (granular length): appended (OS-CEWTENV W6b)
 };
 
 inline constexpr Row kCoreRows[kCoreCount] = {
@@ -124,16 +125,38 @@ inline constexpr Row kCoreRows[kCoreCount] = {
     executes(0, 255, 0),     // 62 Panbrello        (xy: x speed, y depth; a zero nibble keeps the track's last)
 };
 
+// OS-CEWTENV W6a: the tracker-ce step FX w (43) and y (44), stored as the ids 96 and 97 (ADR 0004 amendment 3; seq/fx.h kAmpEnvFx, kFilterEnvFx). Executable, two nibbles x y
+// (0..255), start 0; in the picker since W6b. OS-CEWTENV W6b adds z (98, the grain length, 0..100). A table of their own like the core rows.
+inline constexpr unsigned kCeFirst = 96;
+inline constexpr unsigned kCeCount = 3;
+inline constexpr Row kCeRows[kCeCount] = {
+    executes(0, 255, 0),     // 96 w: amp envelope attack x and decay y, or the amp WT slot's duration scale x and warp offset y
+    executes(0, 255, 0),     // 97 y: cutoff envelope attack x and decay y
+    executes(0, 100, 50),    // 98 z: the granular grain length (F11: 0..50 is 44..4,410 samples, 50..100 is 4,410..44,100; 50 is 100 ms at 44.1 kHz)
+};
+
 // Random FX fill (P1c) excludes these two deliberately.
 inline constexpr std::uint8_t kTempoType = 15;
 inline constexpr std::uint8_t kBreakPatternType = 13;
 
+// OS-CECHANCE C2: Chance (type 4) holds 0..100 a probability and 101..174 the conditions (101 with last, 102 not last, 103..138 Play N / Skip M,
+// 139..174 Skip N / Play M; the same constants as seq/fx.h, which the model cannot include). The pads and Fill RANDOM stay in 0..100; the encoder
+// and Fill CONSTANT / FROM-TO reach 174.
+inline constexpr std::uint8_t kChanceType = 4;
+inline constexpr std::uint8_t kChanceProbMax = 100;
+inline constexpr std::uint8_t kChanceWithLast = 101;
+inline constexpr std::uint8_t kChanceNotLast = 102;
+inline constexpr std::uint8_t kChanceCycleFirst = 103;
+inline constexpr std::uint8_t kChanceCycleStep = 6;
+inline constexpr std::uint8_t kChanceMax = 174;
+
 constexpr bool is_core(std::uint8_t type) noexcept { return type >= kCoreFirst && type < kCoreFirst + kCoreCount; }
-constexpr bool is_known(std::uint8_t type) noexcept { return type < kTypeCount || is_core(type); }
+constexpr bool is_ce(std::uint8_t type) noexcept { return type >= kCeFirst && type < kCeFirst + kCeCount; }
+constexpr bool is_known(std::uint8_t type) noexcept { return type < kTypeCount || is_core(type) || is_ce(type); }
 
 // Type 0 (None) counts as executable: a valid, do-nothing slot.
 constexpr bool is_executable(std::uint8_t type) noexcept {
-  if (is_core(type)) {
+  if (is_core(type) || is_ce(type)) {
     return true;
   }
   if (type >= kTypeCount) {
@@ -144,7 +167,16 @@ constexpr bool is_executable(std::uint8_t type) noexcept {
 }
 
 // The table row of a type; an unknown type is row 0 (None: 0-100, default 0).
-constexpr const Row& row(std::uint8_t type) noexcept { return is_core(type) ? kCoreRows[type - kCoreFirst] : kRows[type < kTypeCount ? type : 0u]; }
+constexpr const Row& row(std::uint8_t type) noexcept {
+  return is_core(type) ? kCoreRows[type - kCoreFirst] : (is_ce(type) ? kCeRows[type - kCeFirst] : kRows[type < kTypeCount ? type : 0u]);
+}
+
+// The upper bound of a random draw for a type (OS-CECHANCE C2): Chance draws in 0..100 only (a condition is entered by the encoder or a Fill
+// CONSTANT / FROM-TO, never drawn), every other type in its whole range.
+constexpr std::uint8_t random_hi(std::uint8_t type) noexcept {
+  const Row& r = row(type);
+  return type == kChanceType && r.hi > kChanceProbMax ? kChanceProbMax : r.hi;
+}
 
 // Point-of-use sanitiser: a non-executable type becomes (0, 0) for this use only; an executable type gets its value clamped to
 // [min, max]; type 0 always carries value 0. Idempotent.

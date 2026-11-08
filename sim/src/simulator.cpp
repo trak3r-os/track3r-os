@@ -6,6 +6,7 @@
 #include <o3os/app/sample_bank.h>
 #include <o3os/app/save_service.h>
 #include <o3os/audio/voices.h>
+#include <o3os/audio/wt_contour.h>  // OS-CEWTENV W3a: the sim binds its own contour bank
 #include <o3os/core/input_event.h>
 #include <o3os/midi/cc_in.h>
 #include <o3os/model/editor.h>
@@ -19,6 +20,8 @@
 #include <o3os/sim/sim_apps.h>
 #include <o3os/sim/sim_audio.h>
 #include <o3os/sim/sim_project.h>
+#include <o3os/module/ptfx_catalog.h>
+#include "sim_ptfx.h"
 #include <o3os/ui/plot/peak_cache.h>
 #include <o3os/ui/plot/ram_g_map.h>
 
@@ -76,7 +79,20 @@ struct SimCard {
   static constexpr std::uint32_t kPeakSamples = static_cast<std::uint32_t>((ui::plot::PeakCache::elements_required(std::uint32_t{1} << 22, 1) + 3u) & ~std::size_t{3});  // app_main.cpp kPeakFrames / kPeakSamples
   static constexpr std::uint32_t kBankMemSamples = static_cast<std::uint32_t>((sizeof(app::SampleBankMem) + 7u) & ~std::size_t{7}) / 2u;  // (the sim holds the bank's tables apart; the unit carves them out of the arena)
   static constexpr std::uint32_t kSampleCount = platform::mk66::mem::kSampleArenaSize / static_cast<std::uint32_t>(sizeof(std::int16_t)) - kPeakSamples - kBankMemSamples - kPreviewSamples;
-  explicit SimCard(model::ModelArena& arena) { bank.init(*voices, arena, *bank_mem, samples.get(), kSampleCount); }  // (a bank that was never init()ed cannot be destroyed: close_wav() reads its memory)
+  explicit SimCard(model::ModelArena& arena) {
+    audio::wt_bind(wt_bank);  // OS-CEWTENV W3a: the sim's contour bank (the unit's is the SDRAM wt_contour region, app_main.cpp); the loaders make the contours a descriptor names
+    audio::wt_bake_bind(wt_bake_bank);  // OS-CEWTENV W3c: and bake the warps of a WT slot (the unit's pool is the reverb region's spare tail)
+    audio::wt_user_bind(wt_user->bank);  // OS-CEWTENV W8: and the user contours of /Envelopes (the unit's are the reverb tail's WtUserMem)
+    bank.init(*voices, arena, *bank_mem, samples.get(), kSampleCount);
+    bank.ptfx_page()->cat = &ptfx_cat;  // OS-CEPTFX S4a: the PLUGINS page lists this card's Effects/ (the unit shares modsys().ptfx_cat)
+  }  // (a bank that was never init()ed cannot be destroyed: close_wav() reads its memory)
+  ~SimCard() {  // OS-CEWTENV: the contour bank and the bake pool are members: a later Simulator (with no card) must not find them bound
+    audio::wt_user_unbind(wt_user->bank);
+    audio::wt_bake_unbind(wt_bake_bank);
+    audio::wt_unbind(wt_bank);
+  }
+  SimCard(const SimCard&) = delete;
+  SimCard& operator=(const SimCard&) = delete;
   platform::host::ScratchDir scratch{"simcard"};
   std::unique_ptr<platform::host::HostCard> card;  // a DirCard over `scratch`, or a FatFsStorage over an image (OS-QANET D1: `fat` says which)
   std::unique_ptr<platform::host::SlowCard> slow;  // OS-QANET D2: what the app, the loader, the apps and the screenshot see: `card` with the slow-card model on top (a pass-through while it is off). The scenario's own reads (`assert file`, card_storage()) and the slot's switch use `card`: they are not the unit's calls and cost no time
@@ -85,7 +101,13 @@ struct SimCard {
   std::unique_ptr<app::SampleBankMem> bank_mem = std::make_unique<app::SampleBankMem>();
   std::unique_ptr<std::int16_t[]> samples = std::make_unique<std::int16_t[]>(kSampleCount);  // (zero, like the SDRAM at boot; new[] aligns it to 16)
   std::unique_ptr<std::int16_t[]> preview = std::make_unique<std::int16_t[]>(kPreviewSamples);
+  audio::WtBank wt_bank{};  // OS-CEWTENV W3a: the simulator's wavetable contour bank (64 KiB, heap here; the unit's is in SDRAM), bound in the constructor
+  audio::WtBakeBank wt_bake_bank{};  // OS-CEWTENV W3c: the baked warps (33 KB), bound beside it
+  std::unique_ptr<app::WtUserMem> wt_user = std::make_unique<app::WtUserMem>();  // OS-CEWTENV W8: the user contours and their scratch (value-initialised: zero), bound in the constructor
   app::SampleBank bank;
+  std::unique_ptr<module::PtfxEntry[]> ptfx_entries = std::make_unique<module::PtfxEntry[]>(module::kPtfxCatalogMax);  // OS-CEPTFX S4a: the plugin catalogue (the unit's is in the `ptfx` SDRAM region)
+  module::PtfxCatalog ptfx_cat{ptfx_entries.get()};
+  SimPtfxRun ptfx_run;  // OS-CEPTFX S4b: what F1 APPLY on the PLUGINS page calls (the Mono Tool's host stand-in)
   std::unique_ptr<SimProject> project;  // (last: it uses all of the above)
 };
 
@@ -138,10 +160,20 @@ struct SimShot {
   alignas(4) std::uint8_t buffer[platform::mk66::console::ScreenshotService::kBufferBytes] = {};
 };
 
+namespace {
+// OS-CEWTENV W5: the granular length modulation's storage in the sim (on the unit it is O3OS_SDRAM_NOINIT in the SDRAM slack window, app_main.cpp): one FilterMod per sample slot and one
+// sixth ModGen per voice, bound once a Simulator is built.
+audio::FilterMod g_sim_grlen_mods[audio::kDescSlots];
+audio::ModGen g_sim_grlen_gens[audio::kMaxVoices];
+audio::FxEnvMem g_sim_fxe_mem;  // OS-CEWTENV W6a: the step FX w and y's storage
+}  // namespace
+
 Simulator::Simulator(std::size_t app_dl_words, std::size_t sink_words)
     : display_(raster_, sink_words), app_(input_, clock_, display_, app_dl_words) {
   assets_loaded_ = load_assets(display_) == hal::UploadResult::Ok;  // the platform's one job for the faces, tiles and icons
   app_.attach_play_position(&play_);  // stopped until a scenario's `playhead`
+  audio::grlen_bind(g_sim_grlen_mods, g_sim_grlen_gens);  // OS-CEWTENV W5
+  audio::fxe_bind(&g_sim_fxe_mem);                        // OS-CEWTENV W6a
 }
 
 Simulator::~Simulator() = default;
@@ -159,7 +191,7 @@ hal::storage::shot::Refusal SimShot::Host::card_refusal() noexcept {
 
 bool Simulator::screenshot_running() const { return shot_ != nullptr && shot_->service.active(); }
 
-void Simulator::open_document(bool with_bindings, bool with_new, unsigned tracks, bool sound, bool tb303, bool inserts) {
+void Simulator::open_document(bool with_bindings, bool with_new, unsigned tracks, bool sound, bool tb303, bool inserts, bool events) {
   app_.attach_document(nullptr);
   app_.attach_project_sink(nullptr);
   project_sink_.reset();
@@ -179,6 +211,7 @@ void Simulator::open_document(bool with_bindings, bool with_new, unsigned tracks
     app_.attach_saves(nullptr);
     app_.attach_storage(nullptr);
     app_.attach_samples(nullptr);
+    app_.attach_ptfx_runner(nullptr, nullptr);
     saves_.reset();
     shot_.reset();
     card_.reset();
@@ -186,7 +219,9 @@ void Simulator::open_document(bool with_bindings, bool with_new, unsigned tracks
   app_.attach_param_ring(nullptr);
   document_ = std::make_unique<SimDocument>();
   std::memset(&document_->arena, 0, sizeof document_->arena);
-  if (inserts) {
+  if (events) {
+    fill_events_project(document_->arena.project);
+  } else if (inserts) {
     fill_insert_project(document_->arena.project);
   } else if (tb303) {
     fill_tb303_project(document_->arena.project);
@@ -284,6 +319,9 @@ bool Simulator::open_card(const std::string& fixture, std::string& error) {
   }
   rig->slow = std::make_unique<platform::host::SlowCard>(*rig->card, card_timing_, static_cast<platform::host::CardClock&>(*this));
   rig->project = std::make_unique<SimProject>(document_->arena, *document_->editor, app_, *rig->slow, *rig->voices, rig->bank, rig->samples.get(), SimCard::kSampleCount);
+  rig->project->attach_envelopes(rig->wt_user.get());  // OS-CEWTENV W8: the card's /Envelopes contours, loaded at the mount and on every project load
+  rig->project->reload_envelopes();
+  rig->project->attach_importer();  // OS-FLASHDIET I2: the importer module the File > IMPORT goes through (the starter zip's tracker.tmod, as a native entry)
   card_ = std::move(rig);
   app_.attach_project_sink(nullptr);  // (the sink of `document new` has no card: this one does NEW as well)
   project_sink_.reset();
@@ -293,6 +331,9 @@ bool Simulator::open_card(const std::string& fixture, std::string& error) {
   saves_->attach(*card_->slow, *card_->slow);
   app_.attach_storage(card_->slow.get());
   app_.attach_samples(&card_->bank);
+  card_->ptfx_run.app = &app_;
+  card_->ptfx_run.page = card_->bank.ptfx_page();
+  app_.attach_ptfx_runner(&SimPtfxRun::run, &card_->ptfx_run);
   app_.attach_project_sink(card_->project.get());
   app_.attach_saves(saves_.get());
   step();
@@ -320,6 +361,7 @@ bool Simulator::card_insert(std::string& error) {
   app_.card_changed(app::CardEvent::Reading);
   wait_ms(2 * 16);  // kCardMountDelayMs: the announcement is drawn before the mount
   app_.card_changed(card_->card->mount() == hal::storage::Status::Ok ? app::CardEvent::Ready : app::CardEvent::NotReadable);
+  card_->project->reload_envelopes();  // OS-CEWTENV W8: the new card's contours (a no-op when it did not mount)
   step();
   return true;
 }
@@ -358,6 +400,14 @@ bool Simulator::firmware_on(std::string& error) {
   app_.attach_firmware(&firmware_);
   step();
   return true;
+}
+
+bool Simulator::card_ptfx(std::string& error) {
+  if (card_ == nullptr || card_->fat != nullptr) {
+    error = card_ == nullptr ? "ptfx: there is no card in the slot" : "ptfx: the demo plugins are written to a card folder, not a FAT image";
+    return false;
+  }
+  return write_demo_ptfx(card_->scratch.path(), error);
 }
 
 bool Simulator::card_copy(const std::string& from, const std::string& to, std::string& error) {

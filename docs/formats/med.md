@@ -4,6 +4,9 @@ Status: accepted 2026-10-11 (maintainer-delegated; decisions in §8); slices M0 
 Tags: **Fact** = read in a cited source `[S#]` (section 9) · *estimate* = arithmetic shown, unmeasured · *inference* = my reasoning, not sourced. Every MMD integer is big-endian; `ptr` = u32 byte offset from the start of the file, 0 = absent; offsets are decimal. WebFetch summaries are model-condensed, so the slice that implements a field re-reads the primary source and pins it with a test. Third-party code is not reproduced here.
 
 ## 1. Scope and versions
+
+**Where the reader runs (OS-FLASHDIET I3):** the firmware image does not link this reader any more; it runs in the importer module `modules/importers/tracker.tmod` on the card (built from the `formats_tracker` library's sources), and the image keeps only the probe side in `formats` (`src/tracker_sniff.cpp`: the MMD check is in `app/module_import.cpp`, the `drop_group_name` table in `tracker_sniff.cpp`).
+
 **In:** read MMD0–MMD3 files (OctaMED 4 to SoundStudio); map MED commands onto OG FX, new core FX or engine FX (section 4); play them faithfully in the planned Amiga/Paula mode (section 5); optionally write MMD files (section 6). **The OctaMED keyboard layer** is an input-layer feature, not a file feature: it stays in `octamed-keyboard-shortcuts.md`. What this spec gives it: MED instrument numbers 1..63 keep their numbers (section 3.3), MED's decimal-or-hex volume convention (`FLAG_VOLHEX`) and the command names of section 4 for the editor's command entry. **Out:** pre-MMD MED2/3/4 files, `MMDC` (run-length-packed MMD0 pattern cells, libxmp only `[S5]`), OctaMED 8 (2024) files (format not verified), ARexx, notation, MIDI dump data, SoundStudio plugins.
 
 | Id (hex) | Written by (source) | Adds over the previous | Limits |

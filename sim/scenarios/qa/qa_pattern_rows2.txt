@@ -1,0 +1,360 @@
+# OS-QA: twelve rows of docs/qa/catalogue/pattern.md proven with asserts only (no `snap`, so this scenario needs no golden), the way qa_sample_load_rows.txt does it: QA-PAT-216, 219, 220, 226, 227,
+# 228, 229, 246, 247, 311, 312 and 320. Every block opens a fresh demo document (`document`), but the app keeps its view across it (screen, mode, cursor, the pattern clipboard), so each block first puts WATCH and the cursor back at the start; the clipboard is untouched until the second block, the first to copy. The demo's pattern 1 (app::fill_demo) is 12 tracks of 64 steps and the asserts read what it holds: track 0 (KICK)
+# note 25 on instrument 1 every 4th row from row 0, track 1 (SNARE) note 27 on instrument 2 on rows 4, 12 ..., track 3 (ACID) a note on every row on instrument 4 (13, 13, 25, 16 repeating) with an FX1 on
+# every 4th row from row 3, track 4 (BASS) note 13 on instrument 5 on row 0, track 10 (LINE L) volume 64 and an FX but no note on row 0. The state line's keys used below: mode= (0 STEP, 3 WATCH), pattern=, track=,
+# row=, col=, overlay=, msg= (the last strip text, spaces as _); the model's pat.<p>.<track>.<row>.<field> (both 0-based) and digest.
+
+# QA-PAT-219 (OS-ROWWRAP): Up on the first row goes to the last row of the pattern (the demo's own length is 64 steps), the column and the track stay;
+# QA-PAT-220: Down on the last row goes to the first. Browse (WATCH), stopped, and then Edit (STEP).
+document
+action view.mode 3
+action cursor.jump_fraction 0
+action cursor.home
+action select.clear
+assert state screen=PATTERN mode=3 pattern=1 track=0 row=0 col=NOTE
+assert state screen=PATTERN mode=3 pattern=1 track=0 row=0 col=NOTE playing=0
+tap up
+assert state row=63 track=0 col=NOTE
+tap down
+assert state row=0
+tap down
+assert state row=1
+tap up
+assert state row=0
+tap rec
+assert state mode=0 playing=0
+tap up
+assert state row=63 track=0 col=NOTE
+tap down
+assert state row=0
+tap vol
+assert state col=VOL
+tap up
+assert state row=63 track=0 col=VOL
+tap down
+assert state row=0 track=0 col=VOL
+
+# QA-PAT-226 / 227 / 228 (OS-PATCOPY): the clipboard on the demo document. Demo facts used below (app::fill_demo): track 0 (KICK) has note 25 on instrument 1 at rows 0, 4, 8 ...; track 1 (SNARE) note 27 on
+# instrument 2 at rows 4, 12 ...; track 3 (ACID) a note on every row, instrument 4, rows 10, 11, 14, 15 holding 25, 16, 25, 16; track 10 (LINE L) has volume 64 and FX but no note on row 0.
+document
+action view.mode 3
+action cursor.jump_fraction 0
+action cursor.home
+action select.clear
+assert state screen=PATTERN mode=3 pattern=1 track=0 row=0 col=NOTE
+mark model d0
+# 227: nothing copied yet, Shift + Copy in Edit says so and writes nothing.
+tap rec
+assert state mode=0
+press shift
+tap copy
+release shift
+assert state msg=NOTHING_TO_PASTE
+assert model digest=@d0
+tap rec
+assert state mode=3
+# 226: Copy with no block takes the step under the cursor (Browse): the strip counts it, nothing changes.
+tap copy
+assert state msg=COPIED_1_STEP
+assert model digest=@d0
+# A block of whole steps: 5 rows (Shift + Down x4) over two tracks (Shift + Right x5: Note to Fx2 of track 0, then track 1). Copy counts its steps; no document change and no undo unit.
+press shift
+tap down 4
+tap right 5
+release shift
+assert state row=4 track=1
+tap copy
+assert state msg=COPIED_10_STEPS
+assert model digest=@d0
+tap f8
+assert state msg=NOTHING_TO_UNDO_HERE
+# 227: in Browse the paste does nothing.
+press shift
+tap copy
+release shift
+assert model digest=@d0
+# Edit: the clip lands with its top-left step on the cursor (track 3, row 10), whole steps over what was there.
+tap rec
+assert state mode=0
+action select.clear
+tap down 6
+tap right 10
+assert state row=10 track=3
+press shift
+tap copy
+release shift
+assert model pat.1.3.10.note=25
+assert model pat.1.3.10.instr=1
+assert model pat.1.3.11.note=0
+assert model pat.1.3.14.note=25
+assert model pat.1.3.14.instr=1
+assert model pat.1.4.14.note=27
+assert model pat.1.4.14.instr=2
+assert model pat.1.3.15.note=16
+assert state row=10 track=3
+# One Undo takes the whole paste back.
+tap f8
+assert model digest=@d0
+# 228: near the last step and the last track. Clip: 5 rows x 2 tracks. At track 10, row 62 only the clip's rows 0 and 1 fit and nothing wraps to the top (track 10's row 0 keeps its volume 64).
+action select.clear
+tap down 52
+tap right 35
+assert state row=62 track=10
+press shift
+tap copy
+release shift
+assert model pat.1.10.62.note=25
+assert model pat.1.10.62.instr=1
+assert model pat.1.10.62.vol=127
+assert model pat.1.10.63.note=0
+assert model pat.1.11.62.note=0
+assert model pat.1.10.0.vol=64
+# At the last track (11) the clip's second track is dropped, the first lands.
+tap right 5
+assert state row=62 track=11
+press shift
+tap copy
+release shift
+assert model pat.1.11.62.note=25
+assert model pat.1.11.62.instr=1
+assert model pat.1.10.0.vol=64
+# 226: a second Copy replaces the clip. Track 3, row 63 (ACID: note 16, instrument 4) is copied and pasted on track 2, row 59 (empty); the step arrives, not the earlier block.
+tap left 40
+tap down
+assert state row=63 track=3
+tap copy
+assert state msg=COPIED_1_STEP
+tap left 5
+tap up 4
+assert state row=59 track=2
+press shift
+tap copy
+release shift
+assert model pat.1.2.59.note=16
+assert model pat.1.2.59.instr=4
+
+# QA-PAT-229 (OS-DELPULL): Insert then Shift + Delete is the identity. Demo track 0 has notes (25) on rows 4 and 8; the cursor is on row 3 and goes down to row 4 by the JUMP (1) with the pull (OS-DELJUMP).
+document
+action view.mode 3
+action cursor.jump_fraction 0
+action cursor.home
+action select.clear
+assert state screen=PATTERN mode=3 pattern=1 track=0 row=0 col=NOTE
+tap rec
+tap down 3
+assert state row=3 track=0
+mark model i0
+tap insert
+assert model pat.1.0.3.note=0
+assert model pat.1.0.4.note=0
+assert model pat.1.0.5.note=25
+assert model pat.1.0.9.note=25
+press shift
+tap delete
+release shift
+assert model digest=@i0
+assert state row=4 track=0
+# two undo levels: the pull, then the insert; a third finds nothing
+tap f8
+assert model pat.1.0.5.note=25
+tap f8
+assert model digest=@i0
+tap f8
+assert state msg=NOTHING_TO_UNDO_HERE
+
+# QA-PAT-312 (OS-QAFIX-12): INVERT says what it needs (no key since OS-PTOOLS2 S3: F6 is REPEAT; the scenario names the action); with a block the steps are reversed track by track. Demo track 3 (ACID) has notes 13, 13, 25, 16 on rows 0..3, instrument 4, an FX1 on row 3 (128:13);
+# track 4 (BASS) has note 13 on instrument 5 at row 0 and nothing on rows 1..3.
+document
+action view.mode 3
+action cursor.jump_fraction 0
+action cursor.home
+action select.clear
+assert state screen=PATTERN mode=3 pattern=1 track=0 row=0 col=NOTE
+mark model v0
+action pattern.invert
+assert state msg=TURN_EDIT_ON
+assert model digest=@v0
+tap rec
+action pattern.invert
+assert state msg=SELECT_A_BLOCK_TO_INVERT
+assert model digest=@v0
+tap right 15
+assert state track=3 col=NOTE row=0
+press shift
+tap down 3
+tap right 5
+release shift
+action pattern.invert
+assert model pat.1.3.0.note=16
+assert model pat.1.3.1.note=25
+assert model pat.1.3.2.note=13
+assert model pat.1.3.3.note=13
+assert model pat.1.3.0.instr=4
+assert model pat.1.3.0.fx1=128:13
+assert model pat.1.3.3.fx1=0:0
+assert model pat.1.4.0.note=0
+assert model pat.1.4.3.note=13
+assert model pat.1.4.3.instr=5
+action pattern.invert
+assert model digest=@v0
+
+# QA-PAT-320 (OS-AUDIT-56): Delete on a column block. Demo track 3 (ACID): rows 3..5 hold FX1 128:13 on row 3, FX2 3:4 on row 5, notes 16, 13, 13 (rows 3 and 5), volume 96 on row 3; row 7 holds FX1 128:29.
+document
+action view.mode 3
+action cursor.jump_fraction 0
+action cursor.home
+action select.clear
+assert state screen=PATTERN mode=3 pattern=1 track=0 row=0 col=NOTE
+tap rec
+tap right 15
+tap down 3
+tap fx
+assert state row=3 track=3 col=FX1
+mark model c0
+assert model pat.1.3.3.fx1=128:13
+assert model pat.1.3.5.fx2=3:4
+assert model pat.1.3.7.fx1=128:29
+press shift
+tap down 2
+tap right
+release shift
+tap delete
+assert model pat.1.3.3.fx1=0:0
+assert model pat.1.3.5.fx2=0:0
+assert model pat.1.3.3.note=16
+assert model pat.1.3.3.vol=96
+assert model pat.1.3.5.note=13
+assert model pat.1.3.7.fx1=128:29
+tap f8
+assert model digest=@c0
+
+# QA-PAT-216 (OS-DELREPEAT): a held Delete clears step after step. Demo track 3 (ACID) has a note on every row (13, 13, 25, 16 ...); the cursor goes down by JUMP (1) at each clear.
+document
+action view.mode 3
+action cursor.jump_fraction 0
+action cursor.home
+action select.clear
+assert state screen=PATTERN mode=3 pattern=1 track=0 row=0 col=NOTE
+tap rec
+tap right 15
+assert state track=3 row=0
+press delete
+wait 450
+release delete
+assert state row=2
+assert model pat.1.3.0.note=0
+assert model pat.1.3.1.note=0
+assert model pat.1.3.2.note=25
+# letting go stops it
+wait 1000
+assert state row=2
+assert model pat.1.3.2.note=25
+# the schedule speeds up: the press and the repeats at 400, 700 and 900 ms make four steps in 1000 ms (rows 2..5), the next one is at 1050
+press delete
+wait 1000
+release delete
+assert state row=6
+assert model pat.1.3.2.note=0
+assert model pat.1.3.5.note=0
+assert model pat.1.3.6.note=25
+# a single tap clears one step
+tap delete
+assert state row=7
+assert model pat.1.3.6.note=0
+assert model pat.1.3.7.note=16
+
+# QA-PAT-246 (OS-UNDOGRP): F8 undoes the area of its own screen. A Song slot is added, then two notes are written on Pattern; F8 on Pattern takes the notes back, says there is nothing more, and the slot stays; F8 on Song takes the slot back.
+document
+action view.mode 3
+action cursor.jump_fraction 0
+action cursor.home
+action select.clear
+assert state screen=PATTERN mode=3 pattern=1 track=0 row=0 col=NOTE
+tap song
+assert model order.len=1
+tap f3
+assert model order.len=2
+tap pattern
+tap rec
+pad 14
+pad 14
+assert model pat.1.0.0.note=63
+assert model pat.1.0.1.note=63
+tap f8
+assert model pat.1.0.1.note=0
+tap f8
+assert model pat.1.0.0.note=25
+tap f8
+assert state msg=NOTHING_TO_UNDO_HERE
+assert model order.len=2
+tap song
+tap f8
+assert model order.len=1
+tap pattern
+
+# QA-PAT-247 (OS-UNDOGRP): Shift + Insert on Song makes a new pattern (2); a note is written on it on Pattern; F8 on Song takes the slot and the pattern away and the strip says the Pattern history is cleared.
+document
+action view.mode 3
+action cursor.jump_fraction 0
+action cursor.home
+action select.clear
+assert state screen=PATTERN mode=3 pattern=1 track=0 row=0 col=NOTE
+tap song
+press shift
+tap insert
+release shift
+assert model order.len=2
+tap pattern
+press f1
+wait 450
+pad 1
+assert state pattern=2
+release f1
+wait 10
+tap rec
+pad 14
+assert model pat.2.0.0.note=63
+tap song
+tap f8
+assert state msg=PATTERN_HISTORY_CLEARED
+assert model order.len=1
+tap pattern
+tap f8
+assert state msg=NOTHING_TO_UNDO_HERE
+
+# QA-PAT-311 (OS-QAFIX-6): in the PATTERN chooser (F1 held) Left and Right go to the previous and the next pattern the project holds. Two Shift + Insert on Song make patterns 2 and 3; the Pattern screen then shows pattern 3 (the Song cursor's slot).
+document
+action view.mode 3
+action cursor.jump_fraction 0
+action cursor.home
+action select.clear
+assert state screen=PATTERN mode=3 track=0 row=0 col=NOTE
+tap song
+press shift
+tap insert
+release shift
+press shift
+tap insert
+release shift
+assert model order.len=3
+tap pattern
+assert state pattern=3
+press f1
+wait 450
+assert state overlay=PATTERN_CHOOSER pattern=3
+tap right
+assert state pattern=3 msg=NO_NEXT_PATTERN
+tap left
+assert state pattern=2
+tap left
+assert state pattern=1
+tap left
+assert state pattern=1 msg=NO_PREVIOUS_PATTERN
+tap right
+assert state pattern=2
+# the encoder moves by one id, onto 4 which the project does not hold; Left then goes to the nearest pattern it holds below
+encoder 2
+assert state pattern=4
+tap left
+assert state pattern=3
+release f1

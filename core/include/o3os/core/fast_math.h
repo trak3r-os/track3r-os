@@ -15,5 +15,9 @@ namespace o3os::core {
 
 float exp2_fast(float x) noexcept;
 float log2_fast(float x) noexcept;
+// sin and cos (moved from audio/src/module_voices.cpp, OS-CEPTFX S2: the module host and the .ptfx host table share one copy). Argument reduced into [-pi, pi],
+// then a Taylor series: absolute error under 1e-6 for |x| < 1000 rad; NaN, infinity and |x| >= 1e4 give 0.
+float sin_fast(float x) noexcept;
+float cos_fast(float x) noexcept;
 
 }  // namespace o3os::core

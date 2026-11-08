@@ -43,8 +43,10 @@ export PATH="$PWD/.toolchains/arm-gnu-toolchain-15.3.rel1-x86_64-arm-none-eabi/b
 
 | Need | Command | Runs |
 |---|---|---|
+| Full run on a free machine | `O3OS_REMOTE_JOBS=16 tools/remote_ci.sh host mk66 qemu` | the job count of this run on the machine, over its turn's default; `O3OS_CI_JOBS` is not forwarded |
 | One test while you iterate | `O3OS_CI_TESTS=<regex> tools/remote_ci.sh host` | only the tests whose name matches (`ctest -R`), any label, no scope; the build is still incremental |
 | Your change, before review | `tools/remote_ci.sh --scope changed host` | the area labels your files map to plus `static`; the base is the merge-base with `dev` (`main` when there is no `dev`; `O3OS_CI_BASE_BRANCH` overrides); the tests labelled `slow` and `e2e` are left out |
+| What a scoped run leaves out | | host tests only: `e2e`, `slow` and `qanet` (unless the change is QANET's); target tests (`mk66`, `qemu`) always run whole, they take about a minute and hold the budgets; the `mk66` mode skips the tone and bench-archive images |
 | A change that is risky, or the end of a branch | `tools/remote_ci.sh host` | every test except `e2e`, the `slow` ones included |
 | End-to-end journeys of one item | `tools/remote_ci.sh e2e` | the label `e2e` without the `long` shards (the random user's 8 shards, 5 to 13 minutes each) |
 | The orchestrator's batch run and the image gate | `O3OS_CI_LONG=1 tools/remote_ci.sh e2e`, then `host`, `qemu`, `mk66` | everything |
@@ -61,6 +63,10 @@ export PATH="$PWD/.toolchains/arm-gnu-toolchain-15.3.rel1-x86_64-arm-none-eabi/b
 
 - The `clangd-lsp` plugin needs the `clangd` binary on the PATH when Claude Code starts. `.clangd` points it at the worktree's `build-os-host/compile_commands.json` (configure it first: `cmake -S . -B build-os-host`); the index goes to `build-os-host/.cache/clangd/`, built once per worktree at idle priority (a minute or two, about 1 GB of memory).
 - If every file shows `'atomic' file not found` or `no type named 'uint32_t'`, clang picked a GCC installation without its libstdc++ headers (clangd 18 takes the newest GCC directory). Install that version's `libstdc++-<n>-dev`, or pin the host compiler's version in the user config `~/.config/clangd/config.yaml`: `CompileFlags: {Add: [--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/<n>]}`. `clangd --check=<file>` ends with `0 errors` when it is right.
+
+## The build's compression: `tools/deflate_pack.py` (OS-FLASHDIET A2)
+
+The image stores its flash assets (the built-in modules, the glyph faces, the boot logo, the help text) as raw-deflate streams with a 4 KiB window, decoded on the device by `core::Inflater`; the streams are made at build time by our own encoder, `tools/deflate_pack.py`, not by Python's zlib: zlib's deflate bytes change with the zlib library a machine links (the same input compressed differently by 1.2.11 and 1.3), and the reproducible-image gate must not depend on the build machine's zlib, so the encoder is written from scratch (greedy-lazy LZ77 over a 4 KiB window, dynamic-Huffman blocks with lengths limited to 15, a stored block when smaller, standard library only) and is deterministic across machines, Python versions and runs, at about 100 % of zlib level 9 on those assets (the target is within 4 %). `zlib` appears in the tool only in `--self-test` and `--check-fixture`, which round-trip its streams through `zlib.decompress(data, -12)`, check no distance exceeds 4,096, that two runs are byte-identical and that the length-limited code lengths stay complete, and pin the built-in samples to an absolute byte budget (the zlib level 9 ratio is only reported, so the gate does not depend on the build machine's zlib); ctest `deflate_pack_selftest` runs the self-test with `--check-fixture tests/core_inflate_test.cpp`, which re-makes the fixture that file carries and compares it byte for byte with its committed `kPackZ`, and A1's `tests/core_inflate_test.cpp` carries that fixture, which the Inflater decodes byte for byte.
 
 ## The end-to-end battery: `tools/ci.sh e2e` (OS-E2E, `docs/specs/OS-E2E.md`)
 

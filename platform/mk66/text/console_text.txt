@@ -1,0 +1,157 @@
+# OS-FLASHDIET P5/P8: the console's long texts, one per line: <key><TAB><text as a C string literal body>. tools/text_pack.py packs them into one deflate blob (text.h `text(txt::<key>)`).
+# The text is exactly what the C++ source had as a literal: the served bytes are the old ones (tests/mk66_text_test.cpp). The `help_<command>` keys are the one-line helps of command_table.h.
+help_help	list the commands
+help_version	build identity and USB identity
+help_stage	boot/run stage, uptime, why the chip reset
+help_cpu	cpu [reset|perf off]: audio load: cycles per stage, underruns, jitter
+help_mem	memory map, SRAM budgets, free SRAM
+help_crash	the crash record the previous run left
+help_usb	usb [audio|mode|profile|map ..]: counters, AUDIO mode, stem map
+help_log	log [count]: the last lines boot code and drivers wrote
+help_input	input [stats]: live input events (any key stops)
+help_mix	audio meters (dBFS) and limiter gain reduction; MAIN is pre-limiter
+help_mon	mon [off|on|0..100]: line-in monitor level (0 = off, on = 70)
+help_peek	peek <hexaddr> [1..16]: read 32-bit words (clocked modules only)
+help_poke	poke <hexaddr> <hexvalue>: write one word, I2S0 registers only
+help_audio	audio start: retry the audio bring-up after a boot failure
+help_rot	rot <0..7>: set REG_ROTATE now (display orientation, not saved)
+help_sd	sd [mount]: the SD card (slot, mount, identity, speed, counters)
+help_ls	ls [path]: list a directory of the card (read only)
+help_load	load [folder]: read an OG project folder (default Workspace)
+help_inst	inst <1..64>: what instrument n plays (start, len, loop, root, vol)
+help_mod	mod [load|bind|note|off|set|gov|notice ..]: SD and built-in modules
+help_reset	mute the outputs, then restart the unit
+help_fw	fw [put|rm|arm|update ..]: firmware files on the SD card (OS-006c)
+help_radio	radio [retry]: FM radio state, last failure, registers, pins
+help_voices	sampler voices: in use, peak, steals, advanced spans (OS-VOX)
+help_key	key <button> [tap|down|up|hold <ms>]: inject a button press
+help_pad	pad <0..47> [tap|down|up] [vel]: inject a pad press
+help_enc	enc <n> | accel [off|t1 t2 [ms]]: n detents; list acceleration
+help_state	app state as one key=value line (screen, cursor, play, ...)
+help_shot	shot [565|8888 [w]] [pclk0]: the screen as framed base64 (o3console)
+help_leds	leds: pad LED levels as the driver holds them, one line
+help_bench	bench <kernel|all|disk reset> [blocks]: cycles/block (bench image)
+help_cache	cache [on|off|inv|check]: the code cache (LMEM): state, switch, check
+help_ogexp	ogexp [status|cancel]: the project as an OG folder in Export/<name> OG
+help_power	power [press|release|pin|off [dry]]: the Power switch and the shutdown
+help_disk	disk [share [ro]|eject]: give the card to the computer, take it back
+help_guard	guard [n <1..255>]: the main-loop guard's window (OS-MAINGUARD)
+help_ins	ins [list|bind t s mod|unbind t s|bypass t s on|off] (bind loads mod)
+help_status	status [blink|off]: the status LED heartbeat (not saved)
+help_trans	trans: transport refusals and playing flags [OS-BUG-PLAYSTOP]
+help_mtc	mtc [at <order> <step>]: time code state; the map time of a step
+help_ptfx	ptfx quarantine|list|info <n>|run <n>: .ptfx plugins
+help_scratch	scratch [<ms> <ahead> <gate> <aa 0|1>]: platter tuning
+cpu_1	cpu: peaks and fault counters reset\n
+cpu_2	cpu: module perf off (cpu reset starts it again)\n
+cpu_3	usage: cpu [reset | perf off]\n
+guard_1	usage: guard [n <1..255>]\n
+usb_audio_view_1	usb audio: the driver is not running\n
+usb_request_1	a mode change is already in progress\n
+usb_request_2	refused: the USB DISK mode ends with a restart\n
+usb_request_3	refused: profile not supported yet (4s needs post-pan stems) or driver down\n
+usb_request_4	usb: the return is not presented at 10 or more channels (the setting stays On; 8 channels or fewer bring it back)\n
+usb_request_5	usb: DISK mode is held by the boot disk until a restart, nothing changed: 
+usb_request_6	usb: already presenting AUDIO with that layout: 
+usb_request_7	usb: STANDARD, layout set (used by the next AUDIO attach): 
+usb_request_8	); this terminal drops, reconnect in about a second\n
+usb_map_command_1	usage: usb map [reset | <slot> <sources>]   slot 1..profile channels, sources like T1+T9, ML, MR, SA, SB or -\n
+usb_map_command_2	usage: usb map [reset | <slot> <sources>]\n
+usb_ep0_view_1	nothing recorded (no DISK attach since the boot)\n
+usb_ep0_view_2	the first events of the last DISK attach\n
+usb_subcommand_1	usage: usb mode [standard|audio]\n
+usb_subcommand_2	usage: usb profile <2|4|6|8|10|11> [out|duplex]   (10 = T1..T8 + master, 8 = T1..T6 + master, 6 = T1..T4, 4 = T1, T2 + master; out = capture only: `profile 10 out` is \"10 OUT\",\n       duplex adds the stereo return: `profile 8 duplex` is \"8 OUT / 2 IN\", the layout that opens both ways behind a hub)\n
+usb_subcommand_3	usage: usb return [on|off]   (off = no playback stream: the host cannot open a return the bus has no room for)\n
+usb_subcommand_4	usage: usb [audio [reset] | mode [standard|audio] | profile <2|4|6|8|10|11> [out|duplex] | return [on|off] | map [reset | <slot> <sources>] | ep0]\n
+input_1	no input tap: the app has not started\n
+input_2	input events, live (any key stops):\n
+mon_1	usage: mon [off|on|0..100]\n
+mon_2	mon: the parameter ring is full, try again\n
+mon_3	monitor gain (Q16, 65536 = unity) 
+mon_4	, routes MAIN + CUE; mon on = 
+peek_1	usage: peek <hexaddr> [count 1..16]\n
+peek_2	peek: the address must be 4-byte aligned\n
+peek_3	peek: refused, outside the modules clocked on in this image (a read of a gated module is a bus fault)\n
+poke_1	usage: poke <hexaddr> <hexvalue>\n
+poke_2	poke: the address must be 4-byte aligned\n
+poke_3	poke: refused, only I2S0 (0x4002F000..0x4002F1FF) may be written\n
+audio_1	audio start: Ok, outputs open when clean
+audio_2	audio start: FAILED, result
+rot_1	rot: the display is not running\n
+rot_2	rot: the display is busy with a frame, try again\n
+status_1	usage: status [blink|off]\n
+status_2	 (not saved; a fault code still blinks)\n
+sd_1	sd: the card is in use (a load, a save, an upload, a listing), try again in a moment\n
+sd_2	sd: mounted again from the console
+sd_3	sd: mount from the console FAILED
+disk_1	disk: sharing read-only; the console port re-enumerates, open it again and `disk` shows the state\n
+disk_2	disk: sharing; the console port re-enumerates, open it again and `disk` shows the state\n
+disk_3	disk: share asked from the console
+disk_4	disk: ejecting; the card is remounted, the USB set comes back\n
+disk_5	disk: eject asked from the console
+disk_6	usage: disk [share [ro]|eject]\n
+load_1	load: folder name too long\n
+load_2	 (`sd` shows the result)\n
+load_3	load: started by the console
+ogexp_1	usage: ogexp [status|cancel]\n
+ogexp_2	ogexp: cancel asked, no file after the one in progress\n
+ogexp_3	ogexp: this image has no save layer\n
+ogexp_4	; see the EXPORT page for the rest]
+ogexp_5	 other kinds, see the EXPORT page]
+ins_1	usage: ins [list] | bind <1..16> <1..2> <module> (loads it from the card) | unbind <1..16> <1..2> | bypass <1..16> <1..2> on|off | preset <1..16> <1..2> <1..32> | psave <1..16> <1..2> <name...> | pload <1..16> <1..2> <name...> | bind master <module> | unbind master | bypass master on|off\n
+mod_1	mod: more lines than the listing shows (cpu perf off drops the perf lines)\n
+mod_2	mod: load started by the console
+mod_3	usage: mod note <1..64> <0..127> [1..127]\n
+mod_4	mod: not bound, or the queue is full\n
+mod_5	mod: notices unreadable\n
+mod_6	usage: mod set <1..64> <parameter 0..31> <value>\n
+mod_7	mod gov: this image has no module voices\n
+mod_8	usage: mod gov [thr <50..95> | budget <10..100>]\n
+mod_9	mod gov: thr is refused outside 50..95 (percent of the block)\n
+mod_10	mod gov: budget is refused outside 10..100 (percent of the block)\n
+mod_11	mod gov: recent worst render 
+mod_12	%), without the modules 
+mod_13	mod gov: new voices admitted 
+mod_14	usage: mod | mod load <name> | mod bind <1..64> <name> | mod note <1..64> <note> [vel] | mod off <1..64> | mod set <1..64> <id> <value> | mod preset <1..64> <1..32> | mod presets <stem> | mod psave <1..64> <name...> | mod pload <1..64> <name...> | mod gov [thr <50..95> | budget <10..100>] | mod notice [line]\n
+radio_1	radio: this image has no radio\n
+radio_2	radio: power-up started again from the reset; `radio` shows how it went\n
+radio_3	radio: retry refused, a take from the radio is armed or recording (the reset would record silence); stop it first. State only:\n
+radio_4	radio: retry skipped, the radio is not the selected record source (select it on the Record screen first). State only:\n
+run_inject_1	ERR no input: the app has not started\n
+run_inject_2	ERR refused: an fw update is armed or running\n
+run_inject_3	ERR too many releases pending, try again\n
+run_inject_4	ERR the input queue is full, try again\n
+key_1	unknown button (a name like f1, play, shift, or 0..32)
+key_2	key <button> [tap|down|up|hold <ms>]   button by name (f1, play, shift ...) or 0..32
+pad_1	pad <0..47> [tap|down|up] [vel 1..127]
+enc_accel_1	usage: enc accel [off | <t1> <t2> [gap_ms]]   x4 from t1 detents of a run, x8 from t2 (1..255), gap 5..250 ms (default 6 16 60)\n
+enc_accel_2	ERR need 1 <= t1 <= t2 <= 255 and gap_ms 5..250\n
+enc_accel_3	ERR no app: it has not started\n
+enc_accel_4	enc accel off (a row a detent)\n
+enc_1	enc <n>   n detents, -64..64, not 0 (minus = counter-clockwise)
+mtc_1	usage: mtc [at <order 0..254> <step 0..127>]\n
+scratch_1	usage: scratch [<inertia_ms 5..500> <ahead 0..4> <gate 1..64> <aa 0|1>]\n
+ptfx_1	usage: ptfx quarantine | list | info <n> | run <n>\n
+shot_1	usage: shot [565|8888 [w]] [pclk0]\n
+shot_2	ERR shot: a screenshot is being saved\n
+shot_3	ERR shot: the RAM_G region cannot hold bands of that width (try a smaller w)\n
+shot_4	shot: started by the console
+reset_1	resetting (SYSRESETREQ)\n
+bench_1	ERR bench is not in this image (build with -DO3OS_BENCH=ON)\n
+cache_1	ERR cache check is not in this image (build with -DO3OS_BENCH=ON)\n
+cache_2	usage: cache [on|off|inv|check]\n
+cache_3	ERR the cache command did not finish\n
+cache_4	  (8 KiB, 2 ways, 16 B lines; flash and the 0x0800_0000 SDRAM alias only)\n
+power_refusal_text_1	a firmware update is running
+power_refusal_text_2	an export is running (stop it first)
+power_refusal_text_3	the USB disk may be written by the computer (eject it first)
+power_refusal_text_4	Power is down (or reads pressed: check the polarity with power)
+power_1	power: switch held by the console
+power_2	power: the console holds the switch down (`power release` lets go, `power pin` reads the pin again)\n
+power_3	power: switch released by the console
+power_4	power: the console holds the switch up (`power pin` reads the pin again)\n
+power_5	power: the hold reads the pin\n
+power_6	power: off dry: the stages 0 to E, USB off, the lights out, then a restart after Power is released\n
+power_7	power: off: the stages 0 to F, USB off, the lights out, then the VLPR off after Power is released (a press boots the unit)\n
+power_8	power: off: the stages 0 to F, USB off, the lights out, then a restart after Power is released (built without the VLPR off)\n
+power_9	usage: power [press|release|pin|off [dry]]\n

@@ -65,6 +65,7 @@ void ExportDrops::add(const ExportDrops& o) noexcept {
   sum(tracks_beyond_12, o.tracks_beyond_12);
   sum(engine_fx, o.engine_fx);
   sum(core_fx, o.core_fx);
+  sum(ce_fx, o.ce_fx);
   sum(volume_as_fx18, o.volume_as_fx18);
   sum(volume_dropped, o.volume_dropped);
   sum(track_settings, o.track_settings);
@@ -77,6 +78,7 @@ void ExportDrops::add(const ExportDrops& o) noexcept {
   sum(unknown_chunks, o.unknown_chunks);
   sum(instrument_names_cut, o.instrument_names_cut);
   sum(lfo_sine, o.lfo_sine);
+  sum(wt_mod, o.wt_mod);
   sum(pattern_names, o.pattern_names);
   sum(settings_ignored, o.settings_ignored);
   sum(midi_settings, o.midi_settings);
@@ -94,9 +96,9 @@ void ExportDrops::add(const ExportDrops& o) noexcept {
 }
 
 bool ExportDrops::any_lost() const noexcept {
-  return (tracks_beyond_12 | engine_fx | core_fx | volume_dropped | track_settings | track_names_cut | project_settings |
+  return (tracks_beyond_12 | engine_fx | core_fx | ce_fx | volume_dropped | track_settings | track_names_cut | project_settings |
           module_instruments | midi_instruments | sample_slots_beyond_48 | unknown_chunks | instrument_names_cut |
-          pattern_names | settings_ignored | midi_settings | lfo_sine | rate_ignored | amiga_engine | bit_engine | pcm_too_long | instruments_not_written | levels_clamped | stereo_mid) != 0;
+          pattern_names | settings_ignored | midi_settings | lfo_sine | wt_mod | rate_ignored | amiga_engine | bit_engine | pcm_too_long | instruments_not_written | levels_clamped | stereo_mid) != 0;
 }
 
 bool inspect_settings(const std::uint8_t* payload, std::uint32_t length, std::uint16_t& groups,

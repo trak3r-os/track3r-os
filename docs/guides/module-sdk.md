@@ -12,3 +12,7 @@ the SD-module design guide (the design-time guide, if your checkout has it) pred
 loader, MODULES screen, parameters on the module's pages), the SDK guide above is current.
 
 ABI 1.8 (OS-MODPITCH, OS-INSTUI S10): `pitch()` for the Slide and Glide FX, `O3M_NOTE_RAMP`, page names, INT value labels and the descriptor sized per minor (`O3M_MODULE_SIZE`): README section 8, ADR 0002 amendment 5.
+
+ABI 1.12 (OS-INSFX-ABI2, effects): a stereo render (`"stereo": "widens" | "capable"`), the clock (`get_clock`), an audio sidechain key (`"type": "key"`, `track_level`) and factory presets (`"presets"`, for instruments too): README section 3b, the templates `modules/templates/effect_stereo/` (`o3m_gen.py new --kind effect_stereo`) and `modules/templates/effect_key/` (`--kind effect_key`, a sidechain ducker), spec `docs/specs/OS-INSFX-ABI2.md`. The generator and the template exist now; the OS acts on each part in its own slice (A3 to A9).
+
+ABI 1.13 (OS-MODRATE S2, instruments): the `fx_flags` bit `O3M_FX_RATE` (2), a promise that the instrument renders correctly at `host->sample_rate` 44100, 22050 and 11025 and at 1..32 frames per call, so the OS may offer RATE FULL, 1/2 or 1/4 per instrument (`render_rated`: fewer frames at a lower rate, each held 2 or 4 times). A change of RATE waits until the instrument is idle, then restarts the module. README sections 3b and 8, spec `docs/specs/OS-MODRATE.md`; an OS of 1.12 refuses a 1.13 file.

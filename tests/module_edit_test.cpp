@@ -35,6 +35,7 @@
 #include <o3os/model/limits.h>
 #include <o3os/model/params.h>
 #include <o3os/model/pattern_fill.h>
+#include <o3os/module/clock_state.h>
 #include <o3os/module/loader.h>
 #include <o3os/platform/host/dir_storage.h>
 #include <o3os/platform/host/fakes.h>
@@ -500,6 +501,12 @@ struct Rig {
     input.push(core::make_button_event(clock.now(), static_cast<std::uint8_t>(b), false));
     pass(1);
   }
+  void pad(unsigned index) {
+    input.push(core::make_pad_event(clock.now(), static_cast<std::uint8_t>(index), 100));
+    pass(1);
+    input.push(core::make_pad_event(clock.now(), static_cast<std::uint8_t>(index), 0));
+    pass(1);
+  }
   // F7 + F8 together, as the unit sends them
   void chord_exit() {
     input.push(core::make_button_event(clock.now(), static_cast<std::uint8_t>(Button::F7), true));
@@ -537,8 +544,8 @@ constexpr std::uint8_t kAll = O3M_STEP_NOTE | O3M_STEP_INSTR | O3M_STEP_VOL;
 // ---- the ABI --------------------------------------------------------------------------------------------------------------------------------------------
 
 TEST_CASE("abi 1.5: the version, the tables' sizes and the published offsets of 1.2 .. 1.4, which did not move") {
-  CHECK(O3M_ABI_MINOR == 10);
-  CHECK(module::kOsAbiMinor == 10u);
+  CHECK(O3M_ABI_MINOR == 13);  // (OS-MODRATE S2: 1.13 gave an instrument the RATE bit of fx_flags; 1.12 published the effect surface; OS-FLASHDIET I1: 1.11 the importer kind)
+  CHECK(module::kOsAbiMinor == 13u);
   // On the target (4-byte pointers) the numbers are written in the header itself, and each module build checks them; here the same facts for this host's pointers
   CHECK(offsetof(o3m_read_api, get_tempo) == 8);
   CHECK(offsetof(o3m_read_api, launch_ctx) == 8 + kP);
@@ -570,7 +577,7 @@ TEST_CASE("abi 1.5: an app of 1.4 and an app of 1.3 read the tables through thei
     r.pass(40);
     CHECK(r.project().tempo_x100() == 9000u);
     // and the host table it was handed announces 1.5 with the members it knows where they were
-    CHECK((r.host()->abi_minor == 10u && r.host()->size == sizeof(o3m_host)));
+    CHECK((r.host()->abi_minor == 13u && r.host()->size == sizeof(o3m_host)));  // the OS announces 1.13 (OS-MODRATE S2)
     CHECK((r.host()->io->tap_select != nullptr && r.host()->io->tap_levels != nullptr));  // the 1.4 audio tap is where it was
   }
   r.mods->ui.app_exit();
@@ -645,18 +652,17 @@ TEST_CASE("abi 1.5: a file built for a newer ABI than the OS's is refused at lau
 }
 
 TEST_CASE("abi 1.5: the loader accepts an app of every minor 1..5 with its capabilities, and refuses the bit of a later slice as before") {
-  Rig r;
+  // (one Rig per minor: every launch adds a module to the set, and the set holds kMaxModules of them)
   for (std::uint8_t minor = 3; minor <= O3M_ABI_MINOR; ++minor) {
+    Rig r;
     const std::string name = "Min" + std::to_string(minor);
     r.card.blob(name.c_str(), minor, kReadEdit);
-  }
-  r.mods->ui.scan_apps();
-  for (std::uint8_t minor = 3; minor <= O3M_ABI_MINOR; ++minor) {
-    const std::string name = "Min" + std::to_string(minor);
+    r.mods->ui.scan_apps();
     (void)r.launch(name.c_str());  // (the blob's code is not runnable; what matters is that the loader accepted the header and the capability word)
     CHECK_MESSAGE(r.mods->ui.last_status() == module::Status::Ok, name);
     CHECK(!r.mods->set.quarantined(name.c_str()));
   }
+  Rig r;
   r.card.blob("MinNext", static_cast<std::uint8_t>(O3M_ABI_MINOR + 1), kReadEdit);
   r.mods->ui.scan_apps();
   CHECK(r.launch("MinNext") == app::ModuleUi::LaunchResult::NeedsNewerOs);
@@ -1238,10 +1244,9 @@ TEST_CASE("edit pass budget: a flood of large groups is spread over passes, none
       return d == app::DispatchResult::Disabled ? O3M_EDIT_NO_PROJECT : rig->mods->ui.apply_result();
     }
   };
-  // the page of the running app is the screen the App routes the events to: launched from TOOLS (the fixed entries come first, the first app is "Editor"; the first launch asks, so F1 twice)
+  // the page of the running app is the screen the App routes the events to: launched from TOOLS (the fixed entries come first, the first app is "Editor"; an edit-only app is not confirmed from TOOLS, Q9b)
   r.press(Button::F7);
-  for (unsigned k = 0; k < app::kToolsFixed; ++k) r.press(Button::Down);  // (past the fixed entries: the first app)
-  r.press(Button::F1);
+  r.pad(15);  // OS-PTOOLS2 S3: the verb menu's APPS > row (pad 16) opens the TOOLS list
   r.press(Button::F1);
   NEED(r.state().screen == app::ScreenId::ModuleApp);
   r.mods->ui.set_edit_sink(&Slow::sink, &r);
@@ -1449,7 +1454,8 @@ TEST_CASE("fuzz: random calls of every read and edit entry, in and out of groups
 TEST_CASE("tools: F7 on Pattern opens the list of the apps that hold edit_project, sorted by name, under a modal overlay; F8 closes it") {
   Rig r;
   r.press(Button::F7);
-  CHECK(r.state().overlay == app::OverlayId::Tools);
+  r.pad(15);  // OS-PTOOLS2 S3: the verb menu's APPS > row (pad 16) opens the TOOLS list
+  CHECK(r.state().overlay == app::OverlayId::VerbMenu);
   const app::ModuleUi& ui = r.mods->ui;
   std::vector<std::string> names;
   for (unsigned i = 0; i < ui.tool_count(); ++i) {
@@ -1469,8 +1475,8 @@ TEST_CASE("tools: F7 on Pattern opens the list of the apps that hold edit_projec
     CHECK(strcasecmp(names[i - 1].c_str(), names[i].c_str()) < 0);
   }
   (void)want;
-  CHECK(app::tools_count(r.app->model()) == 5u + app::kToolsFixed);  // the fixed entries (EXPORT PATTERN, DUPLICATE, EXPAND, SHRINK), then the apps
-  CHECK(r.state().modules.tools == 0);  // the cursor opens on the fixed entry
+  CHECK(app::tools_count(r.app->model()) == 5u);  // OS-TOOLSDEDUP: the tool apps alone, no fixed entry
+  CHECK(r.state().modules.tools == 0);  // the cursor opens on the first app
   r.press(Button::Down);
   CHECK(r.state().modules.tools == 1);
   r.press(Button::F8);
@@ -1478,50 +1484,228 @@ TEST_CASE("tools: F7 on Pattern opens the list of the apps that hold edit_projec
   CHECK(r.state().screen == app::ScreenId::Pattern);
 }
 
-TEST_CASE("tools: the list is refused while the view follows the play line, and says why (OS-BUG-TOOLSPLAY)") {
+TEST_CASE("tools: OS-PTOOLS2 S1: the list opens in WATCH while playing, and is refused, with its reason, only in LIVE (OS-BUG-TOOLSPLAY said it in both)") {
   Rig r;
   r.position.publish(true, 1, 0, 12000);
   r.pass(40);
   CHECK(r.state().play.playing);
+  r.press(Button::F7);  // WATCH (Browse, playing): the verb menu opens (the target is the block or the cursor, which are the user's)
+  CHECK(r.state().overlay == app::OverlayId::VerbMenu);
+  CHECK(r.state().notify.size() == 0u);
+  r.pad(15);  // APPS > opens the TOOLS list
+  CHECK(r.state().overlay == app::OverlayId::VerbMenu);
+  r.press(Button::F8);
+  CHECK(r.state().overlay == app::OverlayId::None);
+  (void)r.invoke("pattern.rec_free");  // LIVE: Edit following the playhead
+  NEED(app::pattern_editable(r.state()));
+  NEED(!r.state().edit.rec_free);
   r.press(Button::F7);
   CHECK(r.state().overlay == app::OverlayId::None);
   CHECK(r.state().notify.size() == 1u);
-  CHECK(std::string(r.state().notify.last_text()) == "STOP PLAYING TO OPEN TOOLS");
+  CHECK(std::string(r.state().notify.last_text()) == "THE PLAYHEAD HOLDS THE CURSOR IN LIVE");
   r.position.publish(false, 1, 0, 12000);
   r.pass(40);
   r.press(Button::F7);
-  CHECK(r.state().overlay == app::OverlayId::Tools);
+  r.pad(15);  // OS-PTOOLS2 S3: the verb menu's APPS > row (pad 16) opens the TOOLS list
+  CHECK(r.state().overlay == app::OverlayId::VerbMenu);
 }
 
-TEST_CASE("tools: with apps on the card F1 on the fixed entry (the cursor's start) runs EXPORT PATTERN, not an app: the list closes and no app starts") {
-  Rig r;  // (this rig has no export layer: the strip says so)
+TEST_CASE("tools: OS-PTOOLS2 S1: the page opens on the row it was left on, kept inside the list when the card shrinks") {
+  Rig r;
   r.press(Button::F7);
-  NEED(r.state().overlay == app::OverlayId::Tools);
-  CHECK(app::tools_count(r.app->model()) > app::kToolsFixed);
-  r.press(Button::F1);
-  CHECK(r.state().overlay == app::OverlayId::None);
+  r.pad(15);  // APPS > opens the TOOLS list
+  NEED(r.state().overlay == app::OverlayId::VerbMenu);
+  CHECK(r.state().modules.tools == 0);
+  for (unsigned k = 0; k < 3u; ++k) r.press(Button::Down);
+  CHECK(r.state().modules.tools == 3);
+  r.press(Button::F8);
+  r.press(Button::F7);
+  r.pad(15);
+  CHECK(r.state().overlay == app::OverlayId::VerbMenu);
+  CHECK(r.state().modules.tools == 3);  // the same row
+  for (unsigned k = 0; k < 40u; ++k) r.press(Button::Down);  // the last row (a tool app)
+  const unsigned last = app::tools_count(r.app->model()) - 1u;
+  CHECK(r.state().modules.tools == last);
+  r.press(Button::F8);
+  fs::remove_all(r.card.root / "modules");  // the card lost its apps: the page is empty now, the row stays inside it
+  r.press(Button::F7);
+  r.pad(15);
+  CHECK(r.state().overlay == app::OverlayId::VerbMenu);
+  CHECK(app::tools_count(r.app->model()) == 0u);
+  CHECK(r.state().modules.tools == 0);
+}
+
+TEST_CASE("tools: OS-TOOLSDEDUP: the APPS page starts on the first tool app, F6 on it opens EVENTS and starts no app") {
+  Rig r;
+  r.press(Button::F7);
+  r.pad(15);  // the verb menu's APPS > row (pad 16)
+  NEED(r.state().overlay == app::OverlayId::VerbMenu);
+  CHECK(r.state().verb_menu.apps);
+  CHECK(app::tools_count(r.app->model()) > 0u);
+  app::ToolItem item;
+  NEED(app::tools_item(r.app->model(), 0, item));
+  CHECK(std::string(item.label) == "Editor");  // no fixed entry above the apps
+  r.press(Button::F6);
+  CHECK(r.state().overlay != app::OverlayId::VerbMenu);
   CHECK(r.state().screen == app::ScreenId::Pattern);
   CHECK(!r.mods->ui.app_running());
   CHECK(std::string(r.state().modules.tools_msg).empty());
 }
 
-TEST_CASE("tools: with no tool app on the card the list is the fixed entries alone and Down stops on the last") {
+// ---- OS-APPSNAV: Shift + Pattern is the list of the apps that are not tools ----------------------------------------------------
+
+namespace {
+
+void shift_pattern(Rig& r) {
+  r.input.push(core::make_button_event(r.clock.now(), static_cast<std::uint8_t>(Button::Shift), true));
+  r.pass(1);
+  r.press(Button::Pattern);
+  r.input.push(core::make_button_event(r.clock.now(), static_cast<std::uint8_t>(Button::Shift), false));
+  r.pass(1);
+}
+
+// The row of the apps list that holds the app `stem`; FAILs when it is not listed.
+unsigned apps_row(Rig& r, const char* stem) {
+  for (unsigned k = 0; k < app::apps_count(r.app->model()); ++k) {
+    if (std::strcmp(r.mods->ui.app_entry_at(app::apps_entry(r.app->model(), k))->stem, stem) == 0) {
+      return k;
+    }
+  }
+  FAIL("not in the apps list: " << stem);
+  return 0;
+}
+
+}  // namespace
+
+TEST_CASE("apps list: Shift + Pattern lists the apps that are not tools, the same split as the TOOLS APPS page, and Pattern or Shift + Pattern closes it (OS-APPSNAV)") {
+  Rig r;
+  shift_pattern(r);
+  CHECK(r.state().overlay == app::OverlayId::ModulePicker);
+  CHECK(r.state().screen == app::ScreenId::Pattern);
+  CHECK(r.mods->ui.tool_count() == 5u);
+  CHECK(app::apps_count(r.app->model()) == r.mods->ui.app_entry_count() - r.mods->ui.tool_count());
+  for (unsigned k = 0; k < app::apps_count(r.app->model()); ++k) {
+    const unsigned e = app::apps_entry(r.app->model(), k);
+    for (unsigned t = 0; t < r.mods->ui.tool_count(); ++t) {
+      CHECK_MESSAGE(e != r.mods->ui.tool_entry(t), r.mods->ui.app_entry_at(e)->stem);  // no tool app in the list
+    }
+  }
+  for (const char* n : {"Viewer", "Listener", "Editor2"}) {
+    CHECK_MESSAGE(apps_row(r, n) < app::apps_count(r.app->model()), n);
+  }
+  CHECK(r.state().modules.picker == 0);
+  r.press(Button::Down);
+  CHECK(r.state().modules.picker == 1);
+  r.press(Button::Pattern);  // the key that opened it closes it
+  CHECK(r.state().overlay == app::OverlayId::None);
+  CHECK(r.state().screen == app::ScreenId::Pattern);
+  shift_pattern(r);
+  CHECK(r.state().overlay == app::OverlayId::ModulePicker);
+  CHECK(r.state().modules.picker == 0);  // it opens on the first app each time
+  shift_pattern(r);  // Shift + Pattern again
+  CHECK(r.state().overlay == app::OverlayId::None);
+  CHECK(r.state().screen == app::ScreenId::Pattern);
+  CHECK(!r.mods->ui.app_running());
+  CHECK(r.app->failed_frames() == 0u);
+}
+
+TEST_CASE("apps list: F1 and F8 launch the app under the cursor through the MODULES launch path, and the page is that app's") {
+  for (const Button key : {Button::F1, Button::F8}) {
+    Rig r;
+    shift_pattern(r);
+    NEED(r.state().overlay == app::OverlayId::ModulePicker);
+    const unsigned row = apps_row(r, "Viewer");
+    for (unsigned k = 0; k < row; ++k) {
+      r.press(Button::Down);
+    }
+    CHECK(r.state().modules.picker == row);
+    r.press(key);
+    CHECK(r.state().overlay == app::OverlayId::None);
+    CHECK(r.state().screen == app::ScreenId::ModuleApp);
+    CHECK(r.mods->ui.app_running());
+    r.chord_exit();  // F7 + F8: the app's exit goes to MODULES (the launch path is MODULES')
+    CHECK(r.state().screen == app::ScreenId::Modules);
+    CHECK(!r.mods->ui.app_running());
+  }
+}
+
+TEST_CASE("apps list: an app that edits the project or writes files is a tool app, so it is not listed and no launch from the list needs the confirm (OS-APPSNAV)") {
+  Rig r(12, false, true);
+  shift_pattern(r);
+  NEED(r.state().overlay == app::OverlayId::ModulePicker);
+  for (const char* n : {"Exporter", "ExpEdit", "smfexport", "Writer"}) {  // the apps that confirm: every one is a tool
+    bool listed = false;
+    for (unsigned k = 0; k < app::apps_count(r.app->model()); ++k) {
+      listed = listed || std::strcmp(r.mods->ui.app_entry_at(app::apps_entry(r.app->model(), k))->stem, n) == 0;
+    }
+    CHECK_MESSAGE(!listed, n);
+  }
+  const unsigned row = apps_row(r, "ReadOnly7");  // read only: nothing to confirm
+  for (unsigned k = 0; k < row; ++k) {
+    r.press(Button::Down);
+  }
+  r.press(Button::F8);
+  CHECK(r.state().overlay == app::OverlayId::None);
+  CHECK(r.state().screen == app::ScreenId::ModuleApp);
+  CHECK(r.mods->ui.app_running());
+  CHECK(std::string(r.state().modules.tools_msg).empty());
+}
+
+TEST_CASE("apps list: with no app on the card it is empty, F1 launches nothing, F8 is BACK and Pattern closes it") {
+  Rig r;
+  fs::remove_all(r.card.root / "modules");
+  shift_pattern(r);
+  CHECK(r.state().overlay == app::OverlayId::ModulePicker);  // the card is read again on opening
+  CHECK(app::apps_count(r.app->model()) == 0u);
+  r.press(Button::Down);
+  CHECK(r.state().modules.picker == 0);
+  r.press(Button::F1);
+  CHECK(r.state().overlay == app::OverlayId::ModulePicker);
+  CHECK(!r.mods->ui.app_running());
+  r.press(Button::F8);  // BACK, as in every other picker (F1 reads blank)
+  CHECK(r.state().overlay == app::OverlayId::None);
+  CHECK(r.state().screen == app::ScreenId::Pattern);
+  CHECK(!r.mods->ui.app_running());
+  shift_pattern(r);
+  CHECK(r.state().overlay == app::OverlayId::ModulePicker);
+  r.press(Button::Pattern);
+  CHECK(r.state().overlay == app::OverlayId::None);
+  CHECK(r.state().screen == app::ScreenId::Pattern);
+}
+
+TEST_CASE("apps list: the engine picker of the Instrument page still closes with F8 and binds with F1 (the apps list shares its overlay)") {
+  Rig r;
+  r.press(Button::Params);
+  NEED(r.state().screen == app::ScreenId::Instrument);
+  (void)r.invoke("module.engine");  // (F1 of the page is its first page now; the action opens the picker)
+  NEED(r.state().overlay == app::OverlayId::ModulePicker);
+  r.press(Button::Pattern);  // not the apps list: Pattern does nothing here
+  CHECK(r.state().overlay == app::OverlayId::ModulePicker);
+  r.press(Button::F8);
+  CHECK(r.state().overlay == app::OverlayId::None);
+  CHECK(r.state().screen == app::ScreenId::Instrument);
+}
+
+TEST_CASE("tools: with no tool app on the card the APPS page is empty, Down stays on row 0 and F1 runs nothing") {
   Rig r;
   fs::remove_all(r.card.root / "modules" / "apps");
   fs::create_directories(r.card.root / "modules" / "apps");
   Rig r2;  // (a fresh rig: its natives are in the set, the empty card is the scan's)
   fs::remove_all(r2.card.root / "modules");
   r2.press(Button::F7);
-  CHECK(r2.state().overlay == app::OverlayId::Tools);
-  CHECK(app::tools_count(r2.app->model()) == app::kToolsFixed);
-  for (unsigned k = 0; k < app::kToolsFixed + 2u; ++k) {
+  r2.pad(15);  // OS-PTOOLS2 S3: the verb menu's APPS > row (pad 16) opens the TOOLS list
+  CHECK(r2.state().overlay == app::OverlayId::VerbMenu);
+  CHECK(app::tools_count(r2.app->model()) == 0u);
+  for (unsigned k = 0; k < 3u; ++k) {
     r2.press(Button::Down);
   }
-  CHECK(r2.state().modules.tools == app::kToolsFixed - 1u);
+  CHECK(r2.state().modules.tools == 0u);
+  r2.press(Button::F1);
+  CHECK(r2.state().overlay == app::OverlayId::VerbMenu);  // nothing to run: the page stays up
   CHECK(!r2.mods->ui.app_running());
 }
 
-TEST_CASE("tools: F1 runs the app with the block as its context (the first launch asks, F1 again), F7 + F8 returns to Pattern with the cursor and the block as they were") {
+TEST_CASE("tools: F1 runs the app with the block as its context (no confirm for an edit-only app, Q9b), F7 + F8 returns to Pattern with the cursor and the block as they were") {
   Rig r;
   // a block of 3 tracks x 4 rows from track 2, row 5
   r.invoke("nav.scroll", 5);
@@ -1538,15 +1722,11 @@ TEST_CASE("tools: F1 runs the app with the block as its context (the first launc
   NEED(r.state().edit.selection.active);
   const int row = r.state().pattern.row(), track = r.state().pattern.track();
   r.press(Button::F7);
-  NEED(r.state().overlay == app::OverlayId::Tools);
-  // put the cursor on "Editor" (the first app, below EXPORT PATTERN)
+  r.pad(15);  // OS-PTOOLS2 S3: the verb menu's APPS > row (pad 16) opens the TOOLS list
+  NEED(r.state().overlay == app::OverlayId::VerbMenu);
+  // the page opens on "Editor" (the first app)
   CHECK(std::string(r.mods->ui.app_entry_at(r.mods->ui.tool_entry(0))->stem) == "Editor");
-  for (unsigned k = 0; k < app::tools_fixed(true); ++k) r.press(Button::Down);  // (a block is active: EXPORT SELECTION is listed under EXPORT PATTERN, OS-WAVEXP slice B)
-  r.press(Button::F1);  // the first launch of an app that edits the project asks
-  CHECK(r.state().overlay == app::OverlayId::Tools);
-  CHECK(std::string(r.state().modules.tools_msg).find("EDITS THE PROJECT") != std::string::npos);
-  CHECK(!r.mods->ui.app_running());
-  r.press(Button::F1);
+  r.press(Button::F1);  // OS-PTOOLS2 S6 (Q9b): an app that only edits the project is not confirmed from TOOLS
   CHECK(r.state().overlay == app::OverlayId::None);
   CHECK(r.state().screen == app::ScreenId::ModuleApp);
   CHECK(r.mods->ui.app_running());
@@ -1581,8 +1761,7 @@ TEST_CASE("tools: with no block the context carries the cursor: block_length 0, 
   (void)r.invoke("cursor.track", 1);
   CHECK(!r.state().edit.selection.active);
   r.press(Button::F7);
-  for (unsigned k = 0; k < app::kToolsFixed; ++k) r.press(Button::Down);  // (past the fixed entries: the first app)
-  r.press(Button::F1);
+  r.pad(15);  // OS-PTOOLS2 S3: the verb menu's APPS > row (pad 16) opens the TOOLS list
   r.press(Button::F1);
   NEED(r.mods->ui.app_running());
   o3m_launch_ctx c;
@@ -1610,8 +1789,7 @@ TEST_CASE("tools: an app opened from the MODULES list still exits to MODULES, an
   // from TOOLS, then the modules are cleared (a project load): the page goes back to Pattern by itself
   r.invoke("nav.screen", static_cast<core::ActionArg>(app::ScreenId::Pattern));
   r.press(Button::F7);
-  for (unsigned k = 0; k < app::kToolsFixed; ++k) r.press(Button::Down);  // (past the fixed entries: the first app)
-  r.press(Button::F1);
+  r.pad(15);  // OS-PTOOLS2 S3: the verb menu's APPS > row (pad 16) opens the TOOLS list
   r.press(Button::F1);
   NEED(r.state().screen == app::ScreenId::ModuleApp);
   r.mods->ui.reset();
@@ -1619,24 +1797,16 @@ TEST_CASE("tools: an app opened from the MODULES list still exits to MODULES, an
   CHECK(r.state().screen == app::ScreenId::Pattern);
 }
 
-TEST_CASE("tools: the item list is one place (tools_list.h): a tool app is an App item with its file stem, quarantined ones are marked") {
+TEST_CASE("tools: the item list is one place (tools_list.h): the tool apps with their file stems, quarantined ones are marked, nothing else") {
   Rig r;
   r.mods->ui.scan_tools();
   app::ToolItem item;
-  NEED(app::tools_item(r.app->model(), 0, item));  // the fixed entry
-  CHECK(item.kind == app::ToolItem::Kind::ExportPattern);
-  CHECK(std::string(item.label) == "EXPORT PATTERN");
-  CHECK(!item.bad);
-  CHECK(!item.divider_above);
-  NEED(app::tools_item(r.app->model(), app::kToolsFixed, item));  // the first app, with the divider above it
-  CHECK(item.kind == app::ToolItem::Kind::App);
+  NEED(app::tools_item(r.app->model(), 0, item));  // OS-TOOLSDEDUP: the first app is row 0
   CHECK(std::string(item.label) == "Editor");
   CHECK(!item.bad);
-  CHECK(item.divider_above);
-  NEED(app::tools_item(r.app->model(), app::kToolsFixed + 1u, item));
-  CHECK(!item.divider_above);  // (only the first app has it)
+  NEED(app::tools_item(r.app->model(), 1u, item));
+  CHECK(!app::tools_item(r.app->model(), app::tools_count(r.app->model()), item));
   CHECK(!app::tools_item(r.app->model(), 99, item));
-  CHECK(app::kToolsFixed == 4u);  // EXPORT PATTERN, DUPLICATE x2, EXPAND x2, SHRINK /2 (PAT-OPS-A)
 }
 
 // ---- Rhythm Gen through the whole stack --------------------------------------------------------------------------------------------------------------
@@ -1718,14 +1888,14 @@ TEST_CASE("rhythm gen: through the keys of the unit: F7, the list, F1 twice, F1 
   r.input.push(core::make_button_event(r.clock.now(), static_cast<std::uint8_t>(Button::Shift), false));
   r.pass(1);
   r.press(Button::F7);
-  NEED(r.state().overlay == app::OverlayId::Tools);
+  r.pad(15);  // OS-PTOOLS2 S3: the verb menu's APPS > row (pad 16) opens the TOOLS list
+  NEED(r.state().overlay == app::OverlayId::VerbMenu);
   // move the cursor to rhythmgen
   for (unsigned i = 0; i < r.mods->ui.tool_count(); ++i) {
     if (std::string(r.mods->ui.app_entry_at(r.mods->ui.tool_entry(i))->stem) == "rhythmgen") {
-      for (unsigned k = 0; k < i + app::tools_fixed(true); ++k) r.press(Button::Down);  // (the block adds EXPORT SELECTION)
+      for (unsigned k = 0; k < i; ++k) r.press(Button::Down);  // (the block adds EXPORT SELECTION)
     }
   }
-  r.press(Button::F1);
   r.press(Button::F1);
   NEED(r.state().screen == app::ScreenId::ModuleApp);
   const std::size_t depth = r.journal.depth();
@@ -3035,7 +3205,8 @@ SmfFacts smf_facts(const std::vector<std::uint8_t>& b) {
 TEST_CASE("abi 1.7: the published offsets of 1.2 .. 1.6, member by member (in pointer slots): nothing moved, the export members are appended, and a 1.6 app finds every member of its own layout where it was") {
   const auto at = [](std::size_t header, unsigned slot) { return header + slot * kP; };
   CHECK(offsetof(o3m_host, io) == at(16, 8));
-  CHECK(sizeof(o3m_host) == at(16, 9));  // the host table did not grow
+  CHECK(offsetof(o3m_host, get_clock) == at(16, 9));  // the 1.7 table is nine slots after the header: 1.12 appended get_clock and track_level after them (nothing before moved)
+  CHECK(sizeof(o3m_host) == at(16, 11));
   CHECK(offsetof(o3m_io_api, now_ms) == at(8, 0));
   CHECK(offsetof(o3m_io_api, tap_levels) == at(8, 6));
   CHECK(offsetof(o3m_io_api, export_open) == at(8, 7));
@@ -3051,7 +3222,7 @@ TEST_CASE("abi 1.7: the published offsets of 1.2 .. 1.6, member by member (in po
   Rig r;
   r.launch_ok("Editor");
   NEED(r.host() != nullptr);
-  CHECK(r.host()->abi_minor == 10u);
+  CHECK(r.host()->abi_minor == 13u);  // (the OS is 1.13; the app declares 1.6)
   const o3m_io_api* io = r.host()->io;
   NEED(io != nullptr);
   CHECK((io->version == O3M_IO_API_VERSION && io->size == sizeof(o3m_io_api)));
@@ -3226,7 +3397,8 @@ TEST_CASE("abi 1.7: the confirm is remembered with the bits it covered: a file r
 TEST_CASE("abi 1.7: Pattern F7 TOOLS lists the apps that hold edit_project OR export_files, and the confirm shows in the list") {
   Rig r(12, false, true);
   r.press(Button::F7);
-  NEED(r.state().overlay == app::OverlayId::Tools);
+  r.pad(15);  // OS-PTOOLS2 S3: the verb menu's APPS > row (pad 16) opens the TOOLS list
+  NEED(r.state().overlay == app::OverlayId::VerbMenu);
   const app::ModuleUi& ui = r.mods->ui;
   std::vector<std::string> names;
   for (unsigned i = 0; i < ui.tool_count(); ++i) {
@@ -3242,8 +3414,8 @@ TEST_CASE("abi 1.7: Pattern F7 TOOLS lists the apps that hold edit_project OR ex
   unsigned at = 0;
   for (; at < app::tools_count(r.app->model()); ++at) {
     app::ToolItem item;
-    NEED(app::tools_item(r.app->model(), at, item, false));
-    if (item.kind == app::ToolItem::Kind::App && std::string(ui.app_entry_at(item.app_entry)->stem) == "smfexport") {
+    NEED(app::tools_item(r.app->model(), at, item));
+    if (std::string(ui.app_entry_at(item.app_entry)->stem) == "smfexport") {
       break;
     }
   }
@@ -3252,7 +3424,7 @@ TEST_CASE("abi 1.7: Pattern F7 TOOLS lists the apps that hold edit_project OR ex
     r.press(Button::Down);
   }
   r.press(Button::F1);
-  CHECK(r.state().overlay == app::OverlayId::Tools);
+  CHECK(r.state().overlay == app::OverlayId::VerbMenu);
   CHECK(std::string(r.state().modules.tools_msg) == "WRITES FILES TO APPEXPORT/SMFEXPORT: F1 AGAIN");
   {  // OS-KEYROWDLG: the dialog owns the row: F1 reads RUN? (inverted) while the confirm waits, F8 BACK, the rest blank
     const test::RowRead again = test::read_owner_row(r.app->model(), r.state());
@@ -3270,16 +3442,19 @@ TEST_CASE("abi 1.7: Pattern F7 TOOLS lists the apps that hold edit_project OR ex
 // F7 on Pattern, the cursor on SMF EXPORT in the list, F1 (the first launch says what the app does) and F1 again: the app's page is up, as the user gets there. Returns false if it did not come up.
 bool open_smf_from_tools(Rig& r) {
   r.press(Button::F7);
-  if (r.state().overlay != app::OverlayId::Tools) {
+  r.pad(15);  // OS-PTOOLS2 S3: the verb menu's APPS > row (pad 16) opens the TOOLS list
+  if (r.state().overlay != app::OverlayId::VerbMenu) {
     return false;
   }
-  const bool block = r.state().edit.selection.active;
+  for (unsigned i = 0; i < app::tools_count(r.app->model()); ++i) {
+    r.press(Button::Up);  // the list opens on the row it was left on (OS-PTOOLS2 S1): from the top
+  }
   for (unsigned i = 0; i < app::tools_count(r.app->model()); ++i) {
     app::ToolItem item;
-    if (!app::tools_item(r.app->model(), i, item, block)) {
+    if (!app::tools_item(r.app->model(), i, item)) {
       return false;
     }
-    if (item.kind == app::ToolItem::Kind::App && std::string(r.mods->ui.app_entry_at(item.app_entry)->stem) == "smfexport") {
+    if (std::string(r.mods->ui.app_entry_at(item.app_entry)->stem) == "smfexport") {
       break;
     }
     r.press(Button::Down);
@@ -3444,8 +3619,10 @@ TEST_CASE("abi 1.9: o3m_ui keeps its five members where they were and appends ke
   CHECK(sizeof(o3m_keys) == 16 * sizeof(void*));
   CHECK(offsetof(o3m_keys, shift_f) == 8 * sizeof(void*));
   CHECK(O3M_KEY_LABEL_MAX == 7u);
-  CHECK(O3M_ABI_MINOR == 10u);  // (1.10 appended io members only: o3m_ui and the descriptor are the 1.9 ones)
-  CHECK(sizeof(o3m_module) == O3M_MODULE_SIZE(9));  // the descriptor did not grow
+  CHECK(O3M_ABI_MINOR == 13u);  // (1.11 and 1.12 appended descriptor members only, 1.13 a flag bit: o3m_ui is still the 1.9 one)
+  CHECK(sizeof(o3m_module) == O3M_MODULE_SIZE(13));  // the descriptor grew at 1.11 (the importer's table, kind 3) and at 1.12 (the effect surface)
+  CHECK(O3M_MODULE_SIZE(11) == offsetof(o3m_module, render_st));
+  CHECK(O3M_MODULE_SIZE(10) == O3M_MODULE_SIZE(9));  // 1.10 did not grow it
   CHECK(O3M_MODULE_SIZE(9) == O3M_MODULE_SIZE(8));
 }
 
@@ -3560,10 +3737,11 @@ TEST_CASE("abi 1.10: the layout, member by member and literally: four io members
   CHECK(offsetof(o3m_transport, queued) == 32);
   // the table's name, the version of the table and the host table did not move or grow
   CHECK(O3M_IO_API_VERSION == 1u);
-  CHECK(offsetof(o3m_host, io) + sizeof(void*) == sizeof(o3m_host));
-  CHECK(O3M_ABI_MINOR == 10);
-  CHECK(sizeof(o3m_module) == O3M_MODULE_SIZE(10));  // the descriptor did not grow
-  CHECK(O3M_MODULE_SIZE(10) == O3M_MODULE_SIZE(9));
+  CHECK(offsetof(o3m_host, io) + sizeof(void*) == offsetof(o3m_host, get_clock));  // (1.12 appended get_clock and track_level after io: the 1.0..1.11 members did not move)
+  CHECK(O3M_ABI_MINOR == 13);
+  CHECK(sizeof(o3m_module) == O3M_MODULE_SIZE(13));  // the descriptor grew at 1.11 (the importer member, OS-FLASHDIET I1) and at 1.12 (OS-INSFX-ABI2 A1)
+  CHECK(O3M_MODULE_SIZE(11) == offsetof(o3m_module, render_st));
+  CHECK(O3M_MODULE_SIZE(10) == O3M_MODULE_SIZE(9));  // 1.10 did not grow it
   CHECK(sizeof(o3m_ui) == O3M_UI_SIZE(10));  // nor the ui table
   // the capability bits: the six frozen values, then 64
   static_assert(O3M_CAP_MIDI_IN == 1 && O3M_CAP_READ_PROJECT == 2 && O3M_CAP_AUDIO_TAP == 4 && O3M_CAP_EDIT_PROJECT == 8 && O3M_CAP_EXPORT_FILES == 16 && O3M_CAP_MIDI_OUT == 32, "the six frozen bits");
@@ -3973,13 +4151,13 @@ TEST_CASE("tools: after APPLY the Pattern opens on what the tool wrote: the curs
   CHECK(row == 5);
   CHECK_FALSE(r.state().edit.selection.active);
   r.press(Button::F7);
-  NEED(r.state().overlay == app::OverlayId::Tools);
+  r.pad(15);  // OS-PTOOLS2 S3: the verb menu's APPS > row (pad 16) opens the TOOLS list
+  NEED(r.state().overlay == app::OverlayId::VerbMenu);
   for (unsigned i = 0; i < r.mods->ui.tool_count(); ++i) {
     if (std::string(r.mods->ui.app_entry_at(r.mods->ui.tool_entry(i))->stem) == "rhythmgen") {
-      for (unsigned k = 0; k < i + app::tools_fixed(false); ++k) r.press(Button::Down);
+      for (unsigned k = 0; k < i; ++k) r.press(Button::Down);
     }
   }
-  r.press(Button::F1);
   r.press(Button::F1);
   NEED(r.state().screen == app::ScreenId::ModuleApp);
   const std::size_t depth = r.journal.depth();
@@ -4011,13 +4189,14 @@ TEST_CASE("tools: after APPLY the Pattern opens on what the tool wrote: the curs
   NEED(r.state().edit.selection.active);
   CHECK(r.state().pattern.row() == before.row1);  // (the cursor is at the block's far end: after APPLY it is on the first written step)
   r.press(Button::F7);
-  NEED(r.state().overlay == app::OverlayId::Tools);
+  r.pad(15);  // OS-PTOOLS2 S3: the verb menu's APPS > row (pad 16) opens the TOOLS list
+  NEED(r.state().overlay == app::OverlayId::VerbMenu);
+  for (unsigned k = 0; k < 40u; ++k) r.press(Button::Up);  // (the list opens on the row it was left on, OS-PTOOLS2 S1)
   for (unsigned i = 0; i < r.mods->ui.tool_count(); ++i) {
     if (std::string(r.mods->ui.app_entry_at(r.mods->ui.tool_entry(i))->stem) == "rhythmgen") {
-      for (unsigned k = 0; k < i + app::tools_fixed(true); ++k) r.press(Button::Down);
+      for (unsigned k = 0; k < i; ++k) r.press(Button::Down);
     }
   }
-  r.press(Button::F1);
   r.press(Button::F1);
   NEED(r.state().screen == app::ScreenId::ModuleApp);
   r.press(Button::F1);  // APPLY
@@ -4027,4 +4206,56 @@ TEST_CASE("tools: after APPLY the Pattern opens on what the tool wrote: the curs
   CHECK((after.row0 == before.row0 && after.row1 == before.row1 && after.track0 == before.track0 && after.track1 == before.track1));
   CHECK(r.state().pattern.row() == before.row0);
   CHECK(r.state().pattern.track() == before.track0);
+}
+
+TEST_CASE("abi 1.12: the descriptor's four new members, the host's two and the PODs are where the layout puts them, and nothing before them moved (OS-INSFX-ABI2 A1)") {
+  // the host table: 1.12 appended get_clock and track_level after io (slot 8 of the pointers after the 16-byte header), in this order, and nothing else
+  CHECK(offsetof(o3m_host, io) == 16 + 8 * kP);
+  CHECK(offsetof(o3m_host, get_clock) == 16 + 9 * kP);
+  CHECK(offsetof(o3m_host, track_level) == 16 + 10 * kP);
+  CHECK(sizeof(o3m_host) == 16 + 11 * kP);
+  // the descriptor: render_st after importer, then fx_flags, presets, preset_count; the size is the next multiple of the pointer size
+  CHECK(offsetof(o3m_module, render_st) == offsetof(o3m_module, importer) + kP);
+  CHECK(offsetof(o3m_module, fx_flags) == offsetof(o3m_module, render_st) + kP);
+  CHECK(offsetof(o3m_module, presets) == offsetof(o3m_module, fx_flags) + kP);  // (a uint32_t then padding up to the pointer on a 64-bit host, none on the target)
+  CHECK(offsetof(o3m_module, preset_count) == offsetof(o3m_module, presets) + kP);
+  CHECK(sizeof(o3m_module) == offsetof(o3m_module, preset_count) + kP);
+  CHECK(O3M_MODULE_SIZE(11) == offsetof(o3m_module, render_st));
+  CHECK(O3M_MODULE_SIZE(13) == sizeof(o3m_module));
+  CHECK(offsetof(o3m_module, importer) == offsetof(o3m_module, labels) + kP);  // 1.11's member did not move
+  CHECK(O3M_MODULE_SIZE(10) == offsetof(o3m_module, importer));
+  if (kP == 4) {
+    CHECK((offsetof(o3m_module, render_st) == 84 && offsetof(o3m_module, fx_flags) == 88 && offsetof(o3m_module, presets) == 92 && offsetof(o3m_module, preset_count) == 96 && sizeof(o3m_module) == 100));
+  }
+  // the PODs
+  CHECK(sizeof(o3m_clock) == 16);
+  CHECK((offsetof(o3m_clock, flags) == 4 && offsetof(o3m_clock, tempo_x100) == 8 && offsetof(o3m_clock, beat) == 12));
+  CHECK(sizeof(o3m_preset) == 3 * kP);
+  CHECK(offsetof(o3m_preset, values) == kP);
+  CHECK(offsetof(o3m_preset, count) == 2 * kP);
+  // the published values
+  CHECK((O3M_FX_WIDENS == 1u && O3M_FX_RATE == 2u && O3M_PARAM_KEY == 32u && O3M_PRESETS_MAX == 32u && O3M_PRESET_NAME_MAX == 16u));
+  CHECK((O3M_CLOCK_PLAYING == 1u && O3M_CLOCK_STARTED == 2u && O3M_CLOCK_WRAPPED == 4u));
+  CHECK(((O3M_PARAM_KEY & (O3M_PARAM_LOG | O3M_PARAM_INT | O3M_PARAM_BOOL | O3M_PARAM_NO_LEARN | O3M_PARAM_MOD | O3M_PARAM_UNIT_MASK)) == 0u));  // bit 32 was free
+  // the host table an app is lent carries get_clock (A3: live once an engine has written the store, so this case starts from none: another case of the binary may have run one) and the track_level stub (A6)
+  o3os::module::g_clock.invalidate();
+  Rig r;
+  r.launch_ok("Editor");
+  NEED(r.host() != nullptr);
+  CHECK(O3M_HOST_HAS(r.host(), get_clock));
+  CHECK(O3M_HOST_HAS(r.host(), track_level));
+  NEED((r.host()->get_clock != nullptr && r.host()->track_level != nullptr));
+  o3m_clock c{};
+  c.size = sizeof c;
+  c.flags = 0xFFu;
+  CHECK(r.host()->get_clock(&c) == 1);  // no sequencer clock behind it: the stub's answer
+  CHECK((c.size == sizeof c && c.flags == 0u && c.tempo_x100 == 12000u && c.beat == 0.0f));
+  o3m_clock small{};
+  small.size = 8;  // a caller that knows only size and flags
+  small.tempo_x100 = 77u;
+  CHECK(r.host()->get_clock(&small) == 1);
+  CHECK((small.size == 8u && small.flags == 0u && small.tempo_x100 == 77u));  // only the members that fit
+  CHECK(r.host()->track_level(0) == 0.0f);
+  CHECK(r.host()->track_level(15) == 0.0f);
+  CHECK(r.host()->track_level(99) == 0.0f);
 }

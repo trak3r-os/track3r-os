@@ -15,6 +15,7 @@
 #include <o3os/app/wave_math.h>
 #include <o3os/audio/lfo_sine.h>
 #include <o3os/audio/voices.h>
+#include <o3os/audio/wt_contour.h>
 #include <o3os/core/fast_math.h>
 #include <o3os/core/fixed_string.h>
 #include <o3os/model/params.h>
@@ -57,6 +58,8 @@ unsigned key_of_group(unsigned group) noexcept {
 }
 
 unsigned slot_of(const ViewState& view) noexcept;
+// OS-INSFX S5: the page's target is an insert (the Mixer INSERTS page's Enter on a bound cell).
+bool insert_target(const ViewState& view) noexcept;
 
 // OS-INSTUI S8a / S8b: the pages of a MIDI instrument are no groups of a sample instrument's tables (CHANNEL is the virtual field ip::MidiChannel, the rest are the rows appended for INST 1.3): F1 MIDI
 // (ip::GroupMidi) and F2 CC (ip::GroupCc). group_of answers one of them for a MIDI instrument: the CC page when the view holds it, else MIDI (the page a neighbouring sample instrument was left on is not
@@ -66,8 +69,11 @@ constexpr unsigned kCcGroup = ip::GroupCc;
 constexpr bool is_midi_group(unsigned group) noexcept { return group == kMidiGroup || group == kCcGroup; }
 
 // The page in view as a group of the tables. The source page belongs to a sample instrument: on a free slot or a module (which the page was left on by F6 / F7) the page is VOICE; a MIDI instrument has
-// its own page.
+// its own page. OS-INSFX S5: an insert's page is not a group of the instrument tables at all.
 unsigned group_of(const Model& m, const ViewState& view) noexcept {
+  if (insert_target(view)) {
+    return 0u;  // GroupVoice: no group of the tables applies; the module branch of rows_of takes over
+  }
   const model::Instrument* in = m.project != nullptr ? m.project->instrument(slot_of(view)) : nullptr;
   const unsigned p = view.page[screen_index(ScreenId::Instrument)];
   if (in != nullptr && in->kind == model::InstrumentKind::Midi) {
@@ -95,19 +101,35 @@ unsigned slot_of(const ViewState& view) noexcept {
                                                                                                   : static_cast<unsigned>(view.instrument - 1));
 }
 
-// The instrument of the slot in view is an SD module's (OS-012b): its page is made from the module's own descriptors, eight to a page, and its views are drawn below.
+// OS-INSFX S5: the page's target is an insert (the Mixer INSERTS page's Enter on a bound cell): its host `where` is held in the view.
+bool insert_target(const ViewState& view) noexcept { return params_insert_target(view); }
+ParamTarget target_of(const ViewState& view) noexcept {
+  return insert_target(view) ? ParamTarget::of_insert(view.params.insert) : ParamTarget{slot_of(view)};
+}
+
+// The instrument of the slot in view is an SD module's (OS-012b): its page is made from the module's own descriptors, eight to a page, and its views are drawn below. OS-INSFX S5: an insert's page
+// is its record's module's, the same way (the record is what the cell shows).
 bool is_module_slot(const Model& m, const ViewState& view) noexcept {
+  if (insert_target(view)) {
+    return m.modules != nullptr && m.project != nullptr && m.modules->bound_module(*m.project, target_of(view)) != nullptr;
+  }
   const model::Instrument* in = m.project != nullptr ? m.project->instrument(slot_of(view)) : nullptr;
   return in != nullptr && in->kind == model::InstrumentKind::Module;
 }
 
 unsigned module_params(const Model& m, const ViewState& view) noexcept {
-  return m.modules != nullptr && m.project != nullptr ? m.modules->param_count(*m.project, slot_of(view)) : 0u;
+  return m.modules != nullptr && m.project != nullptr ? m.modules->param_count(*m.project, target_of(view)) : 0u;
+}
+
+// OS-MODSENDS: the MIX page of a module instrument holds the host's own rows (PANNING, DELAY SEND, REVERB SEND), whatever the module's own pages are. It is the view's page 7 (no group of the
+// instrument tables has it), reached by Shift + F2 (ParamsScreen::open_mix) and left by any page key.
+bool is_mix_page(const Model& m, const ViewState& view) noexcept {
+  return !insert_target(view) && view.page[screen_index(ScreenId::Instrument)] == ParamsScreen::kMixPage && is_module_slot(m, view);
 }
 
 // The pages of a module's parameters in view: the ones it names (a page table, ABI 1.8, OS-INSTUI S10) or eight to a page. 0 for a module with no parameters.
 unsigned module_page_total(const Model& m, const ViewState& view) noexcept {
-  const unsigned table = m.modules != nullptr && m.project != nullptr ? m.modules->page_table_count(*m.project, slot_of(view)) : 0u;
+  const unsigned table = m.modules != nullptr && m.project != nullptr ? m.modules->page_table_count(*m.project, target_of(view)) : 0u;
   return table != 0u ? table : (module_params(m, view) + ParamView::kMaxRows - 1) / ParamView::kMaxRows;
 }
 
@@ -128,7 +150,7 @@ ModPage module_page_at(const Model& m, const ViewState& view, unsigned k) noexce
   const unsigned count = module_params(m, view);
   const char* name = nullptr;
   unsigned first = 0, n = 0;
-  if (m.modules != nullptr && m.project != nullptr && m.modules->page_at(*m.project, slot_of(view), k, name, first, n)) {
+  if (m.modules != nullptr && m.project != nullptr && m.modules->page_at(*m.project, target_of(view), k, name, first, n)) {
     out.first = first;
     out.count = first < count ? (n < count - first ? n : count - first) : 0u;
     out.name = name;
@@ -139,7 +161,9 @@ ModPage module_page_at(const Model& m, const ViewState& view, unsigned k) noexce
 }
 
 // OS-INSTUI S5: the slot in view is empty in an open project: the page is the type chooser.
-bool is_chooser(const Model& m, const ViewState& view) noexcept { return m.project != nullptr && m.project->instrument(slot_of(view)) == nullptr; }
+bool is_chooser(const Model& m, const ViewState& view) noexcept {
+  return !insert_target(view) && m.project != nullptr && m.project->instrument(slot_of(view)) == nullptr;
+}
 
 // OS-INSTUI S6: what a destination's SOURCE is (ip::SourceOff / SourceEnvelope / SourceLfo) for the instrument `in` (the stored enable and loop bytes: model::param_load, the one decode); Off without one.
 unsigned mod_source_of(const model::Instrument* in, unsigned e) noexcept {
@@ -158,8 +182,8 @@ const char* mod_dest_why(const model::Instrument* in, unsigned e) noexcept {
   if (in == nullptr || in->kind != model::InstrumentKind::Sample) {
     return nullptr;
   }
-  if (e == kEnvWtPos && in->sampler.play_mode != kPlayModeWavetable) {
-    return "WAVETABLE ONLY";
+  if (e == kEnvWtPos && in->sampler.play_mode != kPlayModeWavetable && in->sampler.play_mode != kPlayModeGranular) {  // OS-CEWTENV W7b: on a granular instrument slot 3 is the GRAN LENGTH
+    return "WAVETABLE OR GRANULAR";
   }
   if (e == kEnvGranPos && in->sampler.play_mode != kPlayModeGranular) {
     return "GRANULAR ONLY";
@@ -189,11 +213,24 @@ const char* mod_row_why(const model::Instrument* in, unsigned e, unsigned row) n
 
 Rows rows_of(const Model& m, const ViewState& view) noexcept {
   Rows r{};
+  if (insert_target(view) && !is_module_slot(m, view)) {
+    return r;  // OS-INSFX S5: an insert whose module is not loaded has no rows (the info line says why)
+  }
+  if (is_mix_page(m, view)) {
+    r.field[r.n++] = ip::Panning;  // OS-MODSENDS: the host's rows of a module instrument
+    r.field[r.n++] = ip::DelaySend;
+    r.field[r.n++] = ip::ReverbSend;
+    if (m.modules != nullptr && m.project != nullptr && m.modules->rate_capable(*m.project, slot_of(view))) {
+      r.field[r.n++] = ip::ModuleRate;  // OS-MODRATE S2: only a module that declares the RATE flag has the row
+    }
+    return r;
+  }
   if (is_module_slot(m, view)) {
     const ModPage page = module_page_at(m, view, module_page(m, view));
     r.n = page.count;
     for (unsigned i = 0; i < r.n; ++i) {
-      r.field[i] = static_cast<std::uint16_t>(ip::kModuleFirst + page.first + i);
+      // OS-INSFX S5: an insert's row is the module's parameter itself (ParamKind::Insert, field = the parameter); an instrument slot's carries kModuleFirst.
+      r.field[i] = static_cast<std::uint16_t>(insert_target(view) ? page.first + i : ip::kModuleFirst + page.first + i);
     }
     return r;
   }
@@ -225,6 +262,7 @@ Rows rows_of(const Model& m, const ViewState& view) noexcept {
     } else if (play_mode_is_slice(mode)) {
       r.field[r.n++] = ip::Slices;
       r.field[r.n++] = ip::Slice;
+      r.field[r.n++] = ip::PlayThru;  // OS-CEPLAYTHRU P2: after SLICE, in the slice modes only (the page stays at six rows there)
     }
     r.field[r.n++] = ip::PlayEngine;
     r.field[r.n++] = ip::PlayStereo;  // OS-STEREO step 2 (INST 1.5): after PLAY ENGINE, so the source page is at most seven rows (granular: PLAY MODE, four rows, ENGINE, STEREO)
@@ -236,7 +274,25 @@ Rows rows_of(const Model& m, const ViewState& view) noexcept {
     const unsigned e = envelope_of(view);
     const model::Instrument* in = m.project != nullptr ? m.project->instrument(slot_of(view)) : nullptr;
     r.field[r.n++] = static_cast<std::uint16_t>(ip::mod(e, ip::ModSource));
-    if (mod_source_of(in, e) == ip::SourceLfo) {
+    const unsigned source = mod_source_of(in, e);
+    if (source == ip::SourceWtEnv || source == ip::SourceWtLfo) {
+      // OS-CEWTENV W7a: a wavetable contour: WAVE, then the envelope's DURATION or the LFO's SPEED, the two warps, and (envelope) SUSTAIN and RELEASE, then AMOUNT. Eight rows at most.
+      const bool env = source == ip::SourceWtEnv;
+      r.field[r.n++] = static_cast<std::uint16_t>(ip::wt(e, ip::WtWave));
+      r.field[r.n++] = static_cast<std::uint16_t>(env ? ip::wt(e, ip::WtDuration) : ip::mod(e, ip::LfoSpeed));
+      r.field[r.n++] = static_cast<std::uint16_t>(ip::wt(e, ip::WtWarpX));
+      r.field[r.n++] = static_cast<std::uint16_t>(ip::wt(e, ip::WtWarpY));
+      if (env) {
+        r.field[r.n++] = static_cast<std::uint16_t>(ip::wt(e, ip::WtSustain));
+        r.field[r.n++] = static_cast<std::uint16_t>(ip::envelope(e, ip::EnvRelease));
+        // AMOUNT: a non-amp WT Env takes its depth from the slot's lfo[e].amount (put_mod), and the amp slot's WT Env has none (voices law F7), so slot 0 shows no row (seven rows).
+        if (e > 0) {
+          r.field[r.n++] = static_cast<std::uint16_t>(ip::mod(e, ip::LfoAmount));
+        }
+      } else {
+        r.field[r.n++] = static_cast<std::uint16_t>(ip::mod(e, ip::LfoAmount));
+      }
+    } else if (source == ip::SourceLfo) {
       for (unsigned f = ip::LfoShape; f < ip::kModFields; ++f) {
         r.field[r.n++] = static_cast<std::uint16_t>(ip::mod(e, f));
       }
@@ -258,10 +314,18 @@ unsigned row_of(const ViewState& view, const Rows& rows) noexcept {
 
 core::ParamId id_of_slot(unsigned slot, unsigned field) noexcept { return core::param_id(core::ParamKind::Instrument, slot, field); }
 
-core::ParamId id_of(const ViewState& view, unsigned field) noexcept { return id_of_slot(slot_of(view), field); }
+core::ParamId id_of(const ViewState& view, unsigned field) noexcept {
+  // OS-INSFX S5: an insert's row is ParamKind::Insert with the host's `where` as the index and the parameter as the field.
+  return insert_target(view) ? core::param_id(core::ParamKind::Insert, view.params.insert, field) : id_of_slot(slot_of(view), field);
+}
 
 // The value of a parameter as the project has it; the descriptor's default without a project or an instrument.
 float value_of(const Model& m, core::ParamId id, const core::ParamDesc& d, bool& live) noexcept {
+  if (is_insert_param(id)) {  // OS-INSFX S5: the insert's blob (the record's), the module's default past its `n`
+    const model::InsertRecord* rec = m.project != nullptr ? m.project->find_insert(core::param_index(id) / 2u, core::param_index(id) % 2u) : nullptr;
+    live = rec != nullptr;
+    return rec != nullptr && core::param_field(id) < rec->n ? rec->param[core::param_field(id)] : d.def;
+  }
   if (is_midi_channel_param(id)) {  // OS-INSTUI S8a: the virtual field reads the instrument
     const model::Instrument* in = m.project != nullptr ? m.project->instrument(core::param_index(id)) : nullptr;
     live = in != nullptr && in->kind == model::InstrumentKind::Midi;
@@ -272,9 +336,28 @@ float value_of(const Model& m, core::ParamId id, const core::ParamDesc& d, bool&
     live = in != nullptr && in->kind == model::InstrumentKind::Sample;
     return live ? static_cast<float>(in->stereo) : d.def;
   }
+  if (is_wt_param(id)) {  // OS-CEWTENV W7a: the virtual WT fields read the instrument (the same read as read_param)
+    const model::Instrument* in = m.project != nullptr ? m.project->instrument(core::param_index(id)) : nullptr;
+    live = in != nullptr && in->kind == model::InstrumentKind::Sample;
+    return live ? model::wt_param_value(*in, core::param_field(id)) : d.def;
+  }
+  if (is_play_thru_param(id)) {  // OS-CEPLAYTHRU P2: the virtual PLAY THRU field reads the instrument
+    const model::Instrument* in = m.project != nullptr ? m.project->instrument(core::param_index(id)) : nullptr;
+    live = in != nullptr && in->kind == model::InstrumentKind::Sample;
+    return live ? static_cast<float>(in->slice_thru) : d.def;
+  }
+  if (is_module_rate_param(id)) {  // OS-MODRATE: the Module instrument's RATE byte, the same read as read_param
+    const model::Instrument* in = m.project != nullptr ? m.project->instrument(core::param_index(id)) : nullptr;
+    live = in != nullptr && in->kind == model::InstrumentKind::Module;
+    return live ? static_cast<float>(in->rate) : d.def;
+  }
   if (m.project != nullptr && m.project->has_param(id)) {
     live = true;
-    return m.project->get_param(id);
+    const float v = m.project->get_param(id);
+    const unsigned f = core::param_field(id);
+    // OS-CEWTENV W7a: the shape byte of a slot that was a WT LFO is a contour; as an LFO it plays (and reads) as a Triangle (the same clamp as read_param)
+    const bool lfo_shape = core::param_kind(id) == core::ParamKind::Instrument && ip::is_mod_field(f) && (f - ip::kModFirst) % ip::kModStride == ip::LfoShape;
+    return lfo_shape && v > static_cast<float>(model::kLfoShapeSine) ? static_cast<float>(model::kLfoShapeTriangle) : v;
   }
   live = false;
   return d.def;
@@ -500,6 +583,33 @@ void draw_lfo(Renderer& r, const Rect& area, unsigned shape, float amount, float
   // the window, said in words above the plot's right edge (the ticks are every 5 steps, from the axis maths); a band says it is one
   const char* const cue = cycles > kLfoMaxCycles + 0.01f ? "16 STEPS  BAND" : "16 STEPS";
   r.text(area.x + area.w - r.text_width(cue, Face::Label), area.y - 16, cue, Color::TextDim, Face::Label);
+}
+
+// OS-CEWTENV W7b: the contour of a WT ENV or WT LFO slot with its warps, one line strip of kWtPlotPoints (evenly spaced over one pass, 0..1 high). `ms` is a WT ENV's length (the cue), 0 for a LFO's cycle.
+constexpr unsigned kWtPlotPoints = 64;
+
+void draw_wt(Renderer& r, const Rect& area, unsigned shape, std::uint8_t bend, unsigned ms) noexcept {
+  const plot::AxisSpec ax{plot::AxisKind::Linear, 0.0f, 1.0f};
+  plot::CurveStyle style;
+  style.max_vertices = kWtPlotPoints;
+  float ys[kWtPlotPoints];
+  audio::wt_make_bound(shape);  // main loop (the screen draws there): makes the contour when it is not made yet
+  for (unsigned i = 0; i < kWtPlotPoints; ++i) {
+    ys[i] = audio::wt_eval_shape(shape, static_cast<float>(i) / static_cast<float>(kWtPlotPoints - 1u), bend);
+  }
+  plot::draw_axes(r, area, ax, ax, style);
+  plot::CurveSeries series;
+  series.y = ys;
+  series.n = kWtPlotPoints;
+  (void)plot::draw_series(r, area, ax, ax, series, true, style, params_curve_scratch());
+  core::FixedString<16> cue;
+  if (ms != 0u) {
+    append_uint(cue, ms);
+    cue.append(" MS");
+  } else {
+    cue.assign("ONE CYCLE");
+  }
+  r.text(area.x + area.w - r.text_width(cue.c_str(), Face::Label), area.y - 16, cue.c_str(), Color::TextDim, Face::Label);
 }
 
 // ---- text -----------------------------------------------------------------------------------------------------------------
@@ -800,6 +910,9 @@ void params_how_clip(Renderer& r, core::FixedString<40>& text, int row_x) noexce
 void params_engine_text(const Model& model, unsigned slot, const model::Instrument& in, core::FixedString<16>& out) noexcept { engine_words(model, slot, in, out); }
 
 SlotKind params_slot_kind(const Model& model, const ViewState& view) noexcept {
+  if (insert_target(view)) {  // OS-INSFX S5: an insert's page is its module's generated page
+    return SlotKind::Module;
+  }
   const model::Instrument* in = model.project != nullptr ? model.project->instrument(slot_of(view)) : nullptr;
   if (in == nullptr) {
     return SlotKind::Empty;
@@ -807,7 +920,15 @@ SlotKind params_slot_kind(const Model& model, const ViewState& view) noexcept {
   return in->kind == model::InstrumentKind::Sample ? SlotKind::Sample : (in->kind == model::InstrumentKind::Midi ? SlotKind::Midi : SlotKind::Module);
 }
 
-Context ParamsScreen::field_context(const Model& model, const ViewState& view) const noexcept { return is_chooser(model, view) ? Context::InstrumentEmpty : Context::None; }
+// OS-INSFX S5: whether the page in view is an insert's (the Mixer INSERTS page's Enter on a bound cell).
+bool params_insert_target(const ViewState& view) noexcept { return view.params.insert != ParamView::kNoInsert; }
+
+ParamTarget params_target(const ViewState& view) noexcept { return target_of(view); }
+
+// OS-INSKEYS: an insert's page has its own field level (F6 BACK to the Mixer; F7 and Shift + F6 / F7 do nothing); an insert's page is never the chooser.
+Context ParamsScreen::field_context(const Model& model, const ViewState& view) const noexcept {
+  return insert_target(view) ? Context::InsertParams : (is_chooser(model, view) ? Context::InstrumentEmpty : Context::None);
+}
 
 int instrument_in_use(const Model& model, int from, int dir) noexcept {
   if (model.project == nullptr || dir == 0) {
@@ -828,6 +949,17 @@ unsigned ParamsScreen::module_page_count(const Model& model, const ViewState& vi
   return module_page_total(model, view);  // 0 for a module with no parameters: no page key at all, and F1 does nothing (OS-MODPAGEKEYS follow-up)
 }
 
+bool ParamsScreen::open_mix(const Model& model, ViewState& view) const noexcept {
+  if (insert_target(view) || !is_module_slot(model, view)) {
+    return false;
+  }
+  // a second press toggles back to the module's first page (a module with no parameters has no page key to leave MIX by)
+  view.page[screen_index(ScreenId::Instrument)] = is_mix_page(model, view) ? 0u : kMixPage;
+  view.params.row = 0;
+  view.params.discard_pending();
+  return true;
+}
+
 // The pages turned to by instrument.turn, which only the empty slot's type chooser binds to Left / Right now (a used slot's arrows edit the row), wrapping. A module's pages are its parameters' (eight to a page); the others' are the four groups, and the
 // ENV page keeps its second axis: Left / Right walk its six envelopes first and turn the page past either end (arriving from the left lands on the first envelope, from the right on the last).
 bool ParamsScreen::turn_page(const Model& model, ViewState& view, int dir, bool wrap) const noexcept {
@@ -842,6 +974,13 @@ bool ParamsScreen::turn_page(const Model& model, ViewState& view, int dir, bool 
       return false;
     }
     page = static_cast<std::uint8_t>(at_cc ? kMidiGroup : kCcGroup);
+    view.params.row = 0;
+    view.params.discard_pending();
+    return true;
+  }
+  if (is_mix_page(model, view)) {  // OS-MODSENDS: the MIX page is past the module's pages: either direction goes back into them (the first one, or the last)
+    const unsigned pages = module_page_count(model, view);
+    page = static_cast<std::uint8_t>(up > 0 || pages == 0u ? 0u : pages - 1u);
     view.params.row = 0;
     view.params.discard_pending();
     return true;
@@ -880,6 +1019,15 @@ bool ParamsScreen::turn(const Model& model, ViewState& view, int dir, bool wrap)
 
 bool ParamsScreen::repress(const Model& model, ViewState& view) const noexcept {
   std::uint8_t& page = view.page[screen_index(ScreenId::Instrument)];
+  if (insert_target(view)) {  // OS-INSFX S5: the Params button again goes to the insert's first page
+    const bool changed = page != 0u;
+    page = 0u;
+    if (changed) {
+      view.params.row = 0;
+      view.params.discard_pending();
+    }
+    return changed;
+  }
   const model::Instrument* inst = model.project != nullptr ? model.project->instrument(slot_of(view)) : nullptr;
   if (inst != nullptr && inst->kind == model::InstrumentKind::Midi) {
     const bool changed = page == ip::GroupCc;  // OS-INSTUI S8b: the Params button is F1: the MIDI page
@@ -903,8 +1051,8 @@ bool ParamsScreen::repress(const Model& model, ViewState& view) const noexcept {
 void params_key_row(const Model& model, const ViewState& view, ParamsKeyRow& out) noexcept {
   out.dim = 0;
   const model::Instrument* inst = model.project != nullptr ? model.project->instrument(slot_of(view)) : nullptr;
-  const bool module_slot = inst != nullptr && inst->kind == model::InstrumentKind::Module;
-  const bool sample_inst = inst != nullptr && inst->kind == model::InstrumentKind::Sample;
+  const bool module_slot = is_module_slot(model, view);  // OS-INSFX S5: an insert's page is a module's page too
+  const bool sample_inst = !insert_target(view) && inst != nullptr && inst->kind == model::InstrumentKind::Sample;
   const Screen& self = kParamsScreen;
   // OS-INSTUI D1: F1 follows the instrument (module: F1..F4 its pages), F6 / F7 show the neighbours (Shift: the nearest in use) and are dimmed where there is none, the keys that wait for
   // their slice (the source page, NAME .. SAVE) are dimmed too.
@@ -913,25 +1061,39 @@ void params_key_row(const Model& model, const ViewState& view, ParamsKeyRow& out
     out.label[i] = (shifted ? kParamsShiftKeys : kParamsSoftKeys)[i];
   }
   const int ins = view.instrument;
-  const int prev = shifted ? instrument_in_use(model, ins, -1) : (ins > 1 ? ins - 1 : 0);
-  const int next = shifted ? instrument_in_use(model, ins, 1) : (ins < static_cast<int>(model::kMaxInstruments) ? ins + 1 : 0);
-  if (prev != 0) {
-    neighbour_label(out.number[0], true, prev);
-    out.label[5] = out.number[0];
+  if (insert_target(view)) {  // OS-INSFX S5: an insert's page has no neighbouring instrument. OS-INSKEYS: F6 is BACK (to the Mixer's INSERTS page), F7 and Shift + F6 / F7 are blank (they do nothing: Context::InsertParams)
+    out.label[5] = shifted ? "" : "BACK";
+    out.label[6] = "";
   } else {
-    out.dim |= 1u << 5;
-  }
-  if (next != 0) {
-    neighbour_label(out.number[1], false, next);
-    out.label[6] = out.number[1];
-  } else {
-    out.dim |= 1u << 6;
+    const int prev = shifted ? instrument_in_use(model, ins, -1) : (ins > 1 ? ins - 1 : 0);
+    const int next = shifted ? instrument_in_use(model, ins, 1) : (ins < static_cast<int>(model::kMaxInstruments) ? ins + 1 : 0);
+    if (prev != 0) {
+      neighbour_label(out.number[0], true, prev);
+      out.label[5] = out.number[0];
+    } else {
+      out.dim |= 1u << 5;
+    }
+    if (next != 0) {
+      neighbour_label(out.number[1], false, next);
+      out.label[6] = out.number[1];
+    } else {
+      out.dim |= 1u << 6;
+    }
   }
   const bool clip = model.samples != nullptr && model.samples->clip_valid();
+  // OS-MODPRESET P4: SAVE (Shift + F5) is live on a bound module's page too, an instrument's or an insert's: it saves a preset, not a .pti.
+  const bool bound = model.modules != nullptr && model.project != nullptr && model.modules->bound_module(*model.project, params_target(view)) != nullptr &&
+                     model.modules->param_count(*model.project, params_target(view)) != 0u;
+  const bool preset_page = module_slot && bound;
   if (shifted) {
-    // OS-INSTUI S7: NAME, COPY and DELETE act on a used slot (COPY not on a module: its instance cannot be duplicated); PASTE needs a clipboard and no module in the way; SAVE is for a sample
-    // instrument. A dim key still answers when pressed, and says why on the strip.
-    out.dim |= (inst == nullptr ? 0x01u : 0u) | (inst == nullptr || module_slot ? 0x02u : 0u) | (!clip || module_slot ? 0x04u : 0u) | (inst == nullptr ? 0x08u : 0u) | (sample_inst ? 0u : 0x10u);
+    if (module_slot && !insert_target(view)) {
+      out.label[1] = "MIX";  // OS-MODSENDS: a module instrument cannot be copied; Shift + F2 opens its MIX page (PANNING and the two sends) instead
+    }
+    // OS-INSTUI S7: NAME, COPY and DELETE act on a used slot (on a module the key is MIX: its instance cannot be copied); PASTE needs a clipboard and no module in the way; SAVE is for a sample
+    // instrument, or a preset on a bound module's page. A dim key still answers when pressed, and says why on the strip. OS-INSFX S5: on an insert's page none of NAME..DELETE applies (they act
+    // on the instrument in view); SAVE does, when the insert's module is bound.
+    out.dim |= (inst == nullptr ? 0x01u : 0u) | (inst == nullptr ? 0x02u : 0u) | (!clip || module_slot ? 0x04u : 0u) | (inst == nullptr ? 0x08u : 0u) |
+               (sample_inst || preset_page ? 0u : 0x10u) | (insert_target(view) ? (preset_page ? 0x0Fu : 0x1Fu) : 0u);
   } else if (is_chooser(model, view)) {
     static constexpr const char* kChooser[5] = {"SAMPLE", "MIDI", "PASTE", "MODULE", "LOAD"};  // the type chooser (D4)
     for (unsigned i = 0; i < 5; ++i) {
@@ -942,10 +1104,11 @@ void params_key_row(const Model& model, const ViewState& view, ParamsKeyRow& out
     static constexpr const char* kModulePages[4] = {"1-8", "9-16", "17-24", "25-32"};
     const unsigned pages = kParamsScreen.module_page_count(model, view);
     for (unsigned i = 0; i < 5; ++i) {
-      // A key shows only a page the module has (OS-MODPAGEKEYS: a module of two pages has F1 and F2); a module with no parameters has no key at all; F3.. and F5 (not bound for a module) are blank, not dim, and the F-number boxes keep the row aligned.
+      // A key shows only a page the module has (OS-MODPAGEKEYS: a module of two pages has F1 and F2); a module with no parameters has no page key at all; the keys past its pages are blank, not dim, and the F-number boxes keep the row aligned.
       const char* named = i < 4u && i < pages ? module_page_at(model, view, i).name : nullptr;  // OS-INSTUI S10: the module's own name for the page (at most 7 characters), else the numbers
       out.label[i] = i >= 4u || i >= pages ? "" : (named != nullptr && named[0] != '\0' ? named : kModulePages[i]);
     }
+    out.label[4] = pages != 0u ? "PRESET" : "";  // OS-INSFX-ABI2 A9: F5 opens the list of the module's presets (a module has at most four pages, so F5 is free for it, on an instrument's page and an insert's); a module with no parameters has none
   } else if (inst == nullptr) {
     out.label[0] = "SAMPLE";  // no project open: the chooser is not offered, the keys do nothing
     out.dim |= 1u;
@@ -959,14 +1122,17 @@ void params_key_row(const Model& model, const ViewState& view, ParamsKeyRow& out
 }
 
 bool ParamsScreen::pad_roles(const Model& model, const ViewState& view, PadRole (&roles)[48]) const noexcept {
-  // OS-INSTUI S2: the pads' LEDs as on Pattern. NOTES lights nothing of its own (the platform's held-pad policy stands); PIANO and ISO draw their keys, but only the note pads: the jump and
-  // octave pads of PIANO do nothing on this screen, so they stay dark.
+  // OS-INSTUI S2: the pads' LEDs as on Pattern. PIANO and ISO draw their keys, but only the note pads: the jump and octave pads of PIANO do nothing on this screen, so they stay dark.
+  // OS-NOTESLED: NOTES lights its board's scale (every pad of the board is a note pad).
   const PadMode mode = view.padmode.fixed();
-  if (mode != PadMode::Piano && mode != PadMode::Iso) {
+  if (mode != PadMode::Piano && mode != PadMode::Iso && mode != PadMode::Notes) {
     return false;
   }
   static const PatternContent kNoContent{};  // (only PATS reads it)
   mode_roles(model, view, kNoContent, false, roles);
+  if (mode == PadMode::Notes) {
+    return true;
+  }
   for (unsigned pad = 0; pad < 48u; ++pad) {
     if ((mode == PadMode::Piano ? piano_pad(pad) : iso_pad(pad)).kind != PadKey::Note) {
       roles[pad] = PadRole::Off;
@@ -978,6 +1144,12 @@ bool ParamsScreen::pad_roles(const Model& model, const ViewState& view, PadRole 
 void ParamsScreen::enter(const Model& model, ViewState& view) const noexcept {
   const Rows rows = rows_of(model, view);
   view.params.row = static_cast<int>(row_of(view, rows));  // inside the page it opens on
+}
+
+// OS-INSFX S5: leaving the page ends an insert's page: the next visit is the instrument in view's (the target is view state, like the page).
+void ParamsScreen::leave(const Model& model, ViewState& view) const noexcept {
+  (void)model;
+  view.params.insert = ParamView::kNoInsert;
 }
 
 // ---- the cursor: the rows of the page, the envelope as the second axis ---------------------------------------------------
@@ -1035,8 +1207,10 @@ void ParamsScreen::render(const Model& model, const ViewState& view, Renderer& r
   const unsigned envelope = envelope_of(view);
   const unsigned cursor = row_of(view, rows);
   const unsigned slot = slot_of(view);
-  const model::Instrument* inst = model.project != nullptr ? model.project->instrument(slot) : nullptr;
-  const bool module_slot = inst != nullptr && inst->kind == model::InstrumentKind::Module;
+  const ParamTarget target = target_of(view);   // OS-INSFX S5: an insert's page, or the instrument slot's
+  const bool ins_page = insert_target(view);
+  const model::Instrument* inst = !ins_page && model.project != nullptr ? model.project->instrument(slot) : nullptr;
+  const bool module_slot = is_module_slot(model, view);
   const bool chooser = is_chooser(model, view);  // OS-INSTUI S5: an empty slot of an open project: the type chooser takes the body
   const int cell_w = t.geometry(Face::Data).cell_w;
   const auto hidden = [&](const Rect& rect) { return covers(covered, rect.x, rect.y, rect.w, rect.h); };
@@ -1061,7 +1235,7 @@ void ParamsScreen::render(const Model& model, const ViewState& view, Renderer& r
     values[i] = value_of(model, id_at(i), *d, live);
     value_text(*d, values[i], texts[i]);
   }
-  const bool has_value = rows.n != 0 && inst != nullptr;
+  const bool has_value = rows.n != 0 && (ins_page ? module_slot : inst != nullptr);
   const Source src = source_state(model, inst, slot);
   bool row_dim[ParamView::kMaxRows] = {};
   const char* row_why[ParamView::kMaxRows] = {};
@@ -1120,8 +1294,8 @@ void ParamsScreen::render(const Model& model, const ViewState& view, Renderer& r
   // The mini-curve under the rows: the filter's response, the envelope's shape.
   const int plot_y = row_y(rows.n) + 2 * m.pad + 8;
   const Rect plot_area = {l.plot_x, plot_y, l.plot_w, f.pane.y + f.pane.h - plot_y - 24};
-  if (module_slot) {  // the module's own views, side by side in the room under the rows (ADR 0002 amendment 1)
-    const unsigned views = model.modules != nullptr && model.project != nullptr ? model.modules->view_count(*model.project, slot) : 0u;
+  if (module_slot && !is_mix_page(model, view)) {  // the module's own views, side by side in the room under the rows (ADR 0002 amendment 1)
+    const unsigned views = model.modules != nullptr && model.project != nullptr ? model.modules->view_count(*model.project, target) : 0u;
     if (views != 0u) {
       model.modules->begin_view_frame();  // the views of this page share the display-list words module::kViewMaxWords gives them
     }
@@ -1129,7 +1303,7 @@ void ParamsScreen::render(const Model& model, const ViewState& view, Renderer& r
       const int w = plot_area.w / static_cast<int>(views);
       const Rect area = {plot_area.x + static_cast<int>(v) * w, plot_area.y, w - 2 * m.gap, plot_area.h};
       if (!hidden(area)) {
-        (void)model.modules->draw_slot_view(r, *model.project, slot, v, area);
+        (void)model.modules->draw_slot_view(r, *model.project, target, v, area);
       }
     }
   } else if (!chooser && (group == ip::GroupFilter || group == ip::GroupEnvelope) && plot_area.h > 40 && !hidden({0, plot_y - 4, l.card_x, plot_area.h + 32})) {
@@ -1144,7 +1318,15 @@ void ParamsScreen::render(const Model& model, const ViewState& view, Renderer& r
                   at(ip::Resonance));
     } else {
       const auto env = [&](unsigned f2) { return at(ip::envelope(envelope, f2)); };
-      if (mod_source_of(inst, envelope) == ip::SourceLfo) {
+      const unsigned plot_source = mod_source_of(inst, envelope);
+      if (plot_source == ip::SourceWtEnv || plot_source == ip::SourceWtLfo) {
+        // OS-CEWTENV W7b: the contour with its warps (a WT ENV runs over its duration: the slot's decay, 1 or less plays 1000 ms)
+        const unsigned dur = static_cast<unsigned>(model::wt_param_value(*inst, ip::wt(envelope, ip::WtDuration)) + 0.5f);
+        const unsigned bend = (static_cast<unsigned>(ip::wt_nibble_of(static_cast<int>(model::wt_param_value(*inst, ip::wt(envelope, ip::WtWarpX))))) << 4) |
+                              ip::wt_nibble_of(static_cast<int>(model::wt_param_value(*inst, ip::wt(envelope, ip::WtWarpY))));
+        draw_wt(r, plot_area, static_cast<unsigned>(model::wt_param_value(*inst, ip::wt(envelope, ip::WtWave)) + 0.5f), static_cast<std::uint8_t>(bend),
+                plot_source == ip::SourceWtEnv ? (dur <= 1u ? 1000u : dur) : 0u);
+      } else if (plot_source == ip::SourceLfo) {
         // the period from the table and the index the engine uses (the amp slot's 24 rates are the last 24 of the 29: voices.h kAmpRateBase)
         const unsigned amp = envelope == 0 ? 1u : 0u;
         unsigned rate = static_cast<unsigned>(at(ip::mod(envelope, ip::LfoSpeed)) + 0.5f);
@@ -1291,8 +1473,19 @@ void ParamsScreen::render(const Model& model, const ViewState& view, Renderer& r
     strip.divider();
     strip.transport(view.playing);
     strip.divider();
-    append_dec(text, static_cast<unsigned>(slot + 1), 2);
-    text.append(" ");
+    if (ins_page) {  // OS-INSFX S5: the strip names the cell: "T1 A" / "T3 B" (S6: "MASTER")
+      if (target.master()) {
+        text.assign("MASTER");
+      } else {
+        text.assign("T");
+        append_uint(text, target.track() + 1u);
+        text.append(target.ins_slot() != 0u ? " B" : " A");
+      }
+      text.append(" ");
+    } else {
+      append_dec(text, static_cast<unsigned>(slot + 1), 2);
+      text.append(" ");
+    }
     const bool midi_inst = inst != nullptr && inst->kind == model::InstrumentKind::Midi;
     std::size_t name_max = sample_inst || midi_inst ? 8 : 12;
     core::FixedString<24> page;  // a module's page, "P1" (the page's name is the header's right-hand "TONE 1/2")
@@ -1301,12 +1494,14 @@ void ParamsScreen::render(const Model& model, const ViewState& view, Renderer& r
     if (module_slot) {
       // OS-BUG-LEGIB: KIND, ENGINE and PAGE follow the name, and the row must end before the load readouts (it ran into VOX). The cells they leave are shared out: the engine's name (a file
       // stem, up to 31 characters) is clipped first, but leaves the instrument's name 8 cells (as a sample's); the instrument's name takes the rest, up to 12.
-      page.assign("P");
-      append_uint(page, module_page(model, view) + 1u);
-      engine_name = ModuleUi::module_name_of(*model.project, slot);
+      page.assign(is_mix_page(model, view) ? "MIX" : "P");  // OS-MODSENDS
+      if (!is_mix_page(model, view)) {
+        append_uint(page, module_page(model, view) + 1u);
+      }
+      engine_name = ModuleUi::module_name_of(*model.project, target);
       const auto field_w = [&](const char* label, const char* value) { return r.text_width(label, Face::Label) + m.gap + r.text_width(value, Face::Data) + 4 * m.gap; };
       const int name_x = row.x() + r.text_width("INS", Face::Label) + m.gap + r.text_width("00 ", Face::Data);
-      const int rest = field_w("KIND", kind_name(inst)) + field_w("ENGINE", "") + field_w("PAGE", page.c_str());
+      const int rest = field_w("KIND", ins_page ? "INSERT" : kind_name(inst)) + field_w("ENGINE", "") + field_w("PAGE", page.c_str());
       const int cells = (ui::kScreenW - 2 * m.pad - StatusStrip::load_width(r) - name_x - 4 * m.gap - rest) / cell_w;  // (the INS field's own group gap follows the name)
       const std::size_t total = cells > 0 ? static_cast<std::size_t>(cells) : 0u;
       engine_max = total > 8u ? total - 8u : 0u;
@@ -1317,7 +1512,7 @@ void ParamsScreen::render(const Model& model, const ViewState& view, Renderer& r
       engine_max = engine_len;
       name_max = total - engine_len < name_max ? total - engine_len : name_max;
     }
-    append_clipped(text, inst != nullptr && inst->name[0] != '\0' ? inst->name : "--", name_max);
+    append_clipped(text, ins_page ? ModuleUi::module_name_of(*model.project, target) : (inst != nullptr && inst->name[0] != '\0' ? inst->name : "--"), name_max);
     row.field("INS", Face::Data, text.c_str(), Color::ChromeDim, Color::ChromeText);
     if (sample_inst || midi_inst) {
       // OS-INSTUI S1: "07 NAME  ONE SHOT / MODERN" (read-only): the play mode and the engine it plays with (Auto resolved: "AUTO>AMIGA"); MIDI: "MIDI / CH 3". The kind is F1's label, the page the
@@ -1340,14 +1535,14 @@ void ParamsScreen::render(const Model& model, const ViewState& view, Renderer& r
       params_how_clip(r, how, row.x());
       row.field("", Face::Data, how.c_str(), Color::ChromeDim, Color::ChromeText);
     } else {
-      row.field("KIND", Face::Data, kind_name(inst), Color::ChromeDim, Color::ChromeText);
+      row.field("KIND", Face::Data, ins_page ? "INSERT" : kind_name(inst), Color::ChromeDim, Color::ChromeText);
       if (module_slot) {  // the module's name, and the page of its parameters
         core::FixedString<32> engine;
         append_clipped(engine, engine_name, engine_max);
         row.field("ENGINE", Face::Data, engine.c_str(), Color::ChromeDim, Color::ChromeText);
         row.field("PAGE", Face::Data, page.c_str(), Color::ChromeDim, Color::ChromeText);
       } else {
-        row.field("PAGE", Face::Data, chooser ? "CHOOSE" : model::param_group_name(core::ParamKind::Instrument, group), Color::ChromeDim, Color::ChromeText);
+        row.field("PAGE", Face::Data, ins_page ? "NO MODULE" : (chooser ? "CHOOSE" : model::param_group_name(core::ParamKind::Instrument, group)), Color::ChromeDim, Color::ChromeText);
       }
     }
     strip.cpu(model.load);
@@ -1371,11 +1566,14 @@ void ParamsScreen::render(const Model& model, const ViewState& view, Renderer& r
       head.assign("DEST ");  // OS-INSTUI S6: the destination of the modulation (the six envelope slots)
       append_uint(head, envelope + 1u);
       head.append("/6 ");
-      head.append(model::envelope_name(envelope));
+      head.append(envelope == kEnvWtPos && inst != nullptr && inst->kind == model::InstrumentKind::Sample && inst->sampler.play_mode == kPlayModeGranular ? "Gran Length"
+                                                                                                                                                          : model::envelope_name(envelope));  // OS-CEWTENV W7b
       r.text(l.card_x, cap_y, head.c_str(), Color::ChromeText, Face::Label);
     }
     if (chooser) {
       head.assign("NEW INSTRUMENT");
+    } else if (is_mix_page(model, view)) {
+      head.assign("MIX: PAN AND SENDS");  // OS-MODSENDS: the host's rows, not the module's
     } else if (module_slot) {
       const unsigned pages = module_page_total(model, view);
       const char* named = module_page_at(model, view, module_page(model, view)).name;
@@ -1387,7 +1585,7 @@ void ParamsScreen::render(const Model& model, const ViewState& view, Renderer& r
     } else if (midi_page) {
       head.assign(group == kCcGroup ? "CC 2/2" : "MIDI 1/2");  // OS-INSTUI S8b: the two pages of a MIDI instrument
     } else {
-      head.assign(model::param_group_name(core::ParamKind::Instrument, group));
+      head.assign(ins_page ? "NOT LOADED" : model::param_group_name(core::ParamKind::Instrument, group));
       head.append(" ");
       const unsigned first = sample_inst ? 0u : 1u;  // (the source page is a sample instrument's)
       append_uint(head, key_of_group(group) - first + 1u);
@@ -1400,13 +1598,13 @@ void ParamsScreen::render(const Model& model, const ViewState& view, Renderer& r
   // The info line and the key row.
   if (!hidden(f.info)) {
     core::FixedString<64> text;
-    if (module_slot && rows.n == 0) {  // a module instrument with no parameter rows: the module is not there, or it has no parameters (the project keeps it, it plays nothing)
+    if ((module_slot || ins_page) && rows.n == 0) {  // a module with no parameter rows: the module is not there, or it has no parameters (the project keeps it, it plays nothing)
       text.assign("MODULE ");
-      append_clipped(text, ModuleUi::module_name_of(*model.project, slot), 24);
-      if (model.modules != nullptr && model.modules->bound_module(*model.project, slot) != nullptr) {
+      append_clipped(text, ModuleUi::module_name_of(*model.project, target), 24);
+      if (model.modules != nullptr && model.modules->bound_module(*model.project, target) != nullptr) {
         text.append(" NO PARAMETERS: nothing to edit");  // OS-MODPAGEKEYS follow-up: the key row is blank too, the screen says why
       } else {
-        text.append(" NOT LOADED: instrument muted");
+        text.append(ins_page ? " NOT LOADED: the effect is not running" : " NOT LOADED: instrument muted");
       }
     } else if (chooser) {
       text.assign("instrument ");
@@ -1414,7 +1612,18 @@ void ParamsScreen::render(const Model& model, const ViewState& view, Renderer& r
       text.append("   empty   F1..F5: choose");
     } else if (!has_value) {
       text.assign(model.project == nullptr ? "NO PROJECT OPEN: the defaults are shown" : "FREE INSTRUMENT SLOT: the defaults are shown");
-    } else if (module_slot && model.modules != nullptr && model.modules->bound_module(*model.project, slot) != nullptr) {
+    } else if (ins_page) {  // OS-INSFX S5: the insert's page: the cell, the module's name, what to do
+      if (target.master()) {
+        text.assign("MASTER");
+      } else {
+        text.assign("T");
+        append_uint(text, target.track() + 1u);
+        text.append(target.ins_slot() != 0u ? " B" : " A");
+      }
+      text.append("   ");
+      append_clipped(text, ModuleUi::module_name_of(*model.project, target), 10);
+      text.append("   encoder: edit");
+    } else if (module_slot && model.modules != nullptr && model.modules->bound_module(*model.project, target) != nullptr) {
       // OS-GOV: what the render measured of the instrument's module: "TB-303 ~16% PER VOICE" ("UNMEASURED" until a note has sounded), or that the safety net muted it.
       text.assign("instrument ");
       append_dec(text, static_cast<unsigned>(slot + 1), 2);
@@ -1422,7 +1631,7 @@ void ParamsScreen::render(const Model& model, const ViewState& view, Renderer& r
       if (model.modules->slot_muted(slot)) {
         text.append("MUTED (CPU BUDGET)");
       } else {
-        append_clipped(text, model.modules->bound_module(*model.project, slot)->name, 10);
+        append_clipped(text, model.modules->bound_module(*model.project, target)->name, 10);
         text.append(" ");
         append_voice_cost(text, model.modules->voice_cost(slot));
       }

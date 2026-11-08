@@ -522,6 +522,24 @@ TEST_CASE("fw arm pad: an unpadded image gets a padded copy that is checked and 
   CHECK(r.said("update: handing over to the bootloader (pad-v100.ptf)"));
 }
 
+TEST_CASE("fw arm pad: an unpadded image that reaches the last flash sector is refused with its reason, with or without the pad word, nothing written (OS-BUG-LASTSECTOR)") {
+  const std::string reaches = to_hex(good_image(0xFF001 - 0x410, false));
+  for (const char* tail : {"", " pad"}) {
+    CAPTURE(tail);
+    Rig r;
+    r.store.put_file("last.ptf", std::vector<std::uint8_t>(reaches.begin(), reaches.end()));
+    r.command("fw arm last.ptf " + hex8s(file_crc(reaches)) + tail);
+    CHECK(r.said("ERR image reaches last flash sector"));
+    CHECK(!r.said("padded "));
+    CHECK(!r.said("ERR image not padded"));
+    CHECK(!r.svc.armed());
+    CHECK(token_of(r).empty());
+    CHECK(r.store.count_calls("begin ") == 0u);
+    CHECK(r.store.files.size() == 2u);  // (the rig's own official image and the file: nothing added)
+    CHECK(!r.host.called("quiesce"));
+  }
+}
+
 TEST_CASE("fw arm pad: the pad word changes nothing for a good image, and every other defect, a wrong CRC or a bad name still refuses with nothing written") {
   const std::string padded = good_text(3000);
   {  // already padded: armed as it is, no copy

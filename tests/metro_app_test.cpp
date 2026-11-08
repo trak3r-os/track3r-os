@@ -139,6 +139,11 @@ struct Rig {
   const model::Step& step(int track, int row) { return project().pattern(1)->steps[track][row]; }
   void set(unsigned field, unsigned value) { CHECK(app->device_settings().set(field, static_cast<float>(value)) == model::Status::Ok); }
   std::string message() const { return app->message(); }
+  // OS-NOTESLED: with no count-in the pads are the NOTES board's lights (the default C, chromatic: the root Front, the next note Back), neither a count-in's flash (all Front or all Back) nor nothing.
+  bool notes_lit() const {
+    PadRole roles[48];
+    return app->pad_lights(roles) && roles[36] == PadRole::Front && roles[37] == PadRole::Back;
+  }
 };
 
 }  // namespace
@@ -300,7 +305,7 @@ TEST_CASE("metro app: the strip counts the beats left, a beat at a time, and the
   rig.play(0, 31);  // inside the beat: the text stays, the flash goes on its own time
   CHECK(rig.message() == "RECORDING IN 4..");
   rig.pass(150);  // past the flash
-  CHECK_FALSE(rig.app->pad_lights(roles));
+  CHECK(rig.notes_lit());
   rig.play(0, 28);  // the second beat
   CHECK(rig.message() == "RECORDING IN 4.. 3..");
   CHECK(rig.app->pad_lights(roles));
@@ -326,7 +331,7 @@ TEST_CASE("metro app: the strip counts the beats left, a beat at a time, and the
   rig.play(0, 0);
   rig.pass(1000);
   CHECK(rig.message().empty());
-  CHECK_FALSE(rig.app->pad_lights(roles));
+  CHECK(rig.notes_lit());
 }
 
 TEST_CASE("metro app: a stopped transport shows no count-in, and a stop in the middle puts the pads back") {
@@ -334,14 +339,14 @@ TEST_CASE("metro app: a stopped transport shows no count-in, and a stop in the m
   PadRole roles[48];
   rig.play(0, 0, false);
   CHECK(rig.message().empty());
-  CHECK_FALSE(rig.app->pad_lights(roles));
+  CHECK(rig.notes_lit());
   rig.play(0, 14);
   CHECK(rig.app->pad_lights(roles));
   CHECK(rig.message() == "RECORDING IN 4..");
   rig.play(0, 0, false);  // stopped (the published count-in is 0 with it)
   CHECK(rig.message().empty());  // the countdown goes with the stop, not a beat (500 ms at 120 BPM) and 150 ms later
   rig.pass(200);
-  CHECK_FALSE(rig.app->pad_lights(roles));
+  CHECK(rig.notes_lit());
   CHECK(rig.state().count_in.beat == 0u);
   // A stale count-in word of a stopped transport is ignored.
   rig.play(0, 9, false);

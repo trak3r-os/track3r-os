@@ -48,6 +48,10 @@
 //               the MIDI out stage can place it to a fraction of a sample (the clock is the one event that is timed finer than a sample)
 //   MidiStart, MidiContinue, MidiStop   transport bytes; value 0
 //   MidiSpp     a Song Position Pointer in MIDI beats (one beat is a step) | value the beat count (0..16383)
+//   MidiMtcQf   (OS-MTC A3, docs/specs/OS-MTC.md) a MIDI Time Code quarter frame `F1 0nnn dddd` | a the data byte `0nnndddd` | value the signed fraction of a sample, as MidiClock (the exact time to a fraction of a sample);
+//               a clock-class event: it goes to the ports the clock goes to (MidiConfig::out_ports), not to the notes' route
+//   MidiMtcFull (OS-MTC A3) a MIDI Time Code full frame, the SysEx `F0 7F 7F 01 01 hh mm ss ff F7`, sent at a run start and a locate | value the time packed in 24 bits (midi::mtc::pack_full: frames 5 bits, seconds 6, minutes 6,
+//               hours 5, the rate code 2, low to high); due at the event's sample, no fraction
 //   Step        the song cursor entered a step (UI step change, ADR 0013 D6 events ring) | a pattern id | value step index | order
 //               position in `b`/`c` as a 16-bit number (b low, c high), 0xFFFF in pattern mode | flags kEvCountIn for a step of the count-in (OS-METRO): the engine does not offer it to a take that waits
 //               for a step, so a take armed before a count-in begins at the step after it
@@ -87,6 +91,8 @@ enum class EventKind : std::uint8_t {
   MidiPitchBend = 25,  // OS-INSTUI S8b
   MidiChanAt = 26,
   MidiPolyAt = 27,
+  MidiMtcQf = 28,    // OS-MTC A3: a MIDI Time Code quarter frame
+  MidiMtcFull = 29,  // OS-MTC A3: a MIDI Time Code full frame
   // engine to UI and app
   Step = 32,
   Pattern = 33,
@@ -184,6 +190,21 @@ inline constexpr std::uint8_t kModGroupTune = 21;
 // them at a note's start (voices.h PERFORMANCE LAYER, SMP POS AND SMP END); the step FX 22 of the Position group has no consumer. audio_model_ids_test holds the groups equal to the sequencer's.
 inline constexpr std::uint8_t kModGroupPosition = 9;
 inline constexpr std::uint8_t kModGroupSampleEnd = 22;
+// OS-CEWTENV W6a: the tracker-ce step FX w and y (model ids 96, 97: seq::FxGroup::AmpEnvFx / FilterEnvFx). A ModSet with .a the FX id and .b its byte (x high nibble, y low nibble), flags the group;
+// the group's end puts the instrument's envelope back. Voice-side, per note: VoicePool::ifx_event (flash), not the dispatch.
+inline constexpr std::uint8_t kModGroupAmpEnv = 23;
+inline constexpr std::uint8_t kModGroupFilterEnv = 24;
+inline constexpr std::uint8_t kFxAmpEnv = 96;
+inline constexpr std::uint8_t kFxFilterEnv = 97;
+// OS-CEWTENV W6b: the tracker-ce step FX z (model id 98: seq::FxGroup::GranLenFx), the grain length of a granular instrument (F11). ModSet .a 98, .b the value 0..100 (held there), flags the group;
+// the group's end puts the instrument's length back. Same route as w and y (VoicePool::ifx_event).
+inline constexpr std::uint8_t kModGroupGranLen = 25;
+inline constexpr std::uint8_t kFxGranLen = 98;
+// F11: 0..50 maps linearly to 44..4410 samples and 50..100 to 4410..44100 (integer, rounded down; the caller holds it to the sample length). Constant divisors, never in the sample loop.
+constexpr std::uint32_t gran_len_fx_samples(std::uint32_t v) noexcept {
+  v = v > 100u ? 100u : v;
+  return v <= 50u ? 44u + v * 4366u / 50u : 4410u + (v - 50u) * 39690u / 50u;
+}
 // The Reverse group (OS-PERF-REVERSE, P8): seq::FxGroup::Reverse, the step FX 26 (ModSet.a == kFxReverse, b 0 forward / 1 backward) and the performance layer's PLAYBACK (ModSet.value 0 / 1). The sampler
 // voices read both at a note's start (voices.h PERFORMANCE LAYER, PLAYBACK). audio_model_ids_test holds the group and the FX number equal to the sequencer's.
 inline constexpr std::uint8_t kModGroupReverse = 8;

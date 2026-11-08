@@ -3,6 +3,7 @@
 
 #include <o3os/app/dj.h>
 #include <o3os/app/enc_accel.h>
+#include <o3os/app/events_view.h>
 #include <o3os/app/export_view.h>
 #include <o3os/app/file_import.h>
 #include <o3os/app/file_view.h>
@@ -16,6 +17,7 @@
 #include <o3os/app/pattern_edit.h>
 #include <o3os/app/pattern_view.h>
 #include <o3os/app/record_view.h>
+#include <o3os/app/pattern_tools_view.h>
 #include <o3os/app/sample_load_view.h>
 #include <o3os/app/screens/ids.h>
 #include <o3os/app/sample_edit_state.h>
@@ -23,6 +25,7 @@
 #include <o3os/app/song_tools_view.h>
 #include <o3os/app/song_view.h>
 #include <o3os/app/text_entry.h>
+#include <o3os/app/verb_menu_view.h>
 #include <o3os/app/wave_state.h>
 #include <o3os/audio/play_position.h>
 #include <o3os/core/notify.h>
@@ -61,11 +64,20 @@ struct ModulesView {
   std::uint8_t app_row = 0;
   // OS-INSFX S4: what the picker is for. kEngine: the engine of the instrument in view (F1 of the Instrument page); else the insert it fills, the host's key track * 2 + slot (the Mixer's INSERTS page, Insert).
   static constexpr std::uint8_t kEngine = 0xFF;
+  // OS-APPSNAV: kApps, the picker lists the installed apps that are not tools (Shift + Pattern), F1 launches the one under the cursor.
+  static constexpr std::uint8_t kApps = 0xFE;
   std::uint8_t insert_where = kEngine;
+  // OS-INSFX-ABI2 A9: the F5 PRESET list's cursor (an index of preset_list.h's list; the target is the parameter page the list is over).
+  std::uint8_t preset = 0;
+  // OS-MODPRESET P4: the CARD section of that list: whether the last scan_presets had more files than it listed (the overlay says "+ MORE ON CARD").
+  bool preset_more = false;
   // OS-H3A, Pattern F7 TOOLS: the list's cursor, the line it says when a launch was refused (a pointer to a literal; the notification strip waits behind a modal overlay), and whether the running app
   // was opened from the list (its exit chord then goes back to Pattern, one level of return, and not to MODULES).
   std::uint8_t tools = 0;
   bool from_tools = false;
+  // OS-PTOOLS2 S6: the running app (opened from TOOLS) is drawn in the right-hand panel beside the Pattern grid, not on its own page: its few declared rows, the block as target. ModuleAppScreen draws it, the
+  // F-key row is the app's (overlay_keys), the arrows stop at the declared rows (App::feed_module_app). Cleared when the page is left.
+  bool panel = false;
   // OS-KEYROWDLG S5 (ABI 1.9): the running app declares its keys, so its page draws the app's Shift + F1..F7 labels while Shift is held (follows_shift). Set by App::poll_modules, cleared when the page is left.
   bool app_keys = false;
   const char* tools_msg = "";
@@ -80,7 +92,8 @@ enum class DiskKeys : std::uint8_t { Off, Restart, Confirm, Finishing };
 // refusal is said inside it: a pointer to a literal).
 struct TextEntryView {
   // Instrument (OS-INSTUI S7): NAME, Shift + F1 of the Instrument screen. Track, Pattern and Project (OS-NAMES): NAME of the Mixer (Shift + F1), the Song (Shift + F6) and the File screen (Shift + F6).
-  enum class Target : std::uint8_t { None, SaveAs, Instrument, Track, Pattern, Project };
+  // Preset (OS-MODPRESET P4): the name a module preset is saved under, Shift + F5 on a module instrument's or an insert's parameter page and in the F5 PRESET list.
+  enum class Target : std::uint8_t { None, SaveAs, Instrument, Track, Pattern, Project, Preset };
   TextEntry entry;
   Target target = Target::None;
   std::uint8_t subject = 0;  // what Track and Pattern name: the track slot (0-based) or the pattern id, fixed when the keyboard opens
@@ -173,11 +186,15 @@ struct ViewState {
   SampleEditState sedit;  // the Sample edit screen's window, selection and hand-offs (OS-011a)
   ParamView params;     // the generated parameter page's row and envelope (OS-002d)
   LearnView learn;      // the Learn overlay's list cursor (OS-013a)
+  core::ParamId enc_target = core::ParamId::None;  // OS-ENCLEARN: the one parameter that Instr + FX1 and the encoder move (set by Instr + FX2 on a Learn row; session only, never saved; main loop only)
   MixerView mixer;      // the Mixer screen's cursor (OS-011b)
   ModulesView modules;  // the MODULES screen, the engine picker and the app page (OS-012b)
   TextEntryView text;   // the on-screen keyboard overlay (OS-FU2)
   StepPopupView popup;  // the step popup (OS-FU3)
   FillView fill;        // the Fill dialog's rows and the last fill (OS-PTOOLS)
+  VerbMenuView verb_menu;  // OS-PTOOLS2 S3: the F7 verb menu's cursor (verb_menu_view.h)
+  PatternToolsView ptools;  // OS-PTOOLS2 S2: the Pattern TOOLS dialog's rows (the menu's TRANSPOSE / INSTRUMENT rows open it; pattern_tools_view.h)
+  EventsView events;    // OS-MIDIREC S1b: the EVENTS overlay over the Pattern screen (events_view.h)
   SongToolsView tools;  // the Song screen's TOOLS dialog: its rows and where it acts (OS-SONGMAP)
   HelpView help;        // the help overlay: its page and the scroll of each page (OS-HELP)
   HeldPreview hold;     // the Preview key of the sample screens (OS-FU3)
@@ -222,6 +239,14 @@ struct ViewState {
     Request request = Request::None;
   };
   DiskView disk;
+  // OS-MTC B3: what the chase says (App::set_mtc_status; the platform tells it every pass): the Config MIDI page's MTC IN row shows it as `MTC 01:00:12:05 25 LOCKED`. state: 0 Off (MTC IN is Off), 1 waiting for a master,
+  // 2 reading, 3 armed, 4 locked, 5 freewheel, 6 rate not followed, 7 past the song's end (midi::MtcState); time: the master's last time, hh << 24 | mm << 16 | ss << 8 | ff; code: 0 24, 1 25, 2 29.97, 3 30 fps.
+  struct MtcView {
+    std::uint8_t state = 0;
+    std::uint8_t code = 1;
+    std::uint32_t time = 0;
+  };
+  MtcView mtc;
   // OS-STATUSLED: the Config > DISPLAY screen's STATUS LED row (BLINK / OFF): whether the status LED's heartbeat blinks (a fault code
   // still shows with OFF). A session choice, RAM only, not saved, like READ ONLY above: BLINK at every boot. The platform reads it
   // (App::status_led_blink) and drives the LED with it.
@@ -259,7 +284,8 @@ struct ViewState {
   // OS-SMALL2, OS-KEYROWDLG: a dialog owns the F-key row. Every modal overlay does (the Navigator, Fill and the export progress since OS-SMALL2; Learn, the choosers, the pickers, the keyboard and the step popup since
   // OS-KEYROWDLG): the row is its own prompt's (key_prompt.h), painted once by render_scene, and the screen under it draws none. On the unit the screen's labels showed through the Navigator's ("F1 GOTTERN") although
   // the simulator's fill hides them (why the chip's did not is open: OS-SIMKEY), so nothing under an owning row may depend on a fill, and one predicate says it for every row site. (Notify is never `overlay`: a notice is not a dialog.)
-  bool overlay_keys() const noexcept { return (overlay != OverlayId::None && overlay != OverlayId::Notify) || disk_keys != DiskKeys::Off; }
+  // OS-PTOOLS2 S6: an app in the TOOLS panel owns the row as a dialog does (its labels, drawn by ModuleAppScreen over the Pattern grid, which draws none).
+  bool overlay_keys() const noexcept { return (overlay != OverlayId::None && overlay != OverlayId::Notify) || disk_keys != DiskKeys::Off || (screen == ScreenId::ModuleApp && modules.panel); }
   // The text of the notification on screen, or "".
   const char* shown_message() const noexcept {
     return shown_overlay() == OverlayId::Notify ? notify.head().text.c_str() : "";

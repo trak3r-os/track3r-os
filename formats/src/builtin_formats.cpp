@@ -50,7 +50,9 @@ bool sniff_og_project(const std::uint8_t* head, std::size_t n, std::uint32_t) no
 
 bool sniff_og_pattern(const std::uint8_t* head, std::size_t n, std::uint32_t size) noexcept {
   return (is(head, n, "KS", 2) || is(head, n, "PM", 2)) &&
-         (size == 0 || size == og::kPatternBytes8 || size == og::kPatternBytes12);
+         (size == 0 || size == og::kPatternBytes8 || size == og::kPatternBytes12 || size == og::kPatternBytes16 ||
+          size == og::kPatternBytes6_8 || size == og::kPatternBytes6_12 || size == og::kPatternBytes6_16);
+  // v5 sizes: 6,184, 9,260 and 12,336 (16 tracks, OS-CEPAT S1b); v6 sizes: OS-CEPAT S1
 }
 
 bool is_instrument_head(const std::uint8_t* head, std::size_t n) noexcept {

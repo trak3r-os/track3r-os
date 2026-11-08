@@ -17,7 +17,6 @@ namespace {
 
 namespace fill = model::fill;
 
-constexpr const char* kScopeNames[3] = {"BLOCK", "TRACK", "PATTERN"};
 constexpr const char* kWhatNames[5] = {"NOTE", "INSTR", "VOLUME", "FX 1", "FX 2"};
 constexpr const char* kTypeNames[4] = {"EVERY N", "RANDOM", "EUCLID", "SCALE"};
 constexpr const char* kModeNames[3] = {"CONST", "RAMP", "RANDOM"};
@@ -28,7 +27,6 @@ using core::ParamUnit;
 
 // name, unit text, names, knots, min, max, def, detents, coarse, list_count, unit, curve, flags, group
 constexpr ParamDesc kRows[kFillRows] = {
-    {"SCOPE", "", kScopeNames, nullptr, 0.0f, 2.0f, 1.0f, 2, 1, 3, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
     {"WHAT", "", kWhatNames, nullptr, 0.0f, 4.0f, 0.0f, 4, 1, 5, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
     {"TYPE", "", kTypeNames, nullptr, 0.0f, 3.0f, 0.0f, 3, 1, 4, ParamUnit::Enum, ParamCurve::Linear, 0, 0},
     {"N", "", nullptr, nullptr, 1.0f, 32.0f, 1.0f, 31, 4, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},
@@ -37,12 +35,11 @@ constexpr ParamDesc kRows[kFillRows] = {
     {"FROM", "", nullptr, nullptr, 0.0f, 255.0f, 0.0f, 255, 10, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},  // the range is the domain of WHAT (model::fill::domain)
     {"TO", "", nullptr, nullptr, 0.0f, 255.0f, 0.0f, 255, 10, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0},
 };
-// Row 4 of TYPE RANDOM, and row 6 of an FX fill (the picker's entries 1..59: None is not one).
+// Row 2 of TYPE RANDOM, and row 4 of an FX fill (the picker's entries 1..59: None is not one).
 constexpr ParamDesc kDensity = {"DENSITY", "%", nullptr, nullptr, 0.0f, 100.0f, 30.0f, 100, 10, 0, ParamUnit::Int, ParamCurve::Linear, 0, 0};
 constexpr ParamDesc kFxType = {"FX TYPE", "", nullptr, nullptr, 1.0f, static_cast<float>(model::fx::kPickerCount - 1u), 1.0f, model::fx::kPickerCount - 2u, 1, 0,
                                ParamUnit::Int, ParamCurve::Linear, 0, 0};
-static_assert(sizeof(kScopeNames) / sizeof(kScopeNames[0]) == 3 && sizeof(kWhatNames) / sizeof(kWhatNames[0]) == 5 && sizeof(kTypeNames) / sizeof(kTypeNames[0]) == 4 &&
-                  sizeof(kModeNames) / sizeof(kModeNames[0]) == 3,
+static_assert(sizeof(kWhatNames) / sizeof(kWhatNames[0]) == 5 && sizeof(kTypeNames) / sizeof(kTypeNames[0]) == 4 && sizeof(kModeNames) / sizeof(kModeNames[0]) == 3,
               "an Enum row has one name for each value");
 
 bool is_fx(const FillView& f) noexcept { return f.plan.what == fill::What::Fx1 || f.plan.what == fill::What::Fx2; }
@@ -62,9 +59,9 @@ const ParamDesc& row_desc(const FillView& f, FillRow row) noexcept {
   return fill_desc(row);
 }
 
-bool enumerated(FillRow row) noexcept { return row == FillRow::Scope || row == FillRow::What || row == FillRow::Type || row == FillRow::Mode || row == FillRow::Key; }
+bool enumerated(FillRow row) noexcept { return row == FillRow::What || row == FillRow::Type || row == FillRow::Mode || row == FillRow::Key; }
 
-// Row 4 is the count of the TYPE: EVENTS of EUCLID, DENSITY of RANDOM, N of the others (the three fields stay separate).
+// Row 2 is the count of the TYPE: EVENTS of EUCLID, DENSITY of RANDOM, N of the others (the three fields stay separate).
 std::uint8_t& count_of(FillView& f) noexcept {
   return f.plan.type == fill::Type::Euclid ? f.plan.events : (f.plan.type == fill::Type::Random ? f.plan.density : f.plan.n);
 }
@@ -98,9 +95,10 @@ bool fill_row_used(const FillView& f, FillRow row) noexcept {
   }
 }
 
+bool fill_random(const FillView& f) noexcept { return f.plan.type == fill::Type::Random || (fill_row_used(f, FillRow::Mode) && f.plan.mode == fill::Mode::Random); }
+
 float fill_get(const FillView& f, FillRow row) noexcept {
   switch (row) {
-    case FillRow::Scope: return static_cast<float>(f.scope);
     case FillRow::What: return static_cast<float>(f.plan.what);
     case FillRow::Type: return static_cast<float>(f.plan.type);
     case FillRow::Count: return static_cast<float>(count_of(f));
@@ -118,7 +116,6 @@ float fill_get(const FillView& f, FillRow row) noexcept {
 void fill_set(FillView& f, FillRow row, float value) noexcept {
   const unsigned v = static_cast<unsigned>(core::param_clamp(row_desc(f, row), value) + 0.5f);
   switch (row) {
-    case FillRow::Scope: f.scope = static_cast<FillScope>(v); break;
     case FillRow::What:
       if (f.plan.what != static_cast<fill::What>(v)) {
         f.plan.what = static_cast<fill::What>(v);
@@ -239,7 +236,9 @@ unsigned fill_text(const FillView& f, FillRow row, char* out, unsigned cap, int 
     s.assign("-");
   } else if (row == FillRow::Key) {
     if (is_fx(f)) {
-      s.assign(fx_picker_name(model::fx::picker_index(f.plan.fx_type)));
+      char name[kFxNameMax];
+      fx_picker_name(model::fx::picker_index(f.plan.fx_type), name, sizeof name);
+      s.assign(name);
     } else {
       const unsigned scale = f.plan.scale < core::kScaleCount ? f.plan.scale : 0u;
       if (scale > 1u) {  // "No scale" and "Chromatic" take every note: the root plays no part
@@ -263,6 +262,65 @@ unsigned fill_text(const FillView& f, FillRow row, char* out, unsigned cap, int 
   }
   while (n > 0u && out[n - 1u] == ' ') {  // "Phrygian " carries a trailing space
     --n;
+  }
+  out[n] = '\0';
+  return n;
+}
+
+// OS-PTOOLS2 S3c: the footer of the dialog, in the Song TOOLS way: `BLOCK  TRACK 3  ROWS 1-16`. The target is the selection: the cursor step (STEP) with nothing selected or a one-cell selection, a BLOCK range, the whole
+// column of Shift + Up at row 1 (TRACK), and PATTERN when the block covers every track. The numbers are the screen's (1-based). (The `column` flag of the selection does not outlive Shift, so the kind comes from the block's extent.)
+unsigned fill_target_text(const Selection& sel, int cursor_row, int cursor_track, int steps, int tracks, char* out, unsigned cap) noexcept {
+  if (cap == 0u) {
+    return 0u;
+  }
+  const Selection::Block b = sel.block(cursor_row, cursor_track);
+  core::FixedString<48> s;
+  const auto rows = [&] {
+    if (b.row1 > b.row0) {
+      s.append("ROWS ");
+      append_uint(s, static_cast<unsigned>(b.row0 + 1));
+      s.append("-");
+      append_uint(s, static_cast<unsigned>(b.row1 + 1));
+    } else {
+      s.append("ROW ");
+      append_uint(s, static_cast<unsigned>(b.row0 + 1));
+    }
+  };
+  const bool single_cell = b.row0 == b.row1 && b.track0 == b.track1;
+  const bool whole_rows = b.row0 == 0 && b.row1 >= steps - 1;
+  const bool all_tracks = b.track0 == 0 && tracks > 1 && b.track1 >= tracks - 1;
+  if (!sel.active || single_cell) {
+    s.assign("STEP  TRACK ");
+    append_uint(s, static_cast<unsigned>(b.track0 + 1));
+    s.append("  ");
+    rows();
+  } else if (whole_rows && all_tracks) {
+    s.assign("PATTERN  ALL TRACKS  ");
+    rows();
+  } else if (whole_rows && b.track0 == b.track1) {
+    s.assign("TRACK ");
+    append_uint(s, static_cast<unsigned>(b.track0 + 1));
+    s.append("  ");
+    rows();
+  } else {
+    s.assign("BLOCK  ");
+    if (b.track1 > b.track0) {
+      s.append("TRACKS ");
+      append_uint(s, static_cast<unsigned>(b.track0 + 1));
+      s.append("-");
+      append_uint(s, static_cast<unsigned>(b.track1 + 1));
+    } else {
+      s.append("TRACK ");
+      append_uint(s, static_cast<unsigned>(b.track0 + 1));
+    }
+    s.append("  ");
+    rows();
+  }
+  const char* text = s.c_str();
+  unsigned n = 0;
+  while (text[n] != '\0' && n + 1u < cap) {
+    out[n] = text[n];
+    ++n;
   }
   out[n] = '\0';
   return n;

@@ -208,6 +208,10 @@ void OgFolderLoader::finish_file(Progress progress) noexcept {
   if (progress == Progress::Done) {
     if (pattern) {
       report_.patterns += rep.patterns;
+      const og::ImportReport& ir = pattern_.import_report();  // reader_ is pattern_ here
+      report_.micromoves_dropped += ir.micromoves_dropped;
+      report_.values_clamped += ir.values_clamped;
+      report_.ce_fx_cleared += ir.ce_fx_cleared;
     } else {
       report_.instruments += rep.instruments;
       report_.pcm_frames += rep.pcm_frames;
@@ -371,6 +375,13 @@ std::size_t describe_load(const OgFolderLoader& loader, char* out, std::size_t c
       }
       if (r.unverified_version) {
         line.str(", unverified version");
+      }
+      if (r.micromoves_dropped != 0u) {  // OS-CEPAT S2 (A10): the strip names what a v6 pattern lost
+        line.str(", ").dec(r.micromoves_dropped).str(r.micromoves_dropped == 1u ? " MICRO-MOVE NOT KEPT" : " MICRO-MOVES NOT KEPT");
+      }
+      const std::uint32_t changed = r.values_clamped + r.ce_fx_cleared;
+      if (changed != 0u) {
+        line.str(", ").dec(changed).str(" VALUES CHANGED");
       }
       break;
     }

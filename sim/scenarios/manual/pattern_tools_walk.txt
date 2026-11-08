@@ -19,13 +19,17 @@ tap rec
 wait 20
 assert state screen=PATTERN
 
-# Step 2. Press `F4` (FILL). The Fill dialog opens on TRACK / NOTE / EVERY N.
+# Step 2. Hold `Shift` and press `Up` on step 1: the whole track is selected. Press `F4` (FILL). The Fill dialog opens on WHAT NOTE / TYPE EVERY N, and its footer says where the fill goes: TRACK 1  ROWS 1-64.
+press shift
+tap up
+release shift
+wait 20
 tap f4
 wait 20
 snap walk_2
 
-# Step 3. `Down` twice and `Right` twice: TYPE reads EUCLID. `Down` and `Right` once more: EVENTS 5 (from 4). The line shows the five hits.
-tap down 2
+# Step 3. `Down` once and `Right` twice: TYPE reads EUCLID. `Down` and `Right` once more: EVENTS 5 (from 4). The line shows the five hits.
+tap down
 tap right 2
 tap down
 tap right
@@ -37,14 +41,13 @@ tap f1
 wait 20
 snap walk_4
 
-# Step 5. Press `F7` (TOOLS). The list opens with EXPORT PATTERN first, then DUPLICATE x2, EXPAND x2 and SHRINK /2. No picture: step 6 shows the list's result.
+# Step 5. Press `F7` (the verb menu). The sixteen verbs are on the pads, DUPLICATE, EXPAND and SHRINK among them. No picture: step 6 shows the result.
 wait 3000
 tap f7
 wait 20
 
-# Step 6. `Down` twice, to EXPAND x2, and `F1` (RUN). Each note moves to every second step and the strip names the new length.
-tap down 2
-tap f1
+# Step 6. Press pad 11 (EXPAND x2). Each note moves to every second step and the strip names the new length.
+pad 10
 wait 20
 snap walk_6
 

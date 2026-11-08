@@ -31,7 +31,22 @@ core::SQ32 floor_div(core::SQ32 a, core::SQ32 b) noexcept {
   return q;
 }
 
-core::SQ32 float_to_q(float samples) noexcept { return static_cast<core::SQ32>(samples * kQ); }
+// A Q32 value as a float, through its two 32-bit halves (an int64 -> float conversion would call __aeabi_l2f): the high word plus the sign
+// carry of the low one, the low word read signed, so that v = hi * 2^32 + lo holds exactly and a small negative v keeps its low word small.
+constexpr float q32_to_float(core::SQ32 v) noexcept {
+  const std::uint64_t u = static_cast<std::uint64_t>(v);
+  const std::int32_t hi = static_cast<std::int32_t>(static_cast<std::uint32_t>(u >> 32)) + static_cast<std::int32_t>(static_cast<std::uint32_t>(u) >> 31);
+  const std::int32_t lo = static_cast<std::int32_t>(static_cast<std::uint32_t>(u));
+  return static_cast<float>(hi) * kQ + static_cast<float>(lo);
+}
+
+using detail::float_to_q;  // in the header, testable (midi_clock_dll_test.cpp checks it at its bound)
+
+// The floor of the widen and re-acquire bands: 4 ms, above the ~3 ms a +-2 ms jittered clock's error reaches at any tempo, so jitter alone never
+// widens or re-acquires the loop. The re-acquire band is reacquire_pct of a period AND this floor: at a fast tempo the percent alone falls below
+// the jitter (at 300 BPM, 20 % of 8.33 ms is 1.67 ms), and a jittered master would then re-acquire every few clocks, each re-acquire re-anchoring
+// the phase to one raw jittered stamp instead of slewing (OS-MIDISYNC M4).
+constexpr core::SQ32 kWidenMin = float_to_q(0.004f * kSampleRate);
 
 }  // namespace
 
@@ -48,6 +63,13 @@ void ClockDll::reset(std::uint64_t origin, core::Q32 nominal_period) noexcept {
   err_ = 0;
   err_n_ = 0;
   err_pos_ = 0;
+  drop_score_ = 0;
+  drop_extra_ = 0;
+  run_extra_ = 0;
+  run_n_ = 0;
+  slow_hold_ = false;
+  err_run_ = 0;
+  wide_clocks_ = 0;
   for (core::SQ32& e : err_hist_) {
     e = 0;
   }
@@ -73,8 +95,9 @@ void ClockDll::rebase_if_needed() noexcept {
 }
 
 float ClockDll::omega() const noexcept {
-  const std::uint32_t mhz = since_acquire_ < cfg_.acquire_clocks ? cfg_.acquire_mhz : cfg_.track_mhz;
-  const float period_s = static_cast<float>(period_) * kInvQ / kSampleRate;  // seconds per clock
+  const bool wide = since_acquire_ < cfg_.acquire_clocks || wide_clocks_ > 0u;  // a sustained error widens the loop, bounded
+  const std::uint32_t mhz = wide ? cfg_.acquire_mhz : cfg_.track_mhz;
+  const float period_s = q32_to_float(period_) * kInvQ / kSampleRate;  // seconds per clock
   float w = kTwoPi * (static_cast<float>(mhz) * 0.001f) * period_s;
   if (w > kOmegaMax) {
     w = kOmegaMax;
@@ -91,6 +114,12 @@ void ClockDll::start_fit(core::SQ32 t) noexcept {
   last_obs_ = t;
   t1_ = t + period_;
   since_acquire_ = 0;
+  drop_score_ = 0;
+  drop_extra_ = 0;
+  run_extra_ = 0;
+  run_n_ = 0;
+  err_run_ = 0;
+  wide_clocks_ = 0;
   state_ = State::Started;
 }
 
@@ -112,6 +141,7 @@ ClockDll::Result ClockDll::fit_clock(core::SQ32 t) noexcept {
   }
   const std::uint32_t want = cfg_.fit_clocks < 2u ? 2u : (cfg_.fit_clocks > 16u ? 16u : cfg_.fit_clocks);
   fit_u_[fit_n_++] = u;
+  slow_hold_ = false;  // two clocks fitted: the period is the master's again (settled_tick())
   ++tick_;
   ++stats_.clocks;
   last_obs_ = t;
@@ -193,27 +223,87 @@ ClockDll::Result ClockDll::on_clock(core::SQ32 t) noexcept {
     stats_.missing += static_cast<std::uint32_t>(drops);
     return Result::Reacquired;
   }
+  // A master that has slowed looks like one that drops clocks, clock after clock: a sustained density of "missing" clocks (the leaky score) re-acquires
+  // as well, and the extra ticks those dropouts had added are taken back, so the tick stays the master's clock index. OS-MIDISYNC M3: a 180 -> 90 BPM step
+  // is exactly this — every clock looked like one missing, the loop saw no error at all and ran on at the old tempo. The level is 800, so four consecutive
+  // missing-clock observations (leaky score 848) re-acquire: at the old 1024 (six of them) the tick ran ahead past the next step boundary (a step is 6 clocks)
+  // before the take-back, and the pull-back re-crossed that boundary, so the sequencer emitted the step twice (OS-MIDISYNC M5: after the 180 -> 90 jump of
+  // battery test 07, 2 steps missing and 2 extra).
+  drop_score_ = drop_score_ * 7u / 8u + (drops >= 1 ? 256u : 0u);
+  if (drop_score_ >= cfg_.drop_score_max) {
+    tick_ += 1u;
+    if (drop_extra_ <= tick_) {
+      tick_ -= drop_extra_;
+    }
+    bad_run_ = 0;
+    start_fit(t);
+    slow_hold_ = true;  // the slowdown the dropouts were: start_fit keeps the old period until the second clock
+    ++stats_.reacquires;
+    return Result::Reacquired;
+  }
+  if (drops >= 1) {
+    run_extra_ += static_cast<std::uint32_t>(drops);
+    ++run_n_;
+    drop_extra_ += static_cast<std::uint32_t>(drops);
+    if (drop_extra_ < static_cast<std::uint32_t>(drops)) {
+      drop_extra_ = 0xFFFFFFFFu;  // saturate
+    }
+  } else if (drop_score_ < 256u) {
+    // The score window holds no drop any more: the drops counted so far were genuine dropouts and the tick count keeps them. Only the drops
+    // inside the window are taken back at a re-acquire, so a long dropout run followed by a re-fit cannot subtract hundreds of ticks.
+    drop_extra_ = 0;
+  }
+  if (drops == 0) {
+    run_extra_ = 0;
+    run_n_ = 0;  // a clean observation: the run of skipped clocks ends, the tick is the master's index
+  }
   const core::SQ32 tp = t1_ + drops * period_;  // the prediction for this clock
   const core::SQ32 e = t - tp;
 
-  // A tempo that has jumped shows as an error that stays large: three in a row restart the loop from this clock.
-  if (abs64(e) * 100 > period_ * static_cast<core::SQ32>(cfg_.reacquire_pct)) {
+  // A tempo that has jumped shows as an error that stays large: three in a row restart the loop from this clock. The band has the 4 ms floor of
+  // the widen band below, so a jittered master at a fast tempo (where reacquire_pct of a period is under the jitter) does not read as a jump.
+  if (abs64(e) * 100 > period_ * static_cast<core::SQ32>(cfg_.reacquire_pct) && abs64(e) > kWidenMin) {
     ++bad_run_;
   } else {
     bad_run_ = 0;
   }
   if (bad_run_ >= 3u) {
     tick_ += static_cast<std::uint64_t>(kk);
+    if (drop_extra_ != 0u && drop_extra_ <= tick_) {
+      tick_ -= drop_extra_;  // the "missing" clocks were the master slowing down, not missing
+    }
     bad_run_ = 0;
     start_fit(t);
     ++stats_.reacquires;
     return Result::Reacquired;
   }
 
+  // A sustained error of one sign beyond the jitter band — a tempo step the reacquire threshold above does not reach — widens the loop to the acquire
+  // bandwidth for a bounded run of clocks; when the error clears, the widening runs out and the narrow loop is back (the band's floor of 4 ms keeps a
+  // master's +-2 ms of jitter out of this at any tempo, so the steady-state rejection does not change).
+  if (abs64(e) * 100 > period_ * static_cast<core::SQ32>(cfg_.widen_pct) && abs64(e) > kWidenMin) {
+    const std::int32_t s = e > 0 ? 1 : -1;
+    err_run_ = (err_run_ != 0 && (err_run_ > 0) == (s > 0)) ? err_run_ + s : s;
+    const std::int32_t lim = static_cast<std::int32_t>(cfg_.widen_clocks);
+    if (err_run_ > lim) {
+      err_run_ = lim;
+    } else if (err_run_ < -lim) {
+      err_run_ = -lim;
+    }
+    if (err_run_ >= lim || err_run_ <= -lim) {
+      if (wide_clocks_ == 0u) {
+        ++stats_.widens;  // a new widening episode: the loop goes to the acquire bandwidth
+      }
+      wide_clocks_ = cfg_.widen_max;
+    }
+  } else {
+    err_run_ = 0;
+  }
+
   const float w = omega();
   const float b = kSqrt2 * w;
   const float c = w * w;
-  const float ef = static_cast<float>(e) * kInvQ;  // samples
+  const float ef = q32_to_float(e) * kInvQ;  // samples
   t0_ = tp;
   t1_ = tp + float_to_q(b * ef) + period_;
   period_ += float_to_q(c * ef);
@@ -222,6 +312,9 @@ ClockDll::Result ClockDll::on_clock(core::SQ32 t) noexcept {
   last_obs_ = t;
   if (since_acquire_ < 0xFFFFFFFFu) {
     ++since_acquire_;
+  }
+  if (wide_clocks_ > 0u) {
+    --wide_clocks_;
   }
   err_ = e;
   err_hist_[err_pos_] = e;
@@ -252,7 +345,7 @@ std::uint32_t ClockDll::bpm_x100() const noexcept {
   return core::bpm_x100_from_tick_q32(static_cast<core::Q32>(period_) / 8u);
 }
 
-float ClockDll::last_error_samples() const noexcept { return static_cast<float>(err_) * kInvQ; }
+float ClockDll::last_error_samples() const noexcept { return q32_to_float(err_) * kInvQ; }
 
 bool ClockDll::locked() const noexcept {
   if (state_ != State::Running || since_acquire_ < cfg_.acquire_clocks || err_n_ < 8u) {

@@ -743,7 +743,7 @@ def map_test(root):
         assert rc == 0, out
         svg = open(os.path.join(d, "docs/manual/img/map.svg"), encoding="utf-8").read()
         assert svg.count('class="k"') == 11 and ">Sample edit</text>" in svg and ">Mixer</text>" in svg and "Hold Shift + F1 + F8" in svg, svg
-        assert "Navigator: Shift + Pattern," in svg and "press F8" in svg and "leave it with F8" in svg, svg
+        assert "Navigator: Song + Pattern," in svg and "press F8" in svg and "leave it with F8" in svg, svg
         rc, out = run(dg, base + ["--check"])
         assert rc == 0, out
         reg = os.path.join(d, "app/src/screens/registry.cpp")

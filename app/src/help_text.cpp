@@ -1,496 +1,57 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// OS-HELP H1 (docs/specs/OS-HELP.md): the help pages. Every page is written to spec item 7: what the screen is for, KEYS, PADS. The lines are wrapped to kHelpKeyCols / kHelpTextCols (help_text.h);
-// tests/help_test.cpp holds them to ASCII and to the width of the dialog in every theme. Text condensed from docs/manual/ and checked against app/src/bindings.cpp: where they disagree the binding is the truth.
-#include <o3os/app/help_text.h>
+// OS-HELP (docs/specs/OS-HELP.md) / OS-FLASHDIET A7 (docs/specs/OS-FLASHDIET.md): the help pages. The text
+// lives in the authoring file app/help/pages.txt, packed at build time by tools/help_pack.py into the
+// generated help_blob.cpp (app/CMakeLists.txt): one raw-deflate stream, a page index, and the page titles in
+// flash. help_page() below serves a page from that stream: it inflates the page into the 4 KiB page buffer
+// (help_page_buf(), help_blob.h) only when the index differs from the last call (a one-entry cache), and the
+// returned reference is valid until the next call with another index. The decode skips to the page's offset
+// in the stream, so a page turn inflates just that page (the last page is the worst case: the whole text).
+// Main loop only, synchronous, never in the render or an ISR. The lines are held as before -- ASCII, and no
+// line wider than the dialog in any built-in theme (tests/help_test.cpp; tools/help_pack.py validates
+// pages.txt the same way at build time). Text condensed from docs/manual/ and checked against
+// app/src/bindings.cpp: where they disagree the binding is the truth.
+#include <o3os/app/help_blob.h>
 
 namespace o3os::app {
 
+#ifndef O3OS_HELP_PAGE_BUF_EXTERNAL
+namespace {
+// The 4 KiB page buffer help_page() serves from. On the MK66 image the platform owns it in SDRAM_STATIC
+// (app/CMakeLists.txt sets O3OS_HELP_PAGE_BUF_EXTERNAL, which drops this copy, and
+// platform/mk66/src/app_main.cpp defines help_page_buf()); host, the simulator and QEMU keep this one.
+HelpPageBuf g_help_page_buf;
+}  // namespace
+HelpPageBuf& help_page_buf() noexcept { return g_help_page_buf; }
+#endif
+
 namespace {
 
-constexpr HelpLine kGlobalLines[] = {
-    {nullptr, "These keys work on every screen, whatever the screen is. Each screen has its own page after"},
-    {nullptr, "this one: Left and Right turn the pages here, Shift + Config opens the page of the screen"},
-    {nullptr, "you are on."},
-    {"", ""},
-    {"KEYS", ""},
-    {"SCREEN BUTTONS", "Open that screen: Pattern, Song, Params, Sample Play, Sample Edit,"},
-    {"", "Sample Load, Sample Rec, Master, Performance, File, Config. Press the"},
-    {"", "same button again for the next page of that screen."},
-    {"SHIFT + PATTERN", "Open the Navigator, a map of every screen. Arrows or the encoder"},
-    {"", "choose, F8 goes there, F7 closes it."},
-    {"PATTERN + ENCODER", "Hold Pattern and turn the encoder: the tempo, 1 BPM a click."},
-    {"", "Shift first: 0.1 BPM. A pad tapped under Pattern taps the tempo."},
-    {"", "Pattern and Shift + Pattern act when you let go, not when you press."},
-    {"SONG, HELD", "Look at Song while you hold it (0.4 s), then go back to the screen you"},
-    {"", "came from."},
-    {"MASTER + ENCODER", "Hold Master and turn the encoder: the master volume, from any screen."},
-    {"SHIFT + MASTER", "Next colour theme: Amiga, Black, White."},
-    {"FX1 + FX2", "Both FX column keys together open Learn: move a control or send a MIDI"},
-    {"", "CC to bind it. F8 closes it."},
-    {"PLAY", "Start or stop the playback. It works from every screen."},
-    {"SHIFT + REC", "On Pattern, turn LIVE recording on or off. On the other screens it"},
-    {"", "does nothing."},
-    {"SHIFT + CONFIG", "Open this help for the screen you are on. Any other key closes it."},
-    {"ARROWS", "Move the cursor of the screen. Held, they repeat, faster the longer"},
-    {"", "you hold."},
-    {"ENCODER", "Change the value under the cursor, or scroll a list."},
-    {"SHIFT + ENCODER", "A coarser step, or one page on a list. What it means is on each"},
-    {"", "screen's page."},
-    {"SHIFT + UP / DOWN", "On a list, one page at a time. On Pattern and Song they select a block"},
-    {"", "or a range."},
-    {"F1 - F8", "The soft keys. The key row above them says what each does on this"},
-    {"", "screen."},
-    {"SHIFT + F1 - F8", "The second row of soft keys, shown while Shift is held. A blank key"},
-    {"", "does nothing."},
-    {"POWER, HELD 2 S", "Switch off. A shorter press only shows a hint and does nothing."},
-    {"SHIFT, THEN POWER", "Save a screenshot to the card: Screenshots/SHOT_nnnn.bmp."},
-    {"AT POWER-ON", "Hold Shift + F1 + F7 and the card shows on the computer as a disk."},
-    {"", "Hold Shift + F1 + F8 and the INPUT TEST screen opens."},
-    {"", ""},
-    {"PADS", ""},
-    {nullptr, "The pads do what the screen says; each page has its own PADS part. On Pattern, Song and"},
-    {nullptr, "Perform a lone Shift hold shows the TRACKS layer of the pads for as long as it is held:"},
-    {nullptr, "mute, mute mode and solo per track."},
-};
-
-constexpr HelpLine kSongLines[] = {
-    {nullptr, "The Song screen builds a song from patterns. The order list holds the slots; each slot holds"},
-    {nullptr, "one pattern, and the slots play in order from the top."},
-    {nullptr, "Press Song again for the second page, ARRANGEMENT: the start bar and the length in bars of"},
-    {nullptr, "each slot."},
-    {nullptr, "Right of the PAT column is the track map, a grid of slots by tracks. Right enters it, Left"},
-    {nullptr, "leaves it. In the map the copy, paste and delete keys act on the selected cells."},
-    {"", ""},
-    {"KEYS", ""},
-    {"F1 PLAY PAT", "Play the pattern of the cursor's slot in a loop. Press it again to"},
-    {"", "stop."},
-    {"F2 PLAY SNG", "Play the song from the selected slot, as Play does."},
-    {"F3 ADD SLOT, INSERT", "Add a slot after the cursor, with the same pattern number."},
-    {"SHIFT + INSERT", "DUP PAT: add a slot after the cursor that holds a copy of the pattern."},
-    {"F4 DEL SLOT", "Remove the cursor's slot."},
-    {"DELETE", "Remove the slot. In the track map it clears the selected cells"},
-    {"", "instead."},
-    {"F5 UNIQUE", "Give the slot, or the range, its own copy of a pattern that other"},
-    {"", "slots share."},
-    {"F6 TOOLS", "A dialog over the selection: TRANSPOSE, INSTRUMENT, CLEAR and EXPORT"},
-    {"", "WAV."},
-    {"F7 TEMPO", "Put the encoder on the tempo. Each press also taps the tempo: two taps"},
-    {"", "set it."},
-    {"F8 UNDO", "Undo the last Song edit. Pattern and Params undo their own edits."},
-    {"SHIFT + F8 REDO", "Redo the Song edit you undid."},
-    {"ENCODER", "Change the pattern number of the cursor's slot. After F7 it changes"},
-    {"", "the tempo."},
-    {"SHIFT + ENCODER", "The same in finer steps; the tempo moves by 0.1 BPM."},
-    {"UP / DOWN", "Move the cursor along the slots."},
-    {"LEFT / RIGHT", "Between the PAT column and the track map, and along the tracks of the"},
-    {"", "map."},
-    {"SHIFT + UP / DOWN", "Select a range of slots."},
-    {"SHIFT + LEFT / RIGHT", "Select a range of tracks in the map."},
-    {"SHIFT + F1 - F4", "Jump to the start, a quarter, the middle and three quarters of the"},
-    {"", "list."},
-    {"SHIFT + F5 END", "Jump to the last slot."},
-    {"SHIFT + F6 NAME", "Name the pattern of the cursor's slot on the on-screen keyboard."},
-    {"SHIFT + F7 PADS", "Switch the pads between TRACKS and SLOTS."},
-    {"COPY", "Copy the range of slots, or the selected cells of the map."},
-    {"SHIFT + COPY", "Paste at the cursor."},
-    {"SHIFT + DELETE", "Cut: copy the slots or the cells, then remove them."},
-    {"COPY + UP / DOWN", "Hold Copy and press Up or Down to move the range of slots one place."},
-    {"NOTE", "Jump to the next slot that holds the cursor's pattern. SHIFT + NOTE:"},
-    {"", "the previous one."},
-    {"REC", "While the song plays, queue the cursor's slot to play next. Press"},
-    {"", "again to cancel."},
-    {"SONG", "Press again for the ARRANGEMENT page. Hold it from another screen to"},
-    {"", "peek."},
-    {"", ""},
-    {"PADS", ""},
-    {nullptr, "Two modes, chosen with Shift + F7. TRACKS is the mode at power-on."},
-    {"TRACKS", "The pads are four rows of twelve, one column for each track. The first"},
-    {"", "row moves the track cursor of the map, the second mutes the track, the"},
-    {"", "third sets its mute mode, the fourth solos it."},
-    {"SLOTS", "The 48 pads are the 48 slots of the page that holds the cursor."},
-    {"", "Stopped, a tap moves the cursor to that slot. Playing, it queues that"},
-    {"", "slot to play next; tap the queued slot to cancel."},
-    {"SHIFT, HELD", "A lone Shift hold shows the TRACKS layer for as long as it is held."},
-};
-
-constexpr HelpLine kPatternLines[] = {
-    {nullptr, "Pattern is where you write the notes: a grid of steps by tracks, with the columns NOTE,"},
-    {nullptr, "INSTR, VOL and two FX for each track. Rec switches between WATCH (browse: the pads only"},
-    {nullptr, "sound) and STEP (edit: a red frame, the pads write). Shift + Rec starts LIVE: the notes you"},
-    {nullptr, "play are written at the playhead."},
-    {"", ""},
-    {"KEYS", ""},
-    {"NOTE, INSTR, VOL, FX", "Go to that column. Hold one for a popup of its values: the arrows, the"},
-    {"", "encoder or a pad choose, letting go closes it."},
-    {"REC", "Switch WATCH and STEP."},
-    {"F1 PATTERN", "Hold for the PATTERN chooser: pads, arrows or encoder pick. While"},
-    {"", "playing, the pick switches the playing pattern."},
-    {"F2 LENGTH, F3 JUMP", "A tap opens or closes the chooser, a hold opens it until you let go."},
-    {"", "LENGTH is the steps of the pattern; JUMP is how far the cursor moves"},
-    {"", "after a write."},
-    {"F4 FILL", "The Fill dialog, in STEP only: a rule that writes many steps; F1"},
-    {"", "applies it, F8 closes."},
-    {"F5 PREVIEW", "Sound the note under the cursor while you hold it."},
-    {"F6 INVERT", "Reverse the steps of the block, track by track. In STEP, with a block."},
-    {"F7 TOOLS", "The TOOLS list: export, duplicate, expand, shrink, the tool apps. Not"},
-    {"", "while the view follows the play line."},
-    {"F8 UNDO", "Undo the last edit. Shift + F8 is REDO."},
-    {"UP / DOWN", "Move the cursor along the steps. LEFT / RIGHT move along the columns"},
-    {"", "and tracks."},
-    {"SHIFT + ARROWS", "Select a block from where Shift went down. Shift + Up at the first"},
-    {"", "step selects the column, again every track."},
-    {"COPY", "Copy the block, or the step. SHIFT + COPY pastes at the cursor."},
-    {"INSERT", "Insert an empty step. SHIFT + DELETE pulls: the reverse of Insert."},
-    {"DELETE", "Clear what the column holds under the cursor; the cursor moves by"},
-    {"", "JUMP."},
-    {"SHIFT + INSERT", "HOME: drop the block and go to the first step."},
-    {"NOTE + INSTR", "Cycle the zoom: 5, 8 or 12 tracks."},
-    {"NOTE + LEFT / RIGHT", "Move the cursor a whole track."},
-    {"SHIFT + NOTE ... FX", "Jump to 0, 1/4, 2/4 and 3/4 of the pattern, with NOTE, INSTR, VOL, FX."},
-    {"SHIFT + PLAY", "Play from the cursor's row, or when playing, jump the play line to it."},
-    {"ENCODER", "WATCH: scroll the steps. STEP: change what the column holds: note,"},
-    {"", "instrument, volume, FX value. FX held + encoder: the FX type."},
-    {"SHIFT + ENCODER", "WATCH: a page of steps. NOTE: an octave. INSTR: 8. VOL: 10. FX: 16, a"},
-    {"", "nibble."},
-    {"", ""},
-    {"PADS", ""},
-    {nullptr, "Chosen with Shift + F2 to F7; the mode stays until you choose another. A lone Shift hold"},
-    {nullptr, "shows TRACKS while held."},
-    {"WATCH", "Pads sound the instrument, nothing is written."},
-    {"STEP", "A pad writes the note at the cursor and moves it by JUMP. In VOL and"},
-    {"", "FX a pad writes that value."},
-    {"SHIFT + F1 OCTAVE", "The pads' base C goes up an octave; after C9 comes C0."},
-    {"SHIFT + F2 NOTES", "The usual note pads."},
-    {"SHIFT + F3 PIANO", "Two octaves laid out like a piano."},
-    {"SHIFT + F4 ISO", "A column is a semitone, a row is a fourth higher."},
-    {"SHIFT + F5 TRACKS", "Columns are tracks. Rows: the track, mute, mute mode, solo."},
-    {"SHIFT + F6 PATS", "48 pads are 48 patterns. A tap queues one."},
-    {"SHIFT + F7 VU", "Columns are tracks with a level meter; again: faders."},
-};
-
-constexpr HelpLine kInstrumentLines[] = {
-    {nullptr, "Instrument sets how an instrument sounds and plays. There are 64 slots. An empty slot offers"},
-    {nullptr, "the types. A filled one has pages on F1 to F5; the key of the page again shows the next"},
-    {nullptr, "window (MOD: the six destinations). Up and Down move the row. A module instrument has its"},
-    {nullptr, "own pages on F1 to F4."},
-    {"", ""},
-    {"KEYS", ""},
-    {"F1 - F5", "Pages: SAMPLE (the source), VOICE, FILTER, MOD, SENDS."},
-    {"F1 - F5, EMPTY SLOT", "Choose the type: SAMPLE (open Sample load), MIDI, PASTE, MODULE, or"},
-    {"", "LOAD a file."},
-    {"F6 <INS, F7 INS>", "The previous or the next instrument."},
-    {"F8 UNDO", "Undo the last edit. Shift + F8 is REDO."},
-    {"ENCODER", "Edit the value of the row under the cursor."},
-    {"SHIFT + ENCODER", "The same in a coarse step."},
-    {"DELETE", "Put the row back to its default."},
-    {"LEFT / RIGHT", "One click of the encoder: the value of the row down or up."},
-    {"SHIFT + LEFT / RIGHT", "The same in a coarse step."},
-    {"INSTR, HELD", "The list of instruments: choose one to show."},
-    {"SHIFT + F1 NAME", "Name the instrument on the on-screen keyboard."},
-    {"SHIFT + F2 COPY", "Copy the instrument. SHIFT + F3 PASTE puts it in this slot."},
-    {"SHIFT + F4 DELETE", "Empty the slot."},
-    {"SHIFT + DELETE", "INIT: put the instrument back to its start values."},
-    {"SHIFT + F5 SAVE", "Save the instrument as a file on the card."},
-    {"SHIFT + F6 <USED", "Show the previous used instrument. SHIFT + F7 USED> the next."},
-    {"", ""},
-    {"PADS", ""},
-    {"A PAD", "Plays the instrument."},
-    {"SHIFT + A PAD", "Selects the instrument of that pad without a sound."},
-};
-
-constexpr HelpLine kWaveLines[] = {
-    {nullptr, "Wave shows the sample of the instrument in view as a waveform. Mark the start, the loop and"},
-    {nullptr, "the end, or cut it into slices on the CHOP page; press Sample Play again for the next page."},
-    {nullptr, "A wavetable or a granular instrument has a view of its own."},
-    {"", ""},
-    {"KEYS", ""},
-    {"F1 - F4", "WAVE page: pick START, LOOP S, LOOP E or END. The encoder moves it."},
-    {"F5 ZC", "Snap the point to a zero crossing, so the loop does not click."},
-    {"F6 PREVIEW", "Hold to hear the sample. Shift + F6 plays from where the view is."},
-    {"F7 ZOOM-", "Zoom out. UP / DOWN also zoom in and out."},
-    {"F8 UNDO", "Undo. Shift + F8 is REDO."},
-    {"LEFT / RIGHT", "Move to the previous or next point, or slice."},
-    {"ENCODER", "Move the point or the slice. SHIFT + ENCODER: 16 columns a click."},
-    {"SHIFT + F1 MODE", "Choose the play mode from the list of eight."},
-    {"INSTR, HELD", "The list of sample instruments: choose the one to show."},
-    {"", ""},
-    {"CHOP PAGE", ""},
-    {"F1 AUTO, F2 EVEN", "AUTO cuts slices from the sound, EVEN into equal ones."},
-    {"SHIFT + UP / DOWN", "How many slices EVEN makes."},
-    {"F3 ZC", "Snap the slice to a zero crossing."},
-    {"F4 ADD, F5 DEL", "Add a slice at the cursor, or delete the selected one."},
-    {"", ""},
-    {"WAVETABLE, GRANULAR", ""},
-    {"F1 - F4", "Pick the row: POSITION, WINDOW, or POSITION, LENGTH, SHAPE, LOOP."},
-    {"ENCODER", "Edit the row. SHIFT + ENCODER: coarse. DELETE: its default."},
-    {"", ""},
-    {"PADS", ""},
-    {"A PAD", "Plays slice n and selects it."},
-    {"SHIFT + A PAD", "Selects slice n without a sound."},
-};
-
-constexpr HelpLine kSampleEditLines[] = {
-    {nullptr, "Sample edit changes the sample in view. Mark a selection with its two edges, then run an"},
-    {nullptr, "effect on it."},
-    {"", ""},
-    {"KEYS", ""},
-    {"LEFT / RIGHT", "Pick the edge of the selection. UP / DOWN zoom."},
-    {"ENCODER", "Move the edge. SHIFT + ENCODER: 16 columns a click."},
-    {"DELETE", "ALL: clear the selection."},
-    {"F1 CROP", "Keep the selection, drop the rest."},
-    {"F2 NORM", "Normalise: raise the peak to full scale."},
-    {"F3 REVERSE", "Play the selection backwards."},
-    {"F4 FADE IN", "A fade up over the selection. F5 FADE OUT fades down."},
-    {"F6 AMP", "Change the level of the selection by the percentage shown."},
-    {"SHIFT + UP / DOWN", "Change the percentage that AMP uses."},
-    {"F7 PREVIEW", "Hold to hear the selection. Shift + F7 plays from the edge."},
-    {"F8 UNDO", "Undo the last effect. Shift + F8 is REDO."},
-    {"SHIFT + F1 AMG 8K", "Convert to the Amiga rate of 8,287 Hz. SHIFT + F2: 16,574 Hz."},
-    {"SHIFT + F3 Q8", "The 8-bit option of the Amiga conversion."},
-    {"SHIFT + F4 DC REM", "Remove the DC offset."},
-    {"SHIFT + F6 SAVE WAV", "Write the sample as a WAV into Samples/."},
-    {"INSTR, HELD", "The list of sample instruments: choose the one to edit."},
-    {"", ""},
-    {"PADS", ""},
-    {"A PAD", "Chooses that instrument to edit."},
-};
-
-constexpr HelpLine kSampleLoadLines[] = {
-    {nullptr, "Sample load puts a sound file from the card into an instrument. Browse the folders, put the"},
-    {nullptr, "cursor on a file and press LOAD. The load goes to the target instrument, which a pad"},
-    {nullptr, "chooses. You come here from an empty slot on Instrument."},
-    {"", ""},
-    {"KEYS", ""},
-    {"F1 LOAD", "Load the file under the cursor into the target instrument."},
-    {"F2 UP", "Go up one folder."},
-    {"F3 ENTER", "Go into the folder under the cursor."},
-    {"F4 ADD", "Load into the first free instrument."},
-    {"F5 PLAY", "Play the file under the cursor."},
-    {"F6 RESCAN", "Read the folder again."},
-    {"F7 WT", "How a file becomes a wavetable: AUTO, LEN, 256 to 2048 or OFF."},
-    {"F8 CH", "For a stereo file: MIX, LEFT or RIGHT channel."},
-    {"UP / DOWN", "Move along the files. SHIFT + UP / DOWN a page at a time."},
-    {"LEFT / RIGHT", "Jump to the next or previous letter."},
-    {"ENCODER", "Move along the files. SHIFT + ENCODER: a page a detent."},
-    {"SHIFT + F1 - F4", "Jump to the start, a quarter, the middle and three quarters."},
-    {"SHIFT + F5 END", "Jump to the last file."},
-    {"", ""},
-    {"PADS", ""},
-    {"A PAD", "Chooses the target instrument, as on Instrument."},
-};
-
-constexpr HelpLine kRecordLines[] = {
-    {nullptr, "Record captures sound into a sample. It has three pages, SOURCES, RESAMPLE and RADIO; the"},
-    {nullptr, "screen button turns them. The looper lives here too: it records a loop of 1 to 16 bars and"},
-    {nullptr, "plays it in time with the pattern."},
-    {"", ""},
-    {"KEYS", ""},
-    {"F1 REC/STOP, REC", "Arm or stop the take."},
-    {"F2 MONITOR", "Switch the monitor of the input."},
-    {"F3 SAVE", "Save the take into the first free instrument."},
-    {"F4 DISCARD", "Throw the take away."},
-    {"F5 SEEK-, F6 SEEK+", "RADIO page: seek down or up. SHIFT + F5 / F6: ten channels."},
-    {"F7 SAVE WAV", "Write the take as a WAV on the card."},
-    {"F8 PREVIEW", "Hold to hear the take."},
-    {"UP / DOWN", "Move the row."},
-    {"LEFT / RIGHT", "One click of the encoder on the row, down or up."},
-    {"", "The pages are the screen button."},
-    {"SHIFT + LEFT / RIGHT", "The same in a coarse step."},
-    {"ENCODER", "Change the row under the cursor. SHIFT + ENCODER: coarse."},
-    {"DELETE", "Put the row back to its default."},
-    {"", ""},
-    {"PADS", ""},
-    {"A PAD", "Plays the take under review."},
-};
-
-constexpr HelpLine kMixerLines[] = {
-    {nullptr, "The Mixer has one column for each track. Use it to set levels, to route tracks, to set the"},
-    {nullptr, "master effects and the stems, to mute and solo. Press Master to open it; F1 to F4 are its"},
-    {nullptr, "four pages."},
-    {"", ""},
-    {"KEYS", ""},
-    {"F1 MIXER", "The track columns: names, levels, meters."},
-    {"F2 ROUTING", "Where each track goes. A turn up sets the route, a turn down clears"},
-    {"", "it."},
-    {"F3 MST FX", "The master effects."},
-    {"F4 STEMS", "The sources of each stem. INSERT sets the source, DELETE clears it."},
-    {"F5 CUE LVL", "Go to the CUE row of the MASTER FX page, where the cue level is set."},
-    {"F7 MUTE, F8 SOLO", "Mute or solo the track under the cursor."},
-    {"SHIFT + F7", "UNMUTE: all tracks sound again. SHIFT + F8: UNSOLO."},
-    {"SHIFT + F1 NAME", "Name the track on the on-screen keyboard."},
-    {"ENCODER", "Change the value under the cursor. SHIFT + ENCODER: coarse."},
-    {"DELETE", "The default of the value. SHIFT + DELETE on STEMS: the factory map."},
-    {"ARROWS", "Move along the tracks and the rows."},
-    {"", ""},
-    {"PADS", ""},
-    {nullptr, "The pads have no job on the Mixer."},
-};
-
-constexpr HelpLine kPerformLines[] = {
-    {nullptr, "Perform has 12 slots. Each slot holds one effect and has four pads: the top pad is OFF, the"},
-    {nullptr, "three below hold values. A pad turns the effect on at that value. The effects act on the"},
-    {nullptr, "tracks that are on, shown at the bottom."},
-    {"", ""},
-    {"KEYS", ""},
-    {"F1 - F3 SCENE", "A tap recalls the scene. Hold about one second to store it."},
-    {"SHIFT + F1 - F3", "STORE 1 to 3: store the scene at once."},
-    {"F4 HALF, F5 DOUBLE", "While held, the pattern steps at half or double speed. Both: the"},
-    {"", "song's speed."},
-    {"F6 LATCH", "On, a pad's row stays on after you let go. Off, it ends."},
-    {"F7 NEXT PAT", "Queue the next pattern of the song, taken at the end of this one."},
-    {"", "Again cancels."},
-    {"F8 RESET", "Turn every slot off. The tracks that are on stay on."},
-    {"ENCODER", "Change the value of the slots you hold. SHIFT + ENCODER too."},
-    {"REC", "Turn EDIT on or off. In EDIT the encoder stores the value in the row."},
-    {"LEFT / RIGHT, EDIT", "Move to another slot. With Shift, swap it with its neighbour."},
-    {"UP / DOWN, EDIT", "Change the effect of the slot."},
-    {"COPY, EDIT", "Copy the slot. SHIFT + COPY pastes it onto the slot."},
-    {"", ""},
-    {"PADS", ""},
-    {"A PAD", "Selects its row on its slot and holds the slot. OFF ends the effect."},
-    {"SHIFT, HELD", "The pads become AFFECTED, MUTE, MUTE MODE and SOLO for the 12 tracks."},
-    {"", "The top row chooses the tracks that are on."},
-};
-
-constexpr HelpLine kPerformDjLines[] = {
-    {nullptr, "The DJ page of Perform mixes the tracks as two groups, A and B: a crossfader, a master"},
-    {nullptr, "filter, kills and transitions into the next pattern. Performance again goes back to the"},
-    {nullptr, "slots. Leaving the page ends every effect; only the groups stay."},
-    {"", ""},
-    {"KEYS", ""},
-    {"ENCODER", "The crossfader, A to B. SHIFT + ENCODER: a fine step."},
-    {"F1 BANK -, F2 BANK +", "The 12 patterns shown on pad row 1."},
-    {"F3 CURVE", "SMOOTH (equal power) or CUT (a scratch fader)."},
-    {"F4 FILTER", "Hold it and turn the encoder: left is a low-pass, right a high-pass."},
-    {"", "It springs back to open when you let go, unless LATCH is on."},
-    {"F5 SCR", "Scratch on or off. On, the encoder is the platter."},
-    {"F6 LATCH", "On, the filter, kills and row 2 pads stay on after you let go."},
-    {"F8 RESET", "Centre the crossfader; end every effect, transition and scratch."},
-    {"LEFT / RIGHT", "Held, the tempo 4 % slower or faster. SHIFT + arrow: 0.1 BPM, kept."},
-    {"", ""},
-    {"PADS", ""},
-    {"ROW 1", "Queue a pattern of the bank. Again cancels."},
-    {"SHIFT, HELD, ROW 1", "The group of each track: THRU, A or B."},
-    {"ROW 2", "Held, per group (left half A, right half B):"},
-    {"", "REP 1/4, 1/8, 1/16, 1/32 repeats the last note. ECHO opens the delay,"},
-    {"", "then cuts the group so the tail rings out. CUT silences the group."},
-    {"ROW 3, KILL", "Pads 1 - 3, held: LOW, MID or HI of the whole mix goes silent."},
-    {"ROW 3, FILT", "Pad 4, held: the encoder is the filter, as F4."},
-    {"ROW 3, TRANS", "Pads 5 - 7, playing: sweep HP or LP, or ECHO out, into the queued"},
-    {"", "pattern. Again cancels."},
-    {"ROW 3, TAPE STOP", "Pad 8, held: the mix slows to a stop over one beat."},
-    {"ROW 4", "The crossfader in 12 steps, A to B: a tap jumps there."},
-};
-
-constexpr HelpLine kFileLines[] = {
-    {nullptr, "File holds the projects on the card. A project is a folder. Three pages: PROJECTS (open,"},
-    {nullptr, "save, new), IMPORT (module files from other trackers) and EXPORT (WAV renders). F6 and F7 go"},
-    {nullptr, "to the other pages."},
-    {"", ""},
-    {"KEYS", ""},
-    {"F1 OPEN", "Open the project under the cursor."},
-    {"F2 RESCAN", "Read the card again."},
-    {"F3 NEW", "Start an empty project. It asks first: F3 again is ALL, F1 is KEEP"},
-    {"", "INSTRUMENTS. Another key takes the question back."},
-    {"F4 SAVE", "Save the project into its folder."},
-    {"F5 SAVE AS", "Save into a new folder."},
-    {"F6 IMPORT", "The IMPORT page. F7 then chooses the engine the import writes for."},
-    {"F7 EXPORT", "The EXPORT page. F1 there starts the row; F8 cancels a run."},
-    {"DELETE", "Mark the folder under the cursor as deleted. Press twice."},
-    {"SHIFT + F7 PURGE", "Remove for good the folders marked deleted."},
-    {"SHIFT + F6 NAME", "Give the project a title on the on-screen keyboard."},
-    {"SHIFT + F1 - F4", "Jump to the start, a quarter, the middle, three quarters."},
-    {"SHIFT + F5 END", "Jump to the last entry."},
-    {"UP / DOWN", "Move along the list. SHIFT + UP / DOWN: a page."},
-    {"LEFT / RIGHT", "Jump to the next or previous letter."},
-    {"ENCODER", "Move along the list. EXPORT page: choose the pattern, SHIFT: 8."},
-    {"", ""},
-    {"IMPORT PAGE", ""},
-    {"F1 ENTER / IMPORT", "Enter the folder under the cursor, or import the module file."},
-    {"F3 UP", "Up one folder."},
-    {"F8 REPORT", "The report of the last import; again, the list. This page only."},
-    {"", ""},
-    {"PADS", ""},
-    {nullptr, "The pads have no job on File, except on the on-screen keyboard when you name a project."},
-};
-
-constexpr HelpLine kConfigLines[] = {
-    {nullptr, "Config holds the settings of the device, in six pages: MIDI, DISPLAY, SD, INFO, USB and"},
-    {nullptr, "PATTERN. Press Config again for the next page. Rows that change the USB port wait for APPLY."},
-    {"", ""},
-    {"KEYS", ""},
-    {"F1 - F6", "The pages MIDI, DISPLAY, SD, INFO, USB and PATTERN."},
-    {"F7 APPLY", "Apply a pending change. Rows that re-enumerate USB wait for it. Press"},
-    {"", "twice."},
-    {"SHIFT + F7 DEFAULTS", "Put the page back to its defaults. Press twice."},
-    {"UP / DOWN", "Move the row."},
-    {"LEFT / RIGHT", "One click of the encoder on the row, down or up."},
-    {"", "The pages are F1 - F6 and the Config button."},
-    {"SHIFT + LEFT / RIGHT", "The same in a coarse step."},
-    {"ENCODER", "Change the value of the row. SHIFT + ENCODER: coarse."},
-    {"DELETE", "Put the row back to its default."},
-    {"", ""},
-    {"PADS", ""},
-    {nullptr, "The pads have no job on Config."},
-};
-
-constexpr HelpLine kModulesLines[] = {
-    {nullptr, "Modules lists the app modules on the card: .tmod files in /modules/apps. Put the cursor on"},
-    {nullptr, "one and launch it."},
-    {"", ""},
-    {"KEYS", ""},
-    {"F1 LAUNCH", "Start the app under the cursor. Its page is the Module app page."},
-    {"F2 RESCAN", "Read the card again."},
-    {"UP / DOWN", "Move along the list. SHIFT + UP / DOWN: a page."},
-    {"ENCODER", "Move along the list. SHIFT + ENCODER: a page a detent."},
-    {"", ""},
-    {"PADS", ""},
-    {nullptr, "The pads have no job on this list."},
-};
-
-constexpr HelpLine kModuleAppLines[] = {
-    {nullptr, "A module app owns its page: it gets the keys and the pads before the OS does. The OS keeps a"},
-    {nullptr, "few keys so you can always leave and always stop. What the keys do inside is the app's own."},
-    {"", ""},
-    {"KEYS", ""},
-    {"F8 BACK", "Leave the app and return to the list. F7 + F8 together do the same."},
-    {"PLAY", "Starts or stops the transport. The app does not see it."},
-    {"SHIFT + CONFIG", "This help."},
-    {"SHIFT + UP / DOWN", "Move the row of the app's parameters."},
-    {"SHIFT + ENCODER", "Edit the row under the cursor."},
-    {"SHIFT + DELETE", "Put the row back to its default."},
-    {nullptr, "(Those three: only apps below ABI 1.10 that declare a parameter.)"},
-    {"SHIFT + F8", "Nothing."},
-    {"", ""},
-    {"PADS", ""},
-    {nullptr, "The pads, the arrows, the encoder and the other keys belong to the app."},
-};
-
-#define O3_HELP_PAGE(title, lines) {title, lines, static_cast<std::uint16_t>(sizeof(lines) / sizeof(lines[0]))}
-
-constexpr HelpPage kPages[kHelpPages] = {
-    O3_HELP_PAGE("HELP: GLOBAL", kGlobalLines),
-    O3_HELP_PAGE("HELP: PATTERN", kPatternLines),
-    O3_HELP_PAGE("HELP: SONG", kSongLines),
-    O3_HELP_PAGE("HELP: INSTRUMENT", kInstrumentLines),
-    O3_HELP_PAGE("HELP: WAVE", kWaveLines),
-    O3_HELP_PAGE("HELP: SAMPLE EDIT", kSampleEditLines),
-    O3_HELP_PAGE("HELP: SAMPLE LOAD", kSampleLoadLines),
-    O3_HELP_PAGE("HELP: RECORD", kRecordLines),
-    O3_HELP_PAGE("HELP: MIXER", kMixerLines),
-    O3_HELP_PAGE("HELP: PERFORM", kPerformLines),
-    O3_HELP_PAGE("HELP: PERFORM DJ", kPerformDjLines),
-    O3_HELP_PAGE("HELP: FILE", kFileLines),
-    O3_HELP_PAGE("HELP: CONFIG", kConfigLines),
-    O3_HELP_PAGE("HELP: MODULES", kModulesLines),
-    O3_HELP_PAGE("HELP: MODULE APP", kModuleAppLines),
-};
-
-#undef O3_HELP_PAGE
+// What help_page() returns, pointed at the page buffer's parts, and the one-entry cache: the index of the
+// page currently in the buffer (kHelpPages itself means none served yet).
+HelpPage g_served;
+unsigned g_served_index = kHelpPages;
 
 }  // namespace
 
-const HelpPage& help_page(unsigned index) noexcept { return kPages[index < kHelpPages ? index : kHelpPages - 1u]; }
+const HelpPage& help_page(unsigned index) noexcept {
+  if (index >= kHelpPages) {
+    index = kHelpPages - 1u;  // clamped to the last
+  }
+  if (index != g_served_index) {
+    HelpPageBuf& buf = help_page_buf();
+    if (help_blob_page(index, buf)) {
+      g_served.title = buf.title;
+      g_served.lines = buf.lines;
+      g_served.count = buf.count;
+    } else {
+      g_served.title = "";  // a malformed stream or an overflow: help_pack.py refuses pages.txt at build time, so this is a guard
+      g_served.lines = buf.lines;
+      g_served.count = 0;
+    }
+    g_served_index = index;
+  }
+  return g_served;
+}
 
 unsigned help_page_of(ScreenId screen, bool dj_page) noexcept {
   switch (screen) {

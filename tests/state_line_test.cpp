@@ -155,9 +155,7 @@ TEST_CASE("state line: keys= is present only while a prompt is live, and names t
   r.app->run_once();
   CHECK(value_of(r.line(), "keys") == "<missing>");
   // The Navigator: its keys in the table's order, a Shift key as SF7, the inert ones left out.
-  r.input.push(core::make_button_event(r.clock.now(), static_cast<std::uint8_t>(Button::Shift), true));
-  r.tap(Button::Pattern);
-  r.input.push(core::make_button_event(r.clock.now(), static_cast<std::uint8_t>(Button::Shift), false));
+  (void)r.app->invoke(core::action_id("navigator.open"));  // (the chord Song + Pattern, OS-APPSNAV: the action it is bound to)
   r.app->run_once();
   l = r.line();
   NEED(value_of(l, "overlay") == "NAVIGATOR");
@@ -181,7 +179,7 @@ TEST_CASE("state line: keys= is present only while a prompt is live, and names t
 TEST_CASE("state line: the keys of any prompt fit the room keys= has, so the console's 384-character line is never cut by it") {
   // The longest line without keys= is about 310 characters (msg up to 48, sel up to 40, and sel only on File and Sample load). A dialog or a question over such a screen has at most kScreenKeys characters of keys; the boot
   // disk's eight RESTART (the one long prompt) is on Pattern, where sel is "-": its line is 39 characters shorter.
-  constexpr std::size_t kScreenKeys = 60;  // (Learn with both its CLEAR ALL options live at once, which no state has: 58)
+  constexpr std::size_t kScreenKeys = 68;  // (Learn with both its CLEAR ALL options and F5 FOLLOW live at once, which no state has: 68; OS-LEARNFOLLOW S1 binds the key)
   static_assert(310u + 6u + kScreenKeys <= 384u, "keys= over the longest line must fit the console's state buffer");
   static_assert(310u - 39u + 6u + app::kKeysLineChars <= 384u, "the boot disk's keys= must fit the console's state buffer next to its line");
   std::size_t longest = 0;

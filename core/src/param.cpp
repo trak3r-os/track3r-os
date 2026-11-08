@@ -322,6 +322,22 @@ unsigned param_format(const ParamDesc& d, float value, char* out, unsigned cap) 
       }
       break;
     }
+    case ParamUnit::WtWave: {  // OS-CEWTENV W7a: 0..127 are F001..F128, 128..255 U001..U128
+      const long n = round_l(value) < 0 ? 0 : round_l(value);
+      o.ch(n < 128 ? 'F' : 'U');
+      const unsigned long k = static_cast<unsigned long>(n & 127) + 1ul;
+      o.ch(static_cast<char>('0' + k / 100ul));
+      o.ch(static_cast<char>('0' + (k / 10ul) % 10ul));
+      o.ch(static_cast<char>('0' + k % 10ul));
+      break;
+    }
+    case ParamUnit::OffInt:  // 0 shows "OFF"
+      if (round_l(value) <= 0) {
+        o.str("OFF");
+        break;
+      }
+      o.sint(round_l(value));
+      break;
     case ParamUnit::Int:
     default:
       o.sint(round_l(value));

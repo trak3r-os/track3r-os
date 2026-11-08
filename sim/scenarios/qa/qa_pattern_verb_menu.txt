@@ -1,0 +1,83 @@
+# OS-PTOOLS2 S3 (docs/specs/OS-PTOOLS2.md section 3.2 and mock-up A): the F7 verb menu on Pattern — the catalogue rows QA-PAT-436..440 of docs/qa/catalogue/pattern.md.
+# The demo document's pattern 1 is 12 tracks of 64 steps (app::fill_demo); the facts used below: track 0 (KICK) holds note 25 on instrument 1 on rows 0, 4, 8 ... and nothing on rows 1-3.
+# State-line keys used: mode= (0 STEP, 3 WATCH), overlay=, msg=; the model's pat.<p>.<track>.<row>.<field> (0-based) and digest.
+
+# QA-PAT-436: F7 opens the verb menu (two columns of eight rows, the cursor on the first verb), the arrows move in the grid, F8 BACK closes it.
+document
+action view.mode 3
+action cursor.jump_fraction 0
+action cursor.home
+action select.clear
+tap f7
+assert state overlay=VERB_MENU
+snap qa_pat_436
+tap down
+tap right
+tap f8
+assert state overlay=NONE
+tap f7
+assert state overlay=VERB_MENU
+snap qa_pat_436_remembered
+tap f8
+assert state overlay=NONE
+
+# QA-PAT-437: pad 9 (INVERT) picks the verb and runs pattern.invert on the block, one undo unit (the undo gives the document back).
+document
+action view.mode 0
+action cursor.jump_fraction 0
+action cursor.home
+action select.clear
+press shift
+tap down 3
+release shift
+assert state overlay=NONE
+mark model d0
+tap f7
+assert state overlay=VERB_MENU
+pad 8
+assert state overlay=NONE
+assert model pat.1.0.0.note=0
+assert model pat.1.0.3.note=25
+assert model pat.1.0.3.instr=1
+action edit.undo
+assert model digest=@d0
+
+# QA-PAT-438: INTERPOLATE (pad 4) runs since OS-PTOOLS2 S3b: on the cursor step alone (no block, select.clear) it has fewer than two anchors, so it says
+# NOTHING TO CHANGE, writes nothing, no undo unit, and the menu closes for the verb (the strip's notice is the NOTIFY overlay until it runs out).
+document
+action view.mode 0
+action cursor.jump_fraction 0
+action cursor.home
+action select.clear
+mark model d1
+tap f7
+assert state overlay=VERB_MENU
+pad 3
+wait 10000
+assert state overlay=NONE
+assert model digest=@d1
+
+# QA-PAT-439: the menu is refused while another modal is open (the Fill dialog up): verb.open does nothing, the Fill dialog stays.
+document
+action view.mode 0
+tap f4
+assert state overlay=FILL
+tap f7
+assert state overlay=FILL
+tap f8
+assert state overlay=NONE
+tap f7
+assert state overlay=VERB_MENU
+snap qa_pat_439
+tap f8
+
+# QA-PAT-440: the menu's APPS > row (pad 16) turns the menu into the APPS page (the tool apps only, or the empty text) in the panel; F8 closes it.
+document
+action view.mode 3
+tap f7
+assert state overlay=VERB_MENU
+pad 15
+assert state overlay=VERB_MENU
+snap qa_pat_440
+tap f8
+assert state overlay=NONE

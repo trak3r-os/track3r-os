@@ -1,6 +1,6 @@
 # OS-SONG-TIMELINE (docs/specs/OS-SONG-VIEW.md): the Song screen's TIMELINE page, QA-SNG-073..082 and 083..087 (OS-SONG-VIEW2), docs/qa/catalogue/song.md. Goldens are keyed qa_song_timeline/<snap>.
-# OS-SONG-TIMELINE (new Community OS behaviour): the Song button's third page. QA-SNG-073: four slots (patterns 1 to 4) as blocks as wide as they have bars, a colour and the pattern's number on each, the thumbnails of the
-# tracks' note density under them, the cursor's block in a white frame; the header says TIMELINE 3/3 and the info line the cursor's slot, its start bar, pattern and length.
+# OS-SONG-TIMELINE (new Community OS behaviour): the Song button's second page. QA-SNG-073: four slots (patterns 1 to 4) as blocks as wide as they have bars, a colour and the pattern's number on each, the thumbnails of the
+# tracks' note density under them, the cursor's block in a white frame; the header says TIMELINE 2/2 (OS-SONG3 S1) and the info line the cursor's slot, its start bar, pattern and length.
 document
 audio on
 wait 20
@@ -12,17 +12,24 @@ tap insert
 release shift
 tap up 3
 tap song
-tap song
-assert state screen=SONG
+assert state screen=SONG page=1
 snap qa_sng_073
 
-# QA-SNG-076: Left and Right (like Up and Down) walk the cursor slot along the page; the frame, the info line and the window follow.
-tap right 2
-tap down
+# QA-SNG-208 (OS-SONG3 S3): the shared mark on the blocks. F3 adds a slot after the cursor's with its pattern, so the two slots that hold pattern 1 both wear the `*` at the right of the block's number (the cursor's pattern's slots in the Fx ink, the other shared ones TextDim); F4 takes the slot back.
+tap f3
+assert model order.len=5
+assert model order.0=1
+assert model order.1=1  # the two slots that hold pattern 1: both wear the `*` on their blocks
+snap qa_sng_208
+tap f4
+assert model order.len=4
+
+# QA-SNG-076: Left and Right walk the cursor slot along the page; the frame, the info line and the window follow. (OS-SONG3 S2: Up and Down are the tracks now, QA-SNG-116.)
+tap right 3
 snap qa_sng_076
 
 # QA-SNG-077: playing, the slot that plays has a green bar under its block and a white playhead line crosses its block and the lanes at the playing step.
-tap up
+tap left
 tap play
 wait 700
 assert state playing=1
@@ -34,7 +41,7 @@ assert state playing=1
 snap qa_sng_083
 
 # QA-SNG-084: a live jump (Rec with the cursor on another slot while the song plays) replaces NEXT with JUMP: the info line says JUMP IN n BARS (the JUMP QUEUED message covers it for its first two seconds).
-tap down 2
+tap right 2
 tap rec
 wait 2500
 snap qa_sng_084
@@ -56,17 +63,16 @@ wait 100
 assert state playing=0
 snap qa_sng_086
 
-# QA-SNG-087: the page key turns ORDER, ARRANGEMENT, TIMELINE (the header says n/3), back to ORDER; a peek of Song from another screen shows the page it was left on.
+# QA-SNG-087: the page key turns LIST and TIMELINE (the header says n/2), back to LIST; a peek of Song from another screen shows the page it was left on.
 tap song
 assert state screen=SONG page=0
 snap qa_sng_087
 tap song
-tap song
-assert state screen=SONG page=2
+assert state screen=SONG page=1
 tap master
 press song
 wait 500
-assert state screen=SONG page=2
+assert state screen=SONG page=1
 snap qa_sng_087_peek
 release song
 wait 5

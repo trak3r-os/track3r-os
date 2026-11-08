@@ -45,6 +45,13 @@ constexpr Frame make_frame(const ui::Theme& theme, int rows) noexcept {
 
 inline constexpr int kFrameRows = 16;  // rows of the pane on the 800 x 480 panel
 
+// OS-PTOOLS2 S3p (docs/specs/OS-PTOOLS2.md 3.1 point 3, mock-ups A and B): the right-hand panel the F7 verb menu and the Pattern TOOLS dialog
+// render in — x 500..800, the full height of the header and the data pane, docked to the right edge. The strip, the info line and the key row
+// stay full width, and the grid is drawn in the 500 px left of it while the panel is up (PatternScreen::render passes the width to
+// PatternView::draw), so three tracks stay visible at the 5-track zoom and the block and the cursor stay in view.
+inline constexpr int kRightPanelX = 500;
+inline constexpr int kRightPanelW = ui::kScreenW - kRightPanelX;  // 300
+
 // True when the rectangle (x, y, w, h) lies entirely inside `outer`: the test of "the base screen skips what the overlay
 // covers", made for every field of a grid, so it is four compares inlined at the call (no Rect to build, no call). An empty
 // `outer` (no overlay) contains nothing, and so does an empty item.

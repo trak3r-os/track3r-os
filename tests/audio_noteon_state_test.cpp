@@ -265,8 +265,9 @@ std::uint64_t run_seed(std::uint32_t seed, NoteOnStateTest::Cover& cov) {
   return acc;
 }
 
-// Captured from the code before the move (dev 03a0015e, `note_on` with its own tail).
-constexpr std::uint64_t kExpected[6] = {0xcf76b70cc10c8ef1ull, 0x14b021e6cc731b96ull, 0xb126568be39ca244ull, 0xb8df307f89522abeull, 0x6ef8a8be7a856b2bull, 0x5359da560c95ae82ull};
+// Captured from the code before the move (dev 03a0015e, `note_on` with its own tail); re-captured for OS-CEWTENV W3a, whose mod_start also writes l_inv (0, the WT setup's mark) and
+// l_q (the note's start step) at every note — bytes no non-WT kind reads, and the render for loop 0/1 stays bit-identical (audio_voices_test).
+constexpr std::uint64_t kExpected[6] = {0x86225d80832c9f5bull, 0xb56fac123b8508c9ull, 0x07e4eaaaa8d63e5aull, 0x10ff8bd27d68c9f2ull, 0x3789160c642d4cffull, 0xba0312db5f6583deull};
 
 }  // namespace
 

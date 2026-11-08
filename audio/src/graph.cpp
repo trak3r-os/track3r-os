@@ -135,6 +135,7 @@ void Graph::configure(std::uint32_t active_mask) noexcept {
 void Graph::install_insert(unsigned track, unsigned slot, InsertFn fn, void* state) noexcept {
   if (track < kTracks && slot < 2u) {
     strips_[track].insert[slot] = Insert{fn, state, true};
+    st_ins_ &= ~(1u << (track * 2u + slot));  // (OS-INSFX-ABI2 A4: a new or an emptied slot has not run stereo)
   }
 }
 void Graph::set_insert_bypass(unsigned track, unsigned slot, bool bypass) noexcept {
@@ -142,6 +143,7 @@ void Graph::set_insert_bypass(unsigned track, unsigned slot, bool bypass) noexce
     strips_[track].insert[slot].bypass = bypass;
     if (bypass) {
       strips_[track].insert[slot].tail = 0;  // a bypassed slot has no tail (OS-INSFX S2)
+      st_ins_ &= ~(1u << (track * 2u + slot));  // ... and does not run stereo (OS-INSFX-ABI2 A4)
     }
   }
 }
@@ -957,20 +959,16 @@ void Graph::run_tracks(bool silence) noexcept {
 // OS-STEREO (c): the side signal of a stereo voice on `track` through the strip's level ramp and pan gains (the lane the mono pass is given) into MAIN's two sides: L += S, R -= S. A strip whose source is not
 // the voices' feed takes none; one with an insert in the path (it processed M only) takes S as much as the insert leaves of the dry signal: OS-INSFX S1, 255 - wet of each insert in the path, from the wet
 // share it had at the start and has at the end of the block (set_insert_wet), so S comes back and goes away over one block, no step; a steady insert (wet 255) takes none, as before.
+// OS-INSFX-ABI2 A4: a stereo insert (side_gain) is the exception: its S is the one in `side` (made by InsertHost::run, which blended the dry S itself in a transition), so the gain starts again at unity after it.
 // In flash, one call per stereo track and block.
 void Graph::side_pass(unsigned track, const std::int16_t* side, const kernel::StripLane& lane) noexcept {
   const Strip& s = strips_[track];
   if (s.source != SourceKind::Feed) {
     return;
   }
-  std::uint32_t g0 = 255u;
-  std::uint32_t g1 = 255u;
-  for (unsigned k = 0; k < 2u; ++k) {
-    if (s.insert[k].fn != nullptr && !s.insert[k].bypass) {
-      g0 = g0 * (255u - s.insert[k].wet0) / 255u;
-      g1 = g1 * (255u - s.insert[k].wet1) / 255u;
-    }
-  }
+  std::uint32_t g0;
+  std::uint32_t g1;
+  side_gain(track, 2u, g0, g1);
   if (g0 == 0u && g1 == 0u) {
     return;
   }
@@ -981,6 +979,36 @@ void Graph::side_pass(unsigned track, const std::int16_t* side, const kernel::St
   }
   kernel::gain_pan_st(side, level, lane.left, lane.right, acc_main_[0], acc_main_[1], kBlk);
   b_main_.dirty = true;
+}
+
+// OS-INSFX-ABI2 A4, rule 7 of the spec (3.2): the walk over the slots before `upto`, in order. A mono insert in the path keeps the share of S its wet share leaves (OS-INSFX D6, OS-INSFX S1); a stereo one
+// (InsertHost::run marks it while it runs stereo) takes S as its input and makes the S that goes on, so the gain is unity again. With no stereo mark it is the loop side_pass always had.
+void Graph::side_gain(unsigned track, unsigned upto, std::uint32_t& g0, std::uint32_t& g1) const noexcept {
+  g0 = 255u;
+  g1 = 255u;
+  if (track >= kTracks) {
+    return;
+  }
+  const Strip& s = strips_[track];
+  for (unsigned k = 0; k < upto && k < 2u; ++k) {
+    if (s.insert[k].fn == nullptr || s.insert[k].bypass) {
+      continue;
+    }
+    if (((st_ins_ >> (track * 2u + k)) & 1u) != 0u) {
+      g0 = 255u;
+      g1 = 255u;
+    } else {
+      g0 = g0 * (255u - s.insert[k].wet0) / 255u;
+      g1 = g1 * (255u - s.insert[k].wet1) / 255u;
+    }
+  }
+}
+
+void Graph::set_insert_stereo(unsigned track, unsigned slot, bool on) noexcept {
+  if (track < kTracks && slot < 2u) {
+    const std::uint32_t bit = 1u << (track * 2u + slot);
+    st_ins_ = (on && strips_[track].insert[slot].fn != nullptr) ? (st_ins_ | bit) : (st_ins_ & ~bit);  // (an empty slot is never marked: a late write after a forced release is ignored)
+  }
 }
 
 void Graph::set_insert_tail(unsigned track, unsigned slot, bool on) noexcept {

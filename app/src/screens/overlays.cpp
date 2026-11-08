@@ -50,8 +50,14 @@ const Overlay* overlay_of(OverlayId id) noexcept {
       return &kSongToolsOverlay;
     case OverlayId::PlayMode:
       return &kPlayModeOverlay;
-    case OverlayId::Tools:
-      return &kToolsOverlay;
+    case OverlayId::Preset:
+      return &kPresetOverlay;
+    case OverlayId::VerbMenu:
+      return &kVerbMenuOverlay;  // OS-PTOOLS2 S3: the F7 verb menu
+    case OverlayId::PatternTools:
+      return &kPatternToolsOverlay;  // OS-PTOOLS2 S2: the Pattern TOOLS dialog over the block
+    case OverlayId::Events:
+      return &kEventsOverlay;
     case OverlayId::ExportProgress:
       return &kExportOverlay;
     case OverlayId::FirmwareUpdate:
@@ -93,7 +99,7 @@ bool LearnOverlay::set_position(const Model& model, ViewState& view, int positio
 
 namespace {
 
-// "CC 74 CH 1 PICKUP" (the channel only when the binding is for one).
+// "CC 74 CH 1 PICKUP" (the channel only when the binding is for one); a follow binding ends "FOLLOW" (OS-LEARNFOLLOW 3.4: "CC 74 PICKUP FOLLOW").
 void binding_text(core::FixedString<48>& line, const core::LearnBinding& b) noexcept {
   static constexpr const char* kModes[core::kLearnModeCount] = {"PICKUP", "JUMP", "RELATIVE"};
   line.assign("CC ");
@@ -104,9 +110,12 @@ void binding_text(core::FixedString<48>& line, const core::LearnBinding& b) noex
   }
   line.append(" ");
   line.append(kModes[b.mode % core::kLearnModeCount]);
+  if ((b.flags & core::kLearnFollow) != 0) {
+    line.append(" FOLLOW");
+  }
 }
 
-// What owns a parameter, for the list: "INS 03", "INS *" (a follow binding), "TRK 02", "MASTER", "SETTING".
+// What owns a parameter, for the list: "INS 03", "INS *" (a follow binding), "TRK 02", "MASTER", "SETTING", and (OS-INSFX S7) "FX 03A" (the insert A of track 3), "FX MST".
 void owner_text(core::FixedString<48>& line, const core::LearnBinding& b) noexcept {
   const core::ParamKind kind = core::param_kind(b.param);
   line.clear();
@@ -122,6 +131,15 @@ void owner_text(core::FixedString<48>& line, const core::LearnBinding& b) noexce
     append_dec(line, core::param_index(b.param) + 1u, 2);
   } else if (kind == core::ParamKind::Master) {
     line.assign("MASTER");
+  } else if (kind == core::ParamKind::Insert) {
+    const unsigned where = core::param_index(b.param);
+    line.assign("FX ");
+    if (where >= core::kInsertIdMaster) {
+      line.append("MST");
+    } else {
+      append_dec(line, where / 2u + 1u, 2);
+      line.append((where % 2u) != 0u ? "B" : "A");
+    }
   } else {
     line.assign("SETTING");
   }
@@ -140,7 +158,8 @@ const core::LearnBinding* find_binding(const Model& model, core::ParamId id) noe
 
 // Title, what to do, the target and what it is bound to, the list of bindings (both stores: the project's, then the device's) with the cursor's row marked, and the keys.
 // The target is the parameter under the cursor of the screen below (Screen::focus_param; OS-002d), a dash when that screen has none; the dialog is the same size
-// either way. F1 unbinds the target, F2 changes how its controller moves it (pickup, jump, relative); the arrows or the encoder choose a binding of the list, F3 deletes it,
+// either way. F1 unbinds the target, F2 changes how its controller moves it (pickup, jump, relative), F5 toggles whether its binding follows the selected
+// instrument (OS-LEARNFOLLOW); the arrows or the encoder choose a binding of the list, F3 deletes it,
 // F4 clears them all (OS-013a: pressed twice, the footer asks).
 void LearnOverlay::render(const Model& model, const ViewState& view, ui::Renderer& r) const noexcept {
   const ui::Theme& t = r.theme();
@@ -168,14 +187,18 @@ void LearnOverlay::render(const Model& model, const ViewState& view, ui::Rendere
   } else {
     // The parameter's name in the Data face, the instrument it is of beside it, and what it is bound to at the right edge.
     r.text(dash_x, ui::caps_y(t, Face::Data, row, pitch), desc->name, Color::ChromeText, Face::Data);
+    const core::LearnBinding* b = find_binding(model, target);
     core::FixedString<48> line;
     if (core::param_kind(target) == core::ParamKind::Instrument) {
       line.assign("INS ");
-      append_dec(line, core::param_index(target) + 1u, 2);
+      if (b != nullptr && (b->flags & core::kLearnFollow) != 0) {
+        line.append("*");  // the binding that acts on the target follows the selected instrument (OS-LEARNFOLLOW 3.4)
+      } else {
+        append_dec(line, core::param_index(target) + 1u, 2);
+      }
       r.text(dash_x + static_cast<int>(core::kParamNameChars) * t.geometry(Face::Data).cell_w, ui::caps_y(t, Face::Label, row, pitch), line.c_str(),
              Color::ChromeDim, Face::Label);
     }
-    const core::LearnBinding* b = find_binding(model, target);
     if (b != nullptr) {
       binding_text(line, *b);
     } else {

@@ -842,6 +842,110 @@ TEST_CASE("native settings: values and bindings survive a save and a load, and t
   }
 }
 
+// OS-INSFX S7 (docs/specs/OS-INSFX.md): the ids of an insert's parameters at the model level. The master insert (S6) is where 16, slot 0 of the project's INSX record and index 32 of the id;
+// nothing here needs the audio side.
+TEST_CASE("insert params: the id maps to the INSX record (a track's slot, the master's index 32), reads the blob, and its generation moves with the value") {
+  three_instruments();
+  model::Project& p = project();
+  CHECK(p.add_module("fx", 2, 1, 0) == model::Status::Ok);
+  const auto ins = [](unsigned where, unsigned slot, unsigned field) { return core::param_id(ParamKind::Insert, core::insert_param_index(where, slot), field); };
+  CHECK(core::insert_param_index(0, 0) == 0u);
+  CHECK(core::insert_param_index(2, 1) == 5u);                                   // track 3, INS B
+  CHECK(core::insert_param_index(model::kInsertWhereMaster, 0) == core::kInsertIdMaster);  // the master: 32
+  CHECK(core::param_index(ins(model::kInsertWhereMaster, 0, 3)) == 32u);
+  // no record, no parameter
+  CHECK_FALSE(p.has_param(ins(1, 0, 0)));
+  CHECK(p.get_param(ins(1, 0, 0)) == 0.0f);
+  // a track's insert B (where 5, slot 1) with three parameters; the master's insert with two
+  model::InsertRecord r{};
+  r.where = 5;
+  r.slot = 1;
+  r.module = 0;
+  r.n = 3;
+  r.param[0] = 0.25f;
+  r.param[1] = -2.0f;
+  r.param[2] = 7.5f;
+  CHECK(p.set_insert(r) == model::Status::Ok);
+  model::InsertRecord m{};
+  m.where = model::kInsertWhereMaster;
+  m.slot = 0;
+  m.module = 0;
+  m.n = 2;
+  m.param[0] = 1.5f;
+  m.param[1] = 3.0f;
+  CHECK(p.set_insert(m) == model::Status::Ok);
+  CHECK(p.has_param(ins(5, 1, 0)));
+  CHECK(p.get_param(ins(5, 1, 2)) == 7.5f);
+  CHECK_FALSE(p.has_param(ins(5, 1, 3)));  // past the record's n
+  CHECK(p.get_param(ins(5, 1, 3)) == 0.0f);
+  CHECK_FALSE(p.has_param(ins(5, 0, 0)));  // the other slot of the track has no record
+  CHECK(p.has_param(core::param_id(ParamKind::Insert, 32, 1)));  // the master by its id index
+  CHECK(p.get_param(core::param_id(ParamKind::Insert, 32, 1)) == 3.0f);
+  CHECK_FALSE(p.has_param(core::param_id(ParamKind::Insert, 32, 2)));
+  CHECK_FALSE(p.has_param(core::param_id(ParamKind::Insert, 33, 0)));  // the master has no slot 1: not an id
+  CHECK_FALSE(p.has_param(core::param_id(ParamKind::Insert, 10, 32)));  // field 32 is past O3M_PARAMS_MAX
+  // the generation follows the value alone: unchanged for the other parameter and the other insert, different for the one written, equal when put back, different after a load (the epoch)
+  const std::uint32_t g0 = p.param_generation(ins(5, 1, 0));
+  const std::uint32_t g1 = p.param_generation(ins(5, 1, 1));
+  const std::uint32_t gm = p.param_generation(core::param_id(ParamKind::Insert, 32, 0));
+  r.param[0] = 0.5f;
+  CHECK(p.set_insert(r) == model::Status::Ok);
+  CHECK(p.param_generation(ins(5, 1, 0)) != g0);
+  CHECK(p.param_generation(ins(5, 1, 1)) == g1);
+  CHECK(p.param_generation(core::param_id(ParamKind::Insert, 32, 0)) == gm);
+  r.param[0] = 0.25f;
+  CHECK(p.set_insert(r) == model::Status::Ok);
+  CHECK(p.param_generation(ins(5, 1, 0)) == g0);
+  p.reset();
+  CHECK_FALSE(p.has_param(ins(5, 1, 0)));  // a reset leaves no insert
+  CHECK(p.param_generation(ins(5, 1, 0)) != g0);
+  // set_param does not write an insert: it is written by set_insert (not an undo unit)
+  CHECK(p.set_param(ins(5, 1, 0), 1.0f) == model::Status::BadIndex);
+  CHECK(model::param_desc(ins(5, 1, 0)) == nullptr);  // the descriptor is the bound module's, not a table row
+  model::ParamField f;
+  CHECK_FALSE(model::find_param(ins(5, 1, 0), f));
+  CHECK(model::param_slots_per_index(ParamKind::Insert) == 0u);
+  CHECK(model::param_index_count(ParamKind::Insert) == 0u);
+}
+
+TEST_CASE("native settings: an insert's Learn binding (OS-INSFX S7) survives a save and a load, and what this version has no id for is skipped and counted, as an older reader skips every Insert entry") {
+  setup_with_settings();
+  const auto ins = [](unsigned index, unsigned field) { return core::param_id(ParamKind::Insert, index, field); };
+  model::Project& p = project();
+  CHECK(p.set_learn_slot(3, core::LearnBinding{ins(2, 0), 20, 0, 0, 0}) == model::Status::Ok);                       // T2 INS A, field 0 (where 2)
+  CHECK(p.set_learn_slot(4, core::LearnBinding{ins(core::kInsertIdMaster, 31), 21, 3, 1, 0}) == model::Status::Ok);  // the master insert's last field, channel 3, jump
+  CHECK(p.set_learn_slot(5, core::LearnBinding{ins(33, 0), 22, 0, 0, 0}) == model::Status::BadValue);                // the master has no slot 1
+  CHECK(p.set_learn_slot(5, core::LearnBinding{ins(0, 32), 22, 0, 0, 0}) == model::Status::BadValue);                // field 32
+  CHECK(p.set_learn_slot(5, core::LearnBinding{ins(2, 1), 22, 0, 0, core::kLearnFollow}) == model::Status::BadValue);  // an insert never follows
+  model::Settings device;
+  device.init(ParamKind::Device);
+  CHECK(device.set_learn(0, core::LearnBinding{ins(2, 0), 20, 0, 0, 0}) == model::Status::BadValue);  // the project's store, not the device's
+  const Bytes a = save();
+  const Snapshot before = take();
+  const model::Settings settings_before = p.settings();
+  p.reset();
+  const formats::native::Report r = load(a);
+  CHECK(r.error == formats::native::Error::None);
+  CHECK(r.settings_skipped == 0u);
+  CHECK(equal(take(), before));
+  CHECK(project().settings().learn_count() == 5u);
+  CHECK(std::memcmp(project().settings().learn_slots(), settings_before.learn_slots(), core::kLearnSlots * sizeof(core::LearnBinding)) == 0);
+  CHECK(project().check_invariants());
+  CHECK(save() == a);
+  // The rule an older reader applies to these entries: a kind it has no binding for is skipped and counted, the project opens with the rest. A kind 7 stands for it here (the older reader's
+  // bindable kinds were Instrument .. Device); the two bindings of an Insert id this version cannot have (index 33, field 32) are skipped by this reader's own check.
+  std::vector<Chunk> cs = chunks_of(a);
+  Chunk& l = find(cs, kLrnb);
+  NEED(l.payload.size() == 4u + 5u * 8u);
+  u32_at(l.payload, 4 + 3 * 8, static_cast<std::uint32_t>(core::param_id(static_cast<ParamKind>(7), 2, 0)));  // entry 3: a kind of a later version
+  u32_at(l.payload, 4 + 4 * 8, static_cast<std::uint32_t>(ins(33, 0)));                                          // entry 4: index 33
+  const formats::native::Report r2 = load(rebuild(cs));
+  CHECK(r2.error == formats::native::Error::None);
+  CHECK(r2.settings_skipped == 2u);
+  CHECK(project().settings().learn_count() == 3u);
+  CHECK(project().check_invariants());
+}
+
 TEST_CASE("native settings: what a file lacks is the default, what it carries that this version cannot use is skipped and counted") {
   setup_with_settings();
   std::vector<Chunk> cs = chunks_of(save());

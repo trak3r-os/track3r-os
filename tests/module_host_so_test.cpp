@@ -112,7 +112,7 @@ TEST_CASE("module host shared objects: the descriptors are valid and say what th
   CHECK(!set.add_native("norender", bad));
   // the TB-303 declares two views (OS-012b) with the draw table's one entry point
   CHECK(tb.entry->view_count == 2u);
-  CHECK((tb.entry->ui != nullptr && tb.entry->ui->view_draw != nullptr && tb.entry->ui->struct_size == O3M_UI_SIZE(8)));
+  CHECK((tb.entry->ui != nullptr && tb.entry->ui->view_draw != nullptr && tb.entry->ui->struct_size == O3M_UI_SIZE(13)));
   CHECK(sine.entry->view_count == 0u);
   CHECK(sine.entry->ui == nullptr);
   bad = *tb.entry;

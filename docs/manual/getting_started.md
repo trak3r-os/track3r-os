@@ -44,7 +44,11 @@ A starter zip is not part of this release. If you have one, you unpack it into t
 | In the zip | What it holds |
 |---|---|
 | `Firmware/` | the update file and its checksum |
-| `modules/apps/` | apps for the TOOLS screen. The TB-303, chip, FM and SID instruments are inside the firmware. The apps alone come in `track3r-os-<version>-apps.zip`, in the release `apps-v<version>`. |
+| `modules/apps/` | apps for the TOOLS screen. The TB-303, chip, FM and SID instruments are inside the firmware (their factory presets are in `modules/presets/`). The apps alone come in `track3r-os-<version>-apps.zip`, in the release `apps-v<version>`. |
+| `modules/effects/` | the effect modules for a track's insert |
+| `modules/instruments/` | the instrument modules that are not inside the firmware (Sine) |
+| `modules/importers/` | the importer module `tracker.tmod`, which the firmware loads from the card to read MOD, S3M and OctaMED files on IMPORT (File screen, F6). Without it an import says **NO IMPORTER** and changes nothing. |
+| `Effects/` | the Sample Editor plugins (`.ptfx`): Add Silence, Analog Kick, Chiptune, Multimode Filter, Stereo Delay, Stereo to Mono, Overdrive, Delay, Bitcrusher, Chorus, Flanger, Limiter and Three-Band EQ |
 | `Samples/` | a drum kit and other one-shots |
 | `WTABLE/` | wavetables |
 | `Songs/` | tracker songs for the importers |

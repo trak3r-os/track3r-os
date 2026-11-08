@@ -10,8 +10,7 @@ tap insert
 release shift
 tap up 3
 tap song
-tap song
-assert state screen=SONG page=2
+assert state screen=SONG page=1
 snap qa_sng_088
 
 # QA-SNG-090: an edit of a pattern redraws only that pattern's map: the first bar's four kicks of pattern 1 are deleted (each Delete moves the cursor on one step) in Pattern (STEP) and the copies keep theirs.
@@ -31,5 +30,5 @@ assert model pat.1.0.8.note=0
 assert model pat.1.0.12.note=0
 assert model pat.2.0.0.note=25
 tap song
-assert state screen=SONG page=2
+assert state screen=SONG page=1
 snap qa_sng_090

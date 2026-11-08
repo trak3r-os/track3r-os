@@ -23,12 +23,12 @@ namespace o3os::model {
 // value is ever repeated. Main loop only.
 class Settings {
  public:
-  // Room reserved for growth: the device scope has 26 fields today (E-CFG-03, row 13: TRANSPORT IN / OUT, ids 23 and 24; E-PAT-35, row 58: PAT SWITCH, id 25) and the project 3, each one byte of the values.
-  // These are the block's capacity, not the scopes' field counts, so adding a setting is a table row (model/params.cpp) until a scope reaches 26: THE DEVICE SCOPE IS NOW FULL
-  // (device_setting::kCount == kMaxFields), and the next device setting needs another raise (here, kModelArenaBytes and the arena static_asserts). In memory only: the files hold entries (id, value), not this
-  // block (it was 16 until OS-006e, 24 until E-CFG-03: the arena grew by 40 bytes, then by the 8 generation bytes of each block: the 2 new value bytes fit in the block's existing pad).
-  static constexpr unsigned kValueBytes = 26;
-  static constexpr unsigned kMaxFields = 26;
+  // Room reserved for growth: the device scope has 30 fields today (OS-MTC B3: MTC IN, id 29; OS-MTC A3: MTC OUT and MTC START, ids 27 and 28, after OS-MIDICCMAP S1: CC MAP, id 26, after E-CFG-03's TRANSPORT IN / OUT, ids 23 and 24, and E-PAT-35's PAT SWITCH, id 25) and the project 3, each one byte of the values.
+  // These are the block's capacity, not the scopes' field counts, so adding a setting is a table row (model/params.cpp) until a scope reaches the capacity. OS-MIDICCMAP S1 landed before OS-MTC and made the raise itself: the capacity went 26 -> 32
+  // (room for OS-MTC's ids 27..29 and three more; the device scope was full at 26: E-PAT-35's id 25 was the last that fit). In memory only: the files hold entries (id, value), not this block (it was 16 until OS-006e, 24 until E-CFG-03, 26 until
+  // OS-MIDICCMAP S1, 32 since: the arena grew by 40 bytes for the 24, by 8 for the 26, by 32 for the 32: 6 value bytes plus the block's pad, and the 6 new generation bytes).
+  static constexpr unsigned kValueBytes = 32;
+  static constexpr unsigned kMaxFields = 32;
 
   // Defaults for every field, an empty Learn store; `kind` is core::ParamKind::Project or Device.
   void init(core::ParamKind kind) noexcept;
@@ -75,7 +75,7 @@ class Settings {
   core::LearnBinding learn_[core::kLearnSlots];
 };
 
-// (kind_ and the value bytes fill whole words: 1 + 26 = 27 bytes, 28 with the pad)
+// (kind_ and the value bytes fill whole words: 1 + 32 = 33 bytes, 36 with the pad)
 static_assert(sizeof(Settings) == ((1 + Settings::kValueBytes + 3) & ~3u) + 4 * Settings::kMaxFields + 4 + 4 + core::kLearnSlots * 8 && alignof(Settings) == 4,
               "Settings layout (it is part of the project arena)");
 

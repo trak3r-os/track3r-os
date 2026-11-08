@@ -97,11 +97,11 @@ std::map<std::string, std::string> parse_pairs(const std::string& line) {
 // ---- assert model --------------------------------------------------------------------------------------------------------------------
 
 struct ModelPath {
-  enum class Kind : std::uint8_t { Tempo, Name, OrderLen, Order, Step, InstName, InstParam };
+  enum class Kind : std::uint8_t { Tempo, Name, OrderLen, Order, Step, InstName, InstParam, TrackFlags };
   enum class StepField : std::uint8_t { Note, Instr, Vol, Fx1, Fx2 };
   Kind kind = Kind::Tempo;
   StepField step_field = StepField::Note;
-  unsigned a = 0;      // Order: the position; Step: the pattern id; InstName, InstParam: the instrument number (1..64)
+  unsigned a = 0;      // Order: the position; Step: the pattern id; InstName, InstParam: the instrument number (1..64); TrackFlags: the track (0..15)
   unsigned track = 0;  // Step
   unsigned step = 0;   // Step
   unsigned field = 0;  // InstParam: the field id of model/params.h
@@ -140,6 +140,12 @@ const std::vector<ParamName>& param_names() {
       if (field == ip::PlayStereo) {
         desc = &model::play_stereo_desc();  // (the other virtual field, OS-STEREO step 2: the instrument's own byte)
       }
+      if (field == ip::PlayThru) {
+        desc = &model::play_thru_desc();  // (the virtual field of OS-CEPLAYTHRU P2: the instrument's own byte)
+      }
+      if (ip::is_wt_field(field)) {
+        desc = model::wt_param_desc(field);  // (the virtual fields of OS-CEWTENV W7a: the instrument's own bytes)
+      }
       if (desc != nullptr) {
         names.push_back({prefix + caption_of(desc->name), field});
       }
@@ -152,12 +158,16 @@ const std::vector<ParamName>& param_names() {
     }
     add("", ip::MidiChannel);
     add("", ip::PlayStereo);
+    add("", ip::PlayThru);
     for (unsigned e = 0; e < ip::kEnvelopes; ++e) {
       for (unsigned f = 0; f < ip::kEnvelopeFields; ++f) {
         add("env" + std::to_string(e) + ".", ip::envelope(e, f));
       }
       for (unsigned f = 0; f < ip::kModFields; ++f) {
         add("mod" + std::to_string(e) + ".", ip::mod(e, f));
+      }
+      for (unsigned f = 0; f < ip::kWtFields; ++f) {
+        add("wt" + std::to_string(e) + ".", ip::wt(e, f));
       }
     }
     for (unsigned f = ip::kMidiFirst; f < ip::kMidiFirst + ip::kMidiRows; ++f) {
@@ -224,6 +234,14 @@ bool parse_model_path(const std::string& path, ModelPath& out, std::string& erro
     }
     return bad("the step field must be note, instr, vol, fx1 or fx2");
   }
+  if (part[0] == "track" && part.size() == 3 && part[2] == "flags") {  // OS-SONG3 S4: the track's mute / solo flags (kTrackMute | kTrackSolo), as `assert model` reads them
+    if (!parse_uint(part[1], 0, model::kMaxTracks - 1u, n)) {
+      return bad("the track must be 0..15");
+    }
+    out.kind = ModelPath::Kind::TrackFlags;
+    out.a = static_cast<unsigned>(n);
+    return true;
+  }
   if (part[0] == "inst" && part.size() >= 3) {
     if (!parse_uint(part[1], 1, model::kMaxInstruments, n)) {
       return bad("the instrument must be 1..64");
@@ -243,7 +261,7 @@ bool parse_model_path(const std::string& path, ModelPath& out, std::string& erro
     }
     return bad("no instrument parameter " + quoted(caption));
   }
-  error = "unknown model path " + quoted(path) + " (tempo, name, order.<n>, order.len, pat.<p>.<t>.<s>.<field>, inst.<n>.name, inst.<n>.<param>)";
+  error = "unknown model path " + quoted(path) + " (tempo, name, order.<n>, order.len, pat.<p>.<t>.<s>.<field>, track.<n>.flags, inst.<n>.name, inst.<n>.<param>)";
   return false;
 }
 
@@ -282,6 +300,15 @@ bool read_value(const model::Project& project, const ModelPath& path, Value& out
     case ModelPath::Kind::Order:
       out = number_value(static_cast<double>(project.order(path.a)), true);
       return true;
+    case ModelPath::Kind::TrackFlags: {  // OS-SONG3 S4: the track's mute / solo flags (kTrackMute | kTrackSolo)
+      const model::TrackSlot* slot = project.track(path.a);
+      if (slot == nullptr) {
+        why = "no track " + std::to_string(path.a);
+        return false;
+      }
+      out = number_value(slot->flags, true);
+      return true;
+    }
     case ModelPath::Kind::Step: {
       const model::Pattern* pattern = project.pattern(path.a);
       if (pattern == nullptr) {
@@ -323,6 +350,14 @@ bool read_value(const model::Project& project, const ModelPath& path, Value& out
       }
       if (path.field == model::instrument_param::PlayStereo) {
         out = number_value(in->stereo, true);
+        return true;
+      }
+      if (path.field == model::instrument_param::PlayThru) {
+        out = number_value(in->slice_thru, true);
+        return true;
+      }
+      if (model::instrument_param::is_wt_field(path.field)) {
+        out = number_value(static_cast<double>(model::wt_param_value(*in, path.field)), true);
         return true;
       }
       const core::ParamId id = core::param_id(core::ParamKind::Instrument, path.a - 1u, path.field);

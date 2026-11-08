@@ -231,6 +231,40 @@ TEST_CASE("inst 1.3: a file that has the fields round-trips (save, load, save), 
   CHECK(file_crc(back) == file_crc(file));
 }
 
+TEST_CASE("module mix: a module instrument's PANNING and sends are saved and loaded with the project, and a default one is the file it was (OS-MODSENDS, no format change)") {
+  test::fill_small(proj(0));  // its module table starts with tb303 (index 0)
+  Instrument m;
+  init_instrument(m, InstrumentKind::Module);
+  std::strcpy(m.name, "ACID");
+  m.module_index = 0;
+  NEED(proj(0).set_instrument(kSlot, m) == Status::Ok);
+  const Bytes plain = saved(proj(0));  // the defaults (pan 50, sends 0)
+  m.sampler.panning = 20;
+  m.sampler.delay_send = 30;
+  m.sampler.reverb_send = 40;
+  NEED(proj(0).set_instrument(kSlot, m) == Status::Ok);
+  const Bytes file = saved(proj(0));
+  CHECK(file != plain);
+  Report rep;
+  NEED(test::load(test::arena(1), file, &rep) == Progress::Done);
+  CHECK_FALSE(rep.newer_minor);
+  const Instrument* q = proj(1).instrument(kSlot);
+  NEED(q != nullptr);
+  CHECK(q->kind == InstrumentKind::Module);
+  CHECK(q->sampler.panning == 20);
+  CHECK(q->sampler.delay_send == 30);
+  CHECK(q->sampler.reverb_send == 40);
+  CHECK(saved(proj(1)) == file);  // save, load, save
+  // the file without the edit loads as the centre with no send
+  NEED(test::load(test::arena(1), plain, &rep) == Progress::Done);
+  q = proj(1).instrument(kSlot);
+  NEED(q != nullptr);
+  CHECK(q->sampler.panning == 50);
+  CHECK(q->sampler.delay_send == 0);
+  CHECK(q->sampler.reverb_send == 0);
+  CHECK(saved(proj(1)) == plain);
+}
+
 TEST_CASE("inst 1.3: an older file (1.1, 1.2) reads as the defaults, and is written back as it was") {
   test::fill_small(proj(0));
   NEED(proj(0).set_instrument(kSlot, busy_midi()) == Status::Ok);
@@ -313,16 +347,22 @@ TEST_CASE("inst 1.3: a value out of its range reads as the field's default (a la
   CHECK(rep.error == Error::Malformed);
 }
 
-TEST_CASE("inst 1.3: a newer minor (1.6, past INST 1.4 of OS-LFOSINE and INST 1.5 of OS-STEREO) is read as far as 1.5, the rest skipped, and written back as 1.3 without it; an older reader meets the same rule at 1.3") {
+TEST_CASE("inst 1.3: a newer minor (1.9, past INST 1.4 of OS-LFOSINE, INST 1.5 of OS-STEREO, INST 1.6 of OS-CEWTENV W1, INST 1.7 of OS-CEPLAYTHRU P1 and INST 1.8 of OS-MODRATE S3) is read as far as 1.8, the rest skipped, and written back as 1.3 without it; an older reader meets the same rule at 1.3") {
   test::fill_small(proj(0));
   NEED(proj(0).set_instrument(kSlot, busy_midi()) == Status::Ok);
   const Bytes file = saved(proj(0));
   std::vector<RawChunk> edit = test::split_chunks(file);
   RawChunk* c = inst_of(edit, kSlot);
   NEED(c != nullptr);
-  c->payload[1] = 0x06;
+  c->payload[1] = 0x09;
+  c->payload.push_back(0xAB);  // the stereo flag of 1.5, above 1: mono
+  for (unsigned i = 0; i < 12; ++i) {
+    c->payload.push_back(0);  // the twelve WT bytes of 1.6: none
+  }
+  c->payload.push_back(0);  // the play-thru flag of 1.7: off
+  c->payload.push_back(0);  // the module RATE of 1.8: FULL
   for (unsigned i = 0; i < 300; ++i) {
-    c->payload.push_back(0xAB);  // the first is a stereo flag above 1 (mono); the rest are fields of a later version
+    c->payload.push_back(0xAB);  // fields of a later version
   }
   Report rep;
   NEED(test::load(test::arena(1), build(edit), &rep) == Progress::Done);
@@ -370,7 +410,7 @@ TEST_CASE("inst 1.3: the fixtures that never used the fields are the files they 
     void (*fill)(Project&);
     std::size_t size;
     std::uint32_t crc;
-  } pins[] = {{test::fill_small, 2648, 0x3f04f4e7u}, {test::fill_state, 3372, 0xa8d283e1u}, {test::fill_persist2, 3032, 0x40ad3678u}, {test::fill_maximal, 1888426, 0xc58be9e8u}};  // (the maximal's CRC: its LFO shapes are 0..4 since OS-LFOSINE, same size, shape bytes only)
+  } pins[] = {{test::fill_small, 2648, 0x3f04f4e7u}, {test::fill_state, 3372, 0xa8d283e1u}, {test::fill_persist2, 3032, 0x40ad3678u}, {test::fill_maximal, 1890090, 0x692144eau}};  // (the maximal's CRC: its LFO shapes are 0..4 since OS-LFOSINE, same size, shape bytes only; since OS-CEWTENV W1 its random envelope loops of 2 or more are WT slots, so its INST chunks are 1.6 — 26 bytes more each than the 1.1 chunk, the engine, the twelve MIDI bytes, the stereo byte and the twelve WT bytes the 1.6 layout holds whole)
   for (const auto& p : pins) {
     p.fill(proj(0));
     const Bytes file = saved(proj(0));
@@ -528,7 +568,7 @@ TEST_CASE("inst 1.5: the length is exact, and the flag on a MIDI instrument is r
   NEED(test::load(test::arena(1), build(cs), &rep) == Progress::Done);  // the flag is a Sample instrument's: on a MIDI instrument it reads 0 (docs/specs/OS-STEREO.md), the file is not refused
   CHECK(proj(1).instrument(kSlot)->stereo == 0);
   CHECK(proj(1).instrument(kSlot)->midi_channel == 5);
-  CHECK(std::memcmp(proj(1).instrument(kSlot)->reserved, "\0\0\0", 3) == 0);
+  CHECK(std::memcmp(proj(1).instrument(kSlot)->reserved, "\0", 1) == 0);
   m->payload.back() = 0;  // the same chunk with the flag at 0 is a valid 1.5 chunk of a MIDI instrument (read, written back as 1.3)
   NEED(test::load(test::arena(1), build(cs), &rep) == Progress::Done);
   CHECK(proj(1).instrument(kSlot)->stereo == 0);

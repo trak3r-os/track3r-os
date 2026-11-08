@@ -24,7 +24,9 @@
 // Perform (the P2 screen) drives the performance layer through Sequencer::set_perf and end_perf; their values are carried as int16 (the performance
 // values range from 8 to 32 bits: start and end points are sample positions, which the P2 contract will normalise: open item, default int16 as given).
 //
-// State: per track two bytes of type, two of value, a word of performance bits and a performance value per group: 16 x (4 + 4 + 2 x 19) = 736 bytes.
+// State: per track two bytes of type, two of value and a word of performance bits: 16 x 8 = 128 bytes, in the table. The performance values (an int16 per track and group, 16 x 25 x 2 = 800 bytes)
+// are the caller's PerfStore, attached with attach_perf(): on the target it is in SDRAM (SRAM_U keeps its 32 KiB free floor; a value is read once an FX event and written once a Perform
+// gesture, never in the sample loop), inside the Sequencer's OrderStore. A table without a store has no performance layer (set_perf does nothing, resolve reports no performance value).
 
 #include <o3os/audio/events.h>
 #include <o3os/seq/fx.h>
@@ -55,6 +57,13 @@ class ControlTable {
  public:
   static constexpr std::uint32_t kTracks = 16;
   static constexpr std::uint32_t kColumns = 2;
+
+  // The performance layer's values: one int16 per track and group (the bits saying which are held stay in the table).
+  struct PerfStore {
+    std::int16_t val[kTracks][kFxGroupCount];
+  };
+  // Gives the table its performance store (zeroed here, and the performance bits cleared), before the first set_perf.
+  void attach_perf(PerfStore& store) noexcept;
 
   void reset() noexcept;
   // The two sequencer columns of every track end and the performance layer stays (a fresh transport start, OS-011b): a play ends the sequencer's FX
@@ -87,7 +96,7 @@ class ControlTable {
   std::uint8_t type_[kTracks][kColumns] = {};
   std::uint8_t value_[kTracks][kColumns] = {};
   std::uint32_t perf_on_[kTracks] = {};
-  std::int16_t perf_val_[kTracks][kFxGroupCount] = {};
+  PerfStore* perf_ = nullptr;
 };
 
 }  // namespace o3os::seq

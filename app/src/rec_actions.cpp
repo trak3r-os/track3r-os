@@ -5,10 +5,14 @@
 // are ONE undo unit (the maintainer's whole-take rule: rec_take_sync below keeps one undo group open from the moment recording begins to the moment it ends).
 //
 // Main loop only (an action): the playhead is read from audio::PlayPosition by App::poll_play_position, once at the top of every pass, and nothing here runs in the audio context.
+#include "param_access.h"
 #include "pattern_edit_util.h"
 
 #include <o3os/app/pad_note.h>
+#include <o3os/app/rec_fx.h>
 #include <o3os/app/rec_place.h>
+#include <o3os/core/fixed_string.h>
+#include <o3os/model/instrument.h>
 #include <o3os/model/params.h>
 
 namespace o3os::app {
@@ -34,12 +38,32 @@ bool take_is_long(const model::Editor& editor) noexcept {
   return j.open_bytes() > j.capacity_bytes() / 2;
 }
 
-// A record was written into the open take (the journal grew): the info line counts the take as an undo level. A write that changed nothing, and one made while no take is open (inside a macro),
+// A write was written into the open take (the journal grew): the info line counts the take as an undo level. A write that changed nothing, and one made while no take is open (inside a macro),
 // do not.
 void note_take_write(ViewState& v, std::size_t journal_bytes_before, const model::Editor& editor) noexcept {
   if (v.edit.take_open && editor.journal().open_bytes() > journal_bytes_before) {
     v.edit.take_wrote = true;
   }
+}
+
+// The row of `track` the play line is on at this moment (REC QUANTIZE, the loop, the track's own length, the count-in rule): the row a recorded note and a recorded FX alike go to (OS-FXREC 3.3:
+// one shared helper with rec_note).
+int rec_row_now(const ActionContext& ctx, const PatternSource& src, int track) noexcept {
+  namespace ds = model::device_setting;
+  const ViewState& v = ctx.view;
+  const rec::Quantize q = device_choice(ctx.model, ds::RecQuantize) == 0u ? rec::Quantize::Nearest : rec::Quantize::Playing;
+  const bool loops = pattern_loops(v);
+  const int head = v.play.step;
+  // OS-COUNTIN: in the last half step of the count-in (pattern_recording lets it through under Nearest) the play line waits on the start point, so the hit IS the start step's: no round-up from it.
+  if (v.play.count_in != 0u) {
+    return src.track_length(track) > 0 ? head % src.track_length(track) : 0;
+  }
+  return rec::quantize_row(head, v.play.ustep, src.track_length(track), src.length(), q, loops);
+}
+
+// OS-ENCLEARN: STEP, the Pattern screen in Edit with the cursor free (OS-RECMODE2: REC), over a document.
+bool rec_step_mode(const Model& model, const ViewState& v) noexcept {
+  return model.project != nullptr && v.screen == ScreenId::Pattern && v.mode[screen_index(ScreenId::Pattern)] == static_cast<std::uint8_t>(PatternMode::Edit) && v.edit.rec_free;
 }
 }  // namespace
 
@@ -76,7 +100,7 @@ bool rec_note(ActionContext& ctx, unsigned note, unsigned velocity) noexcept {
   const bool loops = pattern_loops(v);
   // OS-COUNTIN: in the last half step of the count-in (pattern_recording lets it through under Nearest) the play line waits on the start point, so the hit IS the start step's: no round-up from it.
   const bool in_count = v.play.count_in != 0u;
-  const int row = in_count ? (src.track_length(track) > 0 ? head % src.track_length(track) : 0) : rec::quantize_row(head, v.play.ustep, src.track_length(track), src.length(), q, loops);
+  const int row = rec_row_now(ctx, src, track);
   // REC MICRO: the offset from the step the note is written to (an early note, rounded up, has none: rec_place.h); -1 leaves FX 2 alone. REC VELOCITY: the keyboard's velocity, or 0 for none.
   const int micro = device_choice(ctx.model, ds::RecMicro) != 0u
                         ? static_cast<int>(rec::micro_value(rec::micro_offset(v.play.ustep, in_count || rec::goes_on(head, v.play.ustep, src.length(), q, loops))))
@@ -158,6 +182,97 @@ bool rec_note_off(ActionContext& ctx, core::ActionArg arg) noexcept {
 
 // ---- the take ------------------------------------------------------------------------------------------------------------------------------------------------
 
+// OS-FXREC S2 (docs/specs/OS-FXREC.md 3.2, 3.3, 3.5): a mapped parameter move of a LIVE take is written as the step FX at the play line of the cursor's track. Called from apply_cc after
+// write_param returned Changed, with the parameter the message resolved to. All of 3.2 holds or nothing records: recording is active, the playhead is in the edited pattern, the parameter is of
+// the selected instrument (Q3 a) and that instrument is a Sample one (A-5), and rec_fx_map gives an FX (the filter type read from the instrument's stored FILTER TYPE, the value read back from the
+// parameter). The column is rec_fx_place's; the write goes back with Editor::set_steps inside the open take, and is skipped when the cell is unchanged (F11).
+//
+// OS-ENCLEARN (`enc`): the same function takes the move of Instr + FX1 and the encoder. LIVE is as above. STEP (Edit free, REC: the take that App::run_once opened for the gesture, enc_take) writes the
+// same FX at the CURSOR's step of the cursor's track, whether or not the pattern plays. A parameter that records nothing (not an instrument one, not of the selected Sample instrument, no FX map) says
+// "REC FX: <PARAMETER> HAS NO FX" once per gesture; WATCH and the other screens say nothing and record nothing.
+bool rec_fx_write(ActionContext& ctx, core::ParamId id, const char* name, bool enc) noexcept {
+  ViewState& v = ctx.view;
+  const bool live = rec_active(ctx);
+  const bool step = enc && !live && ctx.edit != nullptr && v.edit.enc_take && rec_step_mode(ctx.model, v);
+  if (!live && !step) {
+    return false;  // not recording
+  }
+  if (live && v.play.pattern != v.edit.pattern) {
+    return false;  // the playhead is in another pattern
+  }
+  const auto no_fx = [&]() noexcept {
+    if (enc && !v.edit.enc_said) {
+      v.edit.enc_said = true;
+      core::FixedString<core::kNotifyTextChars> text;
+      text.append("REC FX: ");
+      text.append(name != nullptr ? name : "");
+      text.append(" HAS NO FX");
+      (void)v.notify.post(core::Severity::Info, text.c_str(), "rec_fx", ViewState::kMessageMs);
+    }
+    return false;
+  };
+  if (core::param_kind(id) != core::ParamKind::Instrument) {
+    return no_fx();  // a Mixer, Perform or device move records nothing (A-7)
+  }
+  const unsigned slot = core::param_index(id);
+  if (static_cast<int>(slot) + 1 != v.instrument) {
+    return no_fx();  // Q3 a: only a binding of the selected instrument
+  }
+  const model::Instrument* in = ctx.model.project != nullptr ? ctx.model.project->instrument(slot) : nullptr;
+  if (in == nullptr || in->kind != model::InstrumentKind::Sample) {
+    return no_fx();  // A-5: only a Sample instrument records (the mapped fields are sampler fields)
+  }
+  float value = 0.0f;
+  if (!read_param(ctx.model, id, value)) {
+    return false;  // the value as it is stored, so as it is heard
+  }
+  float filter_type = 0.0f;
+  (void)read_param(ctx.model, core::param_id(core::ParamKind::Instrument, slot, model::instrument_param::FilterType), filter_type);  // the stored FILTER TYPE (A-1)
+  model::StepFx fx{};
+  if (!rec::rec_fx_map(core::param_field(id), static_cast<unsigned>(filter_type), value, fx)) {
+    return no_fx();  // Tune and every other parameter write nothing (Q2 a)
+  }
+  const PatternSource src(ctx.model, v.edit.pattern);
+  const int tracks = src.tracks() < kRecTracks ? src.tracks() : kRecTracks;
+  const int track = v.pattern.track();  // REC POLY Spill does not spill FX (A-3): the cursor's track
+  if (track >= tracks) {
+    return false;
+  }
+  const int row = step ? v.pattern.row() : rec_row_now(ctx, src, track);  // STEP: the cursor's step
+  if (row < 0 || row >= src.track_length(track)) {
+    return false;
+  }
+  model::Step s = src.step(track, row);
+  const model::Step before = s;
+  if (rec::rec_fx_place(s, fx.type, fx.value) < 0) {
+    if (!v.edit.rec_fx_full) {  // once per take
+      v.edit.rec_fx_full = true;
+      (void)v.notify.post(core::Severity::Info, "REC FX: NO FREE FX COLUMN", "rec_fx", ViewState::kMessageMs);
+    }
+    return false;
+  }
+  if (std::memcmp(&s, &before, sizeof s) == 0) {
+    return false;  // the cell is unchanged: nothing to write, nothing recorded
+  }
+  bool exists = src.exists();
+  if (!pe::create_if_missing(ctx, exists, static_cast<unsigned>(src.length()))) {
+    return false;
+  }
+  const std::size_t journal_before = ctx.edit->journal().open_bytes();
+  if (ctx.edit->set_steps(v.edit.pattern, static_cast<std::uint32_t>(track), static_cast<std::uint32_t>(row), &s, 1) != model::Status::Ok) {
+    return false;
+  }
+  note_take_write(v, journal_before, *ctx.edit);
+  if (!v.edit.rec_fx_said) {  // the take's first recorded FX says which parameter (3.5)
+    v.edit.rec_fx_said = true;
+    core::FixedString<core::kNotifyTextChars> text;
+    text.append("REC FX: ");
+    text.append(name != nullptr ? name : "");
+    (void)v.notify.post(core::Severity::Info, text.c_str(), "rec_fx", ViewState::kMessageMs);
+  }
+  return true;
+}
+
 bool rec_keeps_take(const ActionDef& action, const ViewState& view) noexcept {
   if ((action.flags & core::kActionRecords) == 0u) {
     return false;
@@ -173,6 +288,8 @@ void rec_take_end(model::Editor* editor, PatternEdit& edit) noexcept {
   if (edit.take_open) {
     edit.take_open = false;
     edit.take_wrote = false;
+    edit.rec_fx_said = false;  // OS-FXREC: the take's strip flags go with it
+    edit.rec_fx_full = false;
     if (editor != nullptr) {
       editor->end_group();  // commits the unit if it has records; an empty take leaves no entry
     }
@@ -180,7 +297,8 @@ void rec_take_end(model::Editor* editor, PatternEdit& edit) noexcept {
 }
 
 void rec_take_sync(model::Editor* editor, const Model& model, ViewState& view) noexcept {
-  const bool want = editor != nullptr && pattern_recording(model, view);
+  // OS-ENCLEARN: STEP's gesture of Instr + FX1 and the encoder holds a take-like undo group too (enc_take, cleared when a key is let go); it ends with STEP.
+  const bool want = editor != nullptr && (pattern_recording(model, view) || (view.edit.enc_take && rec_step_mode(model, view)));
   if (want && view.edit.take_open && take_is_long(*editor)) {
     rec_take_end(editor, view.edit);  // closed at half the journal, and a new take begun below: both can be undone, and the history before them is not all lost
     if (!view.edit.take_noticed) {

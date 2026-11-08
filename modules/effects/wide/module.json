@@ -1,0 +1,21 @@
+{
+  "name": "Wide",
+  "id": "wide",
+  "kind": "effect",
+  "description": "A stereo widener insert for a track (a WIDENS effect, ABI 1.12): a short delayed copy of the mid, high-passed, added to the side (Lauridsen widening), so a mono sound gets a stereo image and the mono sum stays the input. Width, Time and Low cut; four factory presets. A stereo effect needs OS-INSFX-ABI2 A4 on the unit.",
+  "state_bytes": 8320,
+  "stereo": "widens",
+  "params": [
+    {"name": "Width", "min": 0, "max": 100, "default": 50, "unit": "percent", "mod": true},
+    {"name": "Time", "min": 2, "max": 30, "default": 12, "unit": "ms", "mod": true},
+    {"name": "Low cut", "min": 20, "max": 1000, "default": 200, "curve": "log", "unit": "hz", "mod": true}
+  ],
+  "presets": [
+    {"name": "Subtle", "values": {"Width": 25, "Time": 8, "Low cut": 300}},
+    {"name": "Wide", "values": {"Width": 50, "Time": 12, "Low cut": 200}},
+    {"name": "Huge", "values": {"Width": 85, "Time": 18, "Low cut": 150}},
+    {"name": "Doubler", "values": {"Width": 60, "Time": 26, "Low cut": 120}}
+  ],
+  "voices": 1,
+  "memory": {"hot_bytes": 900, "sdram_bytes": 8320}
+}

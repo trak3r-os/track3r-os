@@ -2,7 +2,7 @@
   "name": "FM",
   "id": "fm",
   "kind": "instrument",
-  "abi": "1.8",
+  "abi": "1.13",
   "description": "A four-operator FM voice written from scratch: sixteen algorithms, per-operator ratio, detune, level and ADSR, operator-4 feedback. Phase modulation with a polynomial sine; one mono voice an instance.",
   "state_bytes": 448,
   "params": [
@@ -300,6 +300,7 @@
     }
   ],
   "pitch": true,
+  "rate": true,
   "pages": [
     {
       "name": "OP1",

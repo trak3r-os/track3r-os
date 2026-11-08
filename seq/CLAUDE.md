@@ -3,6 +3,7 @@
 - Owns the sequencer as a pure function `step(block_start, n) -> SeqEvent[]` over a `uint64` sample timeline, called once per block from the render: deterministic, no ISR, no second clock, renderable offline. Must not: request SD, allocate, hold a pointer into the model across a call (`rows.h` copies a step and checks the pattern generation), or use `double`. May include `core`, `usb`, `hal`, `audio`, `model`, `midi`.
 - Entry points:
   - `include/o3os/seq/sequencer.h`: `step()`, tempo/swing, transport, follow
+  - OS-MTC (docs/specs/OS-MTC.md): `song_time.h` is the song time map (main loop), `app/mtc_sync.h` answers the time code generator's (`MtcSync`) and the chase's (`ChaseSync`) questions; the chase of MTC IN is `MidiLink` (`chase_*`: the chaser's notices, the request word, the rate trim once a step) over `Sequencer::chase_go` / `chase_stop` / `set_rate_trim` (the run's phase pair `chase_end` / `chase_map`); while `chase_run()` the main loop's Play, Stop, Resume, Locate and slot jumps are dropped (Q8 a) and the song does not loop (Q9 a). Tests `tests/seq_mtc_test.cpp`, `tests/seq_mtc_chase_test.cpp`, `tests/seq_song_time_test.cpp`
   - `include/o3os/seq/fx.h`: `kFxInfo`, the one table of which step FX is executable, with ranges and groups
   - `include/o3os/seq/control.h`: who controls a voice parameter (FX col 1 over col 2 over Perform)
   - `include/o3os/seq/rows.h`: reading a step from the model arena in the render context

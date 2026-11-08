@@ -83,6 +83,8 @@
 #include <o3os/app/og_folder.h>
 #include <o3os/app/preview_job.h>
 #include <o3os/app/pti_load.h>
+#include <o3os/app/ptfx_job.h>
+#include <o3os/app/ptfx_page.h>
 #include <o3os/app/sample_edit_job.h>
 #include <o3os/app/slice_job.h>
 #include <o3os/audio/smoothing.h>
@@ -154,6 +156,8 @@ struct SampleBankMem {
   TransientDetector::Onset scratch[TransientDetector::kMaxOnsets];  // choose_slices' working room
   SliceJob slice_job;          // the Chop page's AUTO slicer
   SampleEditJob edit_job;      // the Sample edit screen's effect
+  PtfxJob ptfx_job;            // OS-CEPTFX S3a: the plugin run (SDRAM with the rest of this struct: no SRAM)
+  PtfxPage ptfx_page;          // OS-CEPTFX S4a: the PLUGINS page's header, list strings and A15 values (about 3.4 KB)
   PreviewJob preview_job;      // OS-FU2: the audition's reader (1.2 KB: the WAV importer)
   PtiLoadJob pti_job;          // OS-INSTUI S7: the LOAD of an instrument file (1.5 KB: the OG instrument reader)
   std::int16_t* preview_pcm = nullptr;  // OS-FU2: the audition's buffer (platform-given SDRAM; nullptr: no audition) and its size in samples
@@ -221,6 +225,9 @@ class SampleBank {
   TransientDetector::Onset* onset_storage() noexcept { return mem_ != nullptr ? mem_->onsets : nullptr; }
   SliceJob& slice_job() noexcept { return mem_->slice_job; }
   SampleEditJob& edit_job() noexcept { return mem_->edit_job; }
+  PtfxJob& ptfx_job() noexcept { return mem_->ptfx_job; }
+  // The PLUGINS page's plugin (a cache of the card, so const like resample_kernel; nullptr before init).
+  PtfxPage* ptfx_page() const noexcept { return mem_ != nullptr ? &mem_->ptfx_page : nullptr; }
   // The band-limited resampler's kernel table, the one the Amiga conversion builds (const: a cache; the standalone .pti save, OS-FILES-C C1b, builds it a slice at a time when it is not ready).
   AmigaKernel& resample_kernel() const noexcept { return mem_->edit_job.kernel(); }
   std::uint16_t* auto_slices() noexcept { return mem_->auto_slices; }

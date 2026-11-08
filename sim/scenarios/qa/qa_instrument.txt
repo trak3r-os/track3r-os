@@ -49,7 +49,7 @@ snap qa_ins_012
 tap f1
 snap qa_ins_015
 
-# QA-INS-016 .. 018: the rows follow the play mode (O8's exception): WAVETABLE (WT POS, WT SIZE), GRANULAR (position, length, shape, loop), BEAT SLICE (SLICES, SLICE n of m). The simulator has no sample
+# QA-INS-016 .. 018: the rows follow the play mode (O8's exception): WAVETABLE (WT POS, WT SIZE), GRANULAR (position, length, shape, loop), BEAT SLICE (SLICES, SLICE n of m, PLAY THRU). The simulator has no sample
 # bank, so the rows that need audio are dimmed (QA-INS-020 reads why); the window size reads 2048, the default.
 action instrument.play_mode 6
 snap qa_ins_016
@@ -124,7 +124,7 @@ encoder +2
 snap qa_ins_215
 encoder -2
 tap down
-# QA-INS-037: the wavetable position (4th destination) on a one shot is dimmed, not hidden, and the info line says WAVETABLE ONLY.
+# QA-INS-037: the wavetable position (4th destination) on a one shot is dimmed, not hidden, and the info line says WAVETABLE OR GRANULAR.
 tap up 2
 tap f4
 snap qa_ins_037
@@ -254,3 +254,120 @@ snap qa_ins_224
 encoder 1
 assert model inst.2.stereo=0
 snap qa_ins_225
+
+# QA-INS-280 (OS-CEPLAYTHRU P2): in BEAT SLICE the source page has a PLAY THRU row after SLICE, OFF by default (SLICE has the same row; the other play modes have none).
+action instrument.play_mode 5
+wait 100
+tap up 8
+tap down 3
+snap qa_ins_280
+assert model inst.2.play_thru=0
+# One click turns it ON (one undo unit, the slot rebound).
+encoder 1
+assert model inst.2.play_thru=1
+action edit.undo
+assert model inst.2.play_thru=0
+encoder 1
+assert model inst.2.play_thru=1
+
+# QA-INS-281 .. 283 need a sliced sample that sounds: the card e2e_pro (Projects/Kit: instrument 3 PLUCK, an 11025-frame one shot of 250 ms), cut into three slices on the CHOP page, as in sim/scenarios/e2e/e2e_beat_slice_cut.txt.
+card e2e_pro
+audio on
+wait 20
+tap file
+wait 300
+assert state screen=FILE sel=Kit
+tap f1
+wait 1500
+assert state screen=PATTERN msg=PROJECT_Kit_OPENED
+action instrument.select 3
+tap sampleplay
+assert state screen=WAVE
+tap sampleplay
+action wave.even_n -1
+action wave.even_n -1
+action wave.even_n -1
+action wave.even_n -1
+action wave.even_n -1
+action wave.even_n -1
+action wave.even_n -1
+action wave.even_n -1
+action wave.even_n -1
+action wave.even_n -1
+action wave.even_n -1
+action wave.even_n -1
+action wave.even_n -1
+tap f2
+action instrument.play_mode 5
+assert model inst.3.play_mode=5
+# PLAY THRU ON, through the row itself: PLAY MODE, SLICES, SLICE, then PLAY THRU.
+tap params
+tap f1
+wait 100
+tap up 8
+tap down 3
+encoder 1
+assert model inst.3.play_thru=1
+snap qa_ins_281
+# QA-INS-281: a pad plays its slice on through the following slices to the end of the sample: pad 0 is slice 0 ([0, 83) ms), which with PLAY THRU ON sounds the whole 250 ms, not its own 83 ms.
+render thru 600
+pad 0 hold 540
+wait 60
+assert audio thru in=5-240 sound pitch=441.18+-3c
+assert audio thru in=130-240 sound
+assert audio thru in=270-590 silent
+# The same pad with PLAY THRU OFF stops at the next slice point, its own 83 ms; the row goes back ON for QA-INS-282.
+encoder -1
+assert model inst.3.play_thru=0
+# The bank rebinds the slot on a later main loop pass, once the voices are idle.
+wait 200
+render thruoff 600
+pad 0 hold 540
+wait 60
+assert audio thruoff in=5-75 sound
+assert audio thruoff in=120-590 silent
+encoder 1
+assert model inst.3.play_thru=1
+wait 200
+
+# QA-INS-282: the Slice FX (step FX 25) with PLAY THRU ON forces slice 0 too, and it plays to the sample end as well.
+tap pattern
+tap rec
+action cursor.jump_fraction 0
+pad 0
+assert model pat.1.0.0.note=25
+tap fx
+action step.fx_type 25
+action step.fx_value 0
+snap qa_ins_282
+tap rec
+render fx 600
+tap play
+assert state playing=1
+wait 598
+assert audio fx in=5-240 sound pitch=441.18+-3c
+assert audio fx in=130-240 sound
+assert audio fx in=270-590 silent
+tap play
+assert state playing=0
+
+# QA-INS-283: the flag survives a save and a reload: File > SAVE, then OPEN the same project again, and the row still reads ON.
+tap file
+wait 300
+tap f4
+wait 2500
+tap file
+wait 300
+assert state screen=FILE sel=Kit
+tap f1
+wait 1500
+assert state screen=PATTERN msg=PROJECT_Kit_OPENED
+action instrument.select 3
+assert model inst.3.play_mode=5
+assert model inst.3.play_thru=1
+tap params
+tap f1
+wait 100
+tap up 8
+tap down 3
+snap qa_ins_283

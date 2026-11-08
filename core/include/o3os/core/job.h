@@ -49,6 +49,9 @@ class Job {
   // False for a job that cannot be abandoned without harm (an import that has half changed the project): JobRunner::cancel()
   // leaves it running.
   virtual bool cancellable() const noexcept { return true; }
+  // OS-CEPTFX A17: true for a job whose step is one indivisible call (a plugin's process_block) that may take longer than its slice: the runner's overrun
+  // counter skips its steps (the step still counts in steps, total_us and max_step_us). Existing jobs keep false and are counted as before.
+  virtual bool long_step() const noexcept { return false; }
   // A short label for the notification ("IMPORT KICK.WAV"). Static or owned by the job.
   virtual const char* name() const noexcept = 0;
   // After Failed: why, in a few upper-case words ("TRUNCATED"). "" when it has nothing to say.

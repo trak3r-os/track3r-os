@@ -7,6 +7,7 @@
 #include <o3os/app/model.h>
 #include <o3os/app/screens/params_screen.h>
 #include <o3os/eve/dl.h>
+#include <o3os/formats/preset.h>
 #include <o3os/model/params.h>
 #include <o3os/ui/plot/curve.h>
 
@@ -22,11 +23,11 @@ namespace dl = eve::dl;
 namespace plot = ui::plot;
 
 // The SDK's colour roles and faces are the theme's tokens in the theme's order: the module never sees an RGB value.
-static_assert(O3M_COLOR_COUNT + 1 == ui::kColorCount && O3M_COLOR_CHROME == static_cast<unsigned>(ui::Color::Chrome) && O3M_COLOR_PANE == static_cast<unsigned>(ui::Color::Pane) &&
+static_assert(O3M_COLOR_COUNT + 2 == ui::kColorCount && O3M_COLOR_CHROME == static_cast<unsigned>(ui::Color::Chrome) && O3M_COLOR_PANE == static_cast<unsigned>(ui::Color::Pane) &&
                   O3M_COLOR_TEXT == static_cast<unsigned>(ui::Color::Text) && O3M_COLOR_INSTR == static_cast<unsigned>(ui::Color::Instr) &&
                   O3M_COLOR_SEL == static_cast<unsigned>(ui::Color::Sel) && O3M_COLOR_ACCENT == static_cast<unsigned>(ui::Color::Accent) &&
                   O3M_COLOR_PLAY_TEXT == static_cast<unsigned>(ui::Color::PlayText),
-              "O3M_COLOR_* follow ui::Color (the SDK has the first 16: Rec, the 17th, is the host's alone)");
+              "O3M_COLOR_* follow ui::Color (the SDK has the first 16: Rec and SelDim, the 17th and 18th, are the host's alone)");
 static_assert(O3M_FACE_COUNT == ui::kFaceCount && O3M_FACE_DISPLAY == static_cast<unsigned>(ui::Face::Display) && O3M_FACE_MICRO == static_cast<unsigned>(ui::Face::Micro),
               "O3M_FACE_* follow ui::Face");
 static_assert(static_cast<unsigned>(O3M_AXIS_LOG_FREQ) == static_cast<unsigned>(plot::AxisKind::LogFreq) && static_cast<unsigned>(O3M_AXIS_DB) == static_cast<unsigned>(plot::AxisKind::Db),
@@ -36,6 +37,7 @@ constexpr std::uint32_t kMinViewWords = 16;  // a view is not started with less 
 
 constexpr const char* kUnitText[O3M_UNIT_COUNT] = {"", "%", "HZ", "MS", "DB", "ST", "S", "CT"};
 constexpr const char* kBoolNames[2] = {"OFF", "ON"};
+constexpr const char* kKeyNames[17] = {"OFF", "T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T10", "T11", "T12", "T13", "T14", "T15", "T16"};  // OS-INSFX-ABI2 A6: a KEY parameter's values
 
 bool same_ci(const char* a, const char* b) noexcept {
   for (;; ++a, ++b) {
@@ -236,11 +238,41 @@ class RenderSink final : public module::ViewSink {
   ui::Rect area_;
 };
 
+// Keeps the app's answer line out of a record (OS-PTOOLS2 S6): the last label-face text at the page's left edge in the accent or play colour (draw_page's `answer`; the rows, title and facts are in
+// the data face, the right half is dim).
+class AnswerSink final : public module::ViewSink {
+ public:
+  AnswerSink(char* out, unsigned cap) noexcept : out_(out), cap_(cap) {}
+  void fill(int, int, int, int, std::uint8_t) noexcept override {}
+  void text(int x, int, const char* s, std::uint8_t face, std::uint8_t color) noexcept override {
+    if (x == 8 && face == O3M_FACE_LABEL && (color == O3M_COLOR_ACCENT || color == O3M_COLOR_PLAY)) {
+      unsigned n = 0;
+      for (; s[n] != '\0' && n + 1u < cap_; ++n) {
+        out_[n] = s[n];
+      }
+      out_[n] = '\0';
+    }
+  }
+  void polyline(const std::int16_t*, std::uint32_t, std::uint8_t) noexcept override {}
+  void curve(const module::CurveCall&) noexcept override {}
+
+ private:
+  char* out_;
+  unsigned cap_;
+};
+
 }  // namespace
+
+bool ModuleUi::app_answer(char* out, unsigned cap) const noexcept {
+  out[0] = '\0';
+  AnswerSink sink(out, cap);
+  views_.replay(sink);
+  return out[0] != '\0';
+}
 
 // ---- descriptors ------------------------------------------------------------------------------------------------------------------------
 
-bool describe_module_param(const o3m_param& p, ParamScratch& out, const o3m_labels* labels) noexcept {
+bool describe_module_param(const o3m_param& p, ParamScratch& out, const o3m_labels* labels, bool key_ok) noexcept {
   std::memset(&out, 0, sizeof out);
   unsigned n = 0;
   for (; p.name != nullptr && p.name[n] != '\0' && n < core::kParamNameChars; ++n) {
@@ -278,6 +310,13 @@ bool describe_module_param(const o3m_param& p, ParamScratch& out, const o3m_labe
   }
   d.curve = (p.flags & O3M_PARAM_LOG) != 0u && p.min > 0.0f ? core::ParamCurve::Log : core::ParamCurve::Linear;
   d.flags = static_cast<std::uint8_t>(((p.flags & O3M_PARAM_NO_LEARN) != 0u ? 0u : core::kParamLearnable) | ((p.flags & O3M_PARAM_MOD) != 0u ? core::kParamModulatable : 0u));
+  if (key_ok && (p.flags & O3M_PARAM_KEY) != 0u && (p.flags & O3M_PARAM_INT) != 0u && p.min == 0.0f && p.max == 16.0f) {
+    // OS-INSFX-ABI2 A6: the sidechain key: OFF, T1 .. T16 (the loader guarantees an INT 0..16 with no label entry); a controller or a modulator must not re-aim it, so it is neither a Learn target nor modulatable (the review fold: O3M_PARAM_MOD does not survive a KEY)
+    d.names = kKeyNames;
+    d.list_count = 17;
+    d.unit = core::ParamUnit::Enum;
+    d.flags = static_cast<std::uint8_t>(d.flags & ~(core::kParamLearnable | core::kParamModulatable));
+  }
   d.group = 0;
   out.whole = whole;
   return n != 0u && core::param_desc_valid(d);
@@ -288,6 +327,11 @@ bool is_module_param(core::ParamId id) noexcept {
          core::param_index(id) < model::kMaxInstruments;
 }
 
+// OS-INSFX S5: an insert's parameter: Insert kind, the index is the host's `where` (track * 2 + slot; the master's 32 comes with S6), the field the module's parameter.
+bool is_insert_param(core::ParamId id) noexcept {
+  return core::param_kind(id) == core::ParamKind::Insert && core::param_index(id) < 64u && core::param_field(id) < O3M_PARAMS_MAX;
+}
+
 bool is_midi_channel_param(core::ParamId id) noexcept {
   return core::param_kind(id) == core::ParamKind::Instrument && core::param_field(id) == model::instrument_param::MidiChannel && core::param_index(id) < model::kMaxInstruments;
 }
@@ -296,18 +340,42 @@ bool is_play_stereo_param(core::ParamId id) noexcept {
   return core::param_kind(id) == core::ParamKind::Instrument && core::param_field(id) == model::instrument_param::PlayStereo && core::param_index(id) < model::kMaxInstruments;
 }
 
+bool is_play_thru_param(core::ParamId id) noexcept {
+  return core::param_kind(id) == core::ParamKind::Instrument && core::param_field(id) == model::instrument_param::PlayThru && core::param_index(id) < model::kMaxInstruments;
+}
+
+bool is_module_rate_param(core::ParamId id) noexcept {
+  return core::param_kind(id) == core::ParamKind::Instrument && core::param_field(id) == model::instrument_param::ModuleRate && core::param_index(id) < model::kMaxInstruments;
+}
+
+bool is_wt_param(core::ParamId id) noexcept {
+  return core::param_kind(id) == core::ParamKind::Instrument && model::instrument_param::is_wt_field(core::param_field(id)) && core::param_index(id) < model::kMaxInstruments;
+}
+
 const core::ParamDesc* describe_param(const Model& model, core::ParamId id, ParamScratch& scratch) noexcept {
+  if (is_wt_param(id)) {
+    return model::wt_param_desc(core::param_field(id));
+  }
   if (is_midi_channel_param(id)) {
     return &model::midi_channel_desc();
   }
   if (is_play_stereo_param(id)) {
     return &model::play_stereo_desc();
   }
-  if (!is_module_param(id)) {
+  if (is_play_thru_param(id)) {
+    return &model::play_thru_desc();
+  }
+  if (is_module_rate_param(id)) {
+    return &model::module_rate_desc();
+  }
+  if (!is_module_param(id) && !is_insert_param(id)) {
     return model::param_desc(id);
   }
   if (model.modules == nullptr || model.project == nullptr) {
     return nullptr;
+  }
+  if (is_insert_param(id)) {  // OS-INSFX S5: an insert's parameter is described by its record's module
+    return model.modules->describe(*model.project, ParamTarget::of_insert(core::param_index(id)), core::param_field(id), scratch) ? &scratch.desc : nullptr;
   }
   return model.modules->describe(*model.project, core::param_index(id), core::param_field(id) - model::instrument_param::kModuleFirst, scratch) ? &scratch.desc : nullptr;
 }
@@ -361,19 +429,57 @@ void ModuleUi::reset() noexcept {
   eff_count_ = 0;
 }
 
-// ---- the slot's module -------------------------------------------------------------------------------------------------------------------
+// ---- the target's module -------------------------------------------------------------------------------------------------------------------
 
-const o3m_module* ModuleUi::bound_module(const model::Project& project, unsigned slot, int* set_index) const noexcept {
-  if (set_ == nullptr || voices_ == nullptr || slot >= model::kMaxInstruments) {
+// OS-INSFX S5: the host's live instance at `where` (track * 2 + slot), or false (no host in this build, nothing bound there, or it is leaving).
+static bool insert_instance(const audio::InsertHost* host, unsigned where, audio::InsertHost::Info& in) noexcept {
+  if (host == nullptr || where >= audio::InsertHost::kWhere) {
+    return false;
+  }
+  for (unsigned i = 0; i < audio::InsertHost::kInstances; ++i) {
+    if (host->info(i, in) && in.where == where && !in.leaving && in.mod != nullptr) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// OS-INSFX S5: the module of the project's insert record at `where` when it is loaded in the set: its descriptor and its index in the set. nullptr when there is no record there or its
+// module is not loaded (the page says NOT LOADED, the record keeps it).
+static const o3m_module* insert_module(const module::ModuleSet* set, const model::Project& project, unsigned where, int* set_index) noexcept {
+  if (set == nullptr || where >= audio::InsertHost::kWhere) {
     return nullptr;
   }
-  const model::Instrument* in = project.instrument(slot);
+  const model::InsertRecord* rec = project.find_insert(where / 2u, where % 2u);
+  const model::ModuleRef* ref = rec != nullptr ? project.module(rec->module) : nullptr;
+  const int idx = ref != nullptr ? set->find(ref->name) : -1;
+  if (idx < 0) {
+    return nullptr;
+  }
+  const module::LoadedModule* lm = set->at(static_cast<unsigned>(idx));
+  if (lm == nullptr || lm->entry == nullptr) {
+    return nullptr;
+  }
+  if (set_index != nullptr) {
+    *set_index = idx;
+  }
+  return lm->entry;
+}
+
+const o3m_module* ModuleUi::bound_module(const model::Project& project, ParamTarget target, int* set_index) const noexcept {
+  if (target.insert) {
+    return insert_module(set_, project, target.slot, set_index);
+  }
+  if (set_ == nullptr || voices_ == nullptr || target.slot >= model::kMaxInstruments) {
+    return nullptr;
+  }
+  const model::Instrument* in = project.instrument(target.slot);
   if (in == nullptr || in->kind != model::InstrumentKind::Module) {
     return nullptr;
   }
   const model::ModuleRef* ref = project.module(in->module_index);
   const int idx = ref != nullptr ? set_->find(ref->name) : -1;
-  if (idx < 0 || !voices_->bound(slot)) {
+  if (idx < 0 || !(voices_->bound(target.slot) || voices_->rate_busy(target.slot))) {  // (OS-MODRATE S2: a RATE change withdraws the instance for a few blocks; the page keeps its rows)
     return nullptr;
   }
   const module::LoadedModule* lm = set_->at(static_cast<unsigned>(idx));
@@ -386,25 +492,27 @@ const o3m_module* ModuleUi::bound_module(const model::Project& project, unsigned
   return lm->entry;
 }
 
-unsigned ModuleUi::param_count(const model::Project& project, unsigned slot) const noexcept {
-  const o3m_module* m = bound_module(project, slot);
+unsigned ModuleUi::param_count(const model::Project& project, ParamTarget target) const noexcept {
+  const o3m_module* m = bound_module(project, target);
   return m != nullptr ? m->param_count : 0u;
 }
 
-bool ModuleUi::describe(const model::Project& project, unsigned slot, unsigned index, ParamScratch& out) const noexcept {
-  const o3m_module* m = bound_module(project, slot);
+bool ModuleUi::describe(const model::Project& project, ParamTarget target, unsigned index, ParamScratch& out) const noexcept {
+  const o3m_module* m = bound_module(project, target);
   // (the members past byte 64 of the descriptor exist only in a module of ABI 1.8)
-  return m != nullptr && index < m->param_count && describe_module_param(m->params[index], out, m->abi_minor >= module::kPitchAbiMinor && m->labels != nullptr ? &m->labels[index] : nullptr);
+  return m != nullptr && index < m->param_count &&
+         describe_module_param(m->params[index], out, m->abi_minor >= module::kPitchAbiMinor && m->labels != nullptr ? &m->labels[index] : nullptr,
+                               m->kind == O3M_KIND_EFFECT && m->abi_minor >= module::kStereoAbiMinor);  // (OS-INSFX-ABI2 A6: a KEY parameter is honoured in an effect of 1.12 only)
 }
 
-unsigned ModuleUi::page_table_count(const model::Project& project, unsigned slot) const noexcept {
-  const o3m_module* m = bound_module(project, slot);
+unsigned ModuleUi::page_table_count(const model::Project& project, ParamTarget target) const noexcept {
+  const o3m_module* m = bound_module(project, target);
   return m != nullptr && m->abi_minor >= module::kPitchAbiMinor && m->pages != nullptr && m->param_count != 0u ? (m->page_count < O3M_PAGES_MAX ? m->page_count : O3M_PAGES_MAX) : 0u;
 }
 
-bool ModuleUi::page_at(const model::Project& project, unsigned slot, unsigned k, const char*& name, unsigned& first, unsigned& count) const noexcept {
-  const o3m_module* m = bound_module(project, slot);
-  if (k >= page_table_count(project, slot)) {
+bool ModuleUi::page_at(const model::Project& project, ParamTarget target, unsigned k, const char*& name, unsigned& first, unsigned& count) const noexcept {
+  const o3m_module* m = bound_module(project, target);
+  if (k >= page_table_count(project, target)) {
     return false;
   }
   const unsigned total = m->param_count;
@@ -416,11 +524,15 @@ bool ModuleUi::page_at(const model::Project& project, unsigned slot, unsigned k,
   return true;
 }
 
-unsigned ModuleUi::view_count(const model::Project& project, unsigned slot) const noexcept {
+unsigned ModuleUi::view_count(const model::Project& project, ParamTarget target) const noexcept {
   int idx = -1;
-  const o3m_module* m = bound_module(project, slot, &idx);
+  const o3m_module* m = bound_module(project, target, &idx);
   if (m == nullptr || !set_->at(static_cast<unsigned>(idx))->has_views() || set_->views_blocked(static_cast<unsigned>(idx))) {
     return 0;
+  }
+  if (target.insert) {  // OS-INSFX S5: the insert's views need the host's instance (its state block)
+    audio::InsertHost::Info in{};
+    return insert_instance(inserts_, target.slot, in) ? m->view_count : 0u;
   }
   return m->view_count;
 }
@@ -432,8 +544,16 @@ void ModuleUi::sync_slots(const model::Project& project) noexcept {
     return;
   }
   for (unsigned slot = 0; slot < model::kMaxInstruments; ++slot) {
-    if (voices_->bound(slot)) {
+    if (voices_->bound(slot) || voices_->rate_busy(slot)) {
       const model::Instrument* in = project.instrument(slot);
+      // OS-MODRATE: the instance follows the instrument's RATE (a bind is FULL: a project load, or a module picked over another, meets the stored byte here). Main loop, never the render; Busy: the
+      // next pass asks again (the render serves the Release and the retire discipline waits two block starts). The instrument's blob is applied again at the restart. Failed (a module that is not
+      // rate-capable, or whose init refused): the instance plays FULL or is gone, and the stored byte stays (no silent rewrite). A module that is not rate-capable is asked again every pass: set_rate refuses it at once, before touching the instance.
+      const bool mod = in != nullptr && in->kind == model::InstrumentKind::Module;
+      const unsigned want = mod ? in->rate : 0u;
+      if (want != voices_->rate(slot) || voices_->rate_busy(slot)) {
+        (void)voices_->set_rate(slot, want, mod ? in->params : nullptr, mod ? in->param_len : 0u);
+      }
       // A console bind on a FREE slot stays open (OS-BUGS4). Once the slot holds any instrument the project decides again, for good (the mark is dropped): a sampler or MIDI instrument
       // there is never routed to the bench instance, and a Module put there and deleted closes the gate like any other.
       const bool free_slot = in == nullptr || in->kind == model::InstrumentKind::None;
@@ -443,6 +563,11 @@ void ModuleUi::sync_slots(const model::Project& project) noexcept {
       voices_->set_gate(slot, free_slot ? (diag_slots_ >> slot & 1u) != 0u : in->kind == model::InstrumentKind::Module);
     }
   }
+}
+
+bool ModuleUi::rate_capable(const model::Project& project, unsigned slot) const noexcept {
+  const o3m_module* m = bound_module(project, slot);
+  return m != nullptr && m->kind == O3M_KIND_INSTRUMENT && audio::ModuleVoices::rate_capable(*m);
 }
 
 std::uint32_t ModuleUi::voice_cost_of(const char* stem) const noexcept {
@@ -458,8 +583,16 @@ std::uint32_t ModuleUi::voice_cost_of(const char* stem) const noexcept {
   return cost;
 }
 
-const char* ModuleUi::module_name_of(const model::Project& project, unsigned slot) noexcept {
-  const model::Instrument* in = slot < model::kMaxInstruments ? project.instrument(slot) : nullptr;
+const char* ModuleUi::module_name_of(const model::Project& project, ParamTarget target) noexcept {
+  if (target.insert) {  // OS-INSFX S5: the insert record's module name
+    if (target.slot < audio::InsertHost::kWhere) {
+      const model::InsertRecord* rec = project.find_insert(target.slot / 2u, target.slot % 2u);
+      const model::ModuleRef* ref = rec != nullptr ? project.module(rec->module) : nullptr;
+      return ref != nullptr ? ref->name : "";
+    }
+    return "";
+  }
+  const model::Instrument* in = target.slot < model::kMaxInstruments ? project.instrument(target.slot) : nullptr;
   if (in == nullptr || in->kind != model::InstrumentKind::Module) {
     return "";
   }
@@ -484,15 +617,26 @@ void ModuleUi::replay(ui::Renderer& r, const ui::Rect& area) noexcept {
   ++drawn_;
 }
 
-bool ModuleUi::draw_slot_view(ui::Renderer& r, const model::Project& project, unsigned slot, unsigned view, const ui::Rect& area) noexcept {
+bool ModuleUi::draw_slot_view(ui::Renderer& r, const model::Project& project, ParamTarget target, unsigned view, const ui::Rect& area) noexcept {
   int idx = -1;
-  const o3m_module* m = bound_module(project, slot, &idx);
+  const o3m_module* m = bound_module(project, target, &idx);
   if (m == nullptr || area.w < module::kViewMinSize || area.h < module::kViewMinSize || view >= m->view_count) {
     return false;
   }
   const module::LoadedModule* lm = set_->at(static_cast<unsigned>(idx));
   if (!lm->has_views() || set_->views_blocked(static_cast<unsigned>(idx))) {
     return false;
+  }
+  // OS-INSFX S5: an insert's view is drawn for the host's instance (its state block); without one there is nothing to draw.
+  void* state = nullptr;
+  if (target.insert) {
+    audio::InsertHost::Info in{};
+    if (!insert_instance(inserts_, target.slot, in)) {
+      return false;
+    }
+    state = const_cast<void*>(in.state);
+  } else {
+    state = voices_->state_of(target.slot);
   }
   const ui::Theme& t = r.theme();
   module::ViewHost::Metrics metrics;
@@ -504,8 +648,13 @@ bool ModuleUi::draw_slot_view(ui::Renderer& r, const model::Project& project, un
   float values[O3M_PARAMS_MAX];
   const unsigned count = m->param_count < O3M_PARAMS_MAX ? m->param_count : O3M_PARAMS_MAX;
   for (unsigned i = 0; i < count; ++i) {
-    const core::ParamId id = core::param_id(core::ParamKind::Instrument, slot, model::instrument_param::kModuleFirst + i);
-    values[i] = project.has_param(id) ? project.get_param(id) : m->params[i].def;
+    if (target.insert) {  // OS-INSFX S5: the insert's blob (the record's), the module's default past it
+      const model::InsertRecord* rec = project.find_insert(target.slot / 2u, target.slot % 2u);
+      values[i] = rec != nullptr && i < rec->n ? rec->param[i] : m->params[i].def;
+    } else {
+      const core::ParamId id = core::param_id(core::ParamKind::Instrument, target.slot, model::instrument_param::kModuleFirst + i);
+      values[i] = project.has_param(id) ? project.get_param(id) : m->params[i].def;
+    }
   }
   const int w = area.w < module::kViewMaxW ? area.w : module::kViewMaxW;
   const int h = area.h < module::kViewMaxH ? area.h : module::kViewMaxH;
@@ -513,7 +662,7 @@ bool ModuleUi::draw_slot_view(ui::Renderer& r, const model::Project& project, un
   if (room < kMinViewWords) {
     return false;  // the page's share is spent by the views before this one: nothing is drawn, nothing is blamed
   }
-  const module::ViewStatus verdict = views_.draw(*m, voices_->state_of(slot), module::fault_id(lm->name), view, w, h, values, count, room);
+  const module::ViewStatus verdict = views_.draw(*m, state, module::fault_id(lm->name), view, w, h, values, count, room);
   if (verdict != module::ViewStatus::Ok) {
     fault(idx, verdict);
     return false;
@@ -523,8 +672,407 @@ bool ModuleUi::draw_slot_view(ui::Renderer& r, const model::Project& project, un
   return true;
 }
 
-bool ModuleUi::send_param(unsigned slot, unsigned index, float value) noexcept {
-  return voices_ != nullptr && voices_->set_param(slot, index, value);
+bool ModuleUi::send_param(ParamTarget target, unsigned index, float value) noexcept {
+  if (target.insert) {  // OS-INSFX S5: ParamChange{Insert, where, index} through the host's ring (with the binding's generation)
+    return inserts_ != nullptr && inserts_->set_param(target.slot, index, value);
+  }
+  return voices_ != nullptr && voices_->set_param(target.slot, index, value);
+}
+
+// ---- factory presets (OS-INSFX-ABI2 A8, docs/specs/OS-INSFX-ABI2.md section 3.6) -----------------------------------------------------------------------
+
+unsigned ModuleUi::preset_count(const o3m_module* m) noexcept {
+  // (the members past byte 84 of the descriptor exist only in a module of ABI 1.12; the loader held the table to the rules of section 3.5)
+  return m != nullptr && m->abi_minor >= module::kStereoAbiMinor && m->presets != nullptr && m->param_count != 0u ? (m->preset_count < O3M_PRESETS_MAX ? m->preset_count : O3M_PRESETS_MAX) : 0u;
+}
+
+unsigned ModuleUi::preset_count(const model::Project& project, ParamTarget target) const noexcept {
+  return preset_count(bound_module(project, target));
+}
+
+bool ModuleUi::factory_preset(const model::Project& project, ParamTarget target, unsigned n, ParamSet& out) const noexcept {
+  return factory_preset(bound_module(project, target), n, out);
+}
+
+bool ModuleUi::factory_preset(const o3m_module* m, unsigned n, ParamSet& out) noexcept {
+  if (n >= preset_count(m)) {
+    return false;
+  }
+  const o3m_preset& pr = m->presets[n];
+  out = ParamSet{};
+  out.source = ParamSet::Source::Factory;
+  out.set_name(pr.name);
+  const unsigned limit = m->param_count < kParamSetValues ? m->param_count : kParamSetValues;
+  for (unsigned i = 0; pr.values != nullptr && i < pr.count && i < limit; ++i) {
+    (void)out.set_value(i, pr.values[i]);
+  }
+  return true;
+}
+
+unsigned ModuleUi::factory_presets(const model::Project& project, ParamTarget target, ParamSet* out, unsigned cap) const noexcept {
+  const o3m_module* m = bound_module(project, target);
+  const unsigned n = preset_count(m);
+  unsigned made = 0;
+  for (; out != nullptr && made < n && made < cap && factory_preset(m, made, out[made]); ++made) {
+  }
+  return made;
+}
+
+ModuleUi::PresetResult ModuleUi::apply_preset(model::Editor& editor, ParamTarget target, const ParamSet& set, unsigned* dropped) noexcept {
+  if (dropped != nullptr) {
+    *dropped = 0;
+  }
+  const model::Project& p = editor.project();
+  const o3m_module* m = bound_module(p, target);
+  if (m == nullptr || m->param_count == 0u) {
+    return PresetResult::NoModule;
+  }
+  const unsigned n = m->param_count < kParamSetValues ? m->param_count : kParamSetValues;
+  float v[kParamSetValues];
+  const bool labelled = m->abi_minor >= module::kPitchAbiMinor && m->labels != nullptr;  // (as describe(): the labels exist only in a module of ABI 1.8)
+  for (unsigned i = 0; i < n; ++i) {  // every parameter, held to its descriptor as the page holds an edit, before anything is written
+    ParamScratch s;
+    if (!describe_module_param(m->params[i], s, labelled ? &m->labels[i] : nullptr)) {
+      return PresetResult::Rejected;
+    }
+    v[i] = set.resolve(i, s.desc, s.whole);
+  }
+  std::uint32_t changed = ~std::uint32_t{0};  // the parameters to tell the instance of: an insert's all of them, an instrument's those whose value moves (as the page's write: Unchanged sends nothing)
+  PresetResult result = PresetResult::Ok;
+  if (target.insert) {  // the record's blob, not an undo step (OS-INSFX D9)
+    const model::InsertRecord* rec = p.find_insert(target.track(), target.ins_slot());
+    if (rec == nullptr) {
+      return PresetResult::NoModule;
+    }
+    model::InsertRecord next = *rec;
+    std::memcpy(next.param, v, n * sizeof(float));
+    next.n = static_cast<std::uint8_t>(next.n > n ? next.n : n);
+    if (editor.set_insert(next) != model::Status::Ok) {
+      return PresetResult::Rejected;
+    }
+  } else {  // one undo unit (it nests under the unit of an action that calls this)
+    const unsigned slot = target.slot;
+    const model::Instrument* in = p.instrument(slot);  // (a Module instrument: bound_module said so)
+    if (in == nullptr) {
+      return PresetResult::NoModule;
+    }
+    changed = 0;
+    for (unsigned i = 0; i < n; ++i) {
+      const core::ParamId id = core::param_id(core::ParamKind::Instrument, slot, model::instrument_param::kModuleFirst + i);
+      changed |= (!p.has_param(id) || p.get_param(id) != v[i] ? std::uint32_t{1} : 0u) << i;
+    }
+    bool ok = true;
+    unsigned written = 0;  // how many leading values the project holds: a refusal midway keeps those (the unit is not rolled back), so they are still sent below
+    editor.begin_group(core::action_id("module.preset"), 0, model::UndoArea::Sound);
+    if (in->param_len < 4u * n) {  // a short blob is extended to the whole of it, with the preset's values
+      model::Instrument full = *in;
+      std::memcpy(full.params, v, n * sizeof(float));
+      full.param_len = static_cast<std::uint16_t>(4u * n);
+      ok = editor.set_instrument(slot, full) == model::Status::Ok;
+      written = ok ? n : 0u;
+    }
+    for (unsigned i = 0; ok && i < n; ++i) {
+      ok = editor.set_param(core::param_id(core::ParamKind::Instrument, slot, model::instrument_param::kModuleFirst + i), v[i]) == model::Status::Ok;
+      written = ok && i + 1u > written ? i + 1u : written;
+    }
+    editor.end_group();
+    if (!ok) {
+      changed &= written >= 32u ? ~std::uint32_t{0} : (std::uint32_t{1} << written) - 1u;
+      result = PresetResult::Rejected;
+    }
+  }
+  unsigned lost = 0;
+  for (unsigned i = 0; i < n; ++i) {  // at most 32 changes: one block's drain (F14); an insert's unsent value is kept by the host (see send_param_change)
+    if (((changed >> i) & 1u) != 0u && !send_param(target, i, v[i]) && !(target.insert && (inserts_ == nullptr || insert_bound(target.slot)))) {
+      ++lost;  // (an insert's unsent value is kept by the host; with no host at all, as in the simulator, there is no ring to overflow and the blob is the whole load)
+    }
+  }
+  if (dropped != nullptr) {
+    *dropped = lost;
+  }
+  return result;
+}
+
+const char* ModuleUi::preset_text(PresetResult r) noexcept {
+  switch (r) {
+    case PresetResult::Ok: return "PRESET LOADED";
+    case PresetResult::NoModule: return "NO MODULE HERE";
+    case PresetResult::Rejected: return "PRESET REFUSED";
+  }
+  return "?";
+}
+
+// ---- the card's presets (OS-MODPRESET P3) ----------------------------------------------------------------------------------------------------------
+
+namespace {
+
+// The file-name rule of a .o3mp Target, as the guard's valid_name spells it (hal/save_guard.h, which this layer does not include: rule 8 of tools/check_layers.py; preset_card_test.cpp
+// holds this rule equal to the guard's classify() over a corpus of names): 1..kPresetNameMax bytes of letters, digits, space, '_', '-' and '.', the first a letter or digit, the last
+// neither a space nor a dot, no "..", and not a name Windows reserves for a device.
+bool preset_name_ok(const char* s, std::size_t n) noexcept {
+  if (s == nullptr || n == 0u || n > kPresetNameMax) {
+    return false;
+  }
+  char name[kPresetNameMax + 1];
+  std::memcpy(name, s, n);
+  name[n] = '\0';
+  const auto alnum = [](char c) noexcept { return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'); };
+  if (!alnum(name[0]) || name[n - 1u] == ' ' || name[n - 1u] == '.') {
+    return false;
+  }
+  for (std::size_t i = 0; i < n; ++i) {
+    const char c = name[i];
+    if (!(alnum(c) || c == ' ' || c == '_' || c == '-' || c == '.') || (c == '.' && i + 1u < n && name[i + 1u] == '.')) {
+      return false;
+    }
+  }
+  std::size_t stem = 0;
+  while (stem < n && name[stem] != '.') {
+    ++stem;
+  }
+  char head[4] = {name[0], stem > 1u ? name[1] : '\0', stem > 2u ? name[2] : '\0', '\0'};
+  if (stem == 3u && (same_ci(head, "con") || same_ci(head, "prn") || same_ci(head, "aux") || same_ci(head, "nul"))) {
+    return false;
+  }
+  if (stem == 4u && name[3] >= '1' && name[3] <= '9' && (same_ci(head, "com") || same_ci(head, "lpt"))) {
+    return false;
+  }
+  return true;
+}
+
+// "modules/presets/<stem>" (file null) or "modules/presets/<stem>/<file>"; false when it does not fit `cap` with the NUL (out is then an empty string).
+bool preset_path(char* out, std::size_t cap, const char* stem, const char* file) noexcept {
+  std::size_t n = 0;
+  const auto put = [&](const char* s) noexcept {
+    for (; *s != '\0'; ++s) {
+      if (n + 1u >= cap) {
+        return false;
+      }
+      out[n++] = *s;
+    }
+    return true;
+  };
+  const auto sep = [&]() noexcept {
+    if (n == 0u) {
+      return true;
+    }
+    if (n + 1u >= cap) {
+      return false;
+    }
+    out[n++] = '/';
+    return true;
+  };
+  if (!put(kPresetModulesDir) || !sep() || !put(kPresetsDir) || !sep() || !put(stem) || (file != nullptr && (!sep() || !put(file)))) {
+    out[0] = '\0';
+    return false;
+  }
+  out[n] = '\0';
+  return true;
+}
+
+}  // namespace
+
+unsigned ModuleUi::scan_presets(const char* stem, bool& more) noexcept {
+  card_preset_count_ = 0;
+  more = false;
+  if (card_ == nullptr || !card_->mounted() || !formats::preset::is_stem(stem)) {
+    return 0;
+  }
+  char dir[kPresetPathCap];
+  if (!preset_path(dir, sizeof dir, stem, nullptr)) {
+    return 0;
+  }
+  hal::storage::DirHandle d;
+  if (card_->opendir(dir, d) != hal::storage::Status::Ok) {
+    return 0;  // no folder for this module: no presets
+  }
+  hal::storage::DirEntry e;  // 264 B on the main loop's stack
+  unsigned n = 0;
+  for (; n < 256; ++n) {
+    if (card_->readdir(d, e) != hal::storage::Status::Ok) {
+      break;
+    }
+    const std::size_t len = std::strlen(e.name);
+    if (e.is_dir || len <= 5u || !same_ci(e.name + len - 5, kPresetSuffix)) {
+      continue;
+    }
+    const std::size_t name_len = len - 5u;
+    if (!preset_name_ok(e.name, name_len)) {
+      continue;  // not a name the guard takes as a Target: it is not listed, so it cannot be loaded by name
+    }
+    if (card_preset_count_ >= kCardPresetListMax) {
+      more = true;  // the rest are on the card, not listed
+      continue;
+    }
+    char name[kPresetNameMax + 1];  // the stem, without the ".o3mp": the list is sorted by the preset's name, not by the file's
+    std::memcpy(name, e.name, name_len);
+    name[name_len] = '\0';
+    unsigned at = 0;
+    while (at < card_preset_count_ && compare_ci(card_preset_list_[at], name) < 0) {
+      ++at;
+    }
+    for (unsigned i = card_preset_count_; i > at; --i) {
+      std::memcpy(card_preset_list_[i], card_preset_list_[i - 1], sizeof card_preset_list_[i]);
+    }
+    std::memcpy(card_preset_list_[at], name, name_len + 1u);
+    ++card_preset_count_;
+  }
+  if (n == 256 && card_->readdir(d, e) == hal::storage::Status::Ok) {
+    more = true;  // the loop ended on the 256-entry bound with the folder still going: the rest are on the card, not listed
+  }
+  card_->closedir(d);
+  return card_preset_count_;
+}
+
+ModuleUi::CardPreset ModuleUi::read_preset(const char* stem, unsigned kind, const o3m_module* m, const char* name, ParamSet& out, unsigned& skipped) noexcept {
+  skipped = 0;
+  if (card_ == nullptr || !card_->mounted()) {
+    return CardPreset::NoCard;
+  }
+  if (m == nullptr || m->param_count == 0u) {
+    return CardPreset::NoModule;
+  }
+  const std::size_t name_len = name != nullptr ? std::strlen(name) : 0u;
+  if (!formats::preset::is_stem(stem) || !preset_name_ok(name, name_len)) {
+    return CardPreset::NotFound;
+  }
+  char file[kPresetNameMax + 6];
+  std::memcpy(file, name, name_len);
+  std::memcpy(file + name_len, kPresetSuffix, 6);  // ".o3mp" with its NUL
+  char path[kPresetPathCap];
+  if (!preset_path(path, sizeof path, stem, file)) {
+    return CardPreset::NotFound;
+  }
+  // The size first (P1 review note): a longer file cut to the buffer would look like a file of that size and may pass.
+  hal::storage::FileStamp stamp;
+  if (card_->stat(path, stamp) != hal::storage::Status::Ok) {
+    return CardPreset::NotFound;
+  }
+  if (stamp.size > formats::preset::kMaxFileBytes) {
+    return CardPreset::TooBig;
+  }
+  hal::storage::FileHandle f;
+  if (card_->open(path, f) != hal::storage::Status::Ok) {
+    return CardPreset::NotFound;
+  }
+  std::uint32_t size = 0;
+  const bool sized = card_->size(f, size) == hal::storage::Status::Ok && size <= formats::preset::kMaxFileBytes;
+  std::size_t got = 0;
+  if (sized) {
+    while (got < size) {
+      std::size_t n = 0;
+      if (card_->read(f, card_preset_buf_ + got, size - got, n) != hal::storage::Status::Ok || n == 0u) {
+        break;
+      }
+      got += n;
+    }
+  }
+  card_->close(f);
+  if (!sized || got != size) {
+    return CardPreset::NotFound;
+  }
+  formats::preset::Report report;
+  const formats::preset::Error err = formats::preset::read(card_preset_buf_, got, card_preset_file_, report);
+  if (err != formats::preset::Error::None) {
+    switch (err) {
+      case formats::preset::Error::NewerMajor: return CardPreset::NewerMajor;
+      case formats::preset::Error::TooBig: return CardPreset::TooBig;
+      default: return CardPreset::Damaged;  // Truncated, BadMagic, BadCrc, Malformed
+    }
+  }
+  if (!same_ci(card_preset_file_.module, stem) || card_preset_file_.kind != kind) {
+    return CardPreset::OtherModule;  // (A-4: refused, not resolved by name)
+  }
+  // The resolve by name (Q5 a, A-3): each entry matches the first parameter of that name not yet matched (a repeated name takes the next one, in file order). The name compared is the
+  // module's raw one (m->params[i].name, up to 15 characters, as capture_preset saved it), NOT the page caption's: describe_module_param upper-cases and cuts it to core::kParamNameChars
+  // (12), so a 13-15 character name would never match and its parameter would silently take its default.
+  out = ParamSet{};
+  out.source = ParamSet::Source::Card;
+  out.set_name(name);
+  const unsigned n = m->param_count < kParamSetValues ? m->param_count : kParamSetValues;
+  const bool labelled = m->abi_minor >= module::kPitchAbiMinor && m->labels != nullptr;  // (as apply_preset)
+  bool matched[kParamSetValues] = {};
+  for (unsigned e = 0; e < card_preset_file_.count && e < formats::preset::kMaxEntries; ++e) {
+    const formats::preset::Entry& en = card_preset_file_.entries[e];
+    int at = -1;
+    for (unsigned i = 0; i < n; ++i) {
+      if (!matched[i] && m->params[i].name != nullptr && same_ci(m->params[i].name, en.name)) {
+        at = static_cast<int>(i);
+        break;
+      }
+    }
+    if (at < 0) {
+      ++skipped;  // an unknown name: skipped and counted (R4)
+      continue;
+    }
+    ParamScratch s;  // once per matched entry: only the descriptor (range, whole) is needed, not the caption
+    if (!describe_module_param(m->params[static_cast<unsigned>(at)], s, labelled ? &m->labels[static_cast<unsigned>(at)] : nullptr)) {
+      ++skipped;
+      continue;
+    }
+    (void)out.set_value(static_cast<unsigned>(at), fit_param_value(s.desc, s.whole, en.value));  // clamped, and rounded for an INT
+    matched[static_cast<unsigned>(at)] = true;
+  }
+  return CardPreset::Ok;
+}
+
+const char* ModuleUi::card_preset_text(CardPreset r) noexcept {
+  switch (r) {
+    case CardPreset::Ok: return "PRESET LOADED";
+    case CardPreset::NoCard: return "NO SD CARD";
+    case CardPreset::NotFound: return "NO SUCH PRESET";
+    case CardPreset::NoModule: return "NO MODULE HERE";
+    case CardPreset::OtherModule: return "PRESET OF ANOTHER MODULE";  // (the caller words "PRESET OF <STEM>")
+    case CardPreset::Damaged: return "PRESET DAMAGED";
+    case CardPreset::NewerMajor: return "NEWER PRESET FORMAT";
+    case CardPreset::TooBig: return "PRESET TOO BIG";
+  }
+  return "?";
+}
+
+bool ModuleUi::capture_preset(const model::Project& project, ParamTarget target, formats::preset::Preset& out) noexcept {
+  int idx = -1;
+  const o3m_module* m = bound_module(project, target, &idx);
+  if (m == nullptr || idx < 0 || set_ == nullptr) {
+    return false;
+  }
+  const char* stem = module_name_of(project, target);
+  if (!formats::preset::is_stem(stem)) {
+    return false;
+  }
+  out = formats::preset::Preset{};
+  std::size_t at = 0;
+  for (; stem[at] != '\0' && at < formats::preset::kStemMax; ++at) {
+    out.module[at] = stem[at];
+  }
+  out.module[at] = '\0';
+  out.kind = target.insert ? O3M_KIND_EFFECT : O3M_KIND_INSTRUMENT;
+  const module::LoadedModule* lm = set_->at(static_cast<unsigned>(idx));
+  out.module_version = lm != nullptr ? lm->header.module_version : 0u;
+  const unsigned n = m->param_count < formats::preset::kMaxEntries ? m->param_count : formats::preset::kMaxEntries;
+  out.count = static_cast<std::uint8_t>(n);
+  for (unsigned i = 0; i < n; ++i) {
+    formats::preset::Entry& en = out.entries[i];
+    std::size_t len = 0;  // the name as the module declares it
+    for (; m->params[i].name != nullptr && m->params[i].name[len] != '\0' && len < formats::preset::kNameMax; ++len) {
+      en.name[len] = m->params[i].name[len];
+    }
+    en.name[len] = '\0';
+    float v = m->params[i].def;  // the values in force: the blob (a short tail as the defaults), or the record's floats
+    if (target.insert) {
+      const model::InsertRecord* rec = project.find_insert(target.track(), target.ins_slot());
+      if (rec != nullptr && i < rec->n) {
+        v = rec->param[i];
+      }
+    } else {
+      const model::Instrument* in = target.slot < model::kMaxInstruments ? project.instrument(target.slot) : nullptr;
+      if (in != nullptr && 4u * (i + 1u) <= in->param_len) {
+        std::memcpy(&v, in->params + 4u * i, sizeof v);
+      }
+    }
+    en.value = v;
+  }
+  return true;
 }
 
 // ---- loading ---------------------------------------------------------------------------------------------------------------------------
@@ -780,11 +1328,32 @@ std::uint32_t ModuleUi::insert_cost_of(const char* stem) const noexcept {
   return cost;
 }
 
+bool ModuleUi::effect_st(const char* stem) const noexcept {
+  const int idx = set_ != nullptr ? set_->find(stem) : -1;
+  const module::LoadedModule* lm = idx >= 0 ? set_->at(static_cast<unsigned>(idx)) : nullptr;
+  return lm != nullptr && lm->entry != nullptr && audio::InsertHost::shape_of(*lm->entry) != audio::InsertHost::Shape::Mono;
+}
+
+std::uint32_t ModuleUi::project_instances(const model::Project& p) const noexcept {
+  std::uint32_t n = model::insert_instances(p.inserts());
+  if (const model::InsertRecord* r = p.find_insert(model::kInsertWhereMaster, 0)) {
+    if (const model::ModuleRef* m = p.module(r->module)) {
+      if (effect_st(m->name)) {
+        n -= 1u;  // A7: the master's stereo module is one instance, not the pair's two
+      }
+    }
+  }
+  return n;
+}
+
 bool ModuleUi::insert_cell(unsigned track, unsigned slot, InsertCell& out) const noexcept {
   for (unsigned i = 0; inserts_ != nullptr && i < audio::InsertHost::kInstances; ++i) {
     audio::InsertHost::Info in{};
     if (inserts_->info(i, in) && in.where == track * 2u + slot && !in.leaving) {
-      out = {in.user_bypass, in.forced, in.cost};
+      out = {in.user_bypass, in.forced, audio::InsertHost::shape_of(*in.mod) != audio::InsertHost::Shape::Mono, in.cost};  // A5: the ST mark is the module's shape
+      if (in.where == audio::InsertHost::kMasterWhere) {  // S6: the master's cell is both of its instances (L and R): what it costs is the sum
+        out.cost += inserts_->cost(in.where) - in.cost;
+      }
       return true;
     }
   }
@@ -828,13 +1397,17 @@ bool insert_leaving(const audio::InsertHost& host, unsigned where) noexcept {
   return false;
 }
 
+// S6: an insert cell is a track 0..15 with INS A / INS B, or the master (track 16, the project's `where`) with its one cell, slot 0. The host's key is track * 2 + slot either way (the master's is 32).
+static_assert(model::kInsertWhereMaster == audio::kTracks && audio::InsertHost::kMasterWhere == audio::kTracks * 2u, "the master is track 16, key 32");
+bool insert_cell_ok(unsigned track, unsigned slot) noexcept { return track < audio::kTracks ? slot < 2u : (track == audio::kTracks && slot == 0u); }
+
 }  // namespace
 
 ModuleUi::InsertResult ModuleUi::insert_assign(model::Editor& editor, unsigned track, unsigned slot, const char* stem) noexcept {
   if (set_ == nullptr || loader_ == nullptr || inserts_ == nullptr) {
     return InsertResult::NoHost;
   }
-  if (track >= audio::kTracks || slot >= 2u) {
+  if (!insert_cell_ok(track, slot)) {
     return InsertResult::BadWhere;
   }
   if (card_on_computer_ && set_->find(stem) < 0) {
@@ -845,9 +1418,12 @@ ModuleUi::InsertResult ModuleUi::insert_assign(model::Editor& editor, unsigned t
   if (inserts_->bound(where)) {
     return insert_leaving(*inserts_, where) ? InsertResult::Leaving : InsertResult::Taken;
   }
-  // Room first, so a refused bind leaves the project and the host as they were: a record of this (where, slot) is replaced, a new one needs a free place of the four. (A module this call loads stays in the set
-  // when a later check refuses it: ModuleSet has no per-module release, only clear(), which needs every instance retired. Latent and harmless: it is the card's module and the next bind finds it loaded.)
-  if (project.find_insert(track, slot) == nullptr && project.inserts().count >= model::kMaxInserts) {
+  // Room first, so a refused bind leaves the project and the host as they were: a record of this (where, slot) is replaced, a new one needs a free place of the four instances (the master's is two for a mono module, one for
+  // a stereo one: A7). (A module this call loads stays in the set when a later check refuses it: ModuleSet has no per-module release, only clear(), which needs every instance retired. Latent and harmless: it is the card's
+  // module and the next bind finds it loaded.)
+  const bool loaded = set_ != nullptr && set_->find(stem) >= 0;
+  if (project.find_insert(track, slot) == nullptr && (where != audio::InsertHost::kMasterWhere || loaded) &&
+      project_instances(project) + (loaded && where == audio::InsertHost::kMasterWhere && effect_st(stem) ? 1u : audio::InsertHost::states_for(where)) > model::kMaxInserts) {
     return InsertResult::Full;
   }
   if (!load(stem)) {
@@ -867,6 +1443,10 @@ ModuleUi::InsertResult ModuleUi::insert_assign(model::Editor& editor, unsigned t
     return InsertResult::NotRunnable;
   }
   const o3m_module& mod = *lm->entry;
+  // A7: now that the module is loaded its shape is known: the master's room is exact (one instance for a stereo effect, two for a mono one).
+  if (project.find_insert(track, slot) == nullptr && project_instances(project) + audio::InsertHost::instances_for(where, mod) > model::kMaxInserts) {
+    return InsertResult::Full;
+  }
   int ref = -1;
   for (unsigned i = 0; i < project.module_count(); ++i) {
     if (std::strcmp(project.module(i)->name, stem) == 0) {
@@ -881,14 +1461,17 @@ ModuleUi::InsertResult ModuleUi::insert_assign(model::Editor& editor, unsigned t
   bool took = false;
   audio::InsertHost::Bind b = inserts_->bind(where, mod, fault, nullptr, nullptr, 0, false);  // a free record that held this module keeps its state block
   if (b == audio::InsertHost::Bind::NeedState) {
-    std::uint8_t* mem = nullptr;
-    std::uint32_t addr = 0;
-    if (!set_->take_state(mod.state_bytes, mem, addr)) {
-      return InsertResult::NoRoom;
+    std::uint8_t* mem[2] = {nullptr, nullptr};  // (the master's dual mono pair has two blocks; A7: a stereo module takes one, `mem[1]` stays null and bind ignores it)
+    for (unsigned k = 0; k < audio::InsertHost::instances_for(where, mod); ++k) {
+      std::uint32_t addr = 0;
+      if (!set_->take_state(mod.state_bytes, mem[k], addr)) {
+        set_->state_rollback(mark);
+        return InsertResult::NoRoom;
+      }
+      std::memset(mem[k], 0, mod.state_bytes);
     }
     took = true;
-    std::memset(mem, 0, mod.state_bytes);
-    b = inserts_->bind(where, mod, fault, mem, nullptr, 0, false);
+    b = inserts_->bind(where, mod, fault, mem[0], nullptr, 0, false, mem[1]);
   }
   if (b != audio::InsertHost::Bind::Ok) {
     if (took) {
@@ -926,7 +1509,7 @@ ModuleUi::InsertResult ModuleUi::insert_assign(model::Editor& editor, unsigned t
 }
 
 ModuleUi::InsertResult ModuleUi::insert_remove(model::Editor& editor, unsigned track, unsigned slot) noexcept {
-  if (track >= audio::kTracks || slot >= 2u) {
+  if (!insert_cell_ok(track, slot)) {
     return InsertResult::BadWhere;
   }
   const bool was_bound = inserts_ != nullptr && inserts_->unbind(track * 2u + slot);
@@ -935,7 +1518,7 @@ ModuleUi::InsertResult ModuleUi::insert_remove(model::Editor& editor, unsigned t
 }
 
 ModuleUi::InsertResult ModuleUi::insert_bypass(model::Editor& editor, unsigned track, unsigned slot, bool on) noexcept {
-  if (track >= audio::kTracks || slot >= 2u) {
+  if (!insert_cell_ok(track, slot)) {
     return InsertResult::BadWhere;
   }
   const model::InsertRecord* cur = editor.project().find_insert(track, slot);
@@ -990,6 +1573,11 @@ const o3m_module* ModuleUi::app_module() const noexcept {
 unsigned ModuleUi::app_param_count() const noexcept {
   const o3m_module* m = app_module();
   return m != nullptr ? m->param_count : 0u;
+}
+
+bool ModuleUi::app_panel_fits() const noexcept {
+  const unsigned n = app_param_count();
+  return app_running_ && app_minor_ >= 10u && n != 0u && n <= kPanelRows && std::strcmp(app_stem_, "humanize") == 0;
 }
 
 bool ModuleUi::app_describe(unsigned index, ParamScratch& out) const noexcept {
@@ -1059,7 +1647,9 @@ ModuleUi::LaunchResult ModuleUi::launch_app(unsigned entry, const model::Project
   // remembers the stem; the second launch of the same app, straight after, goes through and the stem is kept for the boot. OS-H4: an app that writes files (export_files) is confirmed the same way, and an
   // app with both bits gets ONE message that says both.
   const std::uint32_t caps = lm->header.reserved2[0];
-  const std::uint32_t need = caps & (O3M_CAP_EDIT_PROJECT | O3M_CAP_EXPORT_FILES);
+  // OS-PTOOLS2 S6 (Q9b): a launch from the Pattern's TOOLS is a deliberate run on the block and the edit is one undo unit, so it is not confirmed; an app that writes files still is.
+  const bool from_tools = ctx != nullptr && (ctx->flags & O3M_LAUNCH_FROM_TOOLS) != 0u;
+  const std::uint32_t need = caps & (from_tools ? O3M_CAP_EXPORT_FILES : (O3M_CAP_EDIT_PROJECT | O3M_CAP_EXPORT_FILES));
   if (need != 0u && !edit_acked(e.stem, need)) {
     if (std::strcmp(confirm_stem_, e.stem) != 0 || confirm_caps_ != need) {
       copy_text(confirm_stem_, sizeof confirm_stem_, e.stem);
@@ -1265,7 +1855,7 @@ bool ModuleUi::app_input(std::uint32_t kind, std::uint32_t id, std::int32_t valu
   return true;
 }
 
-bool ModuleUi::draw_app_view(ui::Renderer& r, const ui::Rect& area) noexcept {
+bool ModuleUi::draw_app_view(ui::Renderer& r, const ui::Rect& area, bool paint) noexcept {
   const o3m_module* m = app_module();
   if (m == nullptr || app_stopped_ || area.w < module::kViewMinSize || area.h < module::kViewMinSize) {
     return false;
@@ -1294,7 +1884,11 @@ bool ModuleUi::draw_app_view(ui::Renderer& r, const ui::Rect& area) noexcept {
     fault(app_index_, verdict);
     return false;
   }
-  replay(r, ui::Rect{area.x, area.y, w, h});
+  if (paint) {
+    replay(r, ui::Rect{area.x, area.y, w, h});
+  } else {
+    ++drawn_;
+  }
   return true;
 }
 

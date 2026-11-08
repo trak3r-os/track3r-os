@@ -16,9 +16,11 @@
    may include them; core, usb, hal, eve, ui, model, formats and audio may not.
    The module loader (OS-012a, `module`: the SD modules' file format, relocation and set) sits below the audio engine, which runs the loaded modules:
    module may include core, usb and hal; audio may include module; app, sim and tests may include it; core, usb, hal, eve, ui, model, formats, midi, seq and
-   platform may not (the composition root, below, wires the loader's hooks to the hardware).
+   platform may not (the composition root, below, wires the loader's hooks to the hardware). One exception, by header name (LAYER_HEADER_EXCEPTIONS below):
+   OS-FLASHDIET I1/I2 version-locks importers (kind 3) to the model's import-facing layout through the file header's word 44, so module may include exactly
+   <o3os/model/import_layout.h>, the tag; nothing else of model.
    One exception, by file name (COMPOSITION_ROOTS): platform/mk66/src/app_main.cpp, the image's composition root, may include
-   every layer.
+   every layer; platform/qemu/tests/ptfx_gate_test.cpp (OS-CEPTFX S3b) may include the app, to run the plugin job on the target.
 2. Rules for core, hal, eve, ui, app, model, formats: no standard header that owns heap memory, does I/O or blocks, no
    malloc/new, no `double` (software-emulated on the MK66's single-precision FPU) and no unsuffixed
    floating literal (it is a double: `a / 3.0` would promote silently). The build adds
@@ -79,7 +81,12 @@ ALLOWED = {
 RANKED_EXTRA = {"app": set(DATA_LAYERS)}
 # Composition roots (OS-007c): the named files that wire the app to a platform's real devices, so they see both. A path, not
 # a directory: nothing else under platform/ may include the app or ui. Keep this list at one entry per device image.
-COMPOSITION_ROOTS = {Path("platform/mk66/src/app_main.cpp"): set(LAYERS) | set(DATA_LAYERS) | {"platform"}}
+COMPOSITION_ROOTS = {Path("platform/mk66/src/app_main.cpp"): set(LAYERS) | set(DATA_LAYERS) | {"platform"},
+                     # OS-CEPTFX S3b: the QEMU suite that runs the app's plugin job (app/src/ptfx_job.cpp) through the real call gate: the app header only
+                     Path("platform/qemu/tests/ptfx_gate_test.cpp"): {"app"}}
+# OS-FLASHDIET I1: (source layer, destination layer, header name) triples that are allowed although the layers may not include each other.
+# The module loader compares a kind 3 file's header word 44 with the model's step-layout tag, so it reads exactly one model header.
+LAYER_HEADER_EXCEPTIONS = {("module", "model", "import_layout.h")}
 # Layers held to the no-heap / no-double / single-precision rules (2 below).
 RULED = set(LAYERS) | set(DATA_LAYERS)
 KNOWN = set(LAYERS) | set(ALLOWED)
@@ -271,7 +278,7 @@ def check_tree(root):
                     dest = None
             elif quote == "<" and "/" not in target and layer in RULED and target in BANNED_HEADERS:
                 found.append((str(rel), line, "<%s> is banned in %s (heap, I/O or blocking)" % (target, layer)))
-            if dest is not None and not may_include(layer, dest) and dest not in COMPOSITION_ROOTS.get(rel, ()):
+            if dest is not None and not may_include(layer, dest) and (layer, dest, Path(target).name) not in LAYER_HEADER_EXCEPTIONS and dest not in COMPOSITION_ROOTS.get(rel, ()):
                 found.append((str(rel), line, "layer violation: %s must not include %s (%s)" % (layer, dest, target)))
 
         if layer in RULED:
@@ -363,6 +370,7 @@ def self_test():
         "tests/uses_seq.cpp": head + "#include <o3os/seq/s.h>\n#include <o3os/midi/m.h>\n#include <vector>\n",
         # The module loader: core, usb and hal below it; the audio engine, app, sim and tests above.
         "module/include/o3os/module/m.h": head + "#include <o3os/core/a.h>\n#include <o3os/usb/u.h>\n#include <o3os/hal/h.h>\n#include <o3os/module/n.h>\n",
+        "module/src/uses_tag.cpp": head + "#include <o3os/model/import_layout.h>\n",  # OS-FLASHDIET I1: the one model header module may read
         "audio/src/uses_module.cpp": head + "#include <o3os/module/m.h>\n",
         "app/uses_module.cpp": head + "#include <o3os/module/m.h>\n",
         "sim/uses_module.cpp": head + "#include <o3os/module/m.h>\n",
@@ -468,6 +476,7 @@ def self_test():
         ("app/pin.cpp", head + "int x = kBootloaderRequest;\n", "bootloader request pin"),
         ("module/up_audio.h", head + "#include <o3os/audio/a.h>\n", "module must not include audio"),
         ("module/up_model.cpp", head + "#include <o3os/model/m.h>\n", "module must not include model"),
+        ("module/up_step.cpp", head + "#include <o3os/model/step.h>\n", "module must not include model"),  # only import_layout.h is excepted
         ("module/up_platform.cpp", head + "#include <o3os/platform/mk66/p.h>\n", "module must not include platform"),
         ("module/dbl.cpp", head + "double x = 1.0;\n", "`double` is banned"),
         ("module/heap.cpp", head + "#include <vector>\n", "<vector> is banned"),

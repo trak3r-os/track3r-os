@@ -102,6 +102,7 @@ void PerformBank::reset() noexcept {
     live_[s] = 0;
   }
   held_ = 0;
+  cc_mask_ = 0;
   affected_ = 0;
   edit_ = false;
   edit_slot_ = 0;
@@ -150,6 +151,7 @@ void PerformBank::load_slots(const model::PerfState& s) noexcept {
     load_row(i);
   }
   held_ = 0;
+  cc_mask_ = 0;  // OS-MIDICCMAP S3: a load ends every slot's CC mode
   affected_ = 0;
   edit_ = false;
   edit_slot_ = 0;
@@ -181,6 +183,7 @@ void PerformBank::load_row(unsigned slot) noexcept {
 
 void PerformBank::end_slot(unsigned slot) noexcept {
   held_ = static_cast<std::uint16_t>(held_ & ~(1u << slot));
+  cc_mask_ = static_cast<std::uint16_t>(cc_mask_ & ~(1u << slot));  // OS-MIDICCMAP S3: an ended slot is not in CC mode
   slots_[slot].row = 0;
   live_[slot] = 0;
 }
@@ -215,7 +218,7 @@ int PerformBank::desired(unsigned track, unsigned fx) const noexcept {
     return 0;
   }
   for (unsigned s = 0; s < kPerfSlots; ++s) {
-    if (slots_[s].fx == fx && slots_[s].row != 0u && live_[s] != 0) {
+    if (slots_[s].fx == fx && live_[s] != 0 && (slots_[s].row != 0u || ((cc_mask_ >> s) & 1u) != 0u)) {  // a slot in CC mode wants its live value too
       return live_[s];
     }
   }
@@ -238,6 +241,7 @@ bool PerformBank::pad_down(unsigned pad, CommandSink& out) noexcept {
     return false;
   }
   const unsigned slot = pad % kPerfSlots;
+  cc_mask_ = static_cast<std::uint16_t>(cc_mask_ & ~(1u << slot));  // OS-MIDICCMAP S3: a pad of the slot ends its CC mode
   Slot& s = slots_[slot];
   s.row = s.fx == 0u ? std::uint8_t{0} : static_cast<std::uint8_t>(pad / kPerfSlots);  // a slot with no FX has no row
   held_ = static_cast<std::uint16_t>(held_ | (1u << slot));
@@ -252,6 +256,7 @@ bool PerformBank::pad_up(unsigned pad, CommandSink& out) noexcept {
     return false;
   }
   const unsigned slot = pad % kPerfSlots;
+  cc_mask_ = static_cast<std::uint16_t>(cc_mask_ & ~(1u << slot));  // OS-MIDICCMAP S3: the pad's release ends the slot's CC mode too
   const bool own_row = slots_[slot].row == pad / kPerfSlots;  // the pad's row is still the slot's selected one (another pad of the slot may have taken it over)
   // The row's stored value is reloaded and then the slot lets go: what the encoder made of the value while the pad was held does not outlive the pad,
   // the FX stays on at the stored value until another row of the slot is pressed.
@@ -271,7 +276,8 @@ bool PerformBank::turn(int detents, CommandSink& out) noexcept {
   bool changed = false;
   for (unsigned s = 0; s < kPerfSlots; ++s) {
     Slot& slot = slots_[s];
-    if (((held_ >> s) & 1u) == 0u || slot.row == 0u || slot.fx == 0u) {
+    // OS-MIDICCMAP S3: a held slot in CC mode is turned as for a row, also when its row is 0.
+    if (((held_ >> s) & 1u) == 0u || slot.fx == 0u || (slot.row == 0u && ((cc_mask_ >> s) & 1u) == 0u)) {
       continue;
     }
     const PerfFx fx = static_cast<PerfFx>(slot.fx);
@@ -280,7 +286,7 @@ bool PerformBank::turn(int detents, CommandSink& out) noexcept {
       live_[s] = static_cast<std::int16_t>(next);
       changed = true;
     }
-    if (edit_ && slot.value[slot.row] != live_[s]) {
+    if (edit_ && slot.row != 0u && slot.value[slot.row] != live_[s]) {
       slot.value[slot.row] = live_[s];
       changed = true;
     }
@@ -310,7 +316,30 @@ void PerformBank::enter() noexcept {
 bool PerformBank::turn_off(CommandSink& out) noexcept {
   affected_ = 0;
   held_ = 0;
+  cc_mask_ = 0;  // OS-MIDICCMAP S3: leaving the screen ends every slot's CC mode
   return apply(out);
+}
+
+// OS-MIDICCMAP S3 (docs/specs/OS-MIDICCMAP.md 3.4): a mapped CC 51..62 on the slot. The slot enters CC mode (a runtime bit, never stored), its live
+// value becomes the CC's place in its FX's range (the official law of F5, as app::cc_map_perf), the slots holding the same FX or one it blocks end
+// (exclude, as F5) and apply() sends it to the affected tracks. The stored row and values are untouched. A slot with no FX ignores the message.
+bool PerformBank::set_cc(unsigned slot, unsigned v, CommandSink& out) noexcept {
+  if (slot >= kPerfSlots || v > 127u) {
+    return false;
+  }
+  const PerfFx fx = static_cast<PerfFx>(slots_[slot].fx);
+  if (fx == PerfFx::None) {
+    return false;  // a slot with no FX ignores it
+  }
+  const PerfFxInfo& info = perf_info(fx);
+  const int value = info.min + static_cast<int>(v) * (info.max - info.min) / 127;
+  const bool was_cc = ((cc_mask_ >> slot) & 1u) != 0u;
+  cc_mask_ = static_cast<std::uint16_t>(cc_mask_ | (1u << slot));
+  exclude(slot);  // ends the other slots of the same FX (and their CC mode, through end_slot)
+  const bool changed = !was_cc || live_[slot] != value;
+  live_[slot] = static_cast<std::int16_t>(value);
+  (void)apply(out);
+  return changed;
 }
 
 bool PerformBank::move_edit(int delta) noexcept {
@@ -388,6 +417,7 @@ bool PerformBank::recall_scene(unsigned i, CommandSink& out) noexcept {
   if (!scene_stored(i)) {
     return false;
   }
+  cc_mask_ = 0;  // OS-MIDICCMAP S3: a scene recall ends every slot's CC mode
   // The slots as load_slots() takes them (an id the table does not have is none, a value is held to its FX's range, a row past 3 is off) but the affected tracks and the held pads stay:
   // it is a change of the slots under the performer's hands, not a load.
   const model::PerfState& s = scenes_[i].slots;

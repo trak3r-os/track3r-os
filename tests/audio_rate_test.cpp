@@ -130,7 +130,7 @@ TEST_CASE("audio hal: block and ring geometry") {
 }
 
 TEST_CASE("irq table: ADR 0013 D1 as data, in the same order as the function") {
-  CHECK(irq::kRoleCount == 10u);
+  CHECK(irq::kRoleCount == 11u);
   for (unsigned i = 0; i < irq::kRoleCount; ++i) {
     CHECK(static_cast<unsigned>(irq::kTable[i].role) == i);
     CHECK(irq::kTable[i].priority == irq::priority(irq::kTable[i].role));
@@ -144,12 +144,15 @@ TEST_CASE("irq table: ADR 0013 D1 as data, in the same order as the function") {
   CHECK(std::strcmp(irq::name(irq::Role::AudioDma), "audio_dma") == 0);
   CHECK(std::strcmp(irq::name(irq::Role::Render), "render") == 0);
   CHECK(std::strcmp(irq::name(irq::Role::Unassigned), "unassigned") == 0);
+  CHECK(std::strcmp(irq::name(irq::Role::PluginGate), "plugin_gate") == 0);
+  CHECK(irq::priority(irq::Role::PluginGate) == 240);  // SVCall, the call gate's return, stays the lowest
 }
 
 TEST_CASE("irq table: what the audio engine relies on") {
   using R = irq::Role;
   // Only a fault preempts the DMA boundary ISR.
-  for (const R role : {R::SysTick, R::MidiUart, R::Usb, R::Completion, R::MidiOutTimer, R::Render, R::PinChange, R::Unassigned}) {
+  for (const R role : {R::SysTick, R::MidiUart, R::Usb, R::Completion, R::MidiOutTimer, R::Render, R::PinChange, R::Unassigned,
+                       R::PluginGate}) {
     CHECK_FALSE(irq::preempts(role, R::AudioDma));
     CHECK(irq::preempts(R::AudioDma, role));
   }

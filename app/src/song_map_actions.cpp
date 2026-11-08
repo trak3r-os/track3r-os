@@ -282,10 +282,16 @@ bool song_answer(ActionContext& ctx, core::ActionArg arg) noexcept {
 
 // ---- the cells ---------------------------------------------------------------------------------------------------------------------------
 
-// Shift + Left / Right, in the map: the tracks of the rectangle grow from where Shift was first used (arg = +-1). On PAT they do nothing.
+// Shift + Left / Right, in the map: the tracks of the rectangle grow from where Shift was first used (arg = +-1). On PAT they do nothing. OS-SONG3 S2: on TIMELINE, where Left / Right are the slots, they grow the range of slots.
 bool song_select_tracks(ActionContext& ctx, core::ActionArg arg) noexcept {
   ctx.view.song.set_tempo_focus(false);
-  return (arg == 1 || arg == -1) && ctx.view.song.extend_tracks(arg, song_map_cells(ctx.model, ctx.view));
+  if (arg != 1 && arg != -1) {
+    return false;
+  }
+  if (song_on_timeline(ctx.view)) {
+    return ctx.view.song.extend(arg, SongSource(ctx.model).count());
+  }
+  return ctx.view.song.extend_tracks(arg, song_map_cells(ctx.model, ctx.view));
 }
 
 namespace {

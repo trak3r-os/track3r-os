@@ -39,6 +39,9 @@ inline constexpr std::size_t kInstRate = 4;  // version 1.1 appends the sample r
 inline constexpr std::size_t kInstEngine = 1;  // version 1.2 appends the playback engine (u8) after the rate
 inline constexpr std::size_t kInstMidi = 12;  // version 1.3 appends velocity, program, out, pb range, offset, CC A..F, VEL> (u8 each) after the engine (OS-INSTUI S8b + S9)
 inline constexpr std::size_t kInstStereo = 1;  // version 1.5 appends the stereo flag (u8) after the MIDI bytes (OS-STEREO step 2)
+inline constexpr std::size_t kInstWt = 12;    // version 1.6 appends the twelve WT bytes (wt_bend, wt_sust of the six LFO slots) after the stereo byte (OS-CEWTENV W1)
+inline constexpr std::size_t kInstPlayThru = 1;  // version 1.7 appends the play-thru flag (u8) after the WT bytes (OS-CEPLAYTHRU P1)
+inline constexpr std::size_t kInstModRate = 1;   // version 1.8 appends the module RATE (u8) after the play-thru byte (OS-MODRATE S3)
 inline constexpr std::size_t kInstMax =
     kInstFixed + model::kInstrumentNameMax + model::kSamplePathMax + model::kModuleParamBytes;  // version 1.0
 inline constexpr std::size_t kCrcPayload = 6;
@@ -46,8 +49,8 @@ inline constexpr std::size_t kCrcPayload = 6;
 static_assert(kPhdrMax <= kScratchBytes && kTrakMax <= kScratchBytes && kModrMax <= kScratchBytes &&
                   kSongMax <= kScratchBytes && kInstMax <= kScratchBytes,
               "every chunk read whole must fit the scratch buffer");
-static_assert(kChunkHeader + kInstMax + kInstRate + kInstEngine + kInstMidi + kInstStereo + 1 <= kScratchBytes, "a whole INST chunk is one writer piece");
-static_assert(kInstMax + kInstRate + kInstEngine + kInstMidi + kInstStereo <= kScratchBytes, "an INST chunk of version 1.5 is read whole");
+static_assert(kChunkHeader + kInstMax + kInstRate + kInstEngine + kInstMidi + kInstStereo + kInstWt + kInstPlayThru + kInstModRate + 1 <= kScratchBytes, "a whole INST chunk is one writer piece");
+static_assert(kInstMax + kInstRate + kInstEngine + kInstMidi + kInstStereo + kInstWt + kInstPlayThru + kInstModRate <= kScratchBytes, "an INST chunk of version 1.8 is read whole");
 static_assert(kChunkHeader + kPattHead + model::kPatternNameMax <= kScratchBytes, "PATT head piece");
 static_assert(kChunkHeader + kTrakMax + 1 <= kScratchBytes && kChunkHeader + kModrMax + 1 <= kScratchBytes &&
                   kChunkHeader + kSongMax + 1 <= kScratchBytes && kChunkHeader + kPhdrMax + 1 <= kScratchBytes,

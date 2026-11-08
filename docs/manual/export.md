@@ -3,7 +3,7 @@
 
 Status: draft
 
-Export writes what the unit plays to WAV files on the card, and the tools are spread over three screens: the EXPORT page of File, the TOOLS list of Pattern and the TOOLS dialog of Song. Song, pattern and stems exports work as the official manual describes. The stems are one WAV for each audio track that plays a note, plus the DELAY, REVERB and MIX files. The files are named differently: `Export/<PROJECT>/<PROJECT>_Song0001.wav`, and a second render takes the next number instead of a new folder. <!-- og: same, names different --> **OG PROJECT** writes a folder in the original firmware's project format and is marked EXPERIMENTAL. Not checked against the original firmware: whether an official unit opens it. <!-- og: open -->
+Export writes what the unit plays to WAV files on the card, and the tools are spread over three screens: the EXPORT page of File, the TOOLS menu of Pattern and the TOOLS dialog of Song. Song, pattern and stems exports work as the official manual describes. The stems are one WAV for each audio track that plays a note, plus the DELAY, REVERB and MIX files. The files are named differently: `Export/<PROJECT>/<PROJECT>_Song0001.wav`, and a second render takes the next number instead of a new folder. <!-- og: same, names different --> **OG PROJECT** writes a folder in the original firmware's project format and is marked EXPERIMENTAL. Not checked against the original firmware: whether an official unit opens it. <!-- og: open -->
 
 <!-- Sources: docs/qa/catalogue/file.md, QA-FIL-020..025 (EXPORT page and WAV files), QA-FIL-050..057 (stems), QA-FIL-081..094 (OG PROJECT); docs/qa/catalogue/pattern.md, QA-PAT-114 (channel pan), QA-PAT-160..189 (TOOLS, EXPORT PATTERN, EXPORT SELECTION); docs/qa/catalogue/song.md, QA-SNG-059 (EXPORT WAV of slots). -->
 <!-- Open rows, not written: none in these ranges. QA-FIL-089 (an official unit opens the OG PROJECT folder) is an open research question, written as such. -->
@@ -54,7 +54,7 @@ This walk-through exports one pattern.
 | PATT STEMS nn | The same set, for the pattern nn. |
 | OG PROJECT | A project folder in the original firmware's format. EXPERIMENTAL. |
 
-The page is on the File screen, on the PROJECTS page, with `F7` (**EXPORT**). The card under the rows shows the file name `F1` will make. From the Pattern screen, the same WAV exports are in the TOOLS list. <!-- QA-FIL-020, QA-PAT-180 -->
+The page is on the File screen, on the PROJECTS page, with `F7` (**EXPORT**). The card under the rows shows the file name `F1` will make. From the Pattern screen, the same WAV exports are pads of the TOOLS menu. <!-- QA-FIL-020, QA-PAT-180 -->
 
 ## More tasks
 
@@ -73,10 +73,10 @@ You should see `SAVED EXPORT/<PROJECT>/<PROJECT>_P<n>_0001.WAV` when it ends. Ex
 
 Start on the Pattern screen, with the transport stopped.
 
-1. Press `F7` (**TOOLS**). The list opens, with **EXPORT PATTERN** first. <!-- QA-PAT-180 -->
-2. Press `F1` (**EXPORT**) on **EXPORT PATTERN**. <!-- QA-PAT-180 -->
+1. Press `F7` (**TOOLS**). The verb menu opens. **EXPORT PAT** is pad 15 (with a block, **EXPORT SEL** is pad 14). <!-- QA-PAT-436, QA-PAT-180 -->
+2. Press pad 15 (**EXPORT PAT**). <!-- QA-PAT-180 -->
 
-The file is `<PROJECT>_P<n>_0001.WAV`, as on the EXPORT page. <!-- QA-PAT-180 --> While the view follows the play line (WATCH while playing, or LIVE), the list does not open and the strip says **STOP PLAYING TO OPEN TOOLS**. Press `Play` to stop, then `F7`. <!-- QA-PAT-161 -->
+The file is `<PROJECT>_P<n>_0001.WAV`, as on the EXPORT page. <!-- QA-PAT-180 --> It opens in STEP and WATCH while the transport plays; only in LIVE it does not open and the strip says **THE PLAYHEAD HOLDS THE CURSOR IN LIVE** — leave LIVE, then press `F7`. <!-- QA-PAT-161, QA-PAT-449 -->
 
 ### Export a block of the pattern
 <!-- sync: src=app/src/export_actions.cpp qa=QA-PAT-185,QA-PAT-186,QA-PAT-319 -->
@@ -84,8 +84,8 @@ The file is `<PROJECT>_P<n>_0001.WAV`, as on the EXPORT page. <!-- QA-PAT-180 --
 Start on the Pattern screen, in **STEP**.
 
 1. Select the block with `Shift` and the arrows. <!-- QA-PAT-185 -->
-2. Press `F7` (**TOOLS**). The list shows **EXPORT SELECTION** below **EXPORT PATTERN** and the three pattern tools. <!-- QA-PAT-185 -->
-3. Press `Down` four times to **EXPORT SELECTION**, then `F1` (**EXPORT**). <!-- QA-PAT-186 -->
+2. Press `F7` (**TOOLS**). The verb menu opens, with **EXPORT SEL** on pad 14, next to **EXPORT PAT**. <!-- QA-PAT-185 -->
+3. Press pad 14 (**EXPORT SEL**). <!-- QA-PAT-186 -->
 
 You should see `SAVED EXPORT/<PROJECT>/<PROJECT>_SEL0001.WAV`. The file holds only the tracks of the block, from its first row to the end of its last row. The other tracks are muted in the file. A block that covers only some columns of a track still exports that track's whole steps. <!-- QA-PAT-186, QA-PAT-319, OS-AUDIT-56 in app/src/export_actions.cpp -->
 
@@ -156,7 +156,7 @@ The export refuses while a take is armed or recording, while a job, a load or a 
 | `Shift` + encoder | On PATTERN, moves eight patterns a turn. <!-- QA-FIL-092 --> |
 | `F1` (**EXPORT**) | Starts the chosen row. <!-- QA-FIL-021 --> |
 | `F8` (**CANCEL**) | Stops an export. The finished files stay. <!-- QA-FIL-022, QA-FIL-023 --> |
-| `F7` (**TOOLS**), on Pattern | Opens the list with EXPORT PATTERN, and EXPORT SELECTION when a block is selected. <!-- QA-PAT-160, QA-PAT-185 --> |
+| `F7` (**TOOLS**), on Pattern | Opens the verb menu; EXPORT PAT is pad 15, and EXPORT SEL is pad 14 when a block is selected. <!-- QA-PAT-160, QA-PAT-185 --> |
 | `F6` (**TOOLS**), on Song | Opens the dialog over the selected slots. Its fourth OP is **EXPORT WAV**, and `F1` (**APPLY**) starts it. <!-- QA-SNG-059 --> |
 
 While an export runs, only `F8` works. <!-- QA-FIL-022 -->
@@ -187,4 +187,4 @@ While an export runs, only `F8` works. <!-- QA-FIL-022 -->
 - [File](file.md): saving, opening and the project folder on the card.
 - [Pattern](pattern.md): the Pattern screen, where EXPORT PATTERN and EXPORT SELECTION start.
 - [Song](song.md): the Song screen, where EXPORT WAV of slots starts.
-- [Fill and tools](pattern_tools.md): the TOOLS list in full.
+- [Fill and tools](pattern_tools.md): the TOOLS menu in full.

@@ -6,6 +6,7 @@
 
 #include <o3os/app/app.h>
 #include <o3os/app/frame.h>
+#include <o3os/app/fill_view.h>
 #include <o3os/app/key_prompt.h>
 #include <o3os/app/model.h>
 #include <o3os/app/pattern_layout.h>
@@ -16,14 +17,19 @@
 #include <o3os/app/screens/screen.h>
 #include <o3os/app/song_data.h>
 #include <o3os/app/view_state.h>
+#include <o3os/core/scales.h>
+#include <o3os/model/pattern_fill.h>
 #include <o3os/eve/display_list_builder.h>
 #include <o3os/platform/host/fakes.h>
 #include <o3os/sim/eve_raster.h>
 #include <o3os/sim/raster_display.h>
+#include <o3os/sim/screens.h>
 #include <o3os/ui/components.h>
 #include <o3os/ui/font.h>
 #include <o3os/ui/renderer.h>
 #include <o3os/ui/theme.h>
+
+#include "../app/src/screens/dialog.h"  // make_dialog (private to app/src): the Fill dialog's body, for the KEY row check
 
 #include <cstdint>
 #include <cstring>
@@ -129,8 +135,8 @@ std::vector<app::ViewState> views() {
       v.push_back(s);
     }
   }
-  for (const unsigned page : {0u, 1u}) {
-    for (const int pos : {0, 9, 23}) {
+  for (const unsigned page : {0u}) {  // (OS-SONG3 S1: page 1 is TIMELINE, which has no rows for a dialog to cover; the list is the one page of rows)
+    for (const int pos : {0, 9, 23, 3, 14, 20}) {
       app::ViewState s;
       s.screen = ScreenId::Song;
       s.page[app::screen_index(ScreenId::Song)] = static_cast<std::uint8_t>(page);
@@ -231,17 +237,93 @@ TEST_CASE("overlay: the dialogs lie in the pane on whole rows and are centred, t
   CHECK(app::overlay_of(OverlayId::None) == nullptr);
 }
 
+// OS-PTOOLS2 S3p (docs/specs/OS-PTOOLS2.md 3.1 point 3, mock-ups A and B): the F7 verb menu and the Pattern TOOLS dialog are ONE right-hand
+// panel — x 500..800, the full height of the header and the data pane — and while it is up the grid is drawn in the 500 px left of it, with
+// the track columns that fit there (three at the 5-track zoom), scrolled so the cursor and the block stay in view.
+TEST_CASE("overlay: OS-PTOOLS2 S3p: the verb menu and the TOOLS dialog are the right-hand panel, and the grid under them narrows to its 500 px") {
+  for (unsigned t = 0; t < ui::kThemeCount; ++t) {
+    const ui::Theme& theme = built_in(t);
+    const app::Frame f = app::make_frame(theme, app::kFrameRows);
+    const Rect want{app::kRightPanelX, f.header.y, app::kRightPanelW, f.header.h + f.pane.h};  // over the header and the pane, not the strip, info or keys
+    for (const OverlayId id : {OverlayId::VerbMenu, OverlayId::PatternTools}) {
+      const Rect r = app::overlay_of(id)->rect(theme);
+      CHECK_MESSAGE((r.x == want.x && r.y == want.y && r.w == want.w && r.h == want.h), theme.name << ", overlay " << static_cast<int>(id));
+      CHECK_MESSAGE(app::overlay_of(id)->modal(), theme.name);
+    }
+    // Three tracks of the 5-track zoom fit the 500 px (the assumption of spec section 5), and the fields fit a column.
+    const app::PatternLayout narrow = app::make_pattern_layout(theme, app::PatternView::kVisibleRows, app::pattern_tracks_fit(theme, app::PatternView::kVisibleTracks, 0, app::kRightPanelX), 0, app::kRightPanelX);
+    CHECK(narrow.tracks == 3);
+    CHECK(narrow.fits);
+    CHECK(narrow.track0_x + narrow.tracks * narrow.track_w <= app::kRightPanelX);
+  }
+  // The grid under the panel: a block on tracks 5..7 with the cursor on track 7 is scrolled so the block's first track is the window's
+  // leftmost column, and no grid pixel lies under the panel.
+  app::ViewState v;
+  v.pattern.scroll_rows(app::PatternView::kCentreRow);
+  (void)v.pattern.move_track(6);  // the cursor on track 7 (0-based 6)
+  v.edit.selection.active = true;  // the block: rows 5..9 of tracks 5..7
+  v.edit.selection.start_row = 5;
+  v.edit.selection.end_row = 9;
+  v.edit.selection.start_track = 4;
+  v.edit.selection.end_track = 6;
+  const Scene bare(v, OverlayId::None, true);
+  v.overlay = OverlayId::VerbMenu;  // PatternScreen::render narrows the grid by the view's overlay, not by the Scene's argument
+  const Scene panel(v, OverlayId::VerbMenu, true);
+  const ui::Theme& theme = panel.theme;
+  const app::PatternLayout full = app::make_pattern_layout(theme, app::PatternView::kVisibleRows, app::PatternView::kVisibleTracks);
+  const int pane_tracks = app::pattern_tracks_fit(theme, app::PatternView::kVisibleTracks, 0, app::kRightPanelX);
+  const app::PatternLayout narrow = app::make_pattern_layout(theme, app::PatternView::kVisibleRows, pane_tracks, 0, app::kRightPanelX);
+  const int gy = full.grid.y + 5;
+  CHECK(bare.pixel(full.track_x(4), gy) == bare.rgb(Color::Empty));                     // the bare screen's fifth column separator
+  CHECK(panel.pixel(narrow.track_x(pane_tracks - 1), gy) == panel.rgb(Color::Empty));   // the panel's grid has the last fitting column there
+  CHECK(panel.pixel(narrow.track_x(pane_tracks - 1) + narrow.track_w, gy) == panel.rgb(Color::Pane));  // and no column past it
+  const int slot = 6 - 4;  // the cursor's slot: the block's first track (0-based 4) is the leftmost column of the narrowed window
+  const int cx = narrow.track_x(slot) + narrow.field_x[0] - narrow.cursor_pad_x;
+  CHECK(panel.count(Color::Accent, cx, full.grid.y, narrow.track_w, full.grid.h) > 0);  // the cursor block is drawn, inside the 500 px
+  CHECK(panel.count(Color::Sel, narrow.track_x(0), full.grid.y, pane_tracks * narrow.track_w, full.grid.h) > 0);  // the block is painted in the narrowed grid
+  CHECK(panel.count(Color::Accent, app::kRightPanelX, 0, ui::kScreenW - app::kRightPanelX, ui::kScreenH) == 0);     // nothing of the grid under the panel
+  const int cx_bare = full.track_x(4) + full.field_x[0] - full.cursor_pad_x;
+  CHECK(bare.count(Color::Accent, cx_bare, full.grid.y, full.track_w, full.grid.h) > 0);
+
+  // A block wider than the pane (tracks 4..7, four columns for three) with the cursor at its far end: the block's first track cannot be the
+  // leftmost column and keep the cursor in view, so the cursor wins (the `track_ >= left + pane_tracks` branch of PatternView::draw): the
+  // window starts at track 5 (0-based 4) and the cursor, on track 7 (0-based 6), is the last fitting column, still drawn inside the 500 px.
+  v.edit.selection.start_track = 3;
+  const Scene wide(v, OverlayId::VerbMenu, true);
+  const int last = pane_tracks - 1;  // the cursor's slot: the window's last column
+  const int wx = narrow.track_x(last) + narrow.field_x[0] - narrow.cursor_pad_x;
+  CHECK(wide.count(Color::Accent, wx, full.grid.y, narrow.track_w, full.grid.h) > 0);  // the cursor block is in the last fitting column
+  CHECK(wide.count(Color::Accent, narrow.track_x(0), full.grid.y, (pane_tracks - 1) * narrow.track_w, full.grid.h) == 0);  // and not in an earlier one
+  CHECK(wide.count(Color::Sel, narrow.track_x(0), full.grid.y, pane_tracks * narrow.track_w, full.grid.h) > 0);  // the block is painted in the columns that fit
+  CHECK(wide.count(Color::Accent, app::kRightPanelX, 0, ui::kScreenW - app::kRightPanelX, ui::kScreenH) == 0);  // nothing of the grid under the panel
+}
+
 // ---- the covered rectangle ------------------------------------------------------------------------------------------------
 
 TEST_CASE("overlay: with no overlay nothing is skipped: the pattern and song frames are the OS-003b ones (the pattern with its new info line)") {
   app::ViewState pattern;
   pattern.pattern.scroll_rows(app::PatternView::kCentreRow);  // (OS-PATCENTER: the cursor on row 0 has seven blank slots above it; on row 7 the window is full, as the typical state was)
   const Scene p(pattern, OverlayId::None, true);
-  CHECK(p.words == 985u);  // (OS-AUDIT E-PAT-03: seven more, the FX names are a name tile and a Micro value, and the bitmap handle changes twice a FX column; OS-H3A: four more, the F7 label is TOOLS and not "-"; OS-RECMODE2: one fewer, the chip says WATCH and not BROWSE; OS-PTOOLS: three more, the F4 label is FILL and not "-"; OS-PADS-B: two more, the info line says "Chromatic" and not "No scale"; OS-PADS-A: eight fewer, the F4 and F7 labels FILL and EXPORT are "-" now) the pattern view's typical state (DISPLAY included): OS-003b's 967, the six words the info line grew by (OS-009), five for the strip's "--" and MEM (OS-FU3), eight for its two-line load group and eight fewer for the dropped SONG 05 placeholder (OS-VOX)
+  CHECK(p.words == 994u);  // (OS-INFOLINE: nine more, "pads NOTES" is said on the info line now; OS-AUDIT E-PAT-03: seven more, the FX names are a name tile and a Micro value, and the bitmap handle changes twice a FX column; OS-H3A: four more, the F7 label is TOOLS and not "-"; OS-RECMODE2: one fewer, the chip says WATCH and not BROWSE; OS-PTOOLS: three more, the F4 label is FILL and not "-"; OS-PADS-B: two more, the info line says "Chromatic" and not "No scale"; OS-PADS-A: eight fewer, the F4 and F7 labels FILL and EXPORT are "-" now) the pattern view's typical state (DISPLAY included): OS-003b's 967, the six words the info line grew by (OS-009), five for the strip's "--" and MEM (OS-FU3), eight for its two-line load group and eight fewer for the dropped SONG 05 placeholder (OS-VOX)
   app::ViewState song;
   song.screen = ScreenId::Song;
   const Scene s(song, OverlayId::None, true);
-  CHECK(s.words == 519u);  // (OS-SONGMAP: three more, the F5 and F6 labels are UNIQUE and TOOLS, not PAT - and PAT +; OS-SHIFTROW: twelve more, the info line says SHIFT+INS DUP; OS-FU3: six more, the strip's "--" and MEM; OS-VOX: seven, the two-line load group; OS-SONG1: the BPM field)
+  CHECK(s.words == 572u);  // (OS-SONG3 S1: fifty-three more, the list has the BAR and BARS columns of the ARRANGEMENT page it folded in, NAME and BAR and BARS; OS-SONGMAP: three more, the F5 and F6 labels are UNIQUE and TOOLS, not PAT - and PAT +; OS-SHIFTROW: twelve more, the info line says SHIFT+INS DUP; OS-FU3: six more, the strip's "--" and MEM; OS-VOX: seven, the two-line load group; OS-SONG1: the BPM field)
+}
+
+TEST_CASE("overlay: the held Note's panel (the step popup, kind Note) is measured: within the standard budget in every theme and both modes, and over the bare screen (OS-SCALES28 S2)") {
+  for (unsigned t = 0; t < ui::kThemeCount; ++t) {
+    for (const bool translate : {true, false}) {
+      app::ViewState v;
+      v.screen = ScreenId::Pattern;
+      v.overlay = OverlayId::StepPopup;
+      v.popup.kind = app::StepPopupView::Note;  // the panel: the top line, the four row captions (row 2's says the encoder walks all 39) and the footer
+      const Scene popup(v, OverlayId::StepPopup, false, t, translate);
+      const Scene plain(v, OverlayId::None, false, t, translate);
+      CHECK_MESSAGE(popup.words <= sim::kBudgetWords, "theme " << t << (translate ? " translate" : " vtx2f") << ": " << popup.words << " words");
+      CHECK_MESSAGE(popup.words > plain.words, "theme " << t << (translate ? " translate" : " vtx2f") << ": the panel draws over the screen");
+    }
+  }
 }
 
 TEST_CASE("strip: the voices indicator is drawn inverted (a ChromeText chip) while a steal flashes, on the pattern and the song screens (OS-VOX)") {
@@ -434,6 +516,106 @@ TEST_CASE("overlay: an overlay paints only inside the rectangle it declares (and
         CHECK(inside > 100);  // and it does paint
       }
     }
+  }
+}
+
+// OS-SCALES28 S2 (Q4c): the Fill dialog's KEY row shows "< A# Neap. minor >" (18 characters; it was 16 with the old names). The display list is looked at, not the pixels: the Data-face glyphs the Fill
+// overlay puts on the KEY row's baseline, in the VERTEX2II / VERTEX2F words (no translate), and the right edge of the last one against the dialog's body.
+namespace {
+struct KeyRow {
+  int glyphs = 0;      // the glyphs on the row's line (the caption "KEY" is a Label glyph at its own line, so these are the value's)
+  int right = 0;       // the right edge of the last glyph
+  int body_right = 0;  // the dialog body's right edge
+  int cell = 0;
+  int body_x = 0;
+};
+
+KeyRow fill_key_row(unsigned theme_index, unsigned scale, unsigned root) {
+  const ui::Theme& theme = built_in(theme_index);
+  app::ViewState v;
+  v.screen = ScreenId::Pattern;
+  v.overlay = OverlayId::Fill;
+  v.fill.row = static_cast<std::uint8_t>(app::FillRow::Key);  // the selected row wears the "< >" arrows
+  v.fill.plan.what = model::fill::What::Note;
+  v.fill.plan.root = static_cast<std::uint8_t>(root);
+  app::fill_set(v.fill, app::FillRow::Key, static_cast<float>(scale));
+  CHECK(app::fill_row_used(v.fill, app::FillRow::Key));
+  const app::Overlay* o = app::overlay_of(OverlayId::Fill);
+  CHECK(o != nullptr);
+  KeyRow out;
+  if (o == nullptr) {
+    return out;
+  }
+  sim::EveRaster raster;
+  sim::RasterDisplay display{raster};
+  CHECK(sim::load_assets(display) == hal::UploadResult::Ok);
+  eve::DisplayListBuffer storage;
+  eve::DisplayListBuilder builder(display, storage.words, eve::kMaxDisplayListWords);
+  ui::Renderer r(builder, theme);
+  r.use_translate(false);  // every glyph is a VERTEX2II (x < 512) or a VERTEX2F in sixteenths, never moved by VERTEX_TRANSLATE_X
+  CHECK(r.begin(Color::Pane));
+  o->render(demo_model(), v, r);
+  CHECK(r.end());
+  // The dialog as the overlay builds it (make_dialog with the rows, the preview and its count, the target and the keys): the same rectangle as the one the overlay declares, or this check is out of date.
+  const ui::Metrics& m = theme.metrics;
+  const app::Dialog d = app::make_dialog(theme, o->rect(theme).w, (static_cast<int>(app::kFillRows) + 4) * m.row_pitch);
+  const Rect declared = o->rect(theme);
+  CHECK((d.outer.x == declared.x && d.outer.y == declared.y && d.outer.w == declared.w && d.outer.h == declared.h));
+  const int y = d.body.y + static_cast<int>(app::FillRow::Key) * m.row_pitch;
+  const int key_y = ui::caps_y(theme, ui::Face::Data, y, m.row_pitch);
+  out.cell = theme.geometry(ui::Face::Data).cell_w;
+  out.body_x = d.body.x;
+  out.body_right = d.body.x + d.body.w;
+  bool bitmaps = false;
+  for (std::size_t i = 0; i < display.last_frame_words(); ++i) {
+    const std::uint32_t w = storage.words[i];
+    int x = -1;
+    int gy = -1;
+    if ((w >> 24) == (eve::dl::begin(eve::Primitive::Bitmaps) >> 24)) {
+      bitmaps = (w & 0xFu) == static_cast<std::uint32_t>(eve::Primitive::Bitmaps);
+    } else if ((w >> 30) == eve::opcode::kVertex2iiTag) {
+      x = static_cast<int>((w >> 21) & 0x1FFu);
+      gy = static_cast<int>((w >> 12) & 0x1FFu);
+    } else if ((w >> 30) == eve::opcode::kVertex2fTag) {
+      const std::int32_t sx = static_cast<std::int32_t>((w >> 15) & 0x7FFFu);
+      x = (sx >= 0x4000 ? sx - 0x8000 : sx) / 16;
+      gy = static_cast<int>(w & 0x7FFFu) / 16;
+    }
+    if (bitmaps && gy == key_y && x >= d.body.x + 12 * out.cell) {  // the value column: from the 12th cell of the body (the caption sits in the first)
+      ++out.glyphs;
+      out.right = x + out.cell > out.right ? x + out.cell : out.right;
+    }
+  }
+  return out;
+}
+}  // namespace
+
+TEST_CASE("overlay: the Fill dialog's KEY row fits the dialog with every scale name under the longest root, in every theme (OS-SCALES28 S2: '< A# Neap. minor >' is 18 characters)") {
+  for (unsigned t = 0; t < ui::kThemeCount; ++t) {
+    const int pad = built_in(t).metrics.pad;
+    int widest = 0;
+    unsigned widest_scale = 0;
+    for (unsigned scale = 0; scale < core::kScaleCount; ++scale) {
+      app::FillView f;
+      f.plan.what = model::fill::What::Note;
+      f.plan.root = 10;  // A#: the root names are one or two characters, A# is the widest of them
+      app::fill_set(f, app::FillRow::Key, static_cast<float>(scale));
+      char text[32];
+      const int chars = static_cast<int>(app::fill_text(f, app::FillRow::Key, text, sizeof text)) + 4;  // "< " and " >" around it
+      const KeyRow k = fill_key_row(t, scale, 10);
+      CHECK_MESSAGE(chars <= 18, built_in(t).name << ", scale " << scale << ": " << chars << " characters");
+      CHECK_MESSAGE(k.glyphs > 0, built_in(t).name << ", scale " << scale << ": the check sees the row's glyphs");
+      // The row's right edge is where the text says: the value column starts at the 12th cell after the body's padding, one cell a character.
+      CHECK_MESSAGE(k.right == k.body_x + 2 * pad + (12 + chars) * k.cell, built_in(t).name << ", scale " << scale << " (" << text << "): the row ends at x " << k.right);
+      CHECK_MESSAGE(k.right <= k.body_right, built_in(t).name << ", scale " << scale << " (" << text << "): the row ends at x " << k.right << ", the dialog's body at " << k.body_right);
+      if (k.right > widest) {
+        widest = k.right;
+        widest_scale = scale;
+      }
+    }
+    const KeyRow last = fill_key_row(t, widest_scale, 10);
+    MESSAGE(built_in(t).name << ": the widest KEY row is scale " << widest_scale << " (" << core::kScaleNames[widest_scale] << "), ends at x " << last.right << " of " << last.body_right << " ("
+                             << (last.body_right - last.right) << " px to spare, " << (last.body_right - last.right) / last.cell << " cells)");
   }
 }
 

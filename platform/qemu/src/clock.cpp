@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include <o3os/hal/code_gate.h>
 #include <o3os/platform/qemu/clock.h>
 
 namespace o3os::platform::qemu {
@@ -38,7 +39,23 @@ void irq_restore(std::uint32_t primask) noexcept { asm volatile("msr primask, %0
 
 }  // namespace
 
-extern "C" void SysTick_Handler() { g_uptime_ms = g_uptime_ms + 1; }
+// The SysTick entry, as on the MK66 (platform/mk66/src/clock.cpp): the OS-CEPTFX call gate's check first, one load
+// and one branch while the gate is idle; the hook gets the EXC_RETURN of the interrupted context before anything
+// clobbers lr, so this is naked. Then the uptime.
+extern "C" [[gnu::naked]] void SysTick_Handler() {
+  asm volatile(
+      "push {r4, lr}\n\t"  // r4 keeps the 8-byte stack alignment of the calls below
+      "ldr r0, =o3os_hal_gate_active\n\t"
+      "ldr r0, [r0]\n\t"
+      "cbz r0, 1f\n\t"
+      "mov r0, lr\n\t"  // the hook's argument: the EXC_RETURN of the interrupted context
+      "bl o3os_hal_gate_systick\n\t"
+      "1:\n\t"
+      "bl o3os_systick_uptime\n\t"
+      "pop {r4, pc}\n\t"
+      ".ltorg");
+}
+extern "C" void o3os_systick_uptime() { g_uptime_ms = g_uptime_ms + 1; }
 
 void SysTickClock::start() noexcept {
   const std::uint32_t primask = irq_save();

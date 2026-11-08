@@ -42,6 +42,27 @@ You should see **OPENING** and the project's name, then the Pattern screen with 
 
 At power-on the unit opens the project you had open last (the newest **RECENT** entry), and the strip says **PROJECT <NAME> OPENED**. If it cannot load, the unit starts with an empty project and the strip says **PROJECT <NAME> FAILED** and why, at every start until you open another project. With no card, or on the USB disk boot, nothing is opened. New in track3r-os. Not yet checked on the unit. <!-- QA-FIL-111 -->
 
+### Open a project saved by tracker-ce
+<!-- sync: src=app/src/og_folder.cpp,formats/src/og_codec.h spec=docs/specs/OS-CEPAT.md qa=QA-FIL-143,QA-FIL-144,QA-FIL-145,QA-FIL-146,QA-FIL-148,QA-PAT-335 -->
+
+New in track3r-os. tracker-ce is the open-source firmware that Polyend published for the Tracker. A project folder it saved opens here like an original-format folder, and its patterns keep what this OS can play. Start on the PROJECTS page, with the folder on the card.
+
+1. Press `F2` (**RESCAN**) if the folder is not in the list. <!-- QA-FIL-112 -->
+2. Move the cursor to the folder and press `F1` (**OPEN**). <!-- QA-FIL-143 -->
+3. Press `Play` and listen to the patterns.
+
+You should see **OPENING** and the folder's name, then the Pattern screen with **PROJECT <NAME> OPENED**. <!-- QA-FIL-143 -->
+
+What changes on the way in:
+
+- **Tracks.** Patterns of 8, 12 and 16 tracks open. A 16-track pattern keeps tracks 13 to 16, and an export in the original format writes 12 tracks. <!-- QA-FIL-144 -->
+- **Volume column.** It plays as the step's volume. A value above 100 plays as full volume. <!-- QA-FIL-143 -->
+- **Micro-move column.** It becomes a [Micro-move](glossary.md) in the step's first free FX cell. The micro-move is left out when no FX cell is free, when a cell already holds a Micro-move, or when the other cell holds Random value 16. <!-- QA-FIL-143 -->
+- **tracker-ce effects.** The tracker-ce effects **w**, **y** and **z** (amp envelope, filter envelope, grain length) are known and play, see [Effects](fx.md). Any other effect that only tracker-ce has shows `?` and its value in the cell, plays nothing, and stays in the project when you save. A number outside tracker-ce's list is cleared. <!-- QA-FIL-143, QA-FIL-148, QA-PAT-335 -->
+- **A damaged pattern file** is skipped, and the rest of the folder opens. <!-- QA-FIL-145 -->
+
+The load ends with one summary line, in the diag console log and in `diag sd` (see [Computer tools](computer_tools.md)). It names what was lost, for example `3 MICRO-MOVES NOT KEPT, 2 VALUES CHANGED`; the changed values are the volumes above 100 and the cleared effects together. A folder that lost nothing says neither part. <!-- QA-FIL-146 --> Not yet checked on the unit.
+
 ### Save a project, save a copy, or name it
 <!-- sync: src=app/src/save_actions.cpp qa=QA-FIL-104,QA-FIL-072,QA-FIL-091,QA-FIL-098,QA-FIL-061,QA-FIL-040,QA-FIL-034,QA-FIL-060 -->
 
@@ -76,6 +97,8 @@ A module is a song file from an Amiga or PC tracker: ProTracker (MOD), Scream Tr
 4. If the project has changes that no save has taken, press `F1` again, as for **OPEN**. <!-- QA-FIL-008 -->
 
 You should see **IMPORTING** and the name, then **IMPORTED** and the name. The module replaces the project; **SAVE AS** names it. The OS reads the first bytes of the file, not its name, to know what it is. A file that no reader takes says **NOT A MODULE THIS OS READS**, asks nothing and changes nothing. A real module cut off inside its header or song list, or with no room for one pattern after its header, says the same, not a more precise reason; the project stays as it was. A name that says one format over bytes of another is refused the same way, except that a MOD and an S3M may swap names. <!-- QA-FIL-127, QA-FIL-128 --> The oldest Soundtracker modules have 15 samples and no tag. They import when the name says MOD or says nothing, as a 4-channel song. Their own effect numbers are not handled. <!-- QA-FIL-129 --> New in track3r-os. Not yet checked on the unit.
+
+The MOD, S3M and MED readers are not in the firmware: they run from `modules/importers/tracker.tmod` on the card, which the starter zip of this release puts there. Without that file an import of a module fails at once with **IMPORT <NAME> FAILED: NO IMPORTER** and nothing is changed, and the REPORT page (**F8**) names the file to copy. A `tracker.tmod` of another firmware says **IMPORTER FOR OTHER FIRMWARE** the same way.
 
 ### Convert other module formats with OpenMPT
 

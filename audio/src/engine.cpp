@@ -2,6 +2,7 @@
 #include <o3os/audio/engine.h>
 
 #include <o3os/audio/kernels_impl.h>
+#include <o3os/module/clock_state.h>
 
 namespace o3os::audio {
 namespace {
@@ -35,11 +36,17 @@ bool Engine::set_tone(bool on) noexcept {
 }
 
 void Engine::attach_voices(VoicePool* voices) noexcept {
+  if (voices_ != nullptr && voices_ != voices) {
+    voices_->set_st_reserved(0);  // OS-INSFX-ABI2 A5: the old pool keeps no reservation (the host's st_res_ is re-synced by attach_pool below, so it stops counting)
+  }
   voices_ = voices;
   if (voices != nullptr) {
     graph_.use_feed_sources((1u << kTracks) - 1u);  // every track takes its voice's block
   }
   graph_.set_instrument_hook(voices != nullptr ? &Engine::instrument_hook : nullptr, this);
+  if (inserts_ != nullptr) {
+    inserts_->attach_pool(voices);  // OS-INSFX-ABI2 A5: the pool may come after the inserts; null or changed, the next begin_block pushes the reservation to the new pool (st_res_ = 0xFF)
+  }
 }
 
 void Engine::attach_modules(ModuleVoices* modules) noexcept {
@@ -119,10 +126,22 @@ bool Engine::instrument_hook(void* self, const ParamChange& change) noexcept {
     }
   }
   const unsigned field = core::param_field(change.id);
-  if (field == inst_param::DelaySend || field == inst_param::ReverbSend) {  // OS-SENDFX: a live edit of a send reaches the tracks that play the instrument
+  const bool send = field == inst_param::DelaySend || field == inst_param::ReverbSend;
+  if (send) {  // OS-SENDFX: a live edit of a send reaches the tracks that play the instrument
     const SampleDesc& d = e.voices_->sample(slot);
     for (std::uint32_t m = e.voices_->slot_tracks(slot); m != 0u; m &= m - 1u) {
       e.graph_.set_voice_sends(static_cast<unsigned>(__builtin_ctz(m)), d.delay_send, d.reverb_send, 0u);  // within the next block's ramp, like the other knobs
+    }
+  }
+  if (e.modules_ != nullptr && (send || field == inst_param::Panning)) {  // OS-MODSENDS: ... and the tracks a module holds for the slot
+    const SampleDesc& d = e.voices_->sample(slot);
+    for (std::uint32_t m = e.modules_->slot_tracks(slot); m != 0u; m &= m - 1u) {
+      const unsigned t = static_cast<unsigned>(__builtin_ctz(m));
+      if (send) {
+        e.graph_.set_voice_sends(t, d.delay_send, d.reverb_send, 0u);
+      } else {
+        e.graph_.set_voice_pan(t, d.pan, 0u);
+      }
     }
   }
   return true;
@@ -130,6 +149,7 @@ bool Engine::instrument_hook(void* self, const ParamChange& change) noexcept {
 
 void Engine::attach_events(const EventSource& source) noexcept {
   source_ = source;
+  module::g_clock.invalidate();  // OS-INSFX-ABI2 A3: the clock of another source is not this one's; get_clock says "no sequencer" until the first block boundary writes it
   graph_.set_param_hook(&Engine::param_route, this);
 }
 
@@ -139,7 +159,7 @@ bool Engine::attach_inserts(InsertHost* inserts, InsertHost::Blobs* blobs) noexc
   }
   inserts_ = inserts;
   if (inserts != nullptr) {
-    inserts->attach(graph_, *modules_, blobs);
+    inserts->attach(graph_, *modules_, blobs, voices_);
     inserts->set_cycles(cycles_);
   }
   return true;
@@ -154,6 +174,14 @@ bool Engine::param_route(void* self, const ParamChange& change) noexcept {
   return e.source_.param != nullptr && e.source_.param(e.source_.self, change);
 }
 
+// OS-INSFX-ABI2 A3: what get_clock answers in the block that starts at `sample`. Without a source clock the store keeps whatever it held (attach_events clears it).
+void Engine::publish_clock(std::uint64_t sample) noexcept {
+  if (source_.clock != nullptr) {
+    const ClockPos p = source_.clock(source_.self, sample);
+    module::g_clock.publish(p.flags, p.tempo_x100, p.beat_q16);
+  }
+}
+
 // The end of a block, once, in flash: the governor takes the block's stage cycles (the block's total is its recent worst render and its base), then the inserts' boundary (the transitions of the block that ran, the nets, the commands).
 void Engine::block_end(const std::uint32_t (&stage_cycles)[hal::audio::kStageCount]) noexcept {
   if (modules_ != nullptr) {
@@ -161,7 +189,9 @@ void Engine::block_end(const std::uint32_t (&stage_cycles)[hal::audio::kStageCou
   }
   if (inserts_ != nullptr) {
     inserts_->begin_block();
+    gate_off_ = static_cast<std::uint16_t>(gate_user_ | inserts_->key_mask());  // OS-INSFX-ABI2 A6: a track some insert names as its key is not gated: a muted kick still keys (play_block is untouched)
   }
+  publish_clock(clock_);  // OS-INSFX-ABI2 A3: clock_ is already the next block's first sample; the sequencer has run every block up to it
 }
 
 // What a note event does to the voices; the events of the other kinds (modulation, MIDI, the UI's) are not this slice's.
@@ -184,9 +214,9 @@ void Engine::dispatch(const SeqEvent& e) noexcept {
       if (modules_ != nullptr && modules_->routed(e.b)) {  // an SD module's instrument (OS-012a): the sampler's voice on the track gives way, the pan is the centre
         voices_->cut(e.track);
         if (modules_->note_on(e.track, e.a, e.b, e.c)) {
-          graph_.set_voice_pan(e.track, 50);
+          graph_.set_voice_pan(e.track, voices_->sample(e.b).pan);  // OS-MODSENDS: the slot's PANNING (50 unless the instrument says otherwise), as for a sample
           graph_.set_voice_sends(e.track, voices_->sample(e.b).delay_send, voices_->sample(e.b).reverb_send);
-          tfx_.note_started(e.track, 50);  // ... and an SD module's
+          tfx_.note_started(e.track, voices_->sample(e.b).pan);  // ... and an SD module's
         }
         break;
       }
@@ -620,6 +650,9 @@ bool Engine::offline_enter(const EventSource& source) noexcept {
   graph_.perf_save(perf_strips_);
   graph_.perf_clear();
   offline_quiet();
+  if (voices_ != nullptr) {
+    voices_->drop_tails();  // STATUS latent (aa): the cut left the live notes' declick tails; they are not the export's (the file of a project is the same whatever sounded when it began)
+  }
   stop_live_notes();
   return true;
 }
@@ -707,6 +740,7 @@ void Engine::render_offline(const hal::audio::BlockIo& io) noexcept {
   if (inserts_ != nullptr) {
     inserts_->begin_block();  // OS-INSFX S1: the boundary the live render has at the end of a block, here at the start of one
   }
+  publish_clock(clock_);  // OS-INSFX-ABI2 A3: likewise the clock (the export's own sequencer, clock_ is this block's first sample)
   if (voices_ != nullptr) {
     play_block();
   }

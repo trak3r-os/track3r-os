@@ -59,6 +59,39 @@ constexpr unsigned order_pos(unsigned instrument) noexcept {
   return slot < 48u ? 16u + slot : 63u - slot;
 }
 
+// OS-CECHANCE C2, the coarse walk of Chance (F12, verified parity with tracker-ce@7fd6c2c mtSequencer_patternEdit.cpp:731-757): a turn of more
+// than one detent walks 0..100 by the delta (clamped at 100), then 101, 102, 103 one each, then by 6 up to 174 — and back the same way.
+constexpr std::uint8_t chance_coarse(std::uint8_t v, int delta) noexcept {
+  if (delta > 1) {
+    if (v < fx::kChanceProbMax) {
+      return static_cast<std::uint8_t>(v + delta > fx::kChanceProbMax ? fx::kChanceProbMax : v + delta);
+    }
+    if (v == fx::kChanceProbMax) {
+      return fx::kChanceWithLast;
+    }
+    if (v == fx::kChanceWithLast) {
+      return fx::kChanceNotLast;
+    }
+    if (v == fx::kChanceNotLast) {
+      return fx::kChanceCycleFirst;
+    }
+    return static_cast<std::uint8_t>(v + fx::kChanceCycleStep > fx::kChanceMax ? fx::kChanceMax : v + fx::kChanceCycleStep);
+  }
+  if (v <= fx::kChanceProbMax) {
+    return static_cast<std::uint8_t>(v + delta < 0 ? 0 : v + delta);
+  }
+  if (v == fx::kChanceWithLast) {
+    return fx::kChanceProbMax;
+  }
+  if (v == fx::kChanceNotLast) {
+    return fx::kChanceWithLast;
+  }
+  if (v < fx::kChanceCycleFirst + fx::kChanceCycleStep) {
+    return fx::kChanceNotLast;
+  }
+  return static_cast<std::uint8_t>(v - fx::kChanceCycleStep);  // v >= 109: no underflow
+}
+
 // The type in an FX slot after the single-step rule picks the last used one for an empty slot.
 constexpr std::uint8_t last_fx_type(const Last& last) noexcept {
   return static_cast<std::uint8_t>(fx::type_of_picker(last.fx));
@@ -184,7 +217,11 @@ void fx_value_delta(Step& step, unsigned fx, int delta, const Rule& rule, Last& 
     last.fx = fx::picker_index(f.type);  // (for a None slot of a range too: the last used FX becomes None)
     if (f.type != 0) {
       const fx::Row& s = fx::row(f.type);
-      f.value = static_cast<std::uint8_t>(clampi(static_cast<int>(f.value) + delta, s.lo, s.hi));
+      if (f.type == fx::kChanceType && (delta > 1 || delta < -1)) {
+        f.value = chance_coarse(f.value, delta);  // OS-CECHANCE C2: the coarse walk of F12 (parity); a plain turn walks every value
+      } else {
+        f.value = static_cast<std::uint8_t>(clampi(static_cast<int>(f.value) + delta, s.lo, s.hi));
+      }
     }
   }
 }
@@ -219,7 +256,8 @@ void fx_pad(Step& step, unsigned fx, unsigned pad, const Rule& rule, Last& last)
   }
   if (fx_enter(step, fx, rule, last)) {
     const fx::Row& s = fx::row(step.fx[fx].type);
-    const int v = map_int(static_cast<int>(pad), 0, 47, s.lo, s.hi);
+    // OS-CECHANCE C2: the pads map 0..47 over 0..100 for Chance (random_hi), over the type's whole range for the others.
+    const int v = map_int(static_cast<int>(pad), 0, 47, s.lo, static_cast<int>(fx::random_hi(step.fx[fx].type)));
     step.fx[fx].value = static_cast<std::uint8_t>(clampi(v, s.lo, s.hi));
   }
 }

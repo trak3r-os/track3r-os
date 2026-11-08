@@ -385,6 +385,31 @@ TEST_CASE("file import: a failed import is told with its reason; one with someth
   CHECK(rig.message() == "IMPORTED ROOT.MOD: 2 NO ROOM, F8 REPORT");
 }
 
+// OS-FLASHDIET I3 review fold: the strip's severity is the import's own outcome (the summary's ok), not whether a project happens to be
+// open: a failed import with the project still open (a refused begin) is an error, a successful one an info.
+TEST_CASE("file import: the strip's severity follows the import's result, not the open project") {
+  Rig rig;
+  rig.import_page();
+  NEED(rig.to("root.mod"));
+  rig.tap(Button::F1);
+  rig.project.ok = true;  // a project is open (a refused begin leaves it as it was)
+  rig.project.summary.valid = true;
+  rig.project.summary.ok = false;
+  std::strcpy(rig.project.summary.name, "ROOT.MOD");
+  std::strcpy(rig.project.summary.error, "NO IMPORTER");
+  rig.end_load();
+  CHECK(rig.message() == "IMPORT ROOT.MOD FAILED: NO IMPORTER");
+  CHECK(rig.app->state().notify.head().severity == core::Severity::Error);
+  rig.expire();
+
+  rig.project.summary.ok = true;
+  rig.project.summary.error[0] = '\0';
+  rig.tap(Button::F1);
+  rig.end_load();
+  CHECK(rig.message() == "IMPORTED ROOT.MOD");
+  CHECK(rig.app->state().notify.head().severity == core::Severity::Info);
+}
+
 TEST_CASE("file import: the load's own refusals are told, and a running load or save blocks the key") {
   Rig rig;
   rig.import_page();

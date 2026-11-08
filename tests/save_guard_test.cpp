@@ -804,3 +804,47 @@ TEST_CASE("save guard OS-SCREENSHOT: Screenshots/SHOT_nnnn.bmp is a Target made 
   CHECK_FALSE(sv::may_rename("Screenshots/_o3save.tmp", "Samples/SHOT_0001.bmp"));        // one folder
   CHECK_FALSE(sv::may_rename("Screenshots/_o3save.tmp", "Screenshots/SHOT_0001.wav"));    // a Temp becomes a screenshot only under a screenshot's name
 }
+
+TEST_CASE("save guard OS-MODPRESET P3: modules/presets/<stem>/<name>.o3mp, a never-replaced Target below a folder chain, nothing else under modules/") {
+  for (const char* folder : {"modules", "MODULES", "modules/presets", "Modules/Presets", "modules/presets/tb303", "modules/presets/TB 303"}) {
+    CHECK(sv::classify(folder) == Place::Folder);
+    CHECK(sv::may_make_dir(folder));
+  }
+  CHECK(sv::classify("modules/presets/tb303/Acid Bass.o3mp") == Place::Target);
+  CHECK(sv::classify("modules/presets/tb303/ACID 2.O3MP") == Place::Target);
+  CHECK(sv::classify("modules/presets/tb303/_o3save.tmp") == Place::Temp);
+  CHECK(sv::may_create("modules/presets/tb303/_o3save.tmp"));
+  CHECK(sv::may_remove("modules/presets/tb303/_o3save.tmp"));
+  CHECK(sv::may_rename("modules/presets/tb303/_o3save.tmp", "modules/presets/tb303/Acid.o3mp"));
+  // The longest path: a 31-byte stem and a 30-byte name; a 31-byte name is refused (the rule of tools/o3preset.py valid_file_name).
+  const std::string stem(sv::kNameMax, 's');
+  const std::string longest = "modules/presets/" + stem + "/" + std::string(sv::kPresetNameMax, 'n') + ".o3mp";
+  CHECK(longest.size() + 1 <= sv::kPathCap);
+  CHECK(sv::classify(longest.c_str()) == Place::Target);
+  CHECK(sv::classify(("modules/presets/" + stem + "/" + std::string(sv::kPresetNameMax + 1, 'n') + ".o3mp").c_str()) == Place::None);
+  CHECK(sv::classify(("modules/presets/" + stem + "x").c_str()) == Place::None);
+  // The names tools/o3preset.py refuses are refused here too (the two lists are held equal: the same names are in o3preset_test.py).
+  for (const char* bad : {"", " lead", "trail ", "trail.", ".hidden", "a..b", "CON", "nul.x", "COM1", "lpt9", "a/b", "a\\b", "a:b", "caf\xC3\xA9", "tab\tx"}) {
+    CHECK(sv::classify((std::string("modules/presets/tb303/") + bad + ".o3mp").c_str()) == Place::None);
+  }
+  CHECK(sv::classify("modules/presets/tb303/.o3mp") == Place::None);
+  // Nothing else under modules/, no Backup form, no fifth component, no traversal, no other extension.
+  for (const char* none : {"modules/instruments", "modules/instruments/tb303.tmod", "modules/tb303.tmod", "modules/presets/tb303/Acid.o3mp.bak",
+                           "modules/presets/tb303/Acid.o3mp.tmp", "modules/presets/tb303/Acid.wav", "modules/presets/tb303/Acid.pti", "modules/presets/tb303/Acid", "modules/presets/tb303/sub/Acid.o3mp",
+                           "modules/presets/tb303/sub/_o3save.tmp", "modules/presets/..", "modules/presets/../x/Acid.o3mp", "modules/presets/tb303/../Acid.o3mp", "modules/../Projects/a/project.o3pj",
+                           "modules/presets/_o3save.tmp", "modules/_o3save.tmp", "modules/presets/CON", "modules/presets/ x/Acid.o3mp", "modules/presets/tb303//Acid.o3mp", "modules//presets",
+                           "modules/presets/tb303/", "modules/preset/tb303/Acid.o3mp", "modules/presets/tb303/Acid.o3mp/x"}) {
+    CAPTURE(none);
+    CHECK(sv::classify(none) == Place::None);
+  }
+  // A Target is never removed, renamed or replaced; a folder is never removed or renamed.
+  CHECK_FALSE(sv::may_remove("modules/presets/tb303/Acid.o3mp"));
+  CHECK_FALSE(sv::may_remove("modules/presets/tb303"));
+  CHECK_FALSE(sv::may_rename("modules/presets/tb303/Acid.o3mp", "modules/presets/tb303/Acid.o3mp.bak"));
+  CHECK_FALSE(sv::may_rename("modules/presets/tb303/Acid.o3mp", "modules/presets/tb303/Other.o3mp"));
+  CHECK_FALSE(sv::may_rename("modules/presets/tb303/_o3save.tmp", "modules/presets/sid/Acid.o3mp"));
+  CHECK_FALSE(sv::may_rename("modules/presets/tb303/_o3save.tmp", "modules/tb303.tmod"));
+  CHECK_FALSE(sv::may_rename("modules", "modules2"));
+  CHECK_FALSE(sv::may_make_dir("modules/presets/tb303/Acid.o3mp"));
+  CHECK_FALSE(sv::may_make_dir("modules/instruments"));
+}

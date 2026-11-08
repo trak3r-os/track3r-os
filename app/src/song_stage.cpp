@@ -36,6 +36,9 @@ StageState stage_state(const SongSource& src, const audio::PlayPosition::Value& 
   if (play.queued != audio::PlayPosition::kNoOrder && static_cast<int>(play.queued) < count) {
     s.next_slot = static_cast<int>(play.queued);
     s.next_kind = StageNext::Jump;
+  } else if (play.looping() && play.loop_last == play.order && static_cast<int>(play.loop_first) < count) {
+    s.next_slot = static_cast<int>(play.loop_first);  // OS-SONG3 S7: the last slot of the looped range goes back to its first
+    s.next_kind = StageNext::Loop;
   } else if (s.now_slot + 1 < count) {
     s.next_slot = s.now_slot + 1;
     s.next_kind = StageNext::Next;

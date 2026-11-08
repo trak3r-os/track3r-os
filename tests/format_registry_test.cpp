@@ -153,8 +153,11 @@ TEST_CASE("format registry: sniffing the magic") {
   CHECK(sniff(head({'M', 'T', 1, 0}), 0) == "(none)");                // type 1 is an instrument
   CHECK(sniff(head({'K', 'S', 2, 0}), 6184) == "og-pattern");
   CHECK(sniff(head({'K', 'S', 2, 0}), 9260) == "og-pattern");
+  CHECK(sniff(head({'K', 'S', 2, 0}), 12336) == "og-pattern");  // v5, 16 tracks (OS-CEPAT S1b)
+  CHECK(sniff(head({'K', 'S', 2, 0}), 8232) == "og-pattern");   // v6, 8 tracks (OS-CEPAT S1)
+  CHECK(sniff(head({'K', 'S', 2, 0}), 12332) == "og-pattern");  // v6, 12 tracks
+  CHECK(sniff(head({'K', 'S', 2, 0}), 16432) == "og-pattern");  // v6, 16 tracks
   CHECK(sniff(head({'P', 'M', 2, 0}), 0) == "og-pattern");
-  CHECK(sniff(head({'K', 'S', 2, 0}), 12336) == "(none)");
   CHECK(sniff(head({'K', 'S', 2, 0}), 1000) == "(none)");
   CHECK(sniff(head({'T', 'I', 1, 0}), 392) == "og-mti");
   CHECK(sniff(head({'T', 'I', 1, 0}), 388) == "og-mti");
@@ -383,7 +386,7 @@ TEST_CASE("format registry: the device settings file is registered, found by nam
   CHECK(run_writer(*d->writer, any_project, file, wp) == Progress::Done);
   CHECK(d->writer->report().error == FormatError::None);
   CHECK(d->writer->report().bytes == file.size());
-  CHECK(file.size() == 222u + 3u * 8u + 8u + 4u + 8u);  // + the two entries of TRANSPORT IN and OUT (E-CFG-03) and the one of PAT SWITCH (E-PAT-35)
+  CHECK(file.size() == 222u + 7u * 8u + 8u + 4u + 8u);  // + the two entries of TRANSPORT IN and OUT (E-CFG-03), the one of PAT SWITCH (E-PAT-35), the one of CC MAP (OS-MIDICCMAP S1) the two of MTC OUT and MTC START (OS-MTC A3) and the one of MTC IN (OS-MTC B3)
   // Found by its bytes (the head the registry offers) and by name-and-bytes; not mistaken for a project, nor a project for it.
   CHECK(r.sniff(file.data(), 16, static_cast<std::uint32_t>(file.size())) == d);
   CHECK(r.identify("settings.o3st", file.data(), 16, static_cast<std::uint32_t>(file.size())) == d);

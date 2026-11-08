@@ -69,8 +69,11 @@ class Decoder {
     }
     for (std::uint32_t i = 0; i < model::kLfos; ++i) {
       const std::uint8_t* l = b_ + instr::kLfo + i * instr::kLfoStride;
-      s.lfo[i].shape = l[0] > 4u ? model::kLfoShapeTriangle : l[0];  // OS-LFOSINE: OG has the shapes 0..4; a larger byte played as Triangle here and still does (5 is this OS's Sine, never an OG value). (field by field: an aggregate would leave the two padding bytes of an Lfo indeterminate, and equal instruments are equal bytes)
+      const bool wt = model::is_wt_loop(s.envelope[i].loop);  // OS-CEWTENV W1 (W3a review: tested exactly, only 2 and 3 exist — a garbage loop byte is not a WT slot): loop 2 WT Env, 3 WT LFO (verified parity, tracker-ce@7fd6c2c:core/source/mtStructs.h:629-637): the shape is the contour 0..255, verbatim, and bytes +2/+3 are the warp and sustain, read
+      s.lfo[i].shape = wt ? l[0] : (l[0] > 4u ? model::kLfoShapeTriangle : l[0]);  // OS-LFOSINE: for loop <= 1 the OG has the shapes 0..4; a larger byte played as Triangle here and still does (5 is this OS's Sine, never an OG value). (field by field: an aggregate would leave bytes of an Lfo indeterminate, and equal instruments are equal bytes)
       s.lfo[i].speed = l[1];
+      s.lfo[i].wt_bend = wt ? l[2] : std::uint8_t{0};  // for loop <= 1 today's rule holds: bytes +2/+3 are dropped
+      s.lfo[i].wt_sust = wt ? l[3] : std::uint8_t{0};
       s.lfo[i].amount = finite(get_f32(l + 4), 0.5f);
     }
     s.cutoff = finite(get_f32(b_ + instr::kCutoff), 1.0f);
@@ -84,6 +87,7 @@ class Decoder {
     const std::uint16_t pan = get16(b_ + instr::kPanning);  // an i16 in the file; 0..100 is the range this OS accepts
     s.panning = pan > model::kMaxPercent ? replaced(50) : static_cast<std::uint8_t>(pan);
     s.delay_send = limited(b_[instr::kDelaySend], model::kMaxPercent, 0);
+    out.slice_thru = b_[instr::kPlayThru] != 0 ? std::uint8_t{1} : std::uint8_t{0};  // OS-CEPLAYTHRU P1: any non-zero byte is On, in every version (verified parity, tracker-ce@7fd6c2c:core/FileManager/fileManagerInstrument.cpp:663-706 reads the struct raw, with no version rule for it); byte 279 was alignment padding before
     for (std::uint32_t i = 0; i < model::kSlices; ++i) {
       s.slices[i] = get16(b_ + instr::kSlices + 2 * i);
     }
@@ -346,6 +350,7 @@ void InstrumentWriter::build() noexcept {
   put16(b + instr::kLoopEnd, s.loop_end);
   put16(b + instr::kEnd, s.end);
   put32(b + instr::kCurrentWindow, s.wavetable_window);
+  std::uint32_t wt_mod = 0;  // OS-CEWTENV: WT slots (loop 2 or 3) written off, and slot 3's dropped enable bit 0x02 (the granular length, W5), one per drop
   for (std::uint32_t i = 0; i < model::kEnvelopes; ++i) {
     std::uint8_t* e = b + instr::kEnvelope + i * instr::kEnvelopeStride;
     const model::Envelope& v = s.envelope[i];
@@ -356,19 +361,28 @@ void InstrumentWriter::build() noexcept {
     put16(e + 10, v.decay);
     put_f32(e + 12, v.sustain);
     put16(e + 16, v.release);
-    e[18] = v.loop;
-    e[19] = v.enable;
+    const bool wt = model::is_wt_loop(v.loop);  // OS-CEWTENV W1 (Q4 a): OG 1.9 has no WT modes, so a WT slot is written as an official one: off (loop 0, enable 0), counted in wt_mod
+    e[18] = wt ? std::uint8_t{0} : v.loop;
+    // OS-CEWTENV W5 (F2): slot 3's enable byte is a bit mask (0x01 the wavetable position, 0x02 the granular length): the export clears bit 0x02 (OG 1.9 has no length destination) and counts it in wt_mod;
+    // every other bit goes down as stored, so a file without bit 0x02 is written byte for byte as before
+    if (!wt && i == 3u && (v.enable & 2u) != 0u) {
+      ++wt_mod;
+    }
+    e[19] = wt ? std::uint8_t{0} : (i == 3u ? static_cast<std::uint8_t>(v.enable & ~2u) : v.enable);
   }
   bool sine = false;
   for (std::uint32_t i = 0; i < model::kLfos; ++i) {
     std::uint8_t* l = b + instr::kLfo + i * instr::kLfoStride;
-    const bool is_sine = s.lfo[i].shape == model::kLfoShapeSine;  // OS-LFOSINE: OG has five shapes; Sine is written as Triangle and counted
+    const bool wt = model::is_wt_loop(s.envelope[i].loop);
+    const bool is_sine = !wt && s.lfo[i].shape == model::kLfoShapeSine;  // OS-LFOSINE: OG has five shapes; Sine is written as Triangle and counted — only for loop <= 1 (a WT slot's shape is a contour, held to 0..4 below instead)
     sine = sine || is_sine;
-    l[0] = is_sine ? model::kLfoShapeTriangle : s.lfo[i].shape;
+    wt_mod += wt ? 1u : 0u;
+    l[0] = wt ? (s.lfo[i].shape > 4u ? std::uint8_t{4} : s.lfo[i].shape) : (is_sine ? model::kLfoShapeTriangle : s.lfo[i].shape);
     l[1] = s.lfo[i].speed;
-    put_f32(l + 4, s.lfo[i].amount);
+    put_f32(l + 4, s.lfo[i].amount);  // l[2] and l[3] stay 0 (the image is zeroed): the warp and sustain bytes are not written
   }
   report_.drops.lfo_sine += sine ? 1u : 0u;
+  report_.drops.wt_mod += wt_mod;
   put_f32(b + instr::kCutoff, s.cutoff);
   put_f32(b + instr::kResonance, s.resonance);
   b[instr::kFilterType] = s.filter_type;
@@ -379,6 +393,7 @@ void InstrumentWriter::build() noexcept {
   put16(b + instr::kGlide, s.glide);
   put16(b + instr::kPanning, s.panning);
   b[instr::kDelaySend] = s.delay_send;
+  b[instr::kPlayThru] = in.slice_thru;  // OS-CEPLAYTHRU P1: 0 or 1 (the model's flag); official 1.9 writes 0 there (measured: 0 in all 70 fixture instruments), so a file without the flag is byte-identical
   for (std::uint32_t i = 0; i < model::kSlices; ++i) {
     put16(b + instr::kSlices + 2 * i, s.slices[i]);
   }

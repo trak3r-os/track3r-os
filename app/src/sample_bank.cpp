@@ -683,10 +683,18 @@ void SampleBank::rebind_now(unsigned slot) noexcept {
       table = s.table;
     }
     bool approximated = false;
-    d = make_sample_desc(*in, s.pcm, s.frames, &approximated, table, law_, s.side);
+    audio::FilterMod grlen{};  // OS-CEWTENV W5: the granular length source (slot 3 bit 0x02) goes with the descriptor
+    d = make_sample_desc(*in, s.pcm, s.frames, &approximated, table, law_, s.side, &grlen);
     d.engine = engine_for(slot, *in);
+    voices_->set_sample(slot, d, d.granular ? &grlen : nullptr);
+  } else {
+    if (in != nullptr && in->kind == model::InstrumentKind::Module) {  // OS-MODSENDS: a module's note has no PCM; the engine reads its PANNING and sends from this silent descriptor
+      d.pan = in->sampler.panning;
+      d.delay_send = in->sampler.delay_send;
+      d.reverb_send = in->sampler.reverb_send;
+    }
+    voices_->set_sample(slot, d);
   }
-  voices_->set_sample(slot, d);
   s.bound = d.length != 0u ? s.pcm : nullptr;
   ++rebinds_;
 }
@@ -774,6 +782,7 @@ bool SampleBank::stage_step(std::uint64_t now_ms, bool params_idle) noexcept {
   SampleBankMem::Slot& s = mem_->slots[slot];
   const model::Instrument* in = project_->project.instrument(slot);
   audio::SampleDesc d;  // silent
+  audio::FilterMod grlen{};  // OS-CEWTENV W5: the granular length source (slot 3 bit 0x02), staged with the descriptor and taken with it
   std::uint16_t* dst = nullptr;
   unsigned words = 0;
   if (in != nullptr && in->kind == model::InstrumentKind::Sample && s.pcm != nullptr && s.frames != 0u) {
@@ -785,7 +794,7 @@ bool SampleBank::stage_step(std::uint64_t now_ms, bool params_idle) noexcept {
       table = s.table != nullptr ? reinterpret_cast<std::int16_t*>(mem_->stage.table) : nullptr;  // built in the cell: the render copies it over the slot's own table with the descriptor
     }
     bool approximated = false;
-    d = make_sample_desc(*in, s.pcm, s.frames, &approximated, table, law_, s.side);
+    d = make_sample_desc(*in, s.pcm, s.frames, &approximated, table, law_, s.side, &grlen);
     d.engine = engine_for(slot, *in);
     if (d.slices != nullptr) {
       dst = reinterpret_cast<std::uint16_t*>(s.table);
@@ -794,7 +803,7 @@ bool SampleBank::stage_step(std::uint64_t now_ms, bool params_idle) noexcept {
     }
   }
   staging_takes_ = voices_->stage_takes();
-  if (!voices_->stage_sample(slot, d, mem_->stage.table, words, dst)) {
+  if (!voices_->stage_sample(slot, d, mem_->stage.table, words, dst, d.granular ? &grlen : nullptr)) {
     todo_ |= bit;
     return false;
   }

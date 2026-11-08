@@ -70,8 +70,12 @@ inline bool pattern_counting_in(const Model& model, const ViewState& view) noexc
 }
 
 // F1..F8 of the pattern screen (product-ux section 4). One table: the key row draws it and the F-key placeholder says it.
-// (OS-PADS-A: FILL and EXPORT moved to Shift + Fx; OS-CFGWIRE: Shift + Fx is pattern.fill, Shift + Copy pattern.export, F6 is INVERT; OS-PTOOLS: F4 is FILL, the dialog (Shift + Fx repeated the last fill until OS-QJUMP took the key for the 3/4 jump: pattern.fill has no key now); F7 is TOOLS (OS-H3A: the list of the tool apps; OS-WAVEXP: EXPORT PATTERN is its first entry).)
-inline constexpr const char* kPatternSoftKeys[8] = {"PATTERN", "LENGTH", "JUMP", "FILL", "PREVIEW", "INVERT", "TOOLS", "UNDO"};
+// (OS-PADS-A: FILL and EXPORT moved to Shift + Fx; OS-CFGWIRE: Shift + Fx is pattern.fill, Shift + Copy pattern.export, F6 was INVERT; OS-PTOOLS: F4 is FILL, the dialog (Shift + Fx repeated the last fill until OS-QJUMP took the key for the 3/4 jump: pattern.fill has no key now); F7 is TOOLS (OS-H3A: the list of the tool apps; OS-WAVEXP: EXPORT PATTERN is its first entry); OS-PTOOLS2 S3 (Q1): F6 is REPEAT of the last parameterised apply — RE FILL after a FILL dialog (and by default; the 8-character key cap of screens_test wins over the spec's "AGAIN FILL" wording), REPEAT after a TOOLS dialog APPLY (pattern_soft_keys); INVERT took the menu's pad 9.)
+inline constexpr const char* kPatternSoftKeys[8] = {"PATTERN", "LENGTH", "JUMP", "FILL", "PREVIEW", "RE FILL", "TOOLS", "UNDO"};
+// The same row with F6 reading REPEAT: what F6 runs is the last TOOLS dialog APPLY (VerbMenuView::LastVerb::Tool), not a fill (OS-PTOOLS2 S2). Not named k...Keys: the manual's key tables read kPatternSoftKeys.
+inline constexpr const char* kPatternRepeatRow[8] = {"PATTERN", "LENGTH", "JUMP", "FILL", "PREVIEW", "REPEAT", "TOOLS", "UNDO"};
+// The plain key row in force: kPatternSoftKeys, or kPatternRepeatRow while F6 repeats a TOOLS apply.
+const char* const* pattern_soft_keys(const ViewState& view) noexcept;
 // What the key row shows while Shift is held (OS-PADS-A, OS-PADOCT): Shift + F1 the pads' octave (the label is the octave in force, "C3": PatternScreen::shift_row swaps it in; this table
 // is the row's shape), the picker of the pads' mode, Shift + F2..F7 (pad_layer.h), and Shift + F8 redo. A key without a mode would be drawn dim (kPatternPickerDim, none now); the mode that stays is
 // drawn inverted (PatternView::Status::soft_hot). The STEP pads have no key: the mode is off until OS-STEPPAD (OS-STEPPADOFF). The mute labels and the quarter jumps this row had are gone.

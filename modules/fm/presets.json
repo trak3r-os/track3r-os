@@ -1,0 +1,89 @@
+{
+ "module": "fm",
+ "kind": "instrument",
+ "presets": [
+  {
+   "name": "Electric Piano",
+   "values": {
+    "Algorithm": 5,
+    "Op1 Ratio": 1,
+    "Op1 Level": 100,
+    "Op2 Ratio": 14,
+    "Op2 Level": 40,
+    "Op2 Decay": 300,
+    "Op3 Ratio": 1,
+    "Op3 Detune": 6,
+    "Op3 Level": 90,
+    "Op4 Ratio": 1,
+    "Op4 Level": 30,
+    "Feedback": 0
+   }
+  },
+  {
+   "name": "Bell",
+   "values": {
+    "Algorithm": 8,
+    "Op1 Ratio": 1,
+    "Op1 Level": 90,
+    "Op1 Decay": 3000,
+    "Op2 Ratio": 7,
+    "Op2 Level": 60,
+    "Op2 Decay": 2000,
+    "Op3 Ratio": 3,
+    "Op3 Level": 55,
+    "Op4 Ratio": 11,
+    "Op4 Level": 40,
+    "Feedback": 1
+   }
+  },
+  {
+   "name": "Fm Bass",
+   "values": {
+    "Algorithm": 1,
+    "Op1 Ratio": 1,
+    "Op1 Level": 100,
+    "Op1 Decay": 400,
+    "Op2 Ratio": 1,
+    "Op2 Level": 70,
+    "Op3 Ratio": 2,
+    "Op3 Level": 50,
+    "Op4 Ratio": 1,
+    "Op4 Level": 60,
+    "Feedback": 3
+   }
+  },
+  {
+   "name": "Brass",
+   "values": {
+    "Algorithm": 2,
+    "Op1 Attack": 40,
+    "Op1 Sustain": 70,
+    "Op2 Ratio": 1,
+    "Op2 Level": 65,
+    "Op2 Attack": 30,
+    "Op2 Sustain": 60,
+    "Op3 Ratio": 1,
+    "Op3 Level": 80,
+    "Op4 Ratio": 1,
+    "Op4 Level": 45,
+    "Feedback": 4
+   }
+  },
+  {
+   "name": "Noisy Tom",
+   "values": {
+    "Algorithm": 7,
+    "Op1 Ratio": 1,
+    "Op1 Level": 100,
+    "Op1 Decay": 250,
+    "Op2 Ratio": 3,
+    "Op2 Level": 30,
+    "Op3 Ratio": 2,
+    "Op3 Level": 30,
+    "Op4 Ratio": 5,
+    "Op4 Level": 30,
+    "Feedback": 7
+   }
+  }
+ ]
+}

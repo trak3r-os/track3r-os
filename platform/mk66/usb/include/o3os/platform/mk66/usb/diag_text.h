@@ -117,4 +117,9 @@ std::size_t format_audio_start(std::uint8_t result, const AudioClockFault& fault
 // The reset sources of BootInfo as words: "power-on", "pin", "watchdog", "software", "lockup", joined with '+'.
 std::size_t format_reset_sources(std::uint16_t sources, char* out, std::size_t cap) noexcept;
 
+// OS-CEPTFX S2c, `ptfx quarantine`: plain scalars, so this layer needs no module headers. format_ptfx_quarantine: line `index` of the set ("ptfx q 1 id 0x8ABC crash"), and for index >= count the closing
+// line "ptfx quarantine 3/16, full no, refused 0" (full: the ids refused after the 16th).
+std::size_t format_ptfx_quarantine(unsigned index, unsigned count, std::uint16_t id, const char* why, unsigned refused, char* out,
+                                   std::size_t cap) noexcept;
+
 }  // namespace o3os::platform::mk66::console

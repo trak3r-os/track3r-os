@@ -5,6 +5,7 @@
 // the file name filter.
 #include <doctest/doctest.h>
 
+#include <o3os/app/module_ui.h>  // kPresetNameMax (OS-MODPRESET P3)
 #include <o3os/app/text_entry.h>
 
 #include <cstring>
@@ -161,4 +162,23 @@ TEST_CASE("text entry: a name for a file refuses the keys FAT and the save layer
   CHECK(a.type(22));
   CHECK(a.type(32));
   CHECK(std::string(a.text()) == "+@");
+}
+
+TEST_CASE("text entry: a preset's name (OS-MODPRESET P4, Target::Preset) is a FileName-filtered entry capped at kPresetNameMax, selected whole when it opens") {
+  TextEntry e;
+  e.begin("REVERB", kPresetNameMax, TextEntry::Filter::FileName);
+  CHECK(e.capacity() == kPresetNameMax);
+  CHECK(std::string(e.text()) == "REVERB");
+  CHECK(e.selected());  // typed over, the suggestion goes
+  CHECK(e.type(0));     // '1' replaces all of it
+  CHECK(std::string(e.text()) == "1");
+  CHECK_FALSE(e.selected());
+  // The cap holds: 30 characters, the guard's kPresetNameMax.
+  TextEntry long_name;
+  long_name.begin("", kPresetNameMax, TextEntry::Filter::FileName);
+  for (unsigned i = 0; i < 40u; ++i) {
+    (void)long_name.type(11);  // 'q'
+  }
+  CHECK(long_name.length() == kPresetNameMax);
+  CHECK_FALSE(long_name.type(11));
 }

@@ -37,7 +37,7 @@ double contrast(const Rgb& a, const Rgb& b) {
 const char* token_name(Color c) {
   static const char* const names[] = {"Chrome", "ChromeText", "ChromeDim", "Pane",    "Text",   "TextDim",
                                       "Empty",  "Instr",      "Vol",       "Fx",      "Sel",    "SelText",
-                                      "Accent", "AccentText", "Play",      "PlayText", "Rec"};
+                                      "Accent", "AccentText", "Play",      "PlayText", "Rec", "SelDim"};
   return names[static_cast<unsigned>(c)];
 }
 
@@ -176,12 +176,31 @@ TEST_CASE("theme: Rec is the one red (Rec mode, OS-REVIEW): red-dominant in ever
     const Theme& th = built_in(t);
     const Rgb rec = th.rgb(Color::Rec);
     CHECK_MESSAGE((rec.r >= 3 * rec.g && rec.r >= 3 * rec.b && rec.r >= 150), th.name << ": Rec reads as red");
-    for (unsigned c = 0; c + 1 < ui::kColorCount; ++c) {  // every token but Rec itself (the last)
+    for (unsigned c = 0; c < ui::kColorCount; ++c) {  // every token but Rec itself
+      if (static_cast<Color>(c) == Color::Rec) {
+        continue;
+      }
       const Rgb o = th.colour[c];
       CHECK_MESSAGE((o.r != rec.r || o.g != rec.g || o.b != rec.b), th.name << ": " << token_name(static_cast<Color>(c)) << " is the same as Rec");
     }
   }
-  CHECK(static_cast<unsigned>(Color::Rec) == ui::kColorCount - 1u);  // the last id: no existing token (nor the SDK's 16) moved
+  CHECK(static_cast<unsigned>(Color::Rec) == 16u);  // the 17th id, and SelDim the 18th and last: no existing token (nor the SDK's 16) moved
+  CHECK(static_cast<unsigned>(Color::SelDim) == ui::kColorCount - 1u);
+}
+
+TEST_CASE("theme: SelDim (OS-SELTINT) is a duller Sel in every theme: not Sel itself, still blue, and it holds 3:1 against the pane") {
+  for (unsigned t = 0; t < ui::kThemeCount; ++t) {
+    const Theme& th = built_in(t);
+    const Rgb sel = th.rgb(Color::Sel);
+    const Rgb dim = th.rgb(Color::SelDim);
+    CHECK_MESSAGE((dim.r != sel.r || dim.g != sel.g || dim.b != sel.b), th.name << ": SelDim differs from Sel");
+    CHECK_MESSAGE((dim.b > dim.r && dim.b > dim.g), th.name << ": SelDim stays blue");
+    // fewer than 40 levels on any channel: a tint, not another colour
+    const int dr = static_cast<int>(dim.r) - static_cast<int>(sel.r);
+    const int dg = static_cast<int>(dim.g) - static_cast<int>(sel.g);
+    const int db = static_cast<int>(dim.b) - static_cast<int>(sel.b);
+    CHECK_MESSAGE((dr > -40 && dr < 40 && dg > -40 && dg < 40 && db > -40 && db < 40), th.name << ": SelDim is a slight shift of Sel");
+  }
 }
 
 TEST_CASE("theme: orange is the cursor's alone (ADR 0001, ADR 0010 section 4)") {

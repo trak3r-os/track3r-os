@@ -6,17 +6,18 @@
 
 namespace o3os::app {
 
-// The Song screen's pages (pressing Song again cycles them): the order list, and the same list as an arrangement with
-// each pattern's start bar, length in bars and a proportional bar. OS-SONG-TIMELINE: the visible slots as blocks scaled to bars, with a thumbnail of each track's note density.
-// OS-SONG-VIEW2: the STAGE page is gone; the bar countdown to the next slot is on TIMELINE's info line while it plays. The cycle is ORDER, ARRANGEMENT, TIMELINE.
-enum class SongPage : std::uint8_t { Order = 0, Arrangement = 1, Timeline = 2 };
-inline constexpr unsigned kSongPages = 3;
+// The Song screen's pages (pressing Song again cycles them): the list (the order list with each slot's start bar and length in bars, and the track map) and, OS-SONG-TIMELINE, the visible slots as blocks scaled to bars with
+// a note map of each track. OS-SONG3 S1 folded the ARRANGEMENT page into the list: the cycle is LIST 1/2, TIMELINE 2/2. OS-SONG-VIEW2: the STAGE page is gone; the bar countdown to the next slot is on TIMELINE's info line while it plays.
+enum class SongPage : std::uint8_t { List = 0, Timeline = 1 };
+inline constexpr unsigned kSongPages = 2;
 
 // F1..F8 of the song screen: at most 8 characters, what a key-cap of the row has room for (the F-number box and the label
 // fit 100 px). OS-SONG1: the row (Play Pattern, Play Song, Undo, Add Slot, Delete Slot, Pattern -, Pattern +,
 // Tempo) with the undo moved to F8 (as on Pattern) and everything between it shifted one key to the left.
 // OS-SONGMAP (Q1, to confirm): F5 UNIQUE and F6 TOOLS, where the slot's pattern - / + were (they stay on the encoder).
 inline constexpr const char* kSongSoftKeys[8] = {"PLAY PAT", "PLAY SNG", "ADD SLOT", "DEL SLOT", "UNIQUE", "TOOLS", "TEMPO", "UNDO"};
+// OS-SONG3 S4 (PREVIEW, new Community OS behaviour): the same row with the cursor in a lane of the TIMELINE page, where F1 auditions the slot's pattern with the rectangle's tracks only.
+inline constexpr const char* kSongLaneSoftKeys[8] = {"PREVIEW", "PLAY SNG", "ADD SLOT", "DEL SLOT", "UNIQUE", "TOOLS", "TEMPO", "UNDO"};
 // While Shift is held (OS-SHIFTROW): the quarter jumps and the end (bound in Song's context), Shift + F8 redo. The duplicate-as-new-pattern slot is Shift + Insert. Shift + F6 NAME names the pattern (OS-NAMES).
 // Shift + F7 PADS switches the pads between TRACKS and SLOTS (OS-SONGPADS).
 inline constexpr const char* kSongShiftKeys[8] = {"0/4", "1/4", "2/4", "3/4", "END", "NAME", "PADS", "REDO"};  // (OS-NAMES: F6 NAME, the slot's pattern)
@@ -59,5 +60,8 @@ bool song_sync(const Model& model, ViewState& view) noexcept;
 
 // How many cells of the track map the page draws: the ones the cursor can enter (OS-SONGMAP). 0 with no project, an empty song, or a page where the map does not fit.
 int song_map_cells(const Model& model, const ViewState& view) noexcept;
+
+// OS-SONG3 S2: the Song screen is on its TIMELINE page, where the arrows are transposed: Left / Right walk the slots, Up / Down the tracks (the lanes), and Shift + arrows extend the ranges the other way round.
+bool song_on_timeline(const ViewState& view) noexcept;
 
 }  // namespace o3os::app

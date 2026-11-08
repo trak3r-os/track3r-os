@@ -78,14 +78,15 @@ class Sheet {
     }
   }
   // Text in the 8 x 16 face of the UI (L1 bitmaps, most significant bit leftmost), clipped to `max_chars`.
-  void text(int x, int y, const std::string& s, Rgb c, std::size_t max_chars) {
+  // OS-FLASHDIET A4: the face is stored deflated in flash; `face_px` is its inflated pixels (ui::face_bitmap).
+  void text(int x, int y, const std::string& s, Rgb c, std::size_t max_chars, const std::uint8_t* face_px) {
     const ui::FontFace& f = ui::font_face(ui::Font::F8x16);
     for (std::size_t i = 0; i < s.size() && i < max_chars; ++i) {
       unsigned ch = static_cast<std::uint8_t>(s[i]);
       if (ch < f.first_char || ch >= static_cast<unsigned>(f.first_char) + f.glyph_count) {
         ch = '?';
       }
-      const std::uint8_t* cell = f.bitmap + static_cast<std::size_t>(ch - f.first_char) * f.stride * f.cell_h;
+      const std::uint8_t* cell = face_px + static_cast<std::size_t>(ch - f.first_char) * f.stride * f.cell_h;
       for (int row = 0; row < f.cell_h; ++row) {
         for (int col = 0; col < f.cell_w; ++col) {
           if ((cell[row * f.stride + col / 8] >> (7 - col % 8)) & 1u) {
@@ -259,6 +260,12 @@ bool render_gallery(const std::string& dir, std::vector<GalleryShot>& shots, std
 }
 
 bool write_contact_sheet(const std::string& path, const std::vector<GalleryShot>& shots, int columns) {
+  // OS-FLASHDIET A4: the 8x16 face the labels are drawn in is stored deflated; inflate it once (the 4 KiB scratch
+  // size, the face is 1,520 B). A stream the build made cannot fail (the converter's self-test round-trips it).
+  std::vector<std::uint8_t> face_px(ui::kFaceScratchBytes);
+  if (!ui::face_bitmap(ui::Font::F8x16, face_px.data(), face_px.size())) {
+    return false;
+  }
   Sheet sheet(contact_sheet_width(columns), contact_sheet_height(shots.size(), columns));
   for (std::size_t n = 0; n < shots.size(); ++n) {
     const int col = static_cast<int>(n % static_cast<std::size_t>(columns)), row = static_cast<int>(n / static_cast<std::size_t>(columns));
@@ -266,7 +273,7 @@ bool write_contact_sheet(const std::string& path, const std::vector<GalleryShot>
     sheet.fill(x0, y0, x0 + kCellW, y0 + kThumbH + 2 * kFrame, verdict_colour(shots[n].verdict));
     sheet.blit_thumb(x0 + kFrame, y0 + kFrame, shots[n].thumb);
     const std::string label = shots[n].key.substr(shots[n].key.find('/') + 1) + " " + std::to_string(shots[n].words) + "w";
-    sheet.text(x0, y0 + kThumbH + 2 * kFrame + 2, label, kLabel, static_cast<std::size_t>(kCellW / 8));
+    sheet.text(x0, y0 + kThumbH + 2 * kFrame + 2, label, kLabel, static_cast<std::size_t>(kCellW / 8), face_px.data());
   }
   return platform::host::write_png_rgba(path.c_str(), sheet.data(), sheet.width(), sheet.height());
 }

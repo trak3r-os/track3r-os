@@ -1,0 +1,23 @@
+{
+  "name": "Env Filter",
+  "id": "envfilter",
+  "kind": "effect",
+  "abi": "1.2",
+  "description": "An envelope-controlled filter insert for a track (an auto-wah): a state-variable filter (low-pass, band-pass or high-pass) whose cutoff is swept up or down from a base by an envelope follower on the track's own signal, with resonance, attack and release of the follower, its sensitivity and a dry/wet mix, and a view of the response at both ends of the sweep. One mono instance.",
+  "state_bytes": 128,
+  "params": [
+    {"name": "Mode", "min": 0, "max": 2, "default": 0, "type": "int"},
+    {"name": "Cutoff", "min": 20, "max": 20000, "default": 400, "curve": "log", "unit": "hz", "mod": true},
+    {"name": "Range", "min": -6, "max": 6, "default": 4, "mod": true},
+    {"name": "Resonance", "min": 0, "max": 100, "default": 0, "unit": "percent", "mod": true},
+    {"name": "Attack", "min": 0.5, "max": 200, "default": 5, "curve": "log", "unit": "ms"},
+    {"name": "Release", "min": 5, "max": 2000, "default": 150, "curve": "log", "unit": "ms"},
+    {"name": "Sens", "min": 0, "max": 36, "default": 12, "unit": "db", "mod": true},
+    {"name": "Mix", "min": 0, "max": 100, "default": 100, "unit": "percent", "mod": true}
+  ],
+  "views": [
+    {"name": "Response", "min_size": [120, 80], "preferred_size": [380, 140]}
+  ],
+  "voices": 1,
+  "memory": {"hot_bytes": 1536, "sdram_bytes": 0}
+}

@@ -35,6 +35,16 @@
 //           Stop and SPP of the followed port (counted in Stats::transport_ignored); the clock is still followed, so the Play key starts on the master's next clock, and a Stop of the master
 //           does not stop the tracker (only a master gone quiet does: manage_follow). OUT Off: Sequencer::Config::emit_transport is false, the clock goes out (Master) or is relayed (Slave)
 //           without Start, Continue, Stop or SPP, and start_lead stays 0 (nothing to put on the wire first). Both take effect at the next Play; a run keeps what it began with.
+// MTC IN (OS-MTC B3; docs/specs/OS-MTC.md 4.2 to 4.6; new Community OS behaviour). With MidiConfig::mtc_in not Off the link chases the time code of that port: the quarter frames and full frames MidiIn::drain hands over feed
+// a midi::mtc::Chaser; when it has the master's time (Acquired) the render asks the main loop which step of the song starts at or after that time plus a margin (chase_request(): app::ChaseSync answers with
+// song_position_at over the sequencer's command ring), computes the local sample at which the master reaches it and starts the run there (Sequencer::chase_go: the tempo and swing the song has at that step,
+// the swing pair's parity, the master's rate as the song's speed). From then on, once a step, the run's phase against the master (Sequencer::chase_end / chase_map against the chaser's master_time_at) sets the
+// rate trim (r = r_m x (1 - e / tau), tau 1 s, limited to +-6 % and to 3 % a step): a phase error is pulled in over about a second and never jumps, swing and the clock out keep their ratios. Locked when |e| is below 1 ms
+// for 8 quarter frames. A relocation or a stop of the master stops the run (the chaser tells: Relocated, Stopped) and the request starts over; a time past the song's end is silence (the unit waits for the master to
+// locate back: PastEnd, Q9 a); a time before it arms step 1 for the sample at which the master reaches MTC START; a full frame while the unit is stopped moves its cursor (Locate). While the chase runs the
+// main loop's Play, Stop, Resume, Locate and slot jumps do nothing (Q8 a, Sequencer::chase_run); a Play of the user while the master is silent (or before it started) is a run of the unit's own clock, and the
+// master takes over only once that run is stopped. MTC IN not Off also turns the clock follow off (CLOCK IN and CLOCK MODE Slave are ignored: a Slave acts as a Master for the clock out) and mutes MTC OUT.
+//
 // NEW COMMUNITY OS BEHAVIOUR (decided here, each a constant or one branch, all reversible): (a) a master that has gone quiet for kStaleClocks (48
 // clocks, two beats) while the tracker follows it stops the transport and releases the loop (a slave that kept flywheeling at the last tempo would play on
 // for ever after a cable was pulled); (b) the Play key under an external clock starts on the master's next clock, quantised to its grid (Sequencer::next_follow_clock),
@@ -80,6 +90,7 @@
 #include <o3os/midi/config.h>
 #include <o3os/midi/din.h>
 #include <o3os/midi/in.h>
+#include <o3os/midi/mtc_in.h>
 #include <o3os/midi/out.h>
 #include <o3os/midi/time_ref.h>
 #include <o3os/midi/usb_out.h>
@@ -106,6 +117,7 @@ class MidiLink {
   static constexpr std::uint32_t kDrainItems = 128;    // items taken from each ring per block (the rest waits)
   static constexpr std::uint32_t kEventCap = 8;        // transport events per block (a Start, an SPP and a Stop are three)
   static constexpr std::uint32_t kPassCap = 16;        // bytes that are not timing, per drain call: counted and dropped
+  static constexpr std::uint32_t kMtcCap = 16;         // OS-MTC B3: time code messages per drain call (a quarter frame is 10 ms: 16 are far more than a block brings)
   static constexpr std::uint32_t kStaleClocks = 48;    // a master quieter than this many clock periods is gone
   static constexpr std::uint32_t kStartLead = 64;      // samples: Sequencer::Config::start_lead with clock out on (one block)
 
@@ -118,6 +130,11 @@ class MidiLink {
   // What set_config() was last given, as the main loop sees it (the defaults before the first call).
   const midi::MidiConfig& config() const noexcept { return box_.last_written(); }
   midi::SyncStatus status() const noexcept;
+  // OS-MTC B3, the chase's question to the main loop (app::ChaseSync): the master's time, minus MTC START, in whole samples, and a word: stamp (bits 24..31, 0 = none yet) | locate only (bit 17: a full frame while
+  // stopped asks where the cursor goes, nothing plays) | Song mode (bit 16; else Pattern mode) | the pattern id of Pattern mode (bits 8..15). The render writes the time before the word (release), the main loop reads the word
+  // first (acquire). The answer is ChaseState + ChaseStart over the sequencer's command ring.
+  std::uint32_t chase_request() const noexcept { return chase_req_.load(std::memory_order_acquire); }
+  std::uint32_t chase_request_time() const noexcept { return chase_req_time_.load(std::memory_order_relaxed); }
   // MIDI Learn's input (OS-013a): where the control changes of both ports go (midi/cc_in.h). Once, at start-up, before the render runs; the storage is the caller's (the
   // platform keeps it in SDRAM). nullptr detaches it. The render is the ring's one producer, the main loop (App::poll_midi_cc) its one consumer.
   void attach_cc(midi::CcInput* cc) noexcept { cc_ = cc; }
@@ -148,6 +165,7 @@ class MidiLink {
   midi::MidiOut& out() noexcept { return out_; }       // the export slice's set_suppress
   const midi::MidiIn& in() const noexcept { return in_; }
   const midi::ClockDll& dll() const noexcept { return dll_; }
+  const midi::mtc::Chaser& chaser() const noexcept { return chaser_; }
   Sequencer& sequencer() noexcept { return seq_; }
 
   struct Stats {
@@ -159,6 +177,11 @@ class MidiLink {
     std::uint32_t passed_dropped = 0;   // bytes that were not timing (channel messages, active sensing, SysEx): control changes go on to attach_cc's parser, the rest ends here
     std::uint32_t events_applied = 0;
     std::uint32_t transport_ignored = 0;  // E-CFG-03: Start, Continue, Stop and SPP from the followed port that TRANSPORT IN Off dropped
+    std::uint32_t chase_requests = 0;     // OS-MTC B3: questions asked of the main loop
+    std::uint32_t chase_starts = 0;       // runs the chase began
+    std::uint32_t chase_retries = 0;      // answers that came too late (the start sample was past) or for another mapping, and requests that went unanswered for 500 ms
+    std::uint32_t chase_relocations = 0;  // relocations and stops of the master that ended a chase
+    std::uint32_t chase_locates = 0;      // full frames while stopped that moved the cursor
     std::uint32_t kicks = 0;
   };
   const Stats& stats() const noexcept { return stats_; }
@@ -172,6 +195,16 @@ class MidiLink {
   void release_follow() noexcept;
   void reset_loop(std::uint64_t origin) noexcept;
   void publish_status(std::uint64_t block_start) noexcept;
+  // OS-MTC B3 (render context, once a block, after the inputs): see the file header.
+  void manage_chase(std::uint64_t block_start) noexcept;
+  void chase_notice(midi::mtc::Chaser::Notice n) noexcept;
+  void chase_ask(std::uint64_t block_start, bool locate) noexcept;
+  void chase_answered(std::uint64_t block_start) noexcept;
+  void chase_settling(std::uint64_t block_start) noexcept;
+  void chase_measure() noexcept;
+  void chase_reset() noexcept;
+  core::Q32 mtc_start_q32() const noexcept;
+  std::uint32_t chase_rate_q16() const noexcept;
   void live_release(std::uint32_t pad) noexcept;
   std::int32_t in_offset_us() const noexcept { return midi::offset_us(cfg_.in_offset_dms[static_cast<unsigned>(cfg_.in_port)]); }
 
@@ -186,6 +219,7 @@ class MidiLink {
   midi::ClockDll dll_;
   midi::ClockMap map_;
   midi::TimeRef ref_;
+  midi::mtc::Chaser chaser_;         // OS-MTC B3: the time code of MTC IN's port (about 0.5 KiB: a second ClockDll and the assembler)
 
   // The settings: the main loop writes the box, the render keeps its own applied copy.
   midi::SeqLockBox<midi::MidiConfig> box_;
@@ -213,6 +247,35 @@ class MidiLink {
   std::atomic<std::uint32_t> st_clocks_{0};
   std::atomic<std::uint32_t> st_error_us_{0};
   std::atomic<std::uint32_t> st_transport_{0};
+  // OS-MTC B3: the chase's status (render writes, main reads) and its request words.
+  std::atomic<std::uint32_t> st_mtc_{0};        // MtcState | rate code << 8
+  std::atomic<std::uint32_t> st_mtc_time_{0};   // hh << 24 | mm << 16 | ss << 8 | ff
+  std::atomic<std::int32_t> st_mtc_ppm_{0};
+  std::atomic<std::int32_t> st_mtc_err_us_{0};
+  std::atomic<std::uint32_t> st_mtc_rel_{0};
+  std::atomic<std::uint32_t> chase_req_{0};
+  std::atomic<std::uint32_t> chase_req_time_{0};
+  enum class ChasePhase : std::uint8_t { Wait, Asked, Settling, Running, PastEnd };
+  ChasePhase chase_ph_ = ChasePhase::Wait;
+  bool chase_loc_ = false;                // the request in flight is a locate
+  bool chase_good_ = false;               // |e| was below 1 ms at the last steps
+  std::uint8_t chase_stamp_ = 0;          // the last request's stamp (1..255)
+  PlayMode chase_mode_ = PlayMode::Song;  // the mode the request in flight was made for (the sequencer's selection)
+  std::uint8_t chase_pattern_ = 0;
+  std::uint32_t chase_epoch_ = 0;         // the chaser's mapping the request was made from
+  std::uint32_t chase_margin_ = 0;        // samples ahead of now that the next request looks (50 ms, doubled on every retry)
+  std::uint32_t chase_seen_ = 0;          // Sequencer::chase_steps() at the last measure
+  std::uint64_t chase_asked_at_ = 0;
+  std::uint64_t chase_good_since_ = 0;
+  // The start in flight: the answer's target (the step's song time plus MTC START) and the start sample the current mapping gives it, watched until it stops moving (a fit that
+  // is still settling, as right after a relocation, would put the start off its map time; the rate trim pulls it in over the next second, but the first steps land off).
+  core::Q32 chase_pend_target_ = 0;
+  std::uint64_t chase_pend_at_ = 0;
+  std::uint64_t chase_pend_since_ = 0;
+  std::uint32_t chase_frames_ = 0;       // quarter frames read since the last relocation/reset
+  bool chase_relocated_ = false;          // the master moved since the last start: the fit needs a hundred frames to converge again
+  std::uint64_t chase_first_ask_ = 0;     // the first non-locate question after the last start/reset (0: none yet; locate asks must not anchor it)
+  std::uint64_t chase_reloc_at_ = 0;      // the block of the last relocation notice (0: none): the settle max hangs off it, not off later re-asks
 };
 
 // The device settings that drive the link (model/params.h device_setting; OS-013a joined the MIDI page's rows of OS-011a to the drivers): CLOCK IN (Internal, USB, MIDI In

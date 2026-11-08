@@ -29,6 +29,20 @@ endif()
 #     without it the header is the source tree's own (committed: ctest o3m_gen_check_<name> finds it stale).
 set(O3M_GEN "${PROJECT_SOURCE_DIR}/tools/o3m_gen.py")
 set(O3M_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/gen")
+
+# OS-FLASHDIET I1/I2: the importer layout tag (model::kImportLayoutTag) printed by a host-compiled one-liner. The packer and o3m_gen.py read
+# the checked-in model/import_layout_tag.txt as their default; ctest o3m_layout_tag_pin below holds that file to the printed value.
+if(NOT O3OS_CROSS)
+  add_executable(o3m_layout_tag "${PROJECT_SOURCE_DIR}/tools/o3m_layout_tag.cpp")
+  target_link_libraries(o3m_layout_tag PRIVATE model)
+  o3os_strict_warnings(o3m_layout_tag)
+  add_custom_command(OUTPUT "${O3M_GEN_DIR}/import_layout_tag.txt"
+    COMMAND $<TARGET_FILE:o3m_layout_tag> > "${O3M_GEN_DIR}/import_layout_tag.txt"
+    DEPENDS o3m_layout_tag COMMENT "printing the importer layout tag" VERBATIM)
+  add_custom_target(o3m_layout_tag_txt ALL DEPENDS "${O3M_GEN_DIR}/import_layout_tag.txt")
+  add_test(NAME o3m_layout_tag_pin
+    COMMAND ${Python3_EXECUTABLE} -I ${PROJECT_SOURCE_DIR}/tools/o3m_layout_tag_check.py "${O3M_GEN_DIR}/import_layout_tag.txt")
+endif()
 function(o3m_manifest name manifest)
   cmake_parse_arguments(ARG "GENERATE" "" "" ${ARGN})
   file(MAKE_DIRECTORY "${O3M_GEN_DIR}")
@@ -120,7 +134,7 @@ function(o3m_add_module name)
     add_custom_command(OUTPUT "${tmod}"
       COMMAND ${Python3_EXECUTABLE} -I ${O3M_PACK} build --cxx ${O3M_ARM_CXX} --out ${tmod} --elf "${CMAKE_CURRENT_BINARY_DIR}/${name}.elf" --opt=${ARG_OPT} ${inc_args}
               ${version_args} ${src_args}
-      DEPENDS ${abs_sources} ${hdr_deps} ${gen_deps} ${O3M_PACK} ${O3M_SDK_DIR}/o3module.h ${O3M_SDK_DIR}/o3module.ld
+      DEPENDS ${abs_sources} ${hdr_deps} ${gen_deps} ${O3M_PACK} ${PROJECT_SOURCE_DIR}/model/import_layout_tag.txt ${O3M_SDK_DIR}/o3module.h ${O3M_SDK_DIR}/o3module.ld  # the tag file is word 44 of every packed importer: a tag change must repack
       COMMENT "o3m_pack ${name}.tmod"
       VERBATIM)
     add_custom_target(o3m_${name}_tmod ALL DEPENDS "${tmod}")
@@ -133,7 +147,7 @@ function(o3m_add_module name)
       add_custom_command(OUTPUT "${raw}"
         COMMAND ${Python3_EXECUTABLE} -I ${O3M_PACK} build --cxx ${O3M_ARM_CXX} --out ${raw} ${inc_args} --opt=${ARG_OPT} --hot-at 0x1FFFC000 --cold-at 0x70000000
                 ${src_args}
-        DEPENDS ${abs_sources} ${hdr_deps} ${gen_deps} ${O3M_PACK} ${O3M_SDK_DIR}/o3module.h ${O3M_SDK_DIR}/o3module.ld
+        DEPENDS ${abs_sources} ${hdr_deps} ${gen_deps} ${O3M_PACK} ${PROJECT_SOURCE_DIR}/model/import_layout_tag.txt ${O3M_SDK_DIR}/o3module.h ${O3M_SDK_DIR}/o3module.ld  # the tag file is word 44 of every packed importer: a tag change must repack
         COMMENT "o3m_pack ${name}.raw (oracle)"
         VERBATIM)
       add_custom_target(o3m_${name}_raw ALL DEPENDS "${raw}")
@@ -144,22 +158,27 @@ function(o3m_add_module name)
   endif()
 endfunction()
 
-# o3m_add_test(<name> <source>...): a host test executable of one module, o3m_<name>_test (ctest `o3m_<name>_test`, OS-012c): doctest, the module's host shared object loaded with dlopen
+# o3m_add_test(<name> <source>... [HOST <module>]): a host test executable of one module, o3m_<name>_test (ctest `o3m_<name>_test`, OS-012c): doctest, the module's host shared object loaded with dlopen
 # (O3M_<NAME>_HOST_SO) and driven through the ABI, the views through module::ViewHost (modules/tests/o3m_test_support.h). Host only; the test references are in double precision on purpose.
+# HOST names the module whose host shared object the test loads (default <name>): a second test of one module (chip_golden) loads the module's own .so.
 function(o3m_add_test name)
   if(O3OS_CROSS)
     return()
   endif()
+  cmake_parse_arguments(ARG "" "HOST" "" ${ARGN})
+  if(NOT ARG_HOST)
+    set(ARG_HOST ${name})
+  endif()
   string(TOUPPER ${name} upper)
-  add_executable(o3m_${name}_test ${ARGN})
+  add_executable(o3m_${name}_test ${ARG_UNPARSED_ARGUMENTS})
   target_include_directories(o3m_${name}_test SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/third_party)  # <doctest/doctest.h>
   target_link_libraries(o3m_${name}_test PRIVATE module ${CMAKE_DL_LIBS})
   o3os_strict_warnings(o3m_${name}_test)
   target_compile_options(o3m_${name}_test PRIVATE -Wno-double-promotion)
-  add_dependencies(o3m_${name}_test o3m_${name}_host)
-  target_compile_definitions(o3m_${name}_test PRIVATE O3M_${upper}_HOST_SO="$<TARGET_FILE:o3m_${name}_host>" O3M_${upper}_TMOD="${CMAKE_CURRENT_BINARY_DIR}/${name}.tmod")
-  if(TARGET o3m_${name}_tmod)
-    add_dependencies(o3m_${name}_test o3m_${name}_tmod)  # the packed file, when the cross compiler is there: the loader's checks run on it
+  add_dependencies(o3m_${name}_test o3m_${ARG_HOST}_host)
+  target_compile_definitions(o3m_${name}_test PRIVATE O3M_${upper}_HOST_SO="$<TARGET_FILE:o3m_${ARG_HOST}_host>" O3M_${upper}_TMOD="${CMAKE_CURRENT_BINARY_DIR}/${ARG_HOST}.tmod")
+  if(TARGET o3m_${ARG_HOST}_tmod)
+    add_dependencies(o3m_${name}_test o3m_${ARG_HOST}_tmod)  # the packed file, when the cross compiler is there: the loader's checks run on it
   endif()
   add_test(NAME o3m_${name}_test COMMAND o3m_${name}_test)
 endfunction()
@@ -169,9 +188,12 @@ o3m_add_module(sine SOURCES sine/sine.cpp)
 o3m_add_module(tb303 SOURCES tb303/tb303.cpp OPT -O2 VERSION 1.0.0)
 o3m_manifest(tb303 tb303/module.json)
 # OS-012c: the chip engine (written from scratch: pulse / triangle / LFSR noise, 4-bit steps, arpeggio, sweep, vibrato). The oscillator loops at -O2.
-o3m_add_module(chip SOURCES chip/chip.cpp OPT -O2 VERSION 1.0.0)
+# OS-CECHIP C2: version 1.1.0 (a card copy of 1.0.0 no longer shadows the built-in module), waves 4..11 from a port of tracker-ce's CHIP engine (chip/chip_ce.h, MIT: chip/LICENSE-tracker-ce.txt).
+o3m_add_module(chip SOURCES chip/chip.cpp OPT -O2 VERSION 1.1.0)
 o3m_manifest(chip chip/module.json)
 o3m_add_test(chip chip/tests/chip_test.cpp)
+o3m_add_test(chip_golden chip/tests/chip_golden_test.cpp HOST chip)  # OS-CECHIP G1: the golden renders of today's voice, recorded before any change to it
+o3m_add_test(chip_ce chip/tests/chip_ce_test.cpp HOST chip)  # OS-CECHIP C2: the parameters 20..29, waves 4..11, Chord, hostile values, the module against the original
 
 # OS-SID: the SID-style voice (written from scratch: saw / triangle / pulse with PWM, 23-bit noise, combined waves, sync and ring, the C64's stepped ADSR; the filter is the next slice). The loops at -O2.
 o3m_add_module(sid SOURCES sid/sid.cpp OPT -O2 VERSION 1.0.0)
@@ -193,6 +215,25 @@ if(TARGET o3m_biquad_test)
   add_dependencies(o3m_biquad_test o3m_biquad_gen)
 endif()
 
+# OS-INSFX-ABI2 A2: the stereo effect template (modules/templates/effect_stereo, ABI 1.12: "stereo": "widens", factory presets), built as it is: manifest -> generated header -> module -> .tmod, and checked back
+# against the manifest by the generator's reader and by the loader (tests/module_gen_test.cpp). Not in the loop of the three kinds below: it is a fourth template, and a .tmod for /modules/effects/ on the card.
+o3m_manifest(example_stereo templates/effect_stereo/module.json GENERATE)
+o3m_add_module(example_stereo SOURCES templates/effect_stereo/example_stereo.cpp GEN)
+# OS-INSFX-ABI2 A6: the sidechain effect template (modules/templates/effect_key, ABI 1.12: a "type": "key" parameter, "stereo": "capable"), a ducker, built the same way.
+o3m_manifest(example_key templates/effect_key/module.json GENERATE)
+o3m_add_module(example_key SOURCES templates/effect_key/example_key.cpp GEN)
+
+# OS-INSFX-FX2 X4 + X5: AUTOPAN, a stereo auto-pan insert (an LFO on the side, mono-compatible, synced to the beat through get_clock; ABI 1.12, a WIDENS effect, factory presets) with the optional
+# HEADPHONE mode (a far-ear delay and head-shadow low-pass; modules/effects/autopan). Same wiring as the FX1 inserts: a .tmod for /modules/effects/ on the card, not in the image; the descriptor
+# header is generated into the build tree; the module's own host test compares it with a double-precision reference.
+o3m_manifest(autopan effects/autopan/module.json GENERATE)
+o3m_add_module(autopan SOURCES effects/autopan/autopan.cpp OPT -O2 VERSION 1.0.0 GEN)
+o3m_add_test(autopan effects/autopan/tests/autopan_test.cpp)
+if(TARGET o3m_autopan_test)
+  target_include_directories(o3m_autopan_test PRIVATE ${O3M_GEN_DIR})  # autopan_gen.h: the parameter ids and ranges
+  add_dependencies(o3m_autopan_test o3m_autopan_gen)
+endif()
+
 # OS-INSFX-FX1: DRIVE, module 1 of the first effect pack, a saturation insert (soft/asymmetric shape, drive, tone, DC blocker, mix, output) for a track (modules/effects/drive). Not built in:
 # a .tmod for /modules/effects/ on the card, so the image does not grow. The descriptor header is generated into the build tree; the module's own host test compares it with a double-precision
 # reference of the same maths.
@@ -204,12 +245,101 @@ if(TARGET o3m_drive_test)
   add_dependencies(o3m_drive_test o3m_drive_gen)
 endif()
 
-# OS-012d: the built-in modules. The packed .tmod files of the TB-303, chip, FM and SID go into a generated table (tools/o3m_embed.py: the bytes as const arrays, flash on the MK66) that
-# the images link (o3m_builtin) and hand to module::ModuleSet::set_builtins; module/builtin.h says how they meet the card's copies. The notices the code in them requires
-# (builtin/NOTICES.txt and Open303's licence text) are in the same file as a string. Without the cross compiler there are no .tmod files: the table is empty and the tests that need it say so.
+# OS-INSFX-FX1: CRUSH, module 2 of the first effect pack, a bit-depth and sample-rate reduction insert (a dead-zone quantiser of 1 to 16 bits, a sample-and-hold of a fractional factor, mix, output) for a
+# track (modules/effects/crush). Same wiring as DRIVE: a .tmod for /modules/effects/ on the card, not in the image; the descriptor header is generated into the build tree; the module's own host test
+# compares it with a double-precision reference.
+o3m_manifest(crush effects/crush/module.json GENERATE)
+o3m_add_module(crush SOURCES effects/crush/crush.cpp OPT -O2 VERSION 1.0.0 GEN)
+o3m_add_test(crush effects/crush/tests/crush_test.cpp)
+if(TARGET o3m_crush_test)
+  target_include_directories(o3m_crush_test PRIVATE ${O3M_GEN_DIR})  # crush_gen.h: the parameter ids and ranges
+  add_dependencies(o3m_crush_test o3m_crush_gen)
+endif()
+
+# OS-INSFX-FX1: FOLD, module 3 of the first effect pack, a wavefolder insert (a level-compensated triangle fold, a symmetry offset, a post tone low-pass, an always-on DC blocker, mix, output) for a track
+# (modules/effects/fold). Same wiring as DRIVE and CRUSH: a .tmod for /modules/effects/ on the card, not in the image; the descriptor header is generated into the build tree; the module's own host
+# test compares it with a double-precision reference.
+o3m_manifest(fold effects/fold/module.json GENERATE)
+o3m_add_module(fold SOURCES effects/fold/fold.cpp OPT -O2 VERSION 1.0.0 GEN)
+o3m_add_test(fold effects/fold/tests/fold_test.cpp)
+if(TARGET o3m_fold_test)
+  target_include_directories(o3m_fold_test PRIVATE ${O3M_GEN_DIR})  # fold_gen.h: the parameter ids and ranges
+  add_dependencies(o3m_fold_test o3m_fold_gen)
+endif()
+
+# OS-INSFX-FX1: ENV FILTER, of the first effect pack, an envelope-controlled state-variable filter insert for a track (modules/effects/envfilter). Same wiring as CRUSH: a .tmod for
+# /modules/effects/ on the card, not in the image; the descriptor header is generated into the build tree; the module's own host test compares it with a double-precision reference.
+o3m_manifest(envfilter effects/envfilter/module.json GENERATE)
+o3m_add_module(envfilter SOURCES effects/envfilter/envfilter.cpp OPT -O2 VERSION 1.0.0 GEN)
+o3m_add_test(envfilter effects/envfilter/tests/envfilter_test.cpp)
+if(TARGET o3m_envfilter_test)
+  target_include_directories(o3m_envfilter_test PRIVATE ${O3M_GEN_DIR})  # envfilter_gen.h: the parameter ids and ranges
+  add_dependencies(o3m_envfilter_test o3m_envfilter_gen)
+endif()
+
+# OS-INSFX-FX1: PHASER, module 3 of the first effect pack, a phaser insert (4 to 6 first-order all-pass stages swept by a sine LFO, a bounded feedback, mix) for a track (modules/effects/phaser).
+# Same wiring as DRIVE and CRUSH: a .tmod for /modules/effects/ on the card, not in the image; the descriptor header is generated into the build tree; the module's own host test compares it with a
+# double-precision reference.
+o3m_manifest(phaser effects/phaser/module.json GENERATE)
+o3m_add_module(phaser SOURCES effects/phaser/phaser.cpp OPT -O2 VERSION 1.0.0 GEN)
+o3m_add_test(phaser effects/phaser/tests/phaser_test.cpp)
+if(TARGET o3m_phaser_test)
+  target_include_directories(o3m_phaser_test PRIVATE ${O3M_GEN_DIR})  # phaser_gen.h: the parameter ids and ranges
+  add_dependencies(o3m_phaser_test o3m_phaser_gen)
+endif()
+
+# OS-INSFX-FX1: COMP, module 3 of the first effect pack, a compressor insert with a TRANSIENT mode (a soft-knee feed-forward compressor, or a transient shaper from a fast and a slow envelope follower; make-up,
+# mix) for a track (modules/effects/comp). Same wiring as DRIVE and CRUSH: a .tmod for /modules/effects/ on the card, not in the image; the descriptor header is generated into the build tree; the module's own
+# host test compares it with a double-precision reference.
+o3m_manifest(comp effects/comp/module.json GENERATE)
+o3m_add_module(comp SOURCES effects/comp/comp.cpp OPT -O2 VERSION 1.1.0 GEN)
+o3m_add_test(comp effects/comp/tests/comp_test.cpp)
+if(TARGET o3m_comp_test)
+  target_include_directories(o3m_comp_test PRIVATE ${O3M_GEN_DIR})  # comp_gen.h: the parameter ids and ranges
+  add_dependencies(o3m_comp_test o3m_comp_gen)
+endif()
+
+# OS-INSFX-FX2: PING-PONG, the tempo-synced stereo echo of the second effect pack (a WIDENS insert of ABI 1.12: render_st, the clock through get_clock, factory presets; modules/effects/pingpong). Same wiring as
+# DRIVE and CRUSH: a .tmod for /modules/effects/ on the card, not in the image; the descriptor header is generated into the build tree; the module's own host test compares it with a double-precision
+# reference of the same maths.
+o3m_manifest(pingpong effects/pingpong/module.json GENERATE)
+o3m_add_module(pingpong SOURCES effects/pingpong/pingpong.cpp OPT -O2 VERSION 1.0.0 GEN)
+o3m_add_test(pingpong effects/pingpong/tests/pingpong_test.cpp)
+if(TARGET o3m_pingpong_test)
+  target_include_directories(o3m_pingpong_test PRIVATE ${O3M_GEN_DIR})  # pingpong_gen.h: the parameter ids and ranges
+  add_dependencies(o3m_pingpong_test o3m_pingpong_gen)
+endif()
+
+# OS-INSFX-FX2 X1: WIDE, module 1 of the stereo pack, a stereo widener insert (a high-passed short delay of the mid added to the side: mono-compatible; ABI 1.12, a WIDENS effect, factory presets) for a track
+# (modules/effects/wide). Same wiring as the FX1 inserts: a .tmod for /modules/effects/ on the card, not in the image; the descriptor header is generated into the build tree; the module's own host
+# test compares it with a double-precision reference.
+o3m_manifest(wide effects/wide/module.json GENERATE)
+o3m_add_module(wide SOURCES effects/wide/wide.cpp OPT -O2 VERSION 1.0.0 GEN)
+o3m_add_test(wide effects/wide/tests/wide_test.cpp)
+if(TARGET o3m_wide_test)
+  target_include_directories(o3m_wide_test PRIVATE ${O3M_GEN_DIR})  # wide_gen.h: the parameter ids and ranges
+  add_dependencies(o3m_wide_test o3m_wide_gen)
+endif()
+
+# OS-INSFX-FX2 X2: STEREO CHORUS, a WIDENS insert for a track (modules/effects/chorus): one delay line of the mid, two taps that swing in opposite directions (L and R), Period, Depth, Delay, Mix,
+# four factory presets. Same wiring as DRIVE: a .tmod for /modules/effects/ on the card, not in the image; the descriptor header is generated into the build tree; the module's own host test compares it
+# with a double-precision reference of the same maths.
+o3m_manifest(chorus effects/chorus/module.json GENERATE)
+o3m_add_module(chorus SOURCES effects/chorus/chorus.cpp OPT -O2 VERSION 1.0.0 GEN)
+o3m_add_test(chorus effects/chorus/tests/chorus_test.cpp)
+if(TARGET o3m_chorus_test)
+  target_include_directories(o3m_chorus_test PRIVATE ${O3M_GEN_DIR})  # chorus_gen.h: the parameter ids and ranges
+  add_dependencies(o3m_chorus_test o3m_chorus_gen)
+endif()
+
+# OS-012d: the built-in modules. The packed .tmod files of the TB-303, chip, FM and SID go into a generated table (tools/o3m_embed.py: OS-FLASHDIET A3, each file's
+# 64-byte header raw and the rest deflated by tools/deflate_pack.py, our own deterministic encoder -- never Python's zlib, whose bytes would depend on the build
+# machine's library) that the images link (o3m_builtin) and hand to module::ModuleSet::set_builtins; module/builtin.h says how they meet the card's copies. The notices
+# the code in them requires (builtin/NOTICES.txt and Open303's licence text) are in the same file as a string. Without the cross compiler there are no .tmod files: the
+# table is empty and the tests that need it say so.
 set(O3M_BUILTIN_STEMS tb303 chip fm sid)
 set(O3M_BUILTIN_CPP "${CMAKE_CURRENT_BINARY_DIR}/builtin_modules.cpp")
-set(O3M_BUILTIN_NOTICES builtin/NOTICES.txt tb303/LICENSE-Open303.txt)
+set(O3M_BUILTIN_NOTICES builtin/NOTICES.txt tb303/LICENSE-Open303.txt chip/LICENSE-tracker-ce.txt)
 set(_embed_args "")
 set(_embed_deps "")
 if(O3M_ARM_CXX)
@@ -225,7 +355,7 @@ foreach(n IN LISTS O3M_BUILTIN_NOTICES)
 endforeach()
 add_custom_command(OUTPUT "${O3M_BUILTIN_CPP}"
   COMMAND ${Python3_EXECUTABLE} -I ${PROJECT_SOURCE_DIR}/tools/o3m_embed.py --out "${O3M_BUILTIN_CPP}" ${_notice_args} ${_embed_args}
-  DEPENDS ${_embed_deps} ${PROJECT_SOURCE_DIR}/tools/o3m_embed.py
+  DEPENDS ${_embed_deps} ${PROJECT_SOURCE_DIR}/tools/o3m_embed.py ${PROJECT_SOURCE_DIR}/tools/deflate_pack.py
   COMMENT "o3m_embed builtin_modules.cpp"
   VERBATIM)
 add_library(o3m_builtin STATIC "${O3M_BUILTIN_CPP}")
@@ -310,6 +440,26 @@ foreach(kind instrument effect app)
   o3m_add_module(example_${kind} SOURCES templates/${kind}/example_${kind}.cpp GEN)
 endforeach()
 
+# OS-FLASHDIET I1: the MOD / S3M / MED importers as one importer module, tracker.tmod (kind 3, ABI 1.11), for modules/importers/ on the card.
+# Built from the formats_tracker library's sources (formats/mod, formats/med, formats/src/volume_level.cpp and the model and core sources
+# they call) plus formats/src/tracker_sniff.cpp (the probe side, which the reader calls) and the module libc shim, so the packed image is
+# the importers' real size and every packer refusal inside them surfaces here.
+# The loader accepts the kind (the descriptor's importer table, the layout tag in header word 44) and holds it apart from the playable modules.
+# OS-FLASHDIET I3: the image no longer links the importers itself; the module is the only place they run from (the starter zip ships it as
+# modules/importers/tracker.tmod).
+o3m_manifest(tracker importers/tracker/module.json)
+# OS-FLASHDIET I1/I2: the packer writes model/import_layout_tag.txt (held to model::kImportLayoutTag by ctest o3m_layout_tag_pin) to word 44.
+get_property(_tracker_sources GLOBAL PROPERTY O3OS_FORMATS_TRACKER_SOURCES)
+set(_tracker_src_args "")
+foreach(_src ${_tracker_sources})
+  list(APPEND _tracker_src_args "../formats/${_src}")
+endforeach()
+o3m_add_module(tracker
+  SOURCES importers/tracker/tracker.cpp importers/tracker/libc_shim.cpp ${_tracker_src_args} ../formats/src/tracker_sniff.cpp
+          ../model/src/project.cpp ../model/src/project_state.cpp ../model/src/params.cpp ../model/src/settings.cpp ../model/src/instrument.cpp
+          ../core/src/learn.cpp ../core/src/param.cpp ../core/src/fast_math.cpp
+  INCLUDE ../formats/mod/include ../formats/med/include ../formats/include ../model/include ../core/include)
+
 if(NOT O3OS_CROSS)
   add_test(NAME o3m_pack_selftest COMMAND ${Python3_EXECUTABLE} -I ${O3M_PACK} --self-test)
   add_test(NAME o3m_gen_selftest COMMAND ${Python3_EXECUTABLE} -I ${O3M_GEN} --self-test)
@@ -318,5 +468,7 @@ if(NOT O3OS_CROSS)
     set_tests_properties(o3m_gen_scaffold PROPERTIES ENVIRONMENT "O3M_CXX=${O3M_ARM_CXX}")
   endif()
 endif()
+
+add_subdirectory(ptfx)  # the .ptfx plugins for the SD card's Effects/ folder (OS-PTFXPACK); a build product, not part of any image
 
 o3os_label_tests()

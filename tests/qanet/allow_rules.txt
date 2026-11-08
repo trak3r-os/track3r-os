@@ -16,8 +16,7 @@ R2 | Right (nav.right 0) | MIXER_page_2 | bound key changes nothing and says not
 R2 | Left (nav.left 0) | Modules | bound key changes nothing and says nothing | rule:one-axis
 R2 | Right (nav.right 0) | Modules | bound key changes nothing and says nothing | rule:one-axis
 R2 | Shift+* (song.select_tracks *) | PadsTracks | bound key changes nothing and says nothing | OS-SONGMAP
-R2 | Shift+* (song.select_tracks *) | SONG_page_1 | bound key changes nothing and says nothing | OS-SONGMAP
-R2 | Shift+* (song.select_tracks *) | SONG_page_2 | bound key changes nothing and says nothing | OS-SONG-TIMELINE
+R2 | Shift+* (song.select *) | SONG_page_1 | bound key changes nothing and says nothing | OS-SONG3 S2
 R2 | Shift+* (popup.page *) | StepPopup | bound key changes nothing and says nothing | OS-FU3
 R2 | F1 (dj.key 0) | PerformDj | bound key changes nothing and says nothing | OS-DJ
 R2 | F1 (dj.key 0) | PERFORM_page_1 | bound key changes nothing and says nothing | OS-DJ
@@ -54,8 +53,23 @@ R2 | F1 (learn.clear 0) | Learn | bound key changes nothing and says nothing | O
 R2 | F2 (learn.mode 0) | Learn | bound key changes nothing and says nothing | OS-QAFIX-15
 R2 | Shift+F1 (learn.clear 0) | Learn | bound key changes nothing and says nothing | OS-QAFIX-15
 R2 | Shift+F2 (learn.mode 0) | Learn | bound key changes nothing and says nothing | OS-QAFIX-15
+# OS-LEARNFOLLOW S1: F5 FOLLOW (learn.follow) acts on the focused parameter's binding like F1/F2; the state the net opens has none focused, so it correctly does nothing (param_actions.cpp learn_follow). The row label is S2's.
+R2 | F5 (learn.follow 0) | Learn | bound key changes nothing and says nothing | OS-LEARNFOLLOW
+R2 | Shift+F5 (learn.follow 0) | Learn | bound key changes nothing and says nothing | OS-LEARNFOLLOW
 # OS-QAFIX-16: TextEntry F6 (automatic name) is for the Save As target only (text_actions.cpp text_auto); on other targets it correctly does nothing.
 R2 | F6 (text.auto 0) | TextEntry | bound key changes nothing and says nothing | OS-QAFIX-16
 R2 | Shift+F6 (text.auto 0) | TextEntry | bound key changes nothing and says nothing | OS-QAFIX-16
 # OS-PADOCT: Shift+F1 on the Pattern pads cycles the note-entry octave. It is an editing aid like the held-Note OCTAVE row, not a sound parameter: it changes no step and no sound, and an undo unit per press would only bury the real edits. The octave is saved with the project as before (OS-PERSIST2), which is why rule 1 sees it.
 R1 | pads.octave | Pattern tap F1 +Shift [demo] | document changed with no question and no undo unit | OS-PADOCT
+# OS-MIDIREC S1b: Shift+F8 has no Shift binding, so the resolver's modifier fallback runs plain F8 BACK (core/binding.cpp: holding a modifier must not kill a plain binding) while spec 3.4's Shift row shows "-" at F8.
+R2 | Shift+F8 (events.back 0) | Events | bound key acts or says something and the key row shows no label | OS-MIDIREC
+# OS-MIDIREC S1c: the same fallback on F1 FILTER and F5 PREVIEW, which act since S1c, while the Shift row shows "-" there.
+R2 | Shift+F1 (events.filter 0) | Events | bound key acts or says something and the key row shows no label | OS-MIDIREC
+R2 | Shift+F5 (events.preview 0) | Events | bound key acts or says something and the key row shows no label | OS-MIDIREC
+# OS-SCALES28 S2 (A10): changing the scale is not an undo unit, as with the pads of row 2; it marks the project unsaved through App::sync_project_state, as every NOTE change does.
+R1 | popup.move 1 | StepPopup tap Up [demo] | document changed with no question and no undo unit | OS-SCALES28
+R1 | popup.move 2 | StepPopup tap Right [demo] | document changed with no question and no undo unit | OS-SCALES28
+R1 | popup.move 3 | StepPopup tap Down [demo] | document changed with no question and no undo unit | OS-SCALES28
+R1 | popup.move 4 | StepPopup tap Left [demo] | document changed with no question and no undo unit | OS-SCALES28
+R1 | popup.delta 1 | StepPopup tap encoder [demo] | document changed with no question and no undo unit | OS-SCALES28
+R1 | fill.vary | FillDialog tap F2 [the Fill dialog reopened on the random fill the reach set (F1 applies it, F4 opens it again)] | document changed with no question and no undo unit | OS-PTOOLS2 S1

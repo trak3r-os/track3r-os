@@ -64,10 +64,15 @@ inline constexpr unsigned GrainShape = 0x19;   // grain_shape: square, triangle,
 inline constexpr unsigned GrainLoop = 0x1A;    // grain_type: forward, backward, ping-pong
 inline constexpr unsigned Slices = 0x1B;       // slice_count (a readout: the slices are made on Wave)
 inline constexpr unsigned Slice = 0x1C;        // selected_slice
+// OS-CEPLAYTHRU P2: the source page's PLAY THRU (Instrument::slice_thru, OG byte 279, INST 1.7), a row after SLICE in the Slice and Beat Slice modes only. A VIRTUAL field
+// like MidiChannel and PlayStereo: no table row, so the generation block, Learn and the rest of the table plumbing do not see it; only the Params screen's source page and
+// app/param_actions.cpp know it. The descriptor is play_thru_desc(), the value is read from the instrument and an edit writes the whole instrument as one undo record and
+// rebinds the slot (as write_play_stereo). 0x1D: past the source rows.
+inline constexpr unsigned PlayThru = 0x1D;
 inline constexpr unsigned kSourceRows = 9;
 // OS-INSTUI S8a: the MIDI page's CHANNEL (Instrument::midi_channel, 1..16). A VIRTUAL field: it is no row of the tables, so the generation block, INIT (the channel stays), Learn and the
 // rest of the table plumbing do not see it and INST is unchanged; only the Params screen's MIDI page and app/param_actions.cpp know it. The descriptor is midi_channel_desc(), the value is
-// read from the instrument and an edit writes the whole instrument as one undo record (Editor::set_instrument, as NAME). 0x1E: past the source rows (0x1D stays nothing).
+// read from the instrument and an edit writes the whole instrument as one undo record (Editor::set_instrument, as NAME). 0x1E: past the source rows and past 0x1D (PlayThru).
 inline constexpr unsigned MidiChannel = 0x1E;
 // OS-STEREO step 2 (INST 1.5): the source page's STEREO choice (Instrument::stereo, MONO / STEREO), next to PLAY ENGINE. A VIRTUAL field like MidiChannel (no table row, so the generation block and the arena
 // do not grow by a slot per instrument): describe_param answers it (play_stereo_desc), the value is read from the instrument and an edit goes through the stereo action (app/param_actions.cpp), which refuses STEREO
@@ -105,6 +110,8 @@ constexpr bool is_mod_field(unsigned field) noexcept { return field >= kModFirst
 inline constexpr unsigned SourceOff = 0;
 inline constexpr unsigned SourceEnvelope = 1;
 inline constexpr unsigned SourceLfo = 2;
+inline constexpr unsigned SourceWtEnv = 3;  // OS-CEWTENV W7a: `loop` 2 (the WT contour played once over a duration)
+inline constexpr unsigned SourceWtLfo = 4;  // `loop` 3 (the contour looped at the LFO's rate)
 inline constexpr unsigned kAmpLfoSpeeds = 24;    // the amp slot's rate table is the last 24 of the 29
 inline constexpr unsigned kOtherLfoSpeeds = 29;  // the tempo-sync rates of the other LFOs
 
@@ -120,6 +127,10 @@ inline constexpr unsigned MidiOffset = 0x84;
 inline constexpr unsigned kMidiCcFirst = 0x85;   // CC A .. CC F: 0x85 .. 0x8A
 inline constexpr unsigned VelSens = 0x8B;
 inline constexpr unsigned kMidiRows = 12;
+// OS-MODRATE S2: the RATE row of a module instrument (FULL, 1/2, 1/4: the sound module renders at half or quarter rate and the host holds each sample, ABI 1.13 O3M_FX_RATE). A VIRTUAL field like PlayStereo
+// and a SESSION value: nothing is saved (S3 persists it), the value lives in app::ModuleUi, so an edit makes no undo record. Only the MIX page of a bound, rate-capable module shows it. 0x8F: past VelSens,
+// before the WT fields.
+inline constexpr unsigned ModuleRate = 0x8F;
 constexpr unsigned midi_cc(unsigned slot) noexcept { return kMidiCcFirst + slot; }
 constexpr bool is_midi_row(unsigned field) noexcept { return field >= kMidiFirst && field < kMidiFirst + kMidiRows; }
 
@@ -127,6 +138,24 @@ inline constexpr unsigned kCount = kBase + kSourceRows + kEnvelopes * kEnvelopeF
 // The parameters of a SAMPLE instrument that the app ABI (module/sdk/o3module.h, 1.6) lists: the first 83, as published. The twelve MIDI / VEL> rows are the project's and the screen's, not the SDK's (their group numbers
 // would also collide with O3M_PGROUP_MOD), so a published count and listing stay exactly what they were.
 inline constexpr unsigned kSdkCount = kCount - kMidiRows;
+
+// OS-CEWTENV W7a (docs/specs/OS-CEWTENV.md 3.8): the five WT fields of each of the six slots, 0x90 + 5 e + f, 0x90..0xAD. VIRTUAL fields like PlayStereo: no table row (the generation block and the arena do not grow), not
+// learnable, not in the app SDK; describe_param answers them (wt_param_desc), the value is read from the instrument (the slot's contour in lfo[e].shape, the duration in envelope[e].decay, the two warps in the
+// nibbles of lfo[e].wt_bend, the sustain in lfo[e].wt_sust) and an edit goes through the WT action (app/param_actions.cpp): the whole instrument as one undo record, then the slot is rebound.
+inline constexpr unsigned kWtFirst = 0x90;
+inline constexpr unsigned kWtStride = 5;
+inline constexpr unsigned WtWave = 0;      // the contour 0..255: F001..F128 (the factory ones), U001..U128 (the user's /Envelopes files)
+inline constexpr unsigned WtDuration = 1;  // ms, 0..20000 (a WT ENV's length: the slot's decay; 1 or less plays 1000)
+inline constexpr unsigned WtWarpX = 2;     // -7..+7 (the time warp: the high nibble of wt_bend)
+inline constexpr unsigned WtWarpY = 3;     // -7..+7 (the level warp: the low nibble)
+inline constexpr unsigned WtSustain = 4;   // 0 = one-shot (OFF), 1..99 %
+inline constexpr unsigned kWtFields = 5;
+inline constexpr unsigned kWtDurationMax = 20000;
+constexpr unsigned wt(unsigned e, unsigned f) noexcept { return kWtFirst + e * kWtStride + f; }
+constexpr bool is_wt_field(unsigned field) noexcept { return field >= kWtFirst && field < kWtFirst + kEnvelopes * kWtStride; }
+// The warp nibble law (spec F4): 0..7 are +0..+7, 9..15 are -7..-1 (8 is 0, as the OG stores it); the inverse packs -7..+7.
+constexpr int wt_warp_of(unsigned nibble) noexcept { return nibble < 8u ? static_cast<int>(nibble) : (nibble == 8u ? 0 : static_cast<int>(nibble) - 16); }
+constexpr unsigned wt_nibble_of(int warp) noexcept { return warp >= 0 ? static_cast<unsigned>(warp) & 7u : static_cast<unsigned>(16 + warp) & 15u; }
 
 // OS-012b: the parameters of a MODULE instrument (an SD module bound to the slot, ADR 0002 amendment 1). Parameter i of the module (its descriptor order, at most
 // kModuleMax) is field kModuleFirst + i of the instrument's id; its value is the i-th little-endian float32 of Instrument::params (the blob the project already
@@ -232,10 +261,23 @@ inline constexpr unsigned PadOffset = 22;
 inline constexpr unsigned TransportIn = 23;
 inline constexpr unsigned TransportOut = 24;
 // E-PAT-35 (row 58; new Community OS behaviour): PAT SWITCH, 0 Step (the default: today's behaviour), 1 Pattern end. While the sequencer plays, a pick in the held PATTERN chooser switches the playing pattern at the next step (Step) or waits for the
-// end of the pattern that plays and then starts (Pattern end: the PATS pads' queue). Appended: a file written before it has no such entry and reads Step; an older reader skips the entry it does not know. The device scope is now FULL
-// (kCount == Settings::kMaxFields == 26): the next device setting needs another raise in settings.h (kValueBytes, kMaxFields) and in the arena sizes.
+// end of the pattern that plays and then starts (Pattern end: the PATS pads' queue). Appended: a file written before it has no such entry and reads Step; an older reader skips the entry it does not know.
 inline constexpr unsigned PatSwitch = 25;
-inline constexpr unsigned kCount = 26;
+// OS-MIDICCMAP S1 (docs/specs/OS-MIDICCMAP.md, Q1 a): CC MAP, 0 Off (the default: the official firmware's default), 1 On: the official fixed MIDI CC map listens on the ports and channel of MIDI IN and IN CHANNEL. Appended: a file written before it has no such
+// entry and reads Off; an older reader skips the entry it does not know. Not learnable (a device MIDI routing switch). This slice landed before OS-MTC, so it makes the raise itself: Settings::kMaxFields and kValueBytes go 26 -> 32 (room for OS-MTC's ids 26..28
+// and three more), and the arena grows with them; CC MAP takes id 26, the first free one.
+inline constexpr unsigned CcMap = 26;
+// OS-MTC A3 (docs/specs/OS-MTC.md 3.7; new Community OS behaviour: the official firmware sends no MIDI Time Code). MTC OUT: 0 Off (the default), 1 24 fps, 2 25 fps, 3 30 fps (midi::mtc::fps_of_setting): the unit sends quarter frames from
+// its sequencer timeline on the ports CLOCK OUT names, and a full frame at a run start and a stop. MTC START: 0..23, the hour of the time code at the song's first step, default 1 (Logic's default plays bar 1 at 01:00:00:00). Both appended, the defaults
+// are Off / 1: a file written before them has no such entries and reads Off / 1; an older reader skips the two entries it does not know. Not learnable (a controller must not start a time code). The spec numbered them 26 and 27; CC MAP (OS-MIDICCMAP S1) took
+// 26 first, so they are 27 and 28 and OS-MTC B's MTC IN is 29. The block already holds 32 fields (OS-MIDICCMAP S1 raised it): no further raise.
+inline constexpr unsigned MtcOut = 27;
+inline constexpr unsigned MtcStart = 28;
+// OS-MTC B3 (docs/specs/OS-MTC.md 4.6; new Community OS behaviour: the official firmware follows no MIDI Time Code). MTC IN: 0 Off (the default), 1 DIN, 2 USB: the port whose MIDI Time Code the unit chases (the song starts where the master is and the run follows its
+// rate). While it is not Off the MIDI clock follow is off (CLOCK IN and CLOCK MODE Slave are ignored) and MTC OUT is muted. Appended by the same rule: a file written before it has no such entry and reads Off; an older reader skips the entry it does not know. Not learnable
+// (a controller must not hand the transport to a master). The block holds 32 fields since OS-MIDICCMAP S1: no raise, no version bump.
+inline constexpr unsigned MtcIn = 29;
+inline constexpr unsigned kCount = 30;
 }  // namespace device_setting
 
 // EnvState (OS-INSTUI S6): the SOURCE of a modulator slot, 0 Off / 1 Envelope / 2 LFO, kept in two bytes of an Envelope: `loop` at the field's offset and `enable` in the byte after it.
@@ -261,6 +303,16 @@ const core::ParamDesc* param_desc(core::ParamId id) noexcept;
 const core::ParamDesc& midi_channel_desc() noexcept;
 // OS-STEREO step 2: the descriptor of the virtual field instrument_param::PlayStereo (STEREO: MONO / STEREO, default MONO, not learnable); param_desc(id) of that field stays nullptr.
 const core::ParamDesc& play_stereo_desc() noexcept;
+// OS-CEPLAYTHRU P2: the descriptor of the virtual field instrument_param::PlayThru (PLAY THRU: OFF / ON, default OFF, not learnable, a row in the slice modes only); param_desc(id) of
+// that field stays nullptr.
+const core::ParamDesc& play_thru_desc() noexcept;
+// OS-MODRATE S2: the descriptor of the virtual field instrument_param::ModuleRate (RATE: FULL / 1/2 / 1/4, default FULL, not learnable); param_desc(id) of that field stays nullptr.
+const core::ParamDesc& module_rate_desc() noexcept;
+// OS-CEWTENV W7a: the descriptor of the virtual field instrument_param::wt(e, f) (f = WtWave .. WtSustain, any slot e; the same descriptor for all six slots); nullptr for a field that is not one.
+const core::ParamDesc* wt_param_desc(unsigned field) noexcept;
+struct Instrument;
+// Its value in a Sample instrument: the contour (the LFO entry's shape byte), the duration (the slot's decay, ms), a warp (-7..+7) or the sustain (0 = OFF, 1..99); `field` is one wt_param_desc answers.
+float wt_param_value(const Instrument& in, unsigned field) noexcept;
 
 // Generations are kept in a dense array per kind: how many slots one index of the kind has (instrument 49, track 5, master 8,
 // project 3, device 20), and the slot of a parameter in that block (kNoParamSlot if it does not exist).
@@ -296,5 +348,8 @@ struct Instrument;
 // OS-INSTUI S5 (INIT): every parameter of a sample or MIDI instrument back to its descriptor's default, in place. Kept: the kind, the MIDI channel, the name, the sample (path, rate, start, loop and end
 // points, the slices and their count: the Wave screen's data, not parameters) and the module fields. The sample type follows the play mode the default brings back (0, one shot), as play_mode_set keeps it.
 void reset_instrument_params(Instrument& in) noexcept;
+// OS-CEWTENV W7b (spec F2): the enable byte of the slot-3 envelope is a bit mask, 0x01 the wavetable position, 0x02 the granular LENGTH. The editor writes 1 for any source; this moves a lone bit
+// to the one the play mode reads (granular 7: 1 -> 2, any other mode: 2 -> 1). Called after a SOURCE write of slot 3 and after a play-mode change; a mask with both bits is left as it is.
+void wt_slot_follow_mode(Instrument& in) noexcept;
 
 }  // namespace o3os::model

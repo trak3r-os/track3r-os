@@ -3,7 +3,7 @@
 """The test data of the HIL and import scenarios, kept out of git (OS-HILCARD; standard library only; run it with `python3 -I`).
 
   testdata.py check-manifest
-  testdata.py fetch [--dest build-fixtures] [--zip FILE] [--third-party]
+  testdata.py fetch [--dest build-fixtures] [--zip FILE] [--third-party] [--only PREFIX]
   testdata.py pack --tv16 DIR --o3test DIR [--out build-fixtures-pack]
 
 The data is two things (testdata_manifest.json lists every file with SHA-256, size, licence, author and source):
@@ -12,12 +12,19 @@ The data is two things (testdata_manifest.json lists every file with SHA-256, si
                     scenarios under platform/mk66/tools/hil/ name. The maintainer's own work, given to the project as test data.
   O3TEST/           one folder per import format (8SVX, AIFF, IT, MED, MOD, S3M, WTABLE, XM): the files that the format readers and the import
                     scenarios are tried on.
+  ptfx-sdk/         the eight editor-fx-sdk files of tracker-ce@7fd6c2c (tracker_plugin.h, ptfx_builder.py, the six examples; MIT, LICENSE part 1,
+                    use expressly permitted by part 2 1(b)): the S0 fixtures of OS-CEPTFX, fetched with `fetch --only ptfx-sdk/` (no release
+                    asset, no other download) or with `--third-party`, never by a plain `fetch`. Never committed: build-fixtures/ is untracked.
 
 `fetch` brings them into build-fixtures/ (untracked): the release asset named by the manifest ("release": tag, asset, url, SHA-256), checked
 against its SHA-256 before anything is unpacked, then every member checked against the manifest. `--zip FILE` uses a local copy of the asset
 (the repository may be private, or the machine offline). `--third-party` also downloads the files that are NOT in the asset (O3TEST entries
-with a "url" and "bundled": false: unknown, share-alike or non-redistributable terms), each one checked against its SHA-256; a download that
-fails or differs is reported and the run exits with 2 (an entry marked "manual" has a page, not a file: it is listed, to be downloaded by hand). Copy build-fixtures/Projects and build-fixtures/O3TEST to the root of an SD card by hand.
+with a "url" and "bundled": false: unknown, share-alike or non-redistributable terms, and the ptfx-sdk/ entries of OS-CEPTFX S0), each one
+checked against its SHA-256; a download that fails or differs is reported and the run exits with 2 (an entry marked "manual" has a page,
+not a file: it is listed, to be downloaded by hand). `--only PREFIX` downloads just the non-bundled entries under PREFIX (e.g.
+`--only ptfx-sdk/`: the SDK fixtures alone), without the release asset and without any other download. A plain `fetch` downloads only the
+asset: an offline `fetch --zip FILE` does not touch the network. Copy build-fixtures/Projects and build-fixtures/O3TEST to the root of an SD
+card by hand.
 
 `pack` builds the asset from local copies (the maintainer's, after a change of the data): sorted entries, a fixed time stamp, fixed attributes,
 the same bytes for the same inputs and the same zlib. It prints the SHA-256 and size to write into the manifest's "release". Only "bundled" files are packed, and
@@ -46,7 +53,10 @@ USER_AGENT = "track3r-os-testdata/1.0 (+https://github.com/trak3r-os/track3r-os)
 
 # The only licences the asset may carry. "Maintainer-own" is the t-v16 Workspace, GPL-3.0-or-later like the repository (see README.md); "CC-BY-4.0" needs its credit in CREDITS.txt.
 BUNDLE_LICENCES = ("CC0-1.0", "Public-Domain", "CC-BY-4.0", "Maintainer-own")
-DEST_ROOTS = ("Projects/t-v16/", "O3TEST/")
+DEST_ROOTS = ("Projects/t-v16/", "O3TEST/", "ptfx-sdk/")
+# A file outside the asset may live under O3TEST/ (fetched by `--third-party`) or under ptfx-sdk/ (the OS-CEPTFX S0 SDK fixtures,
+# fetched by `--only ptfx-sdk/` or `--third-party`, never by a plain `fetch`).
+NONBUNDLED_ROOTS = ("O3TEST/", "ptfx-sdk/")
 REQUIRED = ("dest", "sha256", "size", "licence", "author", "source")
 
 
@@ -122,8 +132,8 @@ def validate_manifest(m):
             if (e["licence"] == "Maintainer-own") != e["dest"].startswith("Projects/t-v16/"):
                 raise TestdataError(where + ": 'Maintainer-own' is for Projects/t-v16/ and only for it")
         else:
-            if not e["dest"].startswith("O3TEST/"):
-                raise TestdataError(where + ": a file outside the asset belongs to O3TEST/")
+            if not e["dest"].startswith(NONBUNDLED_ROOTS):
+                raise TestdataError(where + ": a file outside the asset belongs to %s" % " or ".join(NONBUNDLED_ROOTS))
             if not isinstance(e.get("url"), str) or not e["url"].startswith("https://"):
                 raise TestdataError(where + ": a file outside the asset needs an https url")
             if "manual" in e and not isinstance(e["manual"], bool):
@@ -234,8 +244,40 @@ def write_file(dest_root, rel, data):
     os.replace(target + ".part", target)
 
 
-def cmd_fetch(m, dest, zip_file, third_party):
+def download_entries(m, dest, entries):
+    """Downloads the given non-bundled entries into dest, each checked against its SHA-256; returns the number of failures.
+    An entry marked "manual" has a page, not a file: it is listed, not downloaded."""
+    failed = 0
+    for e in sorted(entries, key=lambda e: e["dest"]):
+        if e.get("manual"):
+            print("by hand: %s from %s" % (e["dest"], e["url"]))
+            continue
+        target = os.path.join(dest, *e["dest"].split("/"))
+        if os.path.isfile(target):
+            with open(target, "rb") as f:
+                if sha256_hex(f.read()) == e["sha256"]:
+                    continue
+        try:
+            data = http_get(e["url"])
+            if sha256_hex(data) != e["sha256"] or len(data) != e["size"]:
+                raise TestdataError("the download differs from the manifest (SHA-256 or size)")
+            write_file(dest, e["dest"], data)
+        except TestdataError as ex:
+            failed += 1
+            print("FAILED %s: %s" % (e["dest"], ex))
+    return failed
+
+
+def cmd_fetch(m, dest, zip_file, third_party, only=None):
     check_output_dir(dest)
+    if only is not None:
+        # Just the files outside the asset under PREFIX (e.g. --only ptfx-sdk/): no release asset, no other download.
+        entries = [e for e in m["files"] if not e["bundled"] and e["dest"].startswith(only)]
+        if not entries:
+            raise TestdataError("--only %r matches no file outside the asset" % only)
+        failed = download_entries(m, dest, entries)
+        print("fetched %d file(s) under %s into %s: %d failed" % (len(entries), only, dest, failed))
+        return 2 if failed else 0
     rel = m["release"]
     if zip_file:
         try:
@@ -264,25 +306,10 @@ def cmd_fetch(m, dest, zip_file, third_party):
     for name, data in members.items():
         write_file(dest, name, data)
     print("unpacked %d files into %s" % (len(names), dest))
-    failed = 0
-    if third_party:
-        for e in sorted((e for e in m["files"] if not e["bundled"]), key=lambda e: e["dest"]):
-            if e.get("manual"):
-                print("by hand: %s from %s" % (e["dest"], e["url"]))
-                continue
-            target = os.path.join(dest, *e["dest"].split("/"))
-            if os.path.isfile(target):
-                with open(target, "rb") as f:
-                    if sha256_hex(f.read()) == e["sha256"]:
-                        continue
-            try:
-                data = http_get(e["url"])
-                if sha256_hex(data) != e["sha256"] or len(data) != e["size"]:
-                    raise TestdataError("the download differs from the manifest (SHA-256 or size)")
-                write_file(dest, e["dest"], data)
-            except TestdataError as ex:
-                failed += 1
-                print("FAILED %s: %s" % (e["dest"], ex))
+    # A plain fetch downloads only the asset; --third-party brings every file outside the asset.
+    entries = [e for e in m["files"] if not e["bundled"]] if third_party else []
+    failed = download_entries(m, dest, entries) if entries else 0
+    if entries:
         print("third-party files: %d failed" % failed)
     return 2 if failed else 0
 
@@ -296,6 +323,7 @@ def main(argv):
     f.add_argument("--dest", default=DEFAULT_DEST)
     f.add_argument("--zip")
     f.add_argument("--third-party", action="store_true")
+    f.add_argument("--only", help="download only the files outside the asset under this prefix (e.g. ptfx-sdk/), without the release asset")
     p = sub.add_parser("pack")
     p.add_argument("--tv16", required=True)
     p.add_argument("--o3test", required=True)
@@ -306,10 +334,11 @@ def main(argv):
         validate_manifest(m)
         if a.cmd == "check-manifest":
             n = sum(1 for e in m["files"] if e["bundled"])
-            print("manifest ok: %d files in the asset, %d fetched from their sources" % (n, len(m["files"]) - n))
+            print("manifest ok: %d files in the asset, %d fetched from their sources (--third-party, or --only PREFIX for one root)"
+                  % (n, len(m["files"]) - n))
             return 0
         if a.cmd == "fetch":
-            return cmd_fetch(m, a.dest, a.zip, a.third_party)
+            return cmd_fetch(m, a.dest, a.zip, a.third_party, a.only)
         return cmd_pack(m, a.tv16, a.o3test, a.out)
     except TestdataError as e:
         print("error: %s" % e, file=sys.stderr)

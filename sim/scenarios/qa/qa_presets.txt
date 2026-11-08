@@ -1,0 +1,131 @@
+# OS-INSFX-ABI2 A9 (docs/specs/OS-INSFX-ABI2.md section 3.6): the F5 PRESET list on a module's parameter page, docs/qa/catalogue/mixer.md (QA-MIX-094..098). One `snap qa_pre_NNN` per row with a visible result;
+# the goldens are keyed qa_presets/qa_pre_NNN. The card is the generated fixture qa_presets_card (target qa_presets_card_fixture): modules/presets/reverb/ holds Card Bright, Damaged (a flipped byte) and Wrong Module (of widen). OS-MODPRESET P4 extends this file: the CARD section, SAVE, a taken name, the refusals.
+# The simulator has no insert host and no bound instrument module, so the page is the insert's: T1 INS B of the inserts document names "reverb", native in the sim's module set (sim_apps.cpp), which declares
+# three factory presets (Bright Room and Dark Hall give all four values, Mode Only gives one). Loading writes the record's blob (no ParamChange is sent) and the page shows it. An instrument module's
+# list, a module with no presets and a sample instrument's F5 are the doctests' (tests/module_ui_test.cpp, tests/mixer_inserts_test.cpp) and the unit's.
+
+document inserts
+card qa_presets_card
+apps on
+wait 20
+
+# QA-MIX-094: the generated page of an insert (T1 INS B, reverb): F5 reads PRESET (the module's pages are F1..F4: this one has one page).
+tap master
+tap f6
+tap right
+tap params
+wait 20
+snap qa_pre_001
+
+# QA-MIX-095: F5 opens the list of the module's presets over the page: the title names the module, one line per preset with how many values it gives, the cursor on the first; the key row reads LOAD and BACK.
+tap f5
+wait 20
+snap qa_pre_002
+
+# QA-MIX-096: Down moves the cursor (Dark Hall); F1 LOAD writes the preset into every parameter of the insert, closes the list and the strip says PRESET DARK HALL LOADED.
+tap down
+wait 20
+snap qa_pre_003
+tap f1
+wait 20
+snap qa_pre_004
+wait 2500
+
+# QA-MIX-097: a preset that gives one value (Mode Only: MODE 3) sets that one and the other three parameters take their defaults (CUTOFF 1000, RESONANCE 10, MIX 100), not what the page held (Dark Hall: 2000, 5, 40).
+tap f5
+tap down 2
+tap f1
+wait 20
+snap qa_pre_005
+wait 2500
+
+# QA-MIX-098: F8 BACK closes the list and loads nothing: the page keeps its values.
+tap f5
+tap down
+tap f8
+wait 20
+snap qa_pre_006
+
+# ---- OS-MODPRESET P4 (docs/specs/OS-MODPRESET.md section 4): the CARD section of the list, SAVE with Shift+F5, a taken name, the refusals --------------------
+# The card's presets of reverb sort after the factory ones: Card Bright (index 3), Damaged (4), Wrong Module (5).
+
+# QA-MIX-100: F5 opens the list with the factory presets then a CARD section; the key row reads LOAD, SAVE on Shift+F5 and BACK.
+tap f5
+wait 20
+snap qa_pre_007
+
+# QA-MIX-101: F1 on a card preset (Down x3 to Card Bright) loads it: the strip says PRESET CARD BRIGHT LOADED, the page shows MODE 1, CUTOFF 8000, RESONANCE 30, MIX 50.
+tap down 3
+tap f1
+wait 20
+snap qa_pre_008
+assert state msg=PRESET_CARD_BRIGHT_LOADED
+wait 2500
+
+# QA-MIX-102: a damaged file (Down x4) is refused: PRESET DAMAGED, nothing is written (the page keeps Card Bright's values).
+tap f5
+tap down 4
+tap f1
+wait 20
+snap qa_pre_009
+assert state msg=PRESET_DAMAGED
+wait 2500
+
+# QA-MIX-105: a file of another module (Down x5, Wrong Module is of widen) is refused: PRESET OF WIDEN.
+tap f5
+tap down 5
+tap f1
+wait 20
+snap qa_pre_010
+assert state msg=PRESET_OF_WIDEN
+wait 2500
+
+# QA-MIX-106: Shift+F5 in the list opens the keyboard (PRESET NAME) with the effect's name "reverb" suggested; the pads type "demo" over it; F8 saves the values in force as modules/presets/reverb/demo.o3mp.
+tap f5
+press shift
+tap f5
+release shift
+wait 20
+snap qa_pre_011
+assert state overlay=TEXT_ENTRY
+pad 26
+pad 14
+pad 42
+pad 20
+wait 20
+tap f8
+wait 300
+snap qa_pre_012
+assert file "modules/presets/reverb/demo.o3mp" exists
+wait 2500
+
+# QA-MIX-107: the same name again is taken: the save gets demo 2 and the strip says PRESET SAVED: DEMO 2.
+tap f5
+press shift
+tap f5
+release shift
+wait 20
+pad 26
+pad 14
+pad 42
+pad 20
+tap f8
+wait 300
+snap qa_pre_013
+assert file "modules/presets/reverb/demo 2.o3mp" exists
+wait 2500
+
+# QA-MIX-106: the list rescanned on open shows the saved presets under CARD (Card Bright, Damaged, demo, demo 2, Wrong Module); Dark Hall is loaded first (Down x1), then demo (Down x5) puts the saved values back: 1, 8000, 30, 50.
+tap f5
+tap down 1
+tap f1
+wait 2500
+tap f5
+wait 20
+snap qa_pre_014
+tap down 5
+tap f1
+wait 20
+snap qa_pre_015
+assert state msg=PRESET_DEMO_LOADED
+wait 2500

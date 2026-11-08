@@ -368,6 +368,8 @@ TEST_CASE("export: the file is a canonical stereo 16-bit 44,100 Hz WAV, its leng
   const Expected e = expected_for(rig.renderer);
   CHECK(e.frames > 40u * kBlk);
   CHECK(w.data_size == e.frames * 4u);
+  // OS-CECHECK K5: the header says 44,100 Hz (above) and the measuring pass's frame count is the file's, so the file lasts frames / 44,100 s.
+  CHECK(rig.source.length_frames() == w.data_size / 4u);
   NEED(file->size() == 44u + e.pcm.size());
   CHECK(std::memcmp(file->data() + 44, e.pcm.data(), e.pcm.size()) == 0);
   // The tail is in it: the arrangement is 40 blocks (2,560 frames), the file runs on to the last block above the silence (12 halvings of 12,000 more blocks).

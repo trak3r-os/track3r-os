@@ -115,6 +115,16 @@ struct Rig {
     release(Button::Shift);
     pass(1);
   }
+  // OS-APPSNAV: the chord Song + Pattern, both let go together: the Navigator.
+  void open_navigator() {
+    press(Button::Song);
+    pass(1);
+    press(Button::Pattern);
+    pass(1);
+    release(Button::Pattern);
+    release(Button::Song);
+    pass(1);
+  }
   void turn(int detents) {
     input.push(core::make_encoder_event(clock.now(), 0, static_cast<std::int16_t>(detents)));
     pass(1);
@@ -1224,7 +1234,7 @@ TEST_CASE("pattern tempo: Shift held first makes a detent 0.1 BPM, a whole step 
   rig.pass(1);
   rig.release(Button::Shift);
   rig.pass(1);
-  CHECK(rig.app->state().overlay == app::OverlayId::None);  // the turn consumed the Shift + Pattern tap: no Navigator
+  CHECK(rig.app->state().overlay == app::OverlayId::None);  // the turn consumed the Shift + Pattern tap: no apps list
   rig.press(Button::Pattern);
   rig.pass(1);
   rig.turn(1);
@@ -1270,7 +1280,7 @@ TEST_CASE("pattern tempo: both ends of the range hold and the strip still says w
   rig.pass(1);
 }
 
-TEST_CASE("pattern tempo: a plain tap of Pattern still opens Pattern, at the release; Shift + Pattern still opens the Navigator") {
+TEST_CASE("pattern tempo: a plain tap of Pattern still opens Pattern, at the release; Shift + Pattern opens the apps list and the chord Song + Pattern the Navigator (OS-APPSNAV)") {
   Rig rig;
   CHECK(rig.app->state().screen == app::ScreenId::Song);
   rig.press(Button::Pattern);
@@ -1281,9 +1291,95 @@ TEST_CASE("pattern tempo: a plain tap of Pattern still opens Pattern, at the rel
   CHECK(rig.app->state().screen == app::ScreenId::Pattern);
   CHECK(rig.project().tempo_x100() == model::kDefaultTempoX100);
   rig.tap(Button::Song);
-  rig.shift_tap(Button::Pattern);
+  rig.shift_tap(Button::Pattern);  // OS-APPSNAV: the list of the apps, no longer the Navigator
+  CHECK(rig.app->state().overlay == app::OverlayId::ModulePicker);
+  CHECK(rig.app->state().screen == app::ScreenId::Song);
+  rig.tap(Button::Pattern);
+  NEED(rig.app->state().overlay == app::OverlayId::None);
+  rig.open_navigator();  // the chord Song + Pattern is the Navigator
   CHECK(rig.app->state().overlay == app::OverlayId::Navigator);
   CHECK(rig.app->state().screen == app::ScreenId::Song);
+}
+
+TEST_CASE("navigator chords: Master + Song and Song + Pattern, in either press order, open the Navigator and fire nothing else (OS-APPSNAV)") {
+  const Button pairs[4][2] = {{Button::Master, Button::Song}, {Button::Song, Button::Master}, {Button::Song, Button::Pattern}, {Button::Pattern, Button::Song}};
+  for (const auto& pair : pairs) {
+    Rig rig;
+    rig.tap(Button::Params);  // a screen that is none of the chord's
+    const app::ScreenId before = rig.app->state().screen;
+    NEED(before != app::ScreenId::Song);
+    NEED(before != app::ScreenId::Pattern);
+    NEED(before != app::ScreenId::Mixer);
+    const auto depth = rig.journal.depth();
+    const std::uint32_t tempo = rig.project().tempo_x100();
+    rig.press(pair[0]);
+    rig.pass(1);
+    rig.press(pair[1]);
+    rig.pass(1);
+    CHECK(rig.app->state().overlay == app::OverlayId::Navigator);
+    CHECK(rig.app->state().screen == before);  // neither screen button's tap
+    CHECK_FALSE(rig.app->state().peeking);
+    rig.pass(core::kGestureTimings.hold_ms + 600);  // far past the hold time of Song: no peek
+    CHECK_FALSE(rig.app->state().peeking);
+    CHECK(rig.app->state().screen == before);
+    CHECK(rig.app->state().overlay == app::OverlayId::Navigator);
+    const int cell = rig.app->state().navigator;
+    rig.turn(1);  // both keys still down: the Navigator's cursor, not the master volume (Master held) and not the tempo (Pattern held)
+    CHECK(rig.app->state().navigator != cell);
+    CHECK(rig.message().rfind("MASTER VOLUME ", 0) != 0u);
+    CHECK(rig.project().tempo_x100() == tempo);
+    rig.release(pair[1]);
+    rig.release(pair[0]);
+    rig.pass(1);
+    CHECK(rig.app->state().overlay == app::OverlayId::Navigator);  // the releases accept nothing
+    CHECK(rig.app->state().screen == before);
+    CHECK_FALSE(rig.app->state().peeking);
+    CHECK(rig.project().tempo_x100() == tempo);
+    CHECK(rig.journal.depth() == depth);
+    rig.tap(Button::F7);  // CLOSE
+    CHECK(rig.app->state().overlay == app::OverlayId::None);
+    CHECK(rig.app->state().screen == before);
+  }
+}
+
+TEST_CASE("navigator chords: Master + Song and Song + Pattern work on every screen, and the plain taps and holds of the three buttons still do their own things (OS-APPSNAV)") {
+  for (const Button from : {Button::Pattern, Button::Song, Button::Params, Button::Master, Button::File}) {
+    Rig rig;
+    rig.tap(from);
+    const app::ScreenId before = rig.app->state().screen;
+    rig.press(Button::Master);
+    rig.pass(1);
+    rig.press(Button::Song);
+    rig.pass(1);
+    rig.release(Button::Song);
+    rig.release(Button::Master);
+    rig.pass(1);
+    CHECK(rig.app->state().overlay == app::OverlayId::Navigator);
+    CHECK(rig.app->state().screen == before);
+  }
+  Rig rig;
+  rig.tap(Button::Master);  // the taps
+  CHECK(rig.app->state().screen == app::ScreenId::Mixer);
+  rig.tap(Button::Song);
+  CHECK(rig.app->state().screen == app::ScreenId::Song);
+  rig.tap(Button::Pattern);
+  CHECK(rig.app->state().screen == app::ScreenId::Pattern);
+  CHECK(rig.app->state().overlay == app::OverlayId::None);
+  rig.press(Button::Song);  // a held Song is still the peek, alone
+  rig.pass(core::kGestureTimings.hold_ms + 1);
+  CHECK(rig.app->state().peeking);
+  CHECK(rig.app->state().screen == app::ScreenId::Song);
+  rig.release(Button::Song);
+  rig.pass(1);
+  CHECK(rig.app->state().screen == app::ScreenId::Pattern);
+  CHECK(rig.app->state().overlay == app::OverlayId::None);
+  rig.press(Button::Master);  // and Master held + the encoder is the volume, alone
+  rig.pass(1);
+  rig.turn(-2);
+  CHECK(rig.message().rfind("MASTER VOLUME ", 0) == 0u);
+  rig.release(Button::Master);
+  rig.pass(1);
+  CHECK(rig.app->state().overlay == app::OverlayId::None);
 }
 
 TEST_CASE("pattern tempo: under a modal overlay the gesture does nothing, and neither does it in an app's page") {
@@ -1305,7 +1401,7 @@ TEST_CASE("pattern tempo: under a modal overlay the gesture does nothing, and ne
   CHECK(rig.app->state().overlay == app::OverlayId::Learn);
 
   Rig nav;
-  nav.shift_tap(Button::Pattern);
+  nav.open_navigator();
   NEED(nav.app->state().overlay == app::OverlayId::Navigator);
   nav.press(Button::Pattern);
   nav.pass(1);
@@ -1549,4 +1645,52 @@ TEST_CASE("pattern tempo: the taps and detents of one Pattern hold are one undo 
   CHECK(rig.project().tempo_x100() == t0);
   rig.tap(Button::F8);  // nothing else of the hold is left on the history
   CHECK(rig.project().tempo_x100() == t0);
+}
+
+TEST_CASE("song edit: Copy held + F3 (ADD EMPTY, OS-SONG3 S5) adds a slot on the first free pattern, the cursor on it, one undo unit; a full pool says NO FREE PATTERN and records nothing") {
+  Rig rig;
+  rig.tap(Button::Down);
+  CHECK(rig.song().pos() == 1);
+  rig.press(Button::Copy);
+  rig.pass(1);
+  rig.tap(Button::F3);  // Copy held + F3: ADD EMPTY, not ADD SLOT
+  rig.release(Button::Copy);
+  rig.pass(1);
+  CHECK(rig.order() == Order{1, 2, 4, 3});  // pattern 4 does not exist: the new slot is empty
+  CHECK(rig.project().pattern(4) == nullptr);
+  CHECK(rig.song().pos() == 2);
+  CHECK(rig.editor->can_undo());
+  // A second press in a row goes to the NEXT free number (5), not to 4 again: the order list counts as used too.
+  rig.press(Button::Copy);
+  rig.pass(1);
+  rig.tap(Button::F3);
+  rig.release(Button::Copy);
+  rig.pass(1);
+  CHECK(rig.order() == Order{1, 2, 4, 5, 3});
+  CHECK(rig.project().pattern(5) == nullptr);
+  CHECK(rig.song().pos() == 3);
+  rig.tap(Button::F8);
+  CHECK(rig.order() == Order{1, 2, 4, 3});  // one unit a press
+  rig.tap(Button::F8);
+  CHECK(rig.order() == Order{1, 2, 3});
+  CHECK_FALSE(rig.editor->can_undo());
+  rig.tap(Button::F3);  // the plain F3 still adds the same pattern and does not wait for the release (the cursor stayed on slot 2, pattern 3: the new slot lands after it)
+  CHECK(rig.order() == Order{1, 2, 3, 3});
+  // A full pool refuses and records nothing.
+  Rig full;
+  model::Project& p = full.project();
+  for (unsigned id = 4; id <= model::kMaxPatterns; ++id) {
+    NEED(p.create_pattern(id, 8) == model::Status::Ok);
+  }
+  full.editor->history_reset();
+  const Order before = full.order();
+  full.press(Button::Copy);
+  full.pass(1);
+  full.tap(Button::F3);
+  full.release(Button::Copy);
+  full.pass(1);
+  CHECK(full.message() == "NO FREE PATTERN");
+  CHECK(full.order() == before);
+  CHECK_FALSE(full.editor->can_undo());
+  CHECK(full.project().check_invariants());
 }

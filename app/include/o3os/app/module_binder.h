@@ -17,7 +17,7 @@
 //
 // OS-INSFX S3b, the inserts (the INSX chunk, docs/specs/OS-INSFX.md): after the instruments, the binder's third phase (the InsertBinder of the spec) binds the effect modules (kind 2) the project's
 // insert records name, UNADMITTED (InsertHost::bind `force`: the project says so; the nets judge them once they run), each with its stored parameters and bypass flag. `where` 0..15 and `slot` 0/1 give
-// the host's key track * 2 + slot; a master record (where 16) is skipped and counted (S6 binds it). A record whose module cannot be had, is not an effect, or whose bind fails is skipped and reported
+// the host's key track * 2 + slot; a master record (where 16, slot 0: key 32) is bound too (OS-INSFX S6: dual mono, TWO instances, so it counts 2 of the cap of four; records bind in (where, slot) order, the master last, and the one that does not fit is skipped and counted). A record whose module cannot be had, is not an effect, or whose bind fails is skipped and reported
 // like a muted instrument: the record stays in the project (and is saved again) and the load goes on. The caller has retired and released the previous project's inserts with its instruments
 // (begin_replace, the Settle phase), so a project without records binds none: nothing leaks from the one before.
 //
@@ -67,7 +67,7 @@ struct ModuleReport {
   unsigned inserts = 0;          // OS-INSFX S3b: insert records in the project
   unsigned inserts_bound = 0;    // of them, bound
   unsigned inserts_skipped = 0;  // ... left unbound (module missing, refused or not an effect; the bind failed)
-  unsigned inserts_master = 0;   // ... master records (where 16): skipped, S6 binds them
+  unsigned inserts_master = 0;   // ... of those, master records (where 16; OS-INSFX S6 binds them, two instances): the ones skipped
   unsigned problem_count = 0;
   unsigned problems_dropped = 0;
   ModuleProblem problems[kMaxProblems] = {};

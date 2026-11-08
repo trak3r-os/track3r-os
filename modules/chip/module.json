@@ -2,11 +2,11 @@
   "name": "Chip",
   "id": "chip",
   "kind": "instrument",
-  "abi": "1.8",
-  "description": "A chip-tune voice written from scratch: pulse (12.5 / 25 / 50 / 75 %), triangle and LFSR noise, optional 4-bit volume steps, a fast linear envelope, a three-step arpeggio, a pitch sweep and a vibrato. One mono voice an instance.",
-  "state_bytes": 208,
+  "abi": "1.13",
+  "description": "A chip-tune voice: pulse (12.5 / 25 / 50 / 75 %), triangle and LFSR noise written from scratch, plus a port of the CHIP waves of tracker-ce (2A03 pulse, Zap, Arp Chord and more), optional 4-bit volume steps, a fast linear envelope, a three-step arpeggio or a chord, a pitch sweep and a vibrato. One mono voice an instance.",
+  "state_bytes": 336,
   "params": [
-    {"name": "Wave", "min": 0, "max": 3, "default": 0, "type": "int", "labels": ["PULSE", "TRIANGLE", "NOISE LONG", "NOISE SHORT"]},
+    {"name": "Wave", "min": 0, "max": 11, "default": 0, "type": "int", "labels": ["PULSE", "TRIANGLE", "NOISE LONG", "NOISE SHORT", "2A03 PULSE", "SID SAW/TRI", "NOISE/LFSR", "FM BELL", "SUPER SQR", "ZAP/LASER", "ARP CHORD", "CHIP DRUM"]},
     {"name": "Duty", "min": 0, "max": 3, "default": 1, "type": "int", "labels": ["12.5%", "25%", "50%", "75%"]},
     {"name": "Raw Edges", "min": 0, "max": 1, "default": 0, "type": "bool"},
     {"name": "Vol Steps", "min": 0, "max": 1, "default": 0, "type": "bool"},
@@ -25,18 +25,29 @@
     {"name": "Vib Delay", "min": 0, "max": 1000, "default": 0, "unit": "ms"},
     {"name": "Arp 1", "min": -24, "max": 24, "default": 0, "type": "int", "unit": "semitones"},
     {"name": "Arp 2", "min": -24, "max": 24, "default": 0, "type": "int", "unit": "semitones"},
-    {"name": "Arp Speed", "min": 1, "max": 120, "default": 50, "curve": "log", "unit": "hz"}
+    {"name": "Arp Speed", "min": 1, "max": 120, "default": 50, "curve": "log", "unit": "hz"},
+    {"name": "Shape", "min": 0, "max": 100, "default": 35, "unit": "percent", "mod": true},
+    {"name": "Sub Osc", "min": 0, "max": 100, "default": 0, "unit": "percent", "mod": true},
+    {"name": "Cutoff", "min": 80, "max": 18000, "default": 18000, "curve": "log", "unit": "hz", "mod": true},
+    {"name": "Resonance", "min": 0, "max": 100, "default": 0, "unit": "percent", "mod": true},
+    {"name": "Bitcrush", "min": 2, "max": 16, "default": 16, "mod": true},
+    {"name": "PWM Depth", "min": 0, "max": 100, "default": 20, "unit": "percent", "mod": true},
+    {"name": "PWM Rate", "min": 0.1, "max": 40, "default": 2.5, "curve": "log", "unit": "hz"},
+    {"name": "Env Amt", "min": -100, "max": 100, "default": 0, "unit": "percent", "mod": true},
+    {"name": "Decimate", "min": 1, "max": 32, "default": 1, "type": "int"},
+    {"name": "Chord", "min": 0, "max": 7, "default": 0, "type": "int", "labels": ["OFF", "OCTAVE", "FIFTH", "MAJOR", "MINOR", "SUS4", "MAJ7", "MIN7"]}
   ],
   "views": [
     {"name": "Wave", "min_size": [160, 64], "preferred_size": [380, 90]},
     {"name": "Envelope", "min_size": [160, 80], "preferred_size": [380, 130]}
   ],
   "pitch": true,
+  "rate": true,
   "pages": [
     {"name": "TONE", "first": 0},
     {"name": "ENV", "first": 8},
-    {"name": "PITCH", "first": 12},
-    {"name": "ARP", "first": 17}
+    {"name": "PITCH", "first": 14},
+    {"name": "OSC/FX", "first": 22}
   ],
   "voices": 1,
   "memory": {"hot_bytes": 1400, "sdram_bytes": 0}

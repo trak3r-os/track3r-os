@@ -39,7 +39,7 @@ class PerformScreen final : public Screen {
   const char* const* soft_keys() const noexcept override { return kPerformSoftKeys; }
   // No Cursor: Global's Shift + F1..F5 jumps resolve here, shadow the scene keys and move nothing ("-"); F6..F8 have no Shift binding and fall through to LATCH, NEXT and RESET (OS-UIFIX).
   const char* const* soft_keys_shifted() const noexcept override { return kPerformShiftKeys; }
-  unsigned pages() const noexcept override { return 2; }
+  unsigned pages() const noexcept override { return 2; }  // SLOTS, DJ (the third, REMIX, was removed by OS-NOREMIX)
   // OS-DJ A1: the DJ page's keys and Shift row are its own, and so is its field level (the crossfader's bindings).
   Context field_context(const Model& model, const ViewState& view) const noexcept override;
   const char* const* shift_row(const ViewState& view) const noexcept override;

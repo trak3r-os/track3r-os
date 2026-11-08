@@ -9,6 +9,9 @@
 #   qanet_random_meta_selftest   B5: each metamorphic relation of --meta is reached, a save that loses a field is found, and its written scenario fails under o3sim
 #   qanet_random_exhaust_selftest  B8: the limit fixtures (--exhaust) each reach their limit, find nothing in a clean run, and find a defect planted at it (rule 1, also with the sample-edit history full)
 #   qanet_random_exhaust         B8: seeds 1..2 as qanet_random_user_short, with --exhaust --exhaust-all instead of --meta: the undo cap, the sample-edit history cap and the first edit after a slot switch (3 fixtures, 6 reached) on those two seeds only (the eight shards do not run --exhaust)
+#   qanet_random_exhaust_pool    B8: the voice pool saturated by 13 to 16 held pads (seeds 1..2, on a simulator of their own: `document sound` with the engine), released in a random order: the pool never holds more than 12 voices, none stays after the release
+#   qanet_random_exhaust_folder  B8: a folder of 2000 files (made at test time in a scratch directory) in Sample load: the listing holds 256 and says so, the cursor stops at both ends, a file of the last row loads, the full flag does not outlive the folder
+#   qanet_random_exhaust_fresh_selftest  B8: the two fixtures above each reach their limit, find nothing in a clean run, and find a defect planted at it (a lost key-up; a listing that lost entries)
 #   qanet_random_user_short      seeds 1..2, 300 steps: the fixed-seed run that is part of `ci.sh host` (about 30 s under the sanitizers); with the audio probe (C4: the walk has the engine, every rebind of an instrument's descriptor is replayed and probed)
 #   qanet_audio_probe_selftest   C4: a scripted walk is probed mid-walk, a planted detune after an undo is found, and without it the settled pad and the Pattern step agree (the fresh-pad findings are the ones the baseline lists)
 #   qanet_random_user_<i>of8     seeds 1..72, 300 steps in eight shards of 9 seeds (B4b: 40 s a seed with the rules at every input and the audio probe, 5 to 7.5 min a shard; the 200 seeds took 16-18 min; the older figure: about 17 s a seed under the sanitizers, and a replay and about four probes a seed more with the audio probe and its edit session) (label `e2e`: `tools/ci.sh e2e`, tools/remote_ci.sh e2e); the seed range and the step count come from the environment
@@ -50,6 +53,13 @@ add_test(NAME qanet_random_exhaust_selftest COMMAND o3_qanet_random_user --exhau
 set_tests_properties(qanet_random_exhaust_selftest PROPERTIES TIMEOUT 900 FAIL_REGULAR_EXPRESSION "FAILED")
 add_test(NAME qanet_random_exhaust COMMAND o3_qanet_random_user --card ${_card} --seed 1 --seeds 2 --steps 300 --min-conclusive 1 --min-keys 1 --rules-every 1 --audio-probe --audio-probe-every 1 --exhaust --exhaust-all --min-exhaust 6 --found-dir ${CMAKE_BINARY_DIR}/qanet_found --baseline ${_base})
 set_tests_properties(qanet_random_exhaust PROPERTIES TIMEOUT 900)
+# B8, the two fixtures that run on a simulator of their own (the walk is one step: it is not theirs): the voice pool saturated by held pads (seeds 1 and 2 draw other pads) and the folder of 2000 files. Their proof is the fresh self-test.
+add_test(NAME qanet_random_exhaust_pool COMMAND o3_qanet_random_user --card ${_card} --seed 1 --seeds 2 --steps 1 --exhaust --exhaust-only voice_pool --min-exhaust 2 --found-dir ${CMAKE_BINARY_DIR}/qanet_found --baseline ${_base})
+set_tests_properties(qanet_random_exhaust_pool PROPERTIES TIMEOUT 300)
+add_test(NAME qanet_random_exhaust_folder COMMAND o3_qanet_random_user --card ${_card} --seed 1 --seeds 1 --steps 1 --exhaust --exhaust-only big_folder --min-exhaust 1 --found-dir ${CMAKE_BINARY_DIR}/qanet_found --baseline ${_base})
+set_tests_properties(qanet_random_exhaust_folder PROPERTIES TIMEOUT 600)
+add_test(NAME qanet_random_exhaust_fresh_selftest COMMAND o3_qanet_random_user --exhaust-fresh-selftest --card ${_card})
+set_tests_properties(qanet_random_exhaust_fresh_selftest PROPERTIES TIMEOUT 900 FAIL_REGULAR_EXPRESSION "FAILED")
 foreach(_i 1 2 3 4 5 6 7 8)
   add_test(NAME qanet_random_user_${_i}of8 COMMAND o3_qanet_random_user --card ${_card} --seed 1 --seeds 72 --steps 300 --rules-every 1 --min-keys 1 --min-sel 1 --env --shard ${_i}/8 --audio-session --meta --min-meta 1 --min-save-open 1 --found-dir ${CMAKE_BINARY_DIR}/qanet_found --baseline ${_base})
   set_tests_properties(qanet_random_user_${_i}of8 PROPERTIES TIMEOUT 14400)

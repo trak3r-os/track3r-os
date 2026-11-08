@@ -3,7 +3,7 @@
 - Owns display-list drawing over `eve/` (`Renderer`), the three compiled-in themes, the glyph/tile/icon faces, stateless components, and `plot/` (curves, scope, spectrum, wave view, RAM_G map). Must not: know what data means (screens in `app/` hand it rectangles and tokens), include `app`, `model`, `formats` or `audio`, write a colour value outside `src/themes.cpp`, or push a state past the display-list budget (RAM_DL 2048 words; every state stays at or below 1792, `ctest budget`).
 - Entry points:
   - `include/o3os/ui/renderer.h`: draws into a display list through `eve/`
-  - `include/o3os/ui/theme.h`, `src/themes.cpp`: 16 colour tokens, faces, metrics; the only place colours are valued
+  - `include/o3os/ui/theme.h`, `src/themes.cpp`: 18 colour tokens (16, Rec, SelDim), faces, metrics; the only place colours are valued
   - `include/o3os/ui/components.h`: Strip, Badge, SoftKeys, FieldRow, Bar, Meter
   - `include/o3os/ui/assets.h`: RAM_G map and boot-time upload of the faces, tiles, icons
   - `plot/include/o3os/ui/plot/`: `ram_g_map.h` owns the whole RAM_G map

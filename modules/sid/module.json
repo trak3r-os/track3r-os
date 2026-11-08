@@ -2,7 +2,7 @@
   "name": "SID",
   "id": "sid",
   "kind": "instrument",
-  "abi": "1.8",
+  "abi": "1.13",
   "description": "A SID-style voice written from scratch: saw, triangle, pulse with a width and a built-in PWM LFO, 23-bit noise, four combined waves, a modulator oscillator for hard sync and ring modulation, the stepped attack / decay / sustain / release of the Commodore 64 table, a three-step arpeggio, a pitch sweep and a vibrato. A zero-delay-feedback state-variable filter (eight modes, resonance, a cutoff curve per model, key tracking, envelope amount and a level-compensated drive). One mono voice an instance.",
   "state_bytes": 368,
   "params": [
@@ -44,6 +44,7 @@
     {"name": "Filter", "min_size": [160, 80], "preferred_size": [380, 130]}
   ],
   "pitch": true,
+  "rate": true,
   "pages": [
     {"name": "OSC", "first": 0},
     {"name": "ENV", "first": 8},

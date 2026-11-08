@@ -248,10 +248,15 @@ TEST_CASE("actions: the flags say what the machinery around an action may do wit
     CHECK_MESSAGE(flags(name) == 0, name);
   }
   // What only makes sense with the base screen in charge needs its focus.
-  for (const char* name : {"pattern.column", "pattern.fx_column", "view.mode", "view.mode_next", "navigator.open", "edit.undo",
+  for (const char* name : {"pattern.column", "pattern.fx_column", "view.mode", "view.mode_next", "navigator.open", "apps.open", "edit.undo",
                            "edit.redo", "macro.play"}) {
     CHECK_MESSAGE(flags(name) == core::kActionNeedsFocus, name);
   }
+  // OS-APPSNAV: the apps list's own actions run in a modal overlay (no focus); the pick is an undo unit only when a document is open (the apps list's F1 launches and needs none).
+  for (const char* name : {"apps.close", "module.picker_f8"}) {
+    CHECK_MESSAGE(flags(name) == 0, name);
+  }
+  CHECK(flags("module.pick") == core::kActionUndoableIfOpen);
   // The history and the macro recorder are not edits themselves; the only action that edits the project is project.tempo
   // (OS-002c), and it is the one undoable action (the dispatcher hands the editor to it and to nothing else).
   for (const char* name : {"macro.record", "job.cancel"}) {
@@ -262,8 +267,11 @@ TEST_CASE("actions: the flags say what the machinery around an action may do wit
     bool pattern_edit = std::strncmp(t.items[i].name, "step.", 5) == 0 || (std::strncmp(t.items[i].name, "track.", 6) == 0 && std::strcmp(t.items[i].name, "track.mute_mode") != 0);  // (OS-MUTE: the mute mode is runtime state, not an edit)
     // OS-011a: the Wave / Chop screen's edits of the instrument are undo units too (the rest of wave.* is view state).
     for (const char* wave_edit : {"wave.nudge", "wave.nudge_coarse", "wave.add", "wave.del", "wave.even", "wave.auto_apply", "sample.commit", "sedit.undo", "sedit.redo",
-                                   "module.pick", "rec.note_off", "instrument.engine", "instrument.play_mode", "wave.mode_pick", "instrument.delete", "instrument.init", "instrument.new_midi", "instrument.paste",
-                                   "song.add_slot", "song.delete_slot", "song.pattern_delta", "song.turn", "song.turn_fine", "song.tempo_hold", "song.paste", "song.clear", "song.cut", "song.move", "song.unique", "song.answer", "songtools.apply", "block.paste", "pattern.op", "pattern.clip_paste", "pattern.fill", "fill.apply", "pattern.invert", "file.purge"}) {  // OS-FILES part B: PURGE UNUSED is one undo unit  // PAT-OPS: DUPLICATE / EXPAND / SHRINK and the whole-pattern paste are one unit each  // OS-CFGWIRE: FILL and INVERT are block edits  // OS-SONG1: the Song screen's slot edits; OS-SONGMAP: Delete, UNIQUE, the question's answer and the TOOLS dialog's APPLY write the cells' patterns; OS-SONGSHARE: CUT and MOVE  // OS-012b: the engine pick writes the instrument and its default parameters; OS-FU2: a recorded note's release writes its OFF; OS-004d: the playback engine
+
+                                   "preset.load", "rec.note_off", "instrument.engine", "instrument.play_mode", "wave.mode_pick", "instrument.delete", "instrument.init", "instrument.new_midi", "instrument.paste",
+                                   "song.add_slot", "song.add_empty", "song.delete_slot", "song.pattern_delta", "song.turn", "song.turn_fine", "song.tempo_hold", "song.paste", "song.clear", "song.cut", "song.move", "song.move_along", "song.unique", "song.answer", "songtools.apply", "block.paste", "pattern.op", "pattern.clip_paste", "pattern.fill", "tools.repeat", "verb.transpose", "verb.instrument", "verb.interpolate", "verb.randomise", "verb.humanise", "verb.rotate_up", "verb.rotate_down", "ptool.apply", "fill.apply", "pattern.invert", "file.purge", "events.edit", "events.coarse", "events.pad", "events.insert", "events.delete", "events.quant"}) {  // OS-MIDIREC S2b/S2c/S3: the EVENTS list's edits (the encoder, Shift + encoder, the pads, Insert, Delete, QUANT) are one undo unit each  // OS-PTOOLS2 S3: TOOLS REPEAT is one undo unit  // OS-FILES part B: PURGE UNUSED is one undo unit  // PAT-OPS: DUPLICATE / EXPAND / SHRINK and the whole-pattern paste are one unit each  // OS-CFGWIRE: FILL and INVERT are block edits; OS-PTOOLS2 S3b: the five S4 verbs of the menu are block edits too; OS-PTOOLS2 S2: the Pattern TOOLS dialog's APPLY  // OS-SONG1: the Song screen's slot edits (ADD EMPTY too); OS-SONGMAP: Delete, UNIQUE, the question's answer and the TOOLS dialog's APPLY write the cells' patterns; OS-SONGSHARE: CUT and MOVE  // OS-012b: the engine pick writes the instrument and its default parameters; OS-FU2: a recorded note's release writes its OFF; OS-004d: the playback engine
+
+
       pattern_edit = pattern_edit || std::strcmp(t.items[i].name, wave_edit) == 0;
     }
     const bool undoable = std::strcmp(t.items[i].name, "project.tempo") == 0 || std::strcmp(t.items[i].name, "module.app_tempo") == 0 || std::strcmp(t.items[i].name, "module.app_group") == 0 || pattern_edit;  // OS-H1: an app's queued set_tempo, one undo unit like project.tempo; OS-H3A: an app's closed edit group, one unit

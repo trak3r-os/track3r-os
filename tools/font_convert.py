@@ -14,6 +14,10 @@ character range (docs/specs/OS-003-ui-toolkit.md, ADR 0010 section 3).
     the RAM_G map (tiles and icons start at kRamGTiles) and the generated file asserts that the faces fit below it.
   * Every bitmap array is declared word aligned on its type and asserted, never left to where the linker puts a byte
     array (ADR 0011: it is uploaded with hal::Display::upload(), whose source must be word aligned).
+  * OS-FLASHDIET A4: each face is emitted as a raw-deflate stream of its L1 bitmap, made by tools/deflate_pack.py
+    (the A2 deterministic encoder, never Python's zlib: the reproducible-image gate must not depend on the build
+    machine's zlib) with the 4 KiB window core::Inflater accepts. The device inflates it at boot through
+    ui::face_bitmap() / ui::upload_assets(); the RAM_G map keeps the raw sizes, so nothing moves.
   * Output is a C++ source file defining ui::font_face(); it is written into the build tree and not committed.
 
 Usage:
@@ -26,6 +30,11 @@ Exit 0 on success, 1 on any error (missing glyph, bad BDF, a BDF whose cell size
 import argparse
 import sys
 from pathlib import Path
+
+# The build runs the converters as `python3 -I tools/font_convert.py`, and -I keeps this script's directory off
+# sys.path, so add it to import the A2 encoder that sits beside this script.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import deflate_pack  # noqa: E402  the OS-FLASHDIET A2 deterministic raw-deflate encoder
 
 FIRST_CHAR = 32     # space
 LAST_CHAR = 126     # '~'
@@ -166,37 +175,47 @@ def emit_cpp(faces, sources):
            "// Font\"; see third_party/fonts/terminus/OFL.TXT. The bitmaps below are a Modified Version in the sense of",
            "// the licence (a format conversion): they are named by cell size (f10x20, f16x32), never \"Terminus\".",
            "// SPDX-License-Identifier: BSD-2-Clause AND OFL-1.1",
+           "// OS-FLASHDIET A4: each face's L1 bitmap is stored as a raw-deflate stream (tools/deflate_pack.py, the 4 KiB",
+           "// window), inflated on the device by core::Inflater through ui::face_bitmap() / ui::upload_assets().",
            "#include <o3os/ui/assets.h>",
            "#include <o3os/ui/font.h>",
            "",
            "namespace o3os::ui {",
            "namespace {",
            "",
-           "// A bitmap is sent to RAM_G with hal::Display::upload(), which wants a word-aligned source (the device may",
-           "// read it with LDM/LDRD or DMA; a misaligned LDM/LDRD is a UsageFault, ADR 0011). So the alignment is",
-           "// declared on the type, never left to where the linker puts a byte array.",
+           "// A stream is declared word aligned on its type and asserted, like the raw bitmaps it replaces (ADR 0011;",
+           "// deflate_pack.py's emit_cpp does the same).",
            "template <unsigned N>",
-           "struct alignas(4) Bitmap {",
+           "struct alignas(4) Stream {",
            "  std::uint8_t bytes[N];",
            "};",
            ""]
+    streams = {}
     for name in FONT_NAMES:
         cw, ch, stride, ascent, cap, data = faces[name]
-        out.append("// %s: %dx%d cells, %d glyphs from U+%04X, %d bytes of L1 data, RAM_G %u, handle %d."
-                   % (name, cw, ch, LAST_CHAR - FIRST_CHAR + 1, FIRST_CHAR, len(data), addrs[name],
+        raw = bytes(data)
+        stats = {}
+        z = deflate_pack.deflate(raw, stats)  # deterministic, a 4 KiB window (never Python's zlib)
+        if stats["max_distance"] > deflate_pack.WINDOW:
+            raise BdfError("%s: a match distance of %d, over the %d window" % (name, stats["max_distance"], deflate_pack.WINDOW))
+        streams[name] = z
+        n = (len(z) + 3) & ~3  # whole words, as deflate_pack.py's emit_cpp pads (ADR 0011)
+        body = z + b"\x00" * (n - len(z))
+        out.append("// %s: %dx%d cells, %d glyphs from U+%04X, %d bytes of L1 data -> %d bytes of raw deflate, RAM_G %u, handle %d."
+                   % (name, cw, ch, LAST_CHAR - FIRST_CHAR + 1, FIRST_CHAR, len(raw), len(z), addrs[name],
                       FONT_NAMES.index(name) + 1))
-        out.append("constexpr Bitmap<%d> k_%s_bitmap = {{" % (len(data), name))
-        for j in range(0, len(data), 16):
-            out.append("    " + ", ".join("0x%02X" % b for b in data[j:j + 16]) + ",")
+        out.append("constexpr Stream<%d> k_%s_z = {{" % (n, name))
+        for j in range(0, n, 16):
+            out.append("    " + ", ".join("0x%02X" % b for b in body[j:j + 16]) + ",")
         out.append("}};")
-        out.append("static_assert(alignof(Bitmap<%d>) >= 4 && sizeof(Bitmap<%d>) >= %d, \"%s bitmap: word aligned, whole\");"
-                   % (len(data), len(data), len(data), name))
+        out.append("static_assert(alignof(Stream<%d>) >= 4 && sizeof(Stream<%d>) == %d, \"%s stream: word aligned, whole words\");"
+                   % (n, n, n, name))
         out.append("")
     out.append("constexpr FontFace kFaces[%d] = {" % len(FONT_NAMES))
     for i, name in enumerate(FONT_NAMES):
         cw, ch, stride, ascent, cap, data = faces[name]
-        out.append("    {k_%s_bitmap.bytes, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d},  // %s" % (
-            name, len(data), addrs[name], i + 1, cw, ch, stride, FIRST_CHAR, LAST_CHAR - FIRST_CHAR + 1, ascent, cap,
+        out.append("    {k_%s_z.bytes, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d},  // %s" % (
+            name, len(streams[name]), len(data), addrs[name], i + 1, cw, ch, stride, FIRST_CHAR, LAST_CHAR - FIRST_CHAR + 1, ascent, cap,
             name))
     out.append("};")
     out.append("")
@@ -281,6 +300,22 @@ def self_test(spleen_dir, terminus_dir):
         if not cond:
             failures.append(what)
 
+    import zlib  # self-test only: the emitted streams never come from zlib
+
+    def check_stream(name, data):
+        """The face's stream: deterministic, in the 4 KiB window, and inflating to the raw bytes (zlib only here)."""
+        raw = bytes(data)
+        stats = {}
+        z = deflate_pack.deflate(raw, stats)
+        check(deflate_pack.deflate(raw) == z, "%s: two deflate runs differ" % name)
+        check(stats["max_distance"] <= deflate_pack.WINDOW,
+              "%s: a distance of %d, over the %d window" % (name, stats["max_distance"], deflate_pack.WINDOW))
+        try:
+            check(zlib.decompress(z, -12) == raw, "%s: the stream does not inflate to its raw bitmap" % name)
+        except zlib.error as e:
+            check(False, "%s: zlib.decompress(data, -12) refuses the stream: %s" % (name, e))
+        return z
+
     font = Bdf(MINI_BDF, "mini")
     check(font.bbox == (8, 4, 0, -1) and font.ascent == 3, "mini: bbox/ascent")
     # 'a': 3x2 bitmap, xoff 1, yoff 0 -> bottom row of glyph on baseline row 3, i.e. rows 1 and 2 of 4, from column 1.
@@ -295,20 +330,26 @@ def self_test(spleen_dir, terminus_dir):
     check(parse_face_arg("f10x20=x.bdf") == ("f10x20", Path("x.bdf")), "face arg")
     check(name_size("f16x32") == (16, 32) and name_size("f6x12") == (6, 12), "name size")
 
-    # Every generated bitmap is declared word aligned on its type and asserted (ADR 0011), never left to placement;
-    # the faces are packed from RAM_G 0, 4-byte aligned, in ui::Font order, with handles 1..4.
+    # Every generated stream is declared word aligned on its type and asserted (ADR 0011), never left to placement;
+    # the faces are packed from RAM_G 0 by their raw size, 4-byte aligned, in ui::Font order, with handles 1..4.
     sizes = [(16, 32, 2), (10, 20, 2), (8, 16, 1), (6, 12, 1)]
     faces = {n: (w, h, s, h * 3 // 4, h // 2, [0x80] * (95 * s * h)) for n, (w, h, s) in zip(FONT_NAMES, sizes)}
     addrs, end = layout(faces)
     check([addrs[n] for n in FONT_NAMES] == [0, 6080, 9880, 11400] and end == 12540, "layout %r end %d" % (addrs, end))
     check(all(a % 4 == 0 for a in addrs.values()), "layout aligned")
     text = emit_cpp(faces, ["mini"])
-    check(text.count("struct alignas(4) Bitmap") == 1, "emit: aligned bitmap type")
-    check(text.count("constexpr Bitmap<") == len(FONT_NAMES), "emit: one aligned array per face")
-    check(text.count("static_assert(alignof(Bitmap<") == len(FONT_NAMES), "emit: alignment asserted per face")
-    check(".bytes," in text and "[8] = {" not in text, "emit: faces point at the aligned bytes, no bare byte array")
+    check(text.count("struct alignas(4) Stream") == 1, "emit: aligned stream type")
+    check(text.count("constexpr Stream<") == len(FONT_NAMES), "emit: one aligned stream per face")
+    check(text.count("static_assert(alignof(Stream<") == len(FONT_NAMES), "emit: alignment asserted per face")
+    check(".bytes," in text and "[8] = {" not in text, "emit: faces point at the aligned stream, no bare byte array")
     check("static_assert(12540 <= kRamGTiles" in text, "emit: the faces are asserted to fit below the tiles")
     check("font.h geometry differs from the BDF" in text, "emit: geometry asserted")
+    # OS-FLASHDIET A4: every face's stream comes from deflate_pack (never zlib), is deterministic, stays in the
+    # 4 KiB window, and round-trips through zlib.decompress(data, -12) -- zlib only here, in the self-test.
+    for name in FONT_NAMES:
+        raw = bytes(faces[name][5])
+        z = check_stream(name, faces[name][5])
+        check(("k_%s_z.bytes, %d, %d," % (name, len(z), len(raw))) in text, "%s: the FontFace row is (z, z_size, bitmap_bytes)" % name)
 
     if spleen_dir:  # the real Spleen 8x16: 'A' is rows 00 00 7C C6 C6 C6 FE C6 C6 C6 C6 C6 00 00 00 00
         path = Path(spleen_dir) / "spleen-8x16.bdf"
@@ -316,12 +357,14 @@ def self_test(spleen_dir, terminus_dir):
         cw, ch, stride, ascent, cap, data = convert_face(real)
         check((cw, ch, stride, ascent, cap) == (8, 16, 1, 12, 10), "spleen 8x16 metrics %r" % ((cw, ch, stride, ascent, cap),))
         check(len(data) == (LAST_CHAR - FIRST_CHAR + 1) * 16, "spleen 8x16 size")
+        check_stream("spleen-8x16", data)
         a = data[(ord("A") - FIRST_CHAR) * 16:][:16]
         check(a == [0, 0, 0x7C, 0xC6, 0xC6, 0xC6, 0xFE, 0xC6, 0xC6, 0xC6, 0xC6, 0xC6, 0, 0, 0, 0], "spleen 'A' %r" % a)
         check(not any(data[:16]), "spleen space is blank")
         small = Bdf((Path(spleen_dir) / "spleen-6x12.bdf").read_text(encoding="utf-8"), "spleen-6x12.bdf")
         m = convert_face(small)
         check((m[0], m[1], m[2]) == (6, 12, 1), "spleen 6x12 metrics")
+        check_stream("spleen-6x12", m[5])
     if terminus_dir:  # the real Terminus: the cell sizes, cap heights, and that every ASCII glyph is there
         for name, ter in (("f10x20", "ter-u20"), ("f16x32", "ter-u32")):
             for weight in "nb":
@@ -335,6 +378,7 @@ def self_test(spleen_dir, terminus_dir):
                 check(not any(m[5][:m[2] * m[1]]), "%s space is blank" % path.name)
                 check(all(any(m[5][i * m[2] * m[1]:(i + 1) * m[2] * m[1]]) for i in range(1, 95)),
                       "%s every printable glyph has ink" % path.name)
+                check_stream(path.name, m[5])
     print("font_convert self-test: %s" % ("FAILED" if failures else "ok"))
     for f in failures:
         print("  " + f)

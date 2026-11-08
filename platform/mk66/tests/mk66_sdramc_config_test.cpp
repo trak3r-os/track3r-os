@@ -279,7 +279,8 @@ TEST_CASE("mk66 sdram: the ICode alias mask makes 0x0800_0000 and 0x7000_0000 th
   CHECK(hits(mem::kSdramAliasBase));
   CHECK(hits(mem::kSdramAliasBase + mem::kSdramSize - 1u));
   CHECK(mem::sdram_alias(mem::kSampleArenaBase) == 0x08000000u);
-  CHECK(mem::sdram_alias(mem::kUiCacheBase) == 0x08F40000u);
+  CHECK(mem::sdram_alias(mem::kUiCacheBase) == 0x08F50000u);  // OS-CEPTFX S2a: ui_cache keeps its last 448 KiB from 0x70F50000
+  CHECK(mem::sdram_alias(mem::kPtfxBase) == 0x08E90000u);
   CHECK(mem::sdram_alias(mem::kSdramBase + mem::kSdramSize - 4u) == 0x08FFFFFCu);
   // Where it does not: the end of the block (the next 16 MiB) at either address, the neighbouring regions.
   CHECK_FALSE(hits(mem::kSdramBase + mem::kSdramSize));

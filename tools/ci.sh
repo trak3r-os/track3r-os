@@ -11,7 +11,8 @@
 #   tools/ci.sh qemu           cross-build the unit suites for the Cortex-M4F, run them on QEMU mps2-an386, ctest
 #   tools/ci.sh mk66           cross-build the MK66 libraries and the skeleton image, ctest (the image's static checks); then the tone
 #                                 image (-DO3OS_AUDIO_TEST=ON, build only: it compiles different code and must not rot)
-#                                 and the bench image (-DO3OS_BENCH=ON, OS-BENCHOPT, build only; the default image carries no bench code)
+#                                 and the bench image (-DO3OS_BENCH=ON, OS-BENCHOPT, build only; the default image carries no bench code), plus one bench
+#                                 image with the retired A/B benches kept (-DO3OS_BENCH_ARCHIVE=ON, OS-FLASHDIET B1, build only, so that they do not rot)
 #   tools/ci.sh goldens        the host build as for `host`, then only the target update_goldens: rewrites sim/goldens.txt and the PNGs
 #                                 (O3OS_GOLDEN_ONLY narrows it; no ctest). For the remote machine: tools/remote_ci.sh brings both back
 #   tools/ci.sh fingerprints   the host build as for `host`, then only the target update_audio_fingerprints: rewrites tests/audio_fingerprints/*.json and writes
@@ -245,10 +246,10 @@ run_mode() {
       [ "${O3OS_CI_LONG:-0}" = 1 ] || label_args+=(-LE '^long$')
       selected=$(ctest --test-dir "$dir" -N "${label_args[@]}" | sed -n 's/^Total Tests: //p')
       echo "== ci.sh $mode: ctest, the e2e label$([ "${O3OS_CI_LONG:-0}" = 1 ] || echo ', without the long shards (O3OS_CI_LONG=1 adds them)'): $selected of $total_all tests"
-    elif [ -n "$SCOPE_REGEX" ]; then
-      label_args=(-L "$SCOPE_REGEX" -LE '^(e2e|slow)$')
+    elif [ -n "$SCOPE_REGEX" ] && [ "${mode#host}" != "$mode" ]; then   # the host tests only: the target ones are about a minute and hold the budgets
+      label_args=(-L "$SCOPE_REGEX" -LE "$SCOPE_EXCLUDE")
       selected=$(ctest --test-dir "$dir" -N "${label_args[@]}" | sed -n 's/^Total Tests: //p')
-      echo "== ci.sh $mode: ctest, scope changed (without the e2e and slow labels): $selected of $(ctest --test-dir "$dir" -N -LE '^e2e$' | sed -n 's/^Total Tests: //p') tests"
+      echo "== ci.sh $mode: ctest, scope changed (without the labels $SCOPE_EXCLUDE): $selected of $(ctest --test-dir "$dir" -N -LE '^e2e$' | sed -n 's/^Total Tests: //p') tests"
     else
       label_args=(-LE '^e2e$')
       selected=
@@ -314,7 +315,9 @@ e2e_finish() {
 # The areas (a test's labels are set in cmake/O3osLabels.cmake): core model formats seq audio app platform python fuzz manual, and `static`
 # (the repo-wide structure checks: layers, wiring audit, unit coverage), which every non-empty scope includes. `manual` is the user manual's
 # generated pictures (docs/manual/img/, OS-MANUALIMG): a change of one of them, or of its manifest, is not "documents only".
+# QANET's rule tests are two thirds of the `app` time: a scoped run leaves them out unless the change is theirs; the full run keeps them.
 SCOPE_REGEX=
+SCOPE_EXCLUDE='^(e2e|slow|qanet)$'
 ALL_LABELS_RE='^(core|model|formats|seq|audio|app|platform|python|fuzz|manual|static)$'
 
 # scope_resolve: sets SCOPE_REGEX from O3OS_CI_SCOPE; exits 0 (nothing to run) for a change of documents only.
@@ -347,8 +350,19 @@ scope_resolve() {
   while IFS= read -r f; do
     total=$((total + 1))
     case "$f" in
+      modules/*) labels="audio python core" ;;   # before the CMakeLists rule: modules/CMakeLists.txt only adds modules. core: unit_rest holds the module_* tests
       core/*|model/*|hal/*|CMakeLists.txt|*/CMakeLists.txt|cmake/*|tools/ci.sh) labels=all ;;
       formats/*) labels="formats fuzz app" ;;
+      module/*) labels="audio app python" ;;
+      midi/*) labels="seq app platform" ;;
+      usb/*) labels=platform ;;
+      tests/qanet/*|tools/qanet_ledger.py|docs/qa/qanet-ledger.md) labels="static app qanet" ;;
+      # A test file: the unit group of tests/CMakeLists.txt it is in, same globs; any other file is in unit_rest or a group of these labels.
+      tests/native_fuzz_test.cpp) labels=fuzz ;;
+      tests/usb_*_test.cpp) labels=platform ;;
+      tests/audio_*_test.cpp|tests/tb303_*_test.cpp|tests/paula_oracle_test.cpp|tests/amiga_*_test.cpp|tests/cechip_*_test.cpp) labels=audio ;;
+      tests/seq_*_test.cpp|tests/midi_*_test.cpp|tests/metro_*_test.cpp|tests/play_*_test.cpp) labels=seq ;;
+      tests/*_test.cpp) labels="core app model formats" ;;
       seq/*) labels="seq app" ;;
       audio/*) labels="audio seq" ;;
       sim/src/audio_check.cpp|sim/include/o3os/sim/audio_check.h) labels="audio app" ;;   # OS-E2E-2: the measurements of `assert audio` are unit_audio's (tests/audio_check_test.cpp), the journeys and the rest of sim/ are app's
@@ -356,11 +370,12 @@ scope_resolve() {
       tests/audio_fingerprints/*|tools/update_audio_fingerprints.py|tools/check_fingerprint_guard.py) labels="python static" ;;   # OS-E2E-4: the guard (ctest fingerprint_guard) and the tools' self-tests
       app/*|ui/*|sim/*|eve/*) labels=app ;;
       platform/host/*) labels="platform app" ;;   # OS-E2E-1b: the host card and storage (dir_card, dir_storage) are used by the simulator (dir_card_test, sim_card_test, the journeys)
+      platform/mk66/tools/hil/*.py) labels="platform python" ;;   # OS-MIDISYNC M1: the HIL Python tools (midi_clock_tool.py) are pure-Python tools like tools/*.py: their self-tests (ctest midi_clock_tool_selftest) run on their change
       platform/*) labels=platform ;;
       docs/manual/img/*|docs/manual/images.txt|docs/manual/diagrams.txt) labels=manual ;;
       tools/manual_images.py|tools/manual_diagrams.py) labels="python manual" ;;
       tests/e2e_card_fixture_test.py|tests/e2e_og_fixture_test.py) labels="app formats python" ;;   # OS-E2E-1b: the check of the generated card of the journeys (the generator is sim/CMakeLists.txt, which maps to everything)
-      docs/qa/*|tools/qa_cover.py|tools/qanet_ledger.py) labels=static ;;   # OS-E2E-3: the catalogue gate (ctest qa_cover) runs on a catalogue edit; it is not "docs only". OS-QANET A4: the ledger (docs/qa/qanet-ledger.md) and its gate (ctest qanet_ledger) are the same
+      docs/qa/*|tools/qa_cover.py) labels=static ;;   # OS-E2E-3: the catalogue gate (ctest qa_cover) runs on a catalogue edit; it is not "docs only". OS-QANET A4: the ledger (docs/qa/qanet-ledger.md) and its gate (ctest qanet_ledger) are the same
       tools/*.py|tests/*.py|tools/release/*) labels=python ;;
       docs/*|*.md) labels=docs ;;
       *) labels=all ;;   # unmapped: fail safe
@@ -384,6 +399,7 @@ scope_resolve() {
     echo "== ci.sh scope: docs only, no tests"
     exit 0
   fi
+  [ -z "${want[qanet]:-}" ] || SCOPE_EXCLUDE='^(e2e|slow)$'
   local chosen
   chosen=$(printf '%s\n' "${!want[@]}" static | sort -u | paste -sd'|')
   SCOPE_REGEX="^(${chosen})\$"
@@ -488,8 +504,10 @@ case "${1:-}" in
   mk66)
     need_cross mk66
     run_mode mk66 -DO3OS_PLATFORM=mk66 "-DCMAKE_TOOLCHAIN_FILE=$ROOT/cmake/mk66-toolchain.cmake" "-DARM_GNU_ROOT=$ARM_DIR"
-    BUILD_ONLY_TARGET=o3os_image run_mode mk66-tone -DO3OS_PLATFORM=mk66 -DO3OS_AUDIO_TEST=ON "-DCMAKE_TOOLCHAIN_FILE=$ROOT/cmake/mk66-toolchain.cmake" "-DARM_GNU_ROOT=$ARM_DIR"
+    [ "${O3OS_CI_SCOPE:-all}" = changed ] || BUILD_ONLY_TARGET=o3os_image run_mode mk66-tone -DO3OS_PLATFORM=mk66 -DO3OS_AUDIO_TEST=ON "-DCMAKE_TOOLCHAIN_FILE=$ROOT/cmake/mk66-toolchain.cmake" "-DARM_GNU_ROOT=$ARM_DIR"
     BUILD_ONLY_TARGET=o3os_image run_mode mk66-bench -DO3OS_PLATFORM=mk66 -DO3OS_BENCH=ON "-DCMAKE_TOOLCHAIN_FILE=$ROOT/cmake/mk66-toolchain.cmake" "-DARM_GNU_ROOT=$ARM_DIR"
+    # OS-FLASHDIET B1: the archived A/B benches (cpuopt, looper, voice_st, disk) are compiled (bench.cpp, console.cpp with O3OS_BENCH_ARCHIVE=ON, no link: that image no longer fits the 1 MiB flash), so that the code does not rot.
+    [ "${O3OS_CI_SCOPE:-all}" = changed ] || BUILD_ONLY_TARGET=o3os_bench_archive_objs run_mode mk66-bench-archive -DO3OS_PLATFORM=mk66 -DO3OS_BENCH=ON -DO3OS_BENCH_ARCHIVE=ON "-DCMAKE_TOOLCHAIN_FILE=$ROOT/cmake/mk66-toolchain.cmake" "-DARM_GNU_ROOT=$ARM_DIR"
     ;;
   toolchain)
     install_toolchain

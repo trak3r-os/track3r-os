@@ -2,6 +2,7 @@
 //
 // The MIDI out router (midi/out.h).
 #include <o3os/midi/out.h>
+#include <o3os/midi/mtc.h>
 
 namespace o3os::midi {
 
@@ -38,13 +39,18 @@ std::uint64_t MidiOut::offset_due(std::uint64_t due, std::uint32_t port) const n
   return due > back ? due - back : 0u;  // an advance cannot reach before the start of the timeline
 }
 
-std::uint8_t MidiOut::stage(std::uint64_t due, std::uint8_t ports, const Msg& m, bool rt, bool note_on) noexcept {
+std::uint8_t MidiOut::stage_full_frame(std::uint64_t due, std::uint8_t ports, std::uint32_t packed) noexcept {
+  const Msg m{0, {static_cast<std::uint8_t>(packed & 0xFFu), static_cast<std::uint8_t>((packed >> 8) & 0xFFu), static_cast<std::uint8_t>((packed >> 16) & 0xFFu)}};
+  return stage_as(due, ports, m, kStagedFullFrame, false);
+}
+
+std::uint8_t MidiOut::stage_as(std::uint64_t due, std::uint8_t ports, const Msg& m, std::uint8_t rt_field, bool note_on) noexcept {
   std::uint8_t took = 0;
   for (std::uint32_t p = 0; p < kPortCount; ++p) {
     if ((ports & (1u << p)) == 0u) {
       continue;
     }
-    if (!staging_.push(offset_due(due, p), Staged{m, static_cast<std::uint8_t>(p), static_cast<std::uint8_t>(rt ? 1u : 0u), static_cast<std::uint8_t>(note_on && took == 0u ? 1u : 0u)})) {
+    if (!staging_.push(offset_due(due, p), Staged{m, static_cast<std::uint8_t>(p), rt_field, static_cast<std::uint8_t>(note_on && took == 0u ? 1u : 0u)})) {
       ++stats_.staging_overflow;  // the queue is full: this item is lost (a full queue means the ports are not draining, a driver fault)
     } else {
       ++stats_.queued;
@@ -63,8 +69,10 @@ bool MidiOut::send(const audio::SeqEvent& ev, std::uint64_t block_start) noexcep
     case EventKind::MidiStart:
     case EventKind::MidiContinue:
     case EventKind::MidiStop:
+    case EventKind::MidiMtcQf:  // OS-MTC A3: timed like the clock, to a fraction of a sample
       due = core::cycles_from_samples_sfrac(sample, ev.value);
       break;
+    case EventKind::MidiMtcFull:  // `value` is the packed time, not a fraction
     case EventKind::MidiNoteOn:
     case EventKind::MidiNoteOff:
     case EventKind::MidiCc:
@@ -84,7 +92,7 @@ bool MidiOut::send(const audio::SeqEvent& ev, std::uint64_t block_start) noexcep
   // OS-INSTUI S8b: the route of a channel message. `flags` names the ports (0: the device's MIDI OUT), `value` is the instrument's OFFSET in microseconds, added to the due time (bounded: held to
   // kRouteDelayMaxUs, so the staging queue holds an item at most 100 ms past its block). The clock and transport kinds do not use either.
   std::uint8_t ports = cfg_.note_ports;
-  const bool channel_msg = (ev.kind >= EventKind::MidiNoteOn && ev.kind <= EventKind::MidiProgram) || ev.kind >= EventKind::MidiPitchBend;  // (the other kinds are the clock's and the transport's)
+  const bool channel_msg = (ev.kind >= EventKind::MidiNoteOn && ev.kind <= EventKind::MidiProgram) || (ev.kind >= EventKind::MidiPitchBend && ev.kind <= EventKind::MidiPolyAt);  // (the other kinds are the clock's and the transport's)
   if (channel_msg) {
     due += route_delay_cycles(ev);
     if ((ev.flags & audio::kRoutePorts) != 0u) {
@@ -161,6 +169,12 @@ bool MidiOut::send(const audio::SeqEvent& ev, std::uint64_t block_start) noexcep
     case EventKind::MidiSpp:
       stage(due, cfg_.clock_ports, song_position(static_cast<std::uint16_t>(ev.value & 0x3FFF)), false);
       break;
+    case EventKind::MidiMtcQf:
+      stage(due, cfg_.mtc_ports, msg2(kQuarterFrame, ev.a), false);
+      break;
+    case EventKind::MidiMtcFull:
+      stage_full_frame(due, cfg_.mtc_ports, static_cast<std::uint32_t>(ev.value) & 0xFFFFFFu);
+      break;
     default:
       break;
   }
@@ -211,7 +225,26 @@ void MidiOut::flush(std::uint64_t block_end_cycles) noexcept {
       break;  // the port's ring is full: keep the order, try again next block
     }
     bool ok = false;
-    if (p == 0u) {
+    if (s.rt == kStagedFullFrame) {
+      // OS-MTC A3: the full frame, whole or not at all (DIN: push_sysex checks the room of the whole run; USB: four words, so the ring needs room for four).
+      const std::uint32_t packed = static_cast<std::uint32_t>(s.m.b[0]) | (static_cast<std::uint32_t>(s.m.b[1]) << 8) | (static_cast<std::uint32_t>(s.m.b[2]) << 16);
+      std::uint8_t body[mtc::kFullFrameBodyBytes];
+      mtc::full_frame_body(packed, body);
+      if (p == 0u) {
+        ok = din_ != nullptr ? din_->push_sysex(due, body, mtc::kFullFrameBodyBytes) : true;
+      } else if (usb_ != nullptr) {
+        std::uint32_t words[4];
+        const std::uint32_t nw = usb_sysex_events(cfg_.usb_cable, body, mtc::kFullFrameBodyBytes, words);
+        if (usb_->room() >= nw) {
+          for (std::uint32_t i = 0; i < nw; ++i) {
+            usb_->push(due, words[i]);  // cannot fail: the room was checked and the ring only drains meanwhile
+          }
+          ok = true;
+        }
+      } else {
+        ok = true;
+      }
+    } else if (p == 0u) {
       if (din_ != nullptr) {
         ok = s.rt != 0u ? din_->push_rt(due, s.m.b[0]) : din_->push_msg(due, s.m);
       } else {

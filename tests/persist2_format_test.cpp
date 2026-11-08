@@ -198,7 +198,7 @@ TEST_CASE("persist2: set_* checks the value, marks the part present, and changes
   for (int field = 0; field < 5; ++field) {
     NoteState bad = n;
     std::uint8_t* f[5] = {&bad.root, &bad.scale, &bad.octave, &bad.lock, &bad.jump};
-    const std::uint8_t over[5] = {12, 12, 10, 2, 33};
+    const std::uint8_t over[5] = {12, 39, 10, 2, 33};  // the scale's top is the official 38 (OS-SCALES28)
     *f[field] = over[field];
     CHECK(validate_note_state(bad) != nullptr);
     CHECK(p.set_note(bad) == Status::BadValue);
@@ -206,7 +206,7 @@ TEST_CASE("persist2: set_* checks the value, marks the part present, and changes
     CHECK(p.generation() == gen);
   }
   n.root = 11;
-  n.scale = 11;
+  n.scale = 38;  // the largest official scale (OS-SCALES28)
   n.octave = 9;
   n.lock = 1;
   n.jump = 32;
@@ -315,7 +315,7 @@ TEST_CASE("persist2: the Editor's wrappers keep the undo history, the Project's 
   CHECK(ed.can_undo());
   NoteState n;
   init_note_state(n);
-  n.scale = 4;
+  n.scale = 7;  // Phrygian, the official index (OS-SCALES28)
   CHECK(ed.set_note_state(n) == Status::Ok);
   MuteState m;
   init_mute_state(m);
@@ -333,18 +333,18 @@ TEST_CASE("persist2: the Editor's wrappers keep the undo history, the Project's 
   CHECK(ed.can_undo());                          // the history is still the history of the pattern
   CHECK(ed.undo() == UndoResult::Ok);
   CHECK(p.pattern(1) == nullptr);
-  CHECK(p.note().scale == 4);  // the state is not part of any undo unit
+  CHECK(p.note().scale == 7);  // the state is not part of any undo unit
   CHECK(p.mute().mode[1] == 1);
   CHECK(p.scenes().latch == 0);
   CHECK(p.send_fx().value[5] == 40);
   CHECK(ed.redo() == UndoResult::Ok);
   CHECK(ed.can_undo());
   // a change behind the editor's back ends the history: that is what the wrappers are for
-  n.scale = 5;
+  n.scale = 4;  // Lydian, the official index (OS-SCALES28)
   CHECK(p.set_note(n) == Status::Ok);
   CHECK_FALSE(ed.can_undo());
   // a history that was already stale stays so
-  n.scale = 6;
+  n.scale = 9;  // Mixolydian, the official index
   CHECK(ed.set_note_state(n) == Status::Ok);
   CHECK_FALSE(ed.can_undo());
   NoteState bad = n;
@@ -403,7 +403,7 @@ TEST_CASE("persist2: the chunks are the bytes of the description, and the file r
   CHECK(q.send_fx() == proj(2).send_fx());
   // field by field, so a swapped pair cannot hide behind the equality
   CHECK(q.note().root == 7);
-  CHECK(q.note().scale == 9);
+  CHECK(q.note().scale == 15);  // Blues, the official index (OS-SCALES28); the 1.0 byte was 9
   CHECK(q.note().octave == 5);
   CHECK(q.note().lock == 1);
   CHECK(q.note().jump == 4);
@@ -577,7 +577,7 @@ TEST_CASE("persist2: every field survives a round trip at both ends of its range
     SendFxState f;
     const bool edge = round < 2;  // round 0: every field at its smallest, round 1 at its largest
     n.root = static_cast<std::uint8_t>(edge ? (round == 0 ? 0 : 11) : r.next() % 12);
-    n.scale = static_cast<std::uint8_t>(edge ? (round == 0 ? 0 : 11) : r.next() % 12);
+    n.scale = static_cast<std::uint8_t>(edge ? (round == 0 ? 0 : 38) : r.next() % 39);  // the official scales 0..38 (OS-SCALES28)
     n.octave = static_cast<std::uint8_t>(edge ? (round == 0 ? 0 : 9) : r.next() % 10);
     n.lock = static_cast<std::uint8_t>(edge ? round : r.next() % 2);
     n.jump = static_cast<std::uint8_t>(edge ? (round == 0 ? 0 : 32) : r.next() % 33);
@@ -595,7 +595,12 @@ TEST_CASE("persist2: every field survives a round trip at both ends of its range
         sc.slots.fx[i] = static_cast<std::uint8_t>(edge ? (round == 0 ? 0 : 21) : r.next() % 22);  // (0..21: OS-PERFFX P1 added 20 and 21)
         sc.slots.row[i] = static_cast<std::uint8_t>(edge ? (round == 0 ? 0 : 3) : r.next() % 4);
         for (std::int16_t& v : sc.slots.value[i]) {
-          v = static_cast<std::int16_t>(edge ? (round == 0 ? -100 : 100) : static_cast<int>(r.next() % 201) - 100);
+          // OS-PERFMODES M3: a PLAYMODE (id 18) slot holds 0..23 (4..23 are the custom play orders, written as SCEN 1.2 and read as they are; in a 1.0 / 1.1 chunk a value above 3 reads as RND, 3)
+          if (sc.slots.fx[i] == 18) {
+            v = static_cast<std::int16_t>(edge ? (round == 0 ? 0 : 23) : r.next() % 24);
+          } else {
+            v = static_cast<std::int16_t>(edge ? (round == 0 ? -100 : 100) : static_cast<int>(r.next() % 201) - 100);
+          }
         }
       }
     }
@@ -729,23 +734,28 @@ TEST_CASE("persist2: an older file (none of the four chunks) reads as the defaul
 
 TEST_CASE("persist2: the previous build keeps the four chunks as unknown chunks: the pool of an older build holds them next to every other chunk and a full OG import") {
   // docs/formats/o3-project.md section 3: an older build (the one before OS-PERSIST2) knows none of NOTE, MUTE, SCEN, SNFX: they are unknown chunks to it (16 chunks, 16,384 bytes) that it
-  // writes back as it read them. At their largest they are 7 + 19 + 295 + 27 = 348 bytes in four chunks; the OS-004d chunks are 1,152 in five; the OG chunks that share the pool are OGPM (at
-  // most 970) and OGPN (at most 12,822).
-  constexpr std::size_t session_max = 7 + 19 + 295 + 27;
+  // writes back as it read them. At their largest they are 8 + 19 + 295 + 27 = 349 bytes in four chunks (OS-SCALES28: the NOTE 1.1 chunk is 8); the OS-004d chunks are 1,152 in five; the OG chunks
+  // that share the pool are OGPM (at most 970) and OGPN (at most 12,822).
+  constexpr std::size_t session_max = 8 + 19 + 295 + 27;
   constexpr std::size_t state_max = 20 + 27 + 25 + 99 + 981;
-  CHECK(session_max == 348u);
+  CHECK(session_max == 349u);
   CHECK(state_max == 1152u);
   CHECK(session_max + state_max + 970u + 12822u <= kUnknownPoolBytes);
-  CHECK(session_max + state_max + 970u + 12822u == 15292u);
+  CHECK(session_max + state_max + 970u + 12822u == 15293u);
   CHECK(4u + 5u + 2u <= kMaxUnknownChunks);
-  // OS-BUG-PASTE24: the LAW chunk (3 bytes, one more chunk) joins them for an OG project below version 7: 15,295 bytes in 12 chunks (law_format_test.cpp)
+  // OS-BUG-PASTE24: the LAW chunk (3 bytes, one more chunk) joins them for an OG project below version 7: 15,296 bytes in 12 chunks (law_format_test.cpp)
   constexpr std::size_t law_max = 3;
-  CHECK(law_max + session_max + state_max + 970u + 12822u == 15295u);
+  CHECK(law_max + session_max + state_max + 970u + 12822u == 15296u);
   CHECK(1u + 4u + 5u + 2u == 12u);
   CHECK(1u + 4u + 5u + 2u <= kMaxUnknownChunks);
-  // the writer's chunks are exactly those sizes
+  // the writer's chunks are at most those sizes: the persist2 fixture's NOTE is 1.0 (7 bytes), the scales fixture's is 1.1 (8)
   const std::vector<RawChunk> cs = test::split_chunks(session_file());
-  CHECK(find(cs, kChunkNote)->payload.size() + find(cs, kChunkMute)->payload.size() + find(cs, kChunkScen)->payload.size() + find(cs, kChunkSnfx)->payload.size() == session_max);
+  CHECK(find(cs, kChunkNote)->payload.size() + find(cs, kChunkMute)->payload.size() + find(cs, kChunkScen)->payload.size() + find(cs, kChunkSnfx)->payload.size() == session_max - 1u);
+  test::fill_scales(proj(0));
+  Bytes scales_file;
+  NEED(test::save(proj(0), scales_file) == Progress::Done);
+  const std::vector<RawChunk> sc = test::split_chunks(scales_file);
+  CHECK(find(sc, kChunkNote)->payload.size() + find(sc, kChunkMute)->payload.size() + find(sc, kChunkScen)->payload.size() + find(sc, kChunkSnfx)->payload.size() == session_max);
 }
 
 namespace {
@@ -779,15 +789,20 @@ TEST_CASE("persist2: the reader is tolerant: a value out of range is its default
   {
     Project& q = t.load_with(kChunkNote, [](Bytes& p) { p[2] = 12; });
     CHECK(q.note().root == 0);
-    CHECK(q.note().scale == 9);  // the others are what the file said
+    CHECK(q.note().scale == 15);  // the others are what the file said (the 1.0 byte 9 = Blues = the official 15)
     CHECK(q.note().octave == 5);
     CHECK(t.rep.settings_skipped == 1u);
   }
   {
-    Project& q = t.load_with(kChunkNote, [](Bytes& p) { p[3] = 12; });
+    Project& q = t.load_with(kChunkNote, [](Bytes& p) { p[3] = 12; });  // scale10 12: above the twelve, Chromatic
     CHECK(q.note().scale == 0);
     CHECK(q.note().root == 7);
     CHECK(t.rep.settings_skipped == 1u);
+  }
+  {
+    Project& q = t.load_with(kChunkNote, [](Bytes& p) { p[3] = 11; });  // scale10 11: the twelfth pad, Whole tone = the official 23 (OS-SCALES28)
+    CHECK(q.note().scale == 23);
+    CHECK(t.rep.settings_skipped == 0u);
   }
   {
     Project& q = t.load_with(kChunkNote, [](Bytes& p) { p[4] = 10; });
@@ -813,9 +828,9 @@ TEST_CASE("persist2: the reader is tolerant: a value out of range is its default
     CHECK(t.rep.settings_skipped == 5u);
   }
   {
-    Project& q = t.load_with(kChunkNote, [](Bytes& p) { p[2] = 11; p[3] = 11; p[4] = 9; p[5] = 1; p[6] = 32; });  // the edges are valid
+    Project& q = t.load_with(kChunkNote, [](Bytes& p) { p[2] = 11; p[3] = 11; p[4] = 9; p[5] = 1; p[6] = 32; });  // the edges are valid (scale10 11 = the official 23)
     CHECK(q.note().root == 11);
-    CHECK(q.note().scale == 11);
+    CHECK(q.note().scale == 23);
     CHECK(q.note().octave == 9);
     CHECK(q.note().lock == 1);
     CHECK(q.note().jump == 32);
@@ -1071,18 +1086,19 @@ TEST_CASE("persist2: a newer minor only appends: it is read as far as 1.0 goes a
   const std::vector<RawChunk> cs = test::split_chunks(file);
   Report rep;
   for (std::uint32_t id : {kChunkNote, kChunkMute, kChunkScen, kChunkSnfx}) {
+    const bool note = id == kChunkNote;  // OS-SCALES28: NOTE is at 1.1, so its newer minor is 1.2; the first appended byte is then read as the 1.1 scale, 0xAB above 38: counted, and the 1.0 byte's scale stands
     for (std::size_t extra : {std::size_t{1}, std::size_t{2}, std::size_t{33}, std::size_t{5000}}) {
       INFO("chunk " << id << " + " << extra);
       std::vector<RawChunk> out = cs;
       for (RawChunk& c : out) {
         if (c.id == id) {
-          c.payload[1] = id == kChunkScen ? 2 : 1;  // (SCEN is at 1.1 since OS-PERFFX P1: its newer minor is 1.2)
+          c.payload[1] = id == kChunkScen ? 3 : (note ? 2 : 1);  // (SCEN is at 1.2 since OS-PERFMODES M3, NOTE at 1.1 since OS-SCALES28: their newer minors are 1.3 and 1.2)
           c.payload.insert(c.payload.end(), extra, 0xAB);
         }
       }
       NEED(test::load(test::arena(1), build(out), &rep) == Progress::Done);
       CHECK(rep.newer_minor);
-      CHECK(rep.settings_skipped == 0u);
+      CHECK(rep.settings_skipped == (note ? 1u : 0u));
       CHECK(proj(1).note() == proj(2).note());
       CHECK(proj(1).mute() == proj(2).mute());
       CHECK(proj(1).scenes() == proj(2).scenes());

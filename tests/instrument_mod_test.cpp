@@ -10,6 +10,7 @@
 #include <o3os/app/actions.h>
 #include <o3os/app/app.h>
 #include <o3os/app/buttons.h>
+#include <o3os/app/module_ui.h>
 #include <o3os/app/sample_bank.h>
 #include <o3os/app/screens/params_screen.h>
 #include <o3os/app/wave_math.h>
@@ -19,8 +20,12 @@
 #include <o3os/model/params.h>
 #include <o3os/platform/host/fakes.h>
 
+#include "../app/src/param_access.h"  // write_param, read_param (private to app/src): the WT tests call the write and read path themselves
+
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -157,11 +162,13 @@ TEST_CASE("mod rows: the SOURCE words, the five shapes and the speeds follow the
     const core::ParamDesc* src = model::param_desc(inst_id(0, ip::mod(e, ip::ModSource)));
     NEED(src != nullptr);
     CHECK(std::strcmp(src->name, "SOURCE") == 0);
-    CHECK(src->list_count == 3);  // the source labels
+    CHECK(src->list_count == 5);  // the source labels (the last two are OS-CEWTENV W7a's)
     CHECK(std::strcmp(src->names[0], "Off") == 0);
     CHECK(std::strcmp(src->names[1], "Envelope") == 0);
     CHECK(std::strcmp(src->names[2], "LFO") == 0);
-    CHECK((src->min == 0.0f && src->max == 2.0f));
+    CHECK(std::strcmp(src->names[3], "WT Env") == 0);
+    CHECK(std::strcmp(src->names[4], "WT LFO") == 0);
+    CHECK((src->min == 0.0f && src->max == 4.0f));
     CHECK(src->def == (e == 0 ? 1.0f : 0.0f));  // our default: the volume envelope on, the others off
     CHECK((src->flags & core::kParamLearnable) != 0);
     CHECK(src->group == ip::GroupEnvelope);
@@ -252,7 +259,7 @@ TEST_CASE("mod source: Off, Envelope and LFO are the enable and loop bytes, and 
     CHECK(model::param_store(&in, f, 0.0f));  // Off: both clear
     CHECK((in.sampler.envelope[e].enable == 0 && in.sampler.envelope[e].loop == 0));
     CHECK(model::param_load(&in, f) == 0.0f);
-    CHECK_FALSE(model::param_store(&in, f, 3.0f));
+    CHECK_FALSE(model::param_store(&in, f, 5.0f));  // past WT LFO
     CHECK_FALSE(model::param_store(&in, f, -1.0f));
     // nothing else of the envelope moved
     const model::Envelope now = in.sampler.envelope[e];
@@ -271,6 +278,9 @@ TEST_CASE("mod source: the SOURCE row steps up and down through its states") {
   // From each state, one click up / down on the row gives the neighbour SOURCE value, and the same two bytes.
   for (unsigned state = 0; state < 3; ++state) {
     for (const bool up : {true, false}) {
+      if (state == 2 && up) {
+        continue;  // (past LFO the list goes on: WT Env, WT Lfo, OS-CEWTENV W7a)
+      }
       model::Envelope og{1.0f, 0, 3000, 0, 0, 1.0f, 1000, static_cast<std::uint8_t>(state == 2 ? 1 : 0), static_cast<std::uint8_t>(state != 0 ? 1 : 0)};
       model::Instrument in;
       model::init_instrument(in, model::InstrumentKind::Sample);
@@ -312,7 +322,8 @@ TEST_CASE("mod page: the rows follow the source; the encoder on SOURCE walks Off
   CHECK(rig.rows()[1] == ip::mod(1, ip::LfoShape));
   CHECK(rig.rows()[2] == ip::mod(1, ip::LfoSpeed));
   CHECK(rig.rows()[3] == ip::mod(1, ip::LfoAmount));
-  rig.turn(1);  // the end: stays
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  CHECK(rig.invoke("edit.redo") == DispatchResult::Changed);  // (the WT sources past LFO are the cases of "wt mod page" below)
   CHECK(rig.value(ip::mod(1, ip::ModSource)) == 2.0f);
   CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
   CHECK(rig.value(ip::mod(1, ip::ModSource)) == 1.0f);
@@ -354,7 +365,7 @@ TEST_CASE("mod page: Delete puts a row back to its default; the volume destinati
 TEST_CASE("mod page: every destination draws in every mode, with a project and without one") {
   Rig rig;
   for (unsigned e = 0; e < ip::kEnvelopes; ++e) {
-    for (unsigned source = 0; source < 3; ++source) {
+    for (unsigned source = 0; source < 5; ++source) {  // (3 and 4: WT Env and WT Lfo, which draw the contour: OS-CEWTENV W7b)
       NEED(rig.editor->set_param(inst_id(kUsed, ip::mod(e, ip::ModSource)), static_cast<float>(source)) == model::Status::Ok);
       rig.go_mod(e);
       for (unsigned shape = 0; shape < 5 && source == 2; ++shape) {
@@ -375,7 +386,7 @@ TEST_CASE("mod page dims the destinations the instrument does not use, with the 
   rig.go_mod(3);
   CHECK(rig.rows().size() == 6u);  // the rows are all there
   for (unsigned row = 0; row < rig.rows().size(); ++row) {
-    CHECK(std::string(rig.why(row) != nullptr ? rig.why(row) : "") == "WAVETABLE ONLY");  // SOURCE too: the destination is not used
+    CHECK(std::string(rig.why(row) != nullptr ? rig.why(row) : "") == "WAVETABLE OR GRANULAR");  // SOURCE too: the destination is not used
   }
   rig.go_mod(4);
   CHECK(std::string(rig.why(0) != nullptr ? rig.why(0) : "") == "GRANULAR ONLY");
@@ -401,7 +412,7 @@ TEST_CASE("mod page dims the destinations the instrument does not use, with the 
   rig.go_mod(4);
   CHECK(rig.why(0) == nullptr);
   rig.go_mod(3);
-  CHECK(std::string(rig.why(0) != nullptr ? rig.why(0) : "") == "WAVETABLE ONLY");
+  CHECK(rig.why(0) == nullptr);  // OS-CEWTENV W7b: slot 3 is the grain LENGTH on a granular instrument
   // a SOURCE that is Off dims the rows under it (not SOURCE itself), and says so
   rig.go_mod(1);
   CHECK(rig.why(0) == nullptr);
@@ -409,16 +420,81 @@ TEST_CASE("mod page dims the destinations the instrument does not use, with the 
   rig.turn(1);  // Envelope: all rows apply
   CHECK(rig.why(1) == nullptr);
   // the destination's reason wins over the source's
+  CHECK(rig.invoke("instrument.play_mode", 0) == DispatchResult::Changed);
   rig.go_mod(3);
-  CHECK(std::string(rig.why(1) != nullptr ? rig.why(1) : "") == "WAVETABLE ONLY");
+  CHECK(std::string(rig.why(1) != nullptr ? rig.why(1) : "") == "WAVETABLE OR GRANULAR");
 }
 
 TEST_CASE("mod page: a dimmed row is still editable (dimmed, not locked)") {
   Rig rig;
-  rig.go_mod(3);  // WAVETABLE ONLY, on a one shot
+  rig.go_mod(3);  // WAVETABLE OR GRANULAR, on a one shot
   CHECK(rig.why(0) != nullptr);
   rig.turn(2);
   CHECK(rig.value(ip::mod(3, ip::ModSource)) == 2.0f);
+}
+
+// ---- OS-CEWTENV W7b: slot 3 is the grain LENGTH on a granular instrument (enable bit 0x02), the wavetable position on a wavetable (0x01) ------------------------
+
+TEST_CASE("mod page: slot 3 on a granular instrument writes the grain length bit (2), on a wavetable the position bit (1), and the bit follows the play mode") {
+  Rig rig;
+  const auto enable = [&] { return rig.inst()->sampler.envelope[3].enable; };
+  const core::ParamId src = inst_id(kUsed, ip::mod(3, ip::ModSource));
+  CHECK(rig.invoke("instrument.play_mode", 7) == DispatchResult::Changed);
+  NEED(rig.editor->set_param(src, 1.0f) == model::Status::Ok);
+  CHECK(enable() == 2);                              // GRAN LENGTH: bit 0x02, which is what the engine reads on a granular instrument
+  CHECK(rig.value(ip::mod(3, ip::ModSource)) == 1.0f);  // and the row still reads Envelope
+  NEED(rig.editor->set_param(src, 3.0f) == model::Status::Ok);  // WT Env
+  CHECK(enable() == 2);
+  CHECK(rig.inst()->sampler.envelope[3].loop == 2);
+  CHECK(rig.invoke("instrument.play_mode", 6) == DispatchResult::Changed);  // to a wavetable: the bit moves to the position
+  CHECK(enable() == 1);
+  CHECK(rig.invoke("instrument.play_mode", 7) == DispatchResult::Changed);  // and back
+  CHECK(enable() == 2);
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);  // the mode change is one unit, the bit goes with it
+  CHECK(enable() == 1);  // the undo left the wavetable mode in place
+  CHECK(rig.inst()->sampler.play_mode == 6);
+  NEED(rig.editor->set_param(src, 2.0f) == model::Status::Ok);
+  CHECK(enable() == 1);  // a wavetable: the position bit
+  NEED(rig.editor->set_param(src, 0.0f) == model::Status::Ok);
+  CHECK(enable() == 0);
+  CHECK(rig.invoke("instrument.play_mode", 7) == DispatchResult::Changed);
+  CHECK(enable() == 0);  // Off stays Off
+}
+
+TEST_CASE("mod page: the slot 3 header says Gran Length on a granular instrument") {
+  Rig rig;
+  CHECK(rig.invoke("instrument.play_mode", 7) == DispatchResult::Changed);
+  rig.go_mod(3);
+  rig.pass();
+  CHECK(rig.app->failed_frames() == 0u);
+  CHECK(rig.why(0) == nullptr);
+}
+
+TEST_CASE("mod page: a loaded granular instrument whose slot 3 enable is 1 reads SOURCE Off (the engine reads bit 2 only), the bytes stay, and a wavetable reads 1 and 2 as on") {
+  Rig rig;
+  model::Instrument in = *rig.inst();
+  in.sampler.play_mode = 7;
+  in.sampler.envelope[3].enable = 1;  // an OG file or an older project: the position bit on a granular instrument
+  in.sampler.envelope[3].loop = 0;
+  NEED(rig.editor->set_instrument(kUsed, in) == model::Status::Ok);
+  const core::ParamId src = inst_id(kUsed, ip::mod(3, ip::ModSource));
+  CHECK(rig.arena->project.get_param(src) == 0.0f);  // plays nothing, so the page says Off
+  CHECK(rig.inst()->sampler.envelope[3].enable == 1);  // a loaded byte is not rewritten
+  CHECK(rig.value(ip::mod(3, ip::ModSource)) == 0.0f);
+  in.sampler.envelope[3].enable = 2;
+  NEED(rig.editor->set_instrument(kUsed, in) == model::Status::Ok);
+  CHECK(rig.arena->project.get_param(src) == 1.0f);
+  in.sampler.play_mode = 6;
+  in.sampler.envelope[3].enable = 2;
+  NEED(rig.editor->set_instrument(kUsed, in) == model::Status::Ok);
+  CHECK(rig.arena->project.get_param(src) == 1.0f);  // any other mode: 1 or 2 is on
+  in.sampler.envelope[3].enable = 1;
+  NEED(rig.editor->set_instrument(kUsed, in) == model::Status::Ok);
+  CHECK(rig.arena->project.get_param(src) == 1.0f);
+  in.sampler.play_mode = 7;  // back to granular with enable 1 and set the source: the write sets the right bit
+  NEED(rig.editor->set_instrument(kUsed, in) == model::Status::Ok);
+  NEED(rig.editor->set_param(src, 1.0f) == model::Status::Ok);
+  CHECK(rig.inst()->sampler.envelope[3].enable == 2);
 }
 
 // ---- the engine: the LFO is audible, and an edit reaches it at the handover, through undo and redo ------------------------------------------------------------
@@ -507,6 +583,169 @@ TEST_CASE("mod engine: an LFO-only edit (the speed of a slot that already is an 
 
 // ---- the S5 review: INIT, and a wavetable window the engine does not play -------------------------------------------------------------------------------------
 
+// ---- OS-CEWTENV W7a: the WT ENV and WT LFO sources and their rows -------------------------------------------------------------------------------------------------------------------
+
+TEST_CASE("wt mod page: SOURCE cycles Off, ENV, LFO, WT ENV, WT LFO, and each source has its rows") {
+  Rig rig;
+  rig.go_mod(1);
+  const std::size_t base = rig.editor->journal().depth();
+  const char* const words[5] = {"Off", "Envelope", "LFO", "WT Env", "WT LFO"};
+  app::ParamScratch scratch;
+  const core::ParamDesc* d = app::describe_param(rig.app->model(), inst_id(kUsed, ip::mod(1, ip::ModSource)), scratch);
+  NEED(d != nullptr);
+  for (unsigned s = 0; s < 5; ++s) {
+    CHECK(std::string(d->names[s]) == words[s]);
+  }
+  CHECK(d->max == 4.0f);
+  for (unsigned s = 1; s < 5; ++s) {
+    rig.pass(1600);  // a pause past the 1.5 s window starts a new undo step
+    rig.turn(1);
+    CHECK(rig.value(ip::mod(1, ip::ModSource)) == static_cast<float>(s));
+  }
+  CHECK(rig.editor->journal().depth() == base + 4);  // one undo unit per step
+  const model::SamplerParams& sp = rig.inst()->sampler;
+  CHECK((sp.envelope[1].enable == 1 && sp.envelope[1].loop == 3));  // WT LFO is loop 3
+  rig.turn(1);                                                       // the end of the list stays
+  CHECK(rig.value(ip::mod(1, ip::ModSource)) == 4.0f);
+  // the rows of WT LFO: SOURCE, WAVE, SPEED, WARP X, WARP Y, AMOUNT
+  std::vector<std::uint16_t> r = rig.rows();
+  NEED(r.size() == 6);
+  CHECK(r[0] == ip::mod(1, ip::ModSource));
+  CHECK(r[1] == ip::wt(1, ip::WtWave));
+  CHECK(r[2] == ip::mod(1, ip::LfoSpeed));
+  CHECK(r[3] == ip::wt(1, ip::WtWarpX));
+  CHECK(r[4] == ip::wt(1, ip::WtWarpY));
+  CHECK(r[5] == ip::mod(1, ip::LfoAmount));
+  rig.turn(-1);  // WT ENV: SOURCE, WAVE, DURATION, WARP X, WARP Y, SUSTAIN, RELEASE, AMOUNT
+  CHECK((sp.envelope[1].enable == 1 && sp.envelope[1].loop == 2));
+  r = rig.rows();
+  NEED(r.size() == 8);
+  CHECK(r[1] == ip::wt(1, ip::WtWave));
+  CHECK(r[2] == ip::wt(1, ip::WtDuration));
+  CHECK(r[3] == ip::wt(1, ip::WtWarpX));
+  CHECK(r[4] == ip::wt(1, ip::WtWarpY));
+  CHECK(r[5] == ip::wt(1, ip::WtSustain));
+  CHECK(r[6] == ip::envelope(1, ip::EnvRelease));
+  CHECK(r[7] == ip::mod(1, ip::LfoAmount));  // the depth the sound reads (put_mod: lfo[e].amount), not the envelope's amount
+  rig.turn(-1);  // LFO: SOURCE, SHAPE, SPEED, AMOUNT
+  CHECK(rig.rows().size() == 4);
+  CHECK(rig.rows()[1] == ip::mod(1, ip::LfoShape));
+  rig.turn(-1);  // ENV
+  for (const std::uint16_t f : rig.rows()) {
+    CHECK_FALSE(ip::is_wt_field(f));
+  }
+}
+
+TEST_CASE("wt mod page: a WT ENV's AMOUNT row is the slot's lfo amount (what the sound reads); the amp slot has no AMOUNT row") {
+  Rig rig;
+  NEED(rig.editor->set_param(inst_id(kUsed, ip::mod(1, ip::ModSource)), 3.0f) == model::Status::Ok);  // WT ENV on slot 1
+  NEED(rig.editor->set_param(inst_id(kUsed, ip::mod(0, ip::ModSource)), 3.0f) == model::Status::Ok);  // and on the amp slot
+  rig.settle();
+  const model::SamplerParams& sp = rig.inst()->sampler;
+  rig.go_mod(1, 7);
+  const auto env_amount = sp.envelope[1].amount;
+  const float before = rig.value(ip::mod(1, ip::LfoAmount));
+  rig.turn(5);
+  CHECK(rig.value(ip::mod(1, ip::LfoAmount)) != before);
+  CHECK(sp.envelope[1].amount == env_amount);  // the envelope's own amount is not touched
+  rig.go_mod(0);
+  const std::vector<std::uint16_t> r = rig.rows();
+  CHECK(r.size() == 7u);
+  for (const std::uint16_t f : r) {
+    CHECK(f != ip::mod(0, ip::LfoAmount));
+    CHECK(f != ip::envelope(0, ip::EnvAmount));
+  }
+}
+
+TEST_CASE("wt mod page: the WT fields read and write the instrument, one undo unit each, and the slot is rebound") {
+  Rig rig;
+  NEED(rig.editor->set_param(inst_id(kUsed, ip::mod(2, ip::ModSource)), 3.0f) == model::Status::Ok);  // WT ENV on slot 2
+  rig.settle();
+  auto model = std::make_unique<app::Model>();
+  app::ViewState view;
+  app::ActionContext ctx{*model, view, app::App::kSoftKeyLabels, 1000, true, &rig.app->session()};
+  ctx.edit = rig.editor.get();
+  ctx.samples = &rig.bank;
+  const model::SamplerParams& sp = rig.inst()->sampler;
+  const std::size_t depth = rig.editor->journal().depth();
+  const std::uint32_t gen = rig.arena->project.generation();
+  const auto decay0 = sp.envelope[2].decay;
+  // WAVE: the contour byte of lfo[2]
+  const core::ParamId wave = inst_id(kUsed, ip::wt(2, ip::WtWave));
+  CHECK(app::write_param(ctx, wave, 77.0f) == app::WriteResult::Changed);
+  CHECK(sp.lfo[2].shape == 77);
+  CHECK(rig.bank.pending(kUsed));  // the slot rebinds
+  CHECK(rig.editor->journal().depth() == depth + 1);
+  CHECK(rig.arena->project.generation() != gen);
+  rig.settle();
+  CHECK_FALSE(rig.bank.pending(kUsed));
+  CHECK(app::write_param(ctx, wave, 77.0f) == app::WriteResult::Unchanged);
+  CHECK(rig.editor->journal().depth() == depth + 1);
+  // DURATION: the slot's decay in ms
+  const core::ParamId dur = inst_id(kUsed, ip::wt(2, ip::WtDuration));
+  CHECK(app::write_param(ctx, dur, 20000.0f) == app::WriteResult::Changed);
+  CHECK(sp.envelope[2].decay == 20000);
+  CHECK(app::write_param(ctx, dur, 20010.0f) == app::WriteResult::Rejected);
+  CHECK(sp.envelope[2].decay == 20000);
+  CHECK(app::write_param(ctx, dur, 1.0f) == app::WriteResult::Rejected);  // 0 and 1 play as 1000 ms: the page starts at 2
+  CHECK(app::write_param(ctx, dur, 2.0f) == app::WriteResult::Changed);
+  CHECK(sp.envelope[2].decay == 2);
+  // WARP X and Y share the byte: X the high nibble, Y the low one; -7..+7 by the nibble law (9..15 are -7..-1)
+  const core::ParamId wx = inst_id(kUsed, ip::wt(2, ip::WtWarpX));
+  const core::ParamId wy = inst_id(kUsed, ip::wt(2, ip::WtWarpY));
+  CHECK(app::write_param(ctx, wx, 3.0f) == app::WriteResult::Changed);
+  CHECK(app::write_param(ctx, wy, -7.0f) == app::WriteResult::Changed);
+  CHECK(sp.lfo[2].wt_bend == ((3u << 4) | 9u));
+  CHECK(model::wt_param_value(*rig.inst(), ip::wt(2, ip::WtWarpY)) == -7.0f);
+  CHECK(model::wt_param_value(*rig.inst(), ip::wt(2, ip::WtWarpX)) == 3.0f);
+  CHECK(app::write_param(ctx, wx, -1.0f) == app::WriteResult::Changed);
+  CHECK(sp.lfo[2].wt_bend == ((15u << 4) | 9u));
+  CHECK(app::write_param(ctx, wx, 8.0f) == app::WriteResult::Rejected);
+  CHECK(app::write_param(ctx, wy, std::numeric_limits<float>::quiet_NaN()) == app::WriteResult::Rejected);
+  // SUSTAIN: OFF (0) or 1..99
+  const core::ParamId sus = inst_id(kUsed, ip::wt(2, ip::WtSustain));
+  CHECK(app::write_param(ctx, sus, 99.0f) == app::WriteResult::Changed);
+  CHECK(sp.lfo[2].wt_sust == 99);
+  CHECK(app::write_param(ctx, sus, 100.0f) == app::WriteResult::Rejected);
+  CHECK(app::write_param(ctx, sus, 0.0f) == app::WriteResult::Changed);
+  CHECK(sp.lfo[2].wt_sust == 0);
+  // eight changes, eight undo units; undoing them all restores the instrument's bytes
+  CHECK(rig.editor->journal().depth() == depth + 8);
+  for (std::size_t i = 0; i < 8; ++i) {
+    CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  }
+  CHECK(rig.editor->journal().depth() == depth);
+  CHECK(sp.lfo[2].wt_bend == 0);
+  CHECK(sp.envelope[2].decay == decay0);
+}
+
+TEST_CASE("wt mod page: the WT fields are described but are no table row (not learnable), refuse a MIDI slot, and a stale contour reads as a Triangle once the slot is an LFO") {
+  Rig rig;
+  const core::ParamId id = inst_id(kUsed, ip::wt(0, ip::WtDuration));
+  app::ParamScratch scratch;
+  const core::ParamDesc* d = app::describe_param(rig.app->model(), id, scratch);
+  NEED(d != nullptr);
+  CHECK(std::string(d->name) == "DURATION");
+  CHECK(model::param_desc(id) == nullptr);
+  CHECK_FALSE(model::instrument_field_app_writable(ip::wt(0, ip::WtDuration)));
+  CHECK(app::is_wt_param(id));
+  CHECK_FALSE(app::is_wt_param(inst_id(kUsed, ip::mod(0, ip::LfoShape))));
+  auto model = std::make_unique<app::Model>();
+  app::ViewState view;
+  app::ActionContext ctx{*model, view, app::App::kSoftKeyLabels, 1000, true, &rig.app->session()};
+  ctx.edit = rig.editor.get();
+  ctx.samples = &rig.bank;
+  CHECK(app::write_param(ctx, inst_id(9, ip::wt(0, ip::WtWave)), 5.0f) == app::WriteResult::NoInstrument);  // the MIDI slot of the rig
+  // WT LFO with a contour 77, then LFO: the stored byte stays, the page reads the Triangle
+  NEED(rig.editor->set_param(inst_id(kUsed, ip::mod(3, ip::ModSource)), 4.0f) == model::Status::Ok);
+  CHECK(app::write_param(ctx, inst_id(kUsed, ip::wt(3, ip::WtWave)), 77.0f) == app::WriteResult::Changed);
+  NEED(rig.editor->set_param(inst_id(kUsed, ip::mod(3, ip::ModSource)), 2.0f) == model::Status::Ok);
+  const core::ParamId shape = inst_id(kUsed, ip::mod(3, ip::LfoShape));
+  float shown = -1.0f;
+  CHECK(app::read_param(rig.app->model(), shape, shown));
+  CHECK(shown == static_cast<float>(model::kLfoShapeTriangle));
+}
+
 TEST_CASE("init: the envelope delay, hold and loop and the LFOs go back to the defaults too; kind, sample, slices, points, name stay") {
   Rig rig;
   model::Instrument edited = *rig.inst();
@@ -520,7 +759,7 @@ TEST_CASE("init: the envelope delay, hold and loop and the LFOs go back to the d
     edited.sampler.envelope[e].hold = static_cast<std::uint16_t>(200 + e);
     edited.sampler.envelope[e].loop = 1;
     edited.sampler.envelope[e].enable = 1;
-    edited.sampler.lfo[e] = model::Lfo{static_cast<std::uint8_t>(4 - e % 5), static_cast<std::uint8_t>(10 + e), 0.9f};
+    edited.sampler.lfo[e] = model::Lfo{static_cast<std::uint8_t>(4 - e % 5), static_cast<std::uint8_t>(10 + e), 0, 0, 0.9f};
   }
   NEED(rig.editor->set_instrument(kUsed, edited) == model::Status::Ok);
   rig.shift_tap(Button::Delete);

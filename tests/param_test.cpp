@@ -113,10 +113,13 @@ TEST_CASE("param tables: every row is a valid descriptor that its storage can ho
     // every parameter is a Learn target (product-ux decision 4), but the PLAY ENGINE choice (OS-FU5): it is made by the engine action, which a CC does not drive; and USB RETURN
     // (OS-USBRET) and USB AUDIO (OS-USBAUDIO): a controller must not be able to re-enumerate the USB port by accident. Those two are the rows that are press to apply (kParamApply), and no others are.
     const bool reenumerates = std::strcmp(d->name, "USB RETURN") == 0 || std::strcmp(d->name, "USB AUDIO") == 0;
+    // OS-MIDICCMAP S1: and CC MAP, a device MIDI routing switch, not learnable.
+    // OS-MTC A3: and MTC OUT and MTC START (a controller must not start a time code).
+    const bool routing = std::strcmp(d->name, "CC MAP") == 0 || std::strcmp(d->name, "MTC OUT") == 0 || std::strcmp(d->name, "MTC START") == 0 || std::strcmp(d->name, "MTC IN") == 0;  // OS-MTC B3: and MTC IN (a controller must not hand the transport to a master)
     // OS-INSTUI S3: and PLAY MODE, WT SIZE and SLICES, which are made by their actions (a window size moves by counters, a mode needs the sample's say, the slices are made on Wave)
     const bool by_action = std::strcmp(d->name, "PLAY ENGINE") == 0 || std::strcmp(d->name, "PLAY MODE") == 0 || std::strcmp(d->name, "WT SIZE") == 0 || std::strcmp(d->name, "SLICES") == 0 ||
                            std::strcmp(d->name, "WT POS") == 0 || std::strcmp(d->name, "SLICE") == 0;  // (WT POS and SLICE: not until a CC scale onto the windows / slices there are exists)
-    CHECK(((d->flags & core::kParamLearnable) != 0) == (!by_action && !reenumerates));
+    CHECK(((d->flags & core::kParamLearnable) != 0) == (!by_action && !reenumerates && !routing));
     CHECK(((d->flags & core::kParamApply) != 0) == reenumerates);
     CHECK_MESSAGE(((d->flags & core::kParamApply) == 0 || (d->flags & core::kParamLearnable) == 0), d->name);
     // The storage can hold the whole range, and a default is a value of it.
@@ -125,7 +128,7 @@ TEST_CASE("param tables: every row is a valid descriptor that its storage can ho
       case model::ParamStore::I8: CHECK((d->min >= -128.0f && d->max <= 127.0f)); break;
       case model::ParamStore::U16: CHECK((d->min >= 0.0f && d->max <= 65535.0f)); break;
       case model::ParamStore::F32: break;
-      case model::ParamStore::EnvState: CHECK((d->min == 0.0f && d->max == 2.0f)); break;  // OS-INSTUI S6: SOURCE, Off / Envelope / LFO
+      case model::ParamStore::EnvState: CHECK((d->min == 0.0f && d->max == 4.0f)); break;  // OS-INSTUI S6, OS-CEWTENV W7a: SOURCE, Off / Envelope / LFO / WT Env / WT LFO
     }
     if (f.mask != 0) {
       CHECK((d->min == 0.0f && d->max == 1.0f && (f.mask & (f.mask - 1u)) == 0));  // a switch: one bit
@@ -137,8 +140,8 @@ TEST_CASE("param tables: every row is a valid descriptor that its storage can ho
              std::strcmp(d->name, "FINE TUNE") == 0));
     }
   });
-  // 64 + 16 instruments' and tracks' worth, and one each of the others: 2 x 95 + 2 x 5 + 8 + 3 + 26 rows were visited.
-  CHECK(rows == 2u * 95u + 2u * 5u + 8u + 3u + 26u);
+  // 64 + 16 instruments' and tracks' worth, and one each of the others: 2 x 95 + 2 x 5 + 8 + 3 + 30 rows were visited (29 device rows before OS-MTC B3 appended MTC IN, 27 device rows before OS-MTC A3 appended MTC OUT and MTC START, 26 before OS-MIDICCMAP S1 appended CC MAP).
+  CHECK(rows == 2u * 95u + 2u * 5u + 8u + 3u + 30u);
   CHECK(model::instrument_param::kCount == 95u);  // 14 + the 9 rows of the source page (OS-INSTUI S3) + 6 x 6 envelope fields + 6 x 4 MOD rows (SOURCE, LFO SHAPE, SPEED, AMOUNT; OS-INSTUI S6) + the 12 MIDI / VEL> rows (OS-INSTUI S8b + S9)
   CHECK(model::kProjectParamSlots == 64u * 95u + 16u * 5u + 8u);
 }
@@ -161,9 +164,9 @@ TEST_CASE("param tables: what is not a parameter is not found") {
   CHECK_FALSE(model::find_param(core::param_id(ParamKind::Master, 0, 8), f));
   CHECK_FALSE(model::find_param(core::param_id(ParamKind::Project, 0, 4), f));
   CHECK_FALSE(model::find_param(core::param_id(ParamKind::Project, 1, 0), f));
-  CHECK_FALSE(model::find_param(core::param_id(ParamKind::Device, 0, 26), f));
-  CHECK(model::param_desc(core::param_id(ParamKind::Device, 0, 26)) == nullptr);
-  CHECK(model::param_slot(core::param_id(ParamKind::Device, 0, 26)) == model::kNoParamSlot);
+  CHECK_FALSE(model::find_param(core::param_id(ParamKind::Device, 0, 30), f));  // 30 is past the last field (OS-MTC B3 took 29, A3 27 and 28, OS-MIDICCMAP S1 26)
+  CHECK(model::param_desc(core::param_id(ParamKind::Device, 0, 30)) == nullptr);
+  CHECK(model::param_slot(core::param_id(ParamKind::Device, 0, 30)) == model::kNoParamSlot);
   CHECK(model::param_field_of_slot(ParamKind::Track, 5) == 0xFFFFu);
   CHECK(model::param_index_count(ParamKind::None) == 0u);
   CHECK(model::param_slots_per_index(ParamKind::None) == 0u);
@@ -207,7 +210,7 @@ TEST_CASE("param tables: the pages cover every field once, every page has rows, 
         CHECK(n >= 1u);
         // the parameter page's ParamView::kMaxRows; the source group is the exception (nine rows and PLAY ENGINE): the page shows the rows of the play mode, at most six
         // ... and the MOD group lists everything a destination can hold (SOURCE, the stored ENABLE, the five envelope rows and the three of the LFO: ten); the page shows six of them
-        CHECK(n <= (kind == ParamKind::Instrument && (g == model::instrument_param::GroupSource || g == model::instrument_param::GroupEnvelope) ? 10u : (kind == ParamKind::Device ? 9u : 8u)));  // the Config pages hold ParamView::kConfigRows = 9 (E-CFG-03)
+        CHECK(n <= (kind == ParamKind::Instrument && (g == model::instrument_param::GroupSource || g == model::instrument_param::GroupEnvelope) ? 10u : (kind == ParamKind::Device ? 13u : 8u)));  // the Config pages hold ParamView::kConfigRows = 13 (OS-MTC B3's MTC IN; 12 with OS-MTC A3's MTC OUT and MTC START; 10 with OS-MIDICCMAP S1's CC MAP, 9 since E-CFG-03)
         std::set<std::string> names;
         for (unsigned i = 0; i < n; ++i) {
           const ParamDesc* d = model::param_desc(core::param_id(kind, 0, fields[i]));
@@ -558,7 +561,7 @@ TEST_CASE("settings: a block starts at the defaults, takes values in range, coun
   CHECK(s.set(model::device_setting::ClockSync, 7.0f) == model::Status::BadValue);
   CHECK(s.set(model::device_setting::ClockSync, -6.0f) == model::Status::Ok);
   CHECK(s.get(model::device_setting::ClockSync) == -6.0f);  // a signed field
-  CHECK(s.set(26, 0.0f) == model::Status::BadIndex);  // 26 is past the last field (E-PAT-35 took 25, the block is full)
+  CHECK(s.set(30, 0.0f) == model::Status::BadIndex);  // 30 is past the last field (OS-MTC B3 took 29, A3 27 and 28, OS-MIDICCMAP S1 26; the block's room is 32)
   CHECK(s.get(model::device_setting::MetronomeVolume) == 80.0f);
   CHECK(s.generation(model::device_setting::MetronomeVolume) == g_volume + 1);
   CHECK(s.check_invariants());
@@ -660,6 +663,33 @@ TEST_CASE("learn: scopes follow the maintainer's split, bindings are valid or em
   CHECK_FALSE(core::learn_overlap(bind(kCutoff, 74, 3), bind(kResonance, 74, 4)));
   CHECK_FALSE(core::learn_overlap(bind(kCutoff, 74), bind(kResonance, 75)));
   CHECK_FALSE(core::learn_overlap(core::LearnBinding{}, core::LearnBinding{}));
+}
+
+TEST_CASE("learn: an insert's parameter (OS-INSFX S7) is a project binding with an id of this version, and never follows") {
+  const auto ins = [](unsigned index, unsigned field) { return core::param_id(ParamKind::Insert, index, field); };
+  CHECK(core::learn_scope(ParamKind::Insert) == core::LearnScope::Project);
+  CHECK(core::learn_valid(bind(ins(0, 0), 20)));
+  CHECK(core::learn_valid(bind(ins(31, 31), 20, 16, core::LearnMode::Jump)));                 // track 16, INS B, the last field
+  CHECK(core::learn_valid(bind(ins(core::kInsertIdMaster, 5), 20)));                           // the master insert: index 32
+  CHECK_FALSE(core::learn_valid(bind(ins(core::kInsertIdMaster + 1, 0), 20)));                 // the master has no slot 1
+  CHECK_FALSE(core::learn_valid(bind(ins(0, core::kInsertIdFields), 20)));                     // field 32 is past O3M_PARAMS_MAX
+  CHECK_FALSE(core::learn_valid(bind(ins(0, 0), 20, 0, core::LearnMode::Pickup, core::kLearnFollow)));
+  CHECK(core::insert_param_valid(ins(32, 31)));
+  CHECK_FALSE(core::insert_param_valid(ins(33, 0)));
+  CHECK_FALSE(core::insert_param_valid(core::param_id(ParamKind::Instrument, 0, 0)));
+  // targets and planning are the same as for any binding: one controller moves one parameter
+  CHECK(core::learn_targets(bind(ins(5, 3), 20), ins(5, 3)));
+  CHECK_FALSE(core::learn_targets(bind(ins(5, 3), 20), ins(4, 3)));
+  core::LearnBinding store[core::kLearnSlots] = {};
+  core::LearnPlan plan{0, 0};
+  CHECK(core::learn_plan(store, core::kLearnSlots, bind(ins(5, 3), 20), plan));
+  store[plan.write] = bind(ins(5, 3), 20);
+  CHECK(core::learn_plan(store, core::kLearnSlots, bind(ins(5, 3), 21), plan));  // the same parameter again: its own slot
+  CHECK(plan.write == 0);
+  CHECK(core::learn_plan(store, core::kLearnSlots, bind(ins(6, 0), 20), plan));  // another parameter on the same controller takes the message over
+  CHECK(plan.write == 0);
+  CHECK(core::learn_find_param(store, core::kLearnSlots, ins(5, 3)) == 0);
+  CHECK(core::learn_store_valid(store, core::kLearnSlots));
 }
 
 TEST_CASE("learn: planning a binding into a store") {

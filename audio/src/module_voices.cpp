@@ -4,7 +4,9 @@
 #include <o3os/audio/module_q15.h>
 
 #include <o3os/core/fast_math.h>
+#include <o3os/module/clock_state.h>
 #include <o3os/module/image.h>
+#include <o3os/module/key_state.h>
 #include <o3os/module/view.h>
 
 #include <cmath>
@@ -50,39 +52,34 @@ float host_log2(float x) { return core::log2_fast(x); }
 // float, about 4 KB of flash, for a service that is asked about corner frequencies. The argument is brought into [-pi, pi] (2 pi as two floats: k turns cost no
 // precision), folded into [-pi/2, pi/2] and a Taylor series of x (relative error under 1e-7, the small angles of a 7 Hz filter included) does the rest. Absolute error
 // under 1e-6 for |x| < 1000 rad; NaN and infinity give 0.
-constexpr float kPi = 3.14159265358979f;
-float sin_core(float x) {  // |x| <= pi/2
-  const float x2 = x * x;
-  return x * (1.0f + x2 * (-1.0f / 6.0f + x2 * (1.0f / 120.0f + x2 * (-1.0f / 5040.0f + x2 * (1.0f / 362880.0f + x2 * (-1.0f / 39916800.0f))))));
-}
-bool reduce(float& x) {  // into [-pi, pi]; false for a value out of range
-  if (!(x > -1.0e4f && x < 1.0e4f)) {
-    return false;
-  }
-  const float turns = x * (1.0f / 6.28318530717959f);
-  const float k = static_cast<float>(static_cast<std::int32_t>(turns + (turns < 0.0f ? -0.5f : 0.5f)));
-  x = (x - k * 6.28125f) - k * 0.0019353071795864769f;
-  return true;
-}
-float host_sin(float x) {
-  if (!reduce(x)) {
-    return 0.0f;
-  }
-  if (x > kPi * 0.5f) {
-    x = kPi - x;
-  } else if (x < -kPi * 0.5f) {
-    x = -kPi - x;
-  }
-  return sin_core(x);
-}
-float host_cos(float x) {
-  if (!reduce(x)) {
-    return 0.0f;
-  }
-  const float ax = x < 0.0f ? -x : x;
-  return ax <= kPi * 0.5f ? sin_core(kPi * 0.5f - ax) : -sin_core(ax - kPi * 0.5f);  // cos x = sin(pi/2 - |x|); past pi/2 it is -sin(|x| - pi/2)
-}
+float host_sin(float x) { return core::sin_fast(x); }
+float host_cos(float x) { return core::cos_fast(x); }
 void host_log_none(const char*) {}
+
+// ABI 1.12 (OS-INSFX-ABI2): get_clock (A3) answers what the engine wrote at the last block boundary (module/clock_state.h): the tempo that plays, the beat as of this block's first sample and the flags, and
+// returns 0. With no source behind it (nothing written: boot, a test) it says "stopped, the project tempo" (12000 = 120 BPM, beat 0, no flags) and returns 1. track_level is the stub of A6: 0. A caller that
+// set a size below sizeof(o3m_clock) gets the members that fit, as get_transport does. No allocation, no loop: four atomic loads and a float multiply (the Q16.16 beat times 2^-16 is exact).
+std::int32_t host_get_clock(o3m_clock* out) {
+  if (out == nullptr) {
+    return 1;
+  }
+  o3m_clock c = {static_cast<std::uint32_t>(sizeof(o3m_clock)), 0u, 12000u, 0.0f};
+  std::uint32_t flags = 0;
+  std::uint32_t tempo = 0;
+  std::uint32_t beat = 0;
+  const bool live = module::g_clock.read(flags, tempo, beat);
+  if (live) {
+    c.flags = flags & (O3M_CLOCK_PLAYING | O3M_CLOCK_STARTED | O3M_CLOCK_WRAPPED);
+    c.tempo_x100 = tempo;
+    c.beat = static_cast<float>(beat) * (1.0f / 65536.0f);
+  }
+  const std::uint32_t want = out->size < sizeof(o3m_clock) ? out->size : static_cast<std::uint32_t>(sizeof(o3m_clock));
+  const std::uint32_t keep = out->size;
+  std::memcpy(out, &c, want);
+  out->size = keep < sizeof(o3m_clock) ? keep : static_cast<std::uint32_t>(sizeof(o3m_clock));
+  return live ? 0 : 1;
+}
+float host_track_level(std::uint32_t track) { return module::g_keys.level(track); }  // OS-INSFX-ABI2 A6: the key store (module/key_state.h), render context
 
 }  // namespace
 
@@ -103,12 +100,23 @@ ModuleVoices::ModuleVoices() noexcept {
   host_.log2_f = &host_log2;
   host_.sin_f = &host_sin;
   host_.cos_f = &host_cos;
+  host_.get_clock = &host_get_clock;      // ABI 1.12 (OS-INSFX-ABI2 A3 and A6): both live, track_level below is the key store
+  host_.track_level = &host_track_level;
   host_.draw = module::draw_api();  // ABI 1.1 (OS-012b): the restricted draw API of the views (module/view.h); a module only gets a canvas inside view_draw()
+  refresh_host();
+}
+
+void ModuleVoices::refresh_host() noexcept {
+  for (unsigned k = 0; k < kMaxRateShift; ++k) {
+    host_rate_[k] = host_;
+    host_rate_[k].sample_rate = host_.sample_rate / static_cast<float>(2u << k);
+  }
 }
 
 void ModuleVoices::set_hooks(const Hooks& hooks) noexcept {
   hooks_ = hooks;
   host_.log = hooks.log != nullptr ? hooks.log : &host_log_none;
+  refresh_host();
 }
 
 bool ModuleVoices::attach_scratch(void* mem, std::uint32_t bytes) noexcept {
@@ -179,6 +187,10 @@ ModuleVoices::Bind ModuleVoices::bind(unsigned slot, const o3m_module& mod, std:
   in.pitch = mod.abi_minor >= module::kPitchAbiMinor ? mod.pitch : nullptr;  // OS-MODPITCH: the members past byte 64 exist only in a descriptor of 1.8 (a 1.7 module's is 64 bytes: nothing past it is read)
   in.ramp = PitchRamp{};
   in.ramp_on = 0;
+  in.shift = 0;  // OS-MODRATE: a bind is FULL (the host_ table it was inited with); the instrument's RATE is set after, set_rate() (ModuleUi::sync_slots)
+  in.ph = 0;
+  in.hold = 0.0f;
+  in.rating = 0;
   in.gov.reset();  // OS-GOV: a reload starts the instance cold and unmuted
   in.acc_render = in.acc_out = in.acc_zero = 0;  // OS-303PERF: and with no measure. (The render does not add to the cell of an instance that is not published, but a `diag cpu reset` it serves clears every cell, this one too:
                                                   // the two clear() can meet, and both write only zeros and leave the sequence number even; see PerfCell)
@@ -224,8 +236,141 @@ void ModuleVoices::release_all() noexcept {
   pending_ = false;
 }
 
+unsigned ModuleVoices::rating_index(unsigned slot) const noexcept {
+  for (unsigned i = 0; i < kMaxModuleInstances; ++i) {
+    if (in_[i].mod != nullptr && in_[i].rating != 0u && in_[i].slot == slot) {
+      return i;
+    }
+  }
+  return kMaxModuleInstances;
+}
+
+unsigned ModuleVoices::rate(unsigned slot) const noexcept {
+  const std::uint8_t idx = slot < kModuleSlots ? slot_[slot].load(std::memory_order_acquire) : kNone;
+  return idx != kNone ? in_[idx].shift : 0u;
+}
+
+ModuleVoices::Rate ModuleVoices::set_rate(unsigned slot, unsigned shift, const std::uint8_t* params, std::uint32_t param_len, bool render_off) noexcept {
+  if (slot >= kModuleSlots || shift > kMaxRateShift) {
+    return Rate::Failed;
+  }
+  unsigned idx = rating_index(slot);
+  if (idx == kMaxModuleInstances) {
+    const std::uint8_t b = slot_[slot].load(std::memory_order_acquire);
+    if (b == kNone) {
+      return Rate::Failed;
+    }
+    idx = b;
+  }
+  Instance& in = in_[idx];
+  const std::uint32_t now = blocks_.load(std::memory_order_acquire);
+  if (in.rating == 0u) {
+    if (in.shift == shift) {
+      return Rate::Done;
+    }
+    if (shift != 0u && !rate_capable(*in.mod)) {
+      return Rate::Failed;
+    }
+    in.want = static_cast<std::uint8_t>(shift);
+    in.rating = kRatePending;  // a sounding note is never cut: nothing changes until the instance is idle
+  } else {
+    in.want = static_cast<std::uint8_t>(shift);  // (the latest ask wins)
+  }
+  if (in.rating == kRatePending) {
+    if (in.want == in.shift) {  // asked back to what it is: nothing to do
+      in.rating = 0;
+      return Rate::Done;
+    }
+    // Idle: no note sounds and no tail rings (`active`, the render's: a byte read, as info() reads it).
+    if (!render_off && in.active != 0u) {
+      return Rate::Busy;
+    }
+    // Shut the gate (nothing new starts; the note path asks routed()). A note the render started between the idle test and here is caught below.
+    const std::uint8_t was = gate_[slot].exchange(1, std::memory_order_acq_rel);
+    in.regate = was == 0u ? 1u : 0u;
+    in.rating = kRateClosing;
+    in.at = now;
+  }
+  if (in.rating == kRateClosing) {
+    if (!render_off) {
+      if (static_cast<std::uint32_t>(now - in.at) < 1u) {
+        return Rate::Busy;  // (the render serves the commands queued before the gate shut)
+      }
+      if (in.active != 0u) {  // a note began in that window: it plays out at the old rate, the change waits again
+        gate_[slot].store(in.regate != 0u ? std::uint8_t{0} : std::uint8_t{1}, std::memory_order_release);
+        in.rating = kRatePending;
+        return Rate::Busy;
+      }
+      // Idle for good: queue the Release that frees the tracks the instance still owns (a held note whose sound is gone); the render serves it at its next block start.
+      const Command c{Cmd::Release, static_cast<std::uint8_t>(slot), 0, 0, 0, 0, 0.0f};
+      if (!ring_.push(c)) {
+        return Rate::Busy;
+      }
+    }
+    in.rating = kRateReleasing;
+    in.at = now;
+  }
+  if (in.rating == kRateReleasing) {
+    if (!render_off && static_cast<std::uint32_t>(now - in.at) < 1u) {
+      return Rate::Busy;
+    }
+    in.ready.store(0, std::memory_order_release);  // withdrawn as retire_all() does: the render skips it, the note path finds no binding
+    slot_[slot].store(kNone, std::memory_order_release);
+    retire_at_ = now;
+    pending_ = true;
+    in.at = now;
+    in.rating = kRateWithdrawn;
+  }
+  if (!render_off && static_cast<std::uint32_t>(now - in.at) < 2u) {
+    return Rate::Busy;
+  }
+  // Clear of the render: the module restarts at the new rate, as a bind does.
+  const o3m_module& mod = *in.mod;
+  const std::uint16_t prev = enter(in);
+  mod.shutdown(in.state);
+  std::memset(in.state, 0, mod.state_bytes);
+  const int rc = mod.init(in.state, &host_at(in.want));
+  if (rc == 0 && params != nullptr) {
+    const std::uint32_t n = mod.param_count < param_len / 4u ? mod.param_count : param_len / 4u;
+    for (std::uint32_t i = 0; i < n; ++i) {
+      float v;
+      std::memcpy(&v, params + 4u * i, 4);
+      if (v == v && v > -1.0e30f && v < 1.0e30f) {
+        mod.set_param(in.state, i, v);
+      }
+    }
+  }
+  leave(prev);
+  in.rating = 0;
+  if (rc != 0) {  // the module refused its own restart: the instance is gone (its state was shut down above)
+    in.mod = nullptr;
+    in.state = nullptr;
+    return Rate::Failed;
+  }
+  in.shift = in.want;
+  in.track = kNone;
+  in.held = 0;
+  in.held_overlap = 0;
+  in.active = 0;
+  in.last_note = 0;
+  in.ph = 0;
+  in.hold = 0.0f;
+  in.ramp = PitchRamp{};
+  in.ramp_on = 0;
+  in.gov.reset();
+  in.ready.store(1, std::memory_order_release);
+  gate_[slot].store(in.regate != 0u ? std::uint8_t{0} : std::uint8_t{1}, std::memory_order_release);
+  slot_[slot].store(static_cast<std::uint8_t>(idx), std::memory_order_release);
+  return Rate::Done;
+}
+
 void ModuleVoices::set_gate(unsigned slot, bool open) noexcept {
   if (slot >= kModuleSlots) {
+    return;
+  }
+  const unsigned ri = rating_index(slot);
+  if (ri != kMaxModuleInstances && in_[ri].rating != kRatePending) {  // OS-MODRATE: a RATE change holds the gate shut and puts it back as the UI last asked (set_rate)
+    in_[ri].regate = open ? 1u : 0u;
     return;
   }
   const std::uint8_t was = gate_[slot].exchange(open ? std::uint8_t{0} : std::uint8_t{1}, std::memory_order_acq_rel);
@@ -368,7 +513,7 @@ void ModuleVoices::render(std::uint32_t begin, std::uint32_t end) noexcept {
     }
     const std::uint16_t prev = enter(in);
     const std::uint32_t t1 = prof ? cycles_() : 0u;
-    const std::uint32_t more = in.mod->render(in.state, nullptr, scratch_, n);
+    const std::uint32_t more = in.shift == 0u ? in.mod->render(in.state, nullptr, scratch_, n) : render_rated(in, n);  // (OS-MODRATE: a rated instance's call is in flash)
     const std::uint32_t t2 = prof ? cycles_() : 0u;
     leave(prev);
     const std::uint32_t t3 = prof ? cycles_() : 0u;
@@ -388,6 +533,33 @@ void ModuleVoices::render(std::uint32_t begin, std::uint32_t end) noexcept {
       in.active = 0;
     }
   }
+}
+
+// OS-MODRATE. `ph` counts the copies of `hold` already out (0: the next frame is a new module sample), so `ph` after `n` frames is (ph + n) mod 2^shift whatever the segmentation. The module renders at its
+// own (reduced) rate, so a segment of n frames asks it for the samples that start inside it, ceil((n - lead) / 2^shift), and a sample cut by the end of the segment is held on into the next one.
+std::uint32_t ModuleVoices::render_rated(Instance& in, std::uint32_t n) noexcept {
+  const unsigned shift = in.shift;
+  const std::uint32_t mask = (1u << shift) - 1u;
+  float* const s = scratch_;
+  std::uint32_t lead = in.ph != 0u ? (mask + 1u) - in.ph : 0u;  // frames that finish the sample held from before
+  lead = lead > n ? n : lead;
+  const std::uint32_t k = (n - lead + mask) >> shift;
+  std::uint32_t more = 1u;
+  if (k != 0u) {
+    more = in.mod->render(in.state, nullptr, s, k);
+  }
+  const float held = in.hold;
+  const float last = k != 0u ? s[k - 1u] : held;
+  for (std::uint32_t o = n; o > lead;) {  // backwards: the sample read, (o - lead) >> shift, is never past o
+    --o;
+    s[o] = s[(o - lead) >> shift];
+  }
+  for (std::uint32_t o = 0; o < lead; ++o) {
+    s[o] = held;
+  }
+  in.ph = static_cast<std::uint8_t>((in.ph + n) & mask);
+  in.hold = last;
+  return more;
 }
 
 void ModuleVoices::end_block() noexcept {
@@ -438,6 +610,7 @@ void ModuleVoices::start_note(unsigned i, unsigned track, unsigned note, unsigne
   }
   owner_[track] = static_cast<std::uint8_t>(i);
   in.track = static_cast<std::uint8_t>(track);
+  in.ph = 0;  // OS-MODRATE: a note's first frame is a new module sample (a legato note too: the held one is the old note's)
   const std::uint16_t prev = enter(in);
   in.mod->note_on(in.state, note, velocity, (legato ? O3M_NOTE_LEGATO : 0u) | (extra & O3M_NOTE_RAMP));
   leave(prev);
@@ -498,6 +671,17 @@ void ModuleVoices::release_track(unsigned track) noexcept {
   owner_[track] = kNone;
 }
 
+std::uint16_t ModuleVoices::slot_tracks(unsigned slot) const noexcept {
+  std::uint16_t mask = 0;
+  for (unsigned t = 0; t < kModuleTracks; ++t) {
+    const std::uint8_t i = owner_[t];
+    if (i != kNone && in_[i].track == t && in_[i].slot == slot && (in_[i].held | in_[i].active) != 0u) {
+      mask = static_cast<std::uint16_t>(mask | (1u << t));
+    }
+  }
+  return mask;
+}
+
 void ModuleVoices::release_notes() noexcept {
   for (unsigned t = 0; t < kModuleTracks; ++t) {
     note_off(t);
@@ -510,7 +694,7 @@ void ModuleVoices::release_notes() noexcept {
 void ModuleVoices::pitch_call(Instance& in, float semitones, float per_frame) noexcept {
   constexpr float kMax = 128.0f;
   semitones = semitones != semitones ? 0.0f : semitones;  // (NaN is no pitch: the ABI promises finite numbers)
-  per_frame = per_frame != per_frame ? 0.0f : per_frame;
+  per_frame = per_frame != per_frame ? 0.0f : per_frame * static_cast<float>(1u << in.shift);  // (OS-MODRATE: the slope is per module frame, and a module frame spans 2^shift output frames)
   semitones = semitones > kMax ? kMax : (semitones < -kMax ? -kMax : semitones);
   per_frame = per_frame > kMax ? kMax : (per_frame < -kMax ? -kMax : per_frame);
   const std::uint16_t prev = enter(in);

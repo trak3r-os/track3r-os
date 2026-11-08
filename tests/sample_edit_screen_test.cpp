@@ -5,11 +5,13 @@
 // is never written. The kernels are sample_dsp_test.cpp, the history sample_history_test.cpp.
 #include <doctest/doctest.h>
 
+#include "support/mem_card.h"
 #include "support/need.h"
 
 #include <o3os/app/actions.h>
 #include <o3os/app/amiga_convert.h>
 #include <o3os/app/app.h>
+#include <o3os/app/ptfx_job.h>
 #include <o3os/app/sample_bank.h>
 #include <o3os/app/screens/overlay.h>
 #include <o3os/app/screens/sample_edit_screen.h>
@@ -18,10 +20,13 @@
 #include <o3os/core/gesture.h>
 #include <o3os/core/input_event.h>
 #include <o3os/model/editor.h>
+#include <o3os/module/ptfx_catalog.h>
+#include <o3os/module/ptfx_format.h>
 #include <o3os/platform/host/fakes.h>
 
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -760,8 +765,12 @@ TEST_CASE("sample edit: the Sample edit button again opens the FX page; the arro
   }
   CHECK(rig.bank.undo_depth(kSlot) == 0u);
   CHECK(std::memcmp(rig.pcm().data, rig.original.data(), kFrames * sizeof(std::int16_t)) == 0);
-  // The button again goes back to the edit page, where F3 is REVERSE.
+  // The button again opens the PLUGINS page (OS-CEPTFX S4a), and once more goes back to the edit page, where F3 is REVERSE.
   rig.tap(Button::SampleEdit);
+  CHECK(app::sedit_plug_page(rig.app->state()));
+  CHECK_FALSE(app::sedit_fx_page(rig.app->state()));
+  rig.tap(Button::SampleEdit);
+  CHECK_FALSE(app::sedit_plug_page(rig.app->state()));
   CHECK_FALSE(app::sedit_fx_page(rig.app->state()));
   rig.run(Button::F3);
   CHECK(rig.bank.undo_depth(kSlot) == 1u);
@@ -835,4 +844,561 @@ TEST_CASE("sample edit: F8 cancels a running FX job (OS-SEDIT-CANCEL): the key r
   CHECK(rig.message() == "NOTHING TO UNDO");
   rig.run(Button::F1);
   CHECK(rig.bank.undo_depth(kSlot) == 1u);
+}
+
+// ---- OS-CEPTFX S4a: the PLUGINS page over an in-memory card of header-only plugins -------------------------------------------------------------------------------------------------------------------------------
+
+namespace {
+
+void p16(std::vector<std::uint8_t>& v, std::size_t at, std::uint16_t x) {
+  v[at] = static_cast<std::uint8_t>(x);
+  v[at + 1] = static_cast<std::uint8_t>(x >> 8);
+}
+void p32(std::vector<std::uint8_t>& v, std::size_t at, std::uint32_t x) {
+  p16(v, at, static_cast<std::uint16_t>(x));
+  p16(v, at + 2, static_cast<std::uint16_t>(x >> 16));
+}
+void pf(std::vector<std::uint8_t>& v, std::size_t at, float f) {
+  std::uint32_t u;
+  std::memcpy(&u, &f, sizeof u);
+  p32(v, at, u);
+}
+
+struct PParam {
+  const char* label;
+  char type;
+  float min, max, def, step;
+  const char* unit;
+  unsigned items;  // 'l': the list SINE / TRI / SQUARE, this many of them
+};
+
+// The header of the format and 64 bytes of code that never runs; a list parameter's strings follow them, inside the code size.
+std::vector<std::uint8_t> make_plug(const char* name, const char* author, std::uint16_t flags, const std::vector<PParam>& params, std::uint16_t version = 1) {
+  static const char kList[] = "SINE\0TRI\0SQUARE\0";
+  std::vector<std::uint8_t> payload(64, 0);
+  std::uint16_t at = 0;
+  for (const PParam& q : params) {
+    if (q.type == 'l') {
+      at = static_cast<std::uint16_t>(payload.size());
+      const char* s = kList;
+      for (unsigned k = 0; k < q.items; ++k) {
+        const std::size_t len = std::strlen(s) + 1u;
+        payload.insert(payload.end(), s, s + len);
+        s += len;
+      }
+    }
+  }
+  std::vector<std::uint8_t> v(module::kPtfxHeaderSize + payload.size(), 0);
+  p32(v, 0, module::kPtfxMagic);
+  p16(v, 4, version);
+  p16(v, 6, flags);
+  std::memcpy(&v[8], name, std::strlen(name));
+  std::memcpy(&v[40], author, std::strlen(author));
+  v[56] = static_cast<std::uint8_t>(params.size());
+  p32(v, 64, module::kPtfxHeaderSize);
+  p32(v, 68, static_cast<std::uint32_t>(payload.size()));
+  p32(v, 80, 8);
+  p32(v, 84, 16);
+  for (std::size_t i = 0; i < params.size(); ++i) {
+    const std::size_t o = 88u + 32u * i;
+    std::memcpy(&v[o], params[i].label, std::strlen(params[i].label));
+    pf(v, o + 8, params[i].min);
+    pf(v, o + 12, params[i].max);
+    pf(v, o + 16, params[i].def);
+    pf(v, o + 20, params[i].step);
+    if (params[i].type == 'l') {
+      p16(v, o + 24, at);
+      v[o + 26] = static_cast<std::uint8_t>(params[i].items);
+    } else {
+      std::memcpy(&v[o + 24], params[i].unit, std::strlen(params[i].unit));
+    }
+    v[o + 30] = static_cast<std::uint8_t>(params[i].type);
+  }
+  std::memcpy(&v[module::kPtfxHeaderSize], payload.data(), payload.size());
+  return v;
+}
+
+const std::vector<PParam> kAlphaParams = {
+    {"RATE", 'f', 0.1f, 10.0f, 1.5f, 0.1f, "Hz", 0},
+    {"VOICES", 'd', 1.0f, 6.0f, 3.0f, 1.0f, "", 0},
+    {"SHAPE", 'l', 0.0f, 2.0f, 0.0f, 1.0f, "", 3},
+};
+
+// The Rig with a card: /Effects holds ALPHA (stereo, 3 parameters: 'f', 'd' and a list), BETA (a generator, one parameter), a file of another version (a refused row) and TWELVE (12 parameters), then `filler` more.
+struct PlugRig : Rig {
+  test::MemCard card;
+  module::PtfxEntry entries[module::kPtfxCatalogMax];
+  module::PtfxCatalog cat{entries};
+
+  explicit PlugRig(unsigned filler = 0) {
+    card.make_dir_now("Effects");
+    card.put("Effects/alpha.ptfx", make_plug("ALPHA", "ANN", module::kPtfxFlagStereo, kAlphaParams));
+    card.put("Effects/beta.ptfx", make_plug("BETA", "", module::kPtfxFlagGenerator, {{"LEVEL", 'f', 0.0f, 1.0f, 0.5f, 0.0f, "", 0}}));
+    card.put("Effects/future.ptfx", make_plug("FUTURE", "", 0, {}, 2));
+    std::vector<PParam> twelve;
+    for (unsigned i = 0; i < 12; ++i) {
+      twelve.push_back({"P", 'd', 0.0f, 100.0f, 10.0f, 1.0f, "", 0});
+    }
+    card.put("Effects/twelve.ptfx", make_plug("TWELVE", "", 0, twelve));
+    for (unsigned i = 0; i < filler; ++i) {
+      const unsigned n = i % 100;  // two digits: the compiler sees the buffers are big enough
+      char file[24];
+      std::snprintf(file, sizeof file, "Effects/f%02u.ptfx", n);
+      char name[8];
+      std::snprintf(name, sizeof name, "F%02u", n);
+      card.put(file, make_plug(name, "", 0, kAlphaParams));
+    }
+    app->attach_storage(&card);
+    bank.ptfx_page()->cat = &cat;
+  }
+  app::PtfxPage& page() { return *bank.ptfx_page(); }
+  // The page, its scan finished and the first plugin read.
+  void open_page() {
+    tap(Button::SampleEdit);
+    tap(Button::SampleEdit);
+    NEED(app::sedit_plug_page(app->state()));
+    passes(8);
+    for (unsigned guard = 0; cat.state() == module::PtfxCatalog::State::Scanning && guard < 600u; ++guard) {
+      pass();  // one header read a step: a long folder takes a pass a file
+    }
+    passes(2);  // the first plugin's header
+  }
+  void down(unsigned n = 1) {
+    for (unsigned i = 0; i < n; ++i) {
+      tap(Button::Down);
+      passes(2);
+    }
+  }
+  void up(unsigned n = 1) {
+    for (unsigned i = 0; i < n; ++i) {
+      tap(Button::Up);
+      passes(2);
+    }
+  }
+  std::string shown(unsigned p) {
+    core::FixedString<app::PtfxPage::kValueChars> buf;
+    page().format_value(p, buf);
+    return buf.c_str();
+  }
+};
+
+}  // namespace
+
+TEST_CASE("sample edit PLUGINS: the page scans /Effects when it opens, lists the files sorted with the refused one in its place, and reads the header of the row in view") {
+  PlugRig rig;
+  CHECK(rig.cat.state() == module::PtfxCatalog::State::Idle);  // nothing is read before the page is opened
+  rig.open_page();
+  CHECK(rig.cat.state() == module::PtfxCatalog::State::Done);
+  NEED(rig.cat.count() == 4u);
+  CHECK(std::strcmp(rig.cat.entry(0).display_name, "ALPHA") == 0);
+  CHECK(std::strcmp(rig.cat.entry(1).display_name, "BETA") == 0);
+  CHECK(rig.cat.entry(2).status != module::PtfxStatus::Ok);  // version 2
+  CHECK(std::strcmp(rig.cat.entry(3).display_name, "TWELVE") == 0);
+  NEED(rig.page().ready());
+  CHECK(rig.page().params() == 3u);
+  CHECK(std::strcmp(rig.page().info().author, "ANN") == 0);
+  CHECK(rig.shown(0) == "1.50 Hz");  // 'f': two decimals, the unit
+  CHECK(rig.shown(1) == "3");        // 'd': whole, no unit
+  CHECK(rig.shown(2) == "SINE");     // a list: its item
+  CHECK(rig.st().plug_focus == 0u);
+  // The page left and opened again keeps the listing: no second scan.
+  rig.tap(Button::SampleEdit);
+  rig.passes(4);
+  CHECK(rig.cat.state() == module::PtfxCatalog::State::Done);
+  CHECK(rig.cat.count() == 4u);
+}
+
+TEST_CASE("sample edit PLUGINS: Up / Down pick the row of the focused column, Left / Right the focus; the encoder picks the plugin or changes the value, Shift x10; Delete and F3 put defaults back") {
+  PlugRig rig;
+  rig.open_page();
+  NEED(rig.cat.count() == 4u);
+  rig.down();  // BETA
+  CHECK(rig.st().plug_sel == 1u);
+  CHECK(rig.page().params() == 1u);
+  CHECK(rig.shown(0) == "0.50");
+  rig.invoke("sedit.plug", -1);  // the encoder picks the plugin while the list has the focus
+  CHECK(rig.st().plug_sel == 0u);
+  rig.passes(2);
+  NEED(rig.page().params() == 3u);
+  rig.tap(Button::Right);  // the parameters
+  CHECK(rig.st().plug_focus == 1u);
+  CHECK(rig.st().plug_param == 0u);
+  rig.tap(Button::Down);
+  CHECK(rig.st().plug_param == 1u);
+  rig.tap(Button::Down);
+  rig.tap(Button::Down);  // the last row: it stays
+  CHECK(rig.st().plug_param == 2u);
+  rig.tap(Button::Up);
+  rig.tap(Button::Up);
+  rig.tap(Button::Up);
+  CHECK(rig.st().plug_param == 0u);
+  rig.invoke("sedit.plug", 5);  // RATE 1.5 + 5 x 0.1
+  CHECK(rig.page().value(0) == doctest::Approx(2.0f));
+  CHECK(rig.shown(0) == "2.00 Hz");
+  rig.invoke("sedit.plug_coarse", 1);  // x10: + 1.00
+  CHECK(rig.shown(0) == "3.00 Hz");
+  rig.invoke("sedit.plug_coarse", 1000);  // held to the range
+  CHECK(rig.shown(0) == "10.00 Hz");
+  rig.tap(Button::Delete);  // this parameter's default
+  CHECK(rig.shown(0) == "1.50 Hz");
+  rig.tap(Button::Down);  // VOICES: whole numbers, 1..6
+  rig.invoke("sedit.plug", 2);
+  CHECK(rig.shown(1) == "5");
+  rig.invoke("sedit.plug", 99);
+  CHECK(rig.shown(1) == "6");
+  rig.invoke("sedit.plug", -99);
+  CHECK(rig.shown(1) == "1");
+  rig.tap(Button::Down);  // SHAPE: a list, one item a click
+  rig.invoke("sedit.plug", 1);
+  CHECK(rig.shown(2) == "TRI");
+  rig.invoke("sedit.plug", 5);  // the last item stays
+  CHECK(rig.shown(2) == "SQUARE");
+  rig.tap(Button::F3);  // DEFAULTS: every parameter
+  CHECK(rig.shown(0) == "1.50 Hz");
+  CHECK(rig.shown(1) == "3");
+  CHECK(rig.shown(2) == "SINE");
+  rig.tap(Button::Left);  // back to the list
+  CHECK(rig.st().plug_focus == 0u);
+  for (const Button b : {Button::F4, Button::F5, Button::F6}) {  // F4..F6 do nothing here
+    rig.tap(b);
+  }
+  CHECK(rig.bank.undo_depth(kSlot) == 0u);
+}
+
+TEST_CASE("sample edit PLUGINS: 12 parameters in two columns of six; Right and Left move between the columns, Up / Down stay inside one") {
+  PlugRig rig;
+  rig.open_page();
+  rig.down(3);  // TWELVE
+  NEED(rig.page().params() == 12u);
+  rig.tap(Button::Right);
+  CHECK(rig.st().plug_focus == 1u);
+  rig.tap(Button::Down);
+  rig.tap(Button::Down);
+  CHECK(rig.st().plug_param == 2u);
+  rig.tap(Button::Right);  // the same row of the second column
+  CHECK(rig.st().plug_param == 8u);
+  for (unsigned i = 0; i < 9; ++i) {
+    rig.tap(Button::Down);
+  }
+  CHECK(rig.st().plug_param == 11u);  // the end of the second column
+  rig.tap(Button::Left);
+  CHECK(rig.st().plug_param == 5u);  // the first column's last row
+  rig.tap(Button::Left);  // from the first column: the list
+  CHECK(rig.st().plug_focus == 0u);
+}
+
+TEST_CASE("sample edit PLUGINS: a refused row reads nothing and takes no focus or value; F1 APPLY on it says why (S4b)") {
+  PlugRig rig;
+  rig.open_page();
+  rig.down(2);  // FUTURE, version 2
+  CHECK(rig.st().plug_sel == 2u);
+  CHECK_FALSE(rig.page().ready());
+  CHECK(rig.page().params() == 0u);
+  rig.tap(Button::Right);  // no parameters to focus
+  CHECK(rig.st().plug_focus == 0u);
+  rig.tap(Button::F3);
+  rig.tap(Button::Delete);
+  CHECK_FALSE(rig.page().ready());
+  rig.tap(Button::F1);
+  CHECK(rig.message() == "PTFX VERSION NOT SUPPORTED");  // S4b: APPLY says why the row is refused
+  CHECK(rig.bank.undo_depth(kSlot) == 0u);
+  CHECK(std::memcmp(rig.pcm().data, rig.original.data(), kFrames * sizeof(std::int16_t)) == 0);
+  rig.down();  // the row after it is read as usual
+  CHECK(rig.page().ready());
+  CHECK(rig.page().params() == 12u);
+}
+
+namespace {
+
+constexpr std::uintptr_t kPInit = 0x100;
+constexpr std::uintptr_t kPSet = 0x200;
+constexpr std::uintptr_t kPProc = 0x300;
+
+// A stand-in for the plugin's code: doubles the body (the S3 tests' gain).
+hal::code_gate::GateResult double_call(const app::PtfxJob::Plugin&, std::uintptr_t entry, std::uintptr_t r0, std::uintptr_t r1, std::uintptr_t r2, std::uintptr_t, float,
+                                       std::int32_t* ret) noexcept {
+  *ret = 0;
+  if (entry == kPProc) {
+    const auto* in = reinterpret_cast<const std::int16_t* const*>(r0);
+    auto* out = reinterpret_cast<std::int16_t* const*>(r1);
+    const std::uint32_t n = static_cast<std::uint32_t>(r2);
+    for (std::uint32_t i = 0; i < n; ++i) {
+      out[0][i] = static_cast<std::int16_t>(in[0][i] * 2);
+    }
+    *ret = static_cast<std::int32_t>(n);
+  }
+  return hal::code_gate::GateResult::Ok;
+}
+
+// What F1 APPLY calls in these tests: records the call and, when `run` is set, starts the job through App::run_ptfx with the stand-in above.
+struct Runner {
+  PlugRig* rig = nullptr;
+  unsigned calls = 0;
+  unsigned index = 99;
+  float first_value = -1.0f;
+  bool run = false;
+  const char* result = nullptr;
+  module::PtfxHostTableStorage store{};
+  module::PtfxHostTable host{store.bytes};
+  alignas(4) std::uint8_t scratch[1024] = {};
+  module::PtfxQuarantine quarantine;
+
+  static const char* go(void* self, unsigned i, const float* values) noexcept {
+    auto* r = static_cast<Runner*>(self);
+    ++r->calls;
+    r->index = i;
+    r->first_value = values[0];
+    if (!r->run) {
+      return r->result;
+    }
+    app::PtfxJob::Plugin p;
+    p.info = &r->rig->page().info();
+    p.entries = {kPInit, kPSet, kPProc};
+    p.host = &r->host;
+    p.host_table = reinterpret_cast<std::uintptr_t>(r->store.bytes);
+    p.scratch = r->scratch;
+    p.scratch_cap = sizeof r->scratch;
+    p.id = module::ptfx_plugin_id("alpha.ptfx");
+    p.values = values;
+    p.quarantine = &r->quarantine;
+    p.call = &double_call;
+    return r->rig->app->run_ptfx(p);
+  }
+};
+
+}  // namespace
+
+TEST_CASE("sample edit PLUGINS (S4b): F1 APPLY with no runner says the plugins run on the tracker and changes nothing") {
+  PlugRig rig;
+  rig.open_page();
+  rig.tap(Button::F1);
+  CHECK(rig.message() == "PLUGINS RUN ON THE TRACKER");
+  CHECK(rig.bank.undo_depth(kSlot) == 0u);
+  CHECK(std::memcmp(rig.pcm().data, rig.original.data(), kFrames * sizeof(std::int16_t)) == 0);
+}
+
+TEST_CASE("sample edit PLUGINS (S4b): F1 APPLY runs the picked plugin with the page's values, as one undo unit, and F8 UNDO restores it") {
+  PlugRig rig;
+  Runner r;
+  r.rig = &rig;
+  r.run = true;
+  rig.app->attach_ptfx_runner(&Runner::go, &r);
+  rig.open_page();
+  rig.tap(Button::F1);
+  CHECK(r.calls == 1u);
+  CHECK(r.index == 0u);  // ALPHA
+  CHECK(r.first_value == rig.page().values()[0]);
+  for (unsigned i = 0; i < 300u && rig.bank.undo_depth(kSlot) == 0u; ++i) {
+    rig.pass();
+  }
+  CHECK(rig.bank.undo_depth(kSlot) == 1u);
+  bool doubled = true;
+  for (std::uint32_t i = 0; i < kFrames; ++i) {
+    doubled = doubled && rig.pcm().data[i] == static_cast<std::int16_t>(rig.original[i] * 2);
+  }
+  CHECK(doubled);
+  rig.app->invoke(core::action_id("sedit.undo"));
+  rig.passes(4);
+  CHECK(std::memcmp(rig.pcm().data, rig.original.data(), kFrames * sizeof(std::int16_t)) == 0);
+}
+
+TEST_CASE("sample edit PLUGINS (S4b): F1 APPLY acts on the selection only and leaves the rest of the sample alone") {
+  PlugRig rig;
+  Runner r;
+  r.rig = &rig;
+  r.run = true;
+  rig.app->attach_ptfx_runner(&Runner::go, &r);
+  rig.select(200, 200);
+  const unsigned start = rig.st().a;
+  const unsigned end = rig.st().b;
+  NEED(start < end);
+  NEED(end - start < kFrames);
+  rig.open_page();
+  rig.tap(Button::F1);
+  for (unsigned i = 0; i < 300u && rig.bank.undo_depth(kSlot) == 0u; ++i) {
+    rig.pass();
+  }
+  CHECK(rig.bank.undo_depth(kSlot) == 1u);
+  for (std::uint32_t i = 0; i < kFrames; ++i) {
+    const bool in_body = i >= start && i < end;
+    CHECK(rig.pcm().data[i] == (in_body ? static_cast<std::int16_t>(rig.original[i] * 2) : rig.original[i]));
+  }
+}
+
+TEST_CASE("sample edit PLUGINS (S4b): F8 while the plugin runs cancels it and keeps the audio") {
+  PlugRig rig;
+  Runner r;
+  r.rig = &rig;
+  r.run = true;
+  rig.app->attach_ptfx_runner(&Runner::go, &r);
+  rig.open_page();
+  rig.press(Button::F1);
+  rig.release(Button::F1);
+  rig.clock.advance(core::kTicksPerMs);  // one short pass: the run has begun, and a job of 40000 frames takes several
+  rig.app->run_once();
+  NEED(rig.st().running);
+  rig.tap(Button::F8);
+  rig.passes(20);
+  CHECK(rig.bank.undo_depth(kSlot) == 0u);
+  CHECK(std::memcmp(rig.pcm().data, rig.original.data(), kFrames * sizeof(std::int16_t)) == 0);
+  CHECK_FALSE(rig.st().running);
+}
+
+TEST_CASE("sample edit PLUGINS (S4b): a file that is for the IMX only is greyed, APPLY says NOT FOR THIS TRACKER, and RESCAN finds a file put on the card later") {
+  PlugRig rig;
+  rig.card.put("Effects/imx.ptfx", make_plug("IMX", "", module::kPtfxFlagImxOnly, {}));
+  rig.open_page();
+  NEED(rig.cat.count() == 5u);
+  unsigned imx = rig.cat.count();
+  for (unsigned i = 0; i < rig.cat.count(); ++i) {
+    if (std::strcmp(rig.cat.entry(i).file_name, "imx.ptfx") == 0) {  // refused before the name: the row shows the file name
+      imx = i;
+    }
+  }
+  NEED(imx < rig.cat.count());
+  rig.down(imx);
+  rig.tap(Button::F1);
+  CHECK(rig.message() == "NOT FOR THIS TRACKER");
+  CHECK(rig.bank.undo_depth(kSlot) == 0u);
+  rig.card.put("Effects/zeta.ptfx", make_plug("ZETA", "", 0, kAlphaParams));
+  rig.tap(Button::F2);
+  for (unsigned guard = 0; rig.cat.state() == module::PtfxCatalog::State::Scanning && guard < 600u; ++guard) {
+    rig.pass();
+  }
+  rig.passes(4);
+  CHECK(rig.cat.count() == 6u);
+}
+
+TEST_CASE("sample edit PLUGINS (S4b): an effect on an empty slot says NO SAMPLE, a generator reaches the runner; a refused runner text is the strip's") {
+  PlugRig rig;
+  Runner r;
+  r.rig = &rig;
+  r.result = "BUSY TEST";
+  rig.app->attach_ptfx_runner(&Runner::go, &r);
+  rig.open_page();
+  rig.app->invoke(core::action_id("instrument.select"), static_cast<core::ActionArg>(kSlot + 2));
+  rig.passes(4);
+  NEED(rig.bank.pcm(kSlot + 1u).frames == 0u);
+  rig.tap(Button::F1);  // ALPHA, an effect
+  CHECK(rig.message() == "NO SAMPLE");
+  CHECK(r.calls == 0u);
+  rig.down();  // BETA, a generator
+  rig.tap(Button::F1);
+  CHECK(r.calls == 1u);
+  CHECK(r.index == 1u);
+  CHECK(rig.message() == "BUSY TEST");
+}
+
+TEST_CASE("sample edit PLUGINS (S4b): F2 and F1 pressed in one pass say SCANNING..., not that the file is damaged, and run nothing") {
+  PlugRig rig;
+  Runner r;
+  r.rig = &rig;
+  rig.app->attach_ptfx_runner(&Runner::go, &r);
+  rig.open_page();
+  rig.press(Button::F2);
+  rig.release(Button::F2);
+  rig.press(Button::F1);
+  rig.release(Button::F1);
+  rig.pass();  // the scan begins in this pass, before the APPLY is looked at
+  NEED(rig.cat.state() == module::PtfxCatalog::State::Scanning);
+  CHECK(rig.message() == "SCANNING...");
+  CHECK(r.calls == 0u);
+  CHECK(rig.bank.undo_depth(kSlot) == 0u);
+}
+
+TEST_CASE("sample edit PLUGINS (S4b): leaving the screen, or a sample that changes, while the plugin runs commits nothing") {
+  {
+    PlugRig rig;
+    Runner r;
+    r.rig = &rig;
+    r.run = true;
+    rig.app->attach_ptfx_runner(&Runner::go, &r);
+    rig.open_page();
+    rig.tap(Button::F1);
+    NEED(rig.st().running);
+    rig.go(ScreenId::Pattern);
+    rig.passes(40);
+    rig.expire();
+    CHECK(rig.bank.undo_depth(kSlot) == 0u);
+    CHECK(std::memcmp(rig.pcm().data, rig.original.data(), kFrames * sizeof(std::int16_t)) == 0);
+    CHECK_FALSE(rig.st().running);
+  }
+  {
+    PlugRig rig;
+    Runner r;
+    r.rig = &rig;
+    r.run = true;
+    rig.app->attach_ptfx_runner(&Runner::go, &r);
+    rig.open_page();
+    rig.tap(Button::F1);
+    NEED(rig.st().running);
+    std::uint32_t cap = 0;
+    std::int16_t* p = rig.bank.reserve(cap);
+    NEED(p != nullptr);
+    for (std::uint32_t i = 0; i < kFrames; ++i) {
+      p[i] = static_cast<std::int16_t>(sample_at(i) + 7);  // another audio takes the slot: its version moves
+    }
+    NEED(rig.bank.commit_load(kSlot, p, kFrames));
+    rig.bank.rebind_now(kSlot);
+    rig.passes(40);
+    CHECK(rig.bank.undo_depth(kSlot) == 0u);
+    CHECK(rig.pcm().data[10] == sample_at(10) + 7);  // the load's audio, not the plugin's result
+    CHECK_FALSE(rig.st().running);
+  }
+}
+
+TEST_CASE("sample edit PLUGINS (A15): the values of the last 8 plugins are kept while the OS runs; the ninth one pushes the oldest out") {
+  PlugRig rig(10);  // sorted by name: ALPHA, BETA, F00..F09, FUTURE, TWELVE
+  rig.open_page();
+  NEED(rig.cat.count() == 14u);
+  rig.tap(Button::Right);
+  rig.tap(Button::Down);
+  rig.invoke("sedit.plug", 2);  // ALPHA: VOICES 5
+  CHECK(rig.shown(1) == "5");
+  rig.tap(Button::Left);
+  rig.down(7);  // eight plugins in all (ALPHA, BETA, F00..F05)
+  CHECK(rig.st().plug_sel == 7u);
+  rig.up(7);
+  CHECK(rig.st().plug_sel == 0u);
+  CHECK(rig.shown(1) == "5");  // still there
+  rig.down(9);  // nine others since ALPHA was read: its values are the oldest and gone
+  rig.up(9);
+  CHECK(rig.st().plug_sel == 0u);
+  CHECK(rig.shown(1) == "3");  // the default again
+}
+
+TEST_CASE("sample edit PLUGINS: F2 RESCAN reads the folder again as a job, the keys that change the page say BUSY while it runs, and the new file is listed afterwards") {
+  PlugRig rig(100);
+  rig.open_page();
+  const unsigned before = rig.cat.count();
+  NEED(before == 104u);
+  rig.card.put("Effects/aaa.ptfx", make_plug("AAA", "", 0, kAlphaParams));
+  rig.tap(Button::F2);
+  CHECK(rig.cat.state() == module::PtfxCatalog::State::Scanning);
+  rig.invoke("sedit.plug", 1);  // held while the scan runs
+  CHECK(rig.message() == "BUSY");
+  rig.tap(Button::F3);
+  CHECK(rig.message() == "BUSY");
+  rig.passes(400);
+  CHECK(rig.cat.state() == module::PtfxCatalog::State::Done);
+  CHECK(rig.cat.count() == before + 1u);
+  CHECK(std::strcmp(rig.cat.entry(0).display_name, "AAA") == 0);
+  CHECK(rig.page().ready());  // the row in view was read again
+  CHECK(rig.card.open_handles == 0);
+}
+
+TEST_CASE("sample edit PLUGINS: with no plugin listing (no catalogue attached) the page shows without a fault and the keys say so") {
+  Rig rig;
+  rig.tap(Button::SampleEdit);
+  rig.tap(Button::SampleEdit);
+  NEED(app::sedit_plug_page(rig.app->state()));
+  rig.passes(6);
+  rig.tap(Button::F2);
+  CHECK(rig.message() == "NO PLUGINS HERE");
+  rig.invoke("sedit.plug", 1);
+  rig.tap(Button::Down);
+  rig.tap(Button::Right);
+  CHECK(rig.st().plug_focus == 0u);
+  rig.tap(Button::SampleEdit);  // the edit page again
+  CHECK_FALSE(app::sedit_plug_page(rig.app->state()));
 }

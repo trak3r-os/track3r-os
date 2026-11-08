@@ -26,15 +26,15 @@ TEST_CASE("mk66 mem_map: the chip's regions") {
   CHECK(mem::kStackTop == 0x20030000u);
 }
 
-TEST_CASE("mk66 mem_map: ADR 0013 D7 SDRAM table, region by region (OS-004a: project 1,920 KiB, sample arena 10,816 KiB)") {
+TEST_CASE("mk66 mem_map: ADR 0013 D7 SDRAM table, region by region (OS-004a: project 1,920 KiB, sample arena 10,816 KiB; OS-CEPTFX S2a: ptfx 768 KiB)") {
   struct Row {
     const char* name;
     std::uint32_t kib;
   };
-  const Row table[] = {{"sample_arena", 10816}, {"delay", 768},  {"reverb", 256},   {"module_region", 768},
-                       {"project", 1920},       {"undo", 384},   {"file_job", 512}, {"lut", 192},
-                       {"ui_cache", 512},       {"diag_log", 64}, {"slack", 192}};
-  CHECK_MESSAGE(mem::kSdramRegionCount == sizeof(table) / sizeof(table[0]), "ADR 0013 D7 lists eleven rows including the slack");
+  const Row table[] = {{"sample_arena", 10816}, {"delay", 768},     {"reverb", 192},     {"wt_contour", 64},
+                       {"module_region", 768},  {"project", 1920},  {"undo", 384},      {"ptfx", 768},
+                       {"ui_cache", 448},       {"diag_log", 64},   {"slack", 192}};
+  CHECK_MESSAGE(mem::kSdramRegionCount == sizeof(table) / sizeof(table[0]), "eleven rows including the slack (file_job and lut merged into ptfx)");
   if (mem::kSdramRegionCount != sizeof(table) / sizeof(table[0])) {
     return;  // no REQUIRE in a no-exceptions build
   }
@@ -56,12 +56,65 @@ TEST_CASE("mk66 mem_map: ADR 0013 D7 SDRAM table, region by region (OS-004a: pro
   CHECK(mem::sdram_regions_total() == mem::kSdramSize);
 }
 
+TEST_CASE("mk66 mem_map: the ptfx region (OS-CEPTFX S2a, A3): carved from file_job + lut + the first 64 KiB of ui_cache, its 3.2 sub-areas tile it") {
+  CHECK(mem::kPtfxBase == 0x70E90000u);  // where file_job started
+  CHECK(mem::kPtfxSize == 768u * 1024u);
+  CHECK(mem::kPtfxBase == mem::kUndoBase + mem::kUndoSize);
+  CHECK(mem::kPtfxBase + mem::kPtfxSize == mem::kUiCacheBase);
+  CHECK(mem::kUiCacheBase == 0x70F50000u);
+  CHECK(mem::kUiCacheSize == 448u * 1024u);  // ui_cache keeps its last 448 KiB
+  CHECK(mem::kUiCacheBase + mem::kUiCacheSize == mem::kDiagLogBase);  // diag_log and the slack are unchanged
+  // The 3.2 table, as offsets from the region's base.
+  CHECK(mem::kPtfxImageOff == 0u);
+  CHECK(mem::kPtfxImageSize == 32u * 1024u);
+  CHECK(mem::kPtfxGuardOff == 32u * 1024u);
+  CHECK(mem::kPtfxGuardSize == 4u * 1024u);
+  CHECK(mem::kPtfxStackOff == 36u * 1024u);
+  CHECK(mem::kPtfxStackSize == 12u * 1024u);
+  CHECK(mem::kPtfxStackTopOff == 48u * 1024u);  // the PSP starts here
+  CHECK((mem::kPtfxBase + mem::kPtfxStackTopOff) % 8u == 0u);  // 8-byte aligned (AAPCS)
+  CHECK(mem::kPtfxStereoOff == 48u * 1024u);
+  CHECK(mem::kPtfxStereoSize == 32u * 1024u);  // L and R, 8,192 frames each
+  CHECK(mem::kPtfxScratchOff == 80u * 1024u);
+  CHECK(mem::kPtfxScratchSize == 640u * 1024u);  // 655,360 B
+  CHECK(mem::kPtfxMetaOff == 720u * 1024u);
+  CHECK(mem::kPtfxMetaSize == 16u * 1024u);  // the catalogue (11 KiB), the params, the host table, the job's state
+  CHECK(mem::kPtfxSpareOff == 736u * 1024u);
+  CHECK(mem::kPtfxSpareSize == 32u * 1024u);
+  CHECK(mem::kPtfxSpareOff + mem::kPtfxSpareSize == mem::kPtfxSize);  // the sub-areas tile the region
+  // The catalogue of OS-CEPTFX S1 (11 KiB for 128 files) fits the meta sub-area.
+  CHECK(128u * 88u <= mem::kPtfxMetaSize);
+  // The region is 32-byte aligned as every SDRAM region, and the alias maps it inside the ICode window.
+  CHECK(mem::kPtfxBase % 32u == 0u);
+  CHECK(mem::kPtfxSize % 32u == 0u);
+  CHECK(mem::sdram_alias(mem::kPtfxBase) == 0x08E90000u);
+  CHECK(mem::sdram_alias(mem::kPtfxBase + mem::kPtfxSize - 1u) == 0x08F4FFFFu);
+}
+
 TEST_CASE("mk66 mem_map: the send effects' share of the delay and reverb regions (OS-SENDFX)") {
   CHECK(mem::kDelayRingBytes == 705872u);  // 176,468 frames x 4 B: 4.0 s of stereo int16 at 44,117 Hz
   CHECK(mem::kDelayRingBytes <= mem::kDelaySize);
   CHECK(mem::kDelaySize - mem::kDelayRingBytes == 80560u);
   CHECK(mem::kReverbMemBytes == 53264u);  // 26,632 int16 samples: the plate's 13 lines, each on a word boundary
   CHECK(mem::kReverbMemBytes <= mem::kReverbSize);
+  CHECK(mem::kReverbSize == 192u * 1024u);  // OS-CEWTENV W2 gave the last 64 KiB of the former 256 KiB to the wt_contour region
+  CHECK(mem::kReverbSize - mem::kReverbMemBytes == 143344u);
+}
+
+TEST_CASE("mk66 mem_map: the wt_contour region (OS-CEWTENV W2)") {
+  CHECK(mem::kWtContourSize == 64u * 1024u);  // 256 contours x 128 int16
+  CHECK(mem::kWtContourBase == 0x70B80000u);
+  CHECK(mem::kWtContourBase == mem::kReverbBase + mem::kReverbSize);
+  CHECK(mem::kWtContourBase + mem::kWtContourSize == mem::kModuleRegionBase);  // the bases after it are unchanged
+  CHECK(mem::kModuleRegionBase == 0x70B90000u);
+}
+
+TEST_CASE("mk66 mem_map: the user contours sit after the bake pool in the reverb tail (OS-CEWTENV W8)") {
+  CHECK(mem::kWtUserBase == mem::kWtBakeBase + mem::kWtBakeBytes);
+  CHECK(mem::kWtUserBase % 4u == 0u);
+  CHECK(mem::kWtUserBytes == 33296u + 24576u * 2u);  // WtUserBank + the PCM scratch
+  CHECK(mem::kWtUserBase + mem::kWtUserBytes - mem::kReverbBase == 181012u);
+  CHECK(mem::kWtUserBase + mem::kWtUserBytes <= mem::kReverbBase + mem::kReverbSize);
 }
 
 TEST_CASE("mk66 mem_map: named regions land where the linker script puts them") {
@@ -106,7 +159,7 @@ TEST_CASE("mk66 mem_map: in_sram() accepts what is in SRAM and nothing else") {
 }
 
 TEST_CASE("mk66 mem_map: the project region holds the model's worst-case arena (OS-004a)") {
-  CHECK(mem::kModelArenaWorstCaseBytes == 1934312u);  // tests/mem_map_model_test.cpp checks this against o3os::model::kModelArenaBytes
+  CHECK(mem::kModelArenaWorstCaseBytes == 1934344u);  // tests/mem_map_model_test.cpp checks this against o3os::model::kModelArenaBytes
   CHECK(mem::kProjectSize == 1920u * 1024u);
   CHECK(mem::kProjectSize >= mem::kModelArenaWorstCaseBytes);
   CHECK(mem::kProjectSize - mem::kModelArenaWorstCaseBytes < 64u * 1024u);  // little waste: the region is the arena plus a margin

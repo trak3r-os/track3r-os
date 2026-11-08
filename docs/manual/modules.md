@@ -10,7 +10,7 @@ Modules are files on the card that add to the OS without a firmware update: soun
 
 ## What it is for
 
-Use a module instrument when a slot should be a synth, not a sample: pick it with `F4` (**MODULE**) on the Instrument screen. Use an app for a job on the pattern, such as a Euclidean rhythm, humanizing, or a MIDI monitor. Open the screen from the Navigator: `Shift` + `Pattern`, then **MODULES**.
+Use a module instrument when a slot should be a synth, not a sample: pick it with `F4` (**MODULE**) on the Instrument screen. Use an app for a job on the pattern, such as a Euclidean rhythm, humanizing, or a MIDI monitor. Open the screen from the Navigator: `Song` + `Pattern`, then **MODULES**.
 
 ## How it works
 <!-- sync: src=module/src/loader.cpp,app/src/module_ui.cpp,app/src/module_actions.cpp spec=docs/specs/OS-MODPITCH.md qa=QA-MOD-001,QA-MOD-079,QA-MOD-099,QA-MOD-105,QA-MOD-127,QA-MOD-128 -->
@@ -37,7 +37,7 @@ Example: put the TB-303 in slot 4, write a line on a track, then add a Glide to 
 
 Example: open Rhythm Gen from `F7` (**TOOLS**) on Pattern. It starts at your cursor, builds a rhythm with its rows, and **APPLY** writes it into the pattern. `F8` on Pattern takes it back. <!-- QA-MOD-132 QA-MOD-078 -->
 
-An app asks before its first launch of a boot when it edits the project or writes files: `F1` reads **LAUNCH?** and the strip says what it will do. Press `F1` again to start it. An app that only listens asks nothing. <!-- QA-MOD-009 QA-MOD-090 QA-MOD-117 -->
+An app asks before its first launch of a boot when it edits the project or writes files: `F1` reads **LAUNCH?** and the strip says what it will do. Press `F1` again to start it. An app that only listens asks nothing, and an app opened from the Pattern's APPS page asks only when it writes files. <!-- QA-MOD-009 QA-MOD-090 QA-MOD-117 -->
 
 ## Try it
 <!-- sync: src=app/src/screens/modules_screen.cpp,sim/scenarios/manual/modules_walk.txt qa=QA-MOD-001,QA-MOD-009,QA-MOD-117,QA-MOD-120,QA-MOD-121,QA-MOD-128 -->
@@ -81,11 +81,21 @@ Not yet checked on the unit.
 
 Start on any screen.
 
-1. Hold `Shift` and press `Pattern`. The Navigator opens. <!-- QA-MOD-002 -->
+1. Press `Song` and `Pattern` together. The Navigator opens. <!-- QA-MOD-002, QA-GLB-233 -->
 2. Turn the encoder until **MODULES** is shown. <!-- QA-MOD-002 -->
 3. Press `F8` (**GO**). <!-- QA-MOD-002 -->
 
 You should see the list of apps on the card. <!-- QA-MOD-001 -->
+
+### Start an app from anywhere
+
+Start on any screen. This is new in track3r-os.
+
+1. Press `Shift` + `Pattern`. A list titled **APPS** opens with the apps that are not tools: the scope, the tuner, the loudness meter, the MIDI monitor and the like. The tools (Chords, Humanize and the other pattern tools) stay on their own page, `F7` on Pattern. <!-- QA-MOD-252 -->
+2. Turn the encoder to the app.
+3. Press `F1` or `F8` (**LAUNCH**). The app starts as it does from `F1` on the Modules screen, and asks you to press `F1` again when it writes files. <!-- QA-MOD-253 -->
+
+You should see the app's page. `Pattern` or `Shift` + `Pattern` again closes the list without starting anything. With no such app the list says so. When you leave the app with `F8` you land on the Modules screen. Not yet checked on the unit.
 
 ### Put a module in an instrument slot
 
@@ -105,11 +115,25 @@ Start on the Instrument screen of a module instrument, for example the TB-303.
 
 1. Press `F1` to `F4` to choose a page. <!-- QA-MOD-105 -->
 
-The key row and the page heading show the module's page names. The TB-303 has **SOUND** and **MODS**. The Chip has **TONE**, **ENV**, **PITCH** and **ARP**. The FM has **OP1** to **OP4**. Keys past the last page, and `F5`, are blank, and a blank key does nothing. The **PAGE** field in the header counts the module's pages: `P1` and `P2` on the TB-303, `P1` to `P4` on the Chip and the FM. A module without named pages shows `1-8`, `9-16` and so on. <!-- QA-MOD-105 QA-MOD-107 -->
+The key row and the page heading show the module's page names. The TB-303 has **SOUND** and **MODS**. The Chip has **TONE**, **ENV**, **PITCH** and **OSC/FX**. The FM has **OP1** to **OP4**. Keys past the last page are blank, and a blank key does nothing. `F5` is **PRESET**, described below. The **PAGE** field in the header counts the module's pages: `P1` and `P2` on the TB-303, `P1` to `P4` on the Chip and the FM. A module without named pages shows `1-8`, `9-16` and so on. <!-- QA-MOD-105 QA-MOD-107 -->
 
 2. Turn the encoder to change a value. <!-- QA-MOD-106 -->
 
 Some values show a name instead of a number. The Chip's wave shows **PULSE**, **TRIANGLE**, **NOISE LONG** or **NOISE SHORT**. Its duty shows 12.5%, 25%, 50% or 75%. The FM's algorithm shows a routing such as `4>3>2>1`. The side pane gives the range in names too. <!-- QA-MOD-106 -->
+
+Not yet checked on the unit.
+
+### Presets: load and save
+
+A module has presets: named sets of values for its parameters. Two kinds show in the same list: the module's factory presets, and the card's — the `.o3mp` files in `modules/presets/<module>/` on the card. Start on the page of a module instrument that has some, or on the page of an insert (see [the Mixer](mixer.md)). The built-in modules (TB-303, Chip, FM, SID) have no factory presets yet: their `F5` (**PRESET**) key opens the list, which says **NO PRESETS, SHIFT+F5 SAVES** when the card holds none either.
+
+1. Press `F5` (**PRESET**). A list opens over the page, titled with the module's name: the factory presets, each with how many values it gives, then a **CARD** heading with the card's presets of the module (at most 128 are listed; the list says **+ MORE ON CARD** when the folder holds more). <!-- QA-INS-290 QA-INS-292 -->
+2. Choose a preset with `Up`, `Down` or the encoder. <!-- QA-INS-290 -->
+3. Press `F1` (**LOAD**). `F8` (**BACK**) closes the list and loads nothing. <!-- QA-INS-290 -->
+
+You should see the list close and the strip say, for example, **PRESET SHORT LOADED** (a card preset that names a parameter the module does not have says **PRESET <NAME> LOADED, <n> SKIPPED**; a damaged file says **PRESET DAMAGED**, a file of another module **PRESET OF <MODULE>**). A preset sets every parameter of the module: a parameter the preset does not name goes back to the module's default, not what it was before. On an instrument the whole load is one undo step, so one `F8` (**UNDO**) on the page puts every value back. A module instrument that is not loaded has a blank `F5`, and a blank key does nothing. A sample instrument's `F5` is still its **SENDS** page. New in track3r-os. <!-- QA-INS-290 QA-INS-291 QA-MOD-245 -->
+
+To save the values in force as a card preset, press `Shift` + `F5` (**SAVE**) on the module's page, or in the list. The on-screen keyboard opens (**PRESET NAME**) with the instrument's name — or the effect's name, on an insert's page — suggested; type a name and press `F8`. The strip says **PRESET SAVED: <NAME>** and the file `modules/presets/<module>/<name>.o3mp` is on the card. Nothing is ever replaced: a name that is taken gets **<name> 2**, and the strip says the name the file got. The folder holds one folder per module, so you can copy a module's presets to or from a computer as one folder (the files are the same `.o3mp` the [preset tool](computer_tools.md) reads); renaming or deleting them on the unit is not offered — do it on the computer. <!-- QA-INS-293 QA-MOD-251 QA-MIX-107 -->
 
 Not yet checked on the unit.
 
@@ -121,9 +145,9 @@ Start on the Pattern screen, with the cursor on the track and row you want to wo
 1. Press `F7` (**TOOLS**). The list holds **EXPORT PATTERN** and the tool apps, sorted by name. <!-- QA-MOD-091 -->
 2. Choose an app and press `F1`. The app opens with its rows set to your cursor: pattern, track and row. <!-- QA-MOD-132 -->
 
-The rows PATTERN, TRACK, ROW and ROWS (TRACKS on Humanize and Chords) are the target. In Rhythm Gen they are on the last page, reached with `Right`; in Chords, on the second page. Press `Down` to a row and turn the encoder. `Shift` + the encoder takes the coarse step. The encoder moves one step and stops at the ends of the pattern. `Delete` puts the value you opened on back. A pattern that does not exist reads **(EMPTY)**, and **APPLY** says so. **APPLY** writes at the track and rows the page shows, and nowhere else. After `F8` the rows read the cursor again. Opened from the Modules screen there is no cursor, and the rows are dim dashes. <!-- QA-MOD-132 -->
+Humanize runs in the TOOLS panel beside the Pattern: it shows only its own rows and works on the block you selected, or on the cursor step. The rows PATTERN, TRACK, ROW and ROWS (TRACKS on Chords) are the target of the other apps, such as Chords and Rhythm Gen, which keep the full app screen. In Rhythm Gen they are on the last page, reached with `Right`; in Chords, on the second page. Press `Down` to a row and turn the encoder. `Shift` + the encoder takes the coarse step. The encoder moves one step and stops at the ends of the pattern. `Delete` puts the value you opened on back. A pattern that does not exist reads **(EMPTY)**, and **APPLY** says so. **APPLY** writes at the track and rows the page shows, and nowhere else. After `F8` the rows read the cursor again. Opened from the Modules screen there is no cursor, and the rows are dim dashes. <!-- QA-MOD-132 -->
 
-Mutate and Morph work on a whole instrument instead. Their last row, **INSTRUMENT** (**INSTRUMENT A** on Morph), starts as the Pattern's current instrument. Turn the encoder to pick another one, 1 to 64, and the page shows that instrument's parameters. A slot that is not a sample or module instrument says **SAMPLE OR MODULE INSTRUMENTS ONLY**. `Delete` puts back the instrument you opened on, and **APPLY** changes the instrument the row shows. <!-- QA-MOD-133 -->
+Mutate and Morph work on a whole instrument instead. Opened from TOOLS or from the Modules screen, they keep their own page, and their last row, **INSTRUMENT** (**INSTRUMENT A** on Morph), starts as the Pattern's current instrument. Turn the encoder to pick another one, 1 to 64, and the page shows that instrument's parameters. A slot that is not a sample or module instrument says **SAMPLE OR MODULE INSTRUMENTS ONLY**. `Delete` puts back the instrument you opened on, and **APPLY** changes the instrument the row shows. <!-- QA-MOD-133 -->
 
 Not yet checked on the unit.
 
@@ -175,7 +199,8 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 
 | Key | What it does | Ref |
 |---|---|---|
-| `Shift` + `Pattern` (Navigator), then the encoder to **MODULES**, then `F8` (**GO**) | opens the Modules screen | QA-MOD-002 |
+| `Song` + `Pattern` (Navigator), then the encoder to **MODULES**, then `F8` (**GO**) | opens the Modules screen | QA-MOD-002 |
+| `Shift` + `Pattern`, then `F1` or `F8` (**LAUNCH**) | lists the apps that are not tools and starts the one you chose | QA-MOD-252, QA-MOD-253 |
 | `F1` (**LAUNCH**) | starts the app under the cursor | QA-MOD-002 |
 | `F2` (**RESCAN**) | looks at the card again. The strip says how many apps it found: **READ AGAIN: 3 APPS** | QA-MOD-001, QA-MOD-157 |
 | `Up`, `Down` | move one row | QA-MOD-060 |
@@ -197,9 +222,9 @@ The engine picker, on the Instrument screen:
 ## Good to know
 
 - While the picker is open, the other keys do nothing. `Pattern` does not leave the Instrument screen. <!-- QA-INS-208 -->
-- A module instrument cannot be copied. `Shift` + `F2` (**COPY**) says **A MODULE INSTRUMENT CANNOT BE COPIED**. <!-- QA-INS-043 -->
+- A module instrument cannot be copied. Its `Shift` + `F2` is **MIX** instead: the page with PANNING, DELAY SEND and REVERB SEND (see [Module sounds](module-sounds.md)). <!-- QA-INS-043, QA-INS-307 -->
 - A paste onto a slot that holds a module does nothing. The strip says **INS nn IS A MODULE: DELETE IT FIRST**, where `nn` is the slot number. Press `Shift` + `F4` (**DELETE**) first. <!-- QA-INS-046 -->
-- `SAVE` works for sample instruments only. On a module instrument the strip says **SAMPLE INSTRUMENTS ONLY**, and the card is not changed. <!-- QA-INS-054 -->
+- `SAVE` saves a sample instrument as a `.pti`. On a module instrument (or an insert's page) `Shift` + `F5` (**SAVE**) saves a preset instead — see [Presets](#presets-load-and-save); on a MIDI instrument the strip says **SAMPLE INSTRUMENTS ONLY**. <!-- QA-INS-054 QA-INS-293 -->
 - Deleting a module instrument with `Shift` + `F4` stops its sound. `F4` (**MODULE**) then says **RELOAD TO PUT A MODULE HERE**. Press `F8` twice to bring the module back. <!-- QA-INS-031 -->
 - A module built for an older track3r-os ignores Glide and Slide. Its notes play as ordinary notes. <!-- QA-MOD-104 -->
 - Glide, Slide up and Slide down change the pitch of a module instrument. Arp plays only with a Chord in the other FX column. Chord alone plays the root. See [Step FX on module instruments](module-instrument-fx.md). <!-- QA-MOD-099 QA-MOD-100 QA-MOD-101 QA-MOD-103 -->

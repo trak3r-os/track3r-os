@@ -108,7 +108,7 @@ All of these are **verified parity** targets of this design unless the design se
 | Faults: a naked stub moves to a fault stack, records a crash record naming the stamped module, and resets. The watchdog is off (its re-enable point is marked). | `platform/mk66/src/startup.cpp:63-89`, `crash_record.h:27-65`, `platform/mk66/src/main.cpp:240-244` |
 | The FPU is enabled for privileged and unprivileged code (CPACR CP10/CP11 full access). | `platform/mk66/src/startup.cpp:114`, `platform/mk66/src/regs.h:140` |
 | The Sample Editor's edit protocol: a `core::Job` on the main loop writes into a spare buffer of the bank's edit pool. `sample.commit` swaps it in as one undo unit and one step of the sample's history (three steps). A stereo sample is M and S blocks (S = L - M) in one pool buffer. | `app/include/o3os/app/screens/sample_edit_screen.h:28-34`, `sample_edit_job.h:24-27`, `sample_bank.h:385-405` |
-| The Sample Editor has an edit page and an FX page (F1 FILTER, F2 COMPRESS, F3-F6 free). The instrument keeps its own sample rate (0 means 44,100). Play mode 6 is Wavetable. | `sample_edit_screen.h:9-14`, `model/include/o3os/model/instrument.h:120-123`, `app/include/o3os/app/play_mode.h:14` |
+| The Sample Editor has an edit page and an FX page (F1 FILTER, F2 COMPRESS, F3-F6 free). The instrument keeps its own sample rate (0 means 44,100). Play mode 6 is Wavetable. | `sample_edit_screen.h:9-14`, `model/include/o3os/model/instrument.h:125-128`, `app/include/o3os/app/play_mode.h:14` |
 | ARMv7-M: in unprivileged thread mode, `CPS` and `MSR` to PRIMASK, BASEPRI, FAULTMASK or CONTROL have no effect, and an access to the System Control Space (SCB, NVIC, SysTick, DWT) is a BusFault. | ARMv7-M Architecture Reference Manual (DDI 0403): the CPS and MSR descriptions, and "System Control Space" |
 
 ### 2.4 Open research questions
@@ -147,6 +147,7 @@ All of these are **verified parity** targets of this design unless the design se
 - A non-finite or reversed range is shown as an integer 0..0, and the parameter is not editable.
 - A non-printable character in a name, label or unit shows as `?`.
 - A default outside the range is clamped.
+- A zero, negative or non-finite `step` becomes 1.
 
 The list strings are read from the file (`code_offset + list_offset`) when a plugin is selected (A4). The catalogue keeps, per file:
 - the file name (≤ 47 characters);
@@ -296,7 +297,7 @@ The bank holds a stereo sample as M and S. During a run the result's M and S blo
 | Stereo | `CONVERT_TO_MONO` | `channels = 2` over the **whole sample** whatever the selection. The result is L (`out[0]`) only, committed as a mono sample (`edit_commit` with no side), which drops S; undo brings it back. New behaviour: tracker-ce converts the selection and keeps L at save time, but a sample that is part mono cannot exist here. |
 | Stereo | generator | `channels = 1`, mono result (A12) |
 
-Before S5 lands, an effect plugin on a stereo sample says `STEREO: MAKE MONO FIRST`, as Compressor does today (`app/src/app.cpp:2665-2670`).
+S5 as built: the refusal is gone for plugins (Compressor and the Amiga conversion keep theirs). Each Process block's input is staged as L = sat(M + S), R = sat(M - S) in the 32 KiB `ptfx` staging; the output goes to the result's M block (L) and S block (R), and a Convert pass turns the produced range back to M and S in place with `M = (L + R + 1) >> 1`, `S = clamp16(L - M)`. This is the WAV importer's rule (`formats/wav/src/wav_importer.cpp` `convert_downmix`, `quantise24`) **without its dither**, so a plugin that changes nothing returns the bytes the importer made (exact for importer-made M/S, including the full-scale corners); an arbitrary M/S pair that the importer could not have made may move by one step.
 
 ### 3.7 The UI: a PLUGINS page in Sample Edit (S4)
 
@@ -464,19 +465,38 @@ Each slice is one branch and one commit per slice ID. The QA rows go to `docs/qa
   - `platform/qemu/tests/ptfx_gate_test.cpp`, `tests/ptfx_host_math_test.cpp`;
   - ADR 0002 amendment 6.
 - **Acceptance:** every QEMU case of section 5 passes. The module host's sin and cos give the same results as before (the module tests unchanged). The region test checks contiguity and the alias view.
+- **S2c (the quarantine set and `ptfx quarantine`, `OS-CEPTFX-S2c`):** `module/include/o3os/module/ptfx_quarantine.h` (16 ids, first 16 kept, full flag; `boot_load` takes the crash record's module word at boot; `quarantine(id, why)` is the call S3 makes on Timeout, Fault and StackOverflow), the catalogue's `set_quarantine` (the set decides: an entry is quarantined when the set holds its id), and the console command `ptfx quarantine` (the ids with their reasons, then the count and the full flag). `ptfx list` and `ptfx info <n>` are deferred to S3, which has the catalogue to list (flash: the S2c link carries only the quarantine path). The crash record's module word cannot tell a `.ptfx` id from a `.tmod` one (both have bit 15), so a `.tmod` id lands in the set too; a `.tmod`/`.ptfx` id collision (15 bits, about 0.4 %) is accepted, and S3 checks the catalogue before honouring `Why::Crash` (an id no listed plugin has is inert).
 - **Tests:** host, `tools/ci.sh qemu`.
 - **QA rows:** none user-visible (console only).
 - **Flash:** about 2.8 KiB. **SRAM:** about 200 B. Needs a risk review plus an independent review.
 
 **S3 `OS-CEPTFX-S3` the run.** M, Level C (foreign code writes sample data through the edit protocol).
 - **Files:** `app/include/o3os/app/ptfx_job.h`, `app/src/ptfx_job.cpp`, the App's start and end of edit (`app/src/app.cpp`, beside the existing edit path), `core/include/o3os/core/job.h` (`long_step()`), `diag ptfx run <n>` (the instrument in view, the selection), `tests/ptfx_job_test.cpp`.
-- **Acceptance:** 3.5 for mono samples. The sequence test equals 2.2. One undo step; F8 restores the bytes. A stereo sample with an effect plugin says `STEREO: MAKE MONO FIRST`.
+- **Acceptance:** 3.5 for mono samples. The sequence test equals 2.2. One undo step; F8 restores the bytes. (A stereo sample went through 3.6 from S5 on; before S5 an effect plugin on it said `STEREO: MAKE MONO FIRST`.)
 - **Tests:** host, plus the SDK oracle when fetched, plus QEMU, which runs `gain` through the job.
 - **QA rows:**
   - QA-SED-027: `diag ptfx run` applies a plugin to the selection.
   - QA-SED-028: a hung plugin times out and is quarantined; the unit stays alive.
   - QA-SED-029: a crashing plugin is contained with the warning.
 - **Flash:** about 2.0 KiB. **SRAM:** about 0.1 KiB.
+- **S3a (`OS-CEPTFX-S3a`, host only):** the job (`ptfx_job.*`), `long_step()` and `tests/ptfx_job_test.cpp`; a refusal for a scratch below the plugin's `scratch_size`. The App hooks (`App::run_ptfx`, the `finish_edit` branch, `edit_ptfx_`, the `report_jobs` strip rule for `PLUGIN ...` texts) and the job's place in `SampleBankMem` move to S3b with their caller and an App-level test; S3a links nothing into the image. Notes for S3b:
+  - The job keeps pointers to the plugin's `PtfxInfo`, parameter values, scratch, catalogue and quarantine across steps: S3b cancels the job before a catalogue rescan, an unload or any other change of those.
+  - After a length-changing result, reset `sedit.a`, `sedit.b` and the selection (they point into the old length).
+  - `edit_begin` clears the undo and redo history on a slot change even when the run is cancelled later (the Size step takes the buffer). Either take the buffer after the first successful `process_block`, or accept that and document it in the QA row.
+  - Keep `long_step()` true for a plugin job only; the runner's overrun counter then skips these steps (the time is still measured).
+- **S3b (`OS-CEPTFX-S3b`, done):** `App::run_ptfx`, `App::cancel_ptfx`, the `finish_edit` branch (`edit_ptfx_`), the `report_jobs` rule for `PLUGIN ...` texts, `SampleBankMem::ptfx_job`; the mk66 composition root (`app_main.cpp`: catalogue scan, header read, load into the `ptfx` region, one `PtfxJob` run) and the console `diag ptfx list|info <n>|run <n>` beside `quarantine`; `tests/ptfx_app_test.cpp`; `qemu_ptfx_gate` runs the gain shape, a hang and a crash through the job. The three S3a notes: (1) `cancel_ptfx` runs before a catalogue rescan (`ptfx scan`) and before `begin_replace`; (2) `finish_edit` resets `sedit.a`, `sedit.b` and the selection after a length-changing result; (3) decision: the buffer is still taken by `edit_begin` at the start (the Size step), so a run that is cancelled or fails after a slot change has already cleared that slot's undo history (the same as the Compressor); this is accepted and noted here, not worked around.
+  - A run needs `Sample Edit` in view with a sample open (the commit action `sample.commit` is enabled there only); the selection is `state_.sedit`'s. Off that screen the run is refused with `OPEN A SAMPLE IN SAMPLE EDIT`. If the screen is left while the plugin runs, the commit action is Disabled at the end: `finish_edit` posts `THE EDIT COULD NOT BE KEPT` and the audio stays as it was.
+  - Review fold: `ptfx run` asks `App::ptfx_refusal` (screen, sample, another job), the quarantine and the header's name against the listed entry's (a card swapped after `ptfx list`: `file changed: run ptfx list`) before the code is read from the card. `ptfx info` during a run answers `plugin running` and leaves the shared info alone (the job reads its parameter count and values there). The host table's `sample_rate` is the instrument's (A8), set in `App::run_ptfx`.
+  - The scan is synchronous: `ptfx list` is a diagnostic console command that runs the catalogue's steps in a bounded loop on the main loop (header reads of up to 128 files), so it blocks the UI for the time a big `/Effects` folder takes. The PLUGINS page (S4) scans as a job.
+- **S4a (`OS-CEPTFX-S4a`):** the PLUGINS page without the run: `app/ptfx_page.h` / `ptfx_page.cpp` (`PtfxPage` in `SampleBankMem`, SDRAM: the picked header, the list strings, the A15 values of 8 plugins), `Context::SampleEditPlug`, `sedit.plug` / `sedit.plug_coarse` / `sedit.plug_do`, `App::poll_ptfx` (a quiet catalogue scan job, one header read a pass, no card work in a handler or the render), the sim line `card ptfx` (`sim/src/sim_ptfx.cpp`), QA-SED-030..032. F1 APPLY said `APPLY: NOT YET` until S4b. Open: a card swap does not invalidate the catalogue (F2 RESCAN covers it); on the unit the console `diag ptfx list` shares the catalogue with the page.
+- **S4b as built (`OS-CEPTFX-S4b`, effect path only):** F1 APPLY (`sedit_plug_do`) sets `SampleEditState::plug_apply`; `App::apply_ptfx` (main loop, after `poll_ptfx`) checks in this order: no page or catalogue (`NO PLUGINS HERE`), no entry (`NO PLUGINS`), a refused or quarantined entry (`ptfx_refusal_text`, moved to `app/ptfx_page.cpp`, the same text the page greys with), an effect on an empty slot (`NO SAMPLE`), a damaged file, no runner (`PLUGINS RUN ON THE TRACKER`), then the runner `App::attach_ptfx_runner(PtfxRunner, ctx)`, a function pointer so `app/` never includes platform code. The unit's runner (`ptfx_page_run` in `app_main.cpp`, under `#if !O3OS_AUDIO_TEST`, so `attach_ptfx_runner` is in `AUDIO_TEST_LEAVES_OUT` of `tests/wiring_audit.py`) is the S3b `ptfx_run(n, values)` with the page's A15 values; the simulator's (`SimPtfxRun`, `sim/src/sim_ptfx.cpp`) has a host stand-in for the demo Mono Tool only (AMOUNT = gain). Both end in `App::run_ptfx` and `finish_edit` (one undo unit, `THE EDIT COULD NOT BE KEPT`); F8 is CANCEL while it runs (`sedit_undo` -> `st.cancel` -> `poll_sedit`). QA-SED-033, 034, 039..042 (039..041 by host test: the simulator cannot show a cancel, an IMX_ONLY file or a card change without more demo files that would move the S4a goldens). **Left for S4c:** the generator (`Gen NN` into an empty slot or replace), the WAVETABLE play mode (6) and Add Silence lengthening (steps 035..038 of the slice list); a generator APPLY says `GENERATORS ARE NOT SUPPORTED YET` meanwhile (`PtfxJob::begin`). Risk: the first run of a plugin loads its code in the main loop (at most 8 steps of 4 KiB, S3b); to be timed on the unit.
+- **S4c as built (`OS-CEPTFX-S4c`, generators, WAVETABLE, Add Silence):**
+  - Generator (flag GENERATOR): `PtfxJob::begin` no longer needs a source sample; the Size step takes 88,200 frames (`kPtfxGeneratorFrames`, `NO ROOM FOR THE EDIT` when the pool has less), `in` is NULL in every `process_block`, the selection and the latch of `set_extra_samples` are not read, and the result is trimmed to what the plugin produced (`NOTHING PRODUCED` when it made none). `App::ptfx_refusal(bool generator)` and the unit's `ptfx_page_run` guard no longer demand a sample for a generator, so `NO SAMPLE` is for effects only.
+  - On a slot with a sample: the same edit buffer as an effect, one history step, F8 restores the old sample; the selection and the window are reset. On an empty slot: the buffer is the bank's take (`take_begin` / `take_end` / `take_commit`, the path of a load: mono, 44,100 Hz, no history step) and `App::finish_generated` makes the instrument a sample instrument named `Gen NN`. NN is the number the screens show (slot + 1, two digits), not the zero-based slot. `edit_dst_` doubles as the marker "this run holds a take": a failed, cancelled or version-mismatched run releases it (`take_end(0)`). A slot that holds another kind of instrument is refused (`NO SAMPLE INSTRUMENT HERE`; `finish_generated` checks the kind again, so a slot that changed while the job ran is not overwritten); a sample instrument without audio keeps the instrument and gets only the audio, `sample_rate` 0 and the wavetable fields; the take is committed before `set_instrument`, so an instrument never stands without its audio; the strip says `GENERATED: Gen NN` at the end.
+  - Deviation from A12 (decision, S4c, removed by S5): a generator on a stereo slot kept the effect path's refusal until S5; from S5 on it follows A12 (mono result, `channels = 1`, one history step, F8 brings the stereo sample back).
+  - WAVETABLE (flag 0x04): after a successful run on a sample slot `sample.commit` sets the instrument's `play_mode` to 6, `sample_type` 1 and fits the window (`wt_fit_size`, `wt_clamp_pos`) in the same step as the audio: the `PointsRec` of the history step carries the mode, the window size and the window position before and after (`pm`, `wsz`, `wpos`; `pm` 0xFF = the step leaves them), so F8 restores the sample, the points, the play mode and the window together and Shift + F8 sets the mode again. On an empty slot `finish_generated` builds the wavetable fields (`make_wavetable_fields`, `wt_fit_size`); there is no history step to undo. A sample shorter than 32 frames cannot be a wavetable: the strip says `WAVETABLE NEEDS A SAMPLE OF 32 FRAMES` and the mode stays as it was.
+  - Add Silence (`set_extra_samples`): the job exposes `body_a/body_b/prepend/append`; the commit remaps the sample points with `insert_points` (`wave_math`): a frame at or before the body start stays, inside the body it moves by the prepend, at or after the body end by prepend + append (crop's mapping in reverse). The points and the audio are one history step.
+  - Tests: host only (`tests/ptfx_job_test.cpp`, `tests/ptfx_app_test.cpp`, `tests/wave_math_test.cpp`). There is no simulator stand-in for a generator or for Add Silence: a new fake plugin would change the PLUGINS list and so the S4a/S4b goldens. QA-SED-035..038 therefore carry `manual:` in the Sim cell and a host test in the Unit cell; the unit still has to run a real plugin of each kind.
 
 **S4 `OS-CEPTFX-S4` the PLUGINS page.** M, Level B.
 - **Files:** `app/include/o3os/app/screens/sample_edit_screen.h`, `app/src/screens/sample_edit_screen.cpp`, `app/include/o3os/app/sample_edit_state.h`, `app/src/sample_edit_actions.cpp`, `app/src/bindings.cpp`, `tests/sample_edit_screen_test.cpp`, `sim/scenarios/qa/qa_sample_edit.txt` and goldens (the catalogue from synthetic header-only files made by the test; runs through registered stand-ins), `docs/ui/ui-map.md`, `docs/manual/sample_edit.md` (a "Plugins" section: what is new, the `/Effects` folder, the tags, the messages).
@@ -499,9 +519,10 @@ Each slice is one branch and one commit per slice ID. The QA rows go to `docs/qa
 - **Flash:** about 2.5 KiB. **SRAM:** about 80 B.
 
 **S5 `OS-CEPTFX-S5` stereo** (if Q4 a). S, Level B.
-- **Files:** `app/src/ptfx_job.cpp`, `tests/ptfx_job_test.cpp`.
+- **Files:** `app/include/o3os/app/ptfx_job.h`, `app/src/ptfx_job.cpp`, `app/src/app.cpp` (`run_ptfx`, `finish_edit`), `platform/mk66/src/app_main.cpp` (the staging pointer), `tests/ptfx_job_test.cpp`, `platform/qemu/tests/ptfx_gate_test.cpp`.
 - **Acceptance:** the table of 3.6. A stereo sample through a plugin that changes nothing comes back as the importer made it.
-- **Tests:** host, QEMU (Multi-Mode Filter with `channels = 2` against the oracle).
+- **Tests:** host (every row of 3.6, the no-op round trip, the length mismatch of A13), QEMU (a two-channel gain stand-in through the real gate: the S3 harness has no Multi-Mode Filter oracle).
+- **As built:** `PtfxJob` has four modes (Mono, Stereo, TwoPass, ToMono); the AllocFn gets a `stereo` flag; `Plugin::stage` is the 32 KiB staging (`kPtfxStereoOff`, SRAM +0). A generator clears the stereo flag of its source (A12). The conversion is the importer's rule without the dither (see 3.6).
 - **QA rows:**
   - QA-SED-043: a STEREO plugin on a stereo sample.
   - QA-SED-044: a mono-only plugin on a stereo sample runs on both sides.
@@ -513,6 +534,11 @@ Each slice is one branch and one commit per slice ID. The QA rows go to `docs/qa
 - **Acceptance:** the unit checks of section 5 pass on a gated image; R3 and R5 answered.
 - **QA rows:** the unit column of QA-SED-027..045.
 - **Flash / SRAM:** 0.
+- **Prepared (S5 branch):** `qa_ptfx.json` exists and validates offline (`o3hil.py validate`); it has not run on a unit. Tester checklist:
+  - Card: `/Effects` holds the six SDK fixtures (`build-fixtures/ptfx/*.ptfx`) and our `hang` and `fault_scs` builds. Run `ptfx list` first and pass the numbers with `--var GAIN=.. MMF=.. DELAY=.. HANG=.. FAULT=..`.
+  - Per fixture: console run and page run (S4), the `inst 1` len and sum compared with the QEMU value; a stereo sample once (QA-SED-043..045: Stereo Delay through the page, a non-`STEREO` effect as two passes, a `CONVERT_TO_MONO` effect, F8 brings the stereo back).
+  - Capture: R3, run `fault_periph` (SIM_SDID read) and note whether it faults; R5, DWT cycles per frame of Multi-Mode Filter from the alias; the `cpu` max during a Stereo Delay run with a project playing.
+  - Timeout check: `hang` ends within 3 s, the console and playback stay responsive, `fault_scs` gives no reset and the next run works.
 
 ## 8. Risks
 
@@ -520,6 +546,7 @@ Each slice is one branch and one commit per slice ID. The QA rows go to `docs/qa
    - A plugin runs with the OS's memory open to it. Unprivileged mode protects the interrupt mask and the SCS, and perhaps the peripherals (R3), but not RAM. A plugin can corrupt the project or the undo journal before it faults.
    - Mitigations: Q1's trust model, containment (3.3), quarantine, the save-and-restart warning, and the stack layout that keeps an overflow inside the region.
    - This is ADR 0002's model, not a sandbox.
+   - The K66 core has no MPU (R1, R2), so on the unit the gate contains accidents (PPB, bus and usage faults, hangs, stack overrun) but is not a sandbox against hostile code.
 2. **No relocations.** A plugin that reads an absolute pointer from its `.data` (a string table, a function table) reads or jumps into our flash. That is undefined behaviour, caught only if it faults. It is equally broken on tracker-ce, so working plugins do not do it. The format gives no way to detect it.
 3. **Containment code is ISR and fault-path code.** A bug there can hang the unit. Level C: QEMU tests of every path, a risk review and an independent review.
 4. **UI stalls** of up to one call (8,192 frames) per main-loop pass, bounded at 2 s. Live pads wait meanwhile; audio does not.
@@ -539,7 +566,7 @@ Each slice is one branch and one commit per slice ID. The QA rows go to `docs/qa
   - this spec's section 2;
   - `tracker-ce@7fd6c2c:core/effector/mtEffectModular.cpp:92-225`, for the exact call sequence; describe it in our own code, never copy it;
   - `editor-fx-sdk/tracker_plugin.h:29-90`, for the offsets; write our own constants with `static_assert`s of the offsets;
-  - `platform/mk66/src/startup.cpp:63-89` (the fault stub), `platform/mk66/src/clock.cpp` (SysTick), `sdram_view.h` (the single-alias rule), `app/src/app.cpp:2620-2700` (the edit start), `sample_bank.h:385-405`.
+  - `platform/mk66/src/startup.cpp:63-89` (the fault stub), `platform/mk66/src/clock.cpp` (SysTick), `sdram_view.h` (the single-alias rule), `app/src/app.cpp:2648-2733` (the edit start), `sample_bank.h:385-405`.
 - **Gate details that are easy to get wrong:**
   - `set_param` takes its float in s0 (hard-float AAPCS).
   - PSP must be 8-byte aligned.

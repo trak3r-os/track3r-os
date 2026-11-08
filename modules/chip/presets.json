@@ -1,0 +1,77 @@
+{
+ "module": "chip",
+ "kind": "instrument",
+ "presets": [
+  {
+   "name": "Square Lead",
+   "values": {
+    "Wave": 0,
+    "Duty": 2,
+    "Attack": 0,
+    "Decay": 250,
+    "Sustain": 80,
+    "Release": 80,
+    "Vib Depth": 20,
+    "Vib Rate": 6,
+    "Vib Delay": 200
+   }
+  },
+  {
+   "name": "Tri Bass",
+   "values": {
+    "Wave": 1,
+    "Attack": 0,
+    "Decay": 400,
+    "Sustain": 90,
+    "Release": 60,
+    "Transpose": -12
+   }
+  },
+  {
+   "name": "Noise Hat",
+   "values": {
+    "Wave": 2,
+    "Attack": 0,
+    "Decay": 60,
+    "Sustain": 0,
+    "Release": 30
+   }
+  },
+  {
+   "name": "Arp Chord",
+   "values": {
+    "Wave": 0,
+    "Duty": 1,
+    "Decay": 300,
+    "Sustain": 60,
+    "Arp 1": 4,
+    "Arp 2": 7,
+    "Arp Speed": 30
+   }
+  },
+  {
+   "name": "Zap",
+   "values": {
+    "Wave": 0,
+    "Duty": 0,
+    "Decay": 150,
+    "Sustain": 0,
+    "Sweep": -24,
+    "Sweep Time": 150
+   }
+  },
+  {
+   "name": "Pwm Pad",
+   "values": {
+    "Wave": 0,
+    "Duty": 2,
+    "Attack": 120,
+    "Decay": 500,
+    "Sustain": 70,
+    "Release": 400,
+    "PWM Depth": 60,
+    "PWM Rate": 1.5
+   }
+  }
+ ]
+}

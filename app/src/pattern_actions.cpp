@@ -45,6 +45,7 @@ bool instrument_select(ActionContext& ctx, core::ActionArg arg) noexcept {
     release_live_pads(ctx);  // OS-INSTUI O2: a note the Instrument screen's pads hold ends on the instrument that started it
   }
   ctx.view.instrument = arg;
+  ctx.view.params.insert = ParamView::kNoInsert;  // OS-INSFX S5: an instrument chosen on an insert's parameter page takes the page over
   if (changed && (ctx.view.screen == ScreenId::Wave || ctx.view.screen == ScreenId::SampleEdit)) {
     wave_view_reset(ctx.view);  // OS-INSTPICK: a pad of Sample edit chooses the sample to edit; its window and selection were the old one's
   }
@@ -224,6 +225,10 @@ bool transport_play(ActionContext& ctx, core::ActionArg) noexcept {
   bool ok = false;
   if (ctx.view.playing) {
     ok = ctx.transport->stop();
+    if (ok) {
+      // OS-SONG3 S4: Stop ends a PREVIEW audition (F1 in a TIMELINE lane): the saved solo set comes back, exactly once.
+      (void)song_preview_end(ctx.session != nullptr ? ctx.session->state_editor() : nullptr, ctx.view, ctx.params);
+    }
   } else if (ctx.view.screen == ScreenId::Song) {
     const int count = SongSource(ctx.model).count();
     if (count <= 0) {
@@ -287,6 +292,9 @@ bool select_extend(ActionContext& ctx, core::ActionArg arg) noexcept {
   Selection& sel = v.edit.selection;
   PatternView& view = v.pattern;
   const PatternView::Dims d = pattern_dims(ctx.model, v);
+  // OS-SELSHIFT: a downward quarter jump leaves the block's end one row above the cursor; while that holds (`end_lags`), Shift + Down keeps the lag so the block grows by one row, not two.
+  const bool lag = sel.end_lags && sel.extending && !sel.column && !sel.follow && sel.end_row == view.row() - 1;  // (a block made while following is dropped below once the cursor is stopped: no lag to carry)
+  sel.end_lags = false;
   // OS-AUDIT-56: Left / Right grow the block a column at a time inside the anchor track; once the block spans two tracks (whole steps), and for the whole-column block, they step by whole tracks as before.
   const auto sideways = [&] {
     const bool by_track = sel.column || view.track() != sel.start_track;
@@ -309,6 +317,10 @@ bool select_extend(ActionContext& ctx, core::ActionArg arg) noexcept {
     } else if (dy < 0 && (sel.column || sel.end_row == 0)) {
       (void)select_column_all(ctx, 0);  // (Shift + Up at step 0 selects the column, as stopped)
     } else {
+      if (sel.column) {
+        sel.start_col = 0;  // (the one-column block of OS-SELCOL becomes whole steps too)
+        sel.end_col = Selection::kLastColumn;
+      }
       sel.column = false;  // (Shift + Down from a column block: it becomes a plain block, as stopped)
       sel.end_row = static_cast<std::int16_t>(pe::clampi(sel.end_row + dy, 0, d.steps - 1));
     }
@@ -365,7 +377,12 @@ bool select_extend(ActionContext& ctx, core::ActionArg arg) noexcept {
     (void)view.jump_row(view.row() + 1, d);
     const bool was_column = sel.column;
     end_here();
-    if (was_column) {  // (a whole-column block that Shift + Down turns into a plain block keeps every column)
+    if (lag) {
+      sel.end_row = static_cast<std::int16_t>(view.row() - 1);  // (the cursor moved on by one, so did the end: the lag stays)
+      sel.end_lags = true;
+    }
+    if (was_column) {  // (a whole-column block that Shift + Down turns into a plain block keeps every column; so does the one-column block of OS-SELCOL)
+      sel.start_col = 0;
       sel.end_col = Selection::kLastColumn;
     }
     sel.column = false;
@@ -373,7 +390,8 @@ bool select_extend(ActionContext& ctx, core::ActionArg arg) noexcept {
   return true;
 }
 
-// The column selection: the cursor's track from step 0 to the end; done again, every track.
+// The column selection, one more step at each press: the cursor's column of the cursor's track from step 0 to the end (OS-SELCOL, only on the Instr, Vol, Fx1 and Fx2 columns; on Note the first
+// press is the track), then the whole track, then every track.
 bool select_column_all(ActionContext& ctx, core::ActionArg) noexcept {
   if (!pe::select_enabled(ctx)) {
     return false;
@@ -384,17 +402,49 @@ bool select_column_all(ActionContext& ctx, core::ActionArg) noexcept {
   sel.follow = pe::select_follows(ctx);  // (made while following: the follow keeps it, OS-BUG-WATCHSEL)
   sel.start_row = 0;
   sel.end_row = static_cast<std::int16_t>(d.steps - 1);
-  sel.start_col = 0;  // (OS-AUDIT-56: the whole column is whole steps, also after Shift is let go and `column` is reset)
-  sel.end_col = Selection::kLastColumn;
-  if (sel.column) {
+  const bool fresh = !sel.column;
+  const bool own_column = sel.column_only() && sel.start_track == sel.end_track;  // (stage 1 of OS-SELCOL, not yet widened by Shift + Right)
+  // OS-AUDIT-56: the track and every-track steps are whole steps, also after Shift is let go and `column` is reset; stage 1 keeps its column range for the same reason.
+  const int col = fresh ? static_cast<int>(v.pattern.column()) : 0;
+  sel.start_col = sel.end_col = static_cast<std::int8_t>(col);
+  if (col == 0) {
+    sel.end_col = Selection::kLastColumn;
+  }
+  if (fresh || own_column) {
+    sel.column = true;
+    sel.start_track = sel.end_track = static_cast<std::int8_t>(fresh ? v.pattern.track() : sel.start_track);
+  } else {
     sel.start_track = 0;
     sel.end_track = static_cast<std::int8_t>(d.tracks - 1);
-  } else {
-    sel.column = true;
-    sel.start_track = sel.end_track = static_cast<std::int8_t>(v.pattern.track());
   }
   sel.active = true;
   sel.extending = true;
+  return true;
+}
+
+// Shift + Note, Instr, Vol, Fx on Pattern (OS-SELSHIFT, new Community OS behaviour): the quarter jump of OS-QJUMP (arg 0..3), and in Edit it also selects the rows it crossed, from the lower row up to one row above the
+// higher one, in the cursor's track and column like a Shift + arrow range (an active block is replaced; the same row selects nothing). Upward the block ends on the cursor, so a Shift + Up goes on from there;
+// downward the cursor is one row past the block's end, so a Shift + Down keeps that lag (Selection::end_lags) and grows the block by one row. Outside Edit it is the jump alone.
+bool select_jump(ActionContext& ctx, core::ActionArg arg) noexcept {
+  ViewState& v = ctx.view;
+  const int from = v.pattern.row();
+  if (!cursor_jump_fraction(ctx, arg)) {
+    return false;
+  }
+  const int to = v.pattern.row();
+  if (!pe::edit_enabled(ctx) || to == from) {
+    return true;
+  }
+  Selection& sel = v.edit.selection;
+  sel.follow = pe::select_follows(ctx);  // (as the arrows: a block made while the cursor rides the playhead is kept by the follow)
+  sel.start_row = static_cast<std::int16_t>(to < from ? from - 1 : from);
+  sel.end_row = static_cast<std::int16_t>(to < from ? to : to - 1);
+  sel.start_track = sel.end_track = static_cast<std::int8_t>(v.pattern.track());
+  sel.start_col = sel.end_col = static_cast<std::int8_t>(v.pattern.column());
+  sel.column = false;
+  sel.extending = true;
+  sel.active = true;
+  sel.end_lags = to > from;  // (the end is one row above the cursor on a downward jump only)
   return true;
 }
 

@@ -50,13 +50,17 @@ RawChunk& chunk_of(std::vector<RawChunk>& cs, std::uint32_t id, int nth = 0) {
 
 Bytes build(const std::vector<RawChunk>& cs, const BuildOptions& o = {}) { return test::build_file(cs, o); }
 
-// A hypothetical INST 1.6 (INST 1.4 is OS-LFOSINE's, with no field of its own; INST 1.5 is OS-STEREO's stereo byte) made of an INST 1.1 payload: the engine byte (automatic), the twelve bytes of INST 1.3 at their defaults (OS-INSTUI S8b)
-// and the stereo byte of 1.5 (mono), then `tail` bytes of a field of a later version.
+// A hypothetical INST 1.9 (INST 1.8 is OS-MODRATE S3's module RATE byte; INST 1.4 is OS-LFOSINE's, with no field of its own; INST 1.5 is OS-STEREO's stereo byte; INST 1.6 is OS-CEWTENV W1's twelve WT bytes; INST 1.7 is OS-CEPLAYTHRU P1's play-thru flag) made of an INST 1.1 payload: the engine byte (automatic), the twelve bytes of INST 1.3 at their defaults (OS-INSTUI S8b),
+// the stereo byte of 1.5 (mono), the twelve WT bytes of 1.6 (zero), the play-thru byte of 1.7 (zero), the RATE byte of 1.8 (zero), then `tail` bytes of a field of a later version.
 void make_inst_next_minor(RawChunk& c, std::size_t tail, std::uint8_t fill = 0xAB, std::uint8_t engine = 0) {
-  c.payload[1] = 6;
+  c.payload[1] = 9;
   c.payload.push_back(engine);
   const std::uint8_t twelve[12] = {127, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 100};
   c.payload.insert(c.payload.end(), twelve, twelve + 12);
+  c.payload.push_back(0);
+  const std::uint8_t wt[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+  c.payload.insert(c.payload.end(), wt, wt + 12);
+  c.payload.push_back(0);
   c.payload.push_back(0);
   c.payload.insert(c.payload.end(), tail, fill);
 }
@@ -215,6 +219,35 @@ TEST_CASE("native: a small project round-trips byte for byte and keeps every fie
   CHECK(b.instrument(1) == nullptr);
   CHECK(b.unknown_count() == 2);
 
+  Bytes second;
+  NEED(test::save(b, second) == Progress::Done);
+  CHECK(second == first);  // byte exact
+}
+
+TEST_CASE("native: tracker-ce FX ids 96..127 round-trip byte for byte (ADR 0004 amendment 3, OS-CEFXIDS: PATT stays 1.0)") {
+  Project& a = proj(0);
+  a.reset();
+  NEED(a.create_pattern(1, 16) == Status::Ok);
+  const std::uint8_t ids[] = {96, 103, 127};  // OG 43, 50 and 74 mapped by the OG import
+  for (unsigned i = 0; i < 3; ++i) {
+    Step s = kEmptyStep;
+    s.note = 10;
+    s.instr = 1;
+    s.fx[0] = {ids[i], static_cast<std::uint8_t>(i + 1)};
+    NEED(a.set_step(1, 0, i, s) == Status::Ok);
+  }
+  Bytes first;
+  NEED(test::save(a, first) == Progress::Done);
+  Report rep;
+  NEED(test::load(test::arena(1), first, &rep) == Progress::Done);
+  CHECK(rep.error == Error::None);
+  Project& b = proj(1);
+  CHECK(b.check_invariants());
+  NEED(b.pattern(1) != nullptr);
+  for (unsigned i = 0; i < 3; ++i) {  // kept verbatim, meaning and all: an older build reads them inert
+    CHECK(b.pattern(1)->steps[0][i].fx[0].type == ids[i]);
+    CHECK(b.pattern(1)->steps[0][i].fx[0].value == i + 1);
+  }
   Bytes second;
   NEED(test::save(b, second) == Progress::Done);
   CHECK(second == first);  // byte exact
@@ -770,7 +803,7 @@ TEST_CASE("native: a source that fails or breaks its contract ends in SourceFail
 TEST_CASE("native: a newer minor version is read, noted, and its extra fields are lost on the next save") {
   const Bytes base = small_file();
   std::vector<RawChunk> cs = test::split_chunks(base);
-  // a hypothetical next minor version of every chunk kind (1.1; INST is at 1.3 since OS-INSTUI S8b, so its next is 1.4): version bumped,
+  // a hypothetical next minor version of every chunk kind (1.1; INST is at 1.8 since OS-MODRATE S3, so its next is 1.9): version bumped,
   // two unknown bytes appended to the fields
   for (RawChunk& c : cs) {
     if (c.id == kChunkInst) {
@@ -798,7 +831,7 @@ TEST_CASE("native: a newer minor version is read, noted, and its extra fields ar
   CHECK(rep.newer_minor);
 }
 
-TEST_CASE("native: INST is version 1.1 with the sample rate appended; 1.0 reads as rate 0, a 1.4 tail is skipped (OS-002c, OS-004d, OS-INSTUI S8b)") {
+TEST_CASE("native: INST is version 1.1 with the sample rate appended; 1.0 reads as rate 0, a 1.9 tail is skipped (OS-002c, OS-004d, OS-INSTUI S8b, OS-CEWTENV W1, OS-CEPLAYTHRU P1)") {
   test::fill_small(proj(0));
   CHECK(proj(0).instrument(0)->sample_rate == 22050u);
   Bytes base;
@@ -859,8 +892,8 @@ TEST_CASE("native: INST is version 1.1 with the sample rate appended; 1.0 reads 
   CHECK(test::load(test::arena(1), build(bad), &rep) == Progress::Failed);
   CHECK(rep.error == Error::Malformed);
 
-  // A 1.4, which a later firmware may write with a field of its own after the twelve of 1.3: read as far as 1.3 (here the engine is 0x11, which is not one, so it reads as automatic, and the
-  // twelve are the defaults), the tail skipped, the report says so, and the next save writes 1.1 (an automatic engine and the defaults, what this reader knows to leave out).
+  // A 1.9, which a later firmware may write with a field of its own after the RATE byte of 1.8: read as far as 1.8 (here the engine is 0x11, which is not one, so it reads as automatic, the twelve are the defaults and the
+  // flag is 0), the tail skipped, the report says so, and the next save writes 1.1 (an automatic engine and the defaults, what this reader knows to leave out).
   std::vector<RawChunk> next = cs;
   for (RawChunk& c : next) {
     if (c.id == kChunkInst) {
@@ -877,6 +910,475 @@ TEST_CASE("native: INST is version 1.1 with the sample rate appended; 1.0 reads 
   // The same file as seen by a reader that only knows 1.0 would be the "newer minor" case above: the tail (here the rate) is
   // skipped. That is what the 1.0 limits of every other chunk have always done, and what the Python reference does too
   // (project_python).
+}
+
+// OS-CEWTENV W1 (docs/specs/OS-CEWTENV.md): INST 1.6 appends the twelve WT bytes (wt_bend, wt_sust of the six LFO slots) after the stereo byte, written only for an instrument with a WT slot (a loop of 2 or 3) or a non-zero WT byte.
+TEST_CASE("native: OS-CEWTENV W1, INST 1.6: a WT instrument writes the new minor and round-trips; one without WT stays at its older minor byte for byte; an older chunk's loop 2 reads as 1; a newer minor's tail is skipped") {
+  test::fill_small(proj(0));
+  const Bytes plain = small_file();  // the same project without WT bytes: the file it was before this slice
+  const Instrument original = *proj(0).instrument(0);
+  // instrument 0: slot 2 a WT Env (loop 2), contour 37, bend 0x9C, sust 40; slot 4 a WT LFO (loop 3), contour 200, bend 0x17, sust 99; slot 1 a non-zero WT byte on a loop-0 slot
+  {
+    Instrument in = *proj(0).instrument(0);
+    in.sampler.envelope[2].loop = 2;
+    in.sampler.lfo[2].shape = 37;
+    in.sampler.lfo[2].wt_bend = 0x9C;
+    in.sampler.lfo[2].wt_sust = 40;
+    in.sampler.envelope[4].loop = 3;
+    in.sampler.lfo[4].shape = 200;
+    in.sampler.lfo[4].wt_bend = 0x17;
+    in.sampler.lfo[4].wt_sust = 99;
+    in.sampler.lfo[1].wt_sust = 7;
+    NEED(proj(0).set_instrument(0, in) == Status::Ok);
+  }
+  Bytes wt_file;
+  NEED(test::save(proj(0), wt_file) == Progress::Done);
+  // the writer: slot 0's INST chunk is 1.6, exactly 12 bytes longer than the same chunk in the plain file, the twelve bytes at its tail being wt_bend, wt_sust of the six slots in slot order; every other chunk is the plain file's
+  {
+    std::vector<RawChunk> cs = test::split_chunks(wt_file);
+    const std::vector<RawChunk> ps = test::split_chunks(plain);
+    NEED(cs.size() == ps.size());
+    for (std::size_t i = 0; i < cs.size(); ++i) {
+      const bool slot0_inst = cs[i].id == kChunkInst && cs[i].payload[2] == 0;
+      if (!slot0_inst) {
+        CHECK(cs[i].id == ps[i].id);
+        CHECK(cs[i].payload == ps[i].payload);
+      } else {
+        CHECK((cs[i].payload[0] == 1 && cs[i].payload[1] == 6));
+        CHECK(ps[i].payload[1] == 1);
+        // 1.6's layout is 1.5's whole: 26 bytes more than the 1.1 chunk (the engine, the twelve MIDI bytes, the stereo byte and the twelve WT bytes after the rate)
+        CHECK(cs[i].payload.size() == ps[i].payload.size() + 26);
+        const std::uint8_t want[12] = {0, 0, 0, 0, 0x9C, 40, 0, 0, 0x17, 99, 0, 0};  // slot 1's loop is 0: the writer zeros its WT bytes (only loops 2 and 3 carry them)
+        CHECK(std::memcmp(cs[i].payload.data() + cs[i].payload.size() - 12, want, 12) == 0);
+      }
+    }
+  }
+  // the reader: the WT slot reads back exactly, and the file round-trips byte for byte
+  {
+    Report rep;
+    NEED(test::load(test::arena(1), wt_file, &rep) == Progress::Done);
+    CHECK_FALSE(rep.newer_minor);
+    const Instrument* q = proj(1).instrument(0);
+    NEED(q != nullptr);
+    CHECK(q->sampler.envelope[2].loop == 2);
+    CHECK(q->sampler.lfo[2].shape == 37);
+    CHECK(q->sampler.lfo[2].wt_bend == 0x9C);
+    CHECK(q->sampler.lfo[2].wt_sust == 40);
+    CHECK(q->sampler.envelope[4].loop == 3);
+    CHECK(q->sampler.lfo[4].shape == 200);
+    CHECK(q->sampler.lfo[4].wt_bend == 0x17);
+    CHECK(q->sampler.lfo[4].wt_sust == 99);
+    CHECK(q->sampler.lfo[1].wt_sust == 0);  // W3a review: a 1.6 chunk's WT byte on a loop-0 slot is zeroed on read, so it cannot force 1.6 on every later save
+    CHECK(q->sampler.lfo[1].shape <= 5);  // a loop-0 slot: the shape rule of OS-LFOSINE applies, not the contour's verbatim one
+    Bytes again;
+    NEED(test::save(proj(1), again) == Progress::Done);
+    CHECK(again == wt_file);
+  }
+  // one without WT bytes stays at its older minor, byte for byte: putting the instrument back gives the plain file back
+  {
+    NEED(proj(0).set_instrument(0, original) == Status::Ok);
+    Bytes cleared;
+    NEED(test::save(proj(0), cleared) == Progress::Done);
+    CHECK(cleared == plain);
+  }
+  // an older chunk (before 1.6) with a loop of 2 or 3 reads as loop 1 (an LFO: what those files played, spec A3), a shape above the last one reads as Triangle, the WT bytes are 0, and the next save writes no 1.6
+  {
+    std::vector<RawChunk> cs = test::split_chunks(wt_file);
+    for (RawChunk& c : cs) {
+      if (c.id == kChunkInst && c.payload[2] == 0) {
+        c.payload[1] = 5;  // 1.5: the same chunk without the twelve WT bytes
+        c.payload.resize(c.payload.size() - 12);
+      }
+    }
+    Report rep;
+    NEED(test::load(test::arena(1), build(cs), &rep) == Progress::Done);
+    CHECK_FALSE(rep.newer_minor);
+    const Instrument* q = proj(1).instrument(0);
+    NEED(q != nullptr);
+    CHECK(q->sampler.envelope[2].loop == 1);
+    CHECK(q->sampler.envelope[4].loop == 1);
+    CHECK(q->sampler.lfo[2].shape == kLfoShapeTriangle);  // 37, a contour index, is above the last shape of a non-WT slot
+    CHECK(q->sampler.lfo[4].shape == kLfoShapeTriangle);
+    CHECK((q->sampler.lfo[2].wt_bend == 0 && q->sampler.lfo[2].wt_sust == 0));
+    CHECK(q->sampler.lfo[1].wt_sust == 0);
+    Bytes resaved;
+    NEED(test::save(proj(1), resaved) == Progress::Done);
+    for (const RawChunk& c : test::split_chunks(resaved)) {
+      if (c.id == kChunkInst) {
+        CHECK(c.payload[1] < 6);
+      }
+    }
+  }
+  // an older reader skips the 12 B: they are the payload's tail, after every field a reader that knows 1.5 stops at, so a chunk of a newer minor carrying them plus a tail is read as of 1.7 (the twelve WT bytes and the flag kept — 0xDE above 1 reads 0 —, the two appended bytes skipped) and lost on the next save
+  {
+    std::vector<RawChunk> cs = test::split_chunks(wt_file);
+    for (RawChunk& c : cs) {
+      if (c.id == kChunkInst && c.payload[2] == 0) {
+        c.payload[1] = 9;  // a later minor appending a field of its own after the RATE byte of 1.8
+        c.payload.push_back(0);  // the play-thru byte of 1.7: off
+        c.payload.push_back(0);  // the RATE byte of 1.8: FULL
+        c.payload.push_back(0xDE);
+        c.payload.push_back(0xAD);
+      }
+    }
+    Report rep;
+    NEED(test::load(test::arena(1), build(cs), &rep) == Progress::Done);
+    CHECK(rep.newer_minor);
+    const Instrument* q = proj(1).instrument(0);
+    NEED(q != nullptr);
+    CHECK(q->sampler.envelope[2].loop == 2);
+    CHECK(q->sampler.lfo[2].wt_bend == 0x9C);
+    CHECK(q->sampler.lfo[2].wt_sust == 40);
+    Bytes resaved;
+    NEED(test::save(proj(1), resaved) == Progress::Done);
+    CHECK(resaved == wt_file);  // written back as 1.6, the two tail bytes gone
+  }
+}
+
+// OS-CEWTENV W3a review: a 1.6 chunk whose only WT bytes sit on slots whose loop is not 2 or 3 reads them zeroed, and the next save does not write 1.6 for them: the chunk drops
+// back to its older minor and the file round-trips byte for byte from there.
+TEST_CASE("native: OS-CEWTENV W3a review, a 1.6 chunk's WT bytes on non-WT slots are zeroed on read and stop forcing 1.6 on later saves") {
+  test::fill_small(proj(0));
+  {
+    Instrument in = *proj(0).instrument(0);
+    in.sampler.lfo[1].wt_sust = 7;  // a WT byte without a WT loop: the writer still takes 1.6 for it (the gate is a loop of 2 or 3 or a non-zero byte)
+    NEED(proj(0).set_instrument(0, in) == Status::Ok);
+  }
+  Bytes wt_only;
+  NEED(test::save(proj(0), wt_only) == Progress::Done);
+  {
+    std::vector<RawChunk> cs = test::split_chunks(wt_only);
+    bool seen16 = false;
+    for (const RawChunk& c : cs) {
+      if (c.id == kChunkInst && c.payload[2] == 0) {  // instrument 0's chunk
+        CHECK(c.payload[1] == 6);  // 1.6, for the stray byte alone
+        seen16 = true;
+      }
+    }
+    CHECK(seen16);
+  }
+  Report rep;
+  NEED(test::load(test::arena(1), wt_only, &rep) == Progress::Done);
+  CHECK_FALSE(rep.newer_minor);
+  const Instrument* q = proj(1).instrument(0);
+  NEED(q != nullptr);
+  CHECK(q->sampler.lfo[1].wt_sust == 0);  // zeroed on read: slot 1's loop is 0
+  Bytes resaved;
+  NEED(test::save(proj(1), resaved) == Progress::Done);
+  for (const RawChunk& c : test::split_chunks(resaved)) {
+    if (c.id == kChunkInst) {
+      CHECK(c.payload[1] < 6);  // no WT slot and no WT byte any more: the older minor, not 1.6
+    }
+  }
+  Bytes again;
+  NEED(test::load(test::arena(2), resaved, &rep) == Progress::Done);
+  NEED(test::save(proj(2), again) == Progress::Done);
+  CHECK(again == resaved);  // from there the file round-trips byte for byte
+}
+
+// OS-CEPLAYTHRU P1 (docs/specs/OS-CEPLAYTHRU.md): INST 1.7 appends one byte after the twelve WT bytes of 1.6, the play-thru flag, written only for a Sample instrument with the flag set.
+TEST_CASE("native: OS-CEPLAYTHRU P1, INST 1.7: a flagged Sample instrument writes the new minor and round-trips; one without the flag stays at its older minor byte for byte; a WT slot and the flag together write 1.7 with 13 tail bytes; a value of 2 reads 0; a newer minor's tail is skipped") {
+  test::fill_small(proj(0));
+  const Bytes plain = small_file();  // the same project without the flag: the file it was before this slice
+  const Instrument original = *proj(0).instrument(0);
+  {
+    Instrument in = *proj(0).instrument(0);
+    in.slice_thru = 1;
+    NEED(proj(0).set_instrument(0, in) == Status::Ok);
+  }
+  Bytes flag_file;
+  NEED(test::save(proj(0), flag_file) == Progress::Done);
+  // the writer: slot 0's INST chunk is 1.7, exactly 27 bytes longer than the same chunk in the plain file (the engine, the twelve MIDI bytes, the stereo byte, the twelve WT bytes and the flag after the rate), the flag its last byte; every other chunk is the plain file's
+  {
+    std::vector<RawChunk> cs = test::split_chunks(flag_file);
+    const std::vector<RawChunk> ps = test::split_chunks(plain);
+    NEED(cs.size() == ps.size());
+    for (std::size_t i = 0; i < cs.size(); ++i) {
+      const bool slot0_inst = cs[i].id == kChunkInst && cs[i].payload[2] == 0;
+      if (!slot0_inst) {
+        CHECK(cs[i].id == ps[i].id);
+        CHECK(cs[i].payload == ps[i].payload);
+      } else {
+        CHECK((cs[i].payload[0] == 1 && cs[i].payload[1] == 7));
+        CHECK(ps[i].payload[1] == 1);
+        // 1.7's layout is 1.6's whole: 27 bytes more than the 1.1 chunk (the engine, the twelve MIDI bytes, the stereo byte, the twelve WT bytes and the flag after the rate)
+        CHECK(cs[i].payload.size() == ps[i].payload.size() + 27);
+        CHECK(cs[i].payload.back() == 1);
+      }
+    }
+  }
+  // the reader: the flag reads back, and the file round-trips byte for byte
+  {
+    Report rep;
+    NEED(test::load(test::arena(1), flag_file, &rep) == Progress::Done);
+    CHECK_FALSE(rep.newer_minor);
+    const Instrument* q = proj(1).instrument(0);
+    NEED(q != nullptr);
+    CHECK(q->slice_thru == 1);
+    Bytes again;
+    NEED(test::save(proj(1), again) == Progress::Done);
+    CHECK(again == flag_file);
+  }
+  // one without the flag stays at its older minor, byte for byte: putting the instrument back gives the plain file back
+  {
+    NEED(proj(0).set_instrument(0, original) == Status::Ok);
+    Bytes cleared;
+    NEED(test::save(proj(0), cleared) == Progress::Done);
+    CHECK(cleared == plain);
+  }
+  // a WT slot and the flag together: 1.7 with the twelve WT bytes and the flag at its tail, 13 bytes more than the same instrument's 1.6 chunk
+  {
+    Instrument in = *proj(0).instrument(0);
+    in.sampler.envelope[2].loop = 2;
+    in.sampler.lfo[2].shape = 37;
+    in.sampler.lfo[2].wt_bend = 0x9C;
+    in.sampler.lfo[2].wt_sust = 40;
+    in.slice_thru = 1;
+    NEED(proj(0).set_instrument(0, in) == Status::Ok);
+    Bytes both_file;
+    NEED(test::save(proj(0), both_file) == Progress::Done);
+    for (const RawChunk& c : test::split_chunks(both_file)) {
+      if (c.id == kChunkInst && c.payload[2] == 0) {
+        CHECK((c.payload[0] == 1 && c.payload[1] == 7));
+        const std::uint8_t want[13] = {0, 0, 0, 0, 0x9C, 40, 0, 0, 0, 0, 0, 0, 1};  // wt_bend, wt_sust of the six slots in slot order (slot 2), then the flag
+        CHECK(std::memcmp(c.payload.data() + c.payload.size() - 13, want, 13) == 0);
+      }
+    }
+    Report rep;
+    NEED(test::load(test::arena(1), both_file, &rep) == Progress::Done);
+    CHECK_FALSE(rep.newer_minor);
+    const Instrument* q = proj(1).instrument(0);
+    NEED(q != nullptr);
+    CHECK(q->slice_thru == 1);
+    CHECK(q->sampler.envelope[2].loop == 2);
+    CHECK(q->sampler.lfo[2].wt_bend == 0x9C);
+    CHECK(q->sampler.lfo[2].wt_sust == 40);
+    Bytes again;
+    NEED(test::save(proj(1), again) == Progress::Done);
+    CHECK(again == both_file);
+    NEED(proj(0).set_instrument(0, original) == Status::Ok);
+  }
+  // a value above 1 reads 0 (the stereo rule), and the next save writes no 1.7: the plain file again
+  {
+    std::vector<RawChunk> cs = test::split_chunks(flag_file);
+    for (RawChunk& c : cs) {
+      if (c.id == kChunkInst && c.payload[2] == 0) {
+        c.payload.back() = 2;
+      }
+    }
+    Report rep;
+    NEED(test::load(test::arena(1), build(cs), &rep) == Progress::Done);
+    CHECK_FALSE(rep.newer_minor);
+    CHECK(proj(1).instrument(0)->slice_thru == 0);
+    Bytes resaved;
+    NEED(test::save(proj(1), resaved) == Progress::Done);
+    CHECK(resaved == plain);
+  }
+  // a 1.7 chunk read by a 1.6 reader skips the byte safely: the flag is the payload's tail, after every field a reader that knows 1.6 stops at, so a chunk of a newer minor (1.9 here) is read as of 1.8 — the flag kept — and its own tail skipped, lost on the next save
+  {
+    std::vector<RawChunk> cs = test::split_chunks(flag_file);
+    for (RawChunk& c : cs) {
+      if (c.id == kChunkInst && c.payload[2] == 0) {
+        c.payload[1] = 9;  // a later minor appending a field of its own after the RATE byte of 1.8
+        c.payload.push_back(0);  // the RATE byte of 1.8: FULL
+        c.payload.push_back(0xDE);
+        c.payload.push_back(0xAD);
+      }
+    }
+    Report rep;
+    NEED(test::load(test::arena(1), build(cs), &rep) == Progress::Done);
+    CHECK(rep.newer_minor);
+    CHECK(proj(1).instrument(0)->slice_thru == 1);
+    Bytes resaved;
+    NEED(test::save(proj(1), resaved) == Progress::Done);
+    CHECK(resaved == flag_file);  // written back as 1.7, the two tail bytes gone
+  }
+}
+
+// OS-MODRATE S3 (docs/specs/OS-MODRATE.md 3.3): INST 1.8 appends one byte after the play-thru byte of 1.7, the module RATE (0 FULL, 1 half, 2 a quarter), written only for a Module instrument with a rate other than FULL.
+// The Module instrument of the small project is slot 50.
+namespace {
+constexpr std::uint32_t kRateSlot = 50;
+
+bool is_rate_slot_chunk(const RawChunk& c) { return c.id == kChunkInst && c.payload[2] == kRateSlot; }
+
+Bytes rate_file(std::uint8_t rate) {
+  test::fill_small(proj(0));
+  Instrument in = *proj(0).instrument(kRateSlot);
+  in.rate = rate;
+  CHECK(proj(0).set_instrument(kRateSlot, in) == Status::Ok);
+  Bytes out;
+  CHECK(test::save(proj(0), out) == Progress::Done);
+  return out;
+}
+}  // namespace
+
+TEST_CASE("native: OS-MODRATE S3, INST 1.8: a Module instrument with rate 1 or 2 writes the new minor (the 1.7 layout whole and the byte) and round-trips; every other chunk is the plain file's") {
+  const Bytes plain = small_file();
+  const std::vector<RawChunk> ps = test::split_chunks(plain);
+  for (std::uint8_t rate : {std::uint8_t{1}, std::uint8_t{2}}) {
+    INFO("rate " << int(rate));
+    const Bytes file = rate_file(rate);
+    std::vector<RawChunk> cs = test::split_chunks(file);
+    NEED(cs.size() == ps.size());
+    for (std::size_t i = 0; i < cs.size(); ++i) {
+      if (!is_rate_slot_chunk(cs[i])) {
+        CHECK(cs[i].payload == ps[i].payload);
+      } else {
+        CHECK((cs[i].payload[0] == 1 && cs[i].payload[1] == 8));
+        CHECK(ps[i].payload[1] == 1);
+        CHECK(cs[i].payload.size() == ps[i].payload.size() + 28);  // 1.7's 27 bytes (the engine, MIDI, stereo, WT, play-thru) and the RATE byte
+        CHECK(cs[i].payload.back() == rate);
+      }
+    }
+    Report rep;
+    NEED(test::load(test::arena(1), file, &rep) == Progress::Done);
+    CHECK_FALSE(rep.newer_minor);
+    const Instrument* q = proj(1).instrument(kRateSlot);
+    NEED(q != nullptr);
+    CHECK(q->kind == InstrumentKind::Module);
+    CHECK(q->rate == rate);
+    CHECK(q->param_len == 5);
+    CHECK(q->params[4] == 0xA4);
+    Bytes again;
+    NEED(test::save(proj(1), again) == Progress::Done);
+    CHECK(again == file);
+  }
+}
+
+TEST_CASE("native: OS-MODRATE S3, INST 1.8: a FULL Module instrument and every other instrument write no 1.8; a 1.7 file reads rate 0 and is written back byte for byte") {
+  const Bytes plain = small_file();
+  CHECK(rate_file(0) == plain);  // a Module instrument at FULL: the file it was
+  // a 1.7 project (the play-thru flag of slot 0): every instrument reads rate 0, and the re-write is the input
+  test::fill_small(proj(0));
+  {
+    Instrument in = *proj(0).instrument(0);
+    in.slice_thru = 1;
+    NEED(proj(0).set_instrument(0, in) == Status::Ok);
+  }
+  Bytes v17;
+  NEED(test::save(proj(0), v17) == Progress::Done);
+  for (const RawChunk& c : test::split_chunks(v17)) {
+    if (c.id == kChunkInst && c.payload[2] == 0) {
+      CHECK(c.payload[1] == 7);
+    }
+  }
+  Report rep;
+  NEED(test::load(test::arena(1), v17, &rep) == Progress::Done);
+  CHECK_FALSE(rep.newer_minor);
+  for (std::uint32_t i = 0; i < kMaxInstruments; ++i) {
+    const Instrument* q = proj(1).instrument(i);
+    CHECK((q == nullptr || q->rate == 0));
+  }
+  Bytes again;
+  NEED(test::save(proj(1), again) == Progress::Done);
+  CHECK(again == v17);
+  // the plain (1.1) file too
+  NEED(test::load(test::arena(1), plain, &rep) == Progress::Done);
+  CHECK(proj(1).instrument(kRateSlot)->rate == 0);
+  NEED(test::save(proj(1), again) == Progress::Done);
+  CHECK(again == plain);
+}
+
+TEST_CASE("native: OS-MODRATE S3, INST 1.8: a RATE above 2 reads 0 and so does one on a non-Module instrument; the chunk is then written as the plain file's; the exact-bound read refuses a wrong size; a newer minor's tail is skipped") {
+  const Bytes plain = small_file();
+  const Bytes file = rate_file(1);
+  // rate 3 reads 0, and the next save is the plain file
+  {
+    std::vector<RawChunk> cs = test::split_chunks(file);
+    for (RawChunk& c : cs) {
+      if (is_rate_slot_chunk(c)) {
+        c.payload.back() = 3;
+      }
+    }
+    Report rep;
+    NEED(test::load(test::arena(1), build(cs), &rep) == Progress::Done);
+    CHECK_FALSE(rep.newer_minor);
+    CHECK(proj(1).instrument(kRateSlot)->rate == 0);
+    Bytes again;
+    NEED(test::save(proj(1), again) == Progress::Done);
+    CHECK(again == plain);
+  }
+  // a 1.8 chunk of the Sample instrument (slot 0), built from the 1.7 layout by hand, with rate 1: reads 0 (the RATE is a Module instrument's)
+  {
+    std::vector<RawChunk> cs = test::split_chunks(plain);
+    const std::vector<RawChunk> ps = test::split_chunks(plain);
+    for (std::size_t i = 0; i < cs.size(); ++i) {
+      if (cs[i].id == kChunkInst && cs[i].payload[2] == 0) {
+        cs[i] = ps[i];
+        make_inst_next_minor(cs[i], 0);  // the 1.9 layout of an instrument with every field at its default: 1.8 is the same without the extra minor
+        cs[i].payload[1] = 8;
+        cs[i].payload.back() = 1;
+      }
+    }
+    Report rep;
+    NEED(test::load(test::arena(1), build(cs), &rep) == Progress::Done);
+    CHECK_FALSE(rep.newer_minor);
+    CHECK(proj(1).instrument(0)->rate == 0);
+    Bytes again;
+    NEED(test::save(proj(1), again) == Progress::Done);
+    CHECK(again == plain);
+  }
+  // the exact-bound read (a minor the reader knows): a chunk one byte short (the RATE byte missing) and one a byte long are refused
+  for (int delta : {-1, 1}) {
+    std::vector<RawChunk> cs = test::split_chunks(file);
+    for (RawChunk& c : cs) {
+      if (is_rate_slot_chunk(c)) {
+        if (delta < 0) {
+          c.payload.pop_back();
+        } else {
+          c.payload.push_back(0);
+        }
+      }
+    }
+    Report rep;
+    CHECK(test::load(test::arena(1), build(cs), &rep) == Progress::Failed);
+    CHECK(rep.error == Error::Malformed);
+  }
+  // a later minor (1.9) appending a field of its own after the RATE byte: read as far as 1.8 (the rate kept), the tail skipped, lost on the next save; a reader that stops at 1.7 sees the same chunk with the RATE byte in its tail
+  {
+    std::vector<RawChunk> cs = test::split_chunks(file);
+    for (RawChunk& c : cs) {
+      if (is_rate_slot_chunk(c)) {
+        c.payload[1] = 9;
+        c.payload.push_back(0xDE);
+        c.payload.push_back(0xAD);
+      }
+    }
+    Report rep;
+    NEED(test::load(test::arena(1), build(cs), &rep) == Progress::Done);
+    CHECK(rep.newer_minor);
+    CHECK(proj(1).instrument(kRateSlot)->rate == 1);
+    Bytes resaved;
+    NEED(test::save(proj(1), resaved) == Progress::Done);
+    CHECK(resaved == file);
+  }
+}
+
+TEST_CASE("native: OS-MODRATE S3: set_instrument clears the rate on any kind but Module and refuses one past 2") {
+  const Bytes plain = small_file();
+  test::fill_small(proj(0));
+  for (std::uint32_t slot : {std::uint32_t{0}, std::uint32_t{48}}) {  // a Sample and a MIDI instrument
+    Instrument in = *proj(0).instrument(slot);
+    in.rate = 2;
+    NEED(proj(0).set_instrument(slot, in) == Status::Ok);
+    CHECK(proj(0).instrument(slot)->rate == 0);
+  }
+  Bytes out;
+  NEED(test::save(proj(0), out) == Progress::Done);
+  CHECK(out == plain);  // nothing of the rate reached the file
+  Instrument in = *proj(0).instrument(kRateSlot);
+  in.rate = 2;
+  CHECK(proj(0).set_instrument(kRateSlot, in) == Status::Ok);
+  CHECK(proj(0).instrument(kRateSlot)->rate == 2);
+  in.rate = 3;
+  CHECK(proj(0).set_instrument(kRateSlot, in) == Status::BadValue);
+  CHECK(proj(0).instrument(kRateSlot)->rate == 2);
+  // the kind changes: the rate goes
+  Instrument mid = *proj(0).instrument(48);
+  mid.rate = 1;
+  NEED(proj(0).set_instrument(kRateSlot, mid) == Status::Ok);
+  CHECK(proj(0).instrument(kRateSlot)->rate == 0);
 }
 
 TEST_CASE("native: a Writer refuses a sink that fails or lies, and a project that changes under it") {
@@ -1028,7 +1530,7 @@ TEST_CASE("native: a chunk of a newer minor version with appended fields is read
       std::vector<RawChunk> cs = chunks;
       for (RawChunk& c : cs) {
         if (c.id == kind && kind == kChunkInst) {
-          make_inst_next_minor(c, tail);  // the next minor version (INST is at 1.3)
+          make_inst_next_minor(c, tail);  // the next minor version (INST is at 1.8)
         } else if (c.id == kind) {
           c.payload[1] = 1;
           c.payload.insert(c.payload.end(), tail, 0xAB);

@@ -886,14 +886,20 @@ TEST_CASE("graph: the inserts are reserved slots: bypassed by default, called in
 }
 
 TEST_CASE("graph: the master chain is a table of reserved stages, bypassed bit-transparently, in order when active") {
-  CHECK(kMasterStages == 7u);
+  CHECK(kMasterStages == 8u);
   CHECK(kMasterChain[0].id == MasterStage::Headroom);  // ADR 0013 D4, order B
   CHECK(kMasterChain[1].id == MasterStage::Saturation);
   CHECK(kMasterChain[2].id == MasterStage::Eq);  // OS-DJ A3c: the DJ page's stages (kill EQ, filter) run ahead of the limiter
   CHECK(kMasterChain[3].id == MasterStage::Bass);
-  CHECK(kMasterChain[4].id == MasterStage::Limiter);
-  CHECK(kMasterChain[5].id == MasterStage::Space);
-  CHECK(kMasterChain[6].id == MasterStage::BitDepth);
+  CHECK(kMasterChain[4].id == MasterStage::Insert);  // OS-INSFX S6: the master effect module sits after the DJ stages and ahead of the limiter, which catches what it adds
+  CHECK(kMasterChain[5].id == MasterStage::Limiter);
+  CHECK(kMasterChain[6].id == MasterStage::Space);
+  CHECK(kMasterChain[7].id == MasterStage::BitDepth);
+  for (unsigned s = 0; s < kMasterStages; ++s) {  // the table is the one source of order: the row index is the enum value, and the names are the diag's
+    CHECK(static_cast<unsigned>(kMasterChain[s].id) == s);
+    CHECK(kMasterChain[s].name != nullptr);
+  }
+  CHECK(std::strcmp(kMasterChain[4].name, "insert") == 0);
 
   alignas(8) std::int16_t reference[3][kBS];
   std::uint32_t order = 0;
@@ -956,6 +962,11 @@ TEST_CASE("graph: the master chain is a table of reserved stages, bypassed bit-t
     c.shared = d.shared = &order;
     c.gain = 1.0f;
     d.gain = 1.0f;
+    StageLog e;  // the master insert (OS-INSFX S6): after bass, before the limiter
+    e.shared = &order;
+    e.gain = 1.0f;
+    active.g.install_master_stage(MasterStage::Insert, &stage_scale, &e);
+    active.g.set_master_bypass(MasterStage::Insert, false);
     active.g.install_master_stage(MasterStage::Limiter, &stage_scale, &b);
     active.g.install_master_stage(MasterStage::Bass, &stage_scale, &d);
     active.g.install_master_stage(MasterStage::Saturation, &stage_scale, &a);
@@ -972,10 +983,12 @@ TEST_CASE("graph: the master chain is a table of reserved stages, bypassed bit-t
     CHECK(b.calls == 1u);
     CHECK(c.calls == 1u);
     CHECK(d.calls == 1u);
-    CHECK(a.my_order == 1u);  // saturation, EQ, bass, then the limiter: kMasterChain order, whatever the install order was
+    CHECK(e.calls == 1u);
+    CHECK(a.my_order == 1u);  // saturation, EQ, bass, insert, then the limiter: kMasterChain order, whatever the install order was
     CHECK(c.my_order == 2u);
     CHECK(d.my_order == 3u);
-    CHECK(b.my_order == 4u);
+    CHECK(e.my_order == 4u);
+    CHECK(b.my_order == 5u);
   }
   // A stage that does something is heard: half gain halves the block (within the conversion's rounding).
   {

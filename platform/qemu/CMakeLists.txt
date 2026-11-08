@@ -44,6 +44,10 @@ o3os_strict_warnings(platform_qemu_runner)
 
 # The layer's own suite: what only a target can show (reset sequence, FPU, SysTick clock, heap).
 o3os_target_suite(platform SOURCES tests/startup_test.cpp)
+# OS-CEPTFX S2b: the call gate (hal/code_gate.h) on the real Cortex-M4F, with our own Thumb test plugins: every
+# containment path (return, timeout, fault, stack overflow, register clobber) plus the canary after each. S3b adds the
+# run job of the app (app/src/ptfx_job.cpp, a static library: only that object and what it uses are linked).
+o3os_target_suite(ptfx_gate DEPENDS app module hal core SOURCES tests/ptfx_gate_test.cpp TIMEOUT 120)
 # The probes: test cases that fail on purpose. `qemu_probe` passes only if a failed CHECK comes out as QEMU's exit
 # status 1, `qemu_probe_stack` only if a stack overflow made of sparse 1 KiB frames (the case a few painted guard words
 # cannot catch) is stopped by the MPU guard with status 3 (see O3osQemuExpectFailure.cmake). Together they prove that

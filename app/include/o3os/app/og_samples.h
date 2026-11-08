@@ -121,8 +121,9 @@ constexpr std::uint8_t unity_level(audio::LevelLaw law) noexcept { return law ==
 // SampleDesc::gain (main loop: calls level_gain_q16).
 // OS-STEREO (c): `side` (when not null) is the sample's S (at pcm + even(frames) in its arena block): the descriptor gets st_off = side - pcm when the instrument's stereo flag is set and its play mode plays forward
 // (one shot, forward loop, slice, beat slice); the voices read it at a note's start (VoicePool::st_start).
+// OS-CEWTENV W5: `grlen` (when not null) gets the granular length modulator's source — slot 3 of a granular instrument with enable bit 0x02 (any source kind); the caller passes it to VoicePool::set_sample / stage_sample with the descriptor. Null on any other instrument.
 audio::SampleDesc make_sample_desc(const model::Instrument& in, const std::int16_t* pcm, std::uint32_t frames, bool* approximated, std::int16_t* slice_table = nullptr,
-                                   audio::LevelLaw law = audio::LevelLaw::Og12, const std::int16_t* side = nullptr) noexcept;
+                                   audio::LevelLaw law = audio::LevelLaw::Og12, const std::int16_t* side = nullptr, audio::FilterMod* grlen = nullptr) noexcept;
 
 // Does make_sample_desc read instrument parameter `field` (model::instrument_param): the voice, filter and envelope fields it turns into the descriptor's gain, pan, tune, filter
 // and modulators (OS-LIVEP; OS-MOD: the amp, pan, cutoff and finetune slots; OS-GRAN: the wavetable and granular position slots). An edit of one must reach the engine's descriptor of the slot

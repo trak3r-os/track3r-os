@@ -9,12 +9,18 @@
 
 #include <o3os/core/qtime.h>
 #include <o3os/midi/config.h>
+#include <o3os/midi/usb_bind.h>
 #include <o3os/model/params.h>
 #include <o3os/model/settings.h>
 #include <o3os/seq/midi_link.h>
+#include <o3os/usb/cdc.h>
+
+#include "usb_rig.h"
+#include "usb_test_util.h"
 
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <initializer_list>
 
 #include "support/need.h"
@@ -216,6 +222,20 @@ void midi_project(std::uint32_t tempo_x100 = 12000) {
     CHECK(p.set_step(1, 0, k, make_step(static_cast<std::uint8_t>(40 + k), 11)) == model::Status::Ok);
   }
   CHECK(p.append_order(1) == model::Status::Ok);
+}
+
+// A song of three 16-step patterns (48 steps in all), a note on every step of track 0, the global song step (0..47) as the note.
+void song_project(std::uint32_t tempo_x100 = 12000) {
+  fresh_project(2, 2);
+  model::Project& p = seq_project();
+  CHECK(p.set_tempo_x100(tempo_x100) == model::Status::Ok);
+  for (std::uint32_t id = 1; id <= 3; ++id) {
+    CHECK(p.create_pattern(id, 16) == model::Status::Ok);
+    for (std::uint32_t k = 0; k < 16; ++k) {
+      CHECK(p.set_step(id, 0, k, make_step(static_cast<std::uint8_t>(40 + (id - 1u) * 16u + k), 11)) == model::Status::Ok);
+    }
+    CHECK(p.append_order(id) == model::Status::Ok);
+  }
 }
 
 midi::MidiConfig master_cfg(std::uint8_t out_ports) {
@@ -496,6 +516,538 @@ TEST_CASE("midi link slave: Stop stops, SPP then Continue resumes at that step, 
   CHECK(good * 10u >= seen * 8u);
 }
 
+// OS-MIDISYNC M2: a master can send Stop, SPP and Continue back to back (the Stop and the SPP are events at once, the Continue fires on the next
+// clock), so the Stop and the SPP are applied in the same block, while the run has not ended yet. MIDI 1.0: the SPP is sent while stopped and the
+// Continue that follows resumes at that position, not where the run stopped.
+TEST_CASE("midi link slave: Stop + SPP in one block, then Continue resumes at the SPP step (Pattern 8, Song 20); Start from 0; a bare Continue where it stopped") {
+  // The first Step record after the first Stopped record: its step value and order position (b), or false when there is none.
+  const auto first_step_after_stop = [](std::int32_t& value, std::uint8_t& order) -> bool {
+    for (std::uint32_t i = 0; i < g_col.n; ++i) {
+      if (g_col.rec[i].ev.kind == EventKind::Stopped) {
+        for (std::uint32_t j = i + 1; j < g_col.n; ++j) {
+          if (g_col.rec[j].ev.kind == EventKind::Step) {
+            value = g_col.rec[j].ev.value;
+            order = g_col.rec[j].ev.b;
+            return true;
+          }
+        }
+        return false;
+      }
+    }
+    return false;
+  };
+  // The last Step record before the first Stopped record: the step the run was on when the Stop came.
+  const auto last_step_before_stop = []() -> std::int32_t {
+    for (std::uint32_t i = g_col.n; i-- > 0u;) {
+      if (g_col.rec[i].ev.kind == EventKind::Stopped) {
+        for (std::uint32_t j = i; j-- > 0u;) {
+          if (g_col.rec[j].ev.kind == EventKind::Step) {
+            return g_col.rec[j].ev.value;
+          }
+        }
+        return -1;
+      }
+    }
+    return -1;
+  };
+  // Sends `bytes` in this order, all stamped into the block that starts at sample `t` (feed_master pushes them in that block's drain): each one
+  // a little earlier than the next, all before the block's start, so the order survives and they land in one drain.
+  const auto send_in_block = [](std::uint64_t t, std::initializer_list<std::uint8_t> bytes) {
+    const double base = static_cast<double>(t) * kCycD - 57601.0;
+    const double n = static_cast<double>(bytes.size());
+    std::uint32_t k = 0;
+    for (std::uint8_t b : bytes) {
+      g_rig.send(base - (n - static_cast<double>(k)) * 1000.0, b);
+      ++k;
+    }
+  };
+
+  // Pattern mode, SPP 8: the Continue run resumes at step 8
+  {
+    midi_project(9000);
+    g_rig.init(slave_cfg(midi::Port::Din, midi::kPortDin));
+    const std::uint32_t c_start = 40;
+    slave_start(540000.0, c_start);
+    bool sent = false;
+    g_rig.run_to(220000, [&](std::uint64_t t) {
+      if (!sent && t >= 100000) {
+        sent = true;
+        send_in_block(t, {midi::kStop, midi::kSongPosition, 8, 0, midi::kContinue});
+      }
+    });
+    NEED(g_col.count(EventKind::Stopped) >= 1u);
+    std::int32_t value = -1;
+    std::uint8_t order = 0xFF;
+    NEED(first_step_after_stop(value, order));
+    CHECK(value == 8);
+    CHECK(g_rig.s->playing());
+  }
+
+  // Song mode (48 steps in three slots), SPP 20: the Continue run resumes at song step 20 = order 1, step 4
+  {
+    song_project(9000);
+    g_rig.init(slave_cfg(midi::Port::Din, midi::kPortDin));
+    g_rig.s->select(seq::PlayMode::Song, 1);
+    g_rig.send(g_rig.m.time_of(40) - 540000.0, midi::kStart);
+    bool sent = false;
+    g_rig.run_to(220000, [&](std::uint64_t t) {
+      if (!sent && t >= 100000) {
+        sent = true;
+        send_in_block(t, {midi::kStop, midi::kSongPosition, 20, 0, midi::kContinue});
+      }
+    });
+    NEED(g_col.count(EventKind::Stopped) >= 1u);
+    std::int32_t value = -1;
+    std::uint8_t order = 0xFF;
+    NEED(first_step_after_stop(value, order));
+    CHECK(order == 1u);
+    CHECK(value == 4);  // 16 steps of slot 0 + 4 = song step 20
+    CHECK(g_rig.s->playing());
+  }
+
+  // A Start after the Stop begins at step 0
+  {
+    midi_project(9000);
+    g_rig.init(slave_cfg(midi::Port::Din, midi::kPortDin));
+    const std::uint32_t c_start = 40;
+    slave_start(540000.0, c_start);
+    bool sent = false;
+    g_rig.run_to(220000, [&](std::uint64_t t) {
+      if (!sent && t >= 100000) {
+        sent = true;
+        send_in_block(t, {midi::kStop, midi::kStart});
+      }
+    });
+    NEED(g_col.count(EventKind::Stopped) >= 1u);
+    std::int32_t value = -1;
+    std::uint8_t order = 0xFF;
+    NEED(first_step_after_stop(value, order));
+    CHECK(value == 0);
+  }
+
+  // A bare Continue (no SPP) resumes where the run stopped
+  {
+    midi_project(9000);
+    g_rig.init(slave_cfg(midi::Port::Din, midi::kPortDin));
+    const std::uint32_t c_start = 40;
+    slave_start(540000.0, c_start);
+    bool sent = false;
+    g_rig.run_to(220000, [&](std::uint64_t t) {
+      if (!sent && t >= 100000) {
+        sent = true;
+        send_in_block(t, {midi::kStop, midi::kContinue});
+      }
+    });
+    NEED(g_col.count(EventKind::Stopped) >= 1u);
+    const std::int32_t stopped_at = last_step_before_stop();
+    NEED(stopped_at >= 0);
+    std::int32_t value = -1;
+    std::uint8_t order = 0xFF;
+    NEED(first_step_after_stop(value, order));
+    CHECK(value == stopped_at);
+  }
+}
+
+// OS-MIDISYNC M2b: on the unit the master's bytes arrive as USB-MIDI event packets, not as raw bytes. The Linux host driver (sound/usb/midi.c,
+// snd_usbmidi_transmit_byte) packs every real-time byte (clock, Start, Continue, Stop) as a CIN 0xF single-byte event and the Song Position
+// Pointer as CIN 0x3 (three-byte system common): [0x03, 0xF2, lsb, msb]. This feeds exactly those event words through the firmware's own
+// intake — usb::midi_packet_to_ring (the bulk OUT token's handler, usb/device.h token_midi_out) then midi::usb_midi_from_host (the USB
+// interrupt's pass, platform/mk66/usb/src/usb0.cpp usb_isr) into the USB port's midiRt ring — and steps the link block by block.
+TEST_CASE("midi link slave over USB event packets (CIN framing): SPP then Continue resumes at the SPP step (Pattern 8, Song 20); Stop+SPP+Continue in one block") {
+  usb::MidiRing from_host;
+  midi::UsbBindStats bst;
+  struct Pend {
+    double t;
+    std::uint32_t word;
+  };
+  Pend pend[460];
+  std::uint32_t pend_n = 0;
+  const auto word = [](std::uint8_t cin, std::uint8_t b0, std::uint8_t b1, std::uint8_t b2) {
+    return static_cast<std::uint32_t>(cin) | (static_cast<std::uint32_t>(b0) << 8) | (static_cast<std::uint32_t>(b1) << 16) |
+           (static_cast<std::uint32_t>(b2) << 24);
+  };
+  const auto rt = [&word](std::uint8_t b) { return word(0x0Fu, b, 0, 0); };  // CIN 0xF: the kernel's packet for a real-time byte
+  const auto sppw = [&word](std::uint16_t v) {
+    return word(0x3u, midi::kSongPosition, static_cast<std::uint8_t>(v & 0x7Fu), static_cast<std::uint8_t>((v >> 7) & 0x7Fu));  // CIN 0x3
+  };
+  // The master's pending event words, fed in time order through the two firmware functions, stamped as the interrupt would.
+  const auto feed = [&](double now_cycles) {
+    for (;;) {
+      std::uint32_t best = pend_n;
+      for (std::uint32_t i = 0; i < pend_n; ++i) {
+        if (best == pend_n || pend[i].t < pend[best].t) {
+          best = i;
+        }
+      }
+      if (best == pend_n || pend[best].t > now_cycles) {
+        break;
+      }
+      alignas(4) std::uint8_t pkt[4];
+      std::memcpy(pkt, &pend[best].word, 4);
+      const usb::MidiPacketResult r = usb::midi_packet_to_ring(from_host, pkt, 4);
+      CHECK(r.accepted == 1u);
+      (void)midi::usb_midi_from_host(from_host, g_rig.link->usb_in(), static_cast<std::uint32_t>(static_cast<std::uint64_t>(pend[best].t)), bst);
+      pend[best] = pend[pend_n - 1u];
+      --pend_n;
+    }
+  };
+  // Start 1.3 clocks before clock c0, then one clock per period (all CIN 0xF), then the extra transport words at their times.
+  const auto plan = [&](std::uint32_t c0, std::uint32_t c_count, std::initializer_list<Pend> tr) {
+    pend_n = 0;
+    pend[pend_n++] = {g_rig.m.time_of(c0) - 540000.0, rt(midi::kStart)};
+    for (std::uint32_t c = 0; c < c_count; ++c) {
+      pend[pend_n++] = {g_rig.m.time_of(c), rt(midi::kClock)};
+    }
+    for (const Pend& p : tr) {
+      pend[pend_n++] = p;
+    }
+  };
+  // The first Step record at or after sample `from`: its value and order, or false when there is none.
+  const auto first_step_from = [](double from, std::int32_t& value, std::uint8_t& order) -> bool {
+    for (std::uint32_t i = 0; i < g_col.n; ++i) {
+      if (g_col.rec[i].ev.kind == EventKind::Step && static_cast<double>(g_col.rec[i].t) >= from) {
+        value = g_col.rec[i].ev.value;
+        order = g_col.rec[i].ev.b;
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Unit test 10 (Pattern, "start,120:10,spp:8,cont,120:10"): the SPP arrives while playing, the Continue right behind it: the first step
+  // of the run after the Continue is step 8.
+  {
+    midi_project(9000);
+    g_rig.init(slave_cfg(midi::Port::Usb));
+    g_rig.m.quiet = true;  // the master is on USB only: no DIN clocks
+    const std::uint32_t c0 = 40;
+    const double spp_t = g_rig.m.time_of(c0 + 63) + 1000000.0;  // mid step 10 (the boundary is at clock c0+60, the next at c0+66)
+    const double cont_t = spp_t + 50000.0;
+    plan(c0, 420, {{spp_t, sppw(8)}, {cont_t, rt(midi::kContinue)}});
+    double cont_block = -1.0;
+    g_rig.run_to(200000, [&](std::uint64_t t) {
+      const double now = static_cast<double>(t) * kCycD;
+      feed(now);
+      if (cont_block < 0.0 && now >= cont_t) {
+        cont_block = static_cast<double>(t);
+      }
+    });
+    NEED(cont_block > 0.0);
+    CHECK(g_rig.link->status().transport_events >= 3u);  // the Start, the SPP and the Continue were all applied
+    std::int32_t value = -1;
+    std::uint8_t order = 0xFF;
+    NEED(first_step_from(cont_block, value, order));
+    CHECK(value == 8);
+  }
+
+  // Unit test 11 (Song, "start,120:10,spp:20,cont,120:10"): SPP 20 = order 1, step 4.
+  {
+    song_project(9000);
+    g_rig.init(slave_cfg(midi::Port::Usb));
+    g_rig.s->select(seq::PlayMode::Song, 1);
+    g_rig.m.quiet = true;
+    const std::uint32_t c0 = 40;
+    const double spp_t = g_rig.m.time_of(c0 + 63) + 1000000.0;
+    const double cont_t = spp_t + 50000.0;
+    plan(c0, 420, {{spp_t, sppw(20)}, {cont_t, rt(midi::kContinue)}});
+    double cont_block = -1.0;
+    g_rig.run_to(200000, [&](std::uint64_t t) {
+      const double now = static_cast<double>(t) * kCycD;
+      feed(now);
+      if (cont_block < 0.0 && now >= cont_t) {
+        cont_block = static_cast<double>(t);
+      }
+    });
+    NEED(cont_block > 0.0);
+    std::int32_t value = -1;
+    std::uint8_t order = 0xFF;
+    NEED(first_step_from(cont_block, value, order));
+    CHECK(order == 1u);
+    CHECK(value == 4);  // 16 steps of slot 0 + 4 = song step 20
+  }
+
+  // Stop + SPP + Continue back to back as packets (all three words in one block's drain), then the Continue fires on the next clock:
+  // the resume is at the SPP step, not where the run stopped.
+  {
+    midi_project(9000);
+    g_rig.init(slave_cfg(midi::Port::Usb));
+    g_rig.m.quiet = true;
+    const std::uint32_t c0 = 40;
+    const double t_all = g_rig.m.time_of(c0 + 63) + 1000000.0;
+    plan(c0, 420, {{t_all, rt(midi::kStop)}, {t_all + 20000.0, sppw(8)}, {t_all + 40000.0, rt(midi::kContinue)}});
+    g_rig.run_to(200000, [&](std::uint64_t t) { feed(static_cast<double>(t) * kCycD); });
+    NEED(g_col.count(EventKind::Stopped) >= 1u);
+    std::int32_t value = -1;
+    std::uint8_t order = 0xFF;
+    // the first Step after the first Stopped record
+    bool found = false;
+    for (std::uint32_t i = 0; i < g_col.n; ++i) {
+      if (g_col.rec[i].ev.kind == EventKind::Stopped) {
+        for (std::uint32_t j = i + 1; j < g_col.n; ++j) {
+          if (g_col.rec[j].ev.kind == EventKind::Step) {
+            value = g_col.rec[j].ev.value;
+            order = g_col.rec[j].ev.b;
+            found = true;
+            break;
+          }
+        }
+        break;
+      }
+    }
+    NEED(found);
+    CHECK(value == 8);
+    CHECK(g_rig.s->playing());
+    (void)order;
+  }
+
+  // OS-MIDISYNC M2b, the unit's wire format: the SPP packed as CIN 0x2 (two-byte system common) instead of CIN 0x3. The packet decoder
+  // must still give the parser both data bytes of F2 (usb_event_bytes takes 3 for CIN 0x2 + F2); with only two the parser waits for the
+  // second data byte forever — every byte after it here is real-time and passes through untouched — no Spp event is ever emitted and
+  // the SPP is ignored, exactly what the unit did (tests 10/11: first step where the run stopped, clock/Start/Stop/Continue all fine).
+  {
+    midi_project(9000);
+    g_rig.init(slave_cfg(midi::Port::Usb));
+    g_rig.m.quiet = true;
+    const std::uint32_t c0 = 40;
+    const double spp_t = g_rig.m.time_of(c0 + 63) + 1000000.0;
+    const double cont_t = spp_t + 50000.0;
+    plan(c0, 420, {{spp_t, word(0x2u, midi::kSongPosition, 8, 0)}, {cont_t, rt(midi::kContinue)}});  // CIN 0x2
+    double cont_block = -1.0;
+    g_rig.run_to(200000, [&](std::uint64_t t) {
+      const double now = static_cast<double>(t) * kCycD;
+      feed(now);
+      if (cont_block < 0.0 && now >= cont_t) {
+        cont_block = static_cast<double>(t);
+      }
+    });
+    NEED(cont_block > 0.0);
+    CHECK(g_rig.link->status().transport_events >= 3u);  // the SPP must be an event too
+    std::int32_t value = -1;
+    std::uint8_t order = 0xFF;
+    NEED(first_step_from(cont_block, value, order));
+    CHECK(value == 8);
+    (void)order;
+  }
+}
+
+// OS-MIDISYNC M2c: the unit's real test 10/11 sequence (MIDISYNC.md, midi_clock_tool.py build_plan() with the default lead_ms=2.0):
+// Start, then 10 s of clocks at 120 BPM (480 clocks = 80 sixteenths), then — with NO Stop, while the slave is PLAYING — the SPP and
+// the Continue stamped before the next clock (build_plan's flush(): the SPP 2*lead = 4 ms before it, the Continue lead = 2 ms before it;
+// that next clock, 480 = 80 x 6, is a step boundary), and the clocks go on. The first Step after the Continue must be the SPP step: 8 in
+// Pattern, song step 20 (order 1, step 4) in Song. On the unit the first step heard was 0 / 32 (= 80 mod 16 / 80 mod 48): the SPP was
+// ignored while playing. Same intake as the case above: CIN-framed USB event packets through usb::midi_packet_to_ring and
+// midi::usb_midi_from_host.
+TEST_CASE("midi link slave over USB event packets: the unit's 10/11 sequence - Start, 480 clocks, then SPP + Continue while playing, 48 clocks") {
+  usb::MidiRing from_host;
+  midi::UsbBindStats bst;
+  struct Pend {
+    double t;
+    std::uint32_t word;
+  };
+  Pend pend[560];
+  std::uint32_t pend_n = 0;
+  const auto word = [](std::uint8_t cin, std::uint8_t b0, std::uint8_t b1, std::uint8_t b2) {
+    return static_cast<std::uint32_t>(cin) | (static_cast<std::uint32_t>(b0) << 8) | (static_cast<std::uint32_t>(b1) << 16) |
+           (static_cast<std::uint32_t>(b2) << 24);
+  };
+  const auto rt = [&word](std::uint8_t b) { return word(0x0Fu, b, 0, 0); };  // CIN 0xF: the kernel's packet for a real-time byte
+  const auto sppw = [&word](std::uint16_t v) {
+    return word(0x3u, midi::kSongPosition, static_cast<std::uint8_t>(v & 0x7Fu), static_cast<std::uint8_t>((v >> 7) & 0x7Fu));  // CIN 0x3
+  };
+  // The master's pending event words, fed in time order through the two firmware functions, stamped as the interrupt would.
+  const auto feed = [&](double now_cycles) {
+    for (;;) {
+      std::uint32_t best = pend_n;
+      for (std::uint32_t i = 0; i < pend_n; ++i) {
+        if (best == pend_n || pend[i].t < pend[best].t) {
+          best = i;
+        }
+      }
+      if (best == pend_n || pend[best].t > now_cycles) {
+        break;
+      }
+      alignas(4) std::uint8_t pkt[4];
+      std::memcpy(pkt, &pend[best].word, 4);
+      const usb::MidiPacketResult r = usb::midi_packet_to_ring(from_host, pkt, 4);
+      CHECK(r.accepted == 1u);
+      (void)midi::usb_midi_from_host(from_host, g_rig.link->usb_in(), static_cast<std::uint32_t>(static_cast<std::uint64_t>(pend[best].t)), bst);
+      pend[best] = pend[pend_n - 1u];
+      --pend_n;
+    }
+  };
+  // build_plan()'s plan: the Start before clock 0 (it fires on clock 0, the run begins there), `c_count` clocks, then the SPP and the
+  // Continue stamped before the next clock (flush() with lead = 2 ms = 360000 cycles: the SPP at 2*lead, the Continue at lead before it),
+  // then `after` more clocks.
+  const auto plan = [&](std::uint32_t c_count, std::uint16_t spp, std::uint32_t after) {
+    pend_n = 0;
+    pend[pend_n++] = {g_rig.m.time_of(0) - 540000.0, rt(midi::kStart)};
+    for (std::uint32_t c = 0; c < c_count; ++c) {
+      pend[pend_n++] = {g_rig.m.time_of(c), rt(midi::kClock)};
+    }
+    const double t_next = g_rig.m.time_of(c_count);  // the next clock: c_count = 480 = 80 x 6, a step boundary
+    pend[pend_n++] = {t_next - 720000.0, sppw(spp)};
+    pend[pend_n++] = {t_next - 360000.0, rt(midi::kContinue)};
+    for (std::uint32_t c = c_count; c < c_count + after; ++c) {
+      pend[pend_n++] = {g_rig.m.time_of(c), rt(midi::kClock)};
+    }
+  };
+  // The first Step record at or after sample `from`: its value and order, or false when there is none.
+  const auto first_step_from = [](double from, std::int32_t& value, std::uint8_t& order) -> bool {
+    for (std::uint32_t i = 0; i < g_col.n; ++i) {
+      if (g_col.rec[i].ev.kind == EventKind::Step && static_cast<double>(g_col.rec[i].t) >= from) {
+        value = g_col.rec[i].ev.value;
+        order = g_col.rec[i].ev.b;
+        return true;
+      }
+    }
+    return false;
+  };
+  const auto steps_before = [](double from) {
+    std::uint32_t c = 0;
+    for (std::uint32_t i = 0; i < g_col.n; ++i) {
+      if (g_col.rec[i].ev.kind == EventKind::Step && static_cast<double>(g_col.rec[i].t) < from) {
+        ++c;
+      }
+    }
+    return c;
+  };
+
+  // Unit test 10 (Pattern, "start,120:10,spp:8,cont,120:10"): no Stop, the slave is playing when the SPP and the Continue arrive.
+  {
+    midi_project(9000);
+    g_rig.init(slave_cfg(midi::Port::Usb));
+    g_rig.s->select(seq::PlayMode::Pattern, 1);  // pattern 1, 16 steps: the cycle of the unit's test 10
+    g_rig.m.quiet = true;  // the master is on USB only: no DIN clocks
+    plan(480, 8, 48);
+    const double cont_t = g_rig.m.time_of(480) - 360000.0;
+    double cont_block = -1.0;
+    g_rig.run_to(500000, [&](std::uint64_t t) {
+      const double now = static_cast<double>(t) * kCycD;
+      feed(now);
+      if (cont_block < 0.0 && now >= cont_t) {
+        cont_block = static_cast<double>(t);
+      }
+    });
+    NEED(cont_block > 0.0);
+    CHECK(g_rig.link->status().transport_events >= 3u);  // the Start, the SPP and the Continue were all applied
+    CHECK(g_rig.s->playing());
+    CHECK(steps_before(cont_block) == 80u);  // 480 clocks = 80 sixteenths ran before the Continue
+    std::int32_t value = -1;
+    std::uint8_t order = 0xFF;
+    NEED(first_step_from(cont_block, value, order));
+    CHECK(value == 8);  // the first step after the Continue is the SPP step, not 80 mod 16 = 0
+    (void)order;
+  }
+
+  // Unit test 11 (Song, "start,120:10,spp:20,cont,120:10" --cycle 48): SPP 20 = order 1, step 4.
+  {
+    song_project(9000);
+    g_rig.init(slave_cfg(midi::Port::Usb));
+    g_rig.s->select(seq::PlayMode::Song, 1);
+    g_rig.m.quiet = true;
+    plan(480, 20, 48);
+    const double cont_t = g_rig.m.time_of(480) - 360000.0;
+    double cont_block = -1.0;
+    g_rig.run_to(500000, [&](std::uint64_t t) {
+      const double now = static_cast<double>(t) * kCycD;
+      feed(now);
+      if (cont_block < 0.0 && now >= cont_t) {
+        cont_block = static_cast<double>(t);
+      }
+    });
+    NEED(cont_block > 0.0);
+    CHECK(g_rig.link->status().transport_events >= 3u);
+    CHECK(g_rig.s->playing());
+    CHECK(steps_before(cont_block) == 80u);
+    std::int32_t value = -1;
+    std::uint8_t order = 0xFF;
+    NEED(first_step_from(cont_block, value, order));
+    CHECK(order == 1u);
+    CHECK(value == 4);  // 16 steps of slot 0 + 4 = song step 20, not 80 mod 48 = 32
+  }
+}
+
+// OS-MIDISYNC M2b, full device level: the same packets through the whole USB device driver — the fake controller's bulk OUT token runs
+// UsbDevice::isr() -> on_token -> token_midi_out -> usb::midi_packet_to_ring into the from-host ring — and then the interrupt's other half,
+// midi::usb_midi_from_host, expands the words into the USB midiRt ring, exactly as platform/mk66/usb/src/usb0.cpp usb_isr() does.
+TEST_CASE("midi link slave over the full USB device (bulk OUT tokens with CIN-framed packets): SPP then Continue resumes at the SPP step") {
+  usb_rig::Rig& ur = usb_rig::fresh();
+  USB_REQUIRE(ur.enumerate());
+  midi_project(9000);
+  g_rig.init(slave_cfg(midi::Port::Usb));
+  g_rig.m.quiet = true;  // the master is on USB only
+  midi::UsbBindStats bst;
+  struct Pend {
+    double t;
+    std::uint8_t pkt[4];
+  };
+  Pend pend[460];
+  std::uint32_t pend_n = 0;
+  const auto rt_pkt = [](std::uint8_t b) { return Pend{0.0, {0x0Fu, b, 0, 0}}; };  // CIN 0xF: the kernel's packet for a real-time byte
+  const auto spp_pkt = [](std::uint16_t v) {
+    return Pend{0.0, {0x03u, midi::kSongPosition, static_cast<std::uint8_t>(v & 0x7Fu), static_cast<std::uint8_t>((v >> 7) & 0x7Fu)}};  // CIN 0x3
+  };
+  const auto feed = [&](double now_cycles) {
+    for (;;) {
+      std::uint32_t best = pend_n;
+      for (std::uint32_t i = 0; i < pend_n; ++i) {
+        if (best == pend_n || pend[i].t < pend[best].t) {
+          best = i;
+        }
+      }
+      if (best == pend_n || pend[best].t > now_cycles) {
+        break;
+      }
+      // The host's bulk OUT packet: the fake controller writes the BD buffer and runs the device's interrupt, which decodes the packet
+      // into the from-host ring (token_midi_out); then the interrupt's second half expands the words into stamped bytes.
+      CHECK(ur.host.bulk_out(3, pend[best].pkt, 4) == usb_rig::Reply::Ack);
+      (void)midi::usb_midi_from_host(ur.midi_out, g_rig.link->usb_in(), static_cast<std::uint32_t>(static_cast<std::uint64_t>(pend[best].t)), bst);
+      pend[best] = pend[pend_n - 1u];
+      --pend_n;
+    }
+  };
+  const std::uint32_t c0 = 40;
+  const double spp_t = g_rig.m.time_of(c0 + 63) + 1000000.0;
+  const double cont_t = spp_t + 50000.0;
+  pend[pend_n++] = {g_rig.m.time_of(c0) - 540000.0, {0x0Fu, midi::kStart, 0, 0}};
+  for (std::uint32_t c = 0; c < 130; ++c) {
+    pend[pend_n++] = {g_rig.m.time_of(c), {0x0Fu, midi::kClock, 0, 0}};
+  }
+  {
+    const Pend p = spp_pkt(8);
+    pend[pend_n++] = {spp_t, {p.pkt[0], p.pkt[1], p.pkt[2], p.pkt[3]}};
+  }
+  {
+    const Pend p = rt_pkt(midi::kContinue);
+    pend[pend_n++] = {cont_t, {p.pkt[0], p.pkt[1], p.pkt[2], p.pkt[3]}};
+  }
+  double cont_block = -1.0;
+  g_rig.run_to(200000, [&](std::uint64_t t) {
+    const double now = static_cast<double>(t) * kCycD;
+    feed(now);
+    if (cont_block < 0.0 && now >= cont_t) {
+      cont_block = static_cast<double>(t);
+    }
+  });
+  NEED(cont_block > 0.0);
+  CHECK(g_rig.link->status().transport_events >= 3u);  // the Start, the SPP and the Continue were all applied
+  CHECK(ur.dev.counters().midi_out_events >= 132u);    // every packet's event was accepted by the packet decoder
+  std::int32_t value = -1;
+  std::uint8_t order = 0xFF;
+  bool found = false;
+  for (std::uint32_t i = 0; i < g_col.n; ++i) {
+    if (g_col.rec[i].ev.kind == EventKind::Step && static_cast<double>(g_col.rec[i].t) >= cont_block) {
+      value = g_col.rec[i].ev.value;
+      order = g_col.rec[i].ev.b;
+      found = true;
+      break;
+    }
+  }
+  NEED(found);
+  CHECK(value == 8);
+  (void)order;
+}
+
 TEST_CASE("midi link slave: the IN OFFSET shifts the steps by its exact length; the followed port is the only one that counts") {
   for (const int dms_i : {20, 50}) {
     const std::int16_t dms = static_cast<std::int16_t>(dms_i);
@@ -740,6 +1292,68 @@ TEST_CASE("midi link: a configuration is clamped, taken at the next block, and t
   CHECK(g_rig.link->out().config().clock_ports == 0u);
 }
 
+// OS-MTC A3 (docs/specs/OS-MTC.md 3.7, A-1): the device settings MTC OUT and MTC START reach MidiConfig, and the time code goes to the ports CLOCK OUT names whatever CLOCK MODE says.
+TEST_CASE("midi link: sync_config_from_settings carries MTC OUT and MTC START; the MTC ports follow MIDI OUT, with any CLOCK MODE") {
+  namespace ds = model::device_setting;
+  model::Settings dev;
+  dev.init(core::ParamKind::Device);
+  midi::MidiConfig base;
+  base.mtc_fps = 30;  // overwritten: the settings own them
+  base.mtc_hour = 9;
+  midi::MidiConfig c = seq::sync_config_from_settings(dev, base);
+  CHECK(c.mtc_fps == 0u);   // Off, the default
+  CHECK(c.mtc_hour == 1u);  // 01:00:00:00, the default
+  const std::uint8_t fps_of[4] = {0, 24, 25, 30};
+  for (unsigned v = 0; v <= 3u; ++v) {
+    CHECK(dev.set(ds::MtcOut, static_cast<float>(v)) == model::Status::Ok);
+    c = seq::sync_config_from_settings(dev, base);
+    CHECK(c.mtc_fps == fps_of[v]);
+  }
+  for (unsigned h : {0u, 1u, 12u, 23u}) {
+    CHECK(dev.set(ds::MtcStart, static_cast<float>(h)) == model::Status::Ok);
+    c = seq::sync_config_from_settings(dev, base);
+    CHECK(c.mtc_hour == h);
+  }
+  // independent of the clock rows
+  CHECK(dev.set(ds::ClockMode, 2.0f) == model::Status::Ok);
+  CHECK(dev.set(ds::TransportOut, 0.0f) == model::Status::Ok);
+  c = seq::sync_config_from_settings(dev, base);
+  CHECK(c.mtc_fps == 30u);
+  CHECK(c.mtc_hour == 23u);
+  // sanitised: a value outside the range is held to it
+  midi::MidiConfig wild;
+  wild.mtc_fps = 29;
+  wild.mtc_hour = 77;
+  wild = midi::sanitized(wild);
+  CHECK(wild.mtc_fps == 0u);
+  CHECK(wild.mtc_hour == 23u);
+}
+
+TEST_CASE("midi link: with MTC OUT on the router's MTC ports are the output ports, with the clock Off too; with it off there are none") {
+  midi_project();
+  midi::MidiConfig c;  // CLOCK MODE Off: the clock has no port
+  c.out_ports = midi::kPortUsb;
+  c.mtc_fps = 25;
+  g_rig.init(c);
+  g_rig.run_to(640);
+  CHECK(g_rig.link->out().config().clock_ports == 0u);
+  CHECK(g_rig.link->out().config().mtc_ports == midi::kPortUsb);
+  CHECK(g_rig.s->config().start_lead == seq::MidiLink::kStartLead);  // A-8: a Play begins one block late with MTC OUT on, as with clock out
+  c.mtc_fps = 0;
+  g_rig.link->set_config(c);
+  g_rig.run_to(1280);
+  CHECK(g_rig.link->out().config().mtc_ports == 0u);
+  CHECK(g_rig.s->config().start_lead == 0u);
+  c.mtc_fps = 30;
+  c.out_ports = midi::kPortDin | midi::kPortUsb;
+  g_rig.link->set_config(c);
+  g_rig.run_to(1920);
+  CHECK(g_rig.link->out().config().mtc_ports == (midi::kPortDin | midi::kPortUsb));
+  // The router takes the time code kinds from the block: a quarter frame and a full frame on the sequencer's output reach the ports (the generator that makes them is the sequencer's).
+  CHECK(g_rig.link->out().send(audio::SeqEvent{0, audio::EventKind::MidiMtcQf, audio::kNoTrack, 0x12, 0, 0, 0, 0}, 1920));
+  CHECK(g_rig.link->out().staged() == 2u);
+}
+
 // ---- After an export (OS-WAVEXP) -------------------------------------------------------------------------------------------------------------------------
 
 TEST_CASE("midi link slave: after an export (the link not stepped, the interrupts stamping on) nothing stale is applied - no Start, the rings emptied - and the loop locks on the master again") {
@@ -952,4 +1566,320 @@ TEST_CASE("midi link: sync_config_from_settings carries both transport switches"
   CHECK(c.mode == midi::SyncMode::Master);
   CHECK(c.out_ports == midi::kPortDin);
   CHECK_FALSE(c.transport_out);
+}
+
+// ---- OS-MIDISYNC 07: a tempo step to half speed must not play a step early -----------------------------------------------------------------
+// The unit battery's test 07 (platform/mk66/tools/hil/MIDISYNC.md: 120 -> 180 -> 90 BPM over USB, each jump on a step boundary) left 1 missing and 1 extra step on the
+// unit: the step after the 180 -> 90 jump sounded 83 ms early, the length of a step at 180 BPM. To the clock loop (midi/clock_dll.cpp) a 2:1 slowdown is a dropout of every
+// other clock; each "missing" observation adds a phantom tick, so the tick runs up to three clocks ahead of the master's clock index until the 4th in a row re-acquires, and the
+// sequencer used to play the step the tick had crossed (and the steps the old, fast period predicted) a clock of the new tempo early for every phantom. The sequencer now waits
+// for a real clock (ClockDll::settled_tick). Reproduced here at the MidiLink level with the tool's own plan (the clock of the jump is the last one at the old tempo; every later
+// interval is slow), the clocks stamped by the USB frame (1 ms). The jump may fall anywhere against the step grid: six alignments. Host only: 24 s of blocks.
+// What no follower can know: the first slow clock is due one fast period after the jump clock, the second two, and the third three; the loop has not yet seen that the first one
+// is late when the blocks that hold a step on the first two are rendered, and the third (the next clock after the first observation, which may be one lost clock) is played on
+// the prediction so that a single dropout stays in time. A step on the n-th clock after the jump may sound up to n fast periods early (13.9 ms each at 180 BPM); every other step
+// must sound within the same 3 ms band as at a steady tempo.
+#if !defined(__arm__)
+namespace {
+
+// The steps of a run whose clocks are `truth` (the cycle each is sent at; a clock whose `sent` is false is lost on the way), as the Start and the clocks reach the USB
+// interrupt. step_err_ms[k] is how far step k sounded from the clock that starts it (6k), signed (negative: early); returns the steps played.
+constexpr std::uint32_t kMaxPlanClocks = 1248;
+double g_step_err_ms[kMaxPlanClocks / 6u];
+
+// The same, with `tail_samples` samples run past the last clock (a master that falls silent) and `after_block(next_block_start)` called after each block, to watch
+// the loop's settled_tick() and the transport mid-run.
+template <typename F>
+std::uint32_t play_clock_plan(const double* truth, const bool* sent, std::uint32_t n_clocks, std::uint64_t tail_samples, F after_block) {
+  midi_project(9000);
+  g_rig.init(slave_cfg(midi::Port::Usb));
+  g_rig.s->select(seq::PlayMode::Pattern, 1);
+  g_rig.m.quiet = true;  // the master is on USB only
+  const double start_at = truth[0] - 540000.0;
+  bool start_sent = false;
+  std::uint32_t next = 0;
+  // the USB interrupt stamps a clock at the end of the 1 ms frame that carried it
+  const auto stamp = [&](std::uint32_t c) { return std::ceil(truth[c] / 180000.0) * 180000.0; };
+  const std::uint64_t end_sample = static_cast<std::uint64_t>(truth[n_clocks - 1u] / kCycD) + tail_samples;
+  while (g_rig.sample < end_sample) {
+    const double now = static_cast<double>(g_rig.sample) * kCycD;
+    if (!start_sent && start_at <= now) {
+      CHECK(g_rig.link->usb_in().push(midi::RtItem{static_cast<std::uint32_t>(static_cast<std::uint64_t>(start_at)), midi::kStart, 1, 0}));
+      start_sent = true;
+    }
+    while (next < n_clocks && stamp(next) <= now) {
+      if (sent[next]) {
+        CHECK(g_rig.link->usb_in().push(midi::RtItem{static_cast<std::uint32_t>(static_cast<std::uint64_t>(stamp(next))), midi::kClock, 1, 0}));
+      }
+      ++next;
+    }
+    g_rig.block();
+    after_block(g_rig.sample);
+  }
+  std::uint32_t played = 0;
+  for (std::uint32_t i = 0; i < g_col.n && played < n_clocks / 6u; ++i) {
+    if (g_col.rec[i].ev.kind == EventKind::Step) {
+      g_step_err_ms[played] = (static_cast<double>(g_col.rec[i].t) - truth[6u * played] / kCycD) / 44.1;
+      ++played;
+    }
+  }
+  return played;
+}
+
+std::uint32_t play_clock_plan(const double* truth, const bool* sent, std::uint32_t n_clocks) {
+  return play_clock_plan(truth, sent, n_clocks, 20000u, [](std::uint64_t) {});
+}
+
+// 120 -> 180 -> 90 BPM, 8 s a segment (64, 96 and 48 steps), the second jump `align` clocks after a step boundary. The interval AFTER clock c has c's tempo (the tool's
+// build_plan()), so the jump clock is the last one at the old tempo. The first slow clock is `jump + 1`.
+constexpr std::uint32_t kSeg0 = 384, kSeg1 = 576, kSeg2 = 288;  // clocks: 8 s at 120, 180 and 90 BPM
+constexpr std::uint32_t kJumpClocks = kSeg0 + kSeg1 + kSeg2;
+constexpr double kFastPeriodMs = 60000.0 / 180.0 / 24.0;
+
+}  // namespace
+
+TEST_CASE("midi link slave over USB: every step of the 120 -> 180 -> 90 tempo jumps sounds within 3 ms of its clock, but the three a slowdown cannot be known at (OS-MIDISYNC 07)") {
+  constexpr double kTol = 3.0;
+  static double truth[kJumpClocks];
+  static bool sent[kJumpClocks];
+  for (std::uint32_t align = 0; align < 6u; ++align) {  // align 0: the jump on a step boundary, the unit battery's 07
+    const std::uint32_t jump = kSeg0 + kSeg1 + align;     // the last clock at 180 BPM
+    double t = 3.0e6 + 540000.0;
+    for (std::uint32_t c = 0; c < kJumpClocks; ++c) {
+      truth[c] = t;
+      sent[c] = true;
+      const double bpm = c < kSeg0 ? 120.0 : (c < jump ? 180.0 : 90.0);
+      t += 450.0e6 / bpm;
+    }
+    const std::uint32_t played = play_clock_plan(truth, sent, kJumpClocks);
+    CHECK_MESSAGE(played == 208u, "align " << align << ": steps played " << played);
+    std::uint32_t bad = 0;
+    double worst = 0.0;
+    std::uint32_t first_bad = 0;
+    for (std::uint32_t k = 1; k < played; ++k) {  // step 0 is the Start's own (late by a block and a byte, checked by the slave test above)
+      const std::uint32_t clock = 6u * k;
+      const double early_ok = (clock > jump && clock <= jump + 3u) ? static_cast<double>(clock - jump) * kFastPeriodMs : 0.0;
+      const double e = g_step_err_ms[k];
+      if (e < -(kTol + early_ok) || e > kTol) {
+        if (bad++ == 0u) {
+          first_bad = k;
+        }
+        if (std::fabs(e) > std::fabs(worst)) {
+          worst = e;
+        }
+      }
+    }
+    CHECK_MESSAGE(bad == 0u, "align " << align << ": " << bad << " step(s) off the clock grid, the first is step " << first_bad << ", the worst " << worst << " ms");
+  }
+}
+
+// One clock lost on the way (a dropout the loop must bridge in time) and two in a row, at every alignment of the lost clock against the step grid, at 120 BPM: no step moves.
+TEST_CASE("midi link slave over USB: a lost clock is bridged in time, a step on the lost clock or the next one sounds on its grid (OS-MIDISYNC 07)") {
+  constexpr std::uint32_t kN = 720;  // 15 s at 120 BPM: 120 steps
+  static double truth[kN];
+  static bool sent[kN];
+  for (std::uint32_t len = 1; len <= 2u; ++len) {
+    for (std::uint32_t align = 0; align < 6u; ++align) {
+      for (std::uint32_t c = 0; c < kN; ++c) {
+        truth[c] = 3.0e6 + 540000.0 + 3750000.0 * c;  // 120 BPM: 3.75 M cycles a clock
+        sent[c] = !(c >= 300u + align && c < 300u + align + len);
+      }
+      const std::uint32_t played = play_clock_plan(truth, sent, kN);
+      CHECK_MESSAGE(played == 120u, "lost " << len << " at +" << align << ": steps played " << played);
+      std::uint32_t bad = 0;
+      double worst = 0.0;
+      for (std::uint32_t k = 1; k < played; ++k) {
+        if (std::fabs(g_step_err_ms[k]) > 3.0) {
+          ++bad;
+          worst = std::fabs(g_step_err_ms[k]) > std::fabs(worst) ? g_step_err_ms[k] : worst;
+        }
+      }
+      CHECK_MESSAGE(bad == 0u, "lost " << len << " at +" << align << ": " << bad << " step(s) off the grid, the worst " << worst << " ms");
+    }
+  }
+}
+
+// OS-MIDISYNC 07a (the review's Level A/S): a step held on a slowdown's re-acquire must not hang when the master then goes silent. 24 clocks at the fast tempo
+// lock the loop, then the interval after each of 5 more clocks is twice as long (a 2:1 slowdown): the last four of those clocks each read as one clock missing, and
+// the 4th re-acquires on the leaky drop score, which sets slow_hold_ (settled_tick() == tick()) until a clock refits the period - and none comes: the plan ends, the
+// master is silent, no Stop. The held step waits for a real clock, but manage_follow's stale() (kStaleClocks = 48 clock periods of the period the loop still holds,
+// the fast one) releases the follow within those 48 clocks, and the release stops the run. The periods are multiples of the 1 ms USB frame so every stamp is exact and
+// the re-acquire is deterministically on the last clock of the plan.
+TEST_CASE("midi link slave over USB: a step held on a slowdown's re-acquire (settled_tick() == tick()), then the master goes silent with no Stop: the run stops within the 48 clocks of manage_follow/stale (OS-MIDISYNC 07a)") {
+  constexpr std::uint32_t kFast = 24u, kSlow = 5u, kN = kFast + kSlow;
+  constexpr double kFastPeriod = 2700000.0;  // cycles a clock at the fast tempo (166.7 BPM), a multiple of the 180000-cycle USB frame
+  static double truth[kN];
+  static bool sent[kN];
+  double t = 3600000.0;  // also a multiple of the frame
+  for (std::uint32_t c = 0; c < kN; ++c) {
+    truth[c] = t;
+    sent[c] = true;
+    t += c < kFast ? kFastPeriod : 2.0 * kFastPeriod;  // the interval AFTER clock c: a 2:1 slowdown from clock 25 on
+  }
+  bool hold_seen = false;            // settled_tick() == tick(): slow_hold_ is on
+  bool started_seen = false;         // the run was playing at least once
+  std::uint64_t stopped_sample = 0;  // the first block after which the run is no longer playing
+  const auto after = [&](std::uint64_t smp) {
+    const midi::ClockDll& d = g_rig.link->dll();
+    if (!hold_seen && d.has_phase() && d.settled_tick() == d.tick()) {
+      hold_seen = true;
+    }
+    if (g_rig.s->playing()) {
+      started_seen = true;
+    } else if (started_seen && stopped_sample == 0u) {
+      stopped_sample = smp;
+    }
+  };
+  // 48 clock periods of the fast period the loop still holds, plus slack for the blocks the stop and the detach take
+  const std::uint64_t stale_samples = static_cast<std::uint64_t>(48.0 * kFastPeriod / kCycD);
+  const std::uint64_t tail = stale_samples + 512u;
+  play_clock_plan(truth, sent, kN, tail, after);
+  CHECK(hold_seen);  // the 2:1 slowdown re-acquired and the hold was on (fails if settled_tick() loses its slow_hold_ branch)
+  // Not pinned as checks: how many re-acquires and how many steps this plan plays depend on the loop's tuning (the leaky drop score, the re-acquire on the 4th missing
+  // clock, the 6-clock step grid), not on a spec promise. What OS-MIDISYNC 07a promises is checked below: the hold was seen, the run stopped, exactly one stale release.
+  MESSAGE("reacquires " << g_rig.link->dll().stats().reacquires << ", steps " << g_col.count(EventKind::Step) << " (loop tuning, reported only)");
+  CHECK(stopped_sample != 0u);                 // the run did stop - nothing hangs (fails if manage_follow loses the stale release)
+  const std::uint64_t last_clock_sample = static_cast<std::uint64_t>(truth[kN - 1u] / kCycD);
+  // within the 48 clocks, and not before them: the hold alone does not stop the run, the stop is the stale
+  const std::int64_t stop_delta = stopped_sample != 0u ? static_cast<std::int64_t>(stopped_sample - last_clock_sample) : -1;
+  CHECK(stop_delta <= static_cast<std::int64_t>(stale_samples) + 400);
+  CHECK(stop_delta >= static_cast<std::int64_t>(stale_samples) - 400);
+  CHECK_FALSE(g_rig.s->playing());
+  CHECK_FALSE(g_rig.s->following());
+  CHECK(g_col.count(EventKind::Stopped) == 1u);
+  CHECK(g_rig.link->stats().stale_releases == 1u);
+  const midi::SyncStatus st = g_rig.link->status();
+  CHECK_FALSE(st.following);
+  CHECK_FALSE(st.clock_present);
+  CHECK(st.bpm_x100 == 0u);
+}
+
+// OS-MIDISYNC 07a (the review's Level A/S): a Start that arrives while a step is held. 120 BPM, clocks 303 and 305 lost: two single dropouts in consecutive
+// observations, the second puts run_n_ at 2 (settled_tick() == tick() - 2) and the step due on the real clock 306 waits for a real clock. The master sends a Start in that
+// window: the run restarts at step 0 on the clock the Start begins on (the first sent clock at or after the Start byte: 306..313 in this plan, where the block-boundary push lands), and nothing is held any more - the held step went away
+// with the run it belonged to.
+TEST_CASE("midi link slave over USB: a Start while a step is held restarts the run at step 0 on the Start's clock and the hold is gone (OS-MIDISYNC 07a)") {
+  constexpr std::uint32_t kN = 720;
+  constexpr std::uint32_t kLost0 = 303u, kLost1 = 305u;
+  static double truth[kN];
+  static bool sent[kN];
+  for (std::uint32_t c = 0; c < kN; ++c) {
+    truth[c] = 3.0e6 + 540000.0 + 3750000.0 * c;  // 120 BPM: 3.75 M cycles a clock
+    sent[c] = c != kLost0 && c != kLost1;
+  }
+  bool run2_seen = false;      // settled_tick() == tick() - 2: run_n_ reached 2
+  bool held_seen = false;      // a step was held at that moment (follow_unsettled())
+  bool start_pushed = false;
+  std::uint32_t steps_at_push = 0;
+  bool restart_seen = false;
+  bool held_after_restart = false;
+  const auto after = [&](std::uint64_t smp) {
+    const midi::ClockDll& d = g_rig.link->dll();
+    if (!run2_seen && d.has_phase() && d.tick() > 100u && d.settled_tick() + 2u == d.tick()) {
+      run2_seen = true;
+      held_seen = g_rig.s->follow_unsettled();  // the step due on the real clock 306 waits
+    }
+    if (run2_seen && !start_pushed) {
+      start_pushed = true;
+      steps_at_push = g_col.count(EventKind::Step);
+      CHECK(g_rig.link->usb_in().push(midi::RtItem{static_cast<std::uint32_t>(static_cast<std::uint64_t>(static_cast<double>(smp) * kCycD)), midi::kStart, 1, 0}));
+    }
+    if (start_pushed && !restart_seen && g_col.count(EventKind::Step) > steps_at_push) {
+      restart_seen = true;
+    }
+    if (restart_seen && g_rig.s->follow_unsettled()) {
+      held_after_restart = true;
+    }
+  };
+  play_clock_plan(truth, sent, kN, 20000u, after);
+  CHECK(run2_seen);
+  CHECK(held_seen);  // a step was really held when the Start arrived (fails if settled_tick() loses its run_n_ >= 2 bound)
+  CHECK(start_pushed);
+  CHECK(restart_seen);               // the Start moved the transport (fails if a Start while held is not applied)
+  CHECK_FALSE(held_after_restart);   // the hold is gone after the restart
+  // the first step of the restarted run is step 0, on the clock the Start began on: the first sent clock at or after the Start byte. Which of the sent clocks 306..313 that is
+  // depends on the block boundary the push lands on (no OS-MIDISYNC spec pins the exact one), so the loop accepts that whole range within 3 ms, not a single clock
+  const Rec* r = g_col.nth(EventKind::Step, steps_at_push);
+  NEED(r != nullptr);
+  CHECK(r->ev.value == 0);
+  bool on_grid = false;
+  for (std::uint32_t c = 306; c < 314u; ++c) {
+    if (sent[c] && std::fabs(static_cast<double>(r->t) - truth[c] / kCycD) <= 3.0 * 44.1) {
+      on_grid = true;
+    }
+  }
+  CHECK(on_grid);
+  CHECK(g_rig.s->playing());
+  CHECK(g_rig.s->following());
+  CHECK(g_rig.link->stats().stale_releases == 0u);
+}
+
+// OS-MIDISYNC 07a (the review's Level A/S), known and accepted: two single dropouts in consecutive observations (clocks c and c+2 lost, at every alignment of c against
+// the step grid) put run_n_ at 2, so settled_tick() = tick() - 2 and a step due on a real clock inside that window waits for the next real one - it sounds about one
+// clock period late. Pinned here: a step off the grid is never early and never later than 1.5 periods, and at least one alignment has one (with the run_n_ >= 2 bound of
+// settled_tick() removed every step would sit on the grid within 3 ms and this test would fail).
+TEST_CASE("midi link slave over USB: two single dropouts in consecutive observations (clocks c and c+2 lost) - run_n_ reaches 2 and a step due on a real clock sounds about one period late, known and accepted (OS-MIDISYNC 07a)") {
+  constexpr std::uint32_t kN = 720;                       // 15 s at 120 BPM: 120 steps
+  constexpr double kPeriodMs = 60000.0 / 120.0 / 24.0;    // 20.83 ms a clock
+  static double truth[kN];
+  static bool sent[kN];
+  std::uint32_t late_total = 0;
+  for (std::uint32_t align = 0; align < 6u; ++align) {
+    const std::uint32_t c0 = 300u + align;
+    for (std::uint32_t c = 0; c < kN; ++c) {
+      truth[c] = 3.0e6 + 540000.0 + 3750000.0 * c;
+      sent[c] = c != c0 && c != c0 + 2u;
+    }
+    bool run2_seen = false;
+    const auto after = [&](std::uint64_t) {
+      const midi::ClockDll& d = g_rig.link->dll();
+      if (!run2_seen && d.has_phase() && d.tick() > 100u && d.settled_tick() + 2u == d.tick()) {
+        run2_seen = true;  // run_n_ == 2: settled_tick() = tick() - 2
+      }
+    };
+    const std::uint32_t played = play_clock_plan(truth, sent, kN, 20000u, after);
+    CHECK_MESSAGE(played == 120u, "align " << align << ": steps played " << played);
+    CHECK_MESSAGE(run2_seen, "align " << align << ": run_n_ never reached 2");
+    CHECK_MESSAGE(g_rig.link->dll().stats().dropouts == 2u, "align " << align << ": dropout observations " << g_rig.link->dll().stats().dropouts);
+    std::uint32_t late = 0;
+    for (std::uint32_t k = 1; k < played; ++k) {
+      const double e = g_step_err_ms[k];
+      // |e| <= 3 ms passes. The band's early side is measurement granularity, not a tolerance for early steps: a step is recorded at its block's start, up to 64 samples
+      // (1.45 ms) before the clock's USB frame stamp, itself up to 1 ms after the true clock, so an on-grid step can measure up to about 2.5 ms "early" - tightening the
+      // early side below that would fail by granularity alone. "Never early" is enforced where it matters, on the held step below (in_band: e >= half a period).
+      if (std::fabs(e) > 3.0) {
+        // the held step: about one period late - never early, never more than 1.5 periods
+        const bool in_band = e >= 0.5 * kPeriodMs && e <= 1.5 * kPeriodMs;
+        CHECK_MESSAGE(in_band, "align " << align << ": step " << k << " err " << e << " ms");
+        ++late;
+      }
+    }
+    late_total += late;
+  }
+  CHECK(late_total >= 1u);  // the behaviour is there: at least one alignment holds a step about one period late
+}
+#endif
+
+// OS-INSFX-ABI2 A3 fold: the unit attaches MidiLink::event_source, not seq::event_source, so the module clock has to come out of this one too. The source's `clock` is asked the way the engine asks it,
+// once a block with the next block's first sample, after MidiLink::step has run the block: stopped it says no flags and the project tempo, playing it follows the sequencer's own clock_at.
+TEST_CASE("midi link: the event source carries the module clock (clock is set, stopped then playing, the beat follows the transport)") {
+  midi_project();
+  g_rig.init(master_cfg(midi::kPortDin | midi::kPortUsb));
+  static audio::SeqEvent buffer[audio::kMaxEventsPerBlock];
+  const audio::EventSource src = g_rig.link->event_source(buffer, audio::kMaxEventsPerBlock);
+  NEED(src.clock != nullptr);
+  audio::ClockPos c = src.clock(src.self, 0);
+  CHECK((c.flags == 0u && c.beat_q16 == 0u && c.tempo_x100 == 12000u));
+  g_rig.s->play_pattern(1);
+  g_rig.run_to(30000);
+  NEED(g_col.count(EventKind::Step) >= 1u);
+  const std::uint64_t origin = g_col.nth(EventKind::Step, 0)->t;
+  const double spb = samples_per_second() * 0.5;  // 120 BPM
+  const std::uint64_t at = g_rig.sample;           // the first sample of the next block
+  c = src.clock(src.self, at);
+  CHECK((c.flags & 1u) != 0u);
+  CHECK(c.tempo_x100 == 12000u);
+  const double want = static_cast<double>(at - origin) / spb;
+  CHECK_MESSAGE(std::fabs(static_cast<double>(c.beat_q16) / 65536.0 - want) < 1e-3, c.beat_q16 << " vs " << want);
+  CHECK(c.beat_q16 == g_rig.s->clock_at(at).beat_q16);  // the one the sequencer gives
 }

@@ -46,6 +46,9 @@ add_subdirectory(save)
 # OS-POWER P1: the shutdown a hold of the Power switch starts (the PowerService state machine over a PowerHost) joins the same library (see power/CMakeLists.txt).
 add_subdirectory(power)
 
+# OS-FLASHDIET P5/P8: the long console and bench texts as deflate blobs plus their ids (see text/CMakeLists.txt); the pools and text() are image only (below).
+add_subdirectory(text)
+
 # The python tools are stdlib only and need no target: their own self-tests, and the generated linker script against the
 # header it came from (the MK66 build below checks the real generated file as well).
 if(O3OS_PLATFORM STREQUAL "host" OR O3OS_PLATFORM STREQUAL "mk66")
@@ -67,6 +70,9 @@ if(O3OS_PLATFORM STREQUAL "host" OR O3OS_PLATFORM STREQUAL "mk66")
   # Only boot::dma_init() writes DMA_CR and the DCHPRIs (ADR 0013 D1): a source check over this tree, so the host build runs it too.
   add_test(NAME mk66_dma_owner_selftest COMMAND ${Python3_EXECUTABLE} -I ${_mk66_tools}/check_dma_owner.py --self-test)
   add_test(NAME mk66_dma_owner COMMAND ${Python3_EXECUTABLE} -I ${_mk66_tools}/check_dma_owner.py check --root ${CMAKE_CURRENT_SOURCE_DIR})
+  # OS-FLASHDIET I3: the importers leave the image: the map must not name formats_tracker, and the only formats::mod / formats::med
+  # symbols in it are the probe side that stays in formats (sniff_kind, its two helpers, the two drop_group_name).
+  add_test(NAME mk66_map_importers_selftest COMMAND ${Python3_EXECUTABLE} -I ${_mk66_tools}/check_map_importers.py --self-test)
   if(NOT O3OS_PLATFORM STREQUAL "mk66")
     add_test(NAME mk66_ld COMMAND ${Python3_EXECUTABLE} -I ${_mk66_tools}/gen_ld.py check
              --header ${_mk66_header} --template ${_mk66_template})
@@ -111,7 +117,7 @@ add_custom_target(mk66_ld_script DEPENDS ${_mk66_ld})
 # The image: startup, boot steps, crash store, clock and main on top of the pure library and the HAL contracts. One
 # executable of first-party objects, no archive in between: nothing the vector table names can be dropped.
 add_executable(o3os src/startup.cpp src/boot.cpp src/crash_store.cpp src/clock.cpp src/i2c.cpp src/audio.cpp src/capture.cpp src/midi_din.cpp src/cache.cpp src/main.cpp)
-# OS-BENCHOPT: the CPU bench (`diag bench ...`, `diag cache check`; src/bench.cpp, about 17.8 KB of flash (+32 B SRAM_L)) is a measurement tool for the tester's bench images, not part of a
+# OS-BENCHOPT: the CPU bench (`diag bench ...`, `diag cache check`; src/bench.cpp, about 17.8 KB of flash, no SRAM_L since OS-CEWTENV W3a: its load kernel runs from flash) is a measurement tool for the tester's bench images, not part of a
 # release image: OFF by default. ON (-DO3OS_BENCH=ON) is how a bench image is built (tools/ci.sh builds one, `mk66-bench`, so that it does not rot). With it OFF the console still lists
 # `bench`, and says so when asked. The host tests of the bench's pure half (bench_report.h, cache_check.h) do not depend on the option.
 option(O3OS_BENCH "Image: include the CPU bench (diag bench <kernel|all>, diag cache check; src/bench.cpp). OFF (default): a release image carries none of it" OFF)
@@ -120,6 +126,10 @@ if(O3OS_BENCH)
   # OS-CPUOPT1: the bench's reference copies of the SVF loop (`diag bench cpuopt`) must be compiled as the audio library is, -ffp-contract=off (audio/CMakeLists.txt): without it GCC fuses their plain products into VFMA, which rounds once, and `cpuopt_eq_svf` compares the new loop with a filter the voices never ran (the first unit run said FAIL for exactly this).
   set_source_files_properties(src/bench.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
 endif()
+# OS-FLASHDIET B1: the retired one-off A/B benches (`bench cpuopt`, `looper`, `voice_st`, `disk` and `bench disk reset|clean`; the four groups of src/bench.cpp, about 11-13 KB of flash) are kept
+# for the image that needs one: ON (-DO3OS_BENCH_ARCHIVE=ON, with O3OS_BENCH=ON) compiles them into a bench image (tools/ci.sh builds one, `mk66-bench-archive`, so that they do not rot). OFF
+# (default): a bench image carries none of them; the console still lists the four kernels and answers `not in this image (O3OS_BENCH_ARCHIVE)`. A release image (O3OS_BENCH=OFF) carries no bench at all.
+option(O3OS_BENCH_ARCHIVE "Bench image: keep the retired one-off A/B benches (bench cpuopt|looper|voice_st|disk) in the image. OFF (default): they are compiled out and the console answers not in this image (O3OS_BENCH_ARCHIVE)" OFF)
 # OS-006b: the USB0 device driver and the `diag` console on the CDC port (usb/src), with the build identity `diag version` prints. The
 # identity header is written at build time (tools/gen_build_info.cmake: git hash, "-dirty" if the tree differs), only when it changed.
 set(_mk66_gen_dir "${CMAKE_CURRENT_BINARY_DIR}/gen")
@@ -130,7 +140,7 @@ add_custom_target(o3os_build_info
   VERBATIM)
 add_dependencies(o3os o3os_build_info)
 target_include_directories(o3os PRIVATE ${_mk66_gen_dir})
-target_sources(o3os PRIVATE usb/src/usb0.cpp usb/src/console.cpp)
+target_sources(o3os PRIVATE usb/src/usb0.cpp usb/src/console.cpp text/src/text.cpp)
 # OS-007e: the read-only SD card. The SDHC register policy (storage/src/sdhc_bus.cpp) and the bus, card and volume objects (storage/src/device.cpp; the project loader is a static of src/app_main.cpp)
 # join the image; the SD protocol, the FatFs-backed storage and the `diag sd` / `ls` text are in platform_mk66_pure, FatFs in third_party/fatfs.
 option(O3OS_SD_HIGH_SPEED "Image: switch the SD card to high speed (CMD6, 50 MHz asked, 45 MHz made) after the 25 MHz identification. OFF: stay at 22.5 MHz, for a hardware session that sees CRC errors at the higher clock" ON)
@@ -157,6 +167,7 @@ target_compile_definitions(o3os PRIVATE
   O3OS_SDRAM_FULL_TEST=$<BOOL:${O3OS_MK66_SDRAM_FULL_TEST}>
   O3OS_CODE_CACHE=$<BOOL:${O3OS_CODE_CACHE}>
   O3OS_BENCH=$<BOOL:${O3OS_BENCH}>
+  O3OS_BENCH_ARCHIVE=$<BOOL:${O3OS_BENCH_ARCHIVE}>
   O3OS_AUDIO_TEST=$<BOOL:${O3OS_AUDIO_TEST}>
   O3OS_AUDIO_TEST_STALL=$<BOOL:${O3OS_AUDIO_TEST_STALL}>)
 # OS-007c: the display. The FT812 driver's hardware half (DSPI2 as the link, the eDMA engine, the bring-up, display/src) and the
@@ -177,6 +188,18 @@ target_compile_definitions(o3os PRIVATE O3OS_INPUT_TEST=$<BOOL:${O3OS_INPUT_TEST
 target_compile_definitions(o3os PRIVATE
   O3OS_DEMO_CYCLE=$<BOOL:${O3OS_DEMO_CYCLE}>
   O3OS_DISPLAY_ROTATE=${O3OS_DISPLAY_ROTATE})
+
+# OS-FLASHDIET B1: the archive bench image no longer fits the 1 MiB flash with the OS around it (about +11-13 KB over the plain bench image, which was 1012 KB), so `tools/ci.sh mk66` does not link it:
+# it builds this target, the two translation units that hold every O3OS_BENCH_ARCHIVE line (src/bench.cpp, usb/src/console.cpp) compiled with the image's own definitions, include paths, options
+# and libraries (generator expressions on `o3os`), no link. Not part of ALL, no output. `o3os_image` of an archive configure still links; it fits only on a tree small enough for it.
+if(O3OS_BENCH AND O3OS_BENCH_ARCHIVE)
+  add_library(o3os_bench_archive_objs OBJECT EXCLUDE_FROM_ALL src/bench.cpp usb/src/console.cpp)
+  target_include_directories(o3os_bench_archive_objs PRIVATE $<TARGET_PROPERTY:o3os,INCLUDE_DIRECTORIES>)
+  target_compile_definitions(o3os_bench_archive_objs PRIVATE $<TARGET_PROPERTY:o3os,COMPILE_DEFINITIONS>)
+  target_compile_options(o3os_bench_archive_objs PRIVATE $<TARGET_PROPERTY:o3os,COMPILE_OPTIONS>)
+  target_link_libraries(o3os_bench_archive_objs PRIVATE usb platform_mk66_pure audio midi hal core o3m_builtin app ui eve seq model)
+  add_dependencies(o3os_bench_archive_objs o3os_build_info)
+endif()
 
 # The reset sequence is the C runtime: its copy and zero loops must stay loops, not become memcpy / memset calls.
 set_source_files_properties(src/startup.cpp PROPERTIES COMPILE_OPTIONS -fno-tree-loop-distribute-patterns)
@@ -199,15 +222,25 @@ target_link_options(o3os PRIVATE
 # interrupt is enabled): the image check is told the SRAM_L code region, mem_map.h kSramLBase and kRamfuncLSize (pinned by
 # mk66_mem_map_test.cpp), and still refuses every other address outside flash.
 set(_mk66_ramfunc_region "0x1FFF0000:0xC000")
+# OS-GATE-BOOTCRASH: the pinned layout of `.noinit` (what survives a reset): an object that moves, grows or appears there fails the build until the file is changed on purpose.
+set(_mk66_noinit_layout "${_mk66_tools}/noinit_layout.txt")
+# OS-BUG-LASTSECTOR: an image must end at or below 0xFF000 (check `last_sector_free`; the unit hung after an update with an image that filled the last
+# flash sector). The CI build of a bench image (O3OS_BENCH=ON) is over that bound until the bench gets a flash diet and is not meant for a unit:
+# only it waives the check, here and in `mk66_image`; the gate (`check_image.py check` without the flag, skill fw-gate-check) refuses such an image.
+set(_mk66_image_flags "")
+if(O3OS_BENCH)
+  set(_mk66_image_flags --allow-last-sector)
+endif()
 set(_mk66_hex "${CMAKE_CURRENT_BINARY_DIR}/o3os.hex")
 set(_mk66_bin "${CMAKE_CURRENT_BINARY_DIR}/o3os.bin")
 add_custom_command(OUTPUT ${_mk66_hex}
   COMMAND ${CMAKE_SIZE} -A -d $<TARGET_FILE:o3os>
   COMMAND ${Python3_EXECUTABLE} -I ${_mk66_tools}/check_ramfunc.py check $<TARGET_FILE:o3os> --objdump ${CMAKE_OBJDUMP}
+  COMMAND ${Python3_EXECUTABLE} -I ${_mk66_tools}/check_image.py noinit $<TARGET_FILE:o3os> --nm ${CMAKE_NM} --expect ${_mk66_noinit_layout}
   COMMAND ${CMAKE_OBJCOPY} -O ihex --set-start=0 --gap-fill 0xFF $<TARGET_FILE:o3os> ${_mk66_hex}
-  COMMAND ${Python3_EXECUTABLE} -I ${_mk66_tools}/check_image.py check ${_mk66_hex} --expect-sp 0x20030000 --ramfunc-l ${_mk66_ramfunc_region} --delete-on-fail
+  COMMAND ${Python3_EXECUTABLE} -I ${_mk66_tools}/check_image.py check ${_mk66_hex} --expect-sp 0x20030000 --ramfunc-l ${_mk66_ramfunc_region} ${_mk66_image_flags} --delete-on-fail
           --json ${CMAKE_CURRENT_BINARY_DIR}/o3os.image-check.json
-  DEPENDS o3os ${_mk66_tools}/check_image.py ${_mk66_tools}/check_ramfunc.py
+  DEPENDS o3os ${_mk66_tools}/check_image.py ${_mk66_tools}/check_ramfunc.py ${_mk66_noinit_layout}
   COMMENT "o3os.hex and its static image checks"
   VERBATIM)
 add_custom_command(OUTPUT ${_mk66_bin}
@@ -223,17 +256,23 @@ add_custom_target(o3os_image ALL DEPENDS ${_mk66_hex} ${_mk66_bin})
 add_test(NAME mk66_ld COMMAND ${Python3_EXECUTABLE} -I ${_mk66_tools}/gen_ld.py check
          --header ${_mk66_header} --template ${_mk66_template} --ld ${_mk66_ld})
 add_test(NAME mk66_image COMMAND ${Python3_EXECUTABLE} -I ${_mk66_tools}/check_image.py check ${_mk66_hex} --expect-sp 0x20030000
-         --ramfunc-l ${_mk66_ramfunc_region})
+         --ramfunc-l ${_mk66_ramfunc_region} ${_mk66_image_flags})
 # OS-005a: the audio hot path (SRAM_L) calls nothing in flash, no veneer in the section.
 add_test(NAME mk66_ramfunc COMMAND ${Python3_EXECUTABLE} -I ${_mk66_tools}/check_ramfunc.py check $<TARGET_FILE:o3os> --objdump ${CMAKE_OBJDUMP})
+# OS-FLASHDIET I3: over the link map: the image does not link the MOD / S3M / MED importers (formats_tracker), only the probe side
+# of them that stays in formats (mod::sniff_kind with tagged_mod_min_bytes and is_soundtracker15, the two drop_group_name).
+add_test(NAME mk66_map_importers COMMAND ${Python3_EXECUTABLE} -I ${_mk66_tools}/check_map_importers.py check $<TARGET_FILE:o3os>.map)
 add_test(NAME mk66_flashconfig COMMAND ${Python3_EXECUTABLE} -I ${_mk66_tools}/check_image.py flashconfig ${_mk66_hex}
          --expect ffffffffffffffffffffffffdef9ffff)
+# OS-GATE-BOOTCRASH: the symbols of `.noinit` in the linked ELF are the pinned layout (the post-build step above runs the same check).
+add_test(NAME mk66_noinit_layout COMMAND ${Python3_EXECUTABLE} -I ${_mk66_tools}/check_image.py noinit $<TARGET_FILE:o3os> --nm ${CMAKE_NM}
+         --expect ${_mk66_noinit_layout})
 # The noinit macros (sections.h) accept what they should and refuse an initialised object at compile time.
 add_test(NAME mk66_noinit_guard
   COMMAND ${CMAKE_COMMAND} -DCXX=${CMAKE_CXX_COMPILER}
           "-DFLAGS=-mthumb|-mcpu=cortex-m4|-mfpu=fpv4-sp-d16|-mfloat-abi=hard|-std=gnu++17|-fno-rtti|-fno-exceptions"
           -DINCLUDE=${CMAKE_CURRENT_SOURCE_DIR}/include -DDIR=${CMAKE_CURRENT_SOURCE_DIR}/tests -DWORK=${CMAKE_CURRENT_BINARY_DIR}
           -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/noinit_guard.cmake)
-set_tests_properties(mk66_ld mk66_image mk66_ramfunc mk66_flashconfig mk66_noinit_guard PROPERTIES TIMEOUT 60 LABELS mk66)
+set_tests_properties(mk66_ld mk66_image mk66_ramfunc mk66_flashconfig mk66_noinit_guard mk66_noinit_layout mk66_map_importers PROPERTIES TIMEOUT 60 LABELS mk66)
 
 o3os_label_tests()

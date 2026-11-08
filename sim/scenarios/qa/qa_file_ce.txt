@@ -1,0 +1,36 @@
+# OS-CEPAT S2 (docs/specs/OS-CEPAT.md section 3.5): a tracker-ce-style project folder (pattern structure v6) on the card opens in the simulator and the v6
+# mapping lands in the model. The card ce_v6 is GENERATED, never committed: target ce_v6_fixture runs `o3og_fixture <dir> ce` (tests/tools/o3og_fixture.cpp, from the
+# synthetic byte maps of tests/support/og_fixture.h, docs/specs/OS-CEPAT.md 2.1; nothing of the official firmware) into <build>/sim/cards/ce_v6 on every build:
+# Projects/CE Demo/{project.mt v16, patterns/pattern_01.mtp v6, 16 tracks of 16 steps}. No `snap`: this scenario checks fields, not pictures, so it needs no golden.
+# The load report's counters and the strip text they reach (OgLoadReport, describe_load) are host-only: og_folder_test ("the v6 counters reach the load report and
+# the strip names them"), the simulator shows the open's own strip (PROJECT CE Demo OPENED).
+document
+wait 20
+card ce_v6
+wait 20
+
+# File > OPEN of the v6 folder (the listing tags it as OG by its project.mt): the OG loader reads the project and the v6 pattern.
+tap file
+wait 300
+assert state screen=FILE overlay=NONE sel=CE_Demo
+tap f1
+wait 800
+assert state screen=PATTERN msg=PROJECT_CE_Demo_OPENED
+assert model "name=CE Demo"
+assert model tempo=20000
+assert model order.len=1
+assert model order.0=1
+
+# Track 1's steps as the v6 reader mapped them (OS-CEPAT 3.3 and 3.1): the volume column, the micromove as FX 2 in the first free column, the micromove with
+# no free column dropped, OG 75 cleared and OG 43 mapped to model 96, a volume above 100 as full, and the boundaries OG 74 -> 127 and 128 verbatim.
+assert model pat.1.0.1.note=61
+assert model pat.1.0.1.vol=63
+assert model pat.1.0.2.note=63
+assert model pat.1.0.2.fx1=2:50
+assert model pat.1.0.3.fx1=4:50
+assert model pat.1.0.3.fx2=5:60
+assert model pat.1.0.4.fx1=0:0
+assert model pat.1.0.4.fx2=96:11
+assert model pat.1.0.5.vol=127
+assert model pat.1.0.6.fx1=127:9
+assert model pat.1.0.6.fx2=128:200

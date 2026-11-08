@@ -405,7 +405,10 @@ TEST_CASE("ui font: geometry, slots, alignment and glyph data of the four faces"
     CHECK(f.ram_g_addr % hal::kUploadAlign == 0);
     CHECK(f.ram_g_addr >= end);                                      // packed in order, no overlap
     end = f.ram_g_addr + f.bitmap_bytes;
-    CHECK(reinterpret_cast<std::uintptr_t>(f.bitmap) % hal::kUploadAlign == 0);  // declared alignas(4) by the generator
+    CHECK(reinterpret_cast<std::uintptr_t>(f.z) % hal::kUploadAlign == 0);  // the stream is declared alignas(4) by the generator
+    // OS-FLASHDIET A4: the face is stored deflated; inflate it and check the glyph data of the raw bitmap.
+    std::vector<std::uint8_t> px(f.bitmap_bytes);
+    CHECK(ui::face_bitmap(want[i].font, px.data(), px.size()));
     // The compile-time geometry layouts use is the geometry of the generated bitmaps.
     const ui::FontGeometry g = ui::font_geometry(want[i].font);
     CHECK((g.cell_w == f.cell_w && g.cell_h == f.cell_h && g.ascent == f.ascent && g.cap_h == f.cap_h));
@@ -414,7 +417,7 @@ TEST_CASE("ui font: geometry, slots, alignment and glyph data of the four faces"
       unsigned ink = 0;
       for (unsigned row = 0; row < f.cell_h; ++row) {
         for (unsigned b = 0; b < f.stride; ++b) {
-          const std::uint8_t bits = f.bitmap[c * f.stride * f.cell_h + row * f.stride + b];
+          const std::uint8_t bits = px[c * f.stride * f.cell_h + row * f.stride + b];
           ink += bits;
           if (b + 1 == f.stride) {
             CHECK((bits & (0xFFu >> (f.cell_w - 8 * (f.stride - 1)))) == 0);  // the pad bits of the last byte
@@ -427,12 +430,18 @@ TEST_CASE("ui font: geometry, slots, alignment and glyph data of the four faces"
   CHECK(end <= ui::kRamGTiles);  // the faces end below where the tiles start
   // 'A' of Spleen 8x16, as in the BDF: rows 2..11 are 7C C6 C6 C6 FE C6 C6 C6 C6 C6.
   const std::uint8_t a[16] = {0, 0, 0x7C, 0xC6, 0xC6, 0xC6, 0xFE, 0xC6, 0xC6, 0xC6, 0xC6, 0xC6, 0, 0, 0, 0};
-  CHECK(std::memcmp(ui::font_face(ui::Font::F8x16).bitmap + cell_of('A') * 16, a, 16) == 0);
+  std::vector<std::uint8_t> px8(ui::font_face(ui::Font::F8x16).bitmap_bytes);
+  CHECK(ui::face_bitmap(ui::Font::F8x16, px8.data(), px8.size()));
+  CHECK(std::memcmp(px8.data() + cell_of('A') * 16, a, 16) == 0);
   // 'A' of Spleen 6x12: 70 88 88 88 F8 88 88 88 on rows 1..8.
   const std::uint8_t sa[12] = {0, 0x70, 0x88, 0x88, 0x88, 0xF8, 0x88, 0x88, 0x88, 0, 0, 0};
-  CHECK(std::memcmp(ui::font_face(ui::Font::F6x12).bitmap + cell_of('A') * 12, sa, 12) == 0);
+  std::vector<std::uint8_t> px6(ui::font_face(ui::Font::F6x12).bitmap_bytes);
+  CHECK(ui::face_bitmap(ui::Font::F6x12, px6.data(), px6.size()));
+  CHECK(std::memcmp(px6.data() + cell_of('A') * 12, sa, 12) == 0);
   // 'C' of Terminus Bold 10x20 (ter-u20b.bdf): ..######.. on row 3, .##....##. on rows 4 and 5.
-  const std::uint8_t* c20 = ui::font_face(ui::Font::F10x20).bitmap + cell_of('C') * 40;
+  std::vector<std::uint8_t> px20(ui::font_face(ui::Font::F10x20).bitmap_bytes);
+  CHECK(ui::face_bitmap(ui::Font::F10x20, px20.data(), px20.size()));
+  const std::uint8_t* c20 = px20.data() + cell_of('C') * 40;
   CHECK((c20[3 * 2] == 0x3F && c20[3 * 2 + 1] == 0x00));
   CHECK((c20[4 * 2] == 0x61 && c20[4 * 2 + 1] == 0x80));
   CHECK(std::memcmp(c20 + 4 * 2, c20 + 5 * 2, 2) == 0);
@@ -449,13 +458,15 @@ TEST_CASE("ui: text drawn through the display list reaches the framebuffer pixel
   }));
   const auto check_text = [&](const char* s, int x0, int y0, ui::Font font) {
     const ui::FontFace& f = ui::font_face(font);
+    std::vector<std::uint8_t> px(f.bitmap_bytes);  // OS-FLASHDIET A4: inflate the face for its raw pixels
+    CHECK(ui::face_bitmap(font, px.data(), px.size()));
     int mismatches = 0;
     for (int i = 0; s[i] != '\0'; ++i) {
       const unsigned cell = cell_of(s[i]);
       for (int row = 0; row < f.cell_h; ++row) {
         for (int col = 0; col < f.cell_w; ++col) {
           const std::uint8_t bits =
-              f.bitmap[cell * f.stride * f.cell_h + static_cast<unsigned>(row) * f.stride + static_cast<unsigned>(col / 8)];
+              px[cell * f.stride * f.cell_h + static_cast<unsigned>(row) * f.stride + static_cast<unsigned>(col / 8)];
           const bool ink = (bits >> (7 - col % 8)) & 1;
           const std::uint32_t want = ink ? rgb_of(Color::Text) : rgb_of(Color::Chrome);
           mismatches += panel->pixel(x0 + i * f.cell_w + col, y0 + row) != want ? 1 : 0;

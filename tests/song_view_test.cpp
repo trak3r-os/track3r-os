@@ -123,3 +123,23 @@ TEST_CASE("stage: an empty list has no slots to name, stopped or playing") {
   const app::StageState s = app::stage_state(src, audio::PlayPosition::Value{}, 0, 16);
   CHECK((s.now_slot == -1 && s.next_slot == -1 && s.next_kind == StageNext::None));
 }
+
+TEST_CASE("stage: OS-SONG3 S7: the last slot of a looped range goes back to its first, the others go on") {
+  StageRig rig;
+  const app::SongSource src(rig.model);
+  audio::PlayPosition::Value v = StageRig::at(1, 0);
+  v.loop_first = 0;
+  v.loop_last = 1;
+  app::StageState s = app::stage_state(src, v, 0, 16);
+  CHECK((s.now_slot == 1 && s.next_slot == 0 && s.next_kind == StageNext::Loop && s.next_pattern == 1u));
+  v = StageRig::at(0, 0);
+  v.loop_first = 0;
+  v.loop_last = 1;
+  s = app::stage_state(src, v, 0, 16);
+  CHECK((s.next_slot == 1 && s.next_kind == StageNext::Next));
+  v = StageRig::at(1, 0);
+  v.loop_first = 1;
+  v.loop_last = 1;  // a loop of one slot: it plays again
+  s = app::stage_state(src, v, 0, 16);
+  CHECK((s.next_slot == 1 && s.next_kind == StageNext::Loop));
+}

@@ -21,7 +21,7 @@ namespace o3os::app::pe {
 constexpr int clampi(int v, int lo, int hi) noexcept { return v < lo ? lo : (v > hi ? hi : v); }
 
 inline bool say(ActionContext& ctx, core::Severity severity, const char* text) noexcept {
-  return ctx.view.notify.post(severity, text, "edit", ViewState::kMessageMs);
+  return say_tag(ctx, severity, text, "edit");
 }
 
 // What the whole-pattern operations (PAT-OPS: TOOLS DUPLICATE / EXPAND / SHRINK, the paste of a held F1) say outside Edit; the Fill dialog names itself in its own (FILL: TURN EDIT ON).
@@ -59,57 +59,19 @@ inline bool create_if_missing(ActionContext& ctx, bool& exists, unsigned length)
   return true;
 }
 
-// Runs `fn(step, rule, last)` over every step of the selection (the cursor step when there is no range) that lies inside its track,
+// The thunk a call site passes to edit_selection: captureless, so it converts to this pointer type; `fn_ctx` carries what the
+// lambda captured (one value, or a small struct declared at the call site).
+using EditFn = void (*)(model::Step&, const model::edit::Rule&, model::edit::Last&, void*);
+
+// Runs `fn(step, rule, last, fn_ctx)` over every step of the selection (the cursor step when there is no range) that lies inside its track,
 // track by track, and writes what changed through the Editor: the span from the first to the last changed step of a track, one record.
 // The pattern is created first if it does not exist, but only when there is something to write. `last` is the session's last used
-// instrument and FX, which the rules read and update; they go back to the view when the walk ends.
-template <class Fn>
-Edited edit_selection(ActionContext& ctx, Fn fn) noexcept {
-  Edited out;
-  ViewState& v = ctx.view;
-  const PatternSource src(ctx.model, v.edit.pattern);
-  const Selection& sel = v.edit.selection;
-  const Selection::Block b = sel.block(v.pattern.row(), v.pattern.track());
-  const model::edit::Rule rule{b.row0 == b.row1 && b.track0 == b.track1, !sel.active};
-  model::edit::Last last{static_cast<std::uint8_t>(clampi(v.instrument, 1, static_cast<int>(model::kMaxInstruments))), v.edit.last_fx};
-  bool exists = src.exists();
-  const int tracks = src.tracks();
-  for (int t = b.track0; t <= b.track1 && t < tracks; ++t) {
-    const int r1 = b.row1 < src.track_length(t) - 1 ? b.row1 : src.track_length(t) - 1;
-    if (b.row0 > r1) {
-      ++out.refused;
-      continue;
-    }
-    model::Step buf[model::kMaxPatternLength];
-    const int n = r1 - b.row0 + 1;
-    int first = -1;
-    int final_changed = -1;
-    for (int k = 0; k < n; ++k) {
-      model::Step s = src.step(t, b.row0 + k);
-      const model::Step before = s;
-      fn(s, rule, last);
-      buf[k] = s;
-      if (std::memcmp(&s, &before, sizeof s) != 0) {
-        first = first < 0 ? k : first;
-        final_changed = k;
-      }
-    }
-    if (first < 0) {
-      continue;
-    }
-    if (!create_if_missing(ctx, exists, static_cast<unsigned>(src.length()))) {
-      out.failed = true;
-      break;
-    }
-    if (ctx.edit->set_steps(v.edit.pattern, static_cast<std::uint32_t>(t), static_cast<std::uint32_t>(b.row0 + first), buf + first,
-                            static_cast<std::uint32_t>(final_changed - first + 1)) == model::Status::Ok) {
-      out.changed = true;
-    }
-  }
-  v.instrument = last.instrument;
-  v.edit.last_fx = last.fx;
-  return out;
-}
+// instrument and FX, which the rules read and update; they go back to the view when the walk ends. One out-of-line function
+// (pattern_edit_util.cpp, OS-FLASHDIET T1), not one instantiation per edit.
+// `multi_cell` (OS-PTOOLS2 S3): the caller is a block verb, not the encoder — a single step of the range takes the multi-cell rule, so a
+// single EMPTY step is never given a note or an instrument (the encoder's own single-cell insert stays with the plain call).
+// `block_cols` (OS-SELCOL, the encoder's value edits): of a column block (OS-AUDIT-56) only the block's columns take what `fn` wrote, the others of each step stay as they were.
+Edited edit_selection(ActionContext& ctx, EditFn fn, void* fn_ctx, bool multi_cell = false, bool block_cols = false) noexcept;
 
 // OS-AUDIT-56 (column-level block, new Community OS behaviour). The fields of the columns c0..c1 (Column values) of `from` over `to`; the others of `to` stay. Note and Instr are one pair (as
 // in Delete): a range that holds either takes both, so a note never loses its instrument.

@@ -24,7 +24,7 @@ constexpr int kMaxDetents = 1 << 16;
 constexpr std::uint8_t kBeatSlice = 5;  // play mode 5 of the OG instrument file (beat slice): its pads play the slices
 
 bool say(ActionContext& ctx, core::Severity severity, const char* text) noexcept {
-  return ctx.view.notify.post(severity, text, "wave", ViewState::kMessageMs);
+  return say_tag(ctx, severity, text, "wave");
 }
 
 bool chop_page(const ActionContext& ctx) noexcept { return ctx.view.page[screen_index(ScreenId::Wave)] == 1u; }

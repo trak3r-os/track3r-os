@@ -99,9 +99,11 @@ You should see the rows of the new mode. The waveform on the right follows each 
 |---|---|
 | WAVETABLE | WT POS, WT SIZE |
 | GRANULAR | GRAIN POS, GRAIN LENGTH, GRAIN SHAPE, GRAIN LOOP |
-| BEAT SLICE | SLICES, SLICE |
+| SLICE, BEAT SLICE | SLICES, SLICE, PLAY THRU |
 
 <!-- QA-INS-016, QA-INS-017, QA-INS-018. PLAY ENGINE and then STEREO are the last rows of every mode. -->
+
+In **SLICE** and **BEAT SLICE**, **PLAY THRU** (the row after **SLICE**) turns play-through on: a slice then plays on through the following slices to the end of the sample, until the note ends or the sample does, instead of stopping at the next slice point; a note played in reverse starts at the sample end and runs down. It is `OFF` by default, one click of the encoder turns it `ON` (one undo step), and it is kept with the instrument when the project or the instrument is saved; in the other play modes the row is not there and the setting does nothing. <!-- QA-INS-280, QA-INS-281, QA-INS-282, QA-INS-283 -->
 
 ### Shape the sound: VOICE, FILTER and SENDS
 
@@ -128,7 +130,7 @@ You should see the shape under the rows. **LFO SHAPE**, **LFO SPEED**, **LFO AMO
 
 **LFO SPEED** has 29 tempo-sync values, from `128 steps` to `1/64 step`. The Volume destination has the last 24, from `24 steps`. <!-- QA-INS-036 -->
 
-A destination the instrument does not use is dimmed, not hidden, and the info line says why: `WAVETABLE ONLY`, `GRANULAR ONLY`, `FILTER OFF` or `SOURCE OFF: PICK ENVELOPE OR LFO`. A dim row can still be edited. <!-- QA-INS-037 -->
+A destination the instrument does not use is dimmed, not hidden, and the info line says why: `WAVETABLE OR GRANULAR` (the **WT Position** destination on another play mode), `GRANULAR ONLY`, `FILTER OFF` or `SOURCE OFF: PICK ENVELOPE OR LFO`. A dim row can still be edited. <!-- QA-INS-037 -->
 
 The LFOs of volume, pan, fine tune, cutoff and grain position also run while the transport is stopped, at the rate the tempo gives. Press `Play` with a pad held and the LFO goes on from where it is, with no jump. <!-- QA-INS-088, QA-INS-089, QA-INS-090 -->
 
@@ -137,6 +139,42 @@ The picture is a window of 16 steps (the label `16 STEPS` above it, the axis und
 **LFO SHAPE** has six waves: Rev Saw, Saw, Triangle, Square, Random and **Sine**. Sine is new in this firmware and is not on the original firmware. It is a smooth wave that rises from nothing to the amount at the middle of the period and falls back, and it works like the others: the same speeds, the same amount, all six destinations, and it can be changed while a note sounds. If you export to the original firmware's format, a Sine LFO is written as Triangle and the export page lists it as **SINE LFO**. <!-- QA-INS-215, QA-INS-216, QA-INS-217, QA-FIL-114 -->
 
 Not yet checked on the unit.
+
+### Move a setting with a wavetable envelope or LFO
+<!-- sync: src=app/src/screens/params_screen.cpp,model/src/params.cpp qa=QA-INS-294,QA-INS-295,QA-INS-296,QA-INS-297,QA-INS-298,QA-INS-299,QA-INS-300,QA-INS-301,QA-INS-302,QA-INS-303 -->
+
+New in this firmware: **SOURCE** has two more words after **LFO**, **WT Env** and **WT LFO**. They move a destination along one of the 256 wavetable contours instead of an ADSR or a plain LFO shape. Instruments that do not use them are unchanged, and they load and save as before. Not yet checked on the unit. <!-- QA-INS-294 -->
+
+1. Press `F4` (**MOD**) and move to a destination with `F4`, such as Panning.
+2. On **SOURCE** turn the encoder up past **LFO**: first **WT Env**, then **WT LFO**. Each click is one undo step. <!-- QA-INS-294 -->
+3. **WT Env** has eight rows: **SOURCE**, **WAVE**, **DURATION**, **WARP X**, **WARP Y**, **SUSTAIN**, **RELEASE** and **AMOUNT** (the amplitude destination has no **AMOUNT** row: seven rows). **WAVE** picks the contour, `F001` to `F128` and `U001` to `U128`. **DURATION** is 0.002 to 20.000 s in clicks of 10 ms. A change is heard from the next note, also when the pattern is stopped. The first time a destination switches to WT, **WAVE** may show an older shape number (`F001` to `F006`): turn it to pick the contour you want. **WARP X** and **WARP Y** bend the contour, from -7 to +7. **SUSTAIN** is `OFF` or 1 to 99 %. <!-- QA-INS-295 -->
+4. `F8` (**UNDO**) takes back the last change of one of these rows and nothing else. <!-- QA-INS-296 -->
+5. **WT LFO** has six rows: **SOURCE**, **WAVE**, **LFO SPEED**, **WARP X**, **WARP Y** and **LFO AMOUNT**. **WAVE** and the two warps are the same values as on **WT Env**: a destination keeps one of each. <!-- QA-INS-297, QA-INS-298 -->
+
+A change on these rows is heard from the next note, not on a note that is held. These rows cannot be bound to a MIDI controller. Turn **SOURCE** back to **LFO** and the **LFO SHAPE** row reads **Triangle**, whatever contour was set before. <!-- QA-INS-299 -->
+
+The plot above the rows draws the contour: **WT Env** over its **DURATION** (the length in milliseconds is written above the right edge), **WT LFO** over one cycle. **WARP X** and **WARP Y** bend the picture as they bend the sound, so you can see what the contour does before you play it. <!-- QA-INS-301, QA-INS-302, QA-INS-303 -->
+
+On a **Granular** instrument the fourth destination is **Gran Length**, the grain length, instead of **WT Position**: the header and the rows follow the play mode, and the same **SOURCE** words work on it. Switch the play mode in the editor and the destination keeps its source. An instrument loaded from an older project or an official firmware file that has a source on this destination while it is Granular shows **Off** there, because that source was meant for **WT Position**; set it again to use it as the grain length. The grain length source is a Community OS feature: an export for the official firmware does not carry it. Not yet checked on the unit. <!-- QA-INS-300 -->
+
+### Use your own contours from the card
+<!-- sync: src=app/src/wt_user.cpp,app/include/o3os/app/wt_user.h qa=QA-INS-304,QA-INS-305,QA-INS-306 -->
+
+New in this firmware: the 128 user contours `U001` to `U128` can come from WAV files. Without files they hold the built-in shapes, so nothing changes until you add some. Not yet checked on the unit.
+
+1. On the card, make a folder called `Envelopes` at the top level and put WAV files in it, named by number: `001.wav` is `U001`, `002.wav` is `U002`, up to `128.wav`. `1.wav` works too. <!-- QA-INS-304 -->
+2. Put the card in, or open a project. The files are read then, never while you play. The strip says how it went, for example `ENVELOPES: 12 LOADED`. <!-- QA-INS-304 -->
+3. Pick `U001` (or the number you used) on **WAVE** of a **WT Env** or **WT LFO** row. The plot shows your contour. <!-- QA-INS-304 -->
+
+The rules for the files:
+
+- The file is PCM, 8, 16 or 24 bit. A stereo file uses its left channel. Float WAV files are refused and counted as `FLOAT` on the strip. <!-- QA-INS-304, QA-INS-306 -->
+- Any length up to 24,576 frames (0.55 s at 44.1 kHz) is stretched or squeezed to 128 points. A longer file is skipped. <!-- QA-INS-304, QA-INS-306 -->
+- A file that goes below zero is read as a wave from -1 to 1 and moved into 0 to 1. A file that stays at or above zero is used as it is. <!-- QA-INS-304 -->
+- Numbering starts at 1. If the folder has a `000.wav` or a `0.wav`, it starts at 0 instead: `000.wav` is `U001` and `127.wav` is `U128`. A number past `U128` is skipped. <!-- QA-INS-305 -->
+- A number with no file keeps its built-in contour. A file that cannot be read is skipped (`SKIPPED` on the strip) and the other files still load. If a file is gone the next time (another card, a deleted file), its contour goes back to the built-in one (`RESET`). <!-- QA-INS-305, QA-INS-306 -->
+
+A note that is already playing may keep the old shape until its next note. If you change the files while a project is loaded, a slot with a warp on its WT row keeps the old contour until you load the project again.
 
 ### Make a MIDI instrument
 <!-- sync: qa=QA-INS-027,QA-INS-063,QA-INS-070,QA-INS-071,QA-INS-072,QA-INS-073,QA-INS-075,QA-INS-076,QA-INS-077,QA-INS-078,QA-INS-079,QA-INS-080 -->
@@ -165,7 +203,7 @@ Not yet checked on the unit.
 
 ### Copy, paste and delete an instrument
 
-Start on a sample or MIDI instrument.
+Start on a sample or MIDI instrument. (On a module instrument `Shift` + `F2` is **MIX**, not COPY: it opens the page with the module's PANNING, DELAY SEND and REVERB SEND.)
 
 1. Press `Shift` + `F2` (**COPY**). The strip says `INS 05 COPIED`. <!-- QA-INS-043 -->
 2. Go to another slot and press `Shift` + `F3` (**PASTE**). The slot becomes a copy: its name, play mode and settings. A used slot is replaced; `F8` gives the old one back. <!-- QA-INS-044, QA-INS-045 -->
@@ -223,7 +261,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 <!-- /manual-tables -->
 
 <!-- manual-tables: hand -->
-Three labels in the table are the ones the screen starts with, and they change as you work. `F1` follows the instrument: **SAMPLE**, **SLICE**, **WT** or **GRAIN** on a sample instrument (by its play mode), **MIDI** on a MIDI instrument, and the module's own page names on a module instrument. `F6` and `F7` show the numbers next to the instrument in view, such as `<06` and `08>`, and are dim where there is none. While `Shift` is held they show the nearest instruments that are in use. <!-- QA-INS-005, QA-INS-007, QA-INS-009 -->
+Three labels in the table are the ones the screen starts with, and they change as you work. `F1` follows the instrument: **SAMPLE**, **SLICE**, **WT** or **GRAIN** on a sample instrument (by its play mode), **MIDI** on a MIDI instrument, and the module's own page names on a module instrument, where `F5` is **PRESET**: it opens the module's list of presets (see [Modules and apps](modules.md)). <!-- QA-INS-290 --> `F6` and `F7` show the numbers next to the instrument in view, such as `<06` and `08>`, and are dim where there is none. While `Shift` is held they show the nearest instruments that are in use. <!-- QA-INS-005, QA-INS-007, QA-INS-009 -->
 
 | Key | What it does | Ref |
 |---|---|---|
@@ -231,13 +269,13 @@ Three labels in the table are the ones the screen starts with, and they change a
 | `F1` (**SAMPLE**, **SLICE**, **WT** or **GRAIN**) | The source page of a sample instrument. The label follows the play mode. On a MIDI instrument, the MIDI page. | QA-INS-005, QA-INS-061 |
 | `F2` (**VOICE**) | The VOICE page, with the VEL> row. | QA-INS-082 |
 | `F3` (**FILTER**) | The FILTER page, with the CUTOFF row. | QA-INS-085 |
-| `F4` (**MOD**) | The MOD page: a SOURCE row and LFO rows for each destination. Pressed again, it moves to the next of the six destinations. | QA-INS-035, QA-INS-010 |
+| `F4` (**MOD**) | The MOD page: a SOURCE row (Off, Envelope, LFO, WT Env, WT LFO) and the rows of the source you pick, for each destination. Pressed again, it moves to the next of the six destinations. | QA-INS-035, QA-INS-010, QA-INS-294 |
 | `F5` (**SENDS**) | The SENDS page, with the OVERDRIVE row. | QA-INS-002 |
 | `F6` (**<NN**) | The previous instrument, such as `<06`. Dim at 1. | QA-INS-007 |
 | `F7` (**NN>**) | The next instrument, such as `02>`. Dim at 64. | QA-INS-007 |
 | `F8` (**UNDO**) | Takes back the last instrument change. | QA-INS-040 |
 | `Shift` + `F1` (**NAME**) | Renames the instrument. | QA-INS-050 |
-| `Shift` + `F2` (**COPY**) | Copies the instrument. | QA-INS-043 |
+| `Shift` + `F2` (**COPY**) | Copies the instrument. On a module instrument it is **MIX** and opens the pan and sends page; pressing it again goes back. | QA-INS-043, QA-INS-307 |
 | `Shift` + `F3` (**PASTE**) | Pastes the copy into the slot. | QA-INS-044, QA-INS-045 |
 | `Shift` + `F4` (**DELETE**) | Deletes the instrument at once. | QA-INS-030 |
 | `Shift` + `F5` (**SAVE**) | Saves a sample instrument as a `.pti` file. | QA-INS-052, QA-INS-054 |

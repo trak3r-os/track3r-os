@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="440" height="520" viewBox="0 0 440 520" role="img" aria-labelledby="t d">
-<title id="t">Panel: Shift is ringed and Pattern is marked. Hold Shift, then press Pattern to open the Navigator.</title>
-<desc id="d">Hold Shift, then press Pattern. The Navigator opens.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="440" height="805" viewBox="0 0 200 366" role="img" aria-labelledby="t d">
+<title id="t">Panel: Song and Pattern are marked. Press both together to open the Navigator.</title>
+<desc id="d">Press Song and Pattern together. The Navigator opens.</desc>
 <style>
 .body { fill: #3c3c3c; }
 .screen { fill: #141414; stroke: #262626; stroke-width: 2; }
@@ -21,60 +21,22 @@
 .cp{font-family:sans-serif;font-size:30px;fill:#f4f4f4;text-anchor:middle}
 .lg{font-family:sans-serif;font-size:20px;fill:#f4f4f4}
 </style>
-<rect class="body" width="440" height="520" rx="14"/>
-<svg x="0" y="0" width="440" height="422" viewBox="900 140 440 422">
-<rect class="btn" x="900" y="140" width="72" height="72" rx="6"/>
-<text class="tk" x="936" y="170">Sample</text>
-<text class="tk" x="936" y="184">Loader</text>
-<rect class="btn" x="980" y="140" width="72" height="72" rx="6"/>
-<text class="tk" x="1016" y="170">Sample</text>
-<text class="tk" x="1016" y="184">Playback</text>
-<rect class="btn" x="1060" y="140" width="72" height="72" rx="6"/>
-<text class="tk" x="1096" y="170">Sample</text>
-<text class="tk" x="1096" y="184">Editor</text>
+<rect class="body" width="200" height="366" rx="14"/>
+<svg x="0" y="0" width="200" height="312" viewBox="1140 60 200 312">
+<rect class="btn" x="1140" y="60" width="72" height="72" rx="6"/>
+<text class="t" x="1176" y="100">Config</text>
+<rect class="btn" x="1220" y="60" width="72" height="72" rx="6"/>
+<text class="t" x="1256" y="100">Master</text>
 <rect class="btn" x="1140" y="140" width="72" height="72" rx="6"/>
 <text class="tk" x="1176" y="170">Sample</text>
 <text class="tk" x="1176" y="184">Recorder</text>
-<rect class="btn" x="1220" y="140" width="72" height="72" rx="6"/>
-<text class="t" x="1256" y="180">Song</text>
-<rect x="900" y="220" width="72" height="72" rx="6" fill="#1f9e96"/>
-<text class="t" x="936" y="260">Note</text>
-<rect x="980" y="220" width="72" height="72" rx="6" fill="#f0c020"/>
-<text class="t dk" style="fill:#141414" x="1016" y="260">Instr</text>
-<rect x="1060" y="220" width="72" height="72" rx="6" fill="#7e4fc4"/>
-<text class="t" x="1096" y="260">Vol</text>
+<rect class="btn p" x="1220" y="140" width="72" height="72" rx="6"/>
+<text class="t" x="1256" y="180" style="fill:#141414">Song</text>
 <rect x="1140" y="220" width="72" height="72" rx="6" fill="#2fc3dd"/>
 <text class="t" style="fill:#141414" x="1176" y="260">Fx</text>
 <rect class="btn p" x="1220" y="220" width="72" height="72" rx="6"/>
 <text class="t" x="1256" y="260" style="fill:#141414">Pattern</text>
-<rect class="key" x="900" y="330" width="72" height="72" rx="6"/>
-<text class="t" x="936" y="376">Play</text>
-<rect class="key" x="980" y="330" width="72" height="72" rx="6"/>
-<text class="tk" x="1016" y="345">Paste</text>
-<text class="t" x="1016" y="376">Copy</text>
-<rect class="key" x="1060" y="330" width="72" height="72" rx="6"/>
-<text class="tk" x="1096" y="345">Home</text>
-<text class="t" x="1096" y="376">Insert</text>
-<rect class="key" x="1140" y="330" width="72" height="72" rx="6"/>
-<text class="t" x="1176" y="376">Up</text>
-<rect class="key" x="1220" y="330" width="72" height="72" rx="6"/>
-<text class="tk" x="1256" y="345">Backspace</text>
-<text class="t" x="1256" y="376">Delete</text>
-<rect x="900" y="410" width="72" height="72" rx="6" fill="#d32f2f"/>
-<text class="t" x="936" y="456">Rec</text>
-<rect class="key h" x="980" y="410" width="72" height="72" rx="6"/>
-<text class="t" x="1016" y="456">Shift</text>
-<rect class="key" x="1060" y="410" width="72" height="72" rx="6"/>
-<text class="t" x="1096" y="456">Left</text>
-<rect class="key" x="1140" y="410" width="72" height="72" rx="6"/>
-<text class="t" x="1176" y="456">Down</text>
-<rect class="key" x="1220" y="410" width="72" height="72" rx="6"/>
-<text class="t" x="1256" y="456">Right</text>
-<circle cx="1235" cy="235" r="14" fill="#141414"/><text class="bn" x="1235" y="241">2</text>
-<circle cx="995" cy="425" r="14" fill="#141414"/><text class="bn" x="995" y="431">1</text>
 </svg>
-<rect x="16" y="434" width="30" height="30" rx="5" fill="#7a7a7a" stroke="#ffb000" stroke-width="5"/>
-<text class="lg" x="60" y="456">1  hold down</text>
-<rect x="16" y="478" width="30" height="30" rx="5" fill="#ffb000"/>
-<text class="lg" x="60" y="500">2  press</text>
+<rect x="16" y="324" width="30" height="30" rx="5" fill="#ffb000"/>
+<text class="lg" x="60" y="346">press together</text>
 </svg>

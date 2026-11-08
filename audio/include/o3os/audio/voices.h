@@ -35,7 +35,9 @@
 //   round(65535 sin(pi i / 1000)) and the triangle round(65535 i / 500) up and round(65535 (1000 - i) / 500) down, with the last entry (index 999) 0; 501 half-sine entries
 //   in flash, the triangle a formula.
 //   The pitch is the note's, as for an ordinary sample (the note, tune, fine tune, and since OS-IFX1 the glide). The position of the grain (SampleDesc::gr_pos 0..65535) is the
-//   instrument's, or the position modulator's (POSITION MODULATION): a new position takes effect at the grain's next wrap or turn, not at once.
+//   instrument's, or the position modulator's (POSITION MODULATION): a new position takes effect at the grain's next wrap or turn, not at once. OS-CEWTENV W5: the grain's LENGTH can be modulated too
+//   (slot 3's enable bit 0x02 on a granular instrument, any source kind, F12): length = base + mod x (max - 44), max = min(sample length, 44,100), held to 44..max, and the new length takes effect at the
+//   grain's next wrap as well, never mid-grain.
 //   Guards: reads never leave the sample (an index is held inside it, so the interpolation stays on near the end), the envelope index is held to 0..999 (for x < loop1 at the very
 //   start of a grain), a degenerate grain (loop2 <= loop1) is one sample long, a step longer than the grain wraps modulo the grain, the interpolation is the plain 15-bit lerp at the
 //   real position, and a ping-pong grain does not jump forward when its first step lands under loop1. Whether the official firmware's granular mode does the same at these edges is an
@@ -190,6 +192,12 @@
 //   the cutoff LFO, the step shift at the note). Here it is a pass over the voice's samples (trem_span), after the voice (its attack and release ramps, the declick residual) and before the filter,
 //   inside the player stage: the multiplier is evaluated at every 16th sample of the block (kFilterCtl, with the cutoff's) and walked linearly between, so it does not depend
 //   on how events split the block; Q23, one multiply a sample. A negative amount is silence. A NoteOff does not stop the voice at once: the voice's plain release ramp (5.8 ms) plays; the phase is the transport's tick count at each evaluation.
+//   OS-CEWTENV W4 (docs/specs/OS-CEWTENV.md 3.5, law F7): the amp slot's loop byte 2 (WT Env) or 3 (WT LFO) makes `amp_mod` kind kFmodWtEnv / kFmodWtLfo and the same pass (trem_span, unchanged)
+//   multiplies the voice; only the grid points differ (wt_amp_block, flash, in place of flfo_level). The AmpEnvelope is not run (`env` null: the plain gain and the attack ramp). WT Env: the multiplier
+//   is the contour's y (no amount) over the slot's decay in ms (1 or less: 1,000) with the slot's release (below 50: 50); a one-shot plays to its end whatever the key does and then the voice stops
+//   (it does not start again, unlike the cutoff's), a sustained one holds at the sustain % while the key is held and a NoteOff runs its release (release_voice leaves the voice to the WT Env: no 5.8 ms
+//   ramp; a NoteFade still fades). The end is the multiplier walking to 0 over its last 16-sample cell (the declick), then stop_voice at the next block's evaluation (the residual it carries is 0).
+//   WT LFO: the multiplier is 1 - (1 - y) x depth, y the contour at the LFO's tempo-synced phase (the amp's rate table), depth the slot's LFO amount. Both are held to 0..1.
 //   WAVETABLE POSITION and GRANULAR POSITION (slots 3 and 4) are POSITION MODULATION below.
 //
 //   POSITION MODULATION (OS-GRAN; the wavetable and granular position envelopes): slot 3 moves a
@@ -198,7 +206,10 @@
 //   65535 (granular), cut to a whole number toward zero, is added to the instrument's window (wt_pos) or position (gr_pos) and held to 0..windows-1 / 0..65535. WAVETABLE: the window
 //   the voice reads moves at the voice's first sample of a block: no crossfade, a hard step between windows
 //   (BASE-16). GRANULAR: the new position is the grain's next-wrap position (GRANULAR). Evaluated once a block per voice, in mod_block, like the pan
-//   and the finetune. A voice that has no position modulator costs one flag test a span for it, as for the others.
+//   and the finetune. A voice that has no position modulator costs one flag test a span for it, as for the others. OS-CEWTENV W3b: the pan, the finetune and the position slots take the WT kinds
+//   (kFmodWtEnv / kFmodWtLfo, FILTER MODULATION): mod_block sends a generator of kind >= kFmodWtEnv to wt_mod_eval (flash, one compare, the same machines as the cutoff's), the output is used as above
+//   (the WT Env's y x amount, the WT LFO's (2y - 1) x amount). Slot 3's enable byte is a bit mask: bit 0x01 the position, 0x02 the granular length (W5), so 0x02 alone runs no position modulation (og_samples.cpp and
+//   apply_instrument_param). The layer's LFO over a WT slot plays kPerfLfoMod (perf_dest: the contour index in `shape` is not an LFO shape). The amp slot's WT kinds are W4's (AMP LFO MODULATION above); over one the layer's VOL LFO plays kPerfLfoMod as well.
 //
 //   SLIDE FX (OS-PFX; step FX 41 Slide up and 42 Slide down, 0..255 sixteenths of a semitone from the step's note, PAR-079: [MAN] 7.36-7.37, 16 is one semitone): while a track holds one
 //   (ModSet / ModEnd of seq::FxGroup::Slide, kModGroupSlide: fx_event()) its sampler voice's pitch moves linearly from the note's to the distance the FX names, up or down, in ONE STEP of
@@ -426,9 +437,16 @@ struct AmpEnvelope {
 // The cutoff modulator of an instrument (slot 2), as the loader gives it from the stored fields (app::make_sample_desc); set_sample() holds them to range. One of an ADSR
 // (`kind` kFmodEnv: amount -1..1, sustain 0..1, the five times in ms) or an LFO (kFmodLfo: shape 0 reverse saw, 1 saw, 2 triangle, 3 square, 4 random, 5 sine (OS-LFOSINE: (1 - cos 2 pi u) / 2, a quintic at control rate), a larger one is a triangle;
 // rate 0..28 the index of the tempo-sync rate, a larger one is 28; amount -1..1). The other fields are not read.
+// OS-CEWTENV W3a: `kind` kFmodWtEnv (3) or kFmodWtLfo (4) is a WT Env / WT LFO (the slot's loop byte 2 or 3): `shape` is then the contour index 0..255 (never
+// clamped), `wt_bend` the warp byte (X high nibble, Y low nibble) and `wt_sust` the sustain byte (0 one-shot, 1..99 freeze %), `rate` the WT LFO's tempo-sync
+// rate, `decay` the WT Env's duration in ms (1 or less: 1,000) and `release` its release in ms (below 50: 50); the output is the contour's level x amount
+// (WT Env, law F5) or (2 x level - 1) x amount (WT LFO, law F6). The two bytes sit in the layout's tail padding: the struct does not grow.
+// OS-CEWTENV W3c: for a WT kind `delay` (the ADSR's, unused there) is the BAKE ID of the slot's warps (wt_contour.h: made when the descriptor is, 0 = apply the warps live).
 inline constexpr std::uint8_t kFmodNone = 0;
 inline constexpr std::uint8_t kFmodEnv = 1;
 inline constexpr std::uint8_t kFmodLfo = 2;
+inline constexpr std::uint8_t kFmodWtEnv = 3;
+inline constexpr std::uint8_t kFmodWtLfo = 4;
 struct FilterMod {
   std::uint8_t kind = kFmodNone;
   std::uint8_t shape = 2;
@@ -445,7 +463,10 @@ struct FilterMod {
   std::uint16_t hold = 0;
   std::uint16_t decay = 0;
   std::uint16_t release = 0;
+  std::uint8_t wt_bend = 0;  // OS-CEWTENV W3a: the warp byte of a WT slot (warp X high nibble, warp Y low nibble); 0 for the other kinds
+  std::uint8_t wt_sust = 0;  // ... and its sustain byte (0 one-shot, 1..99 the freeze %); 0 for the other kinds
 };
+static_assert(sizeof(FilterMod) == 28, "OS-CEWTENV W3a: wt_bend and wt_sust take the two tail padding bytes; FilterMod does not grow");
 
 // The instrument's filter as the loader gives it (app::make_sample_desc), in the .pti's units; set_sample() holds them to range. `type` is kFilterLow / kFilterHigh /
 // kFilterBand (a larger one switches the filter off), `cutoff` 0..1, `resonance` 0..4.3 as stored (the Q is resonance + 0.7, svf.h).
@@ -501,6 +522,9 @@ struct SampleDesc {
   // the pan. They sit in the two bytes the layout had spare before `slices`.
   std::uint8_t delay_send = 0;
   std::uint8_t reverb_send = 0;
+  // OS-CEPLAYTHRU P2: a beat slice note plays its slice on to the end of the sample instead of stopping at the next slice point (beat_slice_span; tracker-ce's
+  // slicePlayThru, docs/specs/OS-CEPLAYTHRU.md F4). In the padding byte the layout still had before `slices` (sizeof(SampleDesc) unchanged). Read at a note's start only.
+  std::uint8_t slice_thru = 0;
   // The slice boundaries: slice_count + 1 offsets in samples from `data`, ascending, the last the length; each as two u16 (low half, high half) so that
   // the table can sit in the 16-bit sample arena after its PCM. Read only in note_on().
   const std::uint16_t* slices = nullptr;
@@ -513,7 +537,7 @@ struct SampleDesc {
   AmpEnvelope env{};
   FilterDesc filter{};  // OS-007l
   // OS-MOD: the other three modulators of the instrument, each a FilterMod (kind, shape, rate, amount, the ADSR's fields). pan_mod (slot 1) moves the pan, tune_mod (slot 5) the fine tune, each
-  // by +-100 of its own unit at amount 1; amp_mod is the tremolo: the amp slot (0) when it is an LFO (the loop byte), kind kFmodLfo or none (an amp ADSR is `env`), its rate the AMP table's
+  // by +-100 of its own unit at amount 1; amp_mod is the tremolo: the amp slot (0) when it is an LFO (the loop byte), kind kFmodLfo, kFmodWtEnv / kFmodWtLfo (OS-CEWTENV W4) or none (an amp ADSR is `env`), its rate the AMP table's
   // 0..23 (held to range by set_sample). See PAN, FINETUNE and AMP LFO MODULATION.
   FilterMod pan_mod{};
   FilterMod tune_mod{};
@@ -529,7 +553,8 @@ struct SampleDesc {
   std::uint32_t wt_windows = 0;
   std::uint32_t wt_pos = 0;
   // OS-GRAN, POSITION MODULATION: the instrument's slot 3 (a wavetable with more than one window) or slot 4 (a granular instrument): the same descriptor as the other modulators; slot 3 runs
-  // for a wavetable instrument only and slot 4 for a granular one only, so one serves both (set_sample drops it for any other).
+  // for a wavetable instrument only and slot 4 for a granular one only, so one serves both (set_sample drops it for any other). OS-CEWTENV W5: on a granular instrument slot 3's bit 0x02 is the
+  // grain LENGTH destination instead (its source FilterMod goes to the grlen_bind() array with set_sample/stage_sample, not here).
   FilterMod pos_mod{};
   // OS-IFX1: the instrument's OVERDRIVE 0..100 (0 = none) and BIT DEPTH 4..16 (16 = none) (see OVERDRIVE and BIT DEPTH).
   std::uint8_t overdrive = 0;
@@ -551,7 +576,8 @@ O3OS_AUDIO_INLINE std::uint32_t slice_bound(const std::uint16_t* table, unsigned
 // The slice is the Slice FX's `forced` value modulo the slice count when the track has one, else
 // note - kSliceRootNote (24, the pad board's lowest note) clamped to the instrument's slices. A sample with no slice table (slice_count 0) is one slice, all of it. False: the slice has no
 // length or starts past the end of the sample, and plays nothing. The boundaries come from the arena: clamped, so that no read leaves [0, length) whatever they hold; an end before the start
-// runs to the end of the sample (this OS's rule). The pitch of a beat slice is not the note's: the voices play it at the root's (kRootNote, the instrument's tune and fine tune apply).
+// runs to the end of the sample (this OS's rule), and so does the whole slice when `slice_thru` is set (OS-CEPLAYTHRU P2, play through to the sample end). The pitch of a beat slice is not
+// the note's: the voices play it at the root's (kRootNote, the instrument's tune and fine tune apply).
 O3OS_AUDIO_INLINE bool beat_slice_span(const SampleDesc& s, unsigned note, unsigned forced, std::uint32_t& from, std::uint32_t& length) noexcept {
   from = 0;
   length = s.length;
@@ -567,7 +593,8 @@ O3OS_AUDIO_INLINE bool beat_slice_span(const SampleDesc& s, unsigned note, unsig
   }
   const std::uint32_t a = slice_bound(s.slices, k);
   const std::uint32_t b = slice_bound(s.slices, k + 1u);
-  const std::uint32_t last = b < a ? s.length : (b > s.length ? s.length : b);
+  // OS-CEPLAYTHRU P2: with `slice_thru` the slice ends at the sample end, not at the next point (tracker-ce's slicePlayThru, F4: the Slice FX and a reversed note follow, as both use this span).
+  const std::uint32_t last = s.slice_thru != 0u ? s.length : (b < a ? s.length : (b > s.length ? s.length : b));
   if (a >= last) {
     return false;
   }
@@ -654,7 +681,9 @@ inline constexpr FilterMod kPerfLfoMod = make_perf_lfo_mod();
 std::uint16_t env_units(std::uint16_t ms) noexcept;
 
 // OS-MOD: the running state of ONE modulator of a voice (the ADSR's stage and level, or the LFO's period and phase shift). The cutoff's (OS-007m) and the three OS-MOD adds (pan,
-// finetune, amp LFO) are the same generator over their own FilterMod, so they share fenv_eval / flfo_eval / mod_start.
+// finetune, amp LFO) are the same generator over their own FilterMod, so they share fenv_eval / flfo_eval / mod_start. OS-CEWTENV W3a: the WT Env machine (kFmodWtEnv) uses `stage`
+// (kFeAttack playing, kFeSustain the freeze at the sustain %, kFeRelease, kFeOff), `key`, `e_t` (samples into the stage), `l_inv` (1 / the duration in samples), `l_period` (the duration
+// in samples, for the one-shot's restart), `l_rand` (1 / the release in samples), `e_max` (the release's start phase) and `e_out`; the WT LFO (kFmodWtLfo) uses the LFO's `l_period`, `l_shift` and `l_inv`.
 inline constexpr unsigned kMgCut = 0;
 inline constexpr unsigned kMgPan = 1;
 inline constexpr unsigned kMgTune = 2;
@@ -672,11 +701,11 @@ struct ModGen {
   float e_kill = 0.0f;            // the level the delay holds and the attack starts from
   float e_max = 0.0f;             // the level the release starts from
   float e_out = 0.0f;             // the last output (the next note's kill)
-  float l_inv = 1.0f;             // LFO: 1 / period
+  float l_inv = 1.0f;             // LFO: 1 / period; OS-CEWTENV W3a: 0 until a WT kind's first evaluation has run its setup (mod_start's mark)
   float l_rand = 0.0f;            // the random shape's level, 0..A
   std::uint32_t l_period = 1;     // ticks
   std::uint32_t l_shift = 0;      // ticks: 576 x (step % 36) at the note
-  std::uint32_t l_q = 0;          // the period the random level was drawn in
+  std::uint32_t l_q = 0;          // the period the random level was drawn in; OS-CEWTENV W3a: the note's start step until the WT setup takes it
 };
 static_assert(sizeof(ModGen) == 44, "OS-COREFX CF2: l_ovr fits the alignment gap before `since`; ModGen (five a voice) does not grow");
 
@@ -689,7 +718,28 @@ struct StageCell {
   std::uint16_t* table_dst = nullptr;
   std::uint16_t table_words = 0;  // 0: no table
   std::uint8_t slot = 0;
+  FilterMod grlen{};  // OS-CEWTENV W5: the granular length modulator's source of the staged descriptor (taken with it)
 };
+
+// OS-CEWTENV W5 (spec 3.6, A5): the granular length destination — on a granular instrument, slot 3's enable byte bit 0x02 drives the
+// grain length (F12) from any source kind; a wavetable instrument ignores the bit (its slot 3 is the position, bit 0x01). The source is
+// one FilterMod per sample slot and the state a sixth ModGen per voice; BOTH arrays are the caller's, bound once here: on the MK66 they
+// are O3OS_SDRAM_NOINIT objects in the SDRAM slack window (SRAM_U's voice_state has no room for a seventh FilterMod a descriptor, and
+// sizeof(Voice) stays 448), in a host test a static. Null (the default): the feature is off and every render is as without it. Main loop.
+void grlen_bind(FilterMod* slot_mods, ModGen* voice_gens) noexcept;
+
+// OS-CEWTENV W6a (spec 3.7): the step FX w and y's storage, the caller's, bound once with fxe_bind(): per track the FX's value byte (x high nibble, y low), and per voice the copies fxe_apply builds from the
+// instrument's descriptor (the cutoff slot, the amp WT slot, the amp ADSR). On the MK66 an O3OS_SDRAM_NOINIT object in the SDRAM slack window (SRAM_U keeps its 32 KiB floor with 36 B of margin: this state is
+// 948 B), in a host test a static. Read and written in the render context only (Engine::dispatch -> ifx_event, note_on -> mods_start). Read by fenv_eval / wtenv_eval at every cutoff grid point
+// (the 16-sample grid, 4 a block) of a voice whose FX bit is set, and never otherwise: [est] 1 to 2 % of a block with 12 voices on FX y (SDRAM reads), 0 with the FX off; measured on the unit later.
+// Null (the default): the two FX do nothing.
+struct FxEnvMem {
+  FilterMod cut[kMaxVoices];
+  FilterMod wt[kMaxVoices];
+  AmpEnvelope env[kMaxVoices];
+  std::uint8_t val[kVoiceTracks][3];  // [0] w, [1] y: the FX's value; [2] z (OS-CEWTENV W6b): the grain-length value + 1 (0: z off)
+};
+void fxe_bind(FxEnvMem* mem) noexcept;
 
 class VoicePool {
  public:
@@ -710,7 +760,8 @@ class VoicePool {
   // ---- Main loop (see "Contexts") -----------------------------------------------------------------------------------------
   // Slot 0..kSampleSlots-1 (kPreviewSlot too: the audition's). A loop that does not fit the sample, or is under 2 samples, is dropped (one shot); a sample of no length empties the slot. A
   // slice table that is not there, or a count past kMaxSlices, is dropped (the whole sample is one slice); a wavetable with no loop is an ordinary sample.
-  void set_sample(unsigned slot, const SampleDesc& desc) noexcept;
+  // `grlen`: OS-CEWTENV W5, the granular length modulator's source for the slot (slot 3 of a granular instrument, bit 0x02; null: none) — kept in the array grlen_bind() gave, with the same contract as the descriptor.
+  void set_sample(unsigned slot, const SampleDesc& desc, const FilterMod* grlen = nullptr) noexcept;
   // The descriptor set_sample() keeps for `desc` (the same sanitising).
   static SampleDesc sanitized(const SampleDesc& desc) noexcept;
   // ---- Staged descriptor (OS-BUG-SLICEPITCH) ----
@@ -721,8 +772,8 @@ class VoicePool {
   // (as apply_param and apply_loop are); a ParamChange pushed after the stage is drained after the take, in the same or a later block. state: 0 free, 1 staged, 2 being taken (render only).
   // `cell` lives in memory that outlives the pool. Main loop.
   void bind_stage(StageCell* cell) noexcept { stage_ = cell; }
-  // True when the cell was free: it now holds `desc` (sanitised) for `slot`, `table_words` words of `table` going to `table_dst`. Main loop.
-  bool stage_sample(unsigned slot, const SampleDesc& desc, const std::uint16_t* table, unsigned table_words, std::uint16_t* table_dst) noexcept;
+  // True when the cell was free: it now holds `desc` (sanitised) for `slot`, `table_words` words of `table` going to `table_dst`, and `grlen` (OS-CEWTENV W5, sanitised the same way; null: none). Main loop.
+  bool stage_sample(unsigned slot, const SampleDesc& desc, const std::uint16_t* table, unsigned table_words, std::uint16_t* table_dst, const FilterMod* grlen = nullptr) noexcept;
   bool stage_busy() const noexcept { return stage_state_.load(std::memory_order_acquire) != 0u; }
   // How many descriptors the render has taken (it is the only writer): the main loop compares it with the value it saw when it staged, to tell a take from a cancel.
   std::uint32_t stage_takes() const noexcept { return stage_takes_.load(std::memory_order_acquire); }
@@ -775,6 +826,9 @@ class VoicePool {
   // project is the same file every time; the live render draws from wherever the generator is.
   void seed_random() noexcept { rng_ = kRngSeed; }
   O3OS_AUDIO_HOT void release_all() noexcept;             // every playing voice enters its release (the transport stopped)
+  // STATUS latent (aa): the declick tails of the voices that have stopped (M's residual and S's, see cut) are dropped at once. Engine::offline_enter calls it after the cut: the live note's tail is
+  // the live render's and must not be in the export's first block. Render parked; in flash.
+  O3OS_AUDIO_COLD void drop_tails() noexcept;
   // The Slice FX (see SLICE FX): the track's next notes play slice `value % slice_count` of a beat slice instrument, until cleared. A value is kept as given
   // (0..255): the modulo is the note's, by the instrument it plays.
   O3OS_AUDIO_INLINE void set_forced_slice(unsigned track, unsigned value) noexcept {
@@ -911,6 +965,13 @@ class VoicePool {
     ifx_on_[0] = 0;
     ifx_on_[1] = 0;
     ifx_on_[2] = 0;
+    fxe_on_[0] = 0;  // OS-CEWTENV W6a: the step FX w and y end with the transport start, like the three above
+    fxe_on_[1] = 0;
+    if (fxm_ != nullptr) {  // OS-CEWTENV W6b: the step FX z ends with the transport start too (its state is the SDRAM word, not an SRAM_U bit)
+      for (unsigned t = 0; t < kVoiceTracks; ++t) {
+        fxm_->val[t][2] = 0;
+      }
+    }
   }
   // The Cutoff FX (see CUTOFF FX): `type` kFilterLow / kFilterHigh / kFilterBand, `value` 0..100. Starts or changes the track's override, which acts on the voice sounding
   // now and on the track's next notes, until cleared.
@@ -987,6 +1048,10 @@ class VoicePool {
   // Graph::feed_side.
   O3OS_AUDIO_INLINE std::uint16_t side_mask() const noexcept { return side_mask_; }
   O3OS_AUDIO_INLINE const std::int16_t* feed_side(unsigned track) const noexcept { return (track < kVoiceTracks && ((side_mask_ >> track) & 1u) != 0u) ? sblocks_[side_idx_[track]] : nullptr; }
+  // OS-INSFX-ABI2 A5 (the cap, spec 3.2): `n` side blocks are kept for the WIDENS track inserts (clamped to kStMax); st_start then sees kStMax - n of them. A voice that holds a block keeps it to the end
+  // of its note (nothing is taken from a sounding voice): the reservation only refuses new ones. Render context, once a change (InsertHost::begin_block), flash.
+  O3OS_AUDIO_COLD void set_st_reserved(unsigned n) noexcept { st_reserved_ = static_cast<std::uint8_t>(n > kStMax ? kStMax : n); }
+  unsigned st_reserved() const noexcept { return st_reserved_; }
   // For tests: the stereo voices now (the blocks held, a fading tail included).
   unsigned stereo_voices() const noexcept {
     unsigned n = 0;
@@ -1083,6 +1148,9 @@ class VoicePool {
   friend struct VoiceRunTest;  // tests/audio_voices_dir_test.cpp: drives run_dir on a hand-made Voice (the differential test of OS-PERF-CPU2 A1); no code
   friend struct LfoStepTest;   // tests/audio_perflfo_test.cpp: reads a voice's modulator mask and step_lfo_ (OS-PERF-LFO-STEP); no code
   friend struct NoteOnStateTest;  // tests/audio_noteon_state_test.cpp: hashes the voices' whole state after each note_on (OS-PERF-CPU3); no code
+  friend struct MovePositionSweepTest;  // tests/audio_wavetable_test.cpp: drives move_position on a hand-made Voice over a sweep of mod and window counts (OS-FLASHDIET T3); no code
+  friend struct FxEnvW6aTest;  // tests/audio_voices_test.cpp: reads a voice's envelope pointer, pmask and the FX copies (OS-CEWTENV W6a); no code
+  friend struct GranLenW5Test;  // tests/audio_granular_test.cpp: reads a voice's grain state and mmask and the pool's grlen arrays (OS-CEWTENV W5); no code
   struct Voice {
     const std::int16_t* data = nullptr;
     std::uint64_t phase = 0;      // Q32.32 position in samples
@@ -1179,9 +1247,27 @@ class VoicePool {
   static constexpr std::uint8_t kModeReverse = 4;   // Voice::mode of a backward one shot (OS-PERF-REVERSE): run_dir with loop_len = the window, bwd from the start, and a stop below its first frame
   static constexpr std::uint8_t kMmSlide = 32u;  // OS-PFX: the Slide FX moves the pitch (mod_block); the bit stays until the ramp has landed and the target is in the pitch
   static constexpr std::uint8_t kMmPan = 1u, kMmTune = 2u, kMmTrem = 4u, kMmTremOff = 8u, kMmPos = 16u;  // kMmPos: OS-GRAN, the position modulator; kMmTremOff: the tremolo was switched off live, the pass ramps back to unity and ends
+  static constexpr std::uint8_t kMmLen = 64u;    // OS-CEWTENV W5: the granular length modulator (slot 3 bit 0x02, a granular instrument only) runs; its sixth ModGen lives in the grlen_bind() array
   static constexpr std::int32_t kTremOne = 1 << 23;  // the tremolo's unity, Q23
   O3OS_AUDIO_INLINE static const FilterMod& dmod(const Voice& v, unsigned d, const FilterMod& m) noexcept { return ((v.pmask >> d) & 1u) != 0u ? kPerfLfoMod : m; }  // the modulator destination d plays (OS-PERF-LFO)
+  // OS-CEWTENV W6a (the step FX w and y): pmask bits 5 and 6 (bits 0..4 are the Perform LFO destinations). kPmFxCut: the cutoff slot plays fxm_->cut[voice] (the instrument's ADSR with the FX's times, or its WT slot with the
+  // FX's duration and warp offset), not the descriptor's; kPmFxAmp: the amp slot's WT kind plays fxm_->wt[voice]. The amp ADSR is Voice::env, pointed at fxm_->env[voice] while the FX holds. Only fxe_apply (flash) sets them.
+  static constexpr std::uint8_t kPmFxCut = 32u, kPmFxAmp = 64u;
+  // The cutoff modulator the voice plays: the Perform LFO's (destination 3) over the step FX y's over the instrument's. Inlined into post_stages (SRAM_L): two bit tests and one index.
+  O3OS_AUDIO_INLINE const FilterMod& cut_mod(const Voice& v) const noexcept {
+    return ((v.pmask >> 3) & 1u) != 0u ? kPerfLfoMod : ((v.pmask & kPmFxCut) != 0u ? fxm_->cut[static_cast<unsigned>(&v - v_)] : samples_[v.slot].filter.mod);
+  }
   static constexpr std::uint8_t mod_bit(unsigned k) noexcept { return k == 3u ? kMmPos : static_cast<std::uint8_t>(1u << k); }  // the bit of mg[kMgPan + k] in mmask: pan, finetune, tremolo, position
+  // OS-CEWTENV W5: the granular length's per-slot source and per-voice sixth ModGen, in the arrays grlen_bind() gave (SDRAM on the MK66, a static in a test; null: the feature is off).
+  O3OS_AUDIO_INLINE const FilterMod* grlen_slot(unsigned slot) const noexcept { return grlen_mods_ != nullptr && slot < kDescSlots ? &grlen_mods_[slot] : nullptr; }
+  O3OS_AUDIO_INLINE ModGen& grlen_gen(Voice& v) noexcept { return grlen_gens_[static_cast<unsigned>(&v - v_)]; }
+  // The grain length in samples a wrap makes the grain with: the block's evaluation (F12) while kMmLen runs, else the descriptor's gr_len; held to 44..min(sample length, 44,100).
+  std::uint32_t grlen_now(const Voice& v) const noexcept;
+  // OS-CEWTENV W6b: the length the descriptor's gr_len stands for: the step FX z's (F11: gran_len_fx_samples, held to 44..the sample's length) while the voice's track holds it, else gr_len.
+  static std::uint32_t gr_base(const Voice& v, const SampleDesc& s) noexcept;
+  static inline FilterMod* grlen_mods_ = nullptr;  // set by grlen_bind() (main loop, once; a plain .bss word on the MK66, not in voice_state)
+  static inline ModGen* grlen_gens_ = nullptr;
+  friend void grlen_bind(FilterMod* slot_mods, ModGen* voice_gens) noexcept;
   enum EnvStage : std::uint8_t { kEnvOff = 0, kEnvDelay, kEnvAttack, kEnvHold, kEnvDecay, kEnvSustain, kEnvRelease };
   enum FStage : std::uint8_t { kFeOff = 0, kFeDelay, kFeAttack, kFeHold, kFeDecay, kFeSustain, kFeRelease };  // the cutoff ADSR's phase order
   // The tick count is integer, Q24 ticks in a u64, so that it does not depend on how a block is split into spans. Ticks a sample is 576 ticks a step x (BPM / 15) steps a second / the
@@ -1205,6 +1291,24 @@ class VoicePool {
   O3OS_AUDIO_HOT static float fenv_eval(ModGen& g, const FilterMod& m) noexcept;                        // the ADSR's output after the time since the last call
   O3OS_AUDIO_HOT float flfo_level(ModGen& g, const FilterMod& m, std::uint32_t samples_on) noexcept;     // the LFO's level A x shape(phase), `samples_on` samples into the span
   O3OS_AUDIO_HOT float flfo_eval(ModGen& g, const FilterMod& m, std::uint32_t samples_on) noexcept;      // ... and the cutoff's, pan's, finetune's output 2 x level - A
+  // OS-CEWTENV W3a: the WT machines (flash, O3OS_AUDIO_COLD: they run only for a WT slot — the hot filter_run reaches wt_mod_eval behind one compare, and the note's first
+  // evaluation runs the setup, so the ADSR and LFO paths keep the branch they already had and the SRAM_L budget is untouched; mod_start only leaves l_inv 0 and the note's
+  // start step in l_q). wt_mod_start is a WT modulator's note start; wt_mod_eval the WT kinds' evaluation (wtenv_eval: the WT Env's output y x amount at the phase the time
+  // since the last call puts it at, law F5; wtlfo_eval: the WT LFO's (2y - 1) x amount at the LFO's phase, law F6).
+  O3OS_AUDIO_COLD static void wt_mod_start(ModGen& g, const FilterMod& m, std::uint32_t step, unsigned rate0) noexcept;
+  // OS-CEWTENV W3a review: the cutoff modulator's start where a Filter LFO FX (or the layer's FLT LFO) may be on: mod_start forces the plain LFO kind over a WT slot, whose `shape` is a contour
+  // index, and the forced LFO then takes the triangle (l_ovr 3, the override flfo_level already prefers), as before W3a clamped a larger shape. Cold; l_ovr is free on the cutoff's generator.
+  O3OS_AUDIO_COLD static void cutoff_mod_start(ModGen& g, const FilterMod& m, std::uint32_t step, float kill, unsigned lfo_fx, unsigned rate0 = 0u) noexcept;
+  O3OS_AUDIO_COLD float wt_mod_eval(ModGen& g, const FilterMod& m, std::uint32_t samples_on) noexcept;
+  O3OS_AUDIO_COLD float wt_cut_eval(ModGen& g, const FilterMod& m, std::uint32_t samples_on) noexcept;  // OS-CEWTENV W3c: the cutoff's WT kinds, every 64 filter samples on the 16-sample grid (the other grid points return the last output)
+  // OS-CEWTENV W4: `amp` is the amp slot's WT Env (law F7): the output is y alone (no amount), a one-shot never starts again and emits its end value once whatever the key does (the voice ends
+  // after it, wt_amp_block); the cutoff's keeps law F5. wtlfo_y is the WT LFO's level y (0..1) at the LFO's phase: the cutoff's output is (2y - 1) x amount, the amp's 1 - (1 - y) x depth.
+  O3OS_AUDIO_COLD static float wtenv_eval(ModGen& g, const FilterMod& m, bool amp = false) noexcept;
+  O3OS_AUDIO_COLD float wtlfo_y(ModGen& g, const FilterMod& m, std::uint32_t samples_on) noexcept;
+  O3OS_AUDIO_COLD float wtlfo_eval(ModGen& g, const FilterMod& m, std::uint32_t samples_on) noexcept;
+  // OS-CEWTENV W4 (flash, once a block per voice whose amp slot is a WT kind, called by mod_block in place of the LFO's grid): the multiplier at the block's grid points and the span's first sample
+  // (tgt, t0), from the WT Env or the WT LFO; the one-shot's end (and a sustained note's release run out) stops the voice once the multiplier has walked to 0.
+  O3OS_AUDIO_COLD void wt_amp_block(Voice& v, const FilterMod& m, std::uint32_t begin) noexcept;
   // lfo_fx: 0, or the Filter LFO FX's rate + 1; rate0: the LFO table's index of the instrument's rate 0 (0, the amp table's is 5)
   O3OS_AUDIO_HOT static void mod_start(ModGen& g, const FilterMod& m, std::uint32_t step, float kill, unsigned lfo_fx, unsigned rate0 = 0) noexcept;
   // OS-MOD (voices.h PAN, FINETUNE, AMP LFO MODULATION). trem_span is the tremolo's pass over a voice's span (HOT: per sample: the multiply only); mod_block the once-a-block evaluation of the pan, the
@@ -1231,6 +1335,8 @@ class VoicePool {
   O3OS_AUDIO_COLD void shape_set(Voice& v, const SampleDesc& s, unsigned track) const noexcept;
   O3OS_AUDIO_COLD static void shape_span(const Voice& v, std::int16_t* io, std::uint32_t n) noexcept;
   O3OS_AUDIO_COLD void ifx_event(unsigned track, unsigned group, unsigned fx_type, unsigned value) noexcept;
+  // OS-CEWTENV W6a: (re)make voice `i`'s overrides from the track's FX w / y and the descriptor `s` (or drop them): at a note's start (mods_start) and when the FX changes under a sounding voice (ifx_event).
+  O3OS_AUDIO_COLD void fxe_apply(Voice& v, const SampleDesc& s, unsigned track, unsigned i) noexcept;
   O3OS_AUDIO_COLD void perf_filter_to(unsigned track, unsigned type_plus_one, int offset) noexcept;  // OS-PERFFX P0: the track's performance filter (type + 1, 0 none; offset) set, the Cutoff FX kept (flash, the export)
   O3OS_AUDIO_COLD void layer_event(unsigned track, const SeqEvent& e) noexcept;  // OS-PERFFX P0: a ModSet / ModEnd of a group other than Slide: the layer's value, then the step layer's FX (ifx_event)
   static void move_position(Voice& v, const SampleDesc& s, float mod) noexcept;  // OS-GRAN: the position modulator's output, once a block (flash, from mod_block)
@@ -1305,12 +1411,12 @@ class VoicePool {
   O3OS_AUDIO_HOT static std::uint32_t run_steady(Voice& v, std::int16_t* out, std::uint32_t n) noexcept;
   O3OS_AUDIO_HOT static std::uint32_t run_ramp(Voice& v, std::int16_t* out, std::uint32_t n) noexcept;
   O3OS_AUDIO_HOT static std::uint32_t run_dir(Voice& v, std::int16_t* out, std::uint32_t n) noexcept;  // the ramp variant: a steady voice has a step of 0
-  // OS-GRAN (voices.h GRANULAR), all in flash: grain_geom makes the grain's points from the descriptor and a position (once a note, once a refresh); run_gran is the grain's sample loop (one call
-  // a span a voice, like the other loops but from flash: SRAM_L has no room for it), refresh_grain takes the pending position at a wrap (at most once a block a voice: the position moves once
-  // a block).
-  O3OS_AUDIO_COLD static void grain_geom(Voice& v, const SampleDesc& s, unsigned pos) noexcept;
+  // OS-GRAN (voices.h GRANULAR), all in flash: grain_geom makes the grain's points from the descriptor, a position and a grain length in samples (once a note, once a refresh); run_gran is the grain's sample loop (one call
+  // a span a voice, like the other loops but from flash: SRAM_L has no room for it), refresh_grain takes the pending position and the block's length at a wrap (at most once a block a voice: the position moves once
+  // a block). OS-CEWTENV W5: `glen` is the grain length in samples (44..min(sample length, 44,100) with the length modulator, the descriptor's gr_len without).
+  O3OS_AUDIO_COLD static void grain_geom(Voice& v, const SampleDesc& s, unsigned pos, std::uint32_t glen) noexcept;
   O3OS_AUDIO_COLD static void grain_start(Voice& v, const SampleDesc& s) noexcept;  // a granular note's start (once a note)
-  O3OS_AUDIO_COLD void refresh_grain(Voice& v) noexcept;
+  O3OS_AUDIO_COLD void refresh_grain(Voice& v, std::uint32_t glen) noexcept;
   template <unsigned Type>
   O3OS_AUDIO_INLINE std::uint32_t run_gran_t(Voice& v, std::int16_t* out, std::uint32_t n) noexcept;
   O3OS_AUDIO_COLD std::uint32_t run_gran(Voice& v, std::int16_t* out, std::uint32_t n) noexcept;
@@ -1357,6 +1463,12 @@ class VoicePool {
   // the last sampler note on the track, which the next one glides from. Render context, like the rest.
   std::uint8_t ifx_val_[kVoiceTracks][3] = {};
   std::uint16_t ifx_on_[3] = {};
+  // OS-CEWTENV W6a: the step FX w (index 0, amp slot) and y (index 1, cutoff slot): in fxe_on_[k] bit t, whether track t holds the FX (4 B of SRAM_U; stays 0 while fxe_bind() has not run). The value bytes and the
+  // per-voice overrides fxe_apply builds from the instrument's descriptor (a copy with the FX's times, sustain, duration and warp) are the FxEnvMem fxm_ points at (SDRAM on the MK66). All written in the render
+  // context only (Engine::dispatch -> ifx_event, note_on -> mods_start), single writer like ifx_*; the block pass reads them (cut_mod, wt_amp_block, the envelope).
+  std::uint16_t fxe_on_[2] = {};
+  static inline FxEnvMem* fxm_ = nullptr;  // set by fxe_bind() (main loop, once; a plain .bss word, not in voice_state)
+  friend void fxe_bind(FxEnvMem* mem) noexcept;
   std::uint8_t last_note1_[kVoiceTracks] = {};
   FilterSetFn filter_set_ = &VoicePool::filter_set_impl;
   LfoSetFn lfo_set_ = &VoicePool::lfo_set_impl;
@@ -1407,6 +1519,7 @@ class VoicePool {
   alignas(8) std::int16_t sblocks_[kStMax][kBlock] = {};
   StSide st_[kStMax] = {};
   std::uint8_t st_used_ = 0;
+  std::uint8_t st_reserved_ = 0;  // OS-INSFX-ABI2 A5: side blocks the WIDENS track inserts keep for themselves (0..kStMax); st_start sees kStMax - st_reserved_ of them
   std::uint8_t st_touched_ = 0;
   std::uint16_t side_mask_ = 0;
   std::uint8_t side_idx_[kVoiceTracks] = {};

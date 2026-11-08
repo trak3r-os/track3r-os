@@ -66,10 +66,13 @@
 
 #include <o3os/app/app.h>
 #include <o3os/app/brightness.h>
+#include <o3os/app/fx_text.h>
+#include <o3os/app/help_blob.h>
 #include <o3os/app/mix_board.h>
 #include <o3os/app/perform_board.h>
 #include <o3os/app/project_state.h>
 #include <o3os/app/metro_sync.h>
+#include <o3os/app/mtc_sync.h>
 #include <o3os/app/usb_return.h>
 #include <o3os/app/og_folder.h>
 #include <o3os/app/module_binder.h>
@@ -84,6 +87,7 @@
 #include <o3os/app/save_service.h>
 #include <o3os/app/state_line.h>
 #include <o3os/app/track_state.h>
+#include <o3os/app/wt_user.h>
 #include <o3os/audio/demo_kit.h>
 #include <o3os/audio/diag.h>
 #include <o3os/audio/events.h>
@@ -92,7 +96,9 @@
 #include <o3os/audio/module_voices.h>
 #include <o3os/audio/send_delay.h>
 #include <o3os/audio/send_reverb.h>
+#include <o3os/audio/wt_contour.h>  // OS-CEWTENV W3a: the contour bank lives in its own SDRAM region (mem::kWtContourBase) and the render reads it through the binding
 #include <o3os/core/action.h>
+#include <o3os/core/inflate.h>
 #include <o3os/core/input_event.h>
 #include <o3os/hal/audio.h>
 #include <o3os/hal/cycles.h>
@@ -119,6 +125,7 @@
 #include <o3os/platform/mk66/sections.h>
 #include <o3os/platform/mk66/save/fat_storage_writer.h>
 #include <o3os/platform/mk66/storage/device.h>
+#include <o3os/platform/mk66/text.h>
 #include <o3os/platform/mk66/update/fw_device.h>
 #include <o3os/platform/mk66/usb/console.h>
 #include <o3os/platform/mk66/usb/diag_text.h>
@@ -126,9 +133,14 @@
 #include <o3os/platform/mk66/usb/usb0.h>
 #include <o3os/model/params.h>
 #include <o3os/module/loader.h>
+#include <o3os/module/ptfx_catalog.h>
+#include <o3os/module/ptfx_host_table.h>
+#include <o3os/module/ptfx_loader.h>
+#include <o3os/module/ptfx_quarantine.h>
 #include <o3os/seq/engine_link.h>
 #include <o3os/seq/midi_link.h>
 #include <o3os/seq/offline.h>
+#include <o3os/seq/play_orders.h>
 #include <o3os/seq/sequencer.h>
 #include <o3os/ui/assets.h>
 #include <o3os/ui/plot/curve.h>
@@ -163,6 +175,19 @@ constexpr std::uint32_t kBootFrameRetries = 50;  // the boot frame is refused wh
 // OS-MEM1: main loop only, so in the SDRAM slack window (28 KB off SRAM_U); zeroed before each construction, as its .bss was (see make_app).
 O3OS_SDRAM_NOINIT alignas(app::App) unsigned char g_app_storage[sizeof(app::App)];  // the app lives for ever: built once, never destroyed
 app::App* g_app = nullptr;
+
+// OS-BUG-PLAYSTOP: cold counters for a Play the transport refused or parked, one increment per refusal reason and no logging on the path (the main loop is the
+// only writer; `diag trans` prints them). Outside the !O3OS_AUDIO_TEST block so `diag trans` compiles in the tone image too. `plays` counts the play() calls that
+// returned true: the App toggles its `playing` badge exactly when the sink says yes, so plays vs the refusals is "the App still toggled playing" against "the tap was lost".
+struct TransportDiag {
+  std::uint32_t plays = 0;             // play()/play_song()/play_count_in()/play_from() accepted (the App toggled `playing`)
+  std::uint32_t stops = 0;             // stop() accepted
+  std::uint32_t refused_no_audio = 0;  // play(): no sequencer, or the block clock is down (audio_running() false)
+  std::uint32_t parked_outputs = 0;    // play(): the outputs are closed; the request waits in g_pending_* for audio_opened()
+  std::uint32_t refused_ring_full = 0; // the Play/Stop command did not fit the sequencer's ring
+  std::uint32_t parked_played = 0;     // audio_opened() pushed a parked Play/Song onto the ring
+};
+TransportDiag g_transport_diag;
 // OS-POWER P1: the power-off latch (set at stage A of the shutdown, never cleared: see internal.h power_off_latched) and the end of stage E (the display is dark and held, the chip in power-down).
 // Main loop only; main.cpp reads the latch through power_off_latched() in the same thread.
 bool g_power_latched = false;
@@ -176,6 +201,12 @@ model::UndoHistory g_journal;  // OS-UNDOGRP: three rings carved out of the one 
 alignas(model::Editor) unsigned char g_editor_storage[sizeof(model::Editor)];
 model::Editor* g_editor = nullptr;
 
+// OS-FLASHDIET P6: the built-in key bindings (768 x 16 B), unpacked from the deflate blob into SDRAM by start_app() before the App is built (every image has the App,
+// the audio test too, so this is outside the sound's #if); the app library's constexpr table is not in the image (app/CMakeLists.txt O3OS_BUILTIN_BINDINGS_PACKED).
+// Written once from the main loop, then read-only from the main loop (key resolution).
+O3OS_SDRAM_NOINIT alignas(4) core::Binding g_builtin_bindings[app::kBuiltinBindingsCapacity];
+static_assert(sizeof g_builtin_bindings == app::kBuiltinBindingsCapacity * 16u, "the unpacked table's slots are the 16-byte bindings the blob holds");
+
 #if !O3OS_AUDIO_TEST
 // ---- The sound (OS-005d lite) --------------------------------------------------------------------------------------------------------
 // The sequencer over the document (it reads the project in SDRAM from the render line, rows with their generation check), built once with the document, in
@@ -184,21 +215,37 @@ alignas(seq::Sequencer) unsigned char g_seq_storage[sizeof(seq::Sequencer)];
 seq::Sequencer* g_seq = nullptr;
 // E-SONG-07: the sequencer's copy of the song list, 656 B, in SDRAM so that SRAM_U keeps its 32 KiB free floor (render reads it once a pattern end and once an edit; attach_order_store zeroes it).
 O3OS_SDRAM_NOINIT seq::OrderStore g_seq_order;
+// OS-FLASHDIET P4: the custom play orders' entry table (2,176 B), unpacked from the deflate blob into SDRAM once, by make_sound() before the sequencer is built; the
+// image's seq library has no plain copy (seq/CMakeLists.txt O3OS_PLAY_ORDERS_PACKED). Fully overwritten by the unpack, then read-only (the render reads one entry a step).
+O3OS_SDRAM_NOINIT alignas(4) std::uint16_t g_play_orders[seq::kPlayOrderEntries];
+// OS-CEWTENV W5: the granular length modulation's storage, in the SDRAM slack window (SRAM_U's voice_state has no room for it): one FilterMod per sample
+// slot (the source, slot 3 of a granular instrument, enable bit 0x02) and one sixth ModGen per voice (12 x 44 B), bound once with audio::grlen_bind below.
+// Raw bytes: both types have non-zero default member initialisers, which `.bss.noinit_sdram` (zero initialisers only) cannot hold; make_sound() zeroes them
+// (kind kFmodNone is 0, and set_sample() rewrites a slot's entry; mods_start() starts a voice's gen), then views them as the arrays.
+O3OS_SDRAM_NOINIT alignas(audio::FilterMod) unsigned char g_grlen_mods_raw[sizeof(audio::FilterMod) * audio::kDescSlots];
+O3OS_SDRAM_NOINIT alignas(audio::ModGen) unsigned char g_grlen_gens_raw[sizeof(audio::ModGen) * audio::kMaxVoices];
+static_assert(alignof(audio::FilterMod) <= 4 && alignof(audio::ModGen) <= 4 && audio::kFmodNone == 0, "the W5 raw storage is word aligned and an all-zero FilterMod is 'no source'");
+// OS-CEWTENV W6a: the step FX w and y's storage (948 B: the tracks' value bytes and the per-voice copies of the cutoff slot, the amp WT slot and the amp ADSR), in the SDRAM slack window (SRAM_U keeps its
+// 32 KiB floor), bound once with audio::fxe_bind. Raw bytes like the W5 arrays (non-zero member initialisers); make_sound() zeroes them, fxe_apply writes a copy whole before the voice reads it.
+O3OS_SDRAM_NOINIT alignas(audio::FxEnvMem) unsigned char g_fxe_raw[sizeof(audio::FxEnvMem)];
+static_assert(alignof(audio::FxEnvMem) <= 4, "the W6a raw storage is word aligned");
 audio::SeqEvent g_events[audio::kMaxEventsPerBlock];
-static_assert(sizeof(seq::Sequencer) <= mem::budget_bytes(mem::kSramUBudget, mem::kSramUBudgetCount, "sequencer") + 640u,  // (512 B of slack, +128 for OS-INSTUI S8b: the MIDI instrument's output state is 72 B: a program and the routes a bend went to for each channel, the route of the note a track sounds)
+static_assert(sizeof(seq::Sequencer) <= mem::budget_bytes(mem::kSramUBudget, mem::kSramUBudgetCount, "sequencer") + 896u,  // (the row is 8,352 B; 512 B of slack, +128 for OS-INSTUI S8b: the MIDI instrument's output state is 72 B, +128 for OS-MTC A3: the time code generator, 72 B, and its request state, +128 for OS-MTC B3: the chase's answer, phase pair, rate trim and flags are 48 B. The Perform layer's values (800 B) are in the OrderStore in SDRAM, not in the sequencer (OS-CEWTENV W6a SRAM_U recovery): sizeof is about 800 B smaller than the 9,152 B measured before that, against the 9,248 B allowed here)
               "the sequencer outgrew its SRAM_U row (mem_map.h sequencer; the 2.3 KB event buffer is in the rings row)");
 
 // OS-005c2: the MIDI link over the sequencer (the emitter's rings, USB out, the router, the two midiRt rings, the clock-follow loop: about 23 KB of SRAM_U, ADR 0013 D7's
 // "rings" row and the slack Amendment 2 left; the cap keeps its growth visible), built with the sequencer, and the configuration the main loop last gave it.
 alignas(seq::MidiLink) unsigned char g_midi_storage[sizeof(seq::MidiLink)];
 seq::MidiLink* g_midi = nullptr;
-static_assert(sizeof(seq::MidiLink) <= 24u * mem::kKiB, "the MIDI link outgrew the 24 KiB OS-005c2 measured: update the SRAM_U plan (mem_map.h) first");
+static_assert(sizeof(seq::MidiLink) <= 24u * mem::kKiB, "the MIDI link outgrew the 24 KiB OS-005c2 measured: update the SRAM_U plan (mem_map.h) first");  // measured on the target: 22,824 B, 1,752 B under the cap (OS-MTC B3's chase state is in it)
 midi::MidiConfig g_midi_cfg;                 // what the engine was last told (main loop only): the settings' fields are rewritten from the device settings, the rest is kept
 std::uint32_t g_midi_clock_gen = 0;          // the sum of the generations of the device settings that drive the link, at the last sync_midi_settings()
 bool g_midi_clock_seen = false;
 app::UsbReturnSync g_usb_return;             // the device setting USB RETURN against the USB driver's return flag (app/usb_return.h)
 app::UsbAudioSync g_usb_audio;               // OS-USBAUDIO: the device setting USB AUDIO against the USB driver's mode (the same sync; the driver's console changes are not copied back)
 app::UsbReturnLevelSync g_usb_return_level;  // OS-006e: the device setting RETURN LEVEL against the engine's (app/usb_return.h)
+app::ChaseSync g_chase_sync;                 // OS-MTC B3: the song position the chase of MTC IN asks for (app/mtc_sync.h)
+app::MtcSync g_mtc_sync;                     // OS-MTC A3: the song time the sequencer's time code generator asks for (app/mtc_sync.h)
 app::MetroSync g_metro_sync;                 // OS-METRO: the device settings METRO and METRO VOL against the engine's and the sequencer's (app/metro_sync.h)
 midi::CcInput* g_cc = nullptr;               // MIDI Learn's control changes (OS-013a) and the notes in (OS-005g): in SDRAM, behind the sample arena's other tail parts
 audio::LiveBox* g_live = nullptr;            // the live notes (OS-005g): the queue and the render's table of held notes, in SDRAM behind the control-change ring
@@ -290,36 +337,58 @@ class SeqTransport final : public app::TransportSink {
  public:
   bool play(unsigned pattern) noexcept override {
     if (g_seq == nullptr || !audio_running()) {
+      ++g_transport_diag.refused_no_audio;
       return false;  // no sequencer (headless) or no block clock: nothing would sound
     }
     if (!g_outputs_open) {
       g_pending_pattern = pattern;
       g_pending_song = false;
       g_open_pending = true;
+      ++g_transport_diag.parked_outputs;
       console::log("play: waiting for the outputs to open");
       return true;
     }
-    return push_command(seq::Command::Kind::PlayPattern, pattern);
+    const bool pushed = push_command(seq::Command::Kind::PlayPattern, pattern);
+    if (pushed) {
+      ++g_transport_diag.plays;
+    } else {
+      ++g_transport_diag.refused_ring_full;
+    }
+    return pushed;
   }
   // OS-METRO: the same command with the bars to count in in its `b` field (the pattern's start step stays 0). With the outputs still closed (the fallback above) the count-in is dropped: the first Play opens them.
   bool play_count_in(unsigned pattern, unsigned bars) noexcept override {
     if (g_seq == nullptr || !audio_running()) {
+      ++g_transport_diag.refused_no_audio;
       return false;
     }
     if (!g_outputs_open) {
       return play(pattern);  // the row is not kept across the deferred open
     }
-    return push_command(seq::Command::Kind::PlayPattern, pattern, static_cast<std::uint16_t>(bars > 2u ? 2u : bars));
+    const bool pushed = push_command(seq::Command::Kind::PlayPattern, pattern, static_cast<std::uint16_t>(bars > 2u ? 2u : bars));
+    if (pushed) {
+      ++g_transport_diag.plays;
+    } else {
+      ++g_transport_diag.refused_ring_full;
+    }
+    return pushed;
   }
   // OS-PLAYCUR: PlayPattern from step `row` (no count-in), and LocateRow while playing. With the outputs not yet open (the start-up only) it falls back to play(pattern): the pattern starts at its first step.
   bool play_from(unsigned pattern, unsigned row) noexcept override {
     if (g_seq == nullptr || !audio_running()) {
+      ++g_transport_diag.refused_no_audio;
       return false;
     }
     if (!g_outputs_open) {
       return play(pattern);
     }
-    return push_command(seq::Command::Kind::PlayPattern, pattern, 0, row);
+    const bool pushed = push_command(seq::Command::Kind::PlayPattern, pattern, 0, row);
+    if (pushed) {
+      ++g_transport_diag.plays;
+    } else {
+      ++g_transport_diag.refused_ring_full;
+    }
+    return pushed;
   }
   bool locate_row(unsigned row) noexcept override {
     if (g_seq == nullptr || !g_outputs_open || !audio_running()) {
@@ -329,6 +398,7 @@ class SeqTransport final : public app::TransportSink {
   }
   bool play_song(unsigned row) noexcept override {  // the sequencer starts from the first position when the row is past the end of the order list
     if (g_seq == nullptr || !audio_running()) {
+      ++g_transport_diag.refused_no_audio;
       return false;
     }
     const unsigned at = row < 0xFFFFu ? row : 0xFFFFu;
@@ -337,15 +407,28 @@ class SeqTransport final : public app::TransportSink {
       g_pending_row = at;
       g_pending_pattern = 0;
       g_open_pending = true;
+      ++g_transport_diag.parked_outputs;
       console::log("play: waiting for the outputs to open");
       return true;
     }
-    return push_command(seq::Command::Kind::PlaySong, 0, static_cast<std::uint16_t>(at));
+    const bool pushed = push_command(seq::Command::Kind::PlaySong, 0, static_cast<std::uint16_t>(at));
+    if (pushed) {
+      ++g_transport_diag.plays;
+    } else {
+      ++g_transport_diag.refused_ring_full;
+    }
+    return pushed;
   }
   bool stop() noexcept override {
     g_pending_pattern = 0;
     g_pending_song = false;
-    return push_command(seq::Command::Kind::Stop, 0);
+    const bool pushed = push_command(seq::Command::Kind::Stop, 0);
+    if (pushed) {
+      ++g_transport_diag.stops;
+    } else {
+      ++g_transport_diag.refused_ring_full;
+    }
+    return pushed;
   }
   // The live jump (OS-SONG1): a command on the same ring (the main loop is its one producer); the sequencer applies it at the pattern's end on the render's timeline. Only while playing, so
   // the outputs are open and the render drains the ring.
@@ -354,6 +437,13 @@ class SeqTransport final : public app::TransportSink {
       return false;
     }
     return push_command(seq::Command::Kind::QueueJump, 0, static_cast<std::uint16_t>(row < seq::kNoJump ? row : seq::kNoJump), g_seq->jump_stamp());  // E-SONG-07: the position is authored against the list as it is now
+  }
+  // OS-SONG3 S7: the loop of a range of slots, a command on the same ring; like the live jump, only while the outputs are open and the render drains the ring (a first Play that waits for them has no loop: hold again).
+  bool loop_range(unsigned first, unsigned last) noexcept override {
+    if (g_seq == nullptr || !g_outputs_open || !audio_running() || first >= seq::kNoJump) {
+      return false;
+    }
+    return push_command(seq::Command::Kind::SetLoop, static_cast<std::uint8_t>(first), static_cast<std::uint16_t>(last < seq::kNoJump ? last : seq::kNoJump), g_seq->jump_stamp());
   }
   // The PATS pads (OS-PADS-B): the sequencer's existing QueuePattern command (the pattern id, 0 cancels), on the same ring.
   bool queue_pattern(unsigned id) noexcept override {
@@ -747,15 +837,29 @@ audio::gov::Snapshot module_governor_snapshot() noexcept { return g_module_voice
 constexpr std::uint32_t kModuleStateBytes = 4096;
 alignas(64) std::uint8_t g_module_state[kModuleStateBytes];  // (.bss: zeroed at start, and the binder zeroes each block it takes)
 
+// OS-CEPTFX S3b: the `ptfx` region's meta sub-area (mem_map.h kPtfxMetaOff, 16 KiB): the catalogue (11 KiB), the header of the plugin `ptfx info` / `ptfx run` is about, and the plugin's host table.
+// Main loop only; nothing here is constructed (the catalogue and the table are written before they are read).
+struct PtfxMeta {
+  module::PtfxEntry entries[module::kPtfxCatalogMax];
+  module::PtfxInfo info;
+  module::PtfxHostTableStorage table;
+};
+static_assert(sizeof(PtfxMeta) <= mem::kPtfxMetaSize, "the ptfx meta sub-area holds the catalogue, a header and the host table");
+PtfxMeta& ptfx_meta() noexcept { return *reinterpret_cast<PtfxMeta*>(static_cast<std::uintptr_t>(mem::core_view(mem::kPtfxBase + mem::kPtfxMetaOff))); }
+
 struct ModuleSystem {
-  ModuleSystem() noexcept : voices(g_module_voices) {}
+  ModuleSystem() noexcept : voices(g_module_voices), ptfx_cat(ptfx_meta().entries), ptfx_host(ptfx_meta().table.bytes) {}
   module::ModuleSet set;
   module::ModuleLoader loader;
   audio::ModuleVoices& voices;
   audio::InsertHost::Blobs insert_blobs;  // OS-INSFX S1: the parameter copies of the inserts (InsertHost::attach)
   app::ModuleBinder binder;
   app::ModuleUi ui;          // OS-012b: the Instrument page's module controls and views, the engine picker, MODULES and the apps' pages (the view host's record is in it)
-  std::uint16_t crashed_id;  // the module the previous run died in (module::fault_id), 0 none
+  module::PtfxQuarantine ptfx_q;  // OS-CEPTFX S2c: the .ptfx plugins quarantined this boot (main loop only: a single writer), loaded from the crash record in make_modules
+  module::PtfxCatalog ptfx_cat;   // OS-CEPTFX S3b: the Effects folder's plugins, scanned by `ptfx list` (main loop only), over the meta sub-area's entries
+  module::PtfxLoader ptfx_loader;  // S3b: the plugin's code into the ptfx region's image, for `ptfx run`
+  module::PtfxHostTable ptfx_host;  // S3b: the host table the plugin is handed (the meta sub-area's)
+  std::uint16_t crashed_id; // the module the previous run died in (module::fault_id), 0 none
   bool manual;               // `diag mod load` is stepping the loader
   char manual_name[module::kStemMax + 1];
 };
@@ -809,9 +913,15 @@ void make_modules() noexcept {
   m->voices.set_sample_rate(static_cast<float>(hal::audio::sample_rate_mhz()) * 0.001f);
   m->crashed_id = 0;
   m->manual = false;
+  m->ptfx_cat.set_quarantine(&m->ptfx_q);  // S3b: a scan stamps the quarantined plugins in the listing
   const crash::CrashRecord* rec = boot_crash_record();
-  if (rec != nullptr && rec->context != crash::kUnknownContext && crash::module_of(rec->context) >= 0x8000u) {
-    m->crashed_id = crash::module_of(rec->context);  // the previous run died inside module code: that module is not loaded this boot
+  if (rec != nullptr && rec->context != crash::kUnknownContext) {
+    // the previous run died inside module code (a module word has bit 15): that module is not loaded this boot. S2c: a .tmod's id and a .ptfx plugin's share the bit and the word cannot
+    // tell them apart: boot_load puts the id in the set, and it only matters when a catalogued plugin has it
+    const std::uint16_t w = crash::module_of(rec->context);
+    if (m->ptfx_q.boot_load(w)) {
+      m->crashed_id = w;
+    }
   }
 }
 
@@ -820,6 +930,39 @@ void make_modules() noexcept {
 // the instruments the user chose, or none).
 bool install_demo(model::Project& project) noexcept {
   return app::install_demo_kit(g_bank, audio_voices(), project, sample_arena(), kArenaSamples);  // SDRAM: 61 KB of the 10.8 MB arena (OS-BUG-PASTE24: app/sample_bank.h; the instruments at unity under the document's law)
+}
+
+// OS-CEWTENV W8: the user contours' storage (the reverb region's spare tail, mem_map.h kWtUserBase) and their load from /Envelopes (app/wt_user.h). Main loop only.
+app::WtUserMem& wt_user_mem() noexcept {
+  return *reinterpret_cast<app::WtUserMem*>(static_cast<std::uintptr_t>(mem::core_view(mem::kWtUserBase)));
+}
+
+// The card mounted, or a project load begins: /Envelopes is read into the bank's user contours and the one report goes to the strip. A card that is not mounted changes nothing.
+// `serviced`: the display is serviced from the idle hook while the load blocks (the mount and the disk share, as the card's own blocking calls do; the project load is inside
+// begin_samples, which runs with the display held by the load, so it passes false). The load time goes to the console, as the mount's does.
+void wt_user_reload(bool serviced) noexcept {
+  hal::storage::Storage& card = storage::device::storage();
+  if (!card.mounted()) {
+    return;
+  }
+  const std::uint64_t started = system_clock().uptime_ms();
+  if (serviced) {
+    service_while_blocked(true);
+  }
+  const app::WtUserReport report = app::wt_user_load(card, wt_user_mem());
+  if (serviced) {
+    service_while_blocked(false);
+  }
+  if (report.folder) {
+    char line[48];
+    audio::diag::Text log(line, sizeof line);
+    log.str("sd: /Envelopes, ").dec(report.loaded).str(" loaded, ").dec(static_cast<std::uint32_t>(system_clock().uptime_ms() - started)).str(" ms");
+    console::log(line);
+  }
+  char text[64];
+  if (g_app != nullptr && app::wt_user_notice(report, text, sizeof text) != 0) {
+    g_app->wtenv_notice(text, 4000, report.refused_float != 0 || report.skipped() != 0);
+  }
 }
 
 // The sound of a fresh document: the demo kit when the project holds nothing (a project load replaces it later), then the sequencer and the engine's wiring.
@@ -833,6 +976,14 @@ void make_sound(model::Project& project) noexcept {
     if (install_demo(project)) {
       (void)project.set_tempo_x100(o3os::model::demo::kTempoX100);
     }
+  }
+  // OS-FLASHDIET P4: the play orders' table, before the sequencer exists (its only readers) and before the render starts (main() calls start() after the app's
+  // init). Boot-time, main loop, synchronous: the UI assets' decoder is idle here (upload_assets() finished, or has not begun, and neither overlaps this call).
+  // A failed unpack leaves the accessor unattached (step 1, option 0), never a half table.
+  if (seq::play_orders_unpack(ui::asset_inflater(), g_play_orders)) {
+    seq::play_orders_use(g_play_orders);
+  } else {
+    console::log("boot: play orders FAILED, custom orders play step 1");  // main loop; visible in `log`
   }
   g_seq = new (g_seq_storage) seq::Sequencer(project);
   g_seq->attach_order_store(g_seq_order);
@@ -850,6 +1001,7 @@ void make_sound(model::Project& project) noexcept {
   g_midi->attach_cc(g_cc);  // before the drivers: the render is the ring's one producer, the main loop its one consumer
   g_live = make_live_box();
   make_modules();
+  g_bank.ptfx_page()->cat = &modsys().ptfx_cat;  // OS-CEPTFX S4a: Sample edit's PLUGINS page lists the catalogue `ptfx list` shares (the bank's mem exists since g_bank.init above)
   audio::AppTap* const app_tap = make_app_tap();  // OS-H2a: before the audio starts; the graph's render is its one writer, the module host's main-loop calls its reader
   audio_engine().graph().attach_app_tap(app_tap);
   modsys().ui.set_audio_tap(app_tap);
@@ -883,6 +1035,22 @@ void make_sound(model::Project& project) noexcept {
   // levels and mutes, and the effects' own controls on the Master FX page; the tempo from the event source). Before start: attach() clears the SDRAM (about 0.76 MB, a few tens of ms).
   g_send_delay.attach(reinterpret_cast<std::uint32_t*>(static_cast<std::uintptr_t>(mem::core_view(mem::kDelayBase))), audio::SendDelay::kRingFrames);
   g_send_reverb.attach(reinterpret_cast<std::int16_t*>(static_cast<std::uintptr_t>(mem::core_view(mem::kReverbBase))), audio::SendReverb::kMemSamples);
+  // OS-CEWTENV W3a: the wavetable contour bank is the `wt_contour` SDRAM region (mem_map.h, reserved by W2); the render reads it through this one binding, and the main loop
+  // makes the contours a descriptor names (app::make_sample_desc -> audio::wt_make_bound) before it stages the descriptor.
+  static_assert(mem::kWtContourBase % alignof(audio::WtBank) == 0, "the wt_contour region is aligned for the bank");
+  audio::wt_bind(*reinterpret_cast<audio::WtBank*>(static_cast<std::uintptr_t>(mem::core_view(mem::kWtContourBase))));
+  // OS-CEWTENV W3c: the baked warps, in the reverb region's spare tail (mem_map.h kWtBakeBase); the main loop bakes a WT slot's warps when it makes the descriptor (app::make_sample_desc -> audio::wt_bake)
+  static_assert(mem::kWtBakeBase % alignof(audio::WtBakeBank) == 0 && mem::kWtBakeBytes == sizeof(audio::WtBakeBank), "the bake pool's mirror is its size");
+  audio::wt_bake_bind(*reinterpret_cast<audio::WtBakeBank*>(static_cast<std::uintptr_t>(mem::core_view(mem::kWtBakeBase))));
+  // OS-CEWTENV W8: the user contours (the pointer table, the spare buffers and the loader's PCM scratch), after the bake pool in the same spare tail; SDRAM, so SRAM_U does not grow. The load is wt_user_reload().
+  static_assert(mem::kWtUserBase % alignof(app::WtUserMem) == 0 && mem::kWtUserBytes == sizeof(app::WtUserMem), "the user contours' mirror is their size");
+  audio::wt_user_bind(wt_user_mem().bank);
+  // OS-CEWTENV W5: the granular length destination's storage (one FilterMod a slot, one sixth ModGen a voice, 12 x 44 B), in the SDRAM slack window; the render reads it once a block
+  std::memset(g_grlen_mods_raw, 0, sizeof g_grlen_mods_raw);  // the slack window is not cleared at boot: every slot starts with no length destination
+  std::memset(g_grlen_gens_raw, 0, sizeof g_grlen_gens_raw);
+  audio::grlen_bind(reinterpret_cast<audio::FilterMod*>(g_grlen_mods_raw), reinterpret_cast<audio::ModGen*>(g_grlen_gens_raw));
+  std::memset(g_fxe_raw, 0, sizeof g_fxe_raw);  // OS-CEWTENV W6a
+  audio::fxe_bind(reinterpret_cast<audio::FxEnvMem*>(g_fxe_raw));
   engine.graph().install_send_fx(0, &audio::SendDelay::process_fx, &g_send_delay, &audio::SendDelay::param_fx);
   engine.graph().install_send_fx(1, &audio::SendReverb::process_fx, &g_send_reverb, &audio::SendReverb::param_fx);
   engine.graph().set_send_fx_bypass(0, false);
@@ -897,7 +1065,7 @@ void make_sound(model::Project& project) noexcept {
 
 // The device settings that drive the MIDI link (seq::sync_config_from_settings): CLOCK IN, CLOCK SYNC, CLOCK MODE, MIDI OUT and OUT CHANNEL. When any of them changes (and once at
 // the first pass, which is the boot: the settings file's values) the link's mode, followed port, PAR-119 correction, output ports and channel follow; the runtime-only rest of the
-// configuration is kept. E-CFG-03: TRANSPORT IN and TRANSPORT OUT are two more of them. Main loop, every pass: eight generation reads. Each generation only ever advances, so their sum moves whenever one of them does.
+// configuration is kept. E-CFG-03: TRANSPORT IN and TRANSPORT OUT are two more of them; OS-MTC A3: MTC OUT and MTC START (MidiConfig::mtc_fps / mtc_hour) two more. Main loop, every pass: ten generation reads. Each generation only ever advances, so their sum moves whenever one of them does.
 void sync_midi_settings() noexcept {
   if (g_midi == nullptr || g_app == nullptr) {
     return;
@@ -905,7 +1073,8 @@ void sync_midi_settings() noexcept {
   namespace ds = model::device_setting;
   const model::Settings& dev = g_app->device_settings();
   const std::uint32_t gen = dev.generation(ds::ClockIn) + dev.generation(ds::ClockSync) + dev.generation(ds::ClockMode) + dev.generation(ds::MidiInPort) +
-                            dev.generation(ds::MidiOutPort) + dev.generation(ds::MidiOutChannel) + dev.generation(ds::TransportIn) + dev.generation(ds::TransportOut);
+                            dev.generation(ds::MidiOutPort) + dev.generation(ds::MidiOutChannel) + dev.generation(ds::TransportIn) + dev.generation(ds::TransportOut) +
+                            dev.generation(ds::MtcOut) + dev.generation(ds::MtcStart) + dev.generation(ds::MtcIn);  // OS-MTC A3: MTC OUT and MTC START are two more; B3: MTC IN a third
   if (g_midi_clock_seen && gen == g_midi_clock_gen) {
     return;
   }
@@ -955,6 +1124,21 @@ void sync_usb_return() noexcept {
 void sync_metro() noexcept {
   if (g_app != nullptr) {
     (void)g_metro_sync.step(g_app->device_settings(), audio_engine().params());
+  }
+}
+
+// OS-MTC A3: answers the time code generator's question (the song time of the position a run or a relocation starts at) over the sequencer's command ring (app/mtc_sync.h). One relaxed read a pass.
+// OS-MTC B3: and the chase's (which step starts at or after the master's time), and the chase's status for the Config row. A few relaxed reads a pass.
+void sync_mtc() noexcept {
+  if (g_seq != nullptr) {
+    (void)g_mtc_sync.step(g_seq->project(), g_seq->mtc_request(), g_seq->commands());
+    if (g_midi != nullptr) {
+      (void)g_chase_sync.step(g_seq->project(), g_midi->chase_request(), g_midi->chase_request_time(), g_seq->commands());
+      if (g_app != nullptr) {
+        const midi::SyncStatus st = g_midi->status();
+        g_app->set_mtc_status(st.mtc_state, st.mtc_code, st.mtc_time);
+      }
+    }
   }
 }
 
@@ -1099,8 +1283,10 @@ app::NativeFolderLoader* native_load() noexcept {
   app::NativeFolderLoader* const n = native_loader();
   return n != nullptr && n->active() ? n : nullptr;
 }
-// OS-FILES part A: a module imported from the File screen (app::ModuleImport: the MOD / S3M and OctaMED importers, about 39 KB, main loop only: SDRAM like the loaders). When it is the load that was
-// started, its phases replace the project loader's and the samples come from it (OgSampleLoader::begin_feed). The tone image has no voices to bind, so no import.
+// OS-FILES part A: a module imported from the File screen (app::ModuleImport: the proxy of the importer module of the card, OS-FLASHDIET I3:
+// the MOD / S3M / MED readers themselves are no longer linked into the image, so the object is small, about 1 KB, in SDRAM like the loaders).
+// When it is the load that was started, its phases replace the project loader's and the samples come from it (OgSampleLoader::begin_feed).
+// The tone image has no voices to bind, so no import.
 #if !O3OS_AUDIO_TEST
 O3OS_SDRAM_NOINIT SdramBox<app::ModuleImport> g_module;
 app::ModuleImport* module_load() noexcept { return g_module->active() ? &*g_module : nullptr; }
@@ -1291,6 +1477,15 @@ void clear_sample_table() noexcept {
   for (unsigned i = 0; i < audio::kSampleSlots; ++i) {
     voices.set_sample(i, audio::SampleDesc{});
   }
+  // OS-CEWTENV W3c: no descriptor holds a bake id now and nothing sounds (the Settle phase waited for the voices; the table was written just above on that same assumption): the pool is emptied, and the
+  // project's own WT slots bake again as their descriptors are rebuilt. A new project that keeps its instruments (OS-NEWKEEP) keeps the table and so the pool.
+  // The Settle phase gives up after kSettleMaxMs, so "nothing sounds" is checked here and not assumed: a voice still reading an entry keeps the pool as it is (an entry is never rewritten while it
+  // may be read); the next load empties it.
+  if (audio_running() && audio_voices().voices_in_use() != 0) {
+    console::log("boot: WT bake pool kept, a voice still sounds");
+    return;
+  }
+  audio::wt_bake_reset();
 }
 
 // The project is in the document: the voices' table is cleared (the demo kit's sounds, or the last project's: nothing is playing, the transport has been stopped
@@ -1302,6 +1497,7 @@ void begin_samples() noexcept {
   if (!keep_audio) {
     clear_sample_table();
   }
+  wt_user_reload(false);  // OS-CEWTENV W8: before the descriptors are built (they bake the contours); main loop, synchronous (one folder scan, at most 128 small files)
   g_sample_summary[0] = '\0';
   // OS-007i: the instrument volume law follows the project file's version (app::instrument_law): 1.2+ projects play their instruments at the -24..+24 dB law.
   // (a native project carries no version of the OG file it may have come from: it plays at the 1.2+ law, the one a new project has)
@@ -1481,6 +1677,9 @@ void advance_load(std::uint64_t now) noexcept {
     // OS-012a: the module instruments were withdrawn when the load began; the render has to be clear of them (two block starts) before they are shut down and their memory reused
     ModuleSystem& m = modsys();
     if ((quiet && (!audio_running() || (m.voices.quiescent() && g_insert_host.settled()))) || waited >= kSettleMaxMs) {
+      if (!quiet && audio_running()) {
+        console::log("boot: Settle timed out, a voice or a module instance is still winding down");  // the load goes on; clear_sample_table() re-checks before it empties the WT bake pool
+      }
       g_insert_host.release_all();  // OS-INSFX S1: before the module memory is reset (the inserts' modules and states are in it)
       m.voices.release_all();  // shutdown() of each, main loop (after kSettleMaxMs the render has long passed its block starts; an audio that is not running calls nothing)
       m.set.clear();           // the modules and their memory: the new project's are loaded in the Modules phase (the quarantine stays)
@@ -1677,6 +1876,41 @@ void shot_cancel() noexcept {
 #endif
 }
 
+// OS-CEPTFX S4b: F1 APPLY on the PLUGINS page (App::attach_ptfx_runner): the same load and run as the console's `ptfx run`, with the page's values. The console's refusals are lower case and name
+// console commands; the strip gets the page's own upper-case text for each (what ptfx_refusal_text says for the same reason), and a text that is already the App's passes as it is.
+#if !O3OS_AUDIO_TEST
+const char* ptfx_page_run(void*, unsigned index, const float* values) noexcept {
+  const char* why = ptfx_run(index, values);
+  if (why == nullptr || (why[0] >= 'A' && why[0] <= 'Z')) {
+    return why;
+  }
+  static const char* const kMap[][2] = {
+      {"plugin running", "PLUGIN IS RUNNING"},
+      {"card busy", "CARD BUSY"},
+      {"no card", "NO CARD"},
+      {"card error", "CARD ERROR"},
+      {"run ptfx list first", "PRESS RESCAN FIRST"},
+      {"not ptfx", "NOT A PTFX PLUGIN"},
+      {"version", "PTFX VERSION NOT SUPPORTED"},
+      {"not for this unit", "NOT FOR THIS TRACKER"},
+      {"needs newer os", "NEEDS NEWER OS"},
+      {"damaged", "PLUGIN FILE DAMAGED"},
+      {"too big", "PLUGIN TOO BIG"},
+      {"plugin too big", "PLUGIN TOO BIG"},
+      {"file changed: run ptfx list", "PLUGIN FILE CHANGED: RESCAN"},
+      {"quarantined", "PLUGIN QUARANTINED"},
+      {"load failed", "PLUGIN LOAD FAILED"},
+      {"not in this image", "NOT IN THIS IMAGE"},
+  };
+  for (const auto& m : kMap) {
+    if (std::strcmp(why, m[0]) == 0) {
+      return m[1];
+    }
+  }
+  return "PLUGIN NOT RUN";
+}
+#endif
+
 // Uploads the bitmaps and builds the app (again, if there is one: a recovery starts it over). false: the upload failed.
 // `first_boot`: also puts the boot screen up (a recovery after a display re-initialisation goes straight to the app).
 bool start_app(hal::Display& display, bool first_boot) noexcept {
@@ -1688,6 +1922,17 @@ bool start_app(hal::Display& display, bool first_boot) noexcept {
   }
   if (result != hal::UploadResult::Ok) {
     return false;
+  }
+  // OS-FLASHDIET P6: the built-in key bindings, unpacked from the deflate blob into SDRAM before the App exists (its first binding lookup is a method of it). The
+  // single place for every boot path (first boot, recovery, the audio test image); a recovery finds the table attached and keeps it. A failed unpack is a failed
+  // start (the app-failure blink and a dark screen), never an app whose keys are dead without a word.
+  if (app::builtin_bindings().count == 0) {
+    const std::size_t n = app::builtin_bindings_unpack(ui::asset_inflater(), g_builtin_bindings, app::kBuiltinBindingsCapacity);
+    if (n == 0) {
+      console::log("boot: built-in bindings FAILED");
+      return false;
+    }
+    app::builtin_bindings_use(g_builtin_bindings, n);
   }
   if (first_boot) {
     show_boot_logo(display);  // before anything else is built: the sooner the frame is committed, the sooner the screen can light
@@ -1720,6 +1965,7 @@ bool start_app(hal::Display& display, bool first_boot) noexcept {
   g_app->attach_mix(g_mix);        // OS-011b: the Mixer screen: routing, meters, stems
   g_app->attach_perform(g_perform);  // OS-011b: the Perform screen: the slots, told to the sequencer's command ring
   g_app->attach_recorder(recorder());  // OS-011c: the Record screen: the sources, the take, the radio
+  g_app->attach_metro_sync(&g_metro_sync);  // OS-RECCOUNT RC2: the App sets the count-in override on it while a Record count-in runs (the click with METRO Off)
   if (g_seq != nullptr) {              // (the sound, and with it the save layer, is built)
     save_host()->service.attach_claim(&firmware_has_card);  // OS-007o
     g_app->attach_saves(&save_host()->service);  // OS-007n: File's SAVE / SAVE AS, the WAV saves, the device settings' own save: all behind the card gate of hal/storage_write.h
@@ -1727,6 +1973,7 @@ bool start_app(hal::Display& display, bool first_boot) noexcept {
 #endif
 #if !O3OS_AUDIO_TEST
   g_app->attach_modules(&modsys().ui);  // OS-012b: the module pages, the engine picker, MODULES and the apps
+  g_app->attach_ptfx_runner(&ptfx_page_run, nullptr);
 #endif
   // OS-USBDISK F3: the one list of who keeps the card across passes (storage/card_claims.h); the hand-over to a computer and `sd mount` ask storage::device::card_busy().
   // A new user of the card across passes adds its claim here and nowhere else.
@@ -1787,10 +2034,14 @@ void audio_opened() noexcept {
   g_open_pending = false;
   g_live_preview.opened();  // OS-FU1: the first live note, which waited for this
   if (g_pending_song) {
-    (void)push_command(seq::Command::Kind::PlaySong, 0, static_cast<std::uint16_t>(g_pending_row));  // the Song Play that asked for them
+    if (push_command(seq::Command::Kind::PlaySong, 0, static_cast<std::uint16_t>(g_pending_row))) {  // the Song Play that asked for them
+      ++g_transport_diag.parked_played;
+    }
     g_pending_song = false;
   } else if (g_pending_pattern != 0u) {
-    (void)push_command(seq::Command::Kind::PlayPattern, g_pending_pattern);  // the Play that asked for them, from its first step
+    if (push_command(seq::Command::Kind::PlayPattern, g_pending_pattern)) {  // the Play that asked for them, from its first step
+      ++g_transport_diag.parked_played;
+    }
     g_pending_pattern = 0;
   }
 }
@@ -1920,6 +2171,7 @@ void begin_replace() noexcept {
   g_live_preview.notes_off(false);  // OS-007o: all sources (the pads' held notes too)
   if (g_app != nullptr) {
     g_app->transport_stopped();
+    g_app->cancel_ptfx();  // OS-CEPTFX S3b: a plugin run in progress gives way (its edit buffer is in the pool the load replaces)
   }
   modsys().loader.cancel();   // a `diag mod load` in progress (OS-012a) gives way
   modsys().manual = false;
@@ -2027,8 +2279,17 @@ LoadStart start_module_import(const char* file, std::uint8_t engine) noexcept {
   if (scratch_holds_arena()) {
     return LoadStart::Scratch;
   }
-  if (g_module->begin(card, file, *g_arena, static_cast<app::ImportEngine>(engine > 2u ? 0u : engine)) != app::ModuleImport::Start::Started) {
-    return LoadStart::BadPath;
+  // OS-FLASHDIET I2: the import goes through the importer module of the card (modules/importers/tracker.tmod): hand the module system to the import's proxy.
+  g_module->set_module_host(&modsys().set, &modsys().loader, &sync_code, "tracker");
+  const app::ModuleImport::Start began = g_module->begin(card, file, *g_arena, static_cast<app::ImportEngine>(engine > 2u ? 0u : engine));
+  if (!app::import_replaces_document(began)) {
+    if (began != app::ModuleImport::Start::Failed) {
+      return LoadStart::BadPath;  // BadPath / NotModule: nothing started, no report to show
+    }
+    // QA-FIL-139/140: the import was refused at begin (no importer file, one for another firmware, a module file that will not open): NO begin_replace, so no Settle clears
+    // the modules and inserts and the open project stays exactly as it is; the load phase stays Idle, so the app's next poll shows the strip from import_summary() at once.
+    g_open_refused = false;
+    return LoadStart::Started;
   }
   g_open_refused = false;
   native->release();  // from here the module's report is the load's
@@ -2299,7 +2560,237 @@ std::size_t module_line(unsigned i, char* out, std::size_t cap) noexcept {
   return 0;
 }
 
-const char* module_notices() noexcept { return module::kBuiltinNotices; }
+std::size_t ptfx_line(unsigned i, char* out, std::size_t cap) noexcept {
+#if !O3OS_AUDIO_TEST
+  const module::PtfxQuarantine& set = modsys().ptfx_q;
+  if (i > set.count()) {  // the set, then its closing line (the count and the full flag)
+    return 0;
+  }
+  return console::format_ptfx_quarantine(i, set.count(), set.id(i), module::PtfxQuarantine::why_name(set.why(i)), set.refused(), out, cap);
+#else
+  (void)i;
+  (void)out;
+  (void)cap;
+  return 0;
+#endif
+}
+
+#if !O3OS_AUDIO_TEST
+namespace {
+
+// OS-CEPTFX S3b. Console-driven and synchronous, main loop only: a scan and a header read are bounded loops over the card (the catalogue's step reads one directory page or one 472-byte header),
+// the load is at most 8 steps of 4 KiB; the run itself is the App's job (App::run_ptfx).
+const char* const kPtfxStatusName[] = {"ok", "not ptfx", "version", "not for this unit", "needs newer os", "damaged", "too big"};
+const char* ptfx_status_name(module::PtfxStatus s) noexcept {
+  const unsigned i = static_cast<unsigned>(s);
+  return i < sizeof kPtfxStatusName / sizeof kPtfxStatusName[0] ? kPtfxStatusName[i] : "?";
+}
+
+// The card is for the catalogue and the loader now, or the reason it is not.
+const char* ptfx_card() noexcept {
+  if (g_load_phase != LoadPhase::Idle || modsys().manual || storage::device::card_busy()) {
+    return "card busy";
+  }
+  return storage::device::storage().mounted() ? nullptr : "no card";
+}
+
+// Entry `n` of the catalogue, its header read into the meta's info (the file is left open for the loader, or closed when `keep` is false): null, or the reason. A run in progress refuses:
+// the image, the info and the catalogue are in use.
+const char* ptfx_open(unsigned n, hal::storage::FileHandle& file, bool keep) noexcept {
+  ModuleSystem& m = modsys();
+  if (g_app == nullptr || g_app->ptfx_busy()) {
+    return "plugin running";
+  }
+  if (const char* why = ptfx_card()) {
+    return why;
+  }
+  if (m.ptfx_cat.state() != module::PtfxCatalog::State::Done || n >= m.ptfx_cat.count()) {
+    return "run ptfx list first";
+  }
+  char path[64];
+  audio::diag::Text(path, sizeof path).str("Effects/").str(m.ptfx_cat.entry(n).file_name);
+  hal::storage::Storage& card = storage::device::storage();
+  std::uint8_t header[module::kPtfxHeaderSize];
+  std::uint32_t bytes = 0;
+  std::size_t got = 0;
+  hal::storage::Status s = card.open(path, file);
+  if (s == hal::storage::Status::Ok) {
+    s = card.size(file, bytes);
+  }
+  if (s == hal::storage::Status::Ok) {
+    s = card.read(file, header, sizeof header, got);
+  }
+  if (s != hal::storage::Status::Ok || !keep) {
+    card.close(file);
+  }
+  if (s != hal::storage::Status::Ok) {
+    return "card error";
+  }
+  (void)module::ptfx_parse_header(header, got, bytes, ptfx_meta().info);
+  return nullptr;
+}
+
+}  // namespace
+#endif
+
+const char* ptfx_scan() noexcept {
+#if !O3OS_AUDIO_TEST
+  if (const char* why = ptfx_card()) {
+    return why;
+  }
+  module::PtfxCatalog& cat = modsys().ptfx_cat;
+  if (g_app != nullptr) {
+    g_app->cancel_ptfx();  // a run reads the image the listing's plugin was loaded into; give it up first
+  }
+  if (cat.begin(storage::device::storage()) != module::PtfxCatalog::Begin::Started) {
+    return "scan failed";
+  }
+  for (unsigned n = 0; n < 1024u && cat.state() == module::PtfxCatalog::State::Scanning; ++n) {
+    (void)cat.step(8000);
+  }
+  switch (cat.state()) {
+    case module::PtfxCatalog::State::Done: return nullptr;
+    case module::PtfxCatalog::State::NoFolder: return "no Effects folder";
+    case module::PtfxCatalog::State::Scanning: cat.cancel(); return "scan too long";
+    default: return "scan failed";
+  }
+#else
+  return "not in this image";
+#endif
+}
+
+std::size_t ptfx_list_line(unsigned i, char* out, std::size_t cap) noexcept {
+#if !O3OS_AUDIO_TEST
+  const module::PtfxCatalog& cat = modsys().ptfx_cat;
+  if (i > cat.count()) {
+    return 0;
+  }
+  audio::diag::Text t(out, cap);
+  if (i == cat.count()) {  // the closing line
+    t.str("ptfx ").dec(i).str(" files").str(cat.truncated() ? ", more not listed" : "");
+    if (cat.card_errors() != 0u) {
+      t.str(", card errors ").dec(cat.card_errors());
+    }
+  } else {
+    const module::PtfxEntry& e = cat.entry(i);
+    t.dec(i).chr(' ').str(e.display_name).str(" (").str(e.file_name).str(") ").str(ptfx_status_name(e.status)).str(e.quarantined ? " quarantined" : "");
+  }
+  return t.nl().size();
+#else
+  (void)i;
+  (void)out;
+  (void)cap;
+  return 0;
+#endif
+}
+
+std::size_t ptfx_info_line(unsigned n, unsigned i, char* out, std::size_t cap) noexcept {
+#if !O3OS_AUDIO_TEST
+  module::PtfxInfo& info = ptfx_meta().info;
+  audio::diag::Text t(out, cap);
+  if (g_app == nullptr || g_app->ptfx_busy()) {  // the running job reads this info (its parameter count and values): touch nothing, print the one refusal line
+    return i == 0u ? t.str("ERR ptfx: plugin running").nl().size() : 0u;
+  }
+  if (i == 0u) {  // the header, read from the card; a failure leaves no parameter lines
+    hal::storage::FileHandle file;
+    const char* why = ptfx_open(n, file, false);
+    if (why == nullptr && info.status != module::PtfxStatus::Ok) {
+      why = ptfx_status_name(info.status);
+    }
+    if (why != nullptr) {
+      info.num_params = 0;  // (no run is in progress here: the info is free)
+      return t.str("ERR ptfx: ").str(why).nl().size();
+    }
+    t.str(info.name).str(" by ").str(info.author).str(", scratch ").dec(info.scratch_size).str(" B, code ").dec(info.code_size).str(" B, flags ").dec(info.flags).nl();
+    return t.size();
+  }
+  if (i > info.num_params) {
+    return 0;
+  }
+  const module::PtfxParam& p = info.params[i - 1u];
+  return t.str("  ").dec(i).chr(' ').str(p.label).chr(' ').chr(p.type).chr(' ').str(p.unit).nl().size();
+#else
+  (void)n;
+  (void)i;
+  (void)out;
+  (void)cap;
+  return 0;
+#endif
+}
+
+const char* ptfx_run(unsigned n, const float* values) noexcept {
+#if !O3OS_AUDIO_TEST
+  ModuleSystem& m = modsys();
+  hal::storage::FileHandle file;
+  if (const char* why = ptfx_open(n, file, true)) {
+    return why;
+  }
+  hal::storage::Storage& card = storage::device::storage();
+  PtfxMeta& meta = ptfx_meta();
+  // Everything that can refuse comes before the code is read from the card: the status, the file being the one that was listed (a card swapped after `ptfx list` has another plugin under
+  // that name: compare the header's display name with the catalogue's, which was read from the same file then), the quarantine, and the App's own (screen, sample, another job).
+  const module::PtfxEntry& entry = m.ptfx_cat.entry(n);
+  const char* refuse = nullptr;
+  if (meta.info.status != module::PtfxStatus::Ok) {
+    refuse = ptfx_status_name(meta.info.status);
+  } else if (std::strcmp(meta.info.name, entry.display_name) != 0) {
+    refuse = "file changed: run ptfx list";
+  } else if (entry.quarantined || m.ptfx_q.contains(entry.id)) {
+    refuse = "quarantined";
+  } else {
+    refuse = g_app->ptfx_refusal((entry.flags & module::kPtfxFlagGenerator) != 0u);
+  }
+  if (refuse != nullptr) {
+    card.close(file);
+    return refuse;
+  }
+  const auto at = [](std::uint32_t off) noexcept { return static_cast<std::uintptr_t>(mem::core_view(mem::kPtfxBase + off)); };
+  if (m.ptfx_loader.begin(card, file, meta.info, reinterpret_cast<void*>(at(mem::kPtfxImageOff)), mem::kPtfxImageSize, &sync_code) != module::PtfxLoader::Begin::Started) {
+    card.close(file);
+    return "plugin too big";
+  }
+  for (unsigned k = 0; k < 64u && m.ptfx_loader.state() == module::PtfxLoader::State::Running; ++k) {
+    (void)m.ptfx_loader.step(8000);
+  }
+  if (m.ptfx_loader.state() != module::PtfxLoader::State::Done) {
+    m.ptfx_loader.cancel();
+    return "load failed";
+  }
+  app::PtfxJob::Plugin p;
+  p.info = &meta.info;
+  p.entries = m.ptfx_loader.entries();
+  p.host = &m.ptfx_host;
+  p.host_table = reinterpret_cast<std::uintptr_t>(meta.table.bytes);
+  p.scratch = reinterpret_cast<void*>(at(mem::kPtfxScratchOff));
+  p.scratch_cap = mem::kPtfxScratchSize;
+  p.stack_top = at(mem::kPtfxStackTopOff);
+  p.stack_bottom = at(mem::kPtfxStackOff);
+  p.image_base = at(mem::kPtfxImageOff);
+  p.image_bytes = mem::kPtfxImageSize;
+  p.guard = reinterpret_cast<void*>(at(mem::kPtfxGuardOff));
+  p.guard_bytes = mem::kPtfxGuardSize;
+  static_assert(mem::kPtfxStereoSize == 2u * app::kPtfxBlockFrames * sizeof(std::int16_t) && mem::kPtfxStereoOff % 4u == 0u, "S5: the staging holds L and R of one block each, word aligned");
+  p.stage = reinterpret_cast<std::int16_t*>(at(mem::kPtfxStereoOff));  // S5: a stereo sample's per-block L / R input (32 KiB, the ptfx region's)
+  p.id = m.ptfx_cat.entry(n).id;
+  p.quarantine = &m.ptfx_q;
+  p.catalog = &m.ptfx_cat;
+  p.values = values;  // (the page's A15 values stay in the sample bank's memory until the run ends; nullptr: every default, as the console's run)
+  return g_app->run_ptfx(p);
+#else
+  (void)n;
+  (void)values;
+  return "not in this image";
+#endif
+}
+
+const char* ptfx_run_why() noexcept { return g_app != nullptr ? g_app->ptfx_not_ready_why() : nullptr; }
+
+bool module_notices_page(unsigned first, unsigned max_lines, NoticeSink sink, void* ctx, bool& more, unsigned& next) noexcept {
+  const module::NoticePage p = module::notices_page(module::kBuiltinNotices, ui::asset_inflater(), first, max_lines, sink, ctx);
+  more = p.more;
+  next = p.next;
+  return p.ok;
+}
 
 const char* module_bind(unsigned slot, const char* stem) noexcept {
 #if !O3OS_AUDIO_TEST
@@ -2407,6 +2898,195 @@ const char* insert_bypass(unsigned track, unsigned slot, bool on) noexcept {
 }
 
 #if !O3OS_AUDIO_TEST
+// OS-INSFX-ABI2 A8: the one path of `mod preset` and `ins preset` (the page's F5 overlay, A9, calls the same ModuleUi::apply_preset). Main loop only.
+static const char* preset_apply(app::ParamTarget target, unsigned n, char* name, std::size_t cap, unsigned& dropped) noexcept {
+  dropped = 0;
+  if (g_load_phase != LoadPhase::Idle) {
+    return "busy: a load is running";
+  }
+  if (g_editor == nullptr) {
+    return "no document";
+  }
+  app::ModuleUi& ui = modsys().ui;
+  const model::Project& project = g_editor->project();
+  const o3m_module* m = ui.bound_module(project, target);  // (looked up once: the count and the set are read from it)
+  if (m == nullptr) {
+    return "no module there";
+  }
+  app::ParamSet set;
+  if (n == 0u || !app::ModuleUi::factory_preset(m, n - 1u, set)) {
+    return app::ModuleUi::preset_count(m) == 0u ? "this module has no presets" : "no such preset";
+  }
+  std::size_t len = 0;
+  for (; len + 1u < cap && set.name[len] != '\0'; ++len) {
+    name[len] = set.name[len];
+  }
+  if (cap != 0u) {
+    name[len] = '\0';
+  }
+  const app::ModuleUi::PresetResult r = ui.apply_preset(*g_editor, target, set, &dropped);
+  return r == app::ModuleUi::PresetResult::Ok ? nullptr : app::ModuleUi::preset_text(r);
+}
+#endif
+
+const char* module_preset(unsigned slot, unsigned n, char* name, std::size_t cap, unsigned& dropped) noexcept {
+#if !O3OS_AUDIO_TEST
+  return preset_apply(app::ParamTarget(slot), n, name, cap, dropped);
+#else
+  (void)slot;
+  (void)n;
+  (void)name;
+  (void)cap;
+  dropped = 0;
+  return "this image has no sound";
+#endif
+}
+
+const char* insert_preset(unsigned track, unsigned slot, unsigned n, char* name, std::size_t cap, unsigned& dropped) noexcept {
+#if !O3OS_AUDIO_TEST
+  return preset_apply(app::ParamTarget::of_insert(track * 2u + slot), n, name, cap, dropped);
+#else
+  (void)track;
+  (void)slot;
+  (void)n;
+  (void)name;
+  (void)cap;
+  dropped = 0;
+  return "this image has no sound";
+#endif
+}
+
+#if !O3OS_AUDIO_TEST
+// OS-MODPRESET P3: `mod presets` / `mod psave` / `mod pload` and the `ins` forms. Main loop only, like every appimg call. The save is a job (the console says it started; the strip words its end, "PRESET <NAME>");
+// the load is synchronous (one cluster, as the settings file).
+static const char* preset_save_why(app::SaveService::Start s, hal::storage::WriteStatus gate) noexcept {
+  using Start = app::SaveService::Start;
+  switch (s) {
+    case Start::Started: return nullptr;
+    case Start::NoWriter: return "no card write layer";
+    case Start::NotWritable: return app::SaveService::gate_text(gate);
+    case Start::Busy: return "a save is already running";
+    case Start::NoJobSlot: return "too many jobs";
+    case Start::NoName: return "no free name on the card";
+    case Start::BadName: return "not a name the card takes";
+    case Start::Empty: return "nothing to save";
+    case Start::CardInUse: return "firmware update has the card: try again";
+    case Start::BadValues: return "values not saveable (a parameter is not a number)";  // OS-MODPRESET P3
+    default: return "could not start";
+  }
+}
+
+static const char* preset_save(app::ParamTarget target, const char* name, char* final, std::size_t cap) noexcept {
+  if (g_load_phase != LoadPhase::Idle) {
+    return "busy: a load is running";
+  }
+  if (g_editor == nullptr || g_app == nullptr || g_seq == nullptr) {
+    return "no document";
+  }
+  app::ModuleUi& ui = modsys().ui;
+  formats::preset::Preset p;
+  if (!ui.capture_preset(g_editor->project(), target, p)) {
+    return "no module there";
+  }
+  SaveHost& host = *save_host();
+  const app::SaveService::Start s = host.service.save_preset(g_app->session().jobs, p, name, final, cap);
+  return preset_save_why(s, host.writer.gate());
+}
+
+static const char* preset_load(app::ParamTarget target, const char* name, char* why, std::size_t why_cap, unsigned& skipped, unsigned& dropped) noexcept {
+  skipped = 0;
+  dropped = 0;
+  if (g_load_phase != LoadPhase::Idle) {
+    return "busy: a load is running";
+  }
+  if (g_editor == nullptr) {
+    return "no document";
+  }
+  app::ModuleUi& ui = modsys().ui;
+  app::ParamSet set;
+  const app::ModuleUi::CardPreset r = ui.read_preset(g_editor->project(), target, name, set, skipped);
+  if (r != app::ModuleUi::CardPreset::Ok) {
+    if (r == app::ModuleUi::CardPreset::OtherModule && why != nullptr && why_cap != 0u) {
+      const char* stem = ui.card_preset_module();  // the file's own module stem; no snprintf here: the image links with no heap
+      const char* head = "PRESET OF ";
+      std::size_t at = 0;
+      for (; head[at] != '\0' && at + 1u < why_cap; ++at) {
+        why[at] = head[at];
+      }
+      for (std::size_t i = 0; stem[i] != '\0' && at + 1u < why_cap; ++i, ++at) {
+        why[at] = stem[i];
+      }
+      why[at] = '\0';
+      return why;
+    }
+    return app::ModuleUi::card_preset_text(r);
+  }
+  const app::ModuleUi::PresetResult pr = ui.apply_preset(*g_editor, target, set, &dropped);
+  return pr == app::ModuleUi::PresetResult::Ok ? nullptr : app::ModuleUi::preset_text(pr);
+}
+#endif
+
+unsigned module_preset_scan(const char* stem, bool& more) noexcept {
+#if !O3OS_AUDIO_TEST
+  return modsys().ui.scan_presets(stem, more);
+#else
+  (void)stem;
+  more = false;
+  return 0;
+#endif
+}
+
+const char* module_preset_at(unsigned i) noexcept {
+#if !O3OS_AUDIO_TEST
+  const char* p = modsys().ui.card_preset_at(i);
+  return p != nullptr ? p : "";
+#else
+  (void)i;
+  return "";
+#endif
+}
+
+const char* module_preset_save(unsigned slot, const char* name, char* final, std::size_t cap) noexcept {
+#if !O3OS_AUDIO_TEST
+  return preset_save(app::ParamTarget(slot), name, final, cap);
+#else
+  (void)slot; (void)name; (void)final; (void)cap;
+  return "this image has no sound";
+#endif
+}
+
+const char* module_preset_load(unsigned slot, const char* name, char* why, std::size_t why_cap, unsigned& skipped, unsigned& dropped) noexcept {
+#if !O3OS_AUDIO_TEST
+  return preset_load(app::ParamTarget(slot), name, why, why_cap, skipped, dropped);
+#else
+  (void)slot; (void)name; (void)why; (void)why_cap;
+  skipped = 0;
+  dropped = 0;
+  return "this image has no sound";
+#endif
+}
+
+const char* insert_preset_save(unsigned track, unsigned slot, const char* name, char* final, std::size_t cap) noexcept {
+#if !O3OS_AUDIO_TEST
+  return preset_save(app::ParamTarget::of_insert(track * 2u + slot), name, final, cap);
+#else
+  (void)track; (void)slot; (void)name; (void)final; (void)cap;
+  return "this image has no sound";
+#endif
+}
+
+const char* insert_preset_load(unsigned track, unsigned slot, const char* name, char* why, std::size_t why_cap, unsigned& skipped, unsigned& dropped) noexcept {
+#if !O3OS_AUDIO_TEST
+  return preset_load(app::ParamTarget::of_insert(track * 2u + slot), name, why, why_cap, skipped, dropped);
+#else
+  (void)track; (void)slot; (void)name; (void)why; (void)why_cap;
+  skipped = 0;
+  dropped = 0;
+  return "this image has no sound";
+#endif
+}
+
+#if !O3OS_AUDIO_TEST
 // "N cycles (P.T%)": the two lines of `ins` share it.
 [[gnu::noinline]] static audio::diag::Text& insert_cycles(audio::diag::Text& t, std::uint32_t cycles) noexcept {
   const std::uint32_t tenths = audio::gov::tenths_of_block(cycles);
@@ -2421,8 +3101,19 @@ std::size_t insert_line(unsigned i, char* out, std::size_t cap) noexcept {
   if (i == 0u) {
     const audio::InsertHost::Stats& s = g_insert_host.stats();
     insert_cycles(t.str("ins: ").dec(g_insert_host.blocks()).str(" blocks, inserts "), g_insert_host.total_cycles()).str(", params ")
-        .dec(s.params).str(" stale ").dec(s.stale).str(" clipped ").dec(s.saturated).str(", forced ").dec(s.forced_instance).chr('/').dec(s.forced_aggregate).str(", activated ")
+        .dec(s.params).str(" stale ").dec(s.stale).str(" clipped ").dec(s.saturated).str(" scrubbed ").dec(s.scrubbed).str(", forced ").dec(s.forced_instance).chr('/').dec(s.forced_aggregate).str(", activated ")
         .dec(s.activations).str(" retired ").dec(s.retired).str(", ring full ").dec(s.ring_full).str(", export unsettled ").dec(s.export_unsettled);
+    t.str(", stereo reserved ").dec(audio_voices().st_reserved()).str(" of 4");  // OS-INSFX-ABI2 A5: the WIDENS track inserts' side blocks, of the cap kStMax 4 (private to the pool); a word the render writes
+    const std::uint16_t keys = g_insert_host.key_mask();  // OS-INSFX-ABI2 A6: the tracks some running insert names as its sidechain key
+    t.str(", keys");
+    for (unsigned k = 0; k < audio::kTracks; ++k) {
+      if (((keys >> k) & 1u) != 0u) {
+        t.str(" T").dec(k + 1u);
+      }
+    }
+    if (keys == 0u) {
+      t.str(" none");
+    }
     return t.size();
   }
   unsigned n = 0;
@@ -2435,8 +3126,12 @@ std::size_t insert_line(unsigned i, char* out, std::size_t cap) noexcept {
       continue;
     }
     static const char* const kPhase[] = {"off", "in", "on", "out (to bypass)", "bypassed", "out (leaving)"};
-    t.str("ins: track ").dec(in.where / 2u + 1u).str(" slot ").dec(in.where % 2u + 1u).str(": ").str(in.mod != nullptr ? in.mod->name : "?").chr(' ')
-        .str(kPhase[static_cast<unsigned>(in.phase) % 6u]);
+    if (in.where >= audio::InsertHost::kMasterWhere) {  // OS-INSFX S6: the master insert's two instances (dual mono), listed one a line
+      t.str("ins: master ").str(in.where == audio::InsertHost::kMasterWhere ? "L" : "R");
+    } else {
+      t.str("ins: track ").dec(in.where / 2u + 1u).str(" slot ").dec(in.where % 2u + 1u);
+    }
+    t.str(": ").str(in.mod != nullptr ? in.mod->name : "?").chr(' ').str(kPhase[static_cast<unsigned>(in.phase) % 6u]);
     if (in.leaving) {
       t.str(", leaving");
     }
@@ -2462,15 +3157,27 @@ std::size_t insert_line(unsigned i, char* out, std::size_t cap) noexcept {
 
 #if O3OS_BENCH
 // `diag bench insert`: the first loaded effect module this build can run (kind 2; `mod load example_effect`), or null. Bench images only.
-const o3m_module* insert_bench_module() noexcept {
+const o3m_module* insert_bench_module(bool stereo) noexcept {
   const module::ModuleSet& set = modsys().set;
   for (unsigned i = 0; i < set.count(); ++i) {
     const module::LoadedModule* lm = set.at(i);
-    if (lm != nullptr && lm->entry != nullptr && lm->header.kind == O3M_KIND_EFFECT) {
+    if (lm != nullptr && lm->entry != nullptr && lm->header.kind == O3M_KIND_EFFECT &&
+        (!stereo || audio::InsertHost::shape_of(*lm->entry) != audio::InsertHost::Shape::Mono)) {
       return lm->entry;
     }
   }
   return nullptr;
+}
+
+// OS-CEWTENV W3a (`diag bench wt`): the sample arena's free bytes (the room a recording has), main loop only. Bench images only.
+std::uint32_t sample_arena_free_bytes() noexcept {
+#if !O3OS_AUDIO_TEST
+  const std::uint32_t free_s = g_bank.free_samples();
+  const std::uint32_t bytes = (free_s > kArenaSamples ? kArenaSamples : free_s) * static_cast<std::uint32_t>(sizeof(std::int16_t));
+  return bytes > mem::kSampleArenaSize ? mem::kSampleArenaSize : bytes;
+#else
+  return mem::kSampleArenaSize;  // the tone image has no sample bank: the whole arena is free
+#endif
 }
 #endif
 
@@ -2761,6 +3468,11 @@ void poll_card(std::uint32_t now) noexcept {
   if (g_app != nullptr) {
     g_app->card_changed(status == hal::storage::Status::Ok ? app::CardEvent::Ready : app::CardEvent::NotReadable);
   }
+#if !O3OS_AUDIO_TEST
+  if (status == hal::storage::Status::Ok) {
+    wt_user_reload(true);  // OS-CEWTENV W8: the card is mounted: /Envelopes into the user contours
+  }
+#endif
 }
 
 // ---- The boot disk (OS-USBDISK U1c, mode (b)) --------------------------------------------------------------------------------------------------
@@ -2922,6 +3634,9 @@ void disk_share_pass(std::uint32_t now) noexcept {
       break;
     case DiskShare::Event::Kind::Ejected:
       g_app->card_changed(app::CardEvent::Ready);  // hazard 13: the remount ends with the event that revalidates what the OS believes about the card
+#if !O3OS_AUDIO_TEST
+      wt_user_reload(true);  // OS-CEWTENV W8: the computer may have changed /Envelopes
+#endif
       if (storage::device::swap().remount_newly_dirty()) {  // 6.3 (F5): a warning after a Host session only, and only when the session left the flag set (a card that was dirty at the share does not warn each time); everything works
         g_app->disk_notice("CARD NOT EJECTED PROPERLY: CHECK THE COMPUTER", 8000, true);
       }
@@ -2933,6 +3648,9 @@ void disk_share_pass(std::uint32_t now) noexcept {
       g_app->disk_notice(DiskShare::fail_text(e.fail), 4000, true);
       if (e.fail == DiskShare::Fail::Open) {  // the card did not start after the flip: it was given back, so it was remounted
         g_app->card_changed(storage::device::storage().mounted() ? app::CardEvent::Ready : app::CardEvent::NotReadable);
+#if !O3OS_AUDIO_TEST
+        wt_user_reload(true);  // (a no-op when the card is not mounted)
+#endif
       }
       break;
   }
@@ -3103,6 +3821,7 @@ std::uint8_t pass() noexcept {
   sync_midi_settings();
   sync_usb_return();  // OS-USBRET
   sync_metro();       // OS-METRO
+  sync_mtc();         // OS-MTC A3
   sync_project_platform_state(g_load_phase != LoadPhase::Idle);  // OS-004d
   if (g_seq != nullptr) {  // (the sound, and with it the capture device, is built)
     capture_at()->service(now);  // OS-011c: the radio's state machine, one bounded step (nothing while it is off)
@@ -3178,6 +3897,70 @@ std::size_t state_line(char* out, std::size_t cap) noexcept {
   return app::describe_state(*g_app, out, cap);
 }
 
+// OS-BUG-PLAYSTOP (`diag trans`): the transport's cold counters and the two `playing` flags, as one line. Main loop only. `app_playing` is the App's badge (it toggles
+// exactly when a play()/stop() returned true), `seq_playing` what the sequencer published.
+std::size_t transport_line(char* out, std::size_t cap) noexcept {
+  audio::diag::Text t(out, cap);
+  t.str("trans plays=").dec(g_transport_diag.plays).str(" stops=").dec(g_transport_diag.stops);
+  t.str(" refused no_audio=").dec(g_transport_diag.refused_no_audio);
+  t.str(" parked_outputs=").dec(g_transport_diag.parked_outputs).str(" parked_played=").dec(g_transport_diag.parked_played);
+  t.str(" refused ring_full=").dec(g_transport_diag.refused_ring_full);
+  t.str(" app_playing=").chr(g_app != nullptr && g_app->state().playing ? '1' : '0');
+#if !O3OS_AUDIO_TEST
+  const bool seq_playing = g_seq != nullptr && g_seq->play_position().read().playing;
+  t.str(" seq_playing=").chr(seq_playing ? '1' : '0');
+  t.str(" outputs_open=").chr(g_outputs_open ? '1' : '0').str(" audio_running=").chr(audio_running() ? '1' : '0');
+  t.str(" ring=").dec(g_seq != nullptr ? g_seq->commands().size() : 0u);
+#else
+  t.str(" audio_test=1");
+#endif
+  return t.size();
+}
+
+// OS-MTC A3 (`diag mtc`): the time code generator's state, one line; with `at`, the song time of a step by the map of OS-MTC A1 and what the walk cost. Main loop only.
+std::size_t mtc_line(char* out, std::size_t cap, bool at, std::uint32_t order, std::uint32_t step) noexcept {
+  audio::diag::Text t(out, cap);
+#if !O3OS_AUDIO_TEST
+  if (g_seq == nullptr) {
+    t.str("mtc: no sequencer");
+    return t.size();
+  }
+  if (at) {
+    const std::uint32_t c0 = o3os::hal::cycles();
+    const seq::SongPoint p = seq::song_time_at(g_seq->project(), seq::PlayMode::Song, order, step);
+    const std::uint32_t cycles = o3os::hal::cycles() - c0;
+    t.str("mtc at ").dec(order).chr(' ').dec(step).str(": samples=").dec(static_cast<std::uint32_t>(o3os::core::q32_floor(p.time))).str(" tempo_x100=").dec(p.tempo_x100).str(" swing=").dec(p.swing);
+    t.str(" capped=").chr(p.capped ? '1' : '0').str(" cycles=").dec(cycles);
+    return t.size();
+  }
+  const o3os::midi::mtc::Generator& g = g_seq->mtc();
+  t.str("mtc fps=").dec(g.fps()).str(" hour=").dec(g.hour()).str(" anchored=").chr(g.anchored() ? '1' : '0').str(" next_q=").dec(g.next_q());
+  t.str(" answered=").dec(g_mtc_sync.stats().answered).str(" capped=").dec(g_mtc_sync.stats().capped).str(" retried=").dec(g_mtc_sync.stats().retried);
+  t.str(" last_samples=").dec(static_cast<std::uint32_t>(g_mtc_sync.last_samples())).str(" request=").dec(g_seq->mtc_request());
+  if (g_midi != nullptr && g_midi->config().mtc_in != 0u) {  // OS-MTC B3: the chase (state: 1 waiting, 2 reading, 3 armed, 4 locked, 5 freewheel, 6 rate, 7 past end)
+    const midi::SyncStatus st = g_midi->status();
+    t.str(" | in=").dec(g_midi->config().mtc_in).str(" state=").dec(st.mtc_state).str(" time=").dec(st.mtc_time >> 24).chr(':').dec((st.mtc_time >> 16) & 0xFFu).chr(':').dec((st.mtc_time >> 8) & 0xFFu).chr(':').dec(st.mtc_time & 0xFFu);
+    t.str(" code=").dec(st.mtc_code).str(" ppm=");
+    if (st.mtc_rate_ppm < 0) {
+      t.chr('-');
+    }
+    t.dec(static_cast<std::uint32_t>(st.mtc_rate_ppm < 0 ? -st.mtc_rate_ppm : st.mtc_rate_ppm)).str(" err_us=");
+    if (st.mtc_error_us < 0) {
+      t.chr('-');
+    }
+    t.dec(static_cast<std::uint32_t>(st.mtc_error_us < 0 ? -st.mtc_error_us : st.mtc_error_us)).str(" reloc=").dec(st.mtc_relocations);
+    t.str(" asked=").dec(g_midi->stats().chase_requests).str(" started=").dec(g_midi->stats().chase_starts).str(" retries=").dec(g_midi->stats().chase_retries);
+    t.str(" answered=").dec(g_chase_sync.stats().answered).str(" past_end=").dec(g_chase_sync.stats().past_end).str(" dropped=").dec(g_seq->stats().chase_dropped);
+  }
+#else
+  (void)at;
+  (void)order;
+  (void)step;
+  t.str("mtc: audio_test");
+#endif
+  return t.size();
+}
+
 bool enc_accel_get(EncAccelNumbers& out) noexcept {
   if (g_app == nullptr) {
     return false;
@@ -3235,4 +4018,42 @@ namespace {
 O3OS_SDRAM_NOINIT platform::mk66::SdramBox<ui::plot::CurveScratch> g_curve_scratch;
 }  // namespace
 ui::plot::CurveScratch& params_curve_scratch() noexcept { return *g_curve_scratch; }
+}  // namespace o3os::app
+
+// OS-FLASHDIET A4: the UI assets' one raw-deflate decoder (core::Inflater, about 5.3 KB) and the 4 KiB face scratch
+// the tiles are composed from, in the SDRAM slack window (ui/CMakeLists.txt sets O3OS_UI_ASSETS_EXTERNAL for this
+// image, which drops ui's own copies in assets.cpp; it defines these two accessors). Both are written and read only
+// from the main loop, synchronously (upload_assets() at boot, face_bitmap() for the few raw readers), never in the
+// render, an ISR or SRAM_L, so the SDRAM window is the right home (SdramBox zeroes the decoder, as .bss did).
+namespace o3os::ui {
+namespace {
+O3OS_SDRAM_NOINIT platform::mk66::SdramBox<core::Inflater> g_asset_inflater;
+O3OS_SDRAM_NOINIT alignas(4) std::uint8_t g_face_scratch[kFaceScratchBytes];
+}  // namespace
+core::Inflater& asset_inflater() noexcept { return *g_asset_inflater; }
+std::uint8_t* face_scratch() noexcept { return g_face_scratch; }
+}  // namespace o3os::ui
+
+// OS-FLASHDIET P5: the platform text pools (platform/mk66/text/include/o3os/platform/mk66/text.h) inflate through the same decoder; the platform cannot name ui, so this root answers.
+namespace o3os::platform::mk66 {
+core::Inflater& text_inflater() noexcept { return ui::asset_inflater(); }
+}  // namespace o3os::platform::mk66
+
+// OS-FLASHDIET A7: the help page buffer (app::HelpPageBuf, 4 KiB) that help_page() serves from
+// (app/src/help_text.cpp; app/CMakeLists.txt sets O3OS_HELP_PAGE_BUF_EXTERNAL for this image, which drops app's
+// own copy in help_text.cpp). It is written and read only from the main loop, synchronously (the help
+// overlay's count and draw, through help_page()), never in the render, an ISR or SRAM_L, so the SDRAM slack
+// window is the right home (SdramBox zeroes it, as .bss did).
+namespace o3os::app {
+namespace {
+O3OS_SDRAM_NOINIT platform::mk66::SdramBox<app::HelpPageBuf> g_help_page_buf;
+}  // namespace
+app::HelpPageBuf& help_page_buf() noexcept { return *g_help_page_buf; }
+
+// OS-FLASHDIET P3: the FX picker's decoded-text cache (app::FxTextCache, 0.9 KB; app/src/fx_text.cpp, O3OS_FX_TEXT_CACHE_EXTERNAL). Main loop only (the step popup's and the Fill dialog's draw),
+// synchronous, never the render or an ISR, so SDRAM like the help page buffer (SdramBox zeroes it: the empty state).
+namespace {
+O3OS_SDRAM_NOINIT platform::mk66::SdramBox<app::FxTextCache> g_fx_text_cache;
+}  // namespace
+app::FxTextCache& fx_text_cache() noexcept { return *g_fx_text_cache; }
 }  // namespace o3os::app

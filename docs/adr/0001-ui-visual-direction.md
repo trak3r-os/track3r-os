@@ -23,3 +23,4 @@ Exact palette, font sizes and grid metrics; whether a user-selectable theme set 
 
 ## Amendments
 - **2026-10-13 (maintainer):** one red token, `Color::Rec`, for record mode only (frame, REC badge, playhead row), because the maintainer asked for "something in red or something very visible". It is the 17th theme colour; the style guide lists it with its contrast pairs. No other screen uses red, and the module SDK keeps its 16 colours.
+- **2026-11-08 (maintainer request OS-SELTINT):** one more token, `Color::SelDim`, the 18th: the duller selection blue of the tracks of a multi-track block other than the cursor's. The style guide lists it with its contrast pairs; the module SDK keeps its 16 colours.

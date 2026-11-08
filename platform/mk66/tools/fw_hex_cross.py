@@ -97,6 +97,11 @@ def build_corpus(ci, real_text):
         segments = dict(good)
         segments[code_end] = b"\xFF" * extra
         add("sector end: " + label, ci.make_hex(segments))
+    # The last flash sector must stay free (OS-BUG-LASTSECTOR): end 0xFF000 is accepted by both, 0xFF001 and 0x100000 are refused by both.
+    for end, label in ((0xFF000, "ends at 0xFF000"), (0xFF001, "ends at 0xFF001"), (0x100000, "ends at 0x100000")):
+        segments = dict(good)
+        segments[code_end] = b"\xFF" * (end - code_end)
+        add("last sector: " + label, ci.make_hex(segments))
     add("image not starting at 0", ci.make_hex({a + 4: b for a, b in good.items()}))
 
     # Head, SP, reset, vectors.

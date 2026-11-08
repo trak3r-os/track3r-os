@@ -2,7 +2,7 @@
   "name": "TB-303",
   "id": "tb303",
   "kind": "instrument",
-  "abi": "1.8",
+  "abi": "1.13",
   "description": "An acid bass voice: a float port of Open303 (MIT). One mono voice an instance.",
   "state_bytes": 432,
   "params": [
@@ -26,6 +26,7 @@
     {"name": "Envelope", "min_size": [160, 100], "preferred_size": [380, 140]}
   ],
   "pitch": true,
+  "rate": true,
   "pages": [
     {"name": "SOUND", "first": 0},
     {"name": "MODS", "first": 8}

@@ -21,7 +21,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Reading order. Chapters not named here follow alphabetically; index.md and the template are never included.
 ORDER = ["install.md", "getting_started.md", "panel.md", "song.md", "mixer.md", "perform.md", "perform_dj.md", "sample_load.md",
-         "sample_edit.md", "wave.md", "record.md", "file.md", "usb_disk.md", "modules.md", "module-sounds.md", "module-instrument-fx.md", "config.md",
+         "sample_edit.md", "wave.md", "record.md", "file.md", "usb_disk.md", "modules.md", "module-sounds.md", "module-instrument-fx.md", "insert_effects.md", "config.md",
          "computer_tools.md", "glossary.md"]
 SKIP = {"index.md", "chapter-template.md"}
 # One-line notes for chapters whose opening sentence says too little for a link list; the rest are derived from the chapter.
@@ -33,6 +33,7 @@ NOTES = {
     "modules.md": "installing .tmod modules from the card and the bundled apps",
     "module-sounds.md": "the new parameters of the TB-303 (MODS page), FM (16 algorithms, Detune) and Chip (learnable wave and duty)",
     "module-instrument-fx.md": "which step FX a module instrument obeys",
+    "insert_effects.md": "the Fold, Env Filter, Phaser and Comp track inserts: what each does and its settings",
     "computer_tools.md": "the USB console on a computer: connect, screenshots, firmware path, diagnostics, key injection",
     "glossary.md": "every term of the manual, one entry each",
 }

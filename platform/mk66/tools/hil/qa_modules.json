@@ -802,7 +802,7 @@
    "say": "QA-MOD-104: with an old card copy of a module of ABI 1.7 or below (if one is on the card), the same pattern has no slide and no legato."
   },
   {
-   "say": "QA-MOD-105 / 106: open the Instrument page of TB-303, Chip and FM: the key row says SOUND/MODS, TONE/ENV/PITCH/ARP, OP1..OP4; Chip Wave and Duty and FM Algorithm show names. Check the page names are legible on the key tile. QA-MOD-107: on TB-303 (two pages) F1 and F2 carry names and F3, F4, F5 are blank (no dimmed 17-24 / 25-32); a blank key does nothing. Then a module with no parameters: F1..F5 are all blank, F1 does nothing, and the info line reads MODULE <name> NO PARAMETERS: nothing to edit."
+   "say": "QA-MOD-105 / 106: open the Instrument page of TB-303, Chip and FM: the key row says SOUND/MODS, TONE/ENV/PITCH/OSC/FX, OP1..OP4; Chip Wave and Duty and FM Algorithm show names. Check the page names are legible on the key tile. QA-MOD-107: on TB-303 (two pages) F1 and F2 carry names and F3, F4, F5 are blank (no dimmed 17-24 / 25-32); a blank key does nothing. Then a module with no parameters: F1..F5 are all blank, F1 does nothing, and the info line reads MODULE <name> NO PARAMETERS: nothing to edit."
   },
   {
    "cmd": "cpu reset",

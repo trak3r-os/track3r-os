@@ -26,6 +26,7 @@ Key notation: keys are written in code style, for example `Shift` + `F3` or hold
 - [Modules](modules.md): installing .tmod modules from the card and the bundled apps
 - [TB-303, FM and Chip: new parameters](module-sounds.md): the new parameters of the TB-303 (MODS page), FM (16 algorithms, Detune) and Chip (learnable wave and duty)
 - [Step FX on module instruments](module-instrument-fx.md): which step FX a module instrument obeys
+- [Insert effects: Fold, Env Filter, Phaser and Comp](insert_effects.md): the Fold, Env Filter, Phaser and Comp track inserts: what each does and its settings
 - [Config](config.md): Use the Config screen to change the unit's settings.
 - [Computer tools](computer_tools.md): the USB console on a computer: connect, screenshots, firmware path, diagnostics, key injection
 - [Glossary](glossary.md): every term of the manual, one entry each

@@ -103,6 +103,18 @@ std::size_t random_budget(o3os::test::Rng& rng) {
   return b[rng.below(6)];
 }
 
+// Imports one pattern file into a fresh arena 0, like og_pattern_test does.
+Progress import_pattern(const Bytes& file, unsigned id, og_ns::ImportReport* rep) {
+  static og_ns::PatternReader r;
+  model::Project& p = arena(0).project;
+  p.reset();
+  formats::ReadParams params;
+  params.index = static_cast<std::uint16_t>(id);
+  const Progress res = run_reader(r, file, arena(0), params);
+  if (rep != nullptr) *rep = r.import_report();
+  return res;
+}
+
 // Runs the reader to the end over `bytes`. False when it never ends.
 template <class R>
 bool drive(R& r, const Bytes& bytes, model::ModelArena& a, formats::ReadParams params, o3os::test::Rng& rng,
@@ -125,7 +137,7 @@ TEST_CASE("og hostile: mutated patterns") {
   static og_ns::PatternReader reader;
   static og_ns::PatternWriter writer;
   const Bytes corpus[] = {pattern_bytes(rich_pattern(12, 5, 91)), pattern_bytes(rich_pattern(8, 4, 92)),
-                          pattern_bytes(rich_pattern(8, 1, 93))};
+                          pattern_bytes(rich_pattern(8, 1, 93)), pattern_bytes(rich_pattern(16, 5, 94))};  // 16-track v5 (OS-CEPAT S1b)
   o3os::test::Rng rng(0xA11CE);
   Tally t;
   for (std::uint32_t i = 0; i < runs(3000); ++i) {
@@ -133,7 +145,7 @@ TEST_CASE("og hostile: mutated patterns") {
     p.reset();
     NEED(p.create_pattern(9, 5) == model::Status::Ok);
     const Snapshot before = snap(p);
-    const Bytes in = mutate(corpus[rng.below(3)], rng, -1, i % 2 == 0);
+    const Bytes in = mutate(corpus[rng.below(4)], rng, -1, i % 2 == 0);
     formats::ReadParams params;
     params.index = static_cast<std::uint16_t>(rng.below(4) == 0 ? rng.below(300) : 7);
     Progress result = Progress::Running;
@@ -161,6 +173,176 @@ TEST_CASE("og hostile: mutated patterns") {
   }
   CHECK(t.done > t.runs / 20);    // the mutations are not all fatal: the accepting paths ran
   CHECK(t.failed > t.runs / 20);  // and not all harmless
+}
+
+TEST_CASE("og hostile: v6 framing (OS-CEPAT S1)") {
+  og_ns::ImportReport rep;
+  model::Project& proj = arena(0).project;
+  const PatternSpec6 good_spec = rich_pattern6(16, 6, 51);
+  const Bytes good = pattern6_bytes(good_spec);
+  CHECK(good.size() == 16432);
+
+  // a declared size that is not one of the three v6 sizes is refused with the pattern removed
+  for (std::uint32_t bad_size : {0u, 6184u, 9260u, 8233u, 12333u, 16431u, 65535u}) {
+    Bytes f = good;
+    p16(f, 12, bad_size);
+    seal(f);
+    CHECK(import_pattern(f, 1, &rep) == Progress::Failed);
+    CHECK_MESSAGE(rep.error == FormatError::Malformed, "size " << bad_size);
+    CHECK(proj.pattern_count() == 0);
+  }
+  // v6 at a v5 size: the version says 6, the size field says 9,260
+  {
+    Bytes f = good;
+    p16(f, 12, 9260);
+    seal(f);
+    CHECK(import_pattern(f, 1, &rep) == Progress::Failed);
+    CHECK(rep.error == FormatError::Malformed);
+    CHECK(proj.pattern_count() == 0);
+  }
+  // v5 at a v6 size: for v <= 5 the declared size is ignored, the stream decides, as today
+  {
+    const PatternSpec v5 = rich_pattern(12, 5, 52);
+    Bytes f = pattern_bytes(v5);
+    p16(f, 12, 16432);  // a v6 size in a v5 head
+    seal(f);
+    CHECK(import_pattern(f, 1, &rep) == Progress::Done);
+    CHECK(rep.version == 5);
+    CHECK(rep.tracks == 12);
+    NEED(proj.pattern(1) != nullptr);
+  }
+  // a v6 stream with the version byte of v5: the v5 stream detection runs over 1,025-byte rows and refuses it
+  {
+    Bytes f = good;
+    for (unsigned i = 8; i < 12; ++i) f[i] = 5;
+    seal(f);
+    CHECK(import_pattern(f, 1, &rep) == Progress::Failed);
+    CHECK(proj.pattern_count() == 0);
+  }
+  // truncated at offsets inside the head, the rows, the CRC and the end
+  for (std::size_t n : {std::size_t{0}, std::size_t{1}, std::size_t{27}, std::size_t{28}, std::size_t{29},
+                        std::size_t{1000}, std::size_t{28 + 1025 * 8}, std::size_t{28 + 1025 * 8 + 4},
+                        std::size_t{28 + 1025 * 15}, good.size() - 5, good.size() - 4, good.size() - 1}) {
+    const Bytes cut(good.begin(), good.begin() + static_cast<std::ptrdiff_t>(n));
+    CHECK_MESSAGE(import_pattern(cut, 1, &rep) == Progress::Failed, "cut at " << n);
+    CHECK_MESSAGE(rep.error == FormatError::Truncated, "cut at " << n);
+    CHECK(proj.pattern_count() == 0);
+  }
+  // one extra byte after the CRC
+  {
+    Bytes f = good;
+    f.push_back(0);
+    CHECK(import_pattern(f, 1, &rep) == Progress::Failed);
+    CHECK(rep.error == FormatError::Malformed);
+    CHECK(proj.pattern_count() == 0);
+  }
+  // a bad CRC, at the end and inside
+  {
+    Bytes f = good;
+    f[f.size() - 1] ^= 0xFF;
+    CHECK(import_pattern(f, 1, &rep) == Progress::Failed);
+    CHECK(rep.error == FormatError::BadCrc);
+    CHECK(proj.pattern_count() == 0);
+    f = good;
+    f[1000] ^= 0x10;
+    CHECK(import_pattern(f, 1, &rep) == Progress::Failed);
+    CHECK(rep.error == FormatError::BadCrc);
+    CHECK(proj.pattern_count() == 0);
+  }
+  // a length byte above 127 in a v6 row
+  {
+    PatternSpec6 s = rich_pattern6(8, 6, 53);
+    s.length[3] = 200;
+    CHECK(import_pattern(pattern6_bytes(s), 1, &rep) == Progress::Failed);
+    CHECK(rep.error == FormatError::Malformed);
+    CHECK(proj.pattern_count() == 0);
+  }
+  // volume and micromove of 127 and -2: read, mapped as 3.3 says
+  {
+    PatternSpec6 s = empty_pattern6(8, 6);
+    s.step[0][0][6] = 127; s.step[0][0][7] = 127;
+    s.step[0][1][6] = static_cast<std::uint8_t>(-2); s.step[0][1][7] = static_cast<std::uint8_t>(-2);
+    s.step[0][2][6] = 100; s.step[0][2][7] = 100;
+    CHECK(import_pattern(pattern6_bytes(s), 1, &rep) == Progress::Done);
+    const model::Pattern* p = proj.pattern(1);
+    NEED(p != nullptr);
+    CHECK(p->steps[0][0].vol == 127);                                   // 127: clamped to full, counted
+    CHECK(p->steps[0][0].fx[0].type == 2);                              // m 127: kept as stored
+    CHECK(p->steps[0][0].fx[0].value == 127);
+    CHECK(p->steps[0][1].vol == model::kVolumeUnset);                   // -2: none
+    CHECK(p->steps[0][1].fx[0].type == 0);                              // m -2: nothing
+    CHECK(p->steps[0][1].fx[1].type == 0);
+    CHECK(p->steps[0][2].vol == 127);                                   // 100 -> floor(100 * 127 / 100)
+    CHECK(p->steps[0][2].fx[0].type == 2);
+    CHECK(p->steps[0][2].fx[0].value == 100);
+    CHECK(rep.values_clamped == 1);
+    CHECK(rep.micromoves_dropped == 0);
+  }
+  // and the good file still loads after all that
+  CHECK(import_pattern(good, 1, &rep) == Progress::Done);
+  CHECK(rep.tracks == 16);
+  CHECK(proj.pattern(1) != nullptr);
+}
+
+TEST_CASE("og hostile: 16-track v5 framing (OS-CEPAT S1b)") {
+  og_ns::ImportReport rep;
+  model::Project& proj = arena(0).project;
+  const PatternSpec good_spec = rich_pattern(16, 5, 61);
+  const Bytes good = pattern_bytes(good_spec);
+  CHECK(good.size() == 12336);
+  CHECK(import_pattern(good, 1, &rep) == Progress::Done);
+  CHECK(rep.version == 5);
+  CHECK(rep.tracks == 16);
+  NEED(proj.pattern(1) != nullptr);
+
+  // truncated inside the 13th row and everywhere past the fork after row 12
+  for (std::size_t n : {std::size_t{28 + 769 * 12 + 1}, std::size_t{28 + 769 * 12 + 5}, std::size_t{28 + 769 * 12 + 500},
+                        std::size_t{28 + 769 * 13}, std::size_t{28 + 769 * 15 + 100}, good.size() - 5, good.size() - 1}) {
+    const Bytes cut(good.begin(), good.begin() + static_cast<std::ptrdiff_t>(n));
+    CHECK_MESSAGE(import_pattern(cut, 1, &rep) == Progress::Failed, "cut at " << n);
+    CHECK_MESSAGE(rep.error == FormatError::Truncated, "cut at " << n);
+    CHECK(proj.pattern_count() == 0);
+  }
+  // the fork after row 12 with exactly four bytes left reads as the 12-track file: those bytes are then its CRC, and fail
+  {
+    const Bytes cut(good.begin(), good.begin() + static_cast<std::ptrdiff_t>(28 + 769 * 12 + 4));
+    CHECK(import_pattern(cut, 1, &rep) == Progress::Failed);
+    CHECK(rep.error == FormatError::BadCrc);
+    CHECK(proj.pattern_count() == 0);
+  }
+  // one extra byte after the CRC of the 16-track file
+  {
+    Bytes f = good;
+    f.push_back(0);
+    CHECK(import_pattern(f, 1, &rep) == Progress::Failed);
+    CHECK(rep.error == FormatError::Malformed);
+    CHECK(proj.pattern_count() == 0);
+  }
+  // a bad CRC, at the end and inside
+  {
+    Bytes f = good;
+    f[f.size() - 1] ^= 0xFF;
+    CHECK(import_pattern(f, 1, &rep) == Progress::Failed);
+    CHECK(rep.error == FormatError::BadCrc);
+    CHECK(proj.pattern_count() == 0);
+    f = good;
+    f[1000] ^= 0x10;
+    CHECK(import_pattern(f, 1, &rep) == Progress::Failed);
+    CHECK(rep.error == FormatError::BadCrc);
+    CHECK(proj.pattern_count() == 0);
+  }
+  // a length byte above 127 in the 13th row
+  {
+    PatternSpec s = rich_pattern(16, 5, 62);
+    s.length[12] = 200;
+    CHECK(import_pattern(pattern_bytes(s), 1, &rep) == Progress::Failed);
+    CHECK(rep.error == FormatError::Malformed);
+    CHECK(proj.pattern_count() == 0);
+  }
+  // and the good file still loads after all that
+  CHECK(import_pattern(good, 1, &rep) == Progress::Done);
+  CHECK(rep.tracks == 16);
+  CHECK(proj.pattern(1) != nullptr);
 }
 
 TEST_CASE("og hostile: mutated instruments") {

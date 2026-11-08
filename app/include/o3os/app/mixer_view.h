@@ -9,7 +9,7 @@
 //   ROUTING   row = the source: T1..Tn, LINE IN, RET A, RET B, OUT MODE; env = the destination: MAIN, CUE, SND A, SND B, REC, USB (a return has MAIN and CUE only; OUT MODE has none)
 //   MASTER FX row = the master section's eight parameters in table order (VOLUME, DRY, REVERB, DELAY, the three mutes, LIMITER), CUE LEVEL, then the twelve controls of the send effects (OS-SENDFX) and the limiter's three (OS-LIMIT)
 //   STEMS     row 0 = OUTPUTS (OS-USBOUTS: the number of USB outputs, a pending value applied by F6 twice), row n = the USB slot Sn (S1..), env = a source of the slot (T1..T12, ML, MR, SA, SB)
-//   INSERTS   row = the track T1..Tn, then MASTER; env = INS A (0) or INS B (1) (OS-INSFX S4: the effect modules on the strips; the MASTER cells are shown and not assignable until S6)
+//   INSERTS   row = the track T1..Tn, then MASTER; env = INS A (0) or INS B (1) (OS-INSFX S4: the effect modules on the strips; S6: the MASTER row has one cell, the master insert, dual mono)
 
 #include <o3os/app/mix_board.h>
 #include <o3os/app/model.h>
@@ -28,7 +28,7 @@ inline constexpr unsigned kMixerPages = 5;
 // which no preset ever filled), F7 mutes and F8 solos what the cursor is on.
 inline constexpr const char* kMixerSoftKeys[8] = {"MIXER", "ROUTING", "MST FX", "STEMS", "CUE LVL", "INSERTS", "MUTE", "SOLO"};
 // On the INSERTS page F7 is BYPASS (the insert under the cursor; the mute of a track does not apply there) and F8 stays SOLO, the track's (TRACKS ONLY on the master row).
-inline constexpr const char* kMixerInsertKeys[8] = {"MIXER", "ROUTING", "MST FX", "STEMS", "CUE LVL", "INSERTS", "BYPASS", "SOLO"};
+inline constexpr const char* kMixerInsertKeys[8] = {"MIXER", "ROUTING", "MST FX", "STEMS", "CUE LVL", "PARAMS", "BYPASS", "SOLO"};  // OS-INSKEYS: F6 is PARAMS on this page (mixer.params, as the Params button)
 // On the STEMS page F6 is APPLY: the pending OUTPUTS value (OS-USBOUTS), pressed twice because the port re-enumerates.
 inline constexpr const char* kMixerStemKeys[8] = {"MIXER", "ROUTING", "MST FX", "STEMS", "CUE LVL", "APPLY", "MUTE", "SOLO"};
 // While Shift is held (OS-SHIFTROW): F7 UNMUTE (every strip), F8 UNSOLO (every strip): mixer.mute_none / mixer.solo_none, one undo unit each. Not REDO: F8 is SOLO here. F1 NAME (OS-NAMES): the track's name.

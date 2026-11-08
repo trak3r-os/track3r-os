@@ -19,6 +19,7 @@
 #include <o3os/platform/host/fake_storage.h>
 #include <o3os/platform/host/fakes.h>
 
+#include <cstring>
 #include <memory>
 #include <string>
 
@@ -209,9 +210,9 @@ TEST_CASE("config: the PATTERN page has METRO, METRO VOL and COUNT-IN after the 
   }
   // The MIDI page lost the row.
   rig.tap(Button::F1);
-  CHECK(app::kConfigScreen.count(rig.app->model(), rig.app->state()) == 9);  // 7 before E-CFG-03 added TRANSPORT IN and OUT
-  std::uint16_t fields[12];
-  const unsigned n = model::param_group_fields(core::ParamKind::Device, 0, 0, fields, 12);
+  CHECK(app::kConfigScreen.count(rig.app->model(), rig.app->state()) == 13);  // 12 before OS-MTC B3 added MTC IN, 10 before OS-MTC A3 added MTC OUT and MTC START, 9 before OS-MIDICCMAP S1 added CC MAP (7 before E-CFG-03 added TRANSPORT IN and OUT)
+  std::uint16_t fields[13];
+  const unsigned n = model::param_group_fields(core::ParamKind::Device, 0, 0, fields, 13);
   for (unsigned i = 0; i < n; ++i) {
     CHECK(fields[i] != ds::MetronomeVolume);
   }
@@ -557,11 +558,11 @@ TEST_CASE("config: the USB page draws the pending value starred, the armed promp
   }
 }
 
-TEST_CASE("config: the MIDI page has the clock, the ports and the channels; the encoder edits the row, Delete puts the default back, with no project open") {
+TEST_CASE("config: the MIDI page has the clock, the ports, the channels and CC MAP; the encoder edits the row, Delete puts the default back, with no project open") {
   Rig rig;
-  CHECK(app::kConfigScreen.count(rig.app->model(), rig.app->state()) == 9);  // (eight until OS-METRO moved METRO VOL to the PATTERN page, seven until E-CFG-03 added TRANSPORT IN and OUT)
+  CHECK(app::kConfigScreen.count(rig.app->model(), rig.app->state()) == 13);  // (twelve before OS-MTC B3 added MTC IN; ten before OS-MTC A3 added MTC OUT and MTC START; nine before OS-MIDICCMAP S1 added CC MAP; eight until OS-METRO moved METRO VOL to the PATTERN page, seven until E-CFG-03 added TRANSPORT IN and OUT)
   CHECK(rig.app->model().project == nullptr);
-  // The rows: CLOCK IN, CLOCK SYNC, CLOCK MODE, TRANSPORT IN, TRANSPORT OUT, MIDI IN, MIDI OUT, IN CHANNEL, OUT CHANNEL.
+  // The rows: CLOCK IN, CLOCK SYNC, CLOCK MODE, TRANSPORT IN, TRANSPORT OUT, MTC OUT, MTC START, MTC IN, MIDI IN, MIDI OUT, IN CHANNEL, CC MAP, OUT CHANNEL.
   for (int i = 0; i < 2; ++i) {
     rig.tap(Button::Down);
   }
@@ -575,8 +576,11 @@ TEST_CASE("config: the MIDI page has the clock, the ports and the channels; the 
   CHECK(rig.get(ds::ClockMode) == 0.0f);
   rig.tap(Button::Down);                  // TRANSPORT IN
   rig.tap(Button::Down);                  // TRANSPORT OUT
+  rig.tap(Button::Down);                  // MTC OUT
+  rig.tap(Button::Down);                  // MTC START
+  rig.tap(Button::Down);                  // MTC IN (OS-MTC B3)
   rig.tap(Button::Down);                  // MIDI IN
-  CHECK(rig.row() == 5);
+  CHECK(rig.row() == 8);
   rig.turn(-1);
   CHECK(rig.get(ds::MidiInPort) == 1.0f);  // USB
   rig.tap(Button::Down);
@@ -584,7 +588,10 @@ TEST_CASE("config: the MIDI page has the clock, the ports and the channels; the 
   rig.turn(3);
   CHECK(rig.get(ds::MidiInChannel) == 3.0f);
   rig.shift_tap(Button::Down);            // (Shift + Down is no binding here: the Cursor's Down runs)
-  CHECK(rig.row() == 8);
+  CHECK(rig.row() == 11);                  // CC MAP (OS-MIDICCMAP S1, after IN CHANNEL)
+  CHECK(rig.get(ds::CcMap) == 0.0f);      // Off, the default
+  rig.tap(Button::Down);                  // OUT CHANNEL
+  CHECK(rig.row() == 12);
   rig.turn(40);
   CHECK(rig.get(ds::MidiOutChannel) == 16.0f);  // 1..16, clamped
   rig.turn(-100);
@@ -593,7 +600,7 @@ TEST_CASE("config: the MIDI page has the clock, the ports and the channels; the 
   for (int i = 0; i < 20; ++i) {
     rig.tap(Button::Down);
   }
-  CHECK(rig.row() == 8);
+  CHECK(rig.row() == 12);
   for (int i = 0; i < 20; ++i) {
     rig.tap(Button::Up);
   }
@@ -631,7 +638,13 @@ TEST_CASE("config: TRANSPORT rows are on the MIDI page after CLOCK MODE; the enc
   CHECK(rig.get(ds::TransportIn) == 1.0f);
   rig.turn(3);
   CHECK(rig.get(ds::TransportOut) == 1.0f);  // On is the last
-  // the rows after them are the ports
+  // the rows after them are MTC OUT and MTC START (OS-MTC A3), MTC IN (OS-MTC B3), then the ports
+  rig.tap(Button::Down);
+  CHECK(focus() == core::param_id(core::ParamKind::Device, 0, ds::MtcOut));
+  rig.tap(Button::Down);
+  CHECK(focus() == core::param_id(core::ParamKind::Device, 0, ds::MtcStart));
+  rig.tap(Button::Down);
+  CHECK(focus() == core::param_id(core::ParamKind::Device, 0, ds::MtcIn));
   rig.tap(Button::Down);
   CHECK(focus() == core::param_id(core::ParamKind::Device, 0, ds::MidiInPort));
   for (const unsigned id : {static_cast<unsigned>(ds::TransportIn), static_cast<unsigned>(ds::TransportOut)}) {
@@ -642,13 +655,47 @@ TEST_CASE("config: TRANSPORT rows are on the MIDI page after CLOCK MODE; the enc
   }
   CHECK(std::string(model::param_desc(core::param_id(core::ParamKind::Device, 0, ds::TransportIn))->name) == "TRANSP IN");  // the caption holds 12 characters
   CHECK(std::string(model::param_desc(core::param_id(core::ParamKind::Device, 0, ds::TransportOut))->name) == "TRANSP OUT");
-  // The page has nine rows (ParamView::kConfigRows; the data pane holds sixteen): the cursor reaches the last.
+  // The page has thirteen rows (ParamView::kConfigRows; the data pane holds sixteen): the cursor reaches the last.
   rig.tap(Button::F1);
-  for (int i = 0; i < 8; ++i) {
+  for (int i = 0; i < 12; ++i) {
     rig.tap(Button::Down);
   }
-  CHECK(rig.row() == 8);
+  CHECK(rig.row() == 12);
   CHECK(focus() == core::param_id(core::ParamKind::Device, 0, ds::MidiOutChannel));
+}
+
+// OS-MIDICCMAP S1 (docs/specs/OS-MIDICCMAP.md, Q1 a): the CC MAP row on the MIDI page, after IN CHANNEL and before OUT CHANNEL (Off, On; the default Off, saved in settings.o3st).
+TEST_CASE("config: the CC MAP row is on the MIDI page after IN CHANNEL; the encoder changes the device value and its generation, Delete puts Off back, it is not learnable") {
+  Rig rig;
+  const auto focus = [&] { return app::kConfigScreen.focus_param(rig.app->model(), rig.app->state()); };
+  for (int i = 0; i < 10; ++i) {
+    rig.tap(Button::Down);  // IN CHANNEL is row 10 (since OS-MTC B3's MTC IN; 9 with OS-MTC A3's two rows, 7 before)
+  }
+  CHECK(rig.row() == 10);
+  CHECK(focus() == core::param_id(core::ParamKind::Device, 0, ds::MidiInChannel));
+  rig.tap(Button::Down);  // CC MAP
+  CHECK(rig.row() == 11);
+  CHECK(focus() == core::param_id(core::ParamKind::Device, 0, ds::CcMap));
+  CHECK(rig.get(ds::CcMap) == 0.0f);  // Off, the default
+  const std::uint32_t gen = rig.generation(ds::CcMap);
+  rig.turn(1);
+  CHECK(rig.get(ds::CcMap) == 1.0f);  // On
+  CHECK(rig.generation(ds::CcMap) != gen);
+  rig.turn(3);
+  CHECK(rig.get(ds::CcMap) == 1.0f);  // On is the last
+  rig.tap(Button::Delete);
+  CHECK(rig.get(ds::CcMap) == 0.0f);  // Delete puts the default (Off) back
+  // Its place: OUT CHANNEL is the row after it.
+  rig.tap(Button::Down);
+  CHECK(rig.row() == 12);
+  CHECK(focus() == core::param_id(core::ParamKind::Device, 0, ds::MidiOutChannel));
+  // The descriptor: Off / On, default Off, not learnable, on the MIDI page.
+  const core::ParamDesc* d = model::param_desc(core::param_id(core::ParamKind::Device, 0, ds::CcMap));
+  NEED(d != nullptr);
+  CHECK(std::string(d->name) == "CC MAP");
+  CHECK((d->min == 0.0f && d->max == 1.0f && d->def == 0.0f));
+  CHECK((d->flags & core::kParamLearnable) == 0);
+  CHECK(model::param_group_name(core::ParamKind::Device, d->group) == std::string("MIDI"));
 }
 
 TEST_CASE("config: a page change starts at its first row; SD and INFO have no rows and no parameter to edit") {
@@ -776,8 +823,8 @@ TEST_CASE("config: Shift + F7 DEFAULTS asks first and resets the page on a secon
   rig.tap(Button::Down);
   rig.tap(Button::Down);  // CLOCK MODE (row 2)
   rig.turn(1);
-  for (int i = 0; i < 5; ++i) {
-    rig.tap(Button::Down);  // IN CHANNEL (row 7: TRANSPORT IN and OUT, E-CFG-03, and MIDI IN and OUT are between)
+  for (int i = 0; i < 8; ++i) {
+    rig.tap(Button::Down);  // IN CHANNEL (row 10: TRANSPORT IN and OUT, E-CFG-03, MTC OUT and MTC START, OS-MTC A3, MTC IN, OS-MTC B3, and MIDI IN and OUT are between)
   }
   rig.turn(3);
   CHECK(rig.get(ds::ClockMode) == 1.0f);
@@ -787,8 +834,8 @@ TEST_CASE("config: Shift + F7 DEFAULTS asks first and resets the page on a secon
   const float rec_poly = rig.get(ds::RecPoly);
   CHECK(rec_poly == 1.0f);
   rig.tap(Button::F1);
-  for (int i = 0; i < 7; ++i) {
-    rig.tap(Button::Down);  // IN CHANNEL
+  for (int i = 0; i < 10; ++i) {
+    rig.tap(Button::Down);  // IN CHANNEL (row 10: MTC IN, OS-MTC B3, sits between MTC START and MIDI IN)
   }
   const int row = rig.row();
 
@@ -1189,4 +1236,102 @@ TEST_CASE("config: F7's question takes the head of the strip over Info news and 
   rig.tap(Button::F7);
   CHECK(rig.get(ds::UsbAudio) == 1.0f);  // applied
   CHECK(rig.last_news() == "USB RECONNECTING");
+}
+
+// OS-MTC A3 (docs/specs/OS-MTC.md 3.7): MTC OUT and MTC START, the MIDI page's rows after TRANSP OUT (Off / 24 / 25 / 30 fps, default Off; 0..23 h, default 01).
+TEST_CASE("config: the MTC OUT and MTC START rows are on the MIDI page after TRANSP OUT; the encoder edits them, Delete puts the defaults back, neither is learnable") {
+  Rig rig;
+  const auto focus = [&] { return app::kConfigScreen.focus_param(rig.app->model(), rig.app->state()); };
+  for (int i = 0; i < 4; ++i) {
+    rig.tap(Button::Down);  // TRANSP OUT is row 4
+  }
+  CHECK(focus() == core::param_id(core::ParamKind::Device, 0, ds::TransportOut));
+  rig.tap(Button::Down);  // MTC OUT
+  CHECK(rig.row() == 5);
+  CHECK(focus() == core::param_id(core::ParamKind::Device, 0, ds::MtcOut));
+  CHECK(rig.get(ds::MtcOut) == 0.0f);  // Off, the default
+  const std::uint32_t gen = rig.generation(ds::MtcOut);
+  rig.turn(1);
+  CHECK(rig.get(ds::MtcOut) == 1.0f);  // 24 fps
+  CHECK(rig.generation(ds::MtcOut) != gen);
+  rig.turn(1);
+  CHECK(rig.get(ds::MtcOut) == 2.0f);  // 25 fps
+  rig.turn(1);
+  CHECK(rig.get(ds::MtcOut) == 3.0f);  // 30 fps
+  rig.turn(5);
+  CHECK(rig.get(ds::MtcOut) == 3.0f);  // the last (29.97 drop-frame is not offered)
+  rig.tap(Button::Delete);
+  CHECK(rig.get(ds::MtcOut) == 0.0f);
+  rig.tap(Button::Down);  // MTC START
+  CHECK(rig.row() == 6);
+  CHECK(focus() == core::param_id(core::ParamKind::Device, 0, ds::MtcStart));
+  CHECK(rig.get(ds::MtcStart) == 1.0f);  // 01:00:00:00, Logic's default
+  rig.turn(-5);
+  CHECK(rig.get(ds::MtcStart) == 0.0f);  // 00 is the first
+  rig.turn(100);
+  CHECK(rig.get(ds::MtcStart) == 23.0f);  // 23 is the last
+  rig.tap(Button::Delete);
+  CHECK(rig.get(ds::MtcStart) == 1.0f);
+  rig.tap(Button::Down);  // MTC IN follows (OS-MTC B3), then the ports
+  CHECK(rig.row() == 7);
+  CHECK(focus() == core::param_id(core::ParamKind::Device, 0, ds::MtcIn));
+  rig.tap(Button::Down);
+  CHECK(rig.row() == 8);
+  CHECK(focus() == core::param_id(core::ParamKind::Device, 0, ds::MidiInPort));
+  for (const unsigned id : {static_cast<unsigned>(ds::MtcOut), static_cast<unsigned>(ds::MtcStart)}) {
+    const core::ParamDesc* d = model::param_desc(core::param_id(core::ParamKind::Device, 0, id));
+    NEED(d != nullptr);
+    CHECK(std::strlen(d->name) <= core::kParamNameChars);
+    CHECK((d->flags & core::kParamLearnable) == 0);  // a controller must not start a time code
+    CHECK(model::param_group_name(core::ParamKind::Device, d->group) == std::string("MIDI"));
+  }
+  const core::ParamDesc* out = model::param_desc(core::param_id(core::ParamKind::Device, 0, ds::MtcOut));
+  CHECK(std::string(out->name) == "MTC OUT");
+  CHECK((out->min == 0.0f && out->max == 3.0f && out->def == 0.0f));
+  const core::ParamDesc* start = model::param_desc(core::param_id(core::ParamKind::Device, 0, ds::MtcStart));
+  CHECK(std::string(start->name) == "MTC START");
+  CHECK((start->min == 0.0f && start->max == 23.0f && start->def == 1.0f));
+}
+
+// OS-MTC B3 (docs/specs/OS-MTC.md 4.6): MTC IN, the MIDI page's thirteenth row, after MTC START (Off / DIN / USB, default Off; not learnable). The chase's status (App::set_mtc_status) is what the row's card shows
+// (`MTC 01:00:12:05 25 LOCKED`): the platform tells it, the page only draws it.
+TEST_CASE("config: the MTC IN row is on the MIDI page after MTC START; the encoder edits it, Delete puts Off back, it is not learnable; the chase's status draws") {
+  Rig rig;
+  const auto focus = [&] { return app::kConfigScreen.focus_param(rig.app->model(), rig.app->state()); };
+  for (int i = 0; i < 7; ++i) {
+    rig.tap(Button::Down);  // MTC IN is row 7
+  }
+  CHECK(rig.row() == 7);
+  CHECK(focus() == core::param_id(core::ParamKind::Device, 0, ds::MtcIn));
+  CHECK(rig.get(ds::MtcIn) == 0.0f);  // Off, the default
+  const std::uint32_t gen = rig.generation(ds::MtcIn);
+  rig.turn(1);
+  CHECK(rig.get(ds::MtcIn) == 1.0f);  // DIN
+  CHECK(rig.generation(ds::MtcIn) != gen);
+  rig.turn(1);
+  CHECK(rig.get(ds::MtcIn) == 2.0f);  // USB
+  rig.turn(5);
+  CHECK(rig.get(ds::MtcIn) == 2.0f);  // the last
+  // the platform's status: every state draws, with and without a time (no failed frame)
+  for (unsigned state = 0; state <= 7u; ++state) {
+    for (unsigned code = 0; code <= 3u; ++code) {
+      rig.app->set_mtc_status(static_cast<std::uint8_t>(state), static_cast<std::uint8_t>(code), (1u << 24) | (12u << 8) | 5u);
+      rig.tap(Button::Up);
+      rig.tap(Button::Down);
+      CHECK(rig.app->failed_frames() == 0u);
+    }
+  }
+  CHECK(rig.app->state().mtc.state == 7u);
+  rig.tap(Button::Delete);
+  CHECK(rig.get(ds::MtcIn) == 0.0f);
+  rig.tap(Button::Down);
+  CHECK(rig.row() == 8);
+  CHECK(focus() == core::param_id(core::ParamKind::Device, 0, ds::MidiInPort));
+  const core::ParamDesc* d = model::param_desc(core::param_id(core::ParamKind::Device, 0, ds::MtcIn));
+  NEED(d != nullptr);
+  CHECK(std::string(d->name) == "MTC IN");
+  CHECK(std::strlen(d->name) <= core::kParamNameChars);
+  CHECK((d->min == 0.0f && d->max == 2.0f && d->def == 0.0f));
+  CHECK((d->flags & core::kParamLearnable) == 0);  // a controller must not hand the transport to a master
+  CHECK(model::param_group_name(core::ParamKind::Device, d->group) == std::string("MIDI"));
 }

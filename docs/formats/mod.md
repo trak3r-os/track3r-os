@@ -5,6 +5,8 @@ Tags: **Fact** = measured against libopenmpt 0.7.3 (tests/modimp_openmpt_oracle.
 
 ## 1. Scope
 
+**Where the reader runs (OS-FLASHDIET I3):** the firmware image does not link this reader any more; it runs in the importer module `modules/importers/tracker.tmod` on the card (built from the `formats_tracker` library's sources), and the image keeps only the probe side in `formats` (`src/tracker_sniff.cpp`: `sniff_kind` with `tagged_mod_min_bytes` and `is_soundtracker15`, and the `drop_group_name` table) for the File screen's IMPORT page.
+
 **In:** ProTracker `.mod` (`M.K.`, `M!K!`, `M&K!`, `N.T.`, `FLT4`, `FLT8`, `1CHN`..`9CHN`, `10CH`..`32CH`) and Scream Tracker 3 `.s3m` into the project model, through the format registry (`mod` and `s3m`, one reader object, `FormatKind::Project`, read only). **Out:** XM and IT (later: envelopes, multi-sample instruments, NNA), Octalyser/`OCTA`/`CD81`/`TDZx` tags, ADPCM-packed S3M samples, AdLib instruments, S3M stereo samples beyond their left channel.
 
 The 15-sample Soundtracker file has no signature and is the one exception (OS-IMPORT-ANY I6, section 2). Detection is otherwise by signature only: S3M `SCRM` at 44 (with `0x1A`, type 16 before it), MOD tag at 1,080. `kSniffBytes` is 1,084 since this slice (a caller that hands over fewer bytes is not offered the two formats by `sniff()`/`identify()`).

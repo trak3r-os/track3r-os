@@ -94,6 +94,8 @@ class NotifyQueue {
   void dismiss(const char* source) noexcept;
   // Only the entries of `source` whose text is exactly `text` (a question that was taken back: OS-NEWKEEP2); an empty source matches nothing.
   void dismiss(const char* source, const char* text) noexcept;
+  // Takes every queued entry of `severity` off, whatever its source (OS-MIDIREC S2b: when the EVENTS list opens, the Info news queued before it goes — the strip waits behind the modal overlay and a hidden head never expires, so a queued Info would mask the list's own refusals after BACK; warnings and errors stay). The next entry, if it becomes the head, starts with its whole TTL when it is first shown.
+  void dismiss(Severity severity) noexcept;
 
  private:
   void remove(unsigned index) noexcept;

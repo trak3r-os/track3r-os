@@ -489,7 +489,8 @@ TEST_CASE("clip: PASTE with nothing copied, a module in the way, COPY of a modul
   rig.shift_tap(Button::F2);
   CHECK(rig.note() == "NOTHING TO COPY");
   rig.copy(kModule);
-  CHECK(rig.note() == "A MODULE INSTRUMENT CANNOT BE COPIED");
+  CHECK(rig.note() != "A MODULE INSTRUMENT CANNOT BE COPIED");  // OS-MODSENDS: its Shift + F2 is MIX now; nothing is copied
+  CHECK(rig.app->state().page[app::screen_index(app::ScreenId::Instrument)] == app::ParamsScreen::kMixPage);
   CHECK_FALSE(rig.bank.clip_valid());
   rig.copy(kA);
   rig.paste(kModule);
@@ -503,6 +504,65 @@ TEST_CASE("clip: PASTE with nothing copied, a module in the way, COPY of a modul
   rig.paste(kModule);
   NEED(rig.inst(kModule) != nullptr);
   CHECK(rig.inst(kModule)->kind == model::InstrumentKind::Sample);
+}
+
+TEST_CASE("mix: a module instrument's Shift+F2 opens MIX, whose PANNING and sends edit, undo and reach the descriptor (OS-MODSENDS)") {
+  Rig rig;
+  rig.copy(kModule);
+  const unsigned page = rig.app->state().page[app::screen_index(app::ScreenId::Instrument)];
+  NEED(page == app::ParamsScreen::kMixPage);
+  const auto sp = [&]() -> const model::SamplerParams& { return rig.inst(kModule)->sampler; };
+  CHECK(sp().panning == 50);
+  CHECK(sp().delay_send == 0);
+  CHECK(sp().reverb_send == 0);
+  const std::size_t depth = rig.depth();
+  const auto turn = [&](int detents) {
+    rig.input.push(core::make_encoder_event(rig.clock.now(), 0, static_cast<std::int16_t>(detents)));
+    rig.pass();
+  };
+  turn(10);  // row 0: PANNING
+  CHECK(sp().panning > 50);
+  rig.tap(Button::Down);
+  turn(10);  // row 1: DELAY SEND
+  CHECK(sp().delay_send > 0);
+  rig.tap(Button::Down);
+  turn(10);  // row 2: REVERB SEND
+  CHECK(sp().reverb_send > 0);
+  CHECK(rig.depth() > depth);
+  rig.settle();
+  CHECK(rig.voices->sample(kModule).pan == sp().panning);  // the rebind hands the descriptor the edit
+  CHECK(rig.voices->sample(kModule).delay_send == sp().delay_send);
+  CHECK(rig.voices->sample(kModule).reverb_send == sp().reverb_send);
+  for (int i = 0; i < 6 && rig.depth() > depth; ++i) {
+    rig.undo();
+  }
+  CHECK(sp().panning == 50);
+  CHECK(sp().delay_send == 0);
+  CHECK(sp().reverb_send == 0);
+  CHECK(rig.depth() == depth);
+  rig.settle();
+  CHECK(rig.voices->sample(kModule).pan == 50);
+  CHECK(rig.voices->sample(kModule).reverb_send == 0);
+  // a sample instrument's Shift+F2 is COPY still
+  rig.copy(kA);
+  CHECK(rig.bank.clip_valid());
+}
+
+TEST_CASE("mix: a second Shift+F2 leaves MIX, and another slot does not open on it (OS-MODSENDS)") {
+  Rig rig;
+  const auto page = [&]() -> unsigned { return rig.app->state().page[app::screen_index(app::ScreenId::Instrument)]; };
+  rig.copy(kModule);
+  NEED(page() == app::ParamsScreen::kMixPage);
+  rig.copy(kModule);  // the toggle: back to the module's first page, for every module (one with no parameters has no page key)
+  CHECK(page() == 0u);
+  rig.copy(kModule);
+  NEED(page() == app::ParamsScreen::kMixPage);
+  CHECK(rig.invoke("instrument.step", 1) == DispatchResult::Changed);  // F7: another slot opens on its own first page
+  CHECK(page() == 0u);
+  rig.copy(kModule);
+  NEED(page() == app::ParamsScreen::kMixPage);
+  CHECK(rig.invoke("instrument.step", -1) == DispatchResult::Changed);  // F6
+  CHECK(page() == 0u);
 }
 
 TEST_CASE("clip: a MIDI instrument pastes with its channel, over a sample slot it leaves the audio for the undo") {
@@ -556,7 +616,7 @@ TEST_CASE("clip: the Shift row follows the instrument: COPY and SAVE dim on a mo
   };
   CHECK(dim(kA) == 0x04u);           // PASTE: nothing copied
   CHECK(dim(kMidi) == (0x04u | 0x10u));
-  CHECK(dim(kModule) == (0x02u | 0x04u | 0x10u));
+  CHECK(dim(kModule) == (0x04u | 0x10u));  // COPY is live: on a module it is MIX (OS-MODSENDS)
   CHECK(dim(kFree) == (0x01u | 0x02u | 0x04u | 0x08u | 0x10u));
   rig.copy(kA);
   CHECK(dim(kA) == 0u);
@@ -984,14 +1044,16 @@ TEST_CASE("save: Shift + F5 writes instruments/<name>.pti through the atomic sav
   CHECK(rig.card.has("instruments/SNARE 2.pti"));
 }
 
-TEST_CASE("save: MIDI and module instruments say SAMPLE INSTRUMENTS ONLY, an empty slot and a sample with no audio say so, and nothing reaches the card") {
+TEST_CASE("save: MIDI instruments say SAMPLE INSTRUMENTS ONLY, a module instrument with no bound module says so (OS-MODPRESET P4: Shift + F5 saves a preset only on a bound module's page), an empty slot and a sample with no audio say so, and nothing reaches the card") {
   Rig rig;
-  for (unsigned slot : {kMidi, kModule}) {
-    rig.select(slot);
-    rig.clear_notes();
-    rig.shift_tap(Button::F5);
-    CHECK(rig.note() == "SAMPLE INSTRUMENTS ONLY");
-  }
+  rig.select(kMidi);
+  rig.clear_notes();
+  rig.shift_tap(Button::F5);
+  CHECK(rig.note() == "SAMPLE INSTRUMENTS ONLY");
+  rig.select(kModule);  // (this rig has no module system attached, so the module instrument is not bound: no preset save here)
+  rig.clear_notes();
+  rig.shift_tap(Button::F5);
+  CHECK(rig.note() == "NO MODULE HERE");
   rig.select(kFree);
   rig.clear_notes();
   rig.shift_tap(Button::F5);

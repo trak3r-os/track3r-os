@@ -19,6 +19,7 @@
 //   delay, reverb  (app_main.cpp: SendDelay::attach, SendReverb::attach)                       the render only
 //   project        (app_main.cpp: the model arena)                                            the sequencer in the render, the UI and the loaders in the main loop
 //   module region  (app_main.cpp: the module system's record and the cold arena)              the loader, the module views (main loop), the modules' cold code (set_param, note_on)
+//   ptfx           (OS-CEPTFX S2a: the .ptfx plugin workspace, mem_map.h kPtfxBase)          the loader and the run job (main loop), the plugin's own code and data (unprivileged, through the alias)
 
 #include <o3os/platform/mk66/mem_map.h>
 

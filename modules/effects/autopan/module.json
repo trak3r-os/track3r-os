@@ -1,0 +1,24 @@
+{
+  "name": "Autopan",
+  "id": "autopan",
+  "kind": "effect",
+  "description": "A stereo auto-pan insert for a track (a WIDENS effect, ABI 1.12): an LFO on the side, so a mono sound swings between the ears and a stereo voice keeps its own image; the mid is untouched, so the mono sum stays the input. The cycle is a sequencer length (Sync 1..15 = 64, 32, 16, 12, 8, 6, 4, 3, 2, 3/2, 1, 3/4, 1/2, 1/3, 1/4 steps, locked to the pattern's beat through get_clock; 0 = free) or a period in milliseconds; Shape 0 sine, 1 triangle, 2 square; depth and phase. HEADPHONE ON swaps the speaker law for a cheap binaural cue (the far ear delayed up to 0.6 ms and darkened by a head-shadow low-pass that follows the pan): it is NOT mono-compatible (the delayed ear combs in a mono sum), so it is off by default. Four factory presets. A stereo effect needs OS-INSFX-ABI2 A4 on the unit; the lock to the pattern needs A3.",
+  "state_bytes": 512,
+  "stereo": "widens",
+  "params": [
+    {"name": "Sync", "min": 0, "max": 15, "default": 3, "type": "int"},
+    {"name": "Period", "min": 100, "max": 20000, "default": 1000, "curve": "log", "unit": "ms", "mod": true},
+    {"name": "Depth", "min": 0, "max": 100, "default": 70, "unit": "percent", "mod": true},
+    {"name": "Shape", "min": 0, "max": 2, "default": 0, "type": "int"},
+    {"name": "Phase", "min": 0, "max": 360, "default": 0, "type": "int", "mod": true},
+    {"name": "Headphone", "min": 0, "max": 1, "default": 0, "type": "bool"}
+  ],
+  "presets": [
+    {"name": "Slow Sine", "values": {"Sync": 3, "Period": 1000, "Depth": 70, "Shape": 0, "Phase": 0}},
+    {"name": "Tri 8th", "values": {"Sync": 9, "Period": 1000, "Depth": 80, "Shape": 1, "Phase": 0}},
+    {"name": "Square 16th", "values": {"Sync": 11, "Period": 1000, "Depth": 60, "Shape": 2, "Phase": 0}},
+    {"name": "Gentle", "values": {"Sync": 2, "Period": 1000, "Depth": 35, "Shape": 0, "Phase": 90}}
+  ],
+  "voices": 1,
+  "memory": {"hot_bytes": 1400, "sdram_bytes": 512}
+}

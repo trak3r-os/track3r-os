@@ -190,9 +190,9 @@ Start on the PATTERN page.
 You should see the setting act at once, with no restart. With **Pattern end**, hold `F1` on the Pattern screen while a pattern plays and press a pad: the pick is queued. While `F1` is held the view stays on your pick. Let go and the view goes on with the pattern that plays, until the queue lands. Press the same pad again, or the pad of the pattern that plays, to take the queue back. Not yet checked on the unit. <!-- QA-PAT-318 -->
 
 ### Choose where the unit listens and sends MIDI
-<!-- sync: src=model/src/params.cpp,seq/src/midi_link.cpp,app/include/o3os/app/midi_input.h qa=QA-CFG-021,QA-CFG-220,QA-CFG-221,QA-CFG-222,QA-CFG-223,QA-CFG-225,QA-CFG-227,QA-CFG-228 -->
+<!-- sync: src=model/src/params.cpp,seq/src/midi_link.cpp,app/include/o3os/app/midi_input.h qa=QA-CFG-021,QA-CFG-220,QA-CFG-221,QA-CFG-222,QA-CFG-223,QA-CFG-225,QA-CFG-227,QA-CFG-228,QA-CFG-275,QA-CFG-276,QA-CFG-277,QA-CFG-278,QA-CFG-279 -->
 
-Start on the Config screen. Press `F1` (**MIDI**). The page has nine rows. Move to a row and turn the encoder. The defaults are DIN + USB for the ports, **All** for IN CHANNEL, 1 for OUT CHANNEL and **On** for both TRANSPORT rows.
+Start on the Config screen. Press `F1` (**MIDI**). The page has thirteen rows. Move to a row and turn the encoder. The defaults are DIN + USB for the ports, **All** for IN CHANNEL, **Off** for CC MAP, MTC OUT and MTC IN, 01 for MTC START, 1 for OUT CHANNEL and **On** for both TRANSPORT rows.
 
 | Row | Values | What it does |
 |---|---|---|
@@ -201,9 +201,13 @@ Start on the Config screen. Press `F1` (**MIDI**). The page has nine rows. Move 
 | CLOCK MODE | Off, Master, Slave | With CLOCK IN on Internal: Master sends the clock, Slave follows it |
 | TRANSP IN | Off, On | Off: the unit ignores Start, Continue, Stop and Song Position from the clock it follows. The default is **On**. |
 | TRANSP OUT | Off, On | Off: the unit sends no Start, Continue, Stop or Song Position. The clock still goes out. The default is **On**. |
+| MTC OUT | Off, 24 fps, 25 fps, 30 fps | MIDI Time Code for a computer program that follows time code and not MIDI clock, such as Logic Pro. The default is **Off**. |
+| MTC START | 00 to 23 hours | The hour of the time code at the first step of the song. The default is **01**, which is where Logic Pro puts bar 1. |
+| MTC IN | Off, DIN, USB | The unit follows the MIDI Time Code of that port: the song starts where the master is and runs with it. The default is **Off**. |
 | MIDI IN | DIN, USB, DIN + USB | The ports the unit listens to for notes and MIDI Learn |
 | MIDI OUT | DIN, USB, DIN + USB | The ports for clock, transport and notes of MIDI tracks |
 | IN CHANNEL | All, 1 to 16 | The channel it listens to |
+| CC MAP | Off, On | The official fixed CC map on the MIDI IN ports and IN CHANNEL. The default is **Off**, kept on the card |
 | OUT CHANNEL | 1 to 16 | The channel for notes of MIDI tracks |
 
 **TRANSPORT IN and TRANSPORT OUT** (the rows read TRANSP IN and TRANSP OUT, which is as long as a caption can be) are new on this firmware. They matter when the unit sends or follows a MIDI clock (CLOCK MODE Master or Slave, or CLOCK IN on USB or MIDI In jack). With CLOCK MODE **Off** they do nothing. A row set to **On** is how every unit worked before: the clock and the transport go together.
@@ -212,6 +216,44 @@ Start on the Config screen. Press `F1` (**MIDI**). The page has nine rows. Move 
 - **TRANSPORT IN Off**: the unit still follows the tempo of the clock, but a Start, Continue, Stop or Song Position from the master does nothing. Press `Play` and the unit starts on the master's next clock. A Stop from the master does not stop the unit. It stops by itself only if the master's clock goes quiet.
 
 A change takes effect at the next `Play`. If you turn TRANSPORT OUT to Off while the unit plays, the Stop of that run is still sent, so a device that got the Start is also stopped. The choice is kept on the card. `Delete` on a TRANSP row puts **On** back. Not yet checked on the unit. <!-- QA-CFG-220 --> <!-- QA-CFG-221 --> <!-- QA-CFG-222 --> <!-- QA-CFG-223 --> <!-- QA-CFG-225 --> <!-- QA-CFG-227 --> <!-- QA-CFG-228 --> <!-- QA-CFG-224 --> <!-- QA-CFG-226 -->
+
+### Make Logic Pro follow the unit
+<!-- sync: src=model/src/params.cpp,midi/include/o3os/midi/mtc.h,seq/src/midi_link.cpp qa=QA-CFG-276,QA-CFG-277 -->
+
+**New on this firmware.** MIDI Time Code (MTC) is a clock that counts hours, minutes, seconds and frames. Some programs, Logic Pro among them, follow it and cannot follow MIDI clock. With **MTC OUT** on, the unit sends it while it plays, so the program starts, stops and jumps with the unit.
+
+1. Press `F1` (**MIDI**) on the Config screen. Move to **MTC OUT** and turn the encoder to the frame rate your program uses: **24 fps**, **25 fps** or **30 fps**. The row reads the rate.
+2. Leave **MTC START** on **01**. The first step of the song is then 01:00:00:00, where Logic Pro puts bar 1. Turn it to **00** for a program or a project that starts at 00:00:00:00.
+3. In the program, choose the unit as the MIDI source for synchronization and set the same frame rate. Set the same tempo in the program as in the project: time code has no tempo.
+4. Press `Play`.
+
+You should see the program lock to the unit and run with it. The time code goes out on the ports of **MIDI OUT**, whatever **CLOCK MODE** is. It starts at once at `Play`, so the program may need a moment to lock and can miss the first part of the first second. `Stop` sends the time at which the unit stopped. The choice is kept on the card. Playing from the middle of a song sends the time of that step. The song's tempo changes are counted in, so the time stays right when the tempo moves. Not yet checked on the unit, and not yet checked with Logic Pro. <!-- QA-CFG-276 --> <!-- QA-CFG-277 -->
+
+### Let the unit follow a time code
+<!-- sync: src=model/src/params.cpp,midi/include/o3os/midi/mtc_in.h,seq/src/midi_link.cpp,seq/src/sequencer.cpp qa=QA-CFG-278,QA-CFG-279 -->
+
+**New on this firmware.** With **MTC IN** on, the unit follows the MIDI Time Code of a computer program or a device, the other way round from **MTC OUT**. Use it when the program is the master and the unit plays along.
+
+1. Press `F1` (**MIDI**) on the Config screen. Move to **MTC IN** and turn the encoder to the port the time code arrives on: **DIN** or **USB**.
+2. Keep **MTC START** on the hour at which the program plays the first step of the song. The default **01** is 01:00:00:00.
+3. In the program, send MIDI Time Code to the unit. Press play in the program.
+
+You should see the row's card read `MTC` with the time, the frame rate and a state: **READING** while it listens, **ARMED** while the start waits, **LOCKED** when the unit runs with the master. It starts the song at the step the master is at, with the tempo and the swing that step has, and follows the master's speed a little (up to 6 percent), so a drift is pulled in over about a second and nothing jumps. If the master starts before 01:00:00:00, the unit waits for it and starts exactly there. If the master goes past the end of the song, the unit is silent and stays locked until the master moves back into the song. If the master stops, jumps or goes backwards, the unit stops, and starts again at the new time when it has read it. While the unit follows, `Play`, `Stop` and the song jumps do nothing: the master owns them, and the card reads **MTC IN: FOLLOWING**. If you press `Play` while the master is silent, the unit plays on its own clock, and the master takes over after you stop it. The song plays its own tempo changes. A tempo change on the unit itself, from Perform, moves the song away from the master until it starts again. **MTC IN** also turns the clock follow off, so CLOCK IN and CLOCK MODE **Slave** are ignored, and it mutes **MTC OUT**. The unit chases the song or the pattern that **Play Song** or **Play Pattern** would play. The choice is kept on the card. Not yet checked on the unit, and not yet checked with Logic Pro as the master. <!-- QA-CFG-278 --> <!-- QA-CFG-279 -->
+
+### Control the unit with the official CC numbers
+<!-- sync: src=app/include/o3os/app/cc_map.h,app/src/cc_map.cpp,app/include/o3os/app/perform_board.h qa=QA-MIX-078,QA-MIX-079,QA-MIX-080,QA-PRF-206,QA-PRF-207,QA-PRF-208 -->
+
+With **CC MAP** on **On**, a MIDI controller drives the unit with the official firmware's fixed control numbers, on the MIDI IN ports and the IN CHANNEL, with no Learn set-up. The map is a static table and it is off by default: a controller that sends these numbers for something else moves nothing until you turn the row on.
+
+| CC | What it moves | Value | Where |
+|---|---|---|---|
+| 71 to 78 | the VOLUME of track 1 to 8 | `cc * 100 / 127` | every screen |
+| 79, 80, 81 | the master DELAY, REVERB and DRY level | `cc * 100 / 127` | every screen |
+| 82 | the INPUT strip's level | `cc * 100 / 127` | every screen |
+| 51 to 62 | the value of Perform slot 1 to 12 | `min + cc * (max - min) / 127` of the slot's effect range | the Perform screen's slot page only |
+| 41 to 48 | the performance pattern of track 1 to 8 | `cc + 1` | the Perform screen's slot page only, while the song plays |
+
+A mapped CC moves its value at once (jump, no pickup) and is a final edit: no undo step, no FX step in a live take. A MIDI Learn binding wins over the map: if any binding of either store listens to the message (on its channel, or on every channel), the map ignores it — a Pickup binding that has not caught the knob still owns the message. The Perform CCs act only on the slot page of the Perform screen, not on its DJ page and not on any other screen. CC 41 to 48 queue the pattern on the one track the CC names, whatever tracks are on, and only while the sequencer plays; the same value again does not take a waiting queue back, and after `Stop` and `Play` it is sent again. A pattern the project does not have is refused with `CC 4x: NO PAT nnn` on the strip. The Perform slots and tracks are described in [Perform](perform.md). Not yet checked on the unit. <!-- QA-MIX-078 --> <!-- QA-MIX-079 --> <!-- QA-MIX-080 --> <!-- QA-PRF-206 --> <!-- QA-PRF-207 --> <!-- QA-PRF-208 -->
 
 ### Change the display, the pad lights and the notation
 <!-- sync: src=model/src/params.cpp,app/include/o3os/app/brightness.h,app/src/screens/pattern_screen.cpp,app/src/bindings.cpp qa=QA-CFG-213,QA-CFG-214,QA-CFG-215,QA-CFG-216,QA-CFG-272,QA-CFG-273,QA-CFG-274 -->
@@ -225,7 +267,7 @@ Press `F2` (**DISPLAY**). Move to a row and turn the encoder.
 | NUMBERING | From 0, From 1, Hex | How the step rows of the Pattern screen are numbered. The default is **From 1**. |
 | MIDDLE C | C-3, C-4, C-5, C-6 | The name of MIDI note 60 on the Pattern screen. The default is **C-5**. |
 | THEME | Amiga, Black, White | The colours of the screens. `Shift` + `Master` also steps to the next theme. |
-| STATUS LED | BLINK, OFF | Whether the status LED behind the F keys blinks its heartbeat. **OFF** stops the heartbeat only: a fault blink code still shows. Not saved: every boot starts with **BLINK**. |
+| STATUS LED | BLINK, OFF | Whether the status LED behind the F keys blinks its heartbeat. **OFF** stops the heartbeat and also keeps blink code 12 (the over-budget code, no fault) dark: a fault blink code still shows (new Community OS behaviour). Not saved: every boot starts with **BLINK**. |
 
 The five setting rows act at once, with nothing to apply. <!-- QA-CFG-213 --> <!-- QA-CFG-215 --> NUMBERING and MIDDLE C show on the Pattern screen: with **From 0** the step rows count from 00, and with MIDDLE C on **C-4** a note that reads C-5 by default reads C-4. <!-- QA-CFG-216 --> <!-- QA-CFG-214 --> The STATUS LED row is not a setting: it is a choice of this session (RAM only), so it is not saved to the card and every boot starts with **BLINK**; `Delete` puts **BLINK** back. <!-- QA-CFG-272 --> <!-- QA-CFG-273 --> <!-- QA-CFG-274 -->
 

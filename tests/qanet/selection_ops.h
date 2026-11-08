@@ -41,9 +41,9 @@ struct SelImage {
   int col0 = 0, col1 = 4;  // OS-AUDIT-56: the columns of the block (a block inside one track keeps the columns it was made over; whole steps otherwise)
   bool selected = false;
   bool editable = false;
-  // The Fill dialog (F4): whether it is open, its SCOPE (0 BLOCK, 1 TRACK, 2 PATTERN) and WHAT (0 NOTE, 1 INSTR, 2 VOLUME, 3 FX 1, 4 FX 2).
+  // The Fill dialog (F4): whether it is open and WHAT (0 NOTE, 1 INSTR, 2 VOLUME, 3 FX 1, 4 FX 2). OS-PTOOLS2 S3c: there is no SCOPE row; the target is the selection (the block fields above).
   bool fill_open = false;
-  int fill_scope = 1, fill_what = 0;
+  int fill_what = 0;
   // Song: the cursor slot, the range (the cursor's slot alone with no range), whether the cursor is in the map (the cells' operations are not judged here).
   int song_pos = 0, song_first = 0, song_last = 0;
   bool song_in_map = false;

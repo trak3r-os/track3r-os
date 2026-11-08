@@ -110,6 +110,9 @@ struct OrderSnapshot {
 };
 
 class Project {
+  // OS-FLASHDIET I1/I2: model/import_layout.h hashes this layout into the importer's layout tag (a kind 3 .tmod's header word 44); the probe is a friend so it can read the members' offsets.
+  friend constexpr std::uint32_t model_import_layout_probe(std::uint32_t h) noexcept;
+
  public:
   // Deliberately trivial, so a static ModelArena in zero-initialised or uninitialised SDRAM is legal: call
   // reset() before use.
@@ -165,7 +168,8 @@ class Project {
   // ---- parameters (OS-002d; model/params.h says which values are parameters and how each is stored) ---------------
   // True when the parameter exists: its kind, index and field are valid and, for an instrument, the slot is in use. The kinds a
   // Project holds are Instrument, Track, Master and Project (the project's settings); a Device parameter belongs to the device's
-  // Settings block, not to a project.
+  // Settings block, not to a project. OS-INSFX S7: also an Insert id (core::insert_param_valid) whose INSX record's blob reaches the field (the record is
+  // index / 2, index % 2: the master's index 32 is record 16, 0); set_param does not write it (an insert is written by set_insert, not an undo unit, D9).
   bool has_param(core::ParamId id) const noexcept;
   // Its value in the descriptor's units (0 when it does not exist).
   float get_param(core::ParamId id) const noexcept;
@@ -231,7 +235,8 @@ class Project {
   // A counter per parameter: advances whenever the value of THAT parameter changes, by set_param or by a whole-object mutator that
   // changes it (set_instrument, clear_instrument, set_track, set_master, set_settings, reset), and by nothing else; setting a value
   // to what it is changes nothing. Free-running, equality only, and never repeats. 0 for a parameter that does not exist. What a
-  // screen polls on redraw; there are no observers.
+  // screen polls on redraw; there are no observers. Exception (OS-INSFX S7): an Insert parameter has no counter; its value is read back from the INSX
+  // record and the generation is the value's bits plus the load epoch (equal when the value is put back where it was).
   std::uint32_t param_generation(core::ParamId id) const noexcept;
 
   // ---- mutators ------------------------------------------------------------------------------------------
@@ -245,6 +250,9 @@ class Project {
   Status set_master(const MasterSettings& value) noexcept;
   // Whole slot; the name must be NUL-terminated within its field.
   Status set_track(std::uint32_t slot, const TrackSlot& value) noexcept;
+  // OS-SONG3 S4 (PREVIEW): only the flags byte, with no generation moving — no touch(), no parameter generation (SaveService::dirty() reads generation(), and a transient
+  // audition's solo set must not show as unsaved work). No format change: the same flags field, written plain. Nothing else of the slot is touched.
+  void set_track_flags_plain(std::uint32_t slot, std::uint8_t flags) noexcept;
   Status set_track_name(std::uint32_t slot, const char* text, std::size_t len) noexcept;
 
   Status append_order(std::uint32_t pattern_id) noexcept;

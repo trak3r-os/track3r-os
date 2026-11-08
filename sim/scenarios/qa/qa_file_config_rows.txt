@@ -1,0 +1,40 @@
+# QA rows of docs/qa/catalogue/file.md (QA-FIL-004, 007, 008) that the sim can check with a card, asserts only (no snap, so no golden). The card is e2e_import_any
+# (mod.title, tune, README.txt in its root). What each assert proves is the state line (screen, sel, msg) and the model digest; nothing here is heard or seen.
+document
+card e2e_import_any
+tap file
+wait 50
+tap f6
+wait 300
+assert state screen=FILE sel=mod.title
+
+# QA-FIL-004 (part): F3 UP at the root of the card says ALREADY AT THE ROOT and the cursor stays.
+tap f3
+wait 100
+assert state screen=FILE msg=ALREADY_AT_THE_ROOT sel=mod.title
+
+# QA-FIL-007 (part): each F7 press cycles the import engine and says it: AUTO -> AMIGA -> MODERN -> AUTO. (The report line and the import itself are the host test.)
+tap f7
+assert state msg=IMPORT_COMMANDS_FOR_THE_AMIGA_ENGINE
+tap f7
+assert state msg=IMPORT_COMMANDS_FOR_THE_MODERN_ENGINE
+tap f7
+assert state msg=IMPORT_COMMANDS_BY_MODULE_TYPE
+
+# QA-FIL-008 (part): after an edit no save has taken, the first F1 on a module asks and imports nothing; the second F1 imports.
+tap pattern
+tap rec
+tap down
+pad 36
+assert model pat.1.0.1.note=37
+mark model edited
+tap file
+wait 50
+assert state screen=FILE sel=mod.title
+tap f1
+wait 100
+assert state screen=FILE msg=UNSAVED_CHANGES:_F1_AGAIN_TO_DISCARD_THEM
+assert model digest=@edited
+tap f1
+wait 800
+assert state screen=FILE msg=~^IMPORTED

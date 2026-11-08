@@ -276,18 +276,50 @@ inline const char* mod_start_name(ModStart s) noexcept {
 }
 ModStart start_module_load(const char* stem) noexcept;
 std::size_t module_line(unsigned i, char* out, std::size_t cap) noexcept;
+// OS-CEPTFX S2c (`ptfx quarantine`): ptfx_line(i, ...) is line i of the quarantine set (one line an id), then its closing line with the full flag; the length, 0 when there is no such line. The set is loaded at
+// boot from the crash record's module word. Main loop only.
+std::size_t ptfx_line(unsigned i, char* out, std::size_t cap) noexcept;
+// OS-CEPTFX S3b (`ptfx list`, `info`, `run`; main loop only, synchronous): ptfx_scan reads the Effects folder into the catalogue (a run in progress is given up first): null or the reason.
+// ptfx_list_line(i): the plugin i, then the closing line; ptfx_info_line(n, i): line 0 is plugin n's header (or "ERR ptfx: <reason>"), then one line a parameter; both return 0 past the last line.
+// ptfx_run(n): loads plugin n and runs it over the sample in view and its selection (App::run_ptfx): null when the job started, else the reason.
+const char* ptfx_scan() noexcept;
+std::size_t ptfx_list_line(unsigned i, char* out, std::size_t cap) noexcept;
+std::size_t ptfx_info_line(unsigned n, unsigned i, char* out, std::size_t cap) noexcept;
+const char* ptfx_run(unsigned n, const float* values = nullptr) noexcept;  // values: the 12 A15 values of the PLUGINS page (S4b), nullptr: the defaults
+const char* ptfx_run_why() noexcept;  // after a refused ptfx_run: which check said PLUGIN NOT READY ("host", "plugin", "stereo", "scratch"), else nullptr (the console appends it)
 const char* module_bind(unsigned slot, const char* stem) noexcept;
 // OS-INSFX S1 (`diag ins`): an effect module (kind 2, loaded by `mod load`) as an insert of `track` (0..15), `slot` 0 (A) or 1 (B). Each returns null or the reason it could not. Nothing is saved: a project
-// load drops the inserts. insert_line(i): line 0 the totals, lines 1.. the bound inserts (phase, forced, cost); 0 when there is none. Main loop only.
+// load drops the inserts. insert_line(i): line 0 the totals (OS-INSFX-ABI2 A5: with the stereo reservation, "stereo reserved N of 4"), lines 1.. the bound inserts (phase, forced, cost); 0 when there is none. Main loop only.
 const char* insert_bind(unsigned track, unsigned slot, const char* stem) noexcept;
 const char* insert_unbind(unsigned track, unsigned slot) noexcept;
 const char* insert_bypass(unsigned track, unsigned slot, bool on) noexcept;
+// OS-INSFX-ABI2 A8 (`mod preset <slot> <n>`, `ins preset <track> <slot> <n>`): factory preset `n` (1-based) of the module on instrument `slot` (0-based) or of the insert at (`track`, `slot`), written to the
+// project and told to the instance (app::ModuleUi::apply_preset: an instrument's is one undo unit, an insert's none). `name` (at least 16 bytes) gets the preset's name, `dropped` how many values
+// reached no instance (none bound, or the ring full: the project holds them). Each returns null or the reason it could not.
+const char* module_preset(unsigned slot, unsigned n, char* name, std::size_t cap, unsigned& dropped) noexcept;
+const char* insert_preset(unsigned track, unsigned slot, unsigned n, char* name, std::size_t cap, unsigned& dropped) noexcept;
+// OS-MODPRESET P3: the card's presets of a module, from the console: `mod presets <stem>` (the list), `mod psave <slot> <name>` (save the values in force as modules/presets/<stem>/<name>.o3mp, the next free
+// "<name> 2" on a taken name), `mod pload <slot> <name>` (read, resolve by name, apply: one undo unit), and the `ins` forms of the two for the insert at (track, slot), 0-based. Main loop only.
+// module_preset_scan(stem, more): rescans the folder into the ModuleUi's list and returns how many names it holds (0: no card or no folder); `more`: the folder held more than the list's 128.
+// module_preset_at(i): the i-th name (sorted case-insensitively), "" when there is none. The saves return null on success and write the file name chosen into `final`; the loads return null on success and write
+// the reason into `why` otherwise ("PRESET DAMAGED", "PRESET OF <STEM>", "NO SUCH PRESET", ...); `skipped` gets the entry names no parameter has, `dropped` the values that reached no instance.
+unsigned module_preset_scan(const char* stem, bool& more) noexcept;
+const char* module_preset_at(unsigned i) noexcept;
+const char* module_preset_save(unsigned slot, const char* name, char* final, std::size_t cap) noexcept;
+const char* module_preset_load(unsigned slot, const char* name, char* why, std::size_t why_cap, unsigned& skipped, unsigned& dropped) noexcept;
+const char* insert_preset_save(unsigned track, unsigned slot, const char* name, char* final, std::size_t cap) noexcept;
+const char* insert_preset_load(unsigned track, unsigned slot, const char* name, char* why, std::size_t why_cap, unsigned& skipped, unsigned& dropped) noexcept;
 std::size_t insert_line(unsigned i, char* out, std::size_t cap) noexcept;
 #if O3OS_BENCH
-const o3m_module* insert_bench_module() noexcept;  // `diag bench insert`: the first loaded effect module, or null
+const o3m_module* insert_bench_module(bool stereo = false) noexcept;  // `diag bench insert`: the first loaded effect module (`stereo`: the first whose InsertHost::shape_of is not Mono), or null
+// OS-CEWTENV W3a (`diag bench wt`): the sample arena's free bytes (the recorder's room), main loop only.
+std::uint32_t sample_arena_free_bytes() noexcept;
 #endif
-// OS-012d: the licence notices of the built-in modules (NUL terminated text, in flash), for `diag mod notice`.
-const char* module_notices() noexcept;
+// OS-012d: the licence notices of the built-in modules, for `diag mod notice` (OS-FLASHDIET P1: a deflate stream in flash, streamed through the shared asset decoder, so main loop
+// only and never across passes). Calls `sink` for lines [first, first + max_lines): pieces of a line (text, n, false) and its end (nullptr, 0, true); `more`: text follows the page, `next`:
+// the line a following page starts at. False when the stream could not be read.
+using NoticeSink = void (*)(void* ctx, const char* text, std::size_t n, bool eol) noexcept;
+bool module_notices_page(unsigned first, unsigned max_lines, NoticeSink sink, void* ctx, bool& more, unsigned& next) noexcept;
 // OS-PERF3 (`diag cache check`): how many bytes of the sample arena hold loaded PCM (the demo kit or a project's samples), from the start of the arena.
 std::uint32_t sample_pcm_bytes() noexcept;
 bool module_audition(unsigned slot, unsigned note, unsigned velocity, bool on) noexcept;
@@ -302,6 +334,10 @@ enum class RadioRetry : std::uint8_t { Started, NoRadio, NotSelected, TakeRunnin
 RadioRetry radio_retry() noexcept;
 // OS-HIL (`diag state`, `key`, `shot`): the app's state as one `key=value` line (app::describe_state; `app=down` before the app has started), at most cap - 1 characters and a NUL, and the length. Main loop only.
 std::size_t state_line(char* out, std::size_t cap) noexcept;
+// OS-BUG-PLAYSTOP (`diag trans`): the transport's cold counters (every refusal reason of SeqTransport::play()/stop()) and the app's and the sequencer's `playing` flags, as one line. Main loop only.
+std::size_t transport_line(char* out, std::size_t cap) noexcept;
+// OS-MTC A3 (`diag mtc`, `diag mtc at <order> <step>`): the time code generator's state, or the song time of a step (A1's map) and the cycles the walk took, as one line. Main loop only.
+std::size_t mtc_line(char* out, std::size_t cap, bool at, std::uint32_t order, std::uint32_t step) noexcept;
 // OS-AUDIT-28 (`enc accel`): the encoder acceleration's numbers (app/enc_accel.h). enc_accel_get is false before the app has started; enc_accel_set is false then, or for numbers EncAccel::valid refuses. Main loop only.
 struct EncAccelNumbers {
   bool on;

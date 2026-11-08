@@ -4,6 +4,60 @@ User-visible changes of the Community OS, newest first, one entry per change, in
 
 ## Unreleased
 
+## v1.2.0 (date to be set at publication)
+
+Everything below is merged and tested on the host and in the emulator. Where a line says "checked on the unit" a Tracker ran it; every other line is waiting for a check on the unit (see "Not yet verified" in the [release notes](release/v1.2.0.md)).
+
+### New
+
+- **Insert effects, per track and on the master.** The Mixer has an INSERTS page: each track has two insert slots and the master has one. Pick an effect module, open its parameter page (`F6` PARAMS), set its values by hand or bind them with MIDI Learn; a small mark by the track name on Master shows which tracks have an insert. Inserts are saved with the project (an optional chunk; a project without inserts is saved as before) and come back after a reload. A heavy insert is forced to dry by the CPU guard instead of causing underruns. Checked on the unit: an insert on Dense8 (about 1.2 % of a block), the tail after Stop, save and load, the INSERTS page. New Community OS behaviour.
+- **Eleven effect modules for inserts, on the card.** DRIVE, CRUSH, COMP (with a TRANSIENT mode and a sidechain KEY from another track), ENV FILTER, FOLD, PHASER, BIQUAD, and the stereo effects PING-PONG (tempo-synced), WIDE, CHORUS and AUTOPAN. They are `.tmod` files in `modules/effects/` of the content zip, with factory presets. Their cost on the unit is measured for DRIVE (1.9 % of a block), BIQUAD and a keyed COMP track (about 740 cycles); the others are pending, and CHORUS measured 5.4 % of a block on the unit, above its 4-point budget. Listening checks are not done.
+- **Stereo effects and sidechain.** An effect can be stereo (a track can come out wider than its mono source) and can read the level of another track as a key. A stereo insert counts against the four-stereo-voice cap of stereo samples.
+- **Module presets.** Shift+F5 SAVE on a module or insert page writes the parameter set to `modules/presets/<module>/<name>.o3mp` (a taken name gets ` 2`..`99`); the F5 list has a CARD section and `F1` loads a preset by parameter name. Factory presets for TB-303, FM, Chip, SID and the effects come in the content zip. A new file format (`.o3mp`, version 1.0).
+- **RATE for instrument modules: FULL, 1/2, 1/4.** On the MIX page (Shift+F2) of an instrument module, the module renders at half or a quarter of the sample rate and each sample is held: crunchy, Amiga-like, and cheaper in CPU. Sine, FM, TB-303, SID and Chip offer it; a module that does not say it can run at any rate is never offered the row. The rate is saved with the instrument (INST 1.8, see below). Changing it waits for a quiet moment so a held note is not cut. What you hear changes with this setting. New Community OS behaviour.
+- **PANNING, DELAY SEND and REVERB SEND on module instruments** (TB-303, FM, Chip, SID and any instrument module), on the Shift+F2 MIX page.
+- **Chip: eight more waves.** The Chip engine adds waves 4 to 11 from the CHIP synth of Polyend's published source (among them a SID-style wave, LFSR noise, SuperSquare, FM bell and a chip drum), a fourth page, and a post chain. Chip's older waves and saved projects sound as before. MIT component, credited in `THIRD_PARTY.md`.
+- **Sample Editor plugins (`.ptfx`).** The Sample Editor has a PLUGINS page that lists `Effects/*.ptfx`, shows a plugin's parameters and applies it (undo works, stereo samples are handled). The plugins run unprivileged: a fault, a hang or a crash inside one is contained and the plugin is quarantined, not the unit. Thirteen plugins come in the content zip: Add Silence, Analog Kick Gen, Chiptune Voice Gen, Multi-Mode Filter, Stereo Delay and Stereo to Mono (the examples of Polyend's published `editor-fx-sdk`), and Overdrive, Delay, Bitcrusher, Chorus, Flanger, Limiter and a three-band EQ (rebuilt from Polyend's `core/effector`). Checked on the unit: nine plugins run, undo, a fault and a hang are contained, Stereo Delay and Stereo to Mono on a stereo sample.
+- **Wavetable envelopes and LFOs.** The MOD page has WT ENV and WT LFO sources (on amplitude, filter cutoff, pan, finetune and wavetable position), a contour drawing, and user contours from `/Envelopes/*.wav`; granular length can be a modulation destination. New step effects `w` (WT amp envelope), `y` (WT filter envelope) and `z` (granular length). Contour shapes are Polyend's `mtWavetableEnvelopes`, bit-exact. A project that uses a WT slot is saved with INST 1.6; any other is as before. Checked on the unit: the worst CPU arm was +0.72 points; the listening is not done.
+- **Play Thru for Slice and Beat Slice.** A slice keeps playing through the next slices until note off or the sample end, as an option on the instrument and in OG files (INST 1.7 only when the flag is set).
+- **Chance conditions beyond 0..100.** FX 4 takes 101 (group with last), 102 (not last) and 103 and up for "play N, skip M" and "skip N, play M" (N, M from 1 to 6), with the values of the official format, so OG files keep their meaning.
+- **Perform: custom play orders C1 to C20.** PLAYMODE takes 0 to 23. The orders are Polyend's published data, and the sequencer plays them with their rolls. PERF and SCEN are written as 1.2 only when a slot uses one; any other project is as before.
+- **MIDI Time Code, out and in.** Config has MTC OUT (Off, 24, 25, 30 fps) and MTC IN (Off, DIN, USB). The unit sends quarter-frame messages from the song timeline on the ports CLOCK OUT names, and follows an incoming MTC with a re-lock after a jump, so a DAW that syncs by MTC (Logic Pro) can follow it. MTC carries no tempo: set the same tempo in the DAW. The settings file grows by appended bytes with defaults Off. The official firmware has no MTC. New Community OS behaviour.
+- **MIDI clock follow, tighter.** The clock DLL settles a tempo jump in about 0.1 s in simulation, an SPP that arrives with a Stop is honoured on Continue, an SPP received while playing relocates at the next step boundary, a step waits for a real clock, and the master's priority and lateness are handled. The loop wrap of a Song loop relocates MTC. A battery with the computer as master passed 14 of 17 tests on the unit before these fixes; the rerun is pending.
+- **MIDI event list (EVENTS) on Pattern.** An edit-through list of the steps of a MIDI track: notes, CC A..F and micro-moves, with FILTER, a play marker, PREVIEW, QUANT, and the FX1 and FX2 columns on NOTE rows (type and value, editable, one undo per edit). No format change.
+- **Official MIDI CC map.** A CC MAP device setting gives the 32 CCs the official manual documents for the mixer, Perform and levels, and the CC row of a Perform slot. Documented behaviour of the official firmware, not yet verified on a unit.
+- **MIDI Learn: follow and encoder.** In the MIDI synth mode Learn follows the selected instrument (F5 FOLLOW); the chord Instr+Fx on a row puts that parameter on the encoder (one target), and a recorded Learn move or encoder move is written into the FX columns of a LIVE or STEP take. Checked on the unit: ENCLEARN in LIVE and STEP recording.
+- **Pattern tools in one grammar.** Select, then `F7`, then a verb. A right-hand panel holds the verb menu and the TOOLS dialog; TRANSPOSE and INSTRUMENT dialogs; Fill works on the selection; `F6` repeats the last FILL or TOOLS apply; CLEAR is refused on a partial column; the APPS page lists only the tool apps. Checked on the unit: the TRANSPOSE and INSTRUMENT dialogs, refusals and `F6` repeat.
+- **Apps list and Navigator.** Shift+Pattern opens one list of the module apps that are not tools (`F1` launches one, `F8` is BACK on an empty list); the Navigator opens with Master+Song or Song+Pattern.
+- **Pattern selection.** Shift+Up at step 0 selects the cursor's column first, then the track, then every track; Shift+Note, Instr, Vol and Fx in edit mode also select the rows they jump over; Shift+Delete follows JUMP; a selection across tracks is drawn dimmer outside the cursor's track.
+- **Song: editable TIMELINE.** A cursor and rectangle on the lanes, PREVIEW (`F1` in a lane auditions it), ADD EMPTY slot, ORDER and ARRANGEMENT folded into LIST, and a loop of a range while editing. 12 lanes show on both pages, the window scrolls to tracks 13 to 16.
+- **tracker-ce files.** The load strip names what a tracker-ce folder lost; 16-track version 5 and version 6 pattern files are read (read only); the official scale numbering and 39 scales on the held-Note panel (NOTE 1.1).
+- **Record: COUNT-IN and status chips.** A COUNT-IN row (OFF, 1, 2, 4 bars) clicks with the music before a take, also with the metronome off; the top strip shows MONITOR, REC, OVERDUB and LOOP chips while each is on.
+- **Status LED option.** Config can turn the heartbeat off (session only; it also hides the over-budget code 12). Checked on the unit.
+- **Importers moved to the card.** MOD, S3M and MED import is now `modules/importers/tracker.tmod`: **copy it to the card or IMPORT refuses.** With the module missing, the project that is open and its modules stay loaded. Checked on the unit: MOD, S3M and MED import with the module, and the refusal without it.
+
+### Changed
+
+- **Flash diet.** Text, glyphs, help pages, key bindings, the boot logo and built-in modules are stored compressed and unpacked at boot, which freed enough flash for this release. Nothing here changes how a screen behaves. Checked on the unit up to the FX picker and custom play orders; the unpack of key bindings and console text is pending.
+- **Master scratch.** The scratch follows the hand: held speed between detents, 70 ms of inertia, a gentler gate near standstill and an anti-alias filter above 1x. What you hear changes. Not judged on the unit yet (it needs a hand on the platter).
+- **Module ABI 1.13** (was 1.10 at v1.1.0): effects with stereo, the tempo and a KEY (1.12), importers (1.11), per-instrument RATE (1.13). Modules of ABI 1.0 to 1.10 still load; a module of a newer minor than the OS says NEEDS NEWER OS.
+
+### Fixed
+
+- **A loaded project keeps its tempo** (OS-BUG-TEMPOLOAD): a project saved with no instrument opened at 120 BPM. Merged and covered by a test; the unit check is left.
+- **An image that fills the last flash sector hung the unit** (OS-BUG-LASTSECTOR): an image ending at 0x100000 left the unit not coming back after the update. The device validator and the image check now refuse an image that reaches sector 0xFF000.
+- **A `.ptfx` whose init is at payload offset 0 is a valid entry**, and the console names the reason when it refuses one.
+- **An export no longer carries live effect tails**, and a project open or NEW clears the old toasts.
+- **Scratch** (see Changed).
+
+### Formats
+
+- **INST 1.6, 1.7, 1.8** append the WT bytes, the play-thru byte and the module RATE; each is written only when the instrument uses it, so projects that do not are byte for byte as before. A project saved with them opens in v1.1.0 but loses those values on its next save. **PERF and SCEN 1.2** hold C1 to C20 only when used. **NOTE 1.1** carries the extra scales. New files: `.o3mp` presets (1.0). The settings file grows by appended bytes (MIDI CC map, MTC OUT, MTC START, MTC IN) with default fill.
+
+### For developers
+
+- Module ABI 1.11 to 1.13 and the SDK: effect templates `effect_stereo` and `effect_key`, preset lists in `module.json`, `"rate": true`. The `.ptfx` tools and packer (`tools/ptfx_pack.py`, `tools/ptfx_inspect.py`) are rebuilt from the format facts; the content zip is built by `tools/release/make_starter.py`.
+
 ## v1.1.0 (date to be set at publication)
 
 ### New

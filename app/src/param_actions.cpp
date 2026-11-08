@@ -4,10 +4,12 @@
 // undoable and sent to the audio side without a line in this file.
 #include "param_access.h"
 
+#include <o3os/app/cc_map.h>
 #include <o3os/app/key_prompt.h>
 #include <o3os/app/learn_list.h>
 #include <o3os/app/module_ui.h>
 #include <o3os/app/og_samples.h>
+#include <o3os/app/param_set.h>
 #include <o3os/app/play_mode.h>
 #include <o3os/app/sample_bank.h>
 #include <o3os/app/screens/config_screen.h>
@@ -16,6 +18,7 @@
 #include <o3os/app/wave_math.h>
 #include <o3os/audio/voices.h>
 #include <o3os/core/fixed_string.h>
+#include <o3os/model/instrument.h>
 #include <o3os/model/params.h>
 #include <o3os/seq/sequencer.h>
 
@@ -53,7 +56,7 @@ void reset_runtime(ActionContext& ctx, core::LearnScope scope, unsigned slot) no
 }
 
 bool say(ActionContext& ctx, core::Severity severity, const char* text) noexcept {
-  return ctx.view.notify.post(severity, text, "params", ViewState::kMessageMs);
+  return say_tag(ctx, severity, text, "params");
 }
 
 // The CARD AS DISK row's messages (OS-USBDISK U2b). While the card is out the platform keeps a persistent strip up and rewrites it every second, so a post() would queue behind it and show only after the eject:
@@ -175,6 +178,19 @@ bool read_param(const Model& model, core::ParamId id, float& value) noexcept {
     value = model.device.get(core::param_field(id));
     return true;
   }
+  if (is_insert_param(id)) {  // OS-INSFX S5: an insert's parameter: the record's blob, or the module's default while `n` does not reach it
+    ParamScratch scratch;
+    const core::ParamDesc* d = describe_param(model, id, scratch);
+    if (d == nullptr || model.project == nullptr) {
+      return false;
+    }
+    const model::InsertRecord* rec = model.project->find_insert(core::param_index(id) / 2u, core::param_index(id) % 2u);
+    if (rec == nullptr) {
+      return false;
+    }
+    value = core::param_field(id) < rec->n ? rec->param[core::param_field(id)] : d->def;
+    return true;
+  }
   if (is_module_param(id)) {  // a module's parameter: the blob's value, or the module's default while the blob does not reach it (the first edit writes the whole blob)
     ParamScratch scratch;
     const core::ParamDesc* d = describe_param(model, id, scratch);
@@ -200,6 +216,30 @@ bool read_param(const Model& model, core::ParamId id, float& value) noexcept {
     value = static_cast<float>(in->stereo);
     return true;
   }
+  if (is_wt_param(id)) {  // OS-CEWTENV W7a: the MOD page's WT fields are the instrument's own bytes (not table rows)
+    const model::Instrument* in = model.project != nullptr ? model.project->instrument(core::param_index(id)) : nullptr;
+    if (in == nullptr || in->kind != model::InstrumentKind::Sample) {
+      return false;
+    }
+    value = model::wt_param_value(*in, core::param_field(id));
+    return true;
+  }
+  if (is_play_thru_param(id)) {  // OS-CEPLAYTHRU P2: the source page's PLAY THRU is the instrument's own byte (not a table row)
+    const model::Instrument* in = model.project != nullptr ? model.project->instrument(core::param_index(id)) : nullptr;
+    if (in == nullptr || in->kind != model::InstrumentKind::Sample) {
+      return false;
+    }
+    value = static_cast<float>(in->slice_thru);
+    return true;
+  }
+  if (is_module_rate_param(id)) {  // OS-MODRATE: the params page's RATE row is the Module instrument's own byte
+    const model::Instrument* in = model.project != nullptr ? model.project->instrument(core::param_index(id)) : nullptr;
+    if (in == nullptr || in->kind != model::InstrumentKind::Module) {
+      return false;
+    }
+    value = static_cast<float>(in->rate);
+    return true;
+  }
   if (model.project == nullptr || !model.project->has_param(id)) {
     return false;
   }
@@ -211,6 +251,10 @@ bool read_param(const Model& model, core::ParamId id, float& value) noexcept {
     value = static_cast<float>(fit != 0u ? fit : wt_size_eff(static_cast<unsigned>(value)));
   } else if (core::param_kind(id) == core::ParamKind::Instrument && core::param_field(id) == model::instrument_param::GrainLength && value < 44.0f) {
     value = 441.0f;  // an unset grain plays 441 (og_samples.cpp): the encoder steps from there
+  } else if (core::param_kind(id) == core::ParamKind::Instrument && model::instrument_param::is_mod_field(core::param_field(id)) &&
+             (core::param_field(id) - model::instrument_param::kModFirst) % model::instrument_param::kModStride == model::instrument_param::LfoShape &&
+             value > static_cast<float>(model::kLfoShapeSine)) {
+    value = static_cast<float>(model::kLfoShapeTriangle);  // OS-CEWTENV W7a: the byte of a slot that was a WT LFO is a contour; as an LFO it plays (and reads) as a Triangle
   }
   return true;
 }
@@ -223,6 +267,16 @@ std::uint32_t param_generation_of(const Model& model, core::ParamId id) noexcept
 }
 
 void send_param_change(const ActionContext& ctx, core::ParamId id, float value, std::uint32_t ramp) noexcept {
+  if (is_insert_param(id)) {  // OS-INSFX S5: an insert's parameter goes to its instance through the host (ParamChange{Insert, where, field}, with the binding's generation)
+    const unsigned where = core::param_index(id);
+    if (ctx.model.modules == nullptr || !ctx.model.modules->send_param(ParamTarget::of_insert(where), core::param_field(id), value)) {
+      // A drop only when no instance is bound there: a bound instance already holds the value in its host blob, flagged dirty, and flush_params retries it on a later service tick once the ring has room.
+      if (ctx.session != nullptr && (ctx.model.modules == nullptr || !ctx.model.modules->insert_bound(where))) {
+        ++ctx.session->param_drops;  // no instance bound: nothing holds the value
+      }
+    }
+    return;
+  }
   if (is_module_param(id)) {  // a module's parameter goes to its instance (the module's own ring, applied at the next block start), not to the engine's table
     if (ctx.model.modules == nullptr || !ctx.model.modules->send_param(core::param_index(id), core::param_field(id) - model::instrument_param::kModuleFirst, value)) {
       if (ctx.session != nullptr) {
@@ -274,6 +328,10 @@ void send_param_change(const ActionContext& ctx, core::ParamId id, float value, 
         ++ctx.session->param_drops;
       }
     };
+    const unsigned mf = rel % ip::kModStride;
+    if (value >= 2.5f && mf == ip::ModSource) {
+      return;  // OS-CEWTENV W7a: WT ENV / WT LFO are not live (the engine's ring knows Off, Envelope and LFO): the rebind above applies them at the quiet moment
+    }
     push(core::param_field(id), value);
     const model::Instrument* in = ctx.model.project != nullptr ? ctx.model.project->instrument(slot) : nullptr;
     if (rel % ip::kModStride == ip::ModSource && in != nullptr && e < ip::kEnvelopes) {
@@ -312,10 +370,7 @@ WriteResult write_module_param(ActionContext& ctx, core::ParamId id, float value
   if (d == nullptr || in == nullptr || in->kind != model::InstrumentKind::Module) {
     return WriteResult::NoInstrument;
   }
-  float v = core::param_clamp(*d, value);
-  if (scratch.whole) {
-    v = core::param_clamp(*d, static_cast<float>(static_cast<std::int32_t>(v + (v < 0.0f ? -0.5f : 0.5f))));
-  }
+  const float v = fit_param_value(*d, scratch.whole, value);
   if (!ctx.edit->project().has_param(id)) {
     model::Instrument full = *in;
     const unsigned have = full.param_len / 4u;
@@ -341,6 +396,57 @@ WriteResult write_module_param(ActionContext& ctx, core::ParamId id, float value
     return WriteResult::Unchanged;
   }
   send_param_change(ctx, id, after);
+  return WriteResult::Changed;
+}
+
+}  // namespace
+
+namespace {
+
+// OS-INSFX S5, an insert's parameter (ParamKind::Insert): clamped to the module's descriptor (rounded when it says whole numbers), written into the project's INSX blob through the
+// Editor (Editor::set_insert: NOT an undo step, D9), then sent to the bound instance (ParamChange{Insert}). A record whose blob is shorter than the parameter is extended first (the
+// module's defaults fill the gap), like a module instrument's.
+WriteResult write_insert_param(ActionContext& ctx, core::ParamId id, float value) noexcept {
+  if (ctx.edit == nullptr) {
+    return WriteResult::NoProject;
+  }
+  const unsigned where = core::param_index(id);
+  const unsigned index = core::param_field(id);
+  const model::Project& p = ctx.edit->project();
+  const model::InsertRecord* rec = p.find_insert(where / 2u, where % 2u);
+  if (rec == nullptr) {
+    return WriteResult::NoInstrument;  // (the page is open only on a bound cell)
+  }
+  ParamScratch scratch;
+  const core::ParamDesc* d = describe_param(ctx.model, id, scratch);
+  if (d == nullptr || index >= model::kInsertParamsMax) {
+    return WriteResult::NoInstrument;
+  }
+  const float v = fit_param_value(*d, scratch.whole, value);
+  model::InsertRecord next = *rec;
+  if (index >= next.n) {  // the blob is extended to hold the parameter: the module's defaults fill the gap
+    if (ctx.model.modules == nullptr || ctx.model.project == nullptr) {
+      return WriteResult::Rejected;
+    }
+    const ParamTarget target = ParamTarget::of_insert(where);
+    for (unsigned i = next.n; i <= index; ++i) {
+      ParamScratch s2;
+      float def = 0.0f;
+      if (ctx.model.modules->describe(p, target, i, s2)) {
+        def = s2.desc.def;
+      }
+      next.param[i] = def;
+    }
+    next.n = static_cast<std::uint8_t>(index + 1u);
+  }
+  if (next.param[index] == v) {
+    return WriteResult::Unchanged;  // before the extended blob (its n) is stored: safe, the read path falls back to the module default past n
+  }
+  next.param[index] = v;
+  if (ctx.edit->set_insert(next) != model::Status::Ok) {  // not journalled (D9): no undo entry, the generation moves so a save keeps it
+    return WriteResult::Rejected;
+  }
+  send_param_change(ctx, id, v);
   return WriteResult::Changed;
 }
 
@@ -521,14 +627,125 @@ WriteResult write_play_stereo(ActionContext& ctx, core::ParamId id, float value)
   return WriteResult::Changed;
 }
 
+// OS-CEPLAYTHRU P2, the source page's PLAY THRU row (the slice modes only): the instrument is written whole with the flag, one undo record, and the slot is rebound, so the
+// rebuilt descriptor carries it (beat_slice_span ends a slice at the sample end). Like write_play_stereo, no refusal: OFF and ON are always allowed.
+WriteResult write_play_thru(ActionContext& ctx, core::ParamId id, float value) noexcept {
+  if (ctx.edit == nullptr) {
+    return WriteResult::NoProject;
+  }
+  const unsigned slot = core::param_index(id);
+  const model::Instrument* in = ctx.edit->project().instrument(slot);
+  if (in == nullptr || in->kind != model::InstrumentKind::Sample) {
+    return WriteResult::NoInstrument;
+  }
+  if (!(value >= 0.0f && value <= static_cast<float>(model::kInstSliceThruMax))) {
+    return WriteResult::Rejected;  // (NaN, negative or past the two choices)
+  }
+  const std::uint8_t target = static_cast<std::uint8_t>(value + 0.5f);
+  if (target == in->slice_thru) {
+    return WriteResult::Unchanged;
+  }
+  model::Instrument next = *in;
+  next.slice_thru = target;
+  if (ctx.edit->set_instrument(slot, next) != model::Status::Ok) {
+    return WriteResult::Rejected;
+  }
+  if (ctx.samples != nullptr) {
+    ctx.samples->request_rebind(slot);  // the descriptor's slice_thru follows the flag (the bank applies it when stopped and idle, as for every descriptor field)
+  }
+  return WriteResult::Changed;
+}
+
+// OS-MODRATE, the params page's RATE row (a rate-capable instrument module): the instrument is written whole with the byte, one undo record (saved with the project, INST 1.8). ModuleUi starts the
+// change (shutdown, init and the blob again at idle, in the main loop: sync_slots, here, by undo and redo, and once a pass); a module that does not declare the flag refuses a RATE above FULL.
+WriteResult write_module_rate(ActionContext& ctx, core::ParamId id, float value) noexcept {
+  if (ctx.edit == nullptr || ctx.model.modules == nullptr) {
+    return WriteResult::NoProject;
+  }
+  const unsigned slot = core::param_index(id);
+  const model::Instrument* in = ctx.edit->project().instrument(slot);
+  if (in == nullptr || in->kind != model::InstrumentKind::Module) {
+    return WriteResult::NoInstrument;
+  }
+  if (!(value >= 0.0f && value <= static_cast<float>(model::kInstRateMax))) {
+    return WriteResult::Rejected;  // (NaN, negative or past 1/4)
+  }
+  const std::uint8_t target = static_cast<std::uint8_t>(value + 0.5f);
+  if (target == in->rate) {
+    return WriteResult::Unchanged;
+  }
+  if (target != 0u && !ctx.model.modules->rate_capable(ctx.edit->project(), slot)) {
+    return WriteResult::Rejected;
+  }
+  model::Instrument next = *in;
+  next.rate = target;
+  if (ctx.edit->set_instrument(slot, next) != model::Status::Ok) {
+    return WriteResult::Rejected;
+  }
+  ctx.model.modules->sync_slots(ctx.edit->project());  // (starts the change now; the next passes finish it)
+  return WriteResult::Changed;
+}
+
+// OS-CEWTENV W7a, the MOD page's WT fields (WAVE, DURATION, WARP X, WARP Y, SUSTAIN of a slot): the instrument is written whole with the changed byte, one undo record, and the slot is rebound, so the rebuilt
+// descriptor carries it (nothing is sent live: a WT slot is built from the project, as the SOURCE choice itself). A value outside the descriptor's range (or NaN) is Rejected.
+WriteResult write_wt_param(ActionContext& ctx, core::ParamId id, float value) noexcept {
+  namespace ip = model::instrument_param;
+  if (ctx.edit == nullptr) {
+    return WriteResult::NoProject;
+  }
+  const unsigned slot = core::param_index(id);
+  const model::Instrument* in = ctx.edit->project().instrument(slot);
+  if (in == nullptr || in->kind != model::InstrumentKind::Sample) {
+    return WriteResult::NoInstrument;
+  }
+  const unsigned field = core::param_field(id);
+  const core::ParamDesc* d = model::wt_param_desc(field);
+  if (d == nullptr || !core::param_in_range(*d, value)) {
+    return WriteResult::Rejected;
+  }
+  const int whole = static_cast<int>(value + (value < 0.0f ? -0.5f : 0.5f));
+  if (model::wt_param_value(*in, field) == static_cast<float>(whole)) {
+    return WriteResult::Unchanged;
+  }
+  const unsigned e = (field - ip::kWtFirst) / ip::kWtStride;
+  model::Instrument next = *in;
+  model::Lfo& l = next.sampler.lfo[e];
+  switch ((field - ip::kWtFirst) % ip::kWtStride) {
+    case ip::WtWave: l.shape = static_cast<std::uint8_t>(whole); break;
+    case ip::WtDuration: next.sampler.envelope[e].decay = static_cast<std::uint16_t>(whole); break;
+    case ip::WtWarpX: l.wt_bend = static_cast<std::uint8_t>((ip::wt_nibble_of(whole) << 4) | (l.wt_bend & 15u)); break;
+    case ip::WtWarpY: l.wt_bend = static_cast<std::uint8_t>((l.wt_bend & 0xF0u) | ip::wt_nibble_of(whole)); break;
+    default: l.wt_sust = static_cast<std::uint8_t>(whole); break;
+  }
+  if (ctx.edit->set_instrument(slot, next) != model::Status::Ok) {
+    return WriteResult::Rejected;
+  }
+  if (ctx.samples != nullptr) {
+    ctx.samples->request_rebind(slot);
+  }
+  return WriteResult::Changed;
+}
+
 }  // namespace
 
 WriteResult write_param(ActionContext& ctx, core::ParamId id, float value, bool tell) noexcept {
+  if (is_wt_param(id)) {
+    return write_wt_param(ctx, id, value);
+  }
   if (is_midi_channel_param(id)) {
     return write_midi_channel(ctx, id, value);
   }
   if (is_play_stereo_param(id)) {
     return write_play_stereo(ctx, id, value);
+  }
+  if (is_play_thru_param(id)) {
+    return write_play_thru(ctx, id, value);
+  }
+  if (is_module_rate_param(id)) {
+    return write_module_rate(ctx, id, value);
+  }
+  if (is_insert_param(id)) {  // OS-INSFX S5: an insert's parameter writes the INSX blob and goes to the instance
+    return write_insert_param(ctx, id, value);
   }
   if (is_module_param(id)) {
     return write_module_param(ctx, id, value);
@@ -838,6 +1055,67 @@ bool learn_mode(ActionContext& ctx, core::ActionArg) noexcept {
   return true;
 }
 
+// OS-LEARNFOLLOW 3.1, F5 in the Learn overlay: toggle the target's binding between "this instrument" and "the selected instrument".
+bool learn_follow(ActionContext& ctx, core::ActionArg) noexcept {
+  ctx.view.learn.confirm = false;
+  const core::ParamId id = focus_param(ctx);
+  if (id == core::ParamId::None) {
+    return false;
+  }
+  if (core::param_kind(id) != core::ParamKind::Instrument) {
+    return say(ctx, core::Severity::Info, "FOLLOW: INSTRUMENT PARAMETERS ONLY");
+  }
+  if (model::instrument_param::is_module_field(core::param_field(id))) {
+    return say(ctx, core::Severity::Info, "FOLLOW: NOT FOR A MODULE PARAMETER");  // A-4: parameter i means something else in every module
+  }
+  ParamScratch scratch;
+  const core::ParamDesc* d = describe_param(ctx.model, id, scratch);
+  if (d == nullptr) {
+    return false;
+  }
+  const core::LearnScope scope = scope_of(id);  // an Instrument parameter is the project's
+  const core::LearnBinding* slots = store_slots(ctx, scope);
+  const int slot = slots != nullptr ? core::learn_find_param(slots, core::kLearnSlots, id) : -1;
+  if (slot < 0) {
+    return say(ctx, core::Severity::Info, "NOTHING BOUND TO THIS");
+  }
+  const core::LearnBinding old = slots[slot];
+  core::LearnBinding b = old;
+  const bool to_follow = (old.flags & core::kLearnFollow) == 0;
+  if (to_follow) {  // the field of whichever instrument is selected (index 0: only its kind and field count)
+    b.param = core::param_id(core::ParamKind::Instrument, 0, core::param_field(id));
+    b.flags = core::kLearnFollow;
+  } else {  // pinned back to the target's instrument
+    b.param = id;
+    b.flags = 0;
+  }
+  core::LearnPlan plan{0, 0};
+  if (!core::learn_plan(slots, core::kLearnSlots, b, plan)) {
+    return say(ctx, core::Severity::Warn, "LEARN STORE FULL");
+  }
+  for (unsigned s = 0; s < core::kLearnSlots; ++s) {  // the bindings this one takes the message from
+    if ((plan.clear & (std::uint32_t{1} << s)) != 0) {
+      (void)store_set(ctx, scope, s, core::LearnBinding{});
+      reset_runtime(ctx, scope, s);
+    }
+  }
+  if (store_set(ctx, scope, static_cast<unsigned>(plan.write), b) != model::Status::Ok) {
+    return say(ctx, core::Severity::Warn, "BINDING REFUSED");
+  }
+  reset_runtime(ctx, scope, static_cast<unsigned>(plan.write));
+  core::FixedString<core::kNotifyTextChars> text;
+  text.assign("CC ");
+  append_uint(text, b.cc);
+  text.append(to_follow ? " FOLLOWS: " : " PINNED: ");
+  text.append(d->name);
+  if (!to_follow) {
+    text.append(" INS ");
+    append_dec(text, core::param_index(id) + 1u, 2);
+  }
+  (void)ctx.view.notify.post(core::Severity::Info, text.c_str(), "learn", ViewState::kMessageMs);
+  return true;
+}
+
 // F3 in the overlay: deletes the binding the list cursor is on (either store; a project binding is an undo unit).
 bool learn_delete(ActionContext& ctx, core::ActionArg) noexcept {
   ctx.view.learn.confirm = false;
@@ -888,6 +1166,19 @@ bool learn_clear_all(ActionContext& ctx, core::ActionArg) noexcept {
 
 namespace {
 
+// OS-LEARNFOLLOW 3.3, the fit rule: a follow binding acts only when the instrument has the field with its meaning (F7): the sampler,
+// source, envelope, MOD and VEL> rows (0x00..0x77, 0x8B) belong to a Sample instrument, a MIDI row (0x80..0x8A) to a MIDI one; a
+// module parameter (0x100..) means something else in every module, so it never follows (A-4).
+bool follow_fits(model::InstrumentKind kind, unsigned field) noexcept {
+  if (model::instrument_param::is_module_field(field)) {
+    return false;
+  }
+  if (field >= model::instrument_param::kMidiFirst && field < model::instrument_param::VelSens) {
+    return kind == model::InstrumentKind::Midi;
+  }
+  return kind == model::InstrumentKind::Sample;
+}
+
 // Binds controller `cc` (channel `channel`, 0 = every) to the Learn target, in the store its kind belongs to.
 bool learn_bind(ActionContext& ctx, unsigned channel, unsigned cc) noexcept {
   ctx.view.learn.confirm = false;
@@ -911,6 +1202,11 @@ bool learn_bind(ActionContext& ctx, unsigned channel, unsigned cc) noexcept {
   const int old = core::learn_find_param(slots, core::kLearnSlots, id);
   if (old >= 0) {
     b.mode = slots[old].mode;
+    // OS-LEARNFOLLOW 3.2: rebinding a followed field stays a follow binding of that field (binding a field that has no binding makes a fixed one).
+    if ((slots[old].flags & core::kLearnFollow) != 0) {
+      b.param = core::param_id(core::ParamKind::Instrument, 0, core::param_field(id));
+      b.flags = core::kLearnFollow;
+    }
   }
   core::LearnPlan plan{0, 0};
   if (!core::learn_plan(slots, core::kLearnSlots, b, plan)) {
@@ -930,6 +1226,37 @@ bool learn_bind(ActionContext& ctx, unsigned channel, unsigned cc) noexcept {
   return true;
 }
 
+// OS-MIDICCMAP S2, Q2 a: does any binding of either store listen to this message (channel and controller)? "A binding listens", not "a binding moved something": a Pickup
+// binding that has not caught the knob still owns the message.
+bool learn_listens(const ActionContext& ctx, unsigned channel, unsigned cc) noexcept {
+  for (const core::LearnScope scope : {core::LearnScope::Project, core::LearnScope::Device}) {
+    const core::LearnBinding* slots = store_slots(ctx, scope);
+    if (slots != nullptr && core::learn_find_cc(slots, core::kLearnSlots, channel, cc) >= 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// The write of a knob's move, shared by a Learn binding (apply_cc) and the encoder of Instr + FX1 (enc_turn, OS-ENCLEARN): the same click group, the same final rules, the same write.
+WriteResult write_moved(ActionContext& ctx, core::ParamId id, float next) noexcept {
+  merge_click(ctx, id);  // a knob's sweep is one unit too, by the parameter it resolved to
+  // D10: a track's or the master's parameter is the Mixer's, and the Mixer has no history, whichever screen the controller moved it on.
+  const bool mixer_owned = ctx.edit != nullptr && (core::param_kind(id) == core::ParamKind::Track || core::param_kind(id) == core::ParamKind::Master);
+  // OS-FXREC 3.4: while a take is open, every parameter write of midi.cc is final as well: the knob's move is applied, not journalled, so one Undo removes the take's notes and FX and leaves the
+  // parameter where the knob put it; only the recorded FX steps are journalled into the take (rec_fx_write).
+  const bool in_take = ctx.edit != nullptr && ctx.view.edit.take_open;
+  const bool was_final = ctx.edit != nullptr ? ctx.edit->final_edits() : false;
+  if (mixer_owned || in_take) {
+    ctx.edit->set_final(true);
+  }
+  const WriteResult r = write_param(ctx, id, next);
+  if (mixer_owned || in_take) {
+    ctx.edit->set_final(was_final);
+  }
+  return r;
+}
+
 // A message for the bindings of one store.
 bool apply_cc(ActionContext& ctx, core::LearnScope scope, unsigned channel, unsigned cc, unsigned value) noexcept {
   const core::LearnBinding* slots = store_slots(ctx, scope);
@@ -945,8 +1272,14 @@ bool apply_cc(ActionContext& ctx, core::LearnScope scope, unsigned channel, unsi
   // A follow binding acts on the instrument the UI has selected (the Instruments are 1..48, slots 0..47).
   core::ParamId id = b.param;
   if ((b.flags & core::kLearnFollow) != 0) {
-    id = core::param_id(core::ParamKind::Instrument, ctx.view.instrument > 0 ? static_cast<unsigned>(ctx.view.instrument - 1) : 0u,
-                        core::param_field(b.param));
+    const unsigned inst_slot = ctx.view.instrument > 0 ? static_cast<unsigned>(ctx.view.instrument - 1) : 0u;
+    const unsigned field = core::param_field(b.param);
+    id = core::param_id(core::ParamKind::Instrument, inst_slot, field);
+    // OS-LEARNFOLLOW 3.3: the selected instrument must have the field with its meaning, else the message does nothing (silent, as a free slot).
+    const model::Instrument* in = ctx.model.project != nullptr ? ctx.model.project->instrument(inst_slot) : nullptr;
+    if (in == nullptr || !follow_fits(in->kind, field)) {
+      return false;
+    }
   }
   ParamScratch scratch;
   const core::ParamDesc* d = describe_param(ctx.model, id, scratch);
@@ -969,21 +1302,69 @@ bool apply_cc(ActionContext& ctx, core::LearnScope scope, unsigned channel, unsi
     }
     next = core::param_denorm(*d, norm);
   }
-  merge_click(ctx, id);  // a knob's sweep is one unit too, by the parameter it resolved to
-  // D10: a track's or the master's parameter is the Mixer's, and the Mixer has no history, whichever screen the controller moved it on.
-  const bool mixer_owned = ctx.edit != nullptr && (core::param_kind(id) == core::ParamKind::Track || core::param_kind(id) == core::ParamKind::Master);
-  if (mixer_owned) {
-    ctx.edit->set_final(true);
-  }
-  const WriteResult r = write_param(ctx, id, next);
-  if (mixer_owned) {
-    ctx.edit->set_final(false);
-  }
+  const WriteResult r = write_moved(ctx, id, next);
   core::learn_applied(rt, id, param_generation_of(ctx.model, id));
+  if (r == WriteResult::Changed) {
+    (void)rec_fx_write(ctx, id, d->name);  // OS-FXREC S2, 3.2: the move records as the step FX of the open take (nothing when no take is open)
+  }
   return r == WriteResult::Changed;
 }
 
 }  // namespace
+
+// OS-ENCLEARN: Instr + FX2 (the chord): the Learn row under the cursor (focus_param, kParamLearnable: Learn's own resolution) becomes the encoder's one target, replacing the old one.
+bool enc_assign(ActionContext& ctx, core::ActionArg) noexcept {
+  const core::ParamId id = focus_param(ctx);
+  ParamScratch scratch;
+  const core::ParamDesc* d = describe_param(ctx.model, id, scratch);
+  if (id == core::ParamId::None || d == nullptr || (d->flags & core::kParamLearnable) == 0) {
+    return say_tag(ctx, core::Severity::Info, "NO TARGET FOR ENCODER", "enc");
+  }
+  ctx.view.enc_target = id;  // no clear gesture (maintainer, 2026-11-08): the same row again keeps it and says it again; another row replaces it
+  core::FixedString<core::kNotifyTextChars> text;
+  text.append("ENCODER: ");
+  text.append(d->name);
+  if (core::param_kind(id) == core::ParamKind::Instrument) {
+    text.append(" INS ");
+    append_uint(text, core::param_index(id) + 1u);
+  }
+  return say_tag(ctx, core::Severity::Info, text.c_str(), "enc");
+}
+
+// OS-ENCLEARN: the encoder turned while Instr + FX1 are held (App::run_once takes it ahead of the bindings): the target moves by `arg` fine steps, a coarse step each with Shift, through the write
+// of a relative Learn binding (write_moved) and the same recorder (rec_fx_write: LIVE, STEP). The strip shows "<PARAMETER> <value>" while it moves.
+bool enc_turn(ActionContext& ctx, core::ActionArg arg) noexcept {
+  const core::ParamId id = ctx.view.enc_target;
+  if (id == core::ParamId::None) {
+    return say_tag(ctx, core::Severity::Info, "NO ENCODER TARGET (INSTR + FX2)", "enc");
+  }
+  ParamScratch scratch;
+  const core::ParamDesc* d = describe_param(ctx.model, id, scratch);
+  float now = 0.0f;
+  if (d == nullptr || (d->flags & core::kParamLearnable) == 0u || !read_param(ctx.model, id, now)) {
+    return say_tag(ctx, core::Severity::Info, "ENCODER TARGET IS GONE", "enc");  // no project or a free instrument slot now
+  }
+  int detents = arg > kMaxDetents ? kMaxDetents : (arg < -kMaxDetents ? -kMaxDetents : static_cast<int>(arg));
+  if (ctx.view.shift) {
+    detents *= static_cast<int>(d->coarse);
+  }
+  const float next = core::param_step(*d, now, detents);
+  const WriteResult r = write_moved(ctx, id, next);
+  float shown = now;
+  (void)read_param(ctx.model, id, shown);
+  core::FixedString<core::kNotifyTextChars> text;
+  text.append(d->name);
+  text.append(" ");
+  char value[core::kParamTextChars + 1];
+  (void)core::param_format(*d, shown, value, sizeof value);
+  text.append(value);
+  (void)ctx.view.notify.upsert(core::Severity::Info, text.c_str(), "enc", ViewState::kMessageMs);
+  if (r == WriteResult::Changed) {
+    (void)rec_fx_write(ctx, id, d->name, true);  // after the value line, so that "REC FX: ..." (the take's first FX, HAS NO FX) is the newest message
+  }
+  return r == WriteResult::Changed;
+}
+
 
 bool midi_cc(ActionContext& ctx, core::ActionArg arg) noexcept {
   const std::uint32_t bits = static_cast<std::uint32_t>(arg);
@@ -1002,7 +1383,13 @@ bool midi_cc(ActionContext& ctx, core::ActionArg arg) noexcept {
   // The project's bindings first, then the device's: one message may move a parameter of each.
   const bool a = apply_cc(ctx, core::LearnScope::Project, channel, cc, value);
   const bool b = apply_cc(ctx, core::LearnScope::Device, channel, cc, value);
-  return a || b;
+  // OS-MIDICCMAP S2 (3.2): the fixed CC map acts after both stores, only when the device setting CC MAP is On and no binding of either store listens to the message (Q2 a).
+  // The port and channel filter is the one poll_midi_cc already applied (MIDI IN, IN CHANNEL); with CC MAP Off this is byte for byte today's behaviour.
+  bool c = false;
+  if (ctx.model.device.get(model::device_setting::CcMap) != 0.0f && !learn_listens(ctx, channel, cc)) {
+    c = cc_map_apply(ctx, cc, value);
+  }
+  return a || b || c;
 }
 
 }  // namespace o3os::app

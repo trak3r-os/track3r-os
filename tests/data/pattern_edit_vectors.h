@@ -82,14 +82,15 @@ inline constexpr std::uint64_t kInstrDigest[22] = {
 };
 
 // one group per FX type tried (kTypes in the test): value delta, pad, type delta and type set over every stored value, column and session
+// (OS-CECHANCE C2 re-pinned: Chance's row reaches 174, its coarse walk and the pads' 0..100 cap change the groups that touch type 4)
 inline constexpr std::uint64_t kFxDigest[26] = {
-    0xb85f4fd8094556a5ull, 0xdc2b24a60add4dedull, 0x7d4d5ea2e50589bdull, 0x8e2cfffff27fa16dull,
-    0x77e09b6741584fb5ull, 0xfeb1d6bb9b30d529ull, 0x96a7cf62dbd41cbdull, 0xa4decbdf36097151ull,
-    0xad5a835ff2819439ull, 0x80dd26a7779468fdull, 0x2d710284b284e5adull, 0x0901a918935ee71dull,
-    0x4c99d41a5acd75bdull, 0x666a3b316e4d1595ull, 0x66a1a89c21438291ull, 0xadfa0bff7a2c21e1ull,
-    0x4d1e498e50df8999ull, 0x9df6ce8b2dc52685ull, 0xb6187e6426b94fb9ull, 0x040b1292b4f1dc9dull,
-    0x9478e173efad187dull, 0xdbfe7ea123f71b7dull, 0xa12097b2856b967dull, 0x57c02227158c737dull,
-    0x8110cd05b27b72bdull, 0x1f484b2d350d4f7dull,
+    0xb85f4fd8094556a5ull, 0xce01e8fa8006e5d1ull, 0xfe2fd1d2516f28ddull, 0x6285fb52ea35f825ull,
+    0x166c400108ef3a45ull, 0xa36f7fbd84cd4f05ull, 0xb88f7689a58b5019ull, 0x79f144cc51b091b5ull,
+    0xf8fc60a8ffe0a3edull, 0xb62a338ae4192a11ull, 0x134657ffe4ab2295ull, 0xcd7da224e1aafbd9ull,
+    0xa78f35b00ac6da59ull, 0x3b8a91c6f957ba51ull, 0xefabab03fc068c99ull, 0xce39ebb3fd79e7ddull,
+    0x3e4f6a1496e1dacdull, 0x5d86c6d51b5b18bdull, 0x3466b8900b6f1eb5ull, 0x70a175c5cc49de95ull,
+    0xda0333aa1550eae1ull, 0x80419fa04ad43121ull, 0x3ff2f4ddc5e3cfa1ull, 0x4b4ea9b5b5b97d21ull,
+    0xf2f89b49ad5c1ae1ull, 0x47bd396ebc8244a1ull,
 };
 
 // one group per element set cleared (all, notes, instruments, FX1, FX2) over the kNotes steps
@@ -99,15 +100,16 @@ inline constexpr std::uint64_t kClearDigest[5] = {
 };
 
 // 3000 random selections and operations, 100 to a group, the comparable ones only
+// (OS-CECHANCE C2 re-pinned where an episode lands on Chance)
 inline constexpr std::uint64_t kRandomDigest[30] = {
-    0xeefcbaf1e2ad584cull, 0xbeedca9fdae14075ull, 0x08bf613eaa2f7470ull, 0xc9b06be297d250a5ull,
-    0x388285c26c66b48eull, 0xb1da80cd29aefdc5ull, 0x64376ab25f394b63ull, 0xb331857d4cd15f82ull,
-    0x6480145e86a296d7ull, 0x90e0c95abac2ffecull, 0xa4ff3881558896f5ull, 0x2a90d419b5989909ull,
-    0x588d7a500f6a8425ull, 0xa33a5a9b39153a29ull, 0xdcb529784e54c752ull, 0x9eb7c03fc77a9566ull,
-    0xdc81db18cdff7c38ull, 0x943b201060d149d8ull, 0xc9abbe4a528efb8full, 0x0f757260623f30b1ull,
-    0x54f9090a4f062d8bull, 0xa2f1bd474f92f1d6ull, 0x6cc140a15c4ac3d5ull, 0xc072184f5bf512d9ull,
-    0x4aad219fdd22feafull, 0x51440982be498e3bull, 0x2f2e91008c349529ull, 0xb29c74c8546dd22aull,
-    0x206c45a32632e5e6ull, 0x2638de99d51e81adull,
+    0x03af1e3c538b64f8ull, 0x8d7c3155ec373c77ull, 0x93173132906ae4c5ull, 0x88d449465a40bacfull,
+    0x388285c26c66b48eull, 0x0cd3c186af090f04ull, 0x64376ab25f394b63ull, 0xb331857d4cd15f82ull,
+    0xcd613b4f3689e919ull, 0x096c3e10fbfd24b2ull, 0x054cf6163126475dull, 0x2a90d419b5989909ull,
+    0xde4a5eae2ea0fac5ull, 0xa33a5a9b39153a29ull, 0x79857eac7d1c7a78ull, 0x9eb7c03fc77a9566ull,
+    0xfd12df4e10f06f8aull, 0x943b201060d149d8ull, 0xc9abbe4a528efb8full, 0xdb858077ac5e9669ull,
+    0x54f9090a4f062d8bull, 0xa2f1bd474f92f1d6ull, 0x511b52bc0274c393ull, 0xbb1a2b435ec0f04bull,
+    0x4aad219fdd22feafull, 0x51440982be498e3bull, 0xb81db6014421067aull, 0xc89155044c631cdcull,
+    0x6fe490bb8cf28562ull, 0x2638de99d51e81adull,
 };
 
 // one group per pattern length 1..128: the row after an entry for every edit step 0..32 shorter than the pattern

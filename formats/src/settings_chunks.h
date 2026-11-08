@@ -29,7 +29,7 @@ inline constexpr std::uint16_t kVersion = 0x0100;
 inline constexpr std::size_t kFixed = 4;   // version and count
 inline constexpr std::size_t kEntry = 8;   // one entry of either chunk
 // What a version 1.0 chunk may hold, which is more than this version keeps (room to grow without a format change): a SETS has an entry for
-// each setting of a scope (this version: at most Settings::kMaxFields, 24 since OS-006e, 16 before), an LRNB one for each binding of a store (this version: at most
+// each setting of a scope (this version: at most Settings::kMaxFields, 32 since OS-MIDICCMAP S1, 24 since OS-006e, 16 before), an LRNB one for each binding of a store (this version: at most
 // core::kLearnSlots, 32; the rest of a longer one is skipped and counted).
 inline constexpr unsigned kMaxSetsEntries = 64;
 inline constexpr unsigned kMaxLrnbEntries = 64;

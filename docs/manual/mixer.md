@@ -18,11 +18,13 @@ To set a level or a pan on the MIXER page, press `Left` or `Right` to pick the c
 <!-- sync: src=audio/include/o3os/audio/graph.h,app/include/o3os/app/mixer_view.h spec=docs/specs/OS-005-audio-engine.md qa=QA-MIX-002,QA-MIX-013,QA-MIX-020 -->
 
 ### What is an insert?
-<!-- sync: src=app/src/module_ui.cpp,app/include/o3os/app/governor_watch.h,app/include/o3os/app/mixer_view.h spec=docs/specs/OS-INSFX.md qa=QA-MIX-058,QA-MIX-059,QA-MIX-060,QA-MIX-061,QA-MIX-062,QA-MIX-064,QA-MIX-067 -->
+<!-- sync: src=app/src/module_ui.cpp,app/include/o3os/app/governor_watch.h,app/include/o3os/app/mixer_view.h spec=docs/specs/OS-INSFX.md,docs/specs/OS-INSFX-ABI2.md qa=QA-MIX-058,QA-MIX-059,QA-MIX-060,QA-MIX-061,QA-MIX-062,QA-MIX-064,QA-MIX-067,QA-MIX-089,QA-MIX-090,QA-MIX-091,QA-MIX-092 -->
 
-An insert is an effect module placed on the sound of one track. The track's sound passes through the effect before it reaches the fader. Each track has two slots, **INS A** and **INS B**. A project holds up to four inserts. The picker lists the effect modules on the card, in the `modules/effects` folder.
+An insert is an effect module placed on the sound of one track. The track's sound passes through the effect before it reaches the fader. Each track has two slots, **INS A** and **INS B**. A project holds up to four inserts at once. The MASTER row has one insert too: it runs its effect twice, once for each side, so it counts as two of the four. The picker lists the effect modules on the card, in the `modules/effects` folder.
 
 Each insert takes some of the processor's time in every audio block. Its cell shows that share as `~N%` or `<1%` of the block, the measured cost of that insert. Until a block has measured it, the cell is blank.
+
+A **stereo** effect (an effect module of ABI 1.12 with a stereo shape) is marked **ST** on its cell and on its line of the picker. A **WIDENS** effect makes a stereo image out of a mono track, and each one that runs keeps one of the unit's four stereo voices for itself: with two WIDENS inserts on, a new stereo note beyond the second plays mono (its mid only), while a note that is already sounding keeps its stereo to the end of the note. Each insert costs one voice, so two WIDENS inserts in the two slots of one track cost two — only WIDENS effects reserve a slot. Bypass gives the voice back to the next note. A stereo-capable effect (one that only keeps a stereo sample's side signal) is marked **ST** too but reserves no voice, and neither does the master insert, whose pair still runs its effect twice, once per side (dual mono), until a stereo master insert lands. The console's `ins` totals line ends with the reservation, `stereo reserved N of 4`. New in track3r-os. <!-- QA-MIX-089, QA-MIX-090, QA-MIX-091, QA-MIX-092 -->
 
 **Bypass** keeps the insert in its slot and plays the track without it. The change is smooth, with no click. `F7` turns bypass on and off.
 
@@ -49,7 +51,7 @@ Below the tracks are three more rows. **LINE IN** is the audio input. Its row ha
 
 ### Sends: a second volume knob
 
-A send takes a copy of a track and feeds it to a shared effect. **SND A** is the delay and **SND B** is the reverb. The send amount is the instrument's **DELAY SEND** and **REVERB SEND**, from 0 to 100, on the SENDS page of Instrument. By default a send taps the track before its fader, so the fader does not change it. The project's SENDS setting can make the tap come after the fader. A return brings the effect's sound back to MAIN and CUE. <!-- audio/graph.h, model/src/params.cpp, OS-005 -->
+A send takes a copy of a track and feeds it to a shared effect. **SND A** is the delay and **SND B** is the reverb. The send amount is the instrument's **DELAY SEND** and **REVERB SEND**, from 0 to 100, on the SENDS page of Instrument (on a module instrument, on its MIX page: `Shift` + `F2`). By default a send taps the track before its fader, so the fader does not change it. The project's SENDS setting can make the tap come after the fader. A return brings the effect's sound back to MAIN and CUE. <!-- audio/graph.h, model/src/params.cpp, OS-005 -->
 
 - **Stored:** routes, levels, pans, names, the mutes and solos, and the effect settings are saved with the project.
 - **Live:** the meters.
@@ -122,6 +124,17 @@ You should see the picker close, the strip say **INSERT SET** and the cell show 
 
 Not yet checked on the unit.
 
+### Load a preset into an insert
+
+Start on the INSERTS page, with the cursor on a cell that holds an effect that has presets.
+
+1. Press `Params` to open the insert's page, then `F5` (**PRESET**). A list opens, titled **PRESET** and the module's name: the factory presets, then a **CARD** heading with the card's presets of the effect (`modules/presets/<module>/` on the card; `+ MORE ON CARD` past 128). <!-- QA-MIX-094 QA-MIX-095 QA-MIX-105 -->
+2. Choose a preset with `Up`, `Down` or the encoder, and press `F1` (**LOAD**). `F8` (**BACK**) closes the list and loads nothing. <!-- QA-MIX-096 QA-MIX-098 --> To save the values in force as a card preset instead, press `Shift` + `F5` (**SAVE**) on the page or in the list, type a name in the keyboard (**PRESET NAME**, the effect's name suggested) and press `F8`: the strip says **PRESET SAVED: <NAME>**, and a taken name gets **<name> 2**. <!-- QA-MIX-107 QA-MIX-106 -->
+
+You should see the strip say, for example, **PRESET DARK HALL LOADED**, and every row of the page show the preset's value. A preset sets every parameter: one that names only some leaves the others at the module's defaults. <!-- QA-MIX-096 QA-MIX-097 --> The values are saved with the project and the insert sounds so at once. Like every change to an insert, a preset load is not an undo step. A card preset that names an unknown parameter says **PRESET <NAME> LOADED, <n> SKIPPED**; a damaged file says **PRESET DAMAGED**; a file of another module **PRESET OF <MODULE>**. An effect with no presets at all opens the list and it says **NO PRESETS, SHIFT+F5 SAVES**. <!-- QA-MIX-099 QA-MIX-106 --> New in track3r-os.
+
+Not yet checked on the unit.
+
 ### Bypass or remove an insert
 <!-- sync: src=app/src/screens/mixer_screen.cpp,app/src/module_ui.cpp qa=QA-MIX-062,QA-MIX-064 -->
 
@@ -132,6 +145,22 @@ Start on the INSERTS page, with the cursor on a cell that holds an insert.
 3. Press `Delete`. The strip says **INSERT DELETED**, and the cell is empty. <!-- QA-MIX-064 -->
 
 `Delete` cannot be undone. Not yet checked on the unit.
+
+### Change an insert's settings
+<!-- sync: src=app/src/screens/mixer_screen.cpp,app/src/module_ui.cpp spec=docs/specs/OS-INSFX.md qa=QA-MIX-073,QA-MIX-074,QA-MIX-075,QA-MIX-076,QA-MIX-077 -->
+
+New in track3r-os. An effect has settings of its own: the Drive effect, for example, has Shape, Drive, Tone, Mix and Output. Start on the INSERTS page, with the cursor on a cell that holds an insert.
+
+1. Press `F6` (**PARAMS**) or `Params`. The effect's page opens with its settings in rows, eight rows a page. The strip names the cell, for example `T1 B`. <!-- QA-MIX-073, QA-MIX-108 -->
+2. If the effect has more than one page, press `F1` to `F4` to choose it. <!-- QA-MIX-073 -->
+3. Press `Up` or `Down` to a row, and turn the encoder. `Left` and `Right` change the value by one click, `Shift` makes the step coarse, and `Delete` puts the default back. <!-- QA-MIX-073, QA-MIX-074 -->
+4. Press `F6` (**BACK**), `Master` or any other screen button. The Mixer opens on INSERTS with the cursor on the same cell. <!-- QA-MIX-077, QA-MIX-109 -->
+
+You should see the value change on the row, and the track's sound change with it from the next audio block. The value is saved with the project. <!-- QA-MIX-074 -->
+
+> **Careful**: A change here has no undo. `F8` says **NOTHING TO UNDO HERE**, and `Delete` on a row cannot be taken back either. <!-- QA-MIX-075 -->
+
+On an empty cell `F6` and `Params` say **NO INSERT HERE** and open nothing. On the insert's page `F7`, `Shift` + `F6` and `Shift` + `F7` do nothing and their labels are blank. <!-- QA-MIX-110 --> On a bound MASTER cell `Params` opens the module's page with the strip saying `MASTER`, and an edit reaches both instances. On the other Mixer pages `Params` still opens the page of the instrument in view. <!-- QA-MIX-076 --> Not yet checked on the unit.
 
 ### Name a track
 
@@ -204,11 +233,12 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 | `F3` (**MST FX**) | the MASTER FX page. The card reads **MASTER LIMITER**, **ALWAYS ON**. | QA-MIX-002 |
 | `F4` (**STEMS**) | the STEMS page, one column for each source. The first row is **OUTPUTS**, the slots follow. With no stem map the page says so. | QA-MIX-034, QA-MIX-050 |
 | `F5` (**CUE LVL**) | goes to the CUE LEVEL row of the MASTER FX page, from any page; on that row it changes nothing | QA-MIX-035 |
-| `F6` | on STEMS, **APPLY**: the number of outputs you chose, after a second press within two seconds. On the MIXER, ROUTING and MASTER FX pages it opens **INSERTS**. | QA-MIX-036, QA-MIX-052, QA-MIX-055, QA-MIX-058 |
+| `F6` | on STEMS, **APPLY**: the number of outputs you chose, after a second press within two seconds. On the MIXER, ROUTING and MASTER FX pages it opens **INSERTS**. On INSERTS it is **PARAMS**: the settings page of the insert under the cursor (an empty cell says **NO INSERT HERE**); on that page it is **BACK**. | QA-MIX-036, QA-MIX-052, QA-MIX-055, QA-MIX-058, QA-MIX-108, QA-MIX-109 |
 | `F7` (**MUTE**) | mutes the track under the cursor, on MIXER, ROUTING and STEMS (the track of the column). On **SNDA** and **SNDB** it mutes the effect; on MASTER FX it mutes the bus of the DRY, REVERB or DELAY row; on STEMS **SA** and **SB** mute their effect. On **INSERTS**, **BYPASS** toggles the insert of the cell. Anywhere else the strip says why. | QA-MIX-003, QA-MIX-037, QA-MIX-038, QA-MIX-062 |
 | `F8` (**SOLO**) | solos the track under the cursor, on MIXER, ROUTING and STEMS. On MASTER FX, and on a bus, the strip says **TRACKS ONLY**. | QA-MIX-004, QA-MIX-037, QA-MIX-038 |
-| `Insert` | on INSERTS, on an empty cell, opens the picker of effect modules; on a taken cell the strip says **DELETE THE INSERT FIRST** | QA-MIX-059, QA-MIX-063 |
+| `Insert` | on INSERTS, on an empty cell, opens the picker of effect modules (on the MASTER row, for the master insert); on a taken cell the strip says **DELETE THE INSERT FIRST** | QA-MIX-059, QA-MIX-063, QA-MIX-084 |
 | `Delete` | on INSERTS, removes the insert of the cell | QA-MIX-064 |
+| `Params` | on INSERTS, on a taken cell, opens the insert's settings page (as `F6` does); `F6`, `Master` or any screen button leaves it. See [Change an insert's settings](#change-an-inserts-settings) | QA-MIX-073, QA-MIX-076, QA-MIX-077 |
 | `Up`, `Down`, `Left`, `Right` | on INSERTS, move between the cells; the MASTER row has one cell | QA-MIX-058 |
 | `Shift` + `F1` (**NAME**) | names the track under the cursor. On IN, SND A, SND B, CUE or MASTER, or on the MASTER FX page, the strip says **TRACKS ONLY**. | QA-MIX-010, QA-MIX-012 |
 | `Shift` + `F7` (**UNMUTE**) | unmutes every track | QA-MIX-003 |
@@ -223,7 +253,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 ## Good to know
 
 - A track with a **STEREO** instrument goes through an insert as one mono signal: while an insert is on, the second channel of the instrument is dropped. Bypass the insert to hear both channels again. <!-- QA-INS-266 -->
-- The MASTER row shows its cells but takes no insert: **MASTER INSERT: NOT YET**. <!-- QA-MIX-068 -->
+- The MASTER row has one cell, the **master insert**. It runs on the whole mix, after the DJ filter and the kill EQ and before the limiter, so the limiter still catches what the effect adds. A mono effect runs on each side separately, with the same settings, and counts as **two** of the four inserts; a stereo effect (marked **ST** in the picker) runs once on both sides together and counts as **one**. Either way, with the four inserts taken, `Insert` on it says **INSERTS FULL**. <!-- QA-MIX-068, QA-MIX-084, QA-MIX-085, QA-MIX-104 -->
 - On a taken cell, `Insert` says **DELETE THE INSERT FIRST**. <!-- QA-MIX-063 -->
 - With four inserts in the project, `Insert` says **INSERTS FULL**. <!-- QA-MIX-063 -->
 - On an empty cell, `F7` says **NO INSERT HERE**. <!-- QA-MIX-069 -->
@@ -233,6 +263,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 - A bind right after the `Delete` of the same cell says **INSERT LEAVING: TRY AGAIN**. Wait a moment and try again. <!-- QA-MIX-070 -->
 - `F7` says **NO CPU** when the block has no room for the effect. <!-- QA-MIX-067 -->
 - The inserts are saved with the project. Not yet checked on the unit: that they are bound again when the project opens. <!-- QA-MIX-060, QA-GLB-173 -->
+- To move an insert's parameter with a MIDI controller, open its page with `Params`, put the cursor on a row, press `Vol` and `Fx` together (Learn) and turn the controller. A row the module marks as not learnable says **NO TARGET TO LEARN**. The binding is saved with the project. Not yet checked on the unit. <!-- QA-MIX-081, QA-MIX-082 -->
 
 > **Careful**: The Mixer has no undo. `F8` here is **SOLO**, and `F8` on Pattern, Song or Params does not bring a Mixer change back. <!-- QA-MIX-013 -->
 

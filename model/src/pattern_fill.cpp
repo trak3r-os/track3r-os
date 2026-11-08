@@ -146,7 +146,15 @@ unsigned apply(const Plan& plan, Step* steps, unsigned len, Rng& rng, edit::Last
       if (plan.mode == Mode::Ramp) {
         value = ramp(a, b, at, hits);
       } else if (plan.mode == Mode::Random && !draws) {
-        value = lo + rng.below(hi - lo + 1u);
+        // OS-CECHANCE C2: a random draw for an FX stays inside random_hi (Chance: 0..100, a condition is never drawn); the other whats draw lo..hi.
+        unsigned hi_draw = hi;
+        unsigned lo_draw = lo;
+        if (fx_fill) {
+          const unsigned rhi = fx::random_hi(plan.fx_type);
+          hi_draw = hi < rhi ? hi : rhi;
+          lo_draw = lo < hi_draw ? lo : hi_draw;
+        }
+        value = lo_draw + rng.below(hi_draw - lo_draw + 1u);
       }
     }
     switch (plan.what) {

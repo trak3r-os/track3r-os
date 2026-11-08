@@ -5,13 +5,20 @@
 // timed queue -> PIT-compare emitter (DIN); USB MIDI is 1 ms-quantised by the bus"). It is the one place where the sequencer's MIDI events
 // (audio::SeqEvent kinds MidiNoteOn .. MidiSpp) become bytes with a due time, in the render context:
 //
-//   event -> bytes (note, CC A..F through the device's CC table, program change, clock, start, continue, stop, SPP)
+//   event -> bytes (note, CC A..F through the device's CC table, program change, clock, start, continue, stop, SPP; OS-MTC A3: the MIDI Time Code quarter frame and full frame)
 //         -> due time in CPU cycles of the audio timeline (the sample of the event, to a fraction of a sample for the clock), plus the OUT OFFSET of
 //            the port (signed: a positive offset delays, a negative one advances; cancels cable and host latency), plus the event's own delay when it
 //            has one (OS-INSTUI S8b: an instrument's OFFSET, SeqEvent::value in microseconds, which stays separate from the port's)
 //         -> the staging queue (a sorted TimedQueue: events of different ports and offsets arrive out of order and leave in due order)
 //         -> at the end of the block, everything due before the horizon is handed to the port: the DinEmitter's two rings and the UsbMidiOut ring,
 //            which are single-producer queues, so their consumers (the PIT-compare interrupt, the SOF interrupt) never see an out-of-order item.
+//
+// MIDI TIME CODE (OS-MTC A3, docs/specs/OS-MTC.md 3.4). MidiMtcQf and MidiMtcFull go to `mtc_ports`, the ports the clock would go to (A-1: CLOCK OUT, without the CLOCK MODE gate that
+// empties `clock_ports` while the mode is Off), each port with its OUT OFFSET, and
+// are timed like the clock (the quarter frame to a fraction of a sample). A quarter frame is a two-byte system common message `F1 0nnndddd` (a normal message for both ports: DIN 0.64 ms on the
+// wire, USB code index 0x2). A full frame is the SysEx `F0 7F 7F 01 01 hh mm ss ff F7`: the DIN emitter takes it through DinEmitter::push_sysex, the USB ring as four event words
+// (usb_sysex_events: code indexes 0x4, 0x4, 0x4, 0x5), pushed in order; each port gets it whole or not at all (a port that has no room for all of it keeps it staged, as any item).
+// A staged full frame keeps its packed time in the three bytes of its Msg and is marked by `rt` == kStagedFullFrame (no growth of the 256-entry staging queue).
 //
 // The horizon is two blocks (about 2.9 ms): far enough ahead that the emitter's compare is programmed in time, near enough that a stop or a mute
 // finds little to take back.
@@ -50,6 +57,7 @@ inline constexpr std::uint8_t kCcUnassigned = 0xFF;  // a CC slot with no number
 
 class MidiOut {
  public:
+  static constexpr std::uint8_t kStagedFullFrame = 2;   // Staged::rt of an MTC full frame
   static constexpr std::uint32_t kStagingSize = 256;
   static constexpr std::uint32_t kMaxMovePerBlock = 64;
   static constexpr std::uint32_t kPanicPerBlock = 16;
@@ -59,6 +67,7 @@ class MidiOut {
   struct Config {
     std::uint8_t note_ports = kPortDin;     // where notes, CC and program changes go (off, usb, jack, both)
     std::uint8_t clock_ports = 0;           // where clock, start, continue, stop and SPP go (CLOCK OUT)
+    std::uint8_t mtc_ports = 0;             // OS-MTC A3: where MIDI Time Code goes (MTC OUT on: the ports CLOCK OUT names, whatever CLOCK MODE says; 0 sends none)
     std::uint8_t cc_channel = 0;            // the device's notes-out channel, 0..15: where kChannelDefault goes
     std::uint8_t cc_number[6] = {kCcUnassigned, kCcUnassigned, kCcUnassigned, kCcUnassigned, kCcUnassigned, kCcUnassigned};  // CC A..F
     std::uint8_t usb_cable = 0;
@@ -113,11 +122,14 @@ class MidiOut {
   struct Staged {
     Msg m;
     std::uint8_t port;   // 0 DIN, 1 USB
-    std::uint8_t rt;     // real-time byte
+    std::uint8_t rt;     // 1 real-time byte; kStagedFullFrame: an MTC full frame (Msg::b holds the packed time, low byte first)
     std::uint8_t pay;    // a note-on: this copy is the one that pays the hang book if it is dropped before it is handed over (the first port that took the note)
   };
   // Queues the message for each port in `ports`; returns the ports that took it (a port whose queue was full lost it: staging_overflow).
-  std::uint8_t stage(std::uint64_t due, std::uint8_t ports, const Msg& m, bool rt, bool note_on = false) noexcept;
+  std::uint8_t stage(std::uint64_t due, std::uint8_t ports, const Msg& m, bool rt, bool note_on = false) noexcept { return stage_as(due, ports, m, rt ? 1u : 0u, note_on); }
+  std::uint8_t stage_as(std::uint64_t due, std::uint8_t ports, const Msg& m, std::uint8_t rt_field, bool note_on) noexcept;
+  // OS-MTC A3: a staged full frame (see the header); the packed time is midi::mtc::pack_full()'s, 24 bits.
+  std::uint8_t stage_full_frame(std::uint64_t due, std::uint8_t ports, std::uint32_t packed) noexcept;
   std::uint64_t offset_due(std::uint64_t due, std::uint32_t port) const noexcept;
 
   Config cfg_{};

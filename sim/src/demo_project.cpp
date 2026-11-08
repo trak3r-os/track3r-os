@@ -3,6 +3,7 @@
 
 #include <o3os/app/pattern_data.h>
 #include <o3os/core/learn.h>
+#include <o3os/model/event_list.h>
 #include <o3os/model/params.h>
 
 #include <cstring>
@@ -145,6 +146,84 @@ void fill_tb303_project(model::Project& p) noexcept {
     }
     (void)p.set_step(1, 0, s.row, step);
   }
+}
+
+// OS-MIDIREC S1 (scenario `document events`): the document of the EVENTS list's pictures and the budget sweep. Pattern 1 of 64
+// steps on the default 12 tracks, with every row kind in the first four tracks: a note with a folded OFF (one row, a LEN), a
+// micro-moved note listed after its step's CC rows, a gated note with a Chord FX (the G and + flags), a note that runs on past
+// the track's end (LEN >), an OFF that ends no note above it, a dim sample-instrument row, an inherited instrument at the top of
+// a track (IN ??), and the CC rows of what really goes out (a MIDI instrument's controller and PROG, the Config numbers on the
+// notes channel, an unassigned number). Instrument 1 a sample, instrument 49 (slot 48) a MIDI instrument on channel 3 whose
+// CC A is controller 74 and CC B a program change; the project's numbers: CC A 74, CC C 71, the rest unassigned.
+void fill_events_project(model::Project& p) noexcept {
+  namespace ev = model::events;
+  p.reset();
+  (void)p.create_pattern(1, 64);
+  (void)p.append_order(1);
+  model::Instrument in;
+  model::init_instrument(in, model::InstrumentKind::Sample);
+  std::memcpy(in.name, "KICK", 4);
+  (void)p.set_instrument(0, in);
+  model::init_instrument(in, model::InstrumentKind::Midi);
+  in.midi_channel = 3;
+  in.midi_cc[0] = model::kMidiCcNumberMax - 53u;  // 75: controller 74
+  in.midi_cc[1] = model::kMidiCcProg;              // CC B: a program change
+  std::memcpy(in.name, "MIDI 3", 6);
+  (void)p.set_instrument(48, in);
+  model::MidiState midi{};
+  midi.notes_channel = 0;  // the device's notes channel: 1 on the wire
+  for (unsigned i = 0; i < model::kMidiCcSlots; ++i) {
+    midi.cc_number[i] = model::kMidiCcUnassigned;
+  }
+  midi.cc_number[0] = 74;
+  midi.cc_number[2] = 71;
+  (void)p.set_midi(midi);
+
+  model::Step s = model::kEmptyStep;
+  // Track 1: a note whose OFF on step 5 is folded into its LEN, a micro-moved note, a dim sample row, a gated note with a Chord,
+  // an OFF of its own, and a note that runs on past the end.
+  s.note = 61; s.instr = 49; s.vol = 100;
+  (void)p.set_step(1, 0, 0, s);
+  s = model::kEmptyStep; s.note = model::kNoteOff;
+  (void)p.set_step(1, 0, 4, s);
+  s = model::kEmptyStep; s.note = 64; s.instr = 49; s.fx[1] = {ev::kFxMicroMove, 50};
+  (void)p.set_step(1, 0, 8, s);
+  s = model::kEmptyStep; s.note = 67; s.instr = 1;  // the volume unset: VAL ---
+  (void)p.set_step(1, 0, 12, s);
+  s = model::kEmptyStep; s.note = 71; s.instr = 49; s.vol = 90; s.fx[0] = {14, 47}; s.fx[1] = {ev::kFxGate, 50};
+  (void)p.set_step(1, 0, 16, s);
+  s = model::kEmptyStep; s.note = model::kNoteOff;  // ends the note on 017: folded into its LEN, no row
+  (void)p.set_step(1, 0, 24, s);
+  s = model::kEmptyStep; s.note = model::kNoteOff;  // ends no note above it (the one on 017 ended at 025): a row of its own
+  (void)p.set_step(1, 0, 25, s);
+  s = model::kEmptyStep; s.note = 72; s.instr = 49; s.vol = 80;
+  (void)p.set_step(1, 0, 28, s);  // nothing below: LEN >36.00
+  // Track 2: a CC row before the note of its step, and a micro-moved note with its step's CC before it.
+  s = model::kEmptyStep; s.note = 61; s.instr = 49; s.fx[0] = {ev::kCcFirst, 74};
+  (void)p.set_step(1, 1, 0, s);
+  s = model::kEmptyStep; s.note = 62; s.instr = 49; s.fx[0] = {ev::kCcFirst + 1, 12}; s.fx[1] = {ev::kFxMicroMove, 50};
+  (void)p.set_step(1, 1, 8, s);
+  // Track 3: what the CC rows send: the MIDI instrument's controller and PROG on channel 3, then the Config numbers on the notes
+  // channel (CC C 71) and an unassigned one (--).
+  s = model::kEmptyStep; s.note = 61; s.instr = 49;
+  (void)p.set_step(1, 2, 0, s);
+  s = model::kEmptyStep; s.fx[0] = {ev::kCcFirst, 74};
+  (void)p.set_step(1, 2, 1, s);
+  s = model::kEmptyStep; s.fx[0] = {ev::kCcFirst + 1, 0};
+  (void)p.set_step(1, 2, 2, s);
+  s = model::kEmptyStep; s.note = 61; s.instr = 1;
+  (void)p.set_step(1, 2, 4, s);
+  s = model::kEmptyStep; s.fx[0] = {ev::kCcFirst + 2, 100};
+  (void)p.set_step(1, 2, 5, s);
+  s = model::kEmptyStep; s.fx[0] = {ev::kCcFirst + 3, 100};
+  (void)p.set_step(1, 2, 6, s);
+  // Track 4: an inherited instrument at the top of the track (IN ??), then one of its own.
+  s = model::kEmptyStep; s.note = 61; s.instr = 0;
+  (void)p.set_step(1, 3, 0, s);
+  s = model::kEmptyStep; s.note = 63; s.instr = 49;
+  (void)p.set_step(1, 3, 4, s);
+  // A pattern that exists and holds nothing, for the empty list.
+  (void)p.create_pattern(2, 16);
 }
 
 void fill_demo_project_with_bindings(model::Project& p) noexcept {

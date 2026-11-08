@@ -289,12 +289,13 @@ Rows 1..3 of a slot hold a value each (row 0 is off). Today a new project has 0 
 | 15 | FLT LFO | -28..28 | -8 | -3 | +3 | as 12 |
 | 16 | POS LFO | -28..28 | -8 | -3 | +3 | as 12 |
 | 17 | STUTTER | 0..15 (labels) | 11 = 1/4 | 13 = 1/8 | 15 = 1/16 | the retrigger gets faster: four, eight, sixteen to a step |
-| 18 | PLAYMODE | 0..3 (labels) | 1 = BACK | 2 = PING | 3 = RND | the three modes that are not the normal one |
+| 18 | PLAYMODE | 0..23 (labels) | 1 = BACK | 2 = PING | 3 = RND | the three modes that are not the normal one; 4..23 (labels C1..C20, OS-PERFMODES M4) are the twenty custom play orders |
 | 19 | PAT LEN | 0..8 (labels) | 4 = 8 | 3 = 4 | 2 = 2 | a loop of eight steps, four, two: shorter is stronger |
 | 20 | BITDEPTH | 0..15 (bits taken away) | 4 = 12 bit | 8 = 8 bit | 12 = 4 bit | lo-fi light, a sampler, a crunch |
 | 21 | OVERDRV | 0..100 | 20 | 50 | 80 | a warm edge, a push, a hard drive |
 
 - **The FX with no consumer keep 0.** A value that does nothing would light the slot (`active`) and the pad for an effect the screen shows dimmed. Their rows are filled when the FX goes live.
+- **Row 18 (PLAYMODE) reaches 23 since OS-PERFMODES M4.** 4..23 are the custom play orders C1..C20 (`seq/play_orders.h`, labels `kPerfLabelsPlayMode[24]`): the sequencer plays them (M2), the file holds them (PERF / SCEN 1.2, M3) and the screen shows them (M4). The three default values stay 1..3 (BACK, PING, RND).
 - **Where it lives.** The table is data of the model (`model::kPerfDefaultValues`, one row of three per FX id), so a new project (`init_perf_state`) and the bank (`PerformBank::change_fx`, `reset`) read the same numbers. `load_slots` does not.
 - **Undo.** None, as for every Perform edit: the slots are runtime state that the App copies into the project outside the undo history (`App::sync_project_state`, `Editor::set_perf_state` is not journalled; `app/src/perform_actions.cpp` header). The FX change and its three values are one operation of the bank (`change_fx`), so they cannot be half applied. Making Perform undoable is a separate design decision.
 - **Files.** No format change. A project file that stores a PERF chunk keeps every value it stores, 0s included (round-trip test). A file with no PERF chunk (older or imported projects) reads as the new-project defaults, as it already read as the default FX.

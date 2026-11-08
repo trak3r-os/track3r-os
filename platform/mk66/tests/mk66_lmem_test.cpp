@@ -133,4 +133,8 @@ TEST_CASE("sdram view: core_view maps the SDRAM byte n to the alias or leaves it
     CHECK(lmem::cacheable_address(mem::core_view(r.base + r.size - 1u)) == mem::kCoreUsesAlias);
   }
   CHECK(mem::core_view(mem::kSampleArenaBase) == (mem::kCoreUsesAlias ? 0x08000000u : 0x70000000u));
+  // OS-CEPTFX S2a: the ptfx region is an alias region like the others: the whole region, sub-areas included, maps inside the window.
+  CHECK(mem::core_view(mem::kPtfxBase) == (mem::kCoreUsesAlias ? 0x08E90000u : 0x70E90000u));
+  CHECK(mem::core_view(mem::kPtfxBase + mem::kPtfxStackTopOff) - mem::core_view(mem::kPtfxBase) == mem::kPtfxStackTopOff);
+  CHECK(lmem::cacheable_address(mem::core_view(mem::kPtfxBase + mem::kPtfxSize - 1u)) == mem::kCoreUsesAlias);
 }

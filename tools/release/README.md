@@ -9,8 +9,41 @@ python3 -I tools/release/make_starter.py --version 0.7.0 --ptf <track3r-os-0.7.0
 
 - The output (default `build-release/`, untracked) also gets `<zip>.sha256` and a record of the Mod Archive licences that were re-read.
   The script refuses an output directory inside the repository unless it is below `build*/`.
-- `--modules-dir` is the `modules/` folder of a build that has the `.tmod` files (the host build with the Arm compiler has them). The apps to pack
-  are listed in `starter_manifest.json` (`modules.apps`); the instrument modules TB-303, chip and FM are inside the firmware and are not packed.
+- `--modules-dir` is the `modules/` folder of a build that has the `.tmod` files (the host build with the Arm compiler has them; to make only
+  those, configure with `ARM_GNU_ROOT` set and build the `o3m_<name>_tmod` targets). `starter_manifest.json` lists what is packed, in
+  `modules` (one list per kind, each file taken from `--modules-dir` as `<name>.tmod`) and `presets`. The script checks the kind in each
+  file's header against the list it is in, so a module cannot land in a folder the firmware does not look in.
+- Where the firmware looks for each kind (the zip puts the files there):
+
+  | Kind | Manifest list | Card path | Firmware code |
+  |---|---|---|---|
+  | App | `modules.apps` | `modules/apps/<name>.tmod` | `module/src/loader.cpp` (`kPlayableDirs`), `app/src/module_ui.cpp` (`scan_apps`) |
+  | Effect | `modules.effects` | `modules/effects/<name>.tmod` | `module/src/loader.cpp`, `app/src/module_ui.cpp` (`scan_effects`) |
+  | Instrument | `modules.instruments` | `modules/instruments/<name>.tmod` | `module/src/loader.cpp`, `app/src/module_ui.cpp` (`scan_instruments`) |
+  | Importer | `modules.importers` | `modules/importers/<name>.tmod` | `module/src/loader.cpp` (`kImporterDir`), `app/src/module_import.cpp` |
+  | Preset pack | `presets` | `modules/presets/<id>/<preset>.o3mp` | `app/src/module_ui.cpp` (`preset_path`) |
+  | `.ptfx` plugin | `ptfx` (a list of plugin names, `--ptfx-dir`) | `Effects/<name>.ptfx` | `module/include/o3os/module/ptfx_catalog.h`, `app/src/ptfx_page.cpp` |
+
+- What is packed, and what is not:
+  - Apps: every folder of `modules/apps` except `common` (a header library): chords, humanize, loudness, midimon, morph, mutate, pads (the SDK's
+    example app), rhythmgen, scope, smfexport, tapcalc, tuner.
+  - Effects: every folder of `modules/effects` (autopan, biquad, chorus, comp, crush, drive, envfilter, fold, phaser, pingpong, wide).
+  - Instruments: `sine` (the SDK's example voice, MIT). TB-303, chip, FM and SID are inside the firmware (`O3M_BUILTIN_STEMS` in `modules/CMakeLists.txt`)
+    and are not packed; their factory presets are (`presets`).
+  - Importers: `tracker` (OS-FLASHDIET I3), the MOD / S3M / MED reader the firmware loads from the card on IMPORT, so the zip must carry it.
+  - `.ptfx` plugins (OS-PTFXPACK): the thirteen folders of `modules/ptfx`, built by the CMake target `o3_ptfx` (`tools/ptfx_pack.py`) and copied to
+    `Effects/`: the six `editor-fx-sdk` examples of polyend/tracker-ce (add_silence, analog_kick_gen, chiptune_gen, multimode_filter, stereo_delay,
+    stereo_to_mono) and seven Sample Editor effects rebuilt from its `core/effector` (overdrive, delay, bitcrusher, chorus, flanger, limiter, eq3). Wavetable Smoother, Cut and Time-stretch are not
+    rebuilt (OS-PTFXPACK P3): one block at a time, a plugin cannot read the whole selection (Smoother, Time-stretch), cannot ask for the project tempo, or produce an output length
+    unrelated to the selection, and our host refuses a run that produces nothing (Cut, which deletes the range). The
+    maintainer approved these components (CLAUDE.md, hard rule 1; `THIRD_PARTY.md`). They are MIT, which is allowed for this section only: each
+    file is read back through the checks of `tools/ptfx_inspect.py`, its source must say `SPDX-License-Identifier: MIT`, the licence text goes to
+    `LICENSES/MIT-tracker-ce.txt` and `CREDITS.txt` names the files. No `.ptfx` is committed.
+  - Not packed: the `modules/templates` examples (SDK scaffolding) and our own `.ptfx` test fixtures (`tests/ptfx`: fault, hang and ABI probes, an
+    integer gain, a test ramp), which are not tools for a user. A plugin from another tracker-ce component is never packed without the
+    maintainer's approval of that component.
+  - `tests/starter_test.py` (ctest `starter_python`) holds the committed lists to `modules/`: a new effect or app that is not in the manifest, or
+    a built-in module that is packed, fails it.
 - Third-party files are listed in `starter_manifest.json` and fetched into a cache (`OUT/cache`, named by SHA-256). A download whose SHA-256 differs
   fails the run. Allowed licences: `CC0-1.0`, `Public-Domain`, `CC-BY-4.0`, `GPL-3.0`; anything else is refused. A file with `modarchive_id` has its
   licence re-read on the module's Mod Archive page; a changed licence or an unreadable page fails the run.
@@ -18,6 +51,22 @@ python3 -I tools/release/make_starter.py --version 0.7.0 --ptf <track3r-os-0.7.0
   no libm call, no random module, no clock.
 - The zip is reproducible: sorted entries, one time stamp, fixed attributes, deflate level 9 (same bytes for the same inputs and the same zlib).
 - `--check-manifest` validates the manifest without a network. `--offline` uses the cache only (the ctest `starter_python` does, with fake files).
+
+## The 1.2.0 archive
+
+Build the modules once, make a `.ptf` through the image gate (`fw-gate-check`), then (the `.ptf` is the gated image of the release):
+
+```
+export ARM_GNU_ROOT=<the Arm GNU toolchain>            # docs/toolchain.md
+cmake -S . -B build-release-mods && cmake --build build-release-mods -j4 --target <every o3m_<name>_tmod of the manifest> o3_ptfx
+python3 -I tools/release/make_starter.py --version 1.2.0 --ptf <build-images>/track3r-os-1.2.0.ptf --modules-dir build-release-mods/modules \
+    --ptfx-dir build-release-mods/modules/ptfx
+```
+
+`--ptfx-build build-release-mods` builds `o3_ptfx` itself before packing (and takes `--ptfx-dir` from it), and a `.ptfx` older than its source, the SDK header or `tools/ptfx_pack.py`
+is refused as stale, so an old `--ptfx-dir` cannot ship. The ctest `ptfx_pack` builds every plugin twice and compares the bytes (the build is reproducible).
+
+Add `--offline` when `build-release/cache` is already filled. The zip is `build-release/track3r-os-1.2.0.zip`.
 
 ## Adding a third-party file
 

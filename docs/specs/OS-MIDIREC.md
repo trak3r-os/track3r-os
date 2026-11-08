@@ -27,7 +27,7 @@ Only what the decisions of 2026-11-05 (backlog row OS-MIDIREC, commit 88c874f3) 
 ## Assumptions (decided in this spec; reversible, each covered by a test)
 
 - **A1 Time unit.** TIME and LEN read `SSS.PP`: the step (1-based, three digits) and the percent of a step (00..96), on the sequencer's 48 microsteps (`offset x 100 / 48`, rounded). The percent is within one of the Micro-move value the grid shows (value 50 plays at microstep 24, which reads `.50`). The encoder moves TIME by one microstep (about 2 %); Shift + encoder moves it by one step.
-- **A2 Scope.** With no block, the scope is the cursor's track, every step of its length. With a block, it is the block's tracks and rows as whole steps (a column block is widened). The scope (pattern, tracks, rows) is fixed when the list opens. TIME edits and Insert stay inside it. A LEN end may fall below the block's rows, because the end belongs to the note.
+- **A2 Scope.** With no block, the scope is the cursor's track, every step of its length. With a block, it is the block's tracks and rows as whole steps (a column block is widened), and each track's rows stop at that track's length. The scope (pattern, tracks, rows) is fixed when the list opens. TIME edits and Insert stay inside it. A LEN end may fall below the block's rows, because the end belongs to the note.
 - **A3 Row order.** Rows are sorted by step, then microstep, then kind (CC rows before a NOTE row at the same time: the sequencer sends the row's FX before the note), then track, then FX column 2 before column 1 (the sequencer's order, so the lower of two CC rows on one step is the value that wins on the wire).
 - **A4 Ownership.** Every byte of a step belongs to at most one row:
   - a NOTE row owns the note, instrument and volume of its step, every FX column that is not a CC FX (Micro-move included), and its end (A5);
@@ -40,7 +40,7 @@ Only what the decisions of 2026-11-05 (backlog row OS-MIDIREC, commit 88c874f3) 
 - **A8 Inherited instrument.** A step with instrument 0 plays the track's last instrument. The list resolves it by looking up the track inside the pattern and draws it dim. At the top of the track it is unknown (`?`), because it depends on what played before.
 - **A9 Insert.**
   - On a NOTE row: a copy of the note (note, instrument and volume; no Micro-move and no other FX) on the row's end step. When that step holds the row's own OFF, the copy replaces it (the row still ends there). When the row runs into the next note, or the end lies outside the scope, nothing is written and the strip says `NO FREE STEP AFTER THIS NOTE`.
-  - On a CC row: the same letter and value on the next step of the scope that has a free FX column.
+  - On a CC row: the same letter and value on the next step of the scope that has a free FX column (none: `NO FREE STEP IN THE SCOPE`).
   - Shift + Insert adds the other kind on the row's step: a `CC A 000` in the first free FX column, or a NOTE (the note and instrument in force, as the pads enter them) when the step's note column is empty.
   - On an empty list, Insert adds a NOTE and Shift + Insert a `CC A`, at the scope's first step on the grid cursor's track.
   - The cursor goes to the new row.
@@ -126,17 +126,17 @@ The row's identity is the key (track, step, kind, column). The cursor keeps it a
 +------------------------------------------------------------------------------------------------+
 | PAT 01/1 | BPM 120.0 | PLAY | REC | LEN 064 JUMP 01 | INS 51 MIDI 3              CPU 41 MEM 12  |
 | EVENTS   PATTERN 01   TRACK 4   STEPS 001-064     23 EVENTS   ALL                      05/23   |
-|    TIME    TYPE  CH  DATA  VAL  LEN     IN FL                                                   |
+|    TIME    TYPE  CH  DATA  VAL  LEN     IN FL FX1  FX2                                         |
 |    001.00  CC A  03  #074  064          51                                                      |
 |    001.00  NOTE  03  C-4   100  04.00   51                                                      |
 |  > 005.00  CC B  03  PROG  012          51       <- the playing step (Accent bar, Q5 a)         |
 |    009.00  CC C  03  #071  100          51                                                      |
-|   [009.50] NOTE  03  E-4   ---  02.00   51 +     <- the cursor row, the TIME field boxed        |
+|   [009.50] NOTE  03  E-4   ---  02.00   51    V40  ---   <- the cursor row, the TIME field boxed (OS-EVFX)  |
 |    013.00  NOTE  03  G-4   090  >52.00  51       (> : plays on past the track's end)          |
 |    017.00  OFF   03                     51       (an OFF that ends no note above it)            |
 |    ...                                                                                           |
 |------------------------------------------------------------------------------------------------|
-| TIME 009.50  ENC: 1/48 STEP  SHIFT+ENC: A STEP  ALSO: CHORD 47           STEP     undo 12       |
+| TIME 009.50  ENC: 1/48 STEP  SHIFT+ENC: A STEP  ALSO: CHORD 57B          STEP     undo 12       |
 | F1 ALL 1/3  F2 QUANT  F3 -  F4 -  F5 PREVIEW  F6 -  F7 UNDO  F8 BACK                            |
 +------------------------------------------------------------------------------------------------+
 ```
@@ -151,7 +151,8 @@ The row's identity is the key (track, step, kind, column). The cursor keeps it a
 | VAL | 3 | the volume, `---` unset (A7) | the value 0..127 | - |
 | LEN | 6 | `SS.PP`, `>SS.PP` (A5) | - | - |
 | IN | 2 | the instrument, dim when inherited, `?` unknown (A8) | the step's instrument, read-only | - |
-| FL | 2 | `+` other FX on the step (the info line names them), `G` Gate | - | - |
+| FL | 2 | `G` Gate (OS-EVFX: the `+` marker is gone; the FX columns show the other FX) | - | - |
+| FX1, FX2 | 3 each | the step's two FX slots as `V40` (type letter or number, value) or `---` empty; the encoder edits the value, an empty slot takes the session's last FX type at its start value (OS-EVFX) | - | - |
 
 Rows of a non-MIDI instrument are dim (Q2 a). The header gives the scope, the count under the filter and the position.
 
@@ -167,7 +168,7 @@ Rows of a non-MIDI instrument are dim (Q2 a). The header gives the scope, the co
 | pads | A14 |
 | Insert / Shift + Insert | A9 |
 | Delete | A10 |
-| F1 | FILTER: ALL 1/3, NOTES 2/3, CC 3/3 |
+| F1 | FILTER: ALL 1/3, NOTE 2/3, CC 3/3 |
 | F2 / Shift + F2 | QUANT the row / every NOTE and end row the filter shows (S3) |
 | F5 (held) | PREVIEW: the row's step sounds |
 | F7 / Shift + F7 | UNDO / REDO in the PATTERN area |
@@ -180,7 +181,7 @@ Shift row: `- QUANT ALL - - - - REDO -`. Every Shift binding has its label (`shi
 
 | Field | NOTE row | CC row | End row (OFF / CUT / FADE) |
 |---|---|---|---|
-| TIME | one microstep through the Micro-move (A6). Crossing `.96` or `.00` moves the note to the next or previous step at `.00` or `.96`, when the move rule allows it (A21; else `STEP 010 HOLDS A NOTE` or the column message). Shift + encoder: a whole step, with its LEN | whole steps (A21) | as a NOTE, without LEN |
+| TIME | one microstep through the Micro-move (A6). Crossing `.96` or `.00` moves the note to the next or previous step at `.00` or `.96`, when the move rule allows it (A21; else `STEP 010 HOLDS A NOTE` or the column message); a move out of the scope's rows is refused with `OUTSIDE THE SCOPE`. Shift + encoder: a whole step, with its LEN | whole steps (A21); Shift + encoder moves 4 steps (new Community OS behaviour); out of the scope: `OUTSIDE THE SCOPE` | as a NOTE, without LEN; out of the scope: `OUTSIDE THE SCOPE` |
 | TYPE | - | CC A..F: types 8..12 and 37; the value stays | - |
 | CH | Q1 b: writes the step's instrument | read-only | - |
 | DATA | the note (`model::edit::note_delta`, `note_set`; pads) | read-only (the Instrument's CC page sets the target) | - |
@@ -192,7 +193,7 @@ Each edit is planned by a pure function in `model/` as either a refusal (with it
 
 ### 3.6 Undo
 
-A12. The unit's name is the action's (`UNDO EVENT TIME`, `UNDO EVENT INSERT`, ...), as other pattern units name theirs. After an undo or a redo the list projects again from the generation and the cursor keeps its key (3.2).
+A12. The unit's name is the action's (`UNDO EVENT`, `UNDO EVENT INSERT`, ...), as other pattern units name theirs; the list's own edit units name no field, because the unit carries the action and its argument (a detent, a pad) only, not the field edited — the field in the box at undo time is not necessarily the one the unit edited. After an undo or a redo the list projects again from the generation and the cursor keeps its key (3.2).
 
 ### 3.7 While playing (Q5 a)
 
@@ -281,6 +282,7 @@ Order: S1, S2, S3, one branch each (`feat/OS-MIDIREC-A-events-view`, ...). S3 ca
 - **Files:** `event_list.cpp`, `events_actions.cpp`, `bindings.cpp`, the tests, the scenario, the catalogue, the manual, `qa_events.json`.
 - **Host tests:** the snap boundary (23 and 24 microsteps), a refused move, all rows as one unit, I1-I3 for the whole operation.
 - **Sim:** `qa_pat_426`..`qa_pat_428`.
+- **As built (S2c + S3, branch `feat/OS-MIDIREC-S3`):** QUANT is `Op::Quant` of the planner, which feeds the TIME planner a delta (`-offset` under 24 microsteps, `48 - offset` from 24), so the move rule, the end's move and the refusals are A21's; a row on its step says `ALREADY ON THE STEP`. `quant_all` plans each row against the pattern as the rows before it left it, walking the steps from the last back, so a row that moves on frees its step (when its move leaves it empty) for the row before it in the same pass; the rows still refused are the `m LEFT`, the reason is the first refusal's (`STEP TAKEN`, `NO FX COLUMN`, `OUTSIDE SCOPE`, any other refusal `REFUSED`). A pass that finds nothing says `NOTHING TO QUANTISE`. F7 / Shift + F7 inside the list are `events.undo` / `events.redo`, which run the grid's PATTERN undo (refused under a modal overlay) and project the list again with the cursor on its key.
 
 ## 5. QA catalogue rows (to add to `docs/qa/catalogue/pattern.md`)
 
@@ -294,8 +296,8 @@ The Sim, Unit, Spec (`OS-MIDIREC`) and Status cells are filled when each slice m
 | QA-PAT-403 | Micro-move in TIME | a note on step 9 with Micro-move 50 | TIME `009.50`, listed after the CC rows of step 9 | S1 |
 | QA-PAT-404 | A CC row says what goes out | CC A on a MIDI instrument whose CC A is controller 74; CC B set to PROG; CC C on Config (number 71); a CC on a sample instrument | `#074`, `PROG`, `#071`; the sample row dim with the Config number and the notes channel; an unassigned number reads `--` | S1 |
 | QA-PAT-405 | CH and IN | notes of instrument 51 (MIDI channel 3) and 01 (sample); a step with no instrument | CH `03`; the sample row dim, CH `--`; the inherited instrument dim, `?` at the top | S1 |
-| QA-PAT-406 | Other FX on a note | Chord 47 on the note's step | the flag `+`; the info line on the row says `ALSO: CHORD 47`; a Gate shows `G` and the gated LEN | S1 |
-| QA-PAT-407 | FILTER | `F1` three times | ALL 1/3, NOTES 2/3, CC 3/3, ALL; the header count follows | S1 |
+| QA-PAT-406 | Other FX on a note | Chord 47 on the note's step | the flag `+`; the info line on the row says `ALSO: CHORD 57B` (the shared chord label); a Gate shows `G` and the gated LEN | S1 |
+| QA-PAT-407 | FILTER | `F1` three times | ALL 1/3, NOTE 2/3, CC 3/3, ALL; the header count follows | S1 |
 | QA-PAT-408 | BACK | `F8` on a CC B row | the grid, the cursor on that step, track and the FX column that holds CC B | S1 |
 | QA-PAT-409 | Refusals and an empty scope | no project; a pattern the project lacks; WATCH while playing; an empty track | `NO PROJECT`; `PATTERN IS EMPTY`; the `tools_open` refusal; an empty list with `NO EVENTS: INSERT ADDS ONE` | S1 |
 | QA-PAT-410 | While playing | STEP, `Play`, the list open | the marker moves with the playing step; the cursor and the window stay (Q5 a) | S1 |
@@ -320,7 +322,7 @@ The Sim, Unit, Spec (`OS-MIDIREC`) and Status cells are filled when each slice m
 
 ## 6. Risks
 
-- **R1 Flash.** At 94 % used (F13), about 6.6 KB [est] is about a tenth of what is left. Each slice records its delta. The reviewer flags a slice over +3.5 KB, and the item stops at 8 KB for the orchestrator to decide. The levers: share the field formatters with the grid's info line, and keep the refusal texts few.
+- **R1 Flash.** At 94 % used (F13), about 6.6 KB [est] is about a tenth of what is left. Each slice records its delta. The reviewer flags a slice over +3.5 KB, and the item stops at 8 KB for the orchestrator to decide. The levers: share the field formatters with the grid's info line, and keep the refusal texts few. Measured (mk66 `.text`): S1a 0, S1b +4.8 KiB, S1c +4.07 KiB, so S1 is 8.9 KiB against the 3 KB estimate and the item passes the 8 KB cap before S2. Orchestrator decision, 2026-11-06: the cap rises to 13 KiB for the item (S2 and S3 at their estimate plus margin; the release image is at 900 KB of 1 MB). The features stay; S2 reports its delta and looks for shared code first.
 - **R2 Rules that surprise.** Edit-through over one note per step and two FX columns means refusals (`HOLDS A NOTE`, `NO FREE FX COLUMN`) and moves that leave CC rows behind. Mitigations: each refusal says why; I1-I3 are property-tested; the grid shows the truth after BACK; the manual section explains the model in five lines.
 - **R3 Static and running instrument differ.** Instrument 0 inherits the last one played, which can come from another pattern (F5). The list shows the pattern's own guess dim, or `?`.
 - **R4 Not the whole step.** FX on a step with no note (a Micro-tune bend, a filter) are not listed (A4). The `+` flag covers note steps only. The manual says so.

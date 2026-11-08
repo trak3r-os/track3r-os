@@ -87,6 +87,26 @@
  *        Every 1.0..1.9 module still loads and runs, and nothing it uses moved; bit 64 is a reserved field below 1.10. Two rules of the app page changed for every app already on a card, whatever its minor:
  *        a screen button leaves the page for its screen like F8 does (the page used to swallow them; the app never sees it), and an app that declares no rows now gets the Shift keys (the OS's Shift layer
  *        is its parameter column only for an app of 1.9 or below that declares rows).
+ *   1.11 OS-FLASHDIET I1 (THE IMPORTER KIND, kind 3; FIRST-PARTY MODULES ONLY): the importer kind is published. The descriptor grows one member at its end, `importer` (offset 80, so the descriptor is
+ *        84 bytes from 1.11: O3M_MODULE_SIZE(11) is 84: it was sizeof(o3m_module) until 1.12 appended four members), pointing at the module's o3m_importer table; every other member is where it was. The file header's word 44 (reserved2[1])
+ *        becomes, FOR KIND 3 ONLY, the IMPORTER LAYOUT TAG: the packer writes the tag of the layout the module was built against, and the OS refuses a kind 3 file whose word is not its own tag (Status
+ *        LayoutMismatch) -- the VERSION LOCK: an importer is compiled against the OS's own model headers, so it may only run on an OS whose step layout is the one it was built against, whatever its ABI minor
+ *        says. For every other kind the word stays reserved and zero (a non-zero word 44 in an instrument, an effect or an app is refused as before), and a kind 3 file that declares a minor below 1.11 is
+ *        refused as an unknown kind: the kind exists from 1.11 only. An importer has no parameters and no views, makes no sound (render, set_param, note_on and note_off may be NULL, as an app's), never
+ *        binds to a track and does not count against the OS's module slots. The importer's table (o3m_importer, eight words) is refined within 1.11 by OS-FLASHDIET I2 before any
+ *        release shipped a kind 3 file: begin is handed the opened file's read window (o3m_file_window), the OS's model arena and the import options, and report / close were appended
+ *        after read_pcm. Every 1.0..1.10 module loads and runs unchanged: its descriptor is 64 or 80 bytes as its minor says, and its word 44 is zero.
+ *   1.12 OS-INSFX-ABI2 A1 (EFFECTS: stereo, the clock, a sidechain key, factory presets; INSTRUMENTS and EFFECTS for the presets): the descriptor grows four members after `importer`, `render_st` (84),
+ *        `fx_flags` (88), `presets` (92) and `preset_count` (96), so it is 100 bytes from 1.12 (O3M_MODULE_SIZE(12) is sizeof(o3m_module)); render_st makes an effect stereo (NULL: a mono effect), fx_flags
+ *        says how (O3M_FX_WIDENS), presets lists named parameter sets (o3m_preset). O3M_PARAM_KEY (32) is a new parameter flag: an effect's INT parameter 0..16 that names another track whose level the effect
+ *        reads (0 = none). o3m_host grows two members at its end, get_clock (the tempo and the beat) and track_level (a track's level, the sidechain key), so the table is 60 bytes; the importer's own
+ *        table stays 52 bytes (O3M_HOST_HAS is false for them there). The new descriptor members are read, and checked, only when the module declares 1.12; an app and an importer carry them zero (presets
+ *        are an instrument's and an effect's). THE LAYOUTS OF 1.0..1.11 DID NOT CHANGE: every module of 1.0 to 1.11 loads and runs bit for bit as before, its descriptor is 64, 80 or 84 bytes as its minor says and
+ *        the new members are never read; an OS of 1.11 refuses a 1.12 file (minor above its own).
+ *   1.13 OS-MODRATE S2 (INSTRUMENTS: a per-instrument RATE): fx_flags gets a second bit, O3M_FX_RATE (2), valid on an instrument of 1.13 or later only. It says "I read host->sample_rate and accept any
+ *        frames": the OS then offers a RATE row (FULL, 1/2, 1/4) on the instrument and, below FULL, calls render() for frames/2 (frames/4) at a host->sample_rate of 22050 (11025) and holds each sample
+ *        2x (4x) into the output, with no filter (the Amiga sound). The module is shut down and initialised again when RATE changes. No layout changed (the descriptor stays 100 bytes, the host table
+ *        60): every module of 1.0..1.12 loads and runs unchanged and never gets a RATE row; an OS of 1.12 refuses a 1.13 file (minor above its own).
  */
 
 #include <stdint.h>
@@ -96,11 +116,12 @@ extern "C" {
 #endif
 
 #define O3M_ABI_MAJOR 1
-#define O3M_ABI_MINOR 10
+#define O3M_ABI_MINOR 13
 
 /* What the module is. The instrument (no input, one mono output) and the effect (one mono input, one mono output) since 1.0; the app
  * since 1.1 (it makes no sound: it owns the body of an OS page, draws a view and takes input; render, set_param, note_on and note_off
- * may be NULL). Importers are reserved and refused by this OS. A module of ABI 1.0 cannot be an app. */
+ * may be NULL). The importer since 1.11 (OS-FLASHDIET I1: it serves files, kind 3; a file that says importer with a minor below 1.11
+ * is refused as an unknown kind). A module of ABI 1.0 cannot be an app. */
 #define O3M_KIND_INSTRUMENT 1u
 #define O3M_KIND_EFFECT 2u
 #define O3M_KIND_IMPORTER 3u
@@ -124,6 +145,9 @@ extern "C" {
 /* 1.1: how the OS builds the standard control of the parameter. All zero (a 1.0 module) = learnable, not a modulation target, no unit. */
 #define O3M_PARAM_NO_LEARN 8u /* MIDI Learn may not bind a controller to it */
 #define O3M_PARAM_MOD 16u     /* a modulation target (the mod matrix may route a source to it) */
+/* 1.12 (OS-INSFX-ABI2): an effect's sidechain KEY: an INT parameter, min 0, max 16, no labels, whose value names the track the effect reads the level of (0 = no key, 1..16 = track 1..16; see
+ * o3m_host.track_level). Effects only, at most two a module; the OS never lets MIDI Learn bind it. A module that declares 1.11 or below never has the flag honoured. */
+#define O3M_PARAM_KEY 32u
 #define O3M_PARAM_UNIT_SHIFT 8u
 #define O3M_PARAM_UNIT_MASK 0xFF00u /* bits 8..15: an O3M_UNIT_* */
 #define O3M_UNIT_NONE 0u
@@ -150,6 +174,15 @@ extern "C" {
 #define O3M_LABELS_MIN 2u
 #define O3M_LABELS_MAX 16u
 #define O3M_LABEL_NAME_MAX 12u
+/* 1.12, factory presets (OS-INSFX-ABI2): at most O3M_PRESETS_MAX presets a module, a name of at most O3M_PRESET_NAME_MAX - 1 characters (bytes with the NUL). */
+#define O3M_PRESETS_MAX 32u
+#define O3M_PRESET_NAME_MAX 16u
+/* 1.12, o3m_module.fx_flags (effects only; every other bit is 0). O3M_FX_WIDENS: the effect makes a stereo image from a mono input, so the OS calls render_st on every block (it needs render_st). Without
+ * it a module that has render_st is stereo-capable: render_st on a block whose input has a side signal, render on every other block, one state for both. */
+#define O3M_FX_WIDENS 1u
+/* 1.13, o3m_module.fx_flags, an instrument's (OS-MODRATE S2): O3M_FX_RATE says the instrument reads host->sample_rate (never a constant) and accepts any frames (1..32: the OS calls it with at most 32 when RATE is not FULL), so the OS may render it at
+ * half or a quarter of the engine rate and hold the samples (the RATE row). Valid on an instrument that declares 1.13 or later; WIDENS stays an effect's. */
+#define O3M_FX_RATE 2u
 
 /* The version of a module itself (not of the ABI), as the file header stores it (ABI 1.2): major in bits 16..31 (0..65535), minor in bits 8..15 and patch in bits 0..7 (each
  * 0..255). 0 is "unversioned" and the lowest there is; versions compare as plain numbers, so the order is major, then minor, then patch. */
@@ -691,6 +724,18 @@ typedef struct o3m_io_api {
   int32_t (*stop_note)(uint32_t instrument);
 } o3m_io_api;
 
+/* THE CLOCK (ABI 1.12, OS-INSFX-ABI2). What o3m_host.get_clock fills: `size` first, set by the caller to sizeof(o3m_clock). `flags` is O3M_CLOCK_*. `tempo_x100` is the BPM x 100 in force (what plays, half and
+ * double time included; the project's tempo while stopped). `beat` is the playhead at the block's first sample, in beats of 4 steps counted from step 0 of the pattern that plays (0 while stopped). */
+#define O3M_CLOCK_PLAYING 1u /* the sequencer plays */
+#define O3M_CLOCK_STARTED 2u /* a run started (the first block that sees it: the OS reads the sequencer at the previous block's end) */
+#define O3M_CLOCK_WRAPPED 4u /* the beat is lower than the previous block's: a new pattern or a jump back */
+typedef struct o3m_clock {
+  uint32_t size;       /* sizeof(o3m_clock): the caller sets it, the OS fills the members up to it */
+  uint32_t flags;      /* O3M_CLOCK_* */
+  uint32_t tempo_x100; /* BPM x 100 */
+  float beat;          /* beats since step 0 of the pattern that plays */
+} o3m_clock;
+
 /* The services the OS gives a module (the pointer passed to init() stays valid until shutdown()). New members are only ever
  * added at the end; check `size` before using one the version you built against lacks. */
 typedef struct o3m_host {
@@ -708,6 +753,12 @@ typedef struct o3m_host {
   const struct o3m_read_api* read; /* O3M_CAP_READ_PROJECT */
   const struct o3m_edit_api* edit; /* O3M_CAP_EDIT_PROJECT */
   const struct o3m_io_api* io;     /* every app of ABI 1.3 */
+  /* ABI 1.12 (OS-INSFX-ABI2; every kind but the importer, whose table is the 52 bytes above). The members do not exist when `size` is below their offset: use O3M_HOST_HAS. */
+  /* get_clock: the tempo in force and the beat position, as of this block (see o3m_clock); `out->size` is set by the caller to sizeof(o3m_clock) and the OS fills the members that fit. Returns 0, or 1 when
+   * the OS has no sequencer to ask (the members are then 0 and tempo_x100 is the project's). Render context. */
+  int32_t (*get_clock)(o3m_clock* out);
+  /* track_level: the linear peak, 0.0 .. 1.0, of track `track` (0..15), the sidechain key (see O3M_PARAM_KEY): 0 for a silent track, a bad index or a track no effect names as its key. Render context. */
+  float (*track_level)(uint32_t track);
 } o3m_host;
 
 /* Whether the OS's host table has the member `m` at all (an OS older than the SDK you built with has a smaller table). A table can still be NULL: not granted. */
@@ -731,6 +782,59 @@ typedef struct o3m_labels {
   uint32_t count;
 } o3m_labels;
 
+/* FACTORY PRESETS (ABI 1.12, OS-INSFX-ABI2): `presets` is `preset_count` entries (0..O3M_PRESETS_MAX, zero exactly when `presets` is NULL, and zero for an app, an importer and a module with no parameters). A preset
+ * sets EVERY parameter: `values` holds `count` floats in parameter order (1..param_count), each finite and within its parameter's range, and the parameters past `count` take their default. The OS applies a
+ * preset through set_param(). Instruments and effects only. */
+typedef struct o3m_preset {
+  const char* name;     /* 1..O3M_PRESET_NAME_MAX - 1 printable ASCII characters */
+  const float* values;  /* `count` floats, in the order of o3m_module.params */
+  uint32_t count;       /* 1..param_count */
+} o3m_preset;
+
+/* THE IMPORTER (ABI 1.11, OS-FLASHDIET I1/I2, kind 3). An importer reads tracker module files (MOD, S3M, OctaMED ...) and turns them into a project: it is not heard and not
+ * seen, it has no parameters and no views, it never binds to a track. Its table, `o3m_module.importer`, says which files it serves and holds its calls: begin is handed the opened
+ * file's read window (below), the OS's model arena and the import options, step drives the job, read_pcm serves the samples, report copies the import's report out and close ends it.
+ * FIRST-PARTY: the importer is compiled against the OS's own model headers, so the OS version-locks it through the file header's word 44 (the layout tag the packer writes; see the file header
+ * below): a kind 3 file whose tag is not the OS's own is refused (LayoutMismatch), never run. */
+#define O3M_IMPORTER_FORMATS_MAX 8u  /* entries in the importer's format list */
+#define O3M_EXT_MAX 8u                /* bytes of a served file extension, with the NUL */
+
+/* step()'s verdicts. */
+#define O3M_IMPORT_RUNNING 0u         /* the job goes on */
+#define O3M_IMPORT_DONE 1u            /* the project is in */
+#define O3M_IMPORT_FAILED 2u          /* the file was refused; the report says why */
+
+typedef struct o3m_format_desc {
+  const char* ext;  /* the file extension it serves, 1..O3M_EXT_MAX - 1 printable ASCII characters, no dot: "mod", "s3m", "med" */
+} o3m_format_desc;
+
+/* The read window over the opened file that the OS lends the importer at begin (its `file` argument): `read(ctx, offset, dst, n)` copies n bytes at `offset`
+ * into `dst` and returns 0 on success, negative on a card error; `size(ctx)` is the file's length in bytes. The OS keeps the file open until close(). */
+typedef struct o3m_file_window {
+  uint32_t struct_size;  /* sizeof(o3m_file_window) */
+  void* ctx;             /* the OS's window object */
+  int32_t (*read)(void* ctx, uint32_t offset, void* dst, uint32_t n);
+  uint32_t (*size)(void* ctx);
+} o3m_file_window;
+
+typedef struct o3m_importer {
+  uint32_t size;                      /* sizeof(o3m_importer) */
+  const o3m_format_desc* formats;     /* format_count entries; format k is the k-th the OS offers the file to */
+  uint32_t format_count;              /* 1..O3M_IMPORTER_FORMATS_MAX */
+  /* begin: start importing the opened file of format `format` (an index into `formats`) into `model_arena` (the OS's own arena: the module is first-party and
+     version-locked, so it writes the project through the OS's model headers it was built against). `file` is the OS's o3m_file_window over the opened file,
+     `options` / `options_size` the OS's import options blob (the module reads the members its build knows). Returns 0, or refuses the import. */
+  int (*begin)(void* state, const o3m_file_window* file, uint32_t format, void* model_arena, const void* options, uint32_t options_size);
+  /* step: do about `budget` units of work; returns O3M_IMPORT_*. Main loop only, never blocking. */
+  uint32_t (*step)(void* state, uint32_t budget);
+  /* read_pcm: `frames` samples of instrument slot `slot` from frame `first` into `dst` (mono int16); negative: refused. */
+  int32_t (*read_pcm)(void* state, uint32_t slot, uint32_t first, uint32_t frames, int16_t* dst);
+  /* report: copy the import's report out into `out`, at most `size` bytes (the shape both sides compiled against under the word 44 lock). Returns the bytes written. */
+  uint32_t (*report)(void* state, void* out, uint32_t size);
+  /* close: the PCM phase is over: the module releases the file window. The OS unloads the module itself. */
+  void (*close)(void* state);
+} o3m_importer;
+
 /* PITCH (ABI 1.8, OS-MODPITCH). The host owns the Slide (41 / 42) and Glide (19) FX of a pattern: it holds the tempo, the glide time and the previous note, and it RAMPS. The module only follows a
  * number. `pitch(state, semitones, per_frame)` is called in the render context (like note_on()). From the next frame of the module's render() the pitch offset is `semitones` and it moves by `per_frame`
  * each frame, linearly, until the next pitch() or note_on(): the OFFSET FROM THE NOTE given to the last note_on(), in semitones, positive up. A module that does not want the slope may ignore
@@ -745,9 +849,11 @@ typedef struct o3m_labels {
 #define O3M_DEFAULT(value)
 #endif
 
-/* The size of the descriptor a module of ABI 1.`minor` has: 64 bytes up to 1.7 (the members up to pitch), 80 from 1.8. The OS refuses a descriptor whose struct_size is another number (the
+/* The size of the descriptor a module of ABI 1.`minor` has: 64 bytes up to 1.7 (the members up to pitch), 80 from 1.8 (pitch, pages, page_count, labels), 84 from 1.11
+ * (`importer`, the importer kind's table; it is NULL in every other kind), 100 from 1.12 (render_st, fx_flags, presets, preset_count). The OS refuses a descriptor whose struct_size is another number (the
  * loader and add_native). Use this macro, not sizeof(o3m_module), for the struct_size of an entry: the generated headers do. Evaluates to a constant on the host as on the target. */
-#define O3M_MODULE_SIZE(minor) ((minor) >= 8u ? sizeof(o3m_module) : __builtin_offsetof(o3m_module, pitch))
+#define O3M_MODULE_SIZE(minor) \
+  ((minor) >= 12u ? sizeof(o3m_module) : ((minor) >= 11u ? __builtin_offsetof(o3m_module, render_st) : ((minor) >= 8u ? __builtin_offsetof(o3m_module, importer) : __builtin_offsetof(o3m_module, pitch))))
 
 /* The module's descriptor: `o3m_entry`, a const object with C linkage. */
 typedef struct o3m_module {
@@ -780,6 +886,15 @@ typedef struct o3m_module {
   const o3m_page* pages O3M_DEFAULT(nullptr);  /* the params pages (see PAGES AND LABELS); NULL = the pages "1-8", "9-16", ... */
   uint32_t page_count O3M_DEFAULT(0);          /* 0..O3M_PAGES_MAX, zero exactly when `pages` is NULL */
   const o3m_labels* labels O3M_DEFAULT(nullptr); /* NULL, or param_count entries parallel to `params` */
+  /* ---- 80 bytes up to here: the descriptor of ABI 1.8..1.10. From here on the member exists only when the module declares ABI 1.11 (struct_size 84); in a lower minor it is not read. ---- */
+  const o3m_importer* importer O3M_DEFAULT(nullptr); /* ABI 1.11, kind 3 only: the importer's table (see THE IMPORTER); NULL in every other kind */
+  /* ---- 84 bytes up to here: the descriptor of ABI 1.11. From here on the members exist only when the module declares ABI 1.12 (struct_size 100); in a lower minor they are not read. ---- */
+  /* In C++ the four default to NULL / 0, so a descriptor written as a list that ends at `importer` or earlier still compiles; in C list them (an effect's `importer` is NULL). */
+  uint32_t (*render_st)(void* state, const float* in_l, const float* in_r, float* out_l, float* out_r, uint32_t frames) O3M_DEFAULT(nullptr);
+                                                  /* ABI 1.12, effects only: the stereo render (`in_*` and `out_*` may be the same buffers; the return value is render()'s; frames 1..64). NULL: a mono effect */
+  uint32_t fx_flags O3M_DEFAULT(0);                /* ABI 1.12: O3M_FX_*; an effect's O3M_FX_WIDENS (needs render_st), an instrument's O3M_FX_RATE (1.13); every other bit 0 */
+  const o3m_preset* presets O3M_DEFAULT(nullptr);  /* ABI 1.12, instruments and effects: the factory presets (see FACTORY PRESETS); NULL when none */
+  uint32_t preset_count O3M_DEFAULT(0);            /* 0..O3M_PRESETS_MAX, zero exactly when `presets` is NULL */
 } o3m_module;
 
 /* The file on the card (<name>.tmod), little endian, built by tools/o3m_pack.py from the module's linked ELF:
@@ -809,7 +924,8 @@ typedef struct o3m_module {
  *     34     2    view_count
  *     36     4    module_version (1.2; reserved, 0, in a file of ABI 1.0 and 1.1)
  *     40     4    capabilities (1.3: O3M_CAP_*, an app's request; reserved, 0, in a file of ABI 1.2 and below)
- *     44     4    reserved2[1] (0)
+ *     44     4    reserved2[1]: 1.11, KIND 3 ONLY, the importer layout tag (written by the packer; the OS refuses a kind 3 file whose word is not its own
+ *                tag, LayoutMismatch). Reserved, 0, in every other file: a non-zero word 44 in an instrument, an effect, an app or a kind 3 file of a minor below 1.11 is refused
  *     48     4    image_crc
  *     52    12    reserved3 (0) */
 #define O3M_FILE_MAGIC 0x444D334Fu /* "O3MD" */
@@ -831,7 +947,7 @@ typedef struct o3m_file_header {
   uint16_t param_count; /* likewise */
   uint16_t view_count;  /* the descriptor's, repeated (0..O3M_VIEWS_MAX) */
   uint32_t module_version; /* 1.2: O3M_VERSION(major, minor, patch) of the module, 0 = unversioned; must be 0 when abi_minor is below 2 (a reserved word until then) */
-  uint32_t reserved2[2]; /* [0]: capabilities (ABI 1.3, apps only, O3M_CAP_*; must be 0 when abi_minor is below 3); [1]: 0 */
+  uint32_t reserved2[2]; /* [0]: capabilities (ABI 1.3, apps only, O3M_CAP_*; must be 0 when abi_minor is below 3); [1]: the importer layout tag (ABI 1.11, kind 3 only; must be 0 otherwise) */
   uint32_t image_crc;
   uint32_t reserved3[3]; /* 0 */
 } o3m_file_header;
@@ -843,7 +959,7 @@ typedef struct o3m_file_header {
 #define O3M_ABI_ASSERT(name, cond) typedef char o3m_abi_assert_##name[(cond) ? 1 : -1]
 #define O3M_OFFSET(type, member) __builtin_offsetof(type, member)
 O3M_ABI_ASSERT(host_1_2, O3M_OFFSET(o3m_host, draw) == 36);                                     /* 1.0..1.2: log 16, exp2 20, log2 24, sin 28, cos 32, draw 36 */
-O3M_ABI_ASSERT(host_1_3, O3M_OFFSET(o3m_host, read) == 40 && O3M_OFFSET(o3m_host, edit) == 44 && O3M_OFFSET(o3m_host, io) == 48 && sizeof(o3m_host) == 52);
+O3M_ABI_ASSERT(host_1_3, O3M_OFFSET(o3m_host, read) == 40 && O3M_OFFSET(o3m_host, edit) == 44 && O3M_OFFSET(o3m_host, io) == 48);  /* (1.3 ends at 52) */
 O3M_ABI_ASSERT(read_1_3, O3M_OFFSET(o3m_read_api, get_tempo) == 8 && O3M_OFFSET(o3m_read_api, launch_ctx) == 12);
 O3M_ABI_ASSERT(read_1_5, O3M_OFFSET(o3m_read_api, pattern_info) == 16 && O3M_OFFSET(o3m_read_api, get_steps) == 20);
 O3M_ABI_ASSERT(read_1_6, O3M_OFFSET(o3m_read_api, instrument_info) == 24 && O3M_OFFSET(o3m_read_api, get_param_desc) == 28 && O3M_OFFSET(o3m_read_api, get_instrument_param) == 32 && sizeof(o3m_read_api) == 36);
@@ -861,7 +977,14 @@ O3M_ABI_ASSERT(transport_pod, O3M_OFFSET(o3m_transport, playing) == 4 && O3M_OFF
 O3M_ABI_ASSERT(launch_ctx, O3M_OFFSET(o3m_launch_ctx, block_length) == 24 && O3M_OFFSET(o3m_launch_ctx, block_tracks) == 28 && sizeof(o3m_launch_ctx) == 32); /* 1.3..1.4: 28 bytes, 1.5 appends block_tracks */
 O3M_ABI_ASSERT(step_pods, sizeof(o3m_step) == 8 && sizeof(o3m_pattern_info) == 28);
 O3M_ABI_ASSERT(module_1_8, O3M_OFFSET(o3m_module, view_count) == 60 && O3M_OFFSET(o3m_module, pitch) == 64 && O3M_OFFSET(o3m_module, pages) == 68 && O3M_OFFSET(o3m_module, page_count) == 72 &&
-                           O3M_OFFSET(o3m_module, labels) == 76 && sizeof(o3m_module) == 80);  /* 1.0..1.7: 64 bytes (O3M_MODULE_SIZE), 1.8 appends pitch, pages, page_count, labels */
+                           O3M_OFFSET(o3m_module, labels) == 76);  /* 1.0..1.7: 64 bytes (O3M_MODULE_SIZE), 1.8 appends pitch, pages, page_count, labels (80 bytes up to 1.10) */
+O3M_ABI_ASSERT(module_1_11, O3M_OFFSET(o3m_module, importer) == 80 && O3M_OFFSET(o3m_module, render_st) == 84);  /* 1.8..1.10: 80 bytes, 1.11 appends importer (kind 3's table, NULL in the others) and ends at 84 */
+O3M_ABI_ASSERT(module_1_12, O3M_OFFSET(o3m_module, render_st) == 84 && O3M_OFFSET(o3m_module, fx_flags) == 88 && O3M_OFFSET(o3m_module, presets) == 92 && O3M_OFFSET(o3m_module, preset_count) == 96 &&
+                            sizeof(o3m_module) == 100);  /* 1.12 appends render_st, fx_flags, presets, preset_count (100 bytes) */
+O3M_ABI_ASSERT(host_1_12, O3M_OFFSET(o3m_host, get_clock) == 52 && O3M_OFFSET(o3m_host, track_level) == 56 && sizeof(o3m_host) == 60);  /* 1.12 appends get_clock and track_level to the 52-byte table */
+O3M_ABI_ASSERT(preset_pod, sizeof(o3m_preset) == 12 && O3M_OFFSET(o3m_preset, values) == 4 && O3M_OFFSET(o3m_preset, count) == 8);
+O3M_ABI_ASSERT(clock_pod, sizeof(o3m_clock) == 16 && O3M_OFFSET(o3m_clock, flags) == 4 && O3M_OFFSET(o3m_clock, tempo_x100) == 8 && O3M_OFFSET(o3m_clock, beat) == 12);
+O3M_ABI_ASSERT(importer_pods, sizeof(o3m_format_desc) == 4 && sizeof(o3m_file_window) == 16 && sizeof(o3m_importer) == 32);  /* 1.11: the importer's table is eight words */
 O3M_ABI_ASSERT(ui_1_9, O3M_OFFSET(o3m_ui, exit) == 16 && O3M_OFFSET(o3m_ui, keys) == 20 && sizeof(o3m_ui) == 24 && sizeof(o3m_keys) == 64 && O3M_OFFSET(o3m_keys, shift_f) == 32); /* 1.1..1.8: 20 bytes (O3M_UI_SIZE), 1.9 appends keys */
 O3M_ABI_ASSERT(page_pods, sizeof(o3m_page) == 8 && O3M_OFFSET(o3m_page, first_param) == 4 && sizeof(o3m_labels) == 8 && O3M_OFFSET(o3m_labels, count) == 4);
 O3M_ABI_ASSERT(param_pods, sizeof(o3m_instrument_info) == 20 && O3M_OFFSET(o3m_instrument_info, midi_channel) == 16 && sizeof(o3m_param_desc) == 40 && O3M_OFFSET(o3m_param_desc, id) == 16 && O3M_OFFSET(o3m_param_desc, group) == 20 && O3M_OFFSET(o3m_param_desc, name) == 24);

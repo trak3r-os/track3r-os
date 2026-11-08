@@ -1912,6 +1912,139 @@
   },
   {
    "say": "QA-PAT-306 / 307 / 308 / 309 (host tests): the arithmetic of the modes, the FX write rules, the rows, the captions and the coarse steps, and the values the dialog opens with are `pattern_fill_test.cpp`, `fill_view_test.cpp` and `pattern_edit_app_test.cpp`; nothing extra on the unit."
+  },
+  {
+   "say": "OS-SCALES28 S2, rows QA-PAT-429..434 of docs/qa/catalogue/pattern.md (docs/specs/OS-SCALES28.md; the spec's QA-PAT-324..329 are taken by OS-FXREC S2). On the Pattern screen, Edit (Rec), stopped: hold Note until the panel shows. The row-2 caption reads SCALE (ENCODER: ALL 39): the encoder and Up / Down walk all 39 scales in the official order, as a ring; pad row 2 keeps its twelve. The simulator's pictures are qa_pat_429..434 of qa/qa_pattern.txt; the save / reload of QA-PAT-434 is the host's note11_format_test and persist2_app_test, on the unit a save, a power-cycle and a load."
+  },
+  {
+   "keys": [
+    "rec"
+   ],
+   "gap": 0.3,
+   "note": "Edit on (STEP), stopped"
+  },
+  {
+   "keys": [
+    "+note"
+   ],
+   "gap": 1.0,
+   "note": "QA-PAT-429: hold Note: the NOTE ENTRY panel opens, the top line names the scale in force"
+  },
+  {
+   "enc": 26,
+   "gap": 0.6,
+   "note": "QA-PAT-429: 26 detents on: Hirajoshi, one of the 27 that no pad of row 2 holds (no pad of the row is lit), the top line reads C Hirajoshi - Jump 1 - Oct 3 - Lock off"
+  },
+  {
+   "shot": "qa_pat_429",
+   "non_blank": true,
+   "note": "QA-PAT-429: the panel with Hirajoshi on the top line and the row-2 caption SCALE (ENCODER: ALL 39)"
+  },
+  {
+   "enc": -27,
+   "gap": 0.6,
+   "note": "QA-PAT-429: the ring wraps below Chromatic to Enigmatic (38)"
+  },
+  {
+   "shot": "qa_pat_429_wrap",
+   "non_blank": true,
+   "note": "QA-PAT-429: Enigmatic, the last of the 39, after the wrap"
+  },
+  {
+   "enc": 1,
+   "gap": 0.3,
+   "note": "back to Chromatic (the ring wraps round)"
+  },
+  {
+   "keys": [
+    "down"
+   ],
+   "gap": 0.4,
+   "note": "QA-PAT-430: Down is +1: Minor"
+  },
+  {
+   "shot": "qa_pat_430",
+   "non_blank": true,
+   "note": "QA-PAT-430: Minor on the top line"
+  },
+  {
+   "keys": [
+    "up"
+   ],
+   "gap": 0.3
+  },
+  {
+   "keys": [
+    "up"
+   ],
+   "gap": 0.4,
+   "note": "QA-PAT-430: Up is -1: Chromatic, then the wrap to Enigmatic"
+  },
+  {
+   "shot": "qa_pat_430_wrap",
+   "non_blank": true,
+   "note": "QA-PAT-430: the wrap with Up"
+  },
+  {
+   "pad": 13,
+   "note": "QA-PAT-431: pad 2 of row 2 (while one of the 27 is in force): Major, the official 2, and its pad is lit Front again"
+  },
+  {
+   "shot": "qa_pat_431",
+   "non_blank": true,
+   "note": "QA-PAT-431: Major after the pad, the pad of row 2 lit"
+  },
+  {
+   "pad": 47,
+   "note": "QA-PAT-432: the last pad: SCALE LOCK on"
+  },
+  {
+   "enc": 24,
+   "gap": 0.6,
+   "note": "QA-PAT-432: to Hirajoshi (the official 26): with the lock on the NOTES pads lay out its five notes"
+  },
+  {
+   "shot": "qa_pat_432",
+   "non_blank": true,
+   "note": "QA-PAT-432: Hirajoshi with Lock ON on the top line"
+  },
+  {
+   "keys": [
+    "-note"
+   ],
+   "gap": 0.5,
+   "note": "QA-PAT-432: let go of Note before the MIDI note (while the panel is held the keyboard writes nothing): the panel closes"
+  },
+  {
+   "say": "QA-PAT-432 (the MIDI keyboard): play C#4 on a keyboard into MIDI IN (channel 1; watch the DIN/USB out with `amidi -d`): with the lock on the written note is the snapped C4, not C#4. In STEP the note lands on the cursor's step; the sim asserts pat.1.0.0.note=61 (the model stores the MIDI note + 1). The NOTES pads play only the scale's notes too."
+  },
+  {
+   "shot": "qa_pat_433",
+   "non_blank": true,
+   "note": "QA-PAT-433: the info line reads scale Hirajoshi C ..."
+  },
+  {
+   "keys": [
+    "+note"
+   ],
+   "gap": 1.0
+  },
+  {
+   "enc": -7,
+   "gap": 0.6,
+   "note": "QA-PAT-434: to Hung. minor (the official 19), one of the 27 that no pad holds"
+  },
+  {
+   "shot": "qa_pat_434",
+   "non_blank": true,
+   "note": "QA-PAT-434: Hung. minor on the top line; save the project (F8 is UNDO, the save is File > SAVE), power-cycle, load it back: the panel opens on Hung. minor again (the NOTE 1.1 chunk; host: note11_format_test, persist2_app_test)"
+  },
+  {
+   "keys": [
+    "-note"
+   ],
+   "gap": 0.5,
+   "note": "(Note released, the panel closed)"
   }
  ],
  "finally": [

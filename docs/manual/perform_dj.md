@@ -8,7 +8,7 @@ The DJ page turns the pattern that plays into something you mix by hand. You put
 
 ## What it is for
 
-Use the DJ page to play a set from one pattern after another: drums on A and a melody on B, a filter sweep into the next pattern, a stutter at the end of a bar. Press `Perform` to open [Perform](perform.md); it opens on the page you left it on, so the strip may already say **PAGE DJ**. If it shows the slots, press `Perform` again. Once more goes back to the slots.
+Use the DJ page to play a set from one pattern after another: drums on A and a melody on B, a filter sweep into the next pattern, a stutter at the end of a bar. Press `Perform` to open [Perform](perform.md); it opens on the page you left it on, so the strip may already say **PAGE DJ**. If it shows the slots, press `Perform` again. The next press after the DJ page goes back to the slots.
 
 ## How it works
 <!-- sync: src=app/src/dj_actions.cpp,app/include/o3os/app/dj.h,audio/src/graph.cpp spec=docs/specs/OS-DJ.md qa=QA-PRF-100,QA-PRF-104,QA-PRF-106,QA-PRF-114,QA-PRF-117,QA-PRF-127,QA-PRF-132,QA-PRF-138,QA-PRF-112,QA-PRF-126,QA-PRF-129,QA-PRF-133,QA-PRF-134,QA-PRF-135,QA-PRF-136,QA-PRF-142,QA-PRF-144,QA-PRF-150 -->
@@ -145,7 +145,7 @@ Tap the same pad again to cancel. The queued pattern stays queued. If less than 
 Start on the DJ page, playing, with no loop recording.
 
 1. Tap `F5` (**SCR**). The strip says **SCR ON: THE ENCODER IS THE PLATTER**. <!-- QA-PRF-133 -->
-2. Turn the encoder. The mix moves with it, and a turn back plays the mix backwards. The platter has a little weight, about a fortieth of a second: a very slow turn is a smooth glide, and a stop or a start is a short curve, never a click or a step. A quick forth-and-back scratch returns to the same place, within about one click, and a turn back after a hard flick follows the new direction at once. <!-- QA-PRF-150 -->
+2. Turn the encoder. The mix moves with it, and a turn back plays the mix backwards. The platter has a little weight, about a fifteenth of a second: a very slow turn is a smooth glide that does not stop between two clicks, and a stop or a start is a short curve, never a click or a step. A quick forth-and-back scratch returns to the same place, within about two clicks, and a turn back after a hard flick follows the new direction at once. A fast turn is gently dulled by a low-pass filter, which tames the harshest aliasing of the high pitch. <!-- QA-PRF-150 -->
 3. To backspin, flick the platter fast backwards and tap `F5` while it still spins. The record brakes in about half a second and the mix is live. A slow turn, or a hand held still, lets go at once. <!-- QA-PRF-135 --> <!-- QA-PRF-150 -->
 
 If the looper is recording, the strip says **NO ROOM: LOOPER IS RECORDING**; without free sample memory it says **NO ROOM FOR THE SCRATCH**. <!-- QA-PRF-137 --> <!-- QA-PRF-133 --> Until the scratch ends, opening a project says **END THE SCRATCH FIRST**. <!-- QA-PRF-139 -->

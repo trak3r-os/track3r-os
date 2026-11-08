@@ -44,10 +44,12 @@ enum class Color : std::uint8_t {
   // Record (Rec mode, OS-REVIEW). The 17th token, past the sixteen of ADR 0001, by the maintainer's request of 2026-10-13: the one red. It is a new id at the end, so no id
   // moved and the module SDK's O3M_COLOR_COUNT stays 16 (a module cannot name it).
   Rec,         // the Pattern screen's Rec mode: the frame round the grid, the REC badge and the playhead bar (SelText on it)
+  // The 18th token (OS-SELTINT), at the end for the same reason: the selection of a multi-track block outside the cursor's track, a little duller than Sel.
+  SelDim,      // the block's highlight on the tracks other than the cursor's (SelText on it)
 };
 
-inline constexpr unsigned kColorCount = static_cast<unsigned>(Color::Rec) + 1;
-static_assert(kColorCount == 17, "a theme has 16 colours (ADR 0010 section 8) and Rec, the red of Rec mode");
+inline constexpr unsigned kColorCount = static_cast<unsigned>(Color::SelDim) + 1;
+static_assert(kColorCount == 18, "a theme has 16 colours (ADR 0010 section 8), Rec, the red of Rec mode, and SelDim, the block's tint off the cursor's track");
 
 // The FT812 panel the UI is designed for (the simulator's framebuffer is the same size).
 inline constexpr int kScreenW = 800;

@@ -764,3 +764,47 @@ TEST_CASE("fill FILL2: every picker type, every mode: the written value is insid
     }
   }
 }
+
+TEST_CASE("fill FILL2: Chance's RANDOM draws in 0..100, CONSTANT and FROM..TO reach 174 (OS-CECHANCE C2)") {
+  fill::Plan p;
+  p.what = fill::What::Fx1;
+  p.type = fill::Type::Every;
+  p.mode = fill::Mode::Random;
+  p.fx_type = 4;  // Chance: the row reaches 174, the draw does not
+  p.from = 0;
+  p.to = 174;
+  Rig r;
+  r.rng.s = 7;
+  CHECK(fill::apply(p, r.steps, kLen, r.rng, r.last) == kLen);
+  for (unsigned i = 0; i < kLen; ++i) {
+    CHECK(r.steps[i].fx[0].type == 4);
+    CHECK_MESSAGE(r.steps[i].fx[0].value <= 100u, "step " << i);
+  }
+  const fill::Range d = fill::domain(p);
+  CHECK((d.lo == 0 && d.hi == 174));  // CONSTANT / FROM..TO accept the whole range
+  // CONSTANT 140 is kept.
+  p.mode = fill::Mode::Const;
+  p.from = 140;
+  Rig c;
+  CHECK(fill::apply(p, c.steps, 4, c.rng, c.last) == 4u);
+  CHECK((c.steps[0].fx[0].type == 4 && c.steps[0].fx[0].value == 140));
+  // RAMP from 100 to 174 walks into the conditions: the first hit 100, the last 174.
+  p.mode = fill::Mode::Ramp;
+  p.from = 100;
+  p.to = 174;
+  Rig q;
+  q.rng.s = 3;
+  CHECK(fill::apply(p, q.steps, 3, q.rng, q.last) == 3u);
+  CHECK(q.steps[0].fx[0].value == 100);
+  CHECK(q.steps[2].fx[0].value == 174);
+  // A draw range above 100 still draws at its cap, not past it.
+  p.mode = fill::Mode::Random;
+  p.from = 150;
+  p.to = 174;
+  Rig w;
+  w.rng.s = 11;
+  (void)fill::apply(p, w.steps, 4, w.rng, w.last);
+  for (unsigned i = 0; i < 4; ++i) {
+    CHECK(w.steps[i].fx[0].value <= 100u);
+  }
+}

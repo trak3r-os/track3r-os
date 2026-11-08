@@ -84,6 +84,8 @@ inline constexpr std::uint32_t kPerfSlots = 12;
 inline constexpr std::uint32_t kPerfStoredRows = 3;     // rows 1..3 (row 0 is "off" and has no value)
 inline constexpr std::uint8_t kPerfRowMax = 3;
 inline constexpr std::uint8_t kPerfFxMax = 21;          // seq::PerfFx::Overdrive: the last of the performance FX (ids 20 and 21 came with OS-PERFFX P1: the file says PERF / SCEN 1.1 when a slot holds one, formats/native.h kStateVersionFx; an older build reads them as none)
+inline constexpr std::uint8_t kPerfPlayModeMaxV11 = 3;  // seq::TrackPlayMode: the last PLAYMODE value of PERF / SCEN 1.0 and 1.1 (FWD, BACK, PING, RND); a PLAYMODE value above it in such a chunk reads as RND (3) (OS-PERFMODES M3)
+inline constexpr std::uint8_t kPerfPlayModeMax = 23;    // the last PLAYMODE value of PERF / SCEN 1.2 (OS-PERFMODES M3: 4..23 are the custom play orders C1..C20); a value above it is held to 23 (formats/native.h kStateVersionPlayOrder)
 inline constexpr std::int32_t kPerfValueMax = 100;      // no FX of the table goes past +-100
 
 struct PerfState {
@@ -139,15 +141,29 @@ struct AppParams {
 
 // ---- Note entry (OS-PERSIST2): the root, the scale, the octave and SCALE LOCK of app/note_entry.h, and JUMP, the edit step of the Pattern screen (PatternEdit::edit_step)
 inline constexpr std::uint8_t kNoteRootMax = 11;        // the pitch class C..B
-inline constexpr std::uint8_t kNoteScaleMax = 11;       // app::kNoteScales - 1
+// OS-SCALES28: the scale is the official numbering 0..38 (the official firmware's 39 scales, MAX_SCALE 38, verified parity tracker-ce@7fd6c2c:core/source/scales.h:6-7), the same order the
+// official project file's pad board byte uses; the core table's index is always this + 1 (core/scales.h). The NOTE 1.0 byte keeps its 1.0 meaning (the panel's twelve, below).
+inline constexpr std::uint8_t kNoteScaleMax = 38;
 inline constexpr std::uint8_t kNoteOctaveMax = 9;       // app::kEntryOctaves - 1
 inline constexpr std::uint8_t kNoteJumpMax = 32;        // 0..32
 inline constexpr std::uint8_t kNoteDefaultOctave = 3;   // with the C root, the C-3 that the pad board always started at
 inline constexpr std::uint8_t kNoteDefaultJump = 1;
 
+// OS-SCALES28: the panel's twelve scales, pad of row 2 (1..12) -> the official index; the NOTE 1.0 byte is the pad - 1. A format fact (what the 1.0 byte means), so it lives here, where the
+// codec maps it, and app/note_entry.h uses it (no second copy).
+inline constexpr std::uint8_t kNotePanelScales[12] = {0, 2, 1, 3, 7, 4, 9, 18, 17, 15, 11, 23};
+static_assert(kNoteScaleMax == 38, "OS-SCALES28: the official 39 scales, 0..38 (tracker-ce@7fd6c2c:core/source/scales.h:6-7)");
+static_assert(sizeof kNotePanelScales / sizeof kNotePanelScales[0] == 12, "OS-SCALES28: the panel's twelve scales");
+static_assert([] {
+  for (std::uint8_t s : kNotePanelScales) {
+    if (s > kNoteScaleMax) return false;
+  }
+  return true;
+}(), "OS-SCALES28: every panel scale is an official index");
+
 struct NoteState {
   std::uint8_t root;    // 0..kNoteRootMax
-  std::uint8_t scale;   // 0..kNoteScaleMax
+  std::uint8_t scale;   // 0..kNoteScaleMax, the official numbering (OS-SCALES28)
   std::uint8_t octave;  // 0..kNoteOctaveMax
   std::uint8_t lock;    // SCALE LOCK: 0 off, 1 on
   std::uint8_t jump;    // 0..kNoteJumpMax
@@ -211,6 +227,17 @@ struct InsertState {
   std::uint8_t reserved[3];  // 0
   InsertRecord rec[kMaxInserts];  // ascending (where, slot), no duplicate; past `count` all zero
 };
+
+// OS-INSFX S6: the master insert is dual mono (two instances of its module in the host), so a master record counts 2 of the audio side's cap of kMaxInserts instances, a track record 1. The file may hold four
+// records (the chunk's cap); the assign refuses a fifth instance, and a load binds the records in (where, slot) order and skips (counts) the one that does not fit.
+// OS-INSFX-ABI2 A7: a stereo module (render_st) on the master is ONE instance in the host; the file alone cannot say which, so this count stays the dual-mono 2 and the app counts exactly (ModuleUi::project_instances).
+constexpr std::uint32_t insert_instances(const InsertState& s) noexcept {
+  std::uint32_t n = 0;
+  for (std::uint32_t i = 0; i < s.count && i < kMaxInserts; ++i) {
+    n += s.rec[i].where == kInsertWhereMaster ? 2u : 1u;
+  }
+  return n;
+}
 
 static_assert(std::is_trivially_copyable<MidiState>::value && std::is_trivially_copyable<UsbState>::value && std::is_trivially_copyable<MixState>::value &&
                   std::is_trivially_copyable<PerfState>::value && std::is_trivially_copyable<AppParams>::value,

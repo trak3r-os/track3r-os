@@ -100,6 +100,13 @@ for v in O3OS_QANET_SEED O3OS_QANET_SEEDS O3OS_QANET_STEPS; do
     *) envs="$envs$v=$val " ;;
   esac
 done
+# O3OS_REMOTE_JOBS: the machine's job count for this run, over its turn's default (a full dev run on a free machine). A name of
+# its own, so an O3OS_CI_JOBS set for a local run never reaches the machine.
+case "${O3OS_REMOTE_JOBS:-}" in
+  "") ;;
+  *[!0-9]*) echo "remote_ci: O3OS_REMOTE_JOBS must be a number" >&2; exit 2 ;;
+  *) envs="${envs}O3OS_CI_JOBS=$O3OS_REMOTE_JOBS " ;;
+esac
 case "${O3OS_GOLDEN_ONLY:-}" in
   "") ;;
   *[!A-Za-z0-9_./-]*) echo "remote_ci: O3OS_GOLDEN_ONLY must be a scenario or screen name" >&2; exit 2 ;;

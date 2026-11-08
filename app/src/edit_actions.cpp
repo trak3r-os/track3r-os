@@ -5,6 +5,7 @@
 #include "session_access.h"
 
 #include <o3os/app/module_ui.h>
+#include <o3os/app/screens/params_screen.h>
 #include <o3os/app/sample_bank.h>
 #include <o3os/model/params.h>
 
@@ -15,7 +16,7 @@ namespace o3os::app {
 namespace {
 
 bool say(ActionContext& ctx, core::Severity severity, const char* text) noexcept {
-  return ctx.view.notify.post(severity, text, "history", ViewState::kMessageMs);
+  return say_tag(ctx, severity, text, "history");
 }
 
 model::Editor* editor_of(const ActionContext& ctx) noexcept {
@@ -26,7 +27,8 @@ bool undo_or_redo(ActionContext& ctx, bool undo) noexcept {
   model::Editor* e = editor_of(ctx);
   // OS-UNDOGRP: the area of the screen F8 is pressed on; a screen with none of its own has no undo (D1, D2).
   const model::UndoArea area = screen_undo_area(ctx.view.screen);
-  if (area == model::UndoArea::Auto || area == model::UndoArea::None) {
+  if (area == model::UndoArea::Auto || area == model::UndoArea::None ||
+      (ctx.view.screen == ScreenId::Instrument && params_insert_target(ctx.view))) {  // OS-INSFX S5: an insert's edits are not journalled (D9): nothing of theirs to undo
     return say(ctx, core::Severity::Info, undo ? "NOTHING TO UNDO HERE" : "NOTHING TO REDO HERE");
   }
   rec_take_end(e, ctx.view.edit);  // OS-LIVEREC: a take in progress is closed first (it cannot be undone from inside its group), so that Undo takes what was recorded so far; recording goes on in a new take
@@ -46,6 +48,13 @@ bool undo_or_redo(ActionContext& ctx, bool undo) noexcept {
   const bool app_unit = have_unit && unit_action == core::action_id("module.app_group");
   const bool audio_unit = have_unit && (unit_action == core::action_id("instrument.paste") || unit_action == core::action_id("instrument.load"));
   const bool purge_unit = have_unit && unit_action == core::action_id("file.purge");  // OS-FILES part B: PURGE UNUSED is one unit, and the strip names it
+  // OS-MIDIREC S2b: the list's edit units say the event on the strip (spec A12's `UNDO EVENT`). The unit itself is named for
+  // the action (the dispatcher names every unit) and carries only its argument (a detent, a pad), not the field edited, so
+  // the notice names no field: reading it from the view would say the field in the box now, not the one the unit edited.
+  const bool events_unit = have_unit && (unit_action == core::action_id("events.edit") || unit_action == core::action_id("events.coarse") ||
+                                         unit_action == core::action_id("events.pad") ||
+                                         unit_action == core::action_id("events.insert") || unit_action == core::action_id("events.delete") ||
+                                         unit_action == core::action_id("events.quant"));
   const model::UndoResult r = e == nullptr ? model::UndoResult::Nothing : (undo ? e->undo(area) : e->redo(area));
   switch (r) {
     case model::UndoResult::Ok: {
@@ -105,6 +114,9 @@ bool undo_or_redo(ActionContext& ctx, bool undo) noexcept {
       }
       if (purge_unit) {
         (void)say(ctx, core::Severity::Info, undo ? "UNDO PURGE" : "REDO PURGE");
+      }
+      if (events_unit) {
+        (void)say(ctx, core::Severity::Info, undo ? "UNDO EVENT" : "REDO EVENT");
       }
       // D4: the unit made or removed something the other areas' units name: their history is gone, and says so
       if (e->fence_cleared(model::UndoArea::Pattern)) {

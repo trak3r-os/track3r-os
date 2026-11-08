@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // OS-INSFX S3b (docs/specs/OS-INSFX.md, section 7): the insert phase of the module binder (app/module_binder.h): the project's INSX records are bound after the instruments, unadmitted, with their
-// parameters and bypass flag; a master record, a module that is missing or not an effect, and a bind that fails are skipped and counted and the run still ends Done; a project without records binds none
+// parameters and bypass flag; the master's record (OS-INSFX S6) binds TWO instances, so it counts 2 of the cap of four; a module that is missing or not an effect, a record that does not fit and a bind that fails
+// are skipped and counted and the run still ends Done; a project without records binds none
 // after one that had some (the platform retires the old ones at the start of a load, begin_replace, and releases them in the Settle phase; the test does the same calls); the model written as the
 // console writes it (the Editor's set_insert / clear_insert) is saved and loaded back and binds the same inserts. Host only; the module code is native, written here.
 #include <doctest/doctest.h>
@@ -71,6 +72,17 @@ const o3m_module kGain = FX("gain", O3M_KIND_EFFECT, fx_init);
 const o3m_module kWide = FX("wide", O3M_KIND_EFFECT, fx_init);
 const o3m_module kStubborn = FX("stubborn", O3M_KIND_EFFECT, fx_refuse);  // its init() refuses
 const o3m_module kInst = FX("inst", O3M_KIND_INSTRUMENT, fx_init);
+// OS-INSFX-ABI2 A7: a 1.12 stereo effect (render_st): on the master it binds ONE instance.
+std::uint32_t fx_st_render(void*, const float* il, const float* ir, float* ol, float* orr, std::uint32_t n) {
+  for (std::uint32_t i = 0; i < n; ++i) {
+    ol[i] = il[i];
+    orr[i] = ir[i];
+  }
+  return 1;
+}
+#define FX_ST(name, render_st) \
+  o3m_module { O3M_ABI_MAJOR, O3M_ABI_MINOR, O3M_KIND_EFFECT, sizeof(o3m_module), name, sizeof(FxState), 2, kParams, fx_init, fx_render, fx_set_param, fx_note_on, fx_note_off, fx_shutdown, nullptr, 0, nullptr, nullptr, 0, nullptr, nullptr, render_st, 0u }
+const o3m_module kStWide = FX_ST("stwide", fx_st_render);
 
 bool route_insert(void* self, const core::ParamChange& c) noexcept {
   return core::param_kind(c.id) == core::ParamKind::Insert && static_cast<audio::InsertHost*>(self)->apply_param(c);
@@ -179,6 +191,7 @@ void fresh_set() {
   g_set.cold().init(g_sdram, 0x70000000u, sizeof g_sdram);
   CHECK(g_set.add_native("gain", kGain));
   CHECK(g_set.add_native("wide", kWide));
+  CHECK(g_set.add_native("stwide", kStWide));  // OS-INSFX-ABI2 A7: a stereo effect, native only
   CHECK(g_set.add_native("stubborn", kStubborn));
   CHECK(g_set.add_native("inst", kInst));
 }
@@ -202,7 +215,7 @@ model::Project& project() {
 
 }  // namespace
 
-TEST_CASE("insert binder: the project's inserts are bound with their parameters and bypass flag, the master's is counted and skipped") {
+TEST_CASE("insert binder: the project's inserts are bound with their parameters and bypass flag; the master's record needs two instances, so with three track inserts it does not fit: skipped and counted") {
   Card card("bind");
   fresh_set();
   Rig r;
@@ -220,10 +233,11 @@ TEST_CASE("insert binder: the project's inserts are bound with their parameters 
   const app::ModuleReport& rep = b.report();
   CHECK(rep.inserts == 4);
   CHECK(rep.inserts_bound == 3);
-  CHECK(rep.inserts_skipped == 0);
-  CHECK(rep.inserts_master == 1);
-  CHECK(rep.problem_count == 0);
+  CHECK(rep.inserts_skipped == 1);
+  CHECK(rep.inserts_master == 1);  // (skipped: the cap counts instances, and the three track inserts are three of the four)
+  CHECK(rep.problem_count == 1);
   CHECK(r.count() == 3);
+  CHECK_FALSE(r.h->bound(audio::InsertHost::kMasterWhere));
   CHECK(r.h->bound(0));          // track 1, INS A
   CHECK(r.h->bound(3 * 2 + 1));  // track 4, INS B
   CHECK(r.h->bound(15 * 2));     // track 16, INS A
@@ -479,4 +493,120 @@ TEST_CASE("insert binder: a console bind, unbind and bypass written through the 
   CHECK_FALSE(r.bypassed(0));
   CHECK(r.blobs[r.inst(0)][0] == 1.0f);
   r.retire_and_release();
+}
+
+// OS-INSFX S6: the master's record is bound as TWO instances of its module (dual mono: L and R, each with its own state block and the stored parameters), and the pair counts 2 of the cap.
+TEST_CASE("insert binder: the master record binds two instances with its parameters and bypass flag, and two more track inserts fill the cap") {
+  Card card("master");
+  fresh_set();
+  Rig r;
+  model::Project& p = project();
+  NEED(p.add_module("gain", 4, O3M_ABI_MAJOR, O3M_ABI_MINOR) == model::Status::Ok);
+  NEED(p.set_insert(record(0, 0, 0, false, {0.5f})) == model::Status::Ok);
+  NEED(p.set_insert(record(5, 1, 0, false, {})) == model::Status::Ok);
+  NEED(p.set_insert(record(model::kInsertWhereMaster, 0, 0, true, {0.25f, 1.5f})) == model::Status::Ok);
+  CHECK(model::insert_instances(p.inserts()) == 4);
+
+  app::ModuleBinder b;
+  NEED(run(b, card, p, r));
+  const app::ModuleReport& rep = b.report();
+  CHECK(rep.inserts == 3);
+  CHECK(rep.inserts_bound == 3);
+  CHECK(rep.inserts_skipped == 0);
+  CHECK(rep.inserts_master == 0);
+  CHECK(rep.problem_count == 0);
+  CHECK(r.count() == 4);  // two track inserts and the master's two instances
+  CHECK(r.h->bound(audio::InsertHost::kMasterWhere));
+  CHECK_FALSE(r.h->bound(audio::InsertHost::kMasterWhere + 1u));  // (the right instance is internal)
+  const int left = r.inst(audio::InsertHost::kMasterWhere);
+  const int right = r.inst(audio::InsertHost::kMasterWhere + 1u);
+  NEED(left >= 0);
+  NEED(right >= 0);
+  CHECK(left != right);
+  CHECK(r.blobs[left][0] == 0.25f);
+  CHECK(r.blobs[left][1] == 1.5f);
+  CHECK(r.blobs[right][0] == 0.25f);
+  CHECK(r.blobs[right][1] == 1.5f);
+  CHECK(r.bypassed(audio::InsertHost::kMasterWhere));  // the flag is the pair's
+  CHECK(r.bypassed(audio::InsertHost::kMasterWhere + 1u));
+  CHECK_FALSE(r.bypassed(0));
+  for (unsigned i = 0; i < 6; ++i) {
+    r.block();
+  }
+  audio::InsertHost::Info info{};
+  NEED(r.h->info(static_cast<unsigned>(left), info));
+  CHECK(info.phase == audio::InsertHost::Phase::Bypassed);
+  NEED(r.h->info(static_cast<unsigned>(right), info));
+  CHECK(info.phase == audio::InsertHost::Phase::Bypassed);
+  CHECK(r.g->master_stage_active(audio::MasterStage::Insert) == false);  // both bypassed: the stage is out of the chain
+  r.retire_and_release();
+  CHECK(r.count() == 0);
+  CHECK(r.g->master_stage_active(audio::MasterStage::Insert) == false);
+}
+
+TEST_CASE("insert binder: a master record alone, and the next project without INSX leaves nothing of it") {
+  Card card("master_leak");
+  fresh_set();
+  Rig r;
+  model::Project& p = project();
+  NEED(p.add_module("gain", 4, O3M_ABI_MAJOR, O3M_ABI_MINOR) == model::Status::Ok);
+  NEED(p.set_insert(record(model::kInsertWhereMaster, 0, 0, false, {2.0f})) == model::Status::Ok);
+  app::ModuleBinder b;
+  NEED(run(b, card, p, r));
+  CHECK(b.report().inserts_bound == 1);
+  CHECK(r.count() == 2);
+  for (unsigned i = 0; i < 4; ++i) {
+    r.block();
+  }
+  CHECK(r.g->master_stage_active(audio::MasterStage::Insert));
+  r.retire_and_release();
+  fresh_set();
+  CHECK(r.count() == 0);
+  CHECK_FALSE(r.g->master_stage_active(audio::MasterStage::Insert));
+  model::Project& q = project();
+  NEED(q.add_module("gain", 4, O3M_ABI_MAJOR, O3M_ABI_MINOR) == model::Status::Ok);
+  NEED(run(b, card, q, r));
+  CHECK(b.report().inserts_bound == 0);
+  CHECK(r.count() == 0);
+}
+
+TEST_CASE("insert binder: a STEREO master record from a full project binds ONE instance beside three track inserts [OS-INSFX-ABI2 A7]") {
+  Card card("stmaster");
+  fresh_set();
+  Rig r;
+  model::Project& p = project();
+  NEED(p.add_module("gain", 4, O3M_ABI_MAJOR, O3M_ABI_MINOR) == model::Status::Ok);
+  NEED(p.add_module("stwide", 6, O3M_ABI_MAJOR, O3M_ABI_MINOR) == model::Status::Ok);
+  NEED(p.set_insert(record(0, 0, 0, false, {0.5f})) == model::Status::Ok);
+  NEED(p.set_insert(record(3, 1, 0, false, {})) == model::Status::Ok);
+  NEED(p.set_insert(record(15, 0, 0, false, {})) == model::Status::Ok);
+  NEED(p.set_insert(record(model::kInsertWhereMaster, 0, 1, true, {0.25f, 1.5f})) == model::Status::Ok);  // the stereo module on the master
+  CHECK(p.inserts().count == 4);
+
+  app::ModuleBinder b;
+  NEED(run(b, card, p, r));
+  const app::ModuleReport& rep = b.report();
+  CHECK(rep.inserts == 4);
+  CHECK(rep.inserts_bound == 4);  // the stereo master fits: ONE instance beside the three tracks (a mono one is skipped, the case above)
+  CHECK(rep.inserts_skipped == 0);
+  CHECK(rep.inserts_master == 0);
+  CHECK(rep.problem_count == 0);
+  CHECK(r.count() == 4);  // three track inserts + ONE master record
+  CHECK(r.h->bound(audio::InsertHost::kMasterWhere));
+  CHECK_FALSE(r.h->bound(audio::InsertHost::kMasterWhere + 1u));  // not the pair's second record
+  const int m = r.inst(audio::InsertHost::kMasterWhere);
+  NEED(m >= 0);
+  CHECK(r.blobs[m][0] == 0.25f);
+  CHECK(r.blobs[m][1] == 1.5f);
+  CHECK(r.bypassed(audio::InsertHost::kMasterWhere));  // the record's bypass flag is the one instance's
+  for (unsigned i = 0; i < 6; ++i) {
+    r.block();
+  }
+  audio::InsertHost::Info info{};
+  NEED(r.h->info(static_cast<unsigned>(m), info));
+  CHECK(info.phase == audio::InsertHost::Phase::Bypassed);
+  CHECK(r.g->master_stage_active(audio::MasterStage::Insert) == false);  // bypassed: the stage is out of the chain
+  r.retire_and_release();
+  CHECK(r.count() == 0);
+  CHECK_FALSE(r.h->bound(audio::InsertHost::kMasterWhere));
 }

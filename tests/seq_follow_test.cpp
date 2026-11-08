@@ -531,3 +531,52 @@ TEST_CASE("seq follow rate: half time spans 12 of the master's clocks a step, do
     check_rate_follow(rate, false);
   }
 }
+
+// OS-INSFX-ABI2 A3: the clock under an external clock. The transport starts on the master's clock 40 and a step is six of its clocks, so the beat (four steps) is (clocks since 40) / 24 whatever the
+// project's own tempo (90 here, the master's is 120), moving on the master's microstep grid: within a few samples of that line at every block end, once the first step has run.
+TEST_CASE("seq follow: clock_at gives the master's beat: step k at clock 40 + 6k, linear between microsteps, the tempo the master's (OS-INSFX-ABI2 A3)") {
+  follow_project();
+  Master m;
+  g_rig.init(m, 0);
+  g_rig.s->select(seq::PlayMode::Pattern, 1);
+  const std::uint32_t c_start = 40;
+  const double clock_cycles = m.time_of(c_start + 1u) - m.time_of(c_start);  // a steady master: the same for every clock
+  const double t_start = m.time_of(c_start);
+  std::uint32_t checked = 0;
+  std::uint32_t wrapped = 0;
+  std::uint32_t started = 0;
+  std::uint32_t tempo_bad = 0;
+  double worst = 0.0;
+  bool sent = false;
+  g_rig.run(0, 700000, [&](std::uint64_t t) {
+    const double start_at = m.time_of(c_start) - 540000.0;
+    if (t == 0) {
+      sent = false;
+    }
+    if (!sent && static_cast<double>(t) * kCyc >= start_at + 57600.0) {
+      sent = true;
+      g_rig.send(start_at, midi::kStart);
+    }
+    if (t == 0) {
+      return;
+    }
+    const audio::ClockPos c = g_rig.s->clock_at(t);  // as the engine asks it: at the end of the block before this one
+    wrapped += (c.flags & 4u) != 0u ? 1u : 0u;
+    started += (c.flags & 2u) != 0u ? 1u : 0u;
+    if ((c.flags & 1u) == 0u) {
+      return;
+    }
+    const double want = std::fmod((static_cast<double>(t) * kCyc - t_start) / clock_cycles / 24.0, 4.0);  // 16 steps are 4 beats
+    if (want > 0.5 && want < 4.0 - 0.01) {  // after the first steps, and not within a microstep of the pattern's end
+      const double err = std::fabs(static_cast<double>(c.beat_q16) / 65536.0 - want);
+      worst = std::fmax(worst, err);
+      ++checked;
+      tempo_bad += c.tempo_x100 != 12000u ? 1u : 0u;
+    }
+  });
+  CHECK(started == 1u);
+  CHECK(wrapped >= 6u);  // 15.9 s of a 2 s lap
+  CHECK(checked > 4000u);
+  CHECK_MESSAGE(worst < 6e-4, "worst error " << worst << " beats");  // 1.5 samples of the loop's placement is 7e-5 beats
+  CHECK(tempo_bad == 0u);
+}

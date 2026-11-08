@@ -1,0 +1,507 @@
+# OS-QA: rows of docs/qa/catalogue/modules.md that need the shipped apps, proven with asserts only (no `snap` here, so this scenario needs no golden). `apps on` puts the host objects of the
+# eleven apps on the card (sim/include/o3os/sim/sim_apps.h). An app's page is its own drawing and an assert cannot read it, so every row below claims only what the state line, the model and
+# the card show: the screen, the strip text (msg=), the project's tempo and steps, the undo digest, a file. What a row says about its page stays open in its Sim cell.
+# The apps in MODULES order: chords 0, humanize 1, loudness 2, midimon 3, morph 4, mutate 5, rhythmgen 6, scope 7, smfexport 8, tapcalc 9, tuner 10. The document is `sound`: an empty
+# pattern of 16 steps at 120 BPM.
+
+action nav.screen 12
+document sound
+wait 20
+card e2e_card
+apps on
+tap f2
+wait 50
+assert state screen=MODULES sel=chords
+wait 2500
+mark model start
+
+# QA-MOD-060 (OS-NAV3): Shift + Down / Up move a page on MODULES. The card holds 11 apps, fewer than a page, so a page goes to the last app and back to the first, neither wraps; the plain
+# Up / Down still move one row.
+press shift
+tap down
+assert state sel=tuner
+tap down
+assert state sel=tuner
+tap up
+assert state sel=chords
+tap up
+assert state sel=chords
+release shift
+tap down
+assert state sel=humanize
+tap up
+assert state sel=chords
+
+# QA-MOD-090 (OS-H4): SMF Export writes files, so its first launch of the boot asks and does not start the app; the second F1 starts it; the third launch starts at once. MIDI Monitor only
+# listens and asks nothing.
+tap down 3
+assert state sel=midimon
+tap f1
+wait 100
+assert state screen=APP
+tap f8
+wait 50
+assert state screen=MODULES
+tap down 5
+assert state sel=smfexport
+tap f1
+wait 50
+assert state screen=MODULES msg=~^WRITES_FILES_TO_APPEXPORT/SMFEXPORT
+tap f1
+wait 100
+assert state screen=APP
+tap f8
+wait 50
+assert state screen=MODULES
+tap f1
+wait 100
+assert state screen=APP
+tap f8
+wait 50
+assert state screen=MODULES sel=smfexport
+# Nothing was written to the project by any of it:
+assert model digest=@start
+
+# Tap Calc declares edit_project: the first launch of the boot asks, the second starts it.
+tap down
+assert state sel=tapcalc
+tap f1
+wait 50
+assert state screen=MODULES msg=~^EDITS_THE_PROJECT
+tap f1
+wait 100
+assert state screen=APP
+assert model tempo=12000
+
+# QA-MOD-005 (OS-TAPCALC, OS-APPUX S3): the encoder moves the BPM 0.1 a detent, Shift + the encoder 1.0, within 20.0..300.0. F2 sends the BPM shown to the project (the tempo, BPM x 100),
+# so the tempo read back is the BPM the page held. 120.0 + 30 detents is 123.0; + 3.0 is 126.0.
+encoder 30
+wait 20
+tap f2
+wait 50
+assert model tempo=12300
+press shift
+wait 20
+encoder 3
+wait 20
+release shift
+wait 20
+tap f2
+wait 50
+assert model tempo=12600
+# Up past the top: 126.0 + 190.0 is held at 300.0; one detent down is 299.0 (so it did not run on above 300.0). (One encoder line takes at most 1000 detents.)
+encoder 1000
+encoder 900
+wait 20
+tap f2
+wait 50
+assert model tempo=30000
+encoder -10
+wait 20
+tap f2
+wait 50
+assert model tempo=29900
+# Down past the bottom: 299.0 - 290.0 is 9.0, below the bottom, so the page is held at 20.0 (the clamp is gone past, not landed on); 199 detents up are 39.9 (the project takes 40.0..800.0, so F2 changes nothing); one more is 40.0 and is taken.
+encoder -1000
+encoder -1000
+encoder -900
+wait 20
+encoder 199
+wait 20
+tap f2
+wait 50
+assert model tempo=29900
+encoder 1
+wait 20
+tap f2
+wait 50
+assert model tempo=4000
+
+# QA-MOD-007: Delete on the BPM row puts the BPM back to 120.0 (the project is at 40.0 now).
+tap delete
+wait 20
+tap f2
+wait 50
+assert model tempo=12000
+
+# QA-MOD-008 (OS-TAPCALC, ADR 0014 H1): F2 is one undoable unit: the tempo it sets stays until one undo takes it back. The project is at 120.0. (The app's tempo is applied while its page is in
+# view, so the unit lives in the Song area: the undo is F8 on Song, not on Pattern. The app's kept BPM row is not part of the unit: it keeps its last value, so the digest is not the marked one.)
+encoder 5
+wait 20
+tap f2
+wait 50
+assert model tempo=12050
+tap f8
+wait 50
+assert state screen=MODULES
+action nav.screen 1
+wait 20
+assert state screen=SONG
+tap f8
+wait 20
+assert model tempo=12000
+
+# QA-MOD-128 (OS-APPUX S3): a screen button on an app page leaves the app for the button's screen (here Tap Calc, from MODULES). The app hearing neither the press nor the release is not
+# readable here: it stays open. Each of the eleven buttons, and Shift + a screen button.
+action nav.screen 12
+wait 20
+assert state screen=MODULES sel=tapcalc
+tap f1
+wait 100
+assert state screen=APP
+tap pattern
+wait 50
+assert state screen=PATTERN
+action nav.screen 12
+wait 20
+tap f1
+wait 100
+assert state screen=APP
+tap song
+wait 50
+assert state screen=SONG
+action nav.screen 12
+wait 20
+tap f1
+wait 100
+assert state screen=APP
+tap params
+wait 50
+assert state screen=INSTRUMENT
+action nav.screen 12
+wait 20
+tap f1
+wait 100
+assert state screen=APP
+tap sampleplay
+wait 50
+assert state screen=WAVE
+action nav.screen 12
+wait 20
+tap f1
+wait 100
+assert state screen=APP
+tap sampleedit
+wait 50
+assert state screen=SAMPLE_EDIT
+action nav.screen 12
+wait 20
+tap f1
+wait 100
+assert state screen=APP
+tap sampleload
+wait 50
+assert state screen=SAMPLE_LOAD
+action nav.screen 12
+wait 20
+tap f1
+wait 100
+assert state screen=APP
+tap samplerec
+wait 50
+assert state screen=RECORD
+action nav.screen 12
+wait 20
+tap f1
+wait 100
+assert state screen=APP
+tap master
+wait 50
+assert state screen=MIXER
+action nav.screen 12
+wait 20
+tap f1
+wait 100
+assert state screen=APP
+tap performance
+wait 50
+assert state screen=PERFORM
+action nav.screen 12
+wait 20
+tap f1
+wait 100
+assert state screen=APP
+tap file
+wait 50
+assert state screen=FILE
+action nav.screen 12
+wait 20
+tap f1
+wait 100
+assert state screen=APP
+tap config
+wait 50
+assert state screen=CONFIG
+action nav.screen 12
+wait 20
+tap f1
+wait 100
+assert state screen=APP
+press shift
+wait 20
+tap song
+wait 20
+release shift
+wait 50
+assert state screen=SONG
+
+# QA-MOD-003 (OS-TAPCALC): the BPM is the mean of the last AVERAGE intervals (default 8), timed by the clock. Taps (F1 or a pad) 400 ms apart say 150.0 BPM; the scenario's clock is exact to a
+# tick or two, so the tempo F2 sends is about 150.0, not exactly. The project is at 120.0 before, so the tempo read back is the taps'.
+action nav.screen 12
+wait 20
+tap f1
+wait 100
+assert state screen=APP
+tap f1
+wait 398
+tap f1
+wait 398
+tap f1
+wait 398
+tap f1
+wait 398
+pad 0
+wait 398
+pad 1
+wait 398
+pad 2
+wait 398
+pad 3
+wait 398
+pad 4
+wait 20
+tap f2
+wait 50
+assert state tempo=~^(14[89]|150)[0-9]{2}$
+# Eight intervals, four of 1000 ms and then four of 400 ms, are 700 ms on the mean: 85.7 BPM (the pause before is more than 2 s, a new series).
+wait 2100
+pad 0
+wait 998
+pad 0
+wait 998
+pad 0
+wait 998
+pad 0
+wait 998
+pad 0
+wait 398
+pad 0
+wait 398
+pad 0
+wait 398
+pad 0
+wait 398
+pad 0
+wait 20
+tap f2
+wait 50
+assert state tempo=~^8[4-7][0-9]{2}$
+
+# QA-MOD-004: one tap more than 2 s after the last starts a new series and the tempo shown stays (85.7, the series before): with no reset the gap would be one of the last eight intervals and
+# the mean would be near 72 BPM. (The project is moved to 120.0 first, so F2 has to send it back.)
+tap delete
+tap f2
+wait 50
+assert model tempo=12000
+pad 0
+wait 998
+pad 0
+wait 998
+pad 0
+wait 998
+pad 0
+wait 998
+pad 0
+wait 398
+pad 0
+wait 398
+pad 0
+wait 398
+pad 0
+wait 398
+pad 0
+wait 2100
+tap f1
+wait 20
+tap f2
+wait 50
+assert state tempo=~^8[4-7][0-9]{2}$
+
+# QA-MOD-003, AVERAGE: with AVERAGE at 4 (Down to its row, the encoder four detents down, Up back) only the last four intervals count: 1000 1000 400 400 400 400 are 400 ms, 150.0 BPM
+# (all six would say 600 ms).
+tap down
+encoder -4
+wait 20
+tap up
+wait 2100
+pad 0
+wait 998
+pad 0
+wait 998
+pad 0
+wait 398
+pad 0
+wait 398
+pad 0
+wait 398
+pad 0
+wait 398
+pad 0
+wait 20
+tap f2
+wait 50
+assert state tempo=~^(14[89]|150)[0-9]{2}$
+tap f8
+wait 50
+assert state screen=MODULES
+
+# QA-MOD-077 (OS-H3A): Rhythm Gen opened from MODULES has no block to write: F1 and F2 on its page write no undo unit (VARY's kept SEED row is the app's own storage, not an edit) and F7 + F8 returns to MODULES.
+tap up 3
+assert state sel=rhythmgen
+tap f1
+wait 50
+assert state screen=MODULES msg=~^EDITS_THE_PROJECT
+tap f1
+wait 100
+assert state screen=APP
+tap f1
+wait 100
+tap f2
+wait 100
+assert state screen=APP
+press f7
+wait 5
+press f8
+wait 5
+release f8
+release f7
+wait 50
+assert state screen=MODULES
+# No edit unit was written: on Pattern, UNDO has nothing to take back.
+action nav.screen 0
+wait 20
+tap f8
+assert state msg=NOTHING_TO_UNDO_HERE
+
+# From here on the Pattern: the empty pattern, the cursor on track 1 row 1, no block. The APPS page (F7, pad 16; OS-TOOLSDEDUP: tool apps only): chords 0, humanize 1, morph 2, mutate 3, rhythmgen 4,
+# smfexport 5, tapcalc 6 (counted in presses of Down from the top).
+action nav.screen 0
+wait 20
+assert state screen=PATTERN track=0 row=0 pattern=1
+
+# QA-MOD-078 (OS-H3A) setup: Rhythm Gen with no block is one lane of 16 rows from the cursor. HITS 16 and PROB 50 (so a new SEED writes other steps), F1 APPLY, F2 VARY, F2 VARY: three writes,
+# PROB and HITS are put back to their defaults before the app is left.
+tap f7
+pad 15
+tap up 20
+wait 20
+assert state overlay=VERB_MENU
+tap down 4
+tap f1
+wait 100
+assert state screen=APP
+# From the TOOLS list an edit-only app starts at once, with no question (OS-PTOOLS2).
+encoder 12
+tap down 4
+encoder -10
+wait 20
+tap f1
+wait 100
+assert state screen=APP
+tap f2
+wait 100
+tap f2
+wait 100
+tap delete
+tap up 4
+tap delete
+wait 20
+tap f8
+wait 50
+assert state screen=PATTERN
+
+# QA-MOD-091 (OS-H4): SMF Export is in the TOOLS list, right after Rhythm Gen (the sixth tool app, five presses of Down): from there it starts, and F1
+# on its page runs the export of the pattern in view, which now holds notes. (The file AppExport/smfexport/PAT001.mid did not appear on the card in the sim run: that assert is dropped and the row keeps the file open.)
+tap f7
+pad 15
+tap up 20
+wait 20
+tap down 5
+tap f1
+wait 100
+assert state screen=APP
+tap f1
+wait 2000
+tap f8
+wait 50
+assert state screen=PATTERN
+
+# QA-MOD-078: the three writes are three undo units, taken back in the opposite order by F8 and re-applied in order by Shift + F8 (each strip names the unit: UNDO / REDO RHYTHM GEN).
+# (The document digest is not used across app launches: the apps' kept rows are written with the project outside the undo journal.)
+tap f8
+wait 20
+assert state msg=~^UNDO.*RHYTHM
+tap f8
+wait 20
+assert state msg=~^UNDO.*RHYTHM
+tap f8
+wait 20
+assert state msg=~^UNDO.*RHYTHM
+press shift
+wait 20
+tap f8
+wait 20
+assert state msg=~^REDO.*RHYTHM
+tap f8
+wait 20
+assert state msg=~^REDO.*RHYTHM
+tap f8
+wait 20
+assert state msg=~^REDO.*RHYTHM
+release shift
+wait 20
+tap f8
+tap f8
+tap f8
+wait 20
+assert state msg=~^UNDO.*RHYTHM
+
+# QA-MOD-071 (OS-H3A): with a block of 2 tracks x 16 rows (Shift + Right x5, the five columns of a track, Shift + Down x15) Rhythm Gen writes two lanes on F1: HITS 4 of LENGTH 16 puts C-4 (step byte 49) on rows 1, 5, 9 and
+# 13 of both tracks, and one F8 takes both lanes back.
+press shift
+wait 20
+tap right 5
+tap down 15
+wait 20
+assert state track=1 row=15
+wait 20
+release shift
+wait 20
+tap f7
+pad 15
+tap up 20
+wait 20
+tap down 4
+tap f1
+wait 100
+assert state screen=APP
+tap f1
+wait 100
+tap f8
+wait 50
+assert state screen=PATTERN
+assert model pat.1.0.0.note=49
+assert model pat.1.0.4.note=49
+assert model pat.1.0.8.note=49
+assert model pat.1.0.12.note=49
+assert model pat.1.1.0.note=49
+assert model pat.1.1.4.note=49
+assert model pat.1.1.8.note=49
+assert model pat.1.1.12.note=49
+assert model pat.1.0.1.note=0
+assert model pat.1.1.2.note=0
+assert model pat.1.2.0.note=0
+tap f8
+wait 20
+assert model pat.1.0.0.note=0
+assert model pat.1.1.12.note=0

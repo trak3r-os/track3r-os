@@ -61,6 +61,7 @@
 #include <o3os/core/job.h>
 #include <o3os/formats/native.h>
 #include <o3os/formats/og.h>
+#include <o3os/formats/preset.h>
 #include <o3os/formats/settings.h>
 #include <o3os/hal/storage.h>
 #include <o3os/hal/storage_write.h>
@@ -268,6 +269,7 @@ class SaveService {
     PtiTooLong,   // save_instrument (OS-FILES-C C1b): the resampled audio is longer than a .pti holds (never cut)
     PtiBits,      // save_instrument: the engine is 12 BIT or 8 BIT, which a .pti cannot say
     PtiLevel,     // save_instrument: the project plays through the 1.1.14 level law and the level has no 1.2+ equivalent (under -24 dB)
+    BadValues,    // save_preset (OS-MODPRESET P3): an entry's value is not a finite float (a NaN in the instrument blob): the writer never writes one, the save refuses it
   };
   // Whether something other than the app is using the card right now (the firmware update path of the console). Asked before a save starts and before the device settings are
   // written: FatFs on this volume is not re-entrant, and an update must not find a save half done. Main loop only; nullptr: nothing else uses the card.
@@ -321,6 +323,12 @@ class SaveService {
   // started (0: written as it is), for the notice.
   Start save_instrument(core::JobRunner& jobs, const model::Project& project, const SampleBank& bank, unsigned slot) noexcept;
   std::uint32_t pti_resampled_hz() const noexcept { return pti_hz_; }
+  // OS-MODPRESET P3: a module preset as modules/presets/<stem>/<name>.o3mp, <stem> = preset.module: the folder chain is made, the file is a NewOnly save (a Target the guard never
+  // replaces: no Backup form exists, nothing is ever removed) and a taken name gets the next free "<name> 2" .. "<name> 99" (the .pti library's rule). `name` is the requested file stem:
+  // BadName when the guard refuses it or it is over kPresetNameMax, or when the module stem is not a name the guard takes as a folder (a stem is_stem accepts but valid_name refuses,
+  // "my+synth"); BadValues when an entry's value is not finite. `final` (cap bytes, may be null) gets the file name chosen, for the message. The file's bytes are
+  // formats::preset::write of `preset`. Main loop only, as the rest of the service.
+  Start save_preset(core::JobRunner& jobs, const formats::preset::Preset& preset, const char* name, char* final, std::size_t cap) noexcept;
   // True once, for the runner's `slot` when it is the .pti save's job and it saturated samples while resampling: the app adds " (CLIPPED)" to the strip's DONE.
   bool take_pti_clipped(unsigned slot) noexcept {
     if (pti_job_ != static_cast<int>(slot)) {
@@ -493,7 +501,7 @@ class SaveService {
   const AtomicSave& job() const noexcept { return job_; }
 
  private:
-  enum class Kind : std::uint8_t { None, Project, Wav, Settings, Sample, Instrument, Export, Recent, AppFile, OgExport };
+  enum class Kind : std::uint8_t { None, Project, Wav, Settings, Sample, Instrument, Export, Recent, AppFile, OgExport, Preset };
   struct Watch {
     const SampleBank* bank = nullptr;
     unsigned slot = 0;
@@ -583,6 +591,7 @@ class SaveService {
   std::uint32_t pti_hz_ = 0;  // save_instrument: the rate the .pti in progress was resampled from, 0 when it is written as it is
   BufferSaveSource buffer_;
   BufferSaveSource recent_source_;
+  std::uint8_t preset_buf_[formats::preset::kMaxFileBytes] = {};  // OS-MODPRESET P3: the bytes of the .o3mp save in progress
   ExportSource export_;
   AppExport app_export_;
   std::uint8_t settings_[formats::settings::kMaxFileBytes];

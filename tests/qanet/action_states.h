@@ -24,6 +24,7 @@ struct State {
   Doc doc;
   const char* steps;  // scenario lines run after the context was reached ("" for none): a cursor on a file, a selection
   const char* pre = "";  // scenario lines run BEFORE the context is reached and before the undo history is seeded (a sample loaded, so that the sample screens have audio)
+  const char* base = "";  // scenario lines that join the script of the document and the card, as ContextReach::base does (`audio on`: the engine, the transport, the perform board and the mixer board exist only with it). A state with `audio on` is not run in a context whose own reach has `apps on` (the simulator refuses the pair): the walk says so
 };
 
 struct ActionEntry {
@@ -38,6 +39,7 @@ struct ContextReach {
   const char* steps;
   const char* skip;
   const char* base = "";  // scenario lines that must share the script of the document and the card (`audio on` needs the `document` line in its own script)
+  const char* rules = nullptr;  // the reach of the rules walk (rules_test.cpp) alone, for a context that has no `steps` (the keys walk, keys_test.cpp, makes its states from `steps` and leaves these two contexts to its own pages)
 };
 
 const std::vector<ActionEntry>& action_states();

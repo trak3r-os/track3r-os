@@ -1482,7 +1482,7 @@ TEST_CASE("og export T4: one counter for every lossy row, exactly those, and the
     NEED(plain.run());
     base = plain.saves->og_drops();
   }
-  // the project-level rows: a module, core and engine FX, tracks 13-16, pan / solo / bus, swing, a moved MIDI instrument, a MIDI instrument with an INST 1.3 field, a sample beyond 48
+  // the project-level rows: a module, core, tracker-ce and engine FX, tracks 13-16, pan / solo / bus, swing, a moved MIDI instrument, a MIDI instrument with an INST 1.3 field, a sample beyond 48
   NEED(proj.add_module("tb303", 5, 1, 0) == model::Status::Ok);
   model::Instrument mod;
   model::init_instrument(mod, model::InstrumentKind::Module);
@@ -1505,6 +1505,9 @@ TEST_CASE("og export T4: one counter for every lossy row, exactly those, and the
   s.fx[0] = {50, 1};   // a core FX
   s.fx[1] = {200, 1};  // an engine FX
   NEED(proj.set_step(1, 0, 3, s) == model::Status::Ok);
+  s.fx[0] = {96, 1};  // a tracker-ce FX (OG id 43 + 53, ADR 0004 amendment 3): dropped as ce_fx, not core_fx
+  s.fx[1] = {127, 2};
+  NEED(proj.set_step(1, 0, 4, s) == model::Status::Ok);
   model::Step far = model::kEmptyStep;
   far.note = 61;
   far.instr = 1;
@@ -1534,6 +1537,7 @@ TEST_CASE("og export T4: one counter for every lossy row, exactly those, and the
   og_ns::ExportDrops want = base;
   want.module_instruments = 1;
   want.core_fx = 1;
+  want.ce_fx = 2;
   want.engine_fx = 1;
   want.tracks_beyond_12 = 1;
   want.track_settings = 3;
@@ -1544,7 +1548,7 @@ TEST_CASE("og export T4: one counter for every lossy row, exactly those, and the
   want.unknown_chunks = 1;
   const og_ns::ExportDrops& got = rig.saves->og_drops();
   const auto row = [](const og_ns::ExportDrops& d) {
-    return std::vector<std::uint32_t>{d.tracks_beyond_12, d.engine_fx,        d.core_fx,       d.volume_as_fx18,        d.volume_dropped, d.track_settings,    d.audio_on_midi_tracks,
+    return std::vector<std::uint32_t>{d.tracks_beyond_12, d.engine_fx,        d.core_fx,       d.ce_fx,         d.volume_as_fx18,        d.volume_dropped, d.track_settings,    d.audio_on_midi_tracks,
                                       d.track_names_cut,  d.project_settings, d.module_instruments, d.midi_instruments, d.sample_slots_beyond_48, d.unknown_chunks, d.instrument_names_cut,
                                       d.pattern_names,    d.settings_ignored, d.midi_settings, d.resampled,             d.rate_ignored,   d.amiga_engine,      d.bit_engine,
                                       d.pcm_too_long,     d.instruments_not_written, d.levels_converted, d.levels_clamped};
@@ -1841,6 +1845,52 @@ TEST_CASE("og export C2c: with no sample memory every sample instrument is skipp
   CHECK(items[0].n == 3u);
   NEED(rig.run());
   CHECK(rig.saves->og_state() == OgState::Done);
+}
+
+
+// OS-CEWTENV W3a review: kOgLossMax went to 17 with the WT MOD kind — the loss strip (app/src/screens/file_screen.cpp) draws into an array of kOgLossMax, so every kind the
+// table has must fit: all 17 at once, each once, WT MOD among them.
+TEST_CASE("og export: the loss list holds all kOgLossMax (17) kinds at once, WT MOD among them") {
+  og_ns::ExportDrops d{};
+  d.instruments_not_written = 30;  // above no_sample_memory, so the "NOT WRITTEN" kind (the rest) is non-zero too
+  d.no_sample_memory = 2;
+  d.bit_engine = 3;
+  d.amiga_engine = 4;
+  d.stereo_mid = 5;
+  d.pcm_too_long = 6;
+  d.levels_clamped = 7;
+  d.module_instruments = 8;
+  d.engine_fx = 9;
+  d.core_fx = 10;
+  d.ce_fx = 11;
+  d.volume_dropped = 12;
+  d.tracks_beyond_12 = 13;
+  d.track_settings = 14;
+  d.midi_instruments = 15;
+  d.midi_settings = 16;
+  d.sample_slots_beyond_48 = 17;
+  d.lfo_sine = 18;
+  d.wt_mod = 19;
+  d.track_names_cut = 20;
+  d.instrument_names_cut = 21;
+  d.project_settings = 22;
+  d.unknown_chunks = 23;
+  d.pattern_names = 24;
+  d.settings_ignored = 25;
+  d.rate_ignored = 26;
+  app::OgLossItem items[app::kOgLossMax];
+  const unsigned n = app::og_loss_items(d, items);
+  CHECK(app::kOgLossMax == 17u);
+  CHECK(n == app::kOgLossMax);  // every kind fits the strip's array
+  bool saw_wt = false;
+  for (unsigned i = 0; i < n; ++i) {
+    CHECK(items[i].n != 0u);
+    for (unsigned j = 0; j < i; ++j) {
+      CHECK(std::string(items[i].brief) != std::string(items[j].brief));  // each kind once
+    }
+    saw_wt = saw_wt || std::string(items[i].brief) == "WT MOD";
+  }
+  CHECK(saw_wt);
 }
 
 // OS-STEREO (e): a stereo instrument is written as its mid M, a mono .pti; the OG format has no place for S, so it is counted (and told in the loss line), and nothing else of the export changes.

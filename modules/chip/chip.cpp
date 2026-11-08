@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 //
-// The Chip module (OS-012c): the descriptor and the glue around chip_dsp.h (the voice), and the two views. Written from scratch against the SDK (module/sdk/o3module.h); the
+// The Chip module (OS-012c): the descriptor and the glue around chip_dsp.h (the voice), and the two views. Written from scratch against the SDK (module/sdk/o3module.h), except waves 4..11,
+// a port of tracker-ce's CHIP engine (chip_ce.h; its MIT notice is LICENSE-tracker-ce.txt); the
 // descriptor, the parameter table and the view ids come from module.json through chip_gen.h (tools/o3m_gen.py). One mono voice an instance.
 #include <o3module.h>
 
@@ -169,5 +170,5 @@ const o3m_ui kUi = {O3M_UI_SIZE(CHIP_ABI_MINOR), nullptr, nullptr, view_draw, nu
 }  // namespace
 
 extern "C" O3M_EXPORT const o3m_module o3m_entry __attribute__((section(".o3m_entry"))) = {
-    CHIP_ENTRY_HEAD, sizeof(Voice), CHIP_ENTRY_PARAMS, init, render, set_param, note_on, note_off, shutdown, CHIP_ENTRY_VIEWS(&kUi), CHIP_ENTRY_TAIL(pitch),
+    CHIP_ENTRY_HEAD, sizeof(Voice), CHIP_ENTRY_PARAMS, init, render, set_param, note_on, note_off, shutdown, CHIP_ENTRY_VIEWS(&kUi), CHIP_ENTRY_TAIL(pitch), CHIP_ENTRY_FX,
 };

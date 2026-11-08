@@ -384,7 +384,7 @@ TEST_CASE("dj publish: only the tracks that changed go out, with the 20 ms glide
 TEST_CASE("dj page: the Performance button again turns to it, the pads and keys are the DJ's and the slots stay untouched") {
   Rig rig;
   CHECK(rig.app->state().screen == ScreenId::Perform);
-  CHECK(app::kPerformScreen.pages() == 2);
+  CHECK(app::kPerformScreen.pages() == 2);  // SLOTS, DJ
   CHECK_FALSE(rig.on_dj());
   rig.to_dj();
   CHECK(rig.app->failed_frames() == 0);

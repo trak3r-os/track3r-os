@@ -27,13 +27,13 @@ TEST_CASE("diag mem: the SDRAM table, the SRAM budgets and the sums, from the re
       "sdram 16384 KiB\n"
       "  sample_arena 0x70000000 10816 KiB\n"
       "  delay 0x70A90000 768 KiB\n"
-      "  reverb 0x70B50000 256 KiB\n"
+      "  reverb 0x70B50000 192 KiB\n"
+      "  wt_contour 0x70B80000 64 KiB\n"
       "  module_region 0x70B90000 768 KiB\n"
       "  project 0x70C50000 1920 KiB\n"
       "  undo 0x70E30000 384 KiB\n"
-      "  file_job 0x70E90000 512 KiB\n"
-      "  lut 0x70F10000 192 KiB\n"
-      "  ui_cache 0x70F40000 512 KiB\n"
+      "  ptfx 0x70E90000 768 KiB\n"
+      "  ui_cache 0x70F50000 448 KiB\n"
       "  diag_log 0x70FC0000 64 KiB\n"
       "  slack 0x70FD0000 192 KiB\n"
       "  regions sum 16384 KiB (complete)\n";
@@ -50,7 +50,7 @@ TEST_CASE("diag mem: the SDRAM table, the SRAM budgets and the sums, from the re
   CHECK(std::strncmp(rest, sram, std::strlen(sram)) == 0);
   CHECK(std::strstr(text, "  budget audio_io_rings 2 KiB\n") != nullptr);
   CHECK(std::strstr(text, "  budget crash_block_fault_stack 640 B\n") != nullptr);
-  CHECK(std::strstr(text, "  budget sum 155200 B\n") != nullptr);  // OS-PERFFX P5: voice_state +64 B; OS-PERF-SMP: sequencer +64 B; OS-STEREO (c): voice_state +832 B
+  CHECK(std::strstr(text, "  budget sum 155296 B\n") != nullptr);  // OS-PERFFX P5: voice_state +64 B; OS-PERF-SMP: sequencer +64 B; OS-STEREO (c): voice_state +832 B; OS-CECHANCE C1: sequencer +96 B
 }
 
 TEST_CASE("diag mem: a table that does not sum to the part is flagged") {

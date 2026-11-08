@@ -127,6 +127,17 @@ bool inst_uses_sine(const Instrument& in) noexcept {
   return false;
 }
 
+bool inst_uses_wt(const Instrument& in) noexcept {
+  for (std::uint32_t i = 0; i < kLfos; ++i) {
+    // (the writer's gate is a loop of 2 OR MORE, as W1 pinned it — the maximal fixture's random loops — or a non-zero WT byte; what a loop MEANS is tested
+    // exactly, on read, by is_wt_loop: only 2 and 3 are WT slots)
+    if (in.sampler.envelope[i].loop >= 2 || in.sampler.lfo[i].wt_bend != 0 || in.sampler.lfo[i].wt_sust != 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 const char* validate_instrument(const Instrument& in, std::uint32_t module_count) noexcept {
   if (in.kind != InstrumentKind::Sample && in.kind != InstrumentKind::Midi && in.kind != InstrumentKind::Module) {
     return "bad instrument kind";
@@ -135,6 +146,8 @@ const char* validate_instrument(const Instrument& in, std::uint32_t module_count
   if (in.engine > kInstEngineMax) return "bad playback engine";
   if (in.stereo > kInstStereoMax) return "bad stereo flag";
   if (in.stereo != 0 && in.kind != InstrumentKind::Sample) return "stereo flag on a non-sample instrument";
+  if (in.slice_thru > kInstSliceThruMax) return "bad play thru flag";
+  if (in.rate > kInstRateMax) return "bad module rate";
   if (in.midi_velocity < 1 || in.midi_velocity > 127 || in.midi_program > kMidiProgramMax || in.midi_out > kMidiOutMax || in.midi_pb_range > kMidiPbRangeMax || in.midi_offset > kMidiOffsetMaxMs ||
       in.vel_sens > kMaxPercent) {
     return "bad MIDI field";

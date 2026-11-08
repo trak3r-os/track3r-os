@@ -1,0 +1,81 @@
+# OS-FINALQA: the rows of docs/qa/catalogue/record.md that the simulator can prove with asserts
+# only (no `snap` here, so this scenario needs no golden): QA-REC-010, QA-REC-039, QA-REC-042 and
+# QA-REC-062. The simulator has no recorder behind the Record screen's keys -- `playhead <step>
+# wait <step|bar|pattern>` attaches one that only says the take waits (for the strip's countdown),
+# so the keys' own edits stay with the host tests. State-line keys used below: screen=, page=,
+# overlay=, msg= (the strip's last text, spaces as _).
+
+document
+
+# The Record screen opens on SOURCES (page 0).
+tap samplerec
+wait 20
+assert state screen=RECORD page=0
+
+# QA-REC-062 (OS-CFG-ARROWS): Left / Right -- and Shift + Left / Right -- never turn the page on
+# any of the three pages; only the screen button does (and it wraps after RADIO). The page is
+# moved with the button before each arrow block, so "the page stays" is never where it started.
+tap samplerec
+wait 20
+assert state screen=RECORD page=1
+tap left
+tap right
+press shift
+tap left
+tap right
+release shift
+assert state screen=RECORD page=1
+tap samplerec
+wait 20
+assert state screen=RECORD page=2
+tap left
+tap right
+press shift
+tap left
+release shift
+assert state screen=RECORD page=2
+tap samplerec
+wait 20
+assert state screen=RECORD page=0
+tap left
+tap right
+assert state screen=RECORD page=0
+
+# QA-REC-010 (OS-METROALIGN): on the Record screen a take armed on the running transport waits
+# for the boundary and the strip counts the wait down like the count-in, from one beat on.
+# `playhead <step> wait bar` is the transport running at <step> with the take waiting for the bar
+# (pattern 1 has 64 steps, 16 a bar): step 3 is 13 steps to the bar line, the first beat.
+playhead 3 wait bar
+assert state screen=RECORD overlay=NOTIFY msg=RECORDING_IN_4..
+playhead 8 wait bar
+assert state msg=RECORDING_IN_4.._3.._2..
+playhead 12 wait bar
+assert state msg=RECORDING_IN_4.._3.._2.._1..
+# A Stop gives the wait up at once: the countdown is dismissed and the overlay goes, without the
+# strip's 2 s running out first (nothing else is queued, so NONE says the countdown is gone).
+playhead stop
+assert state overlay=NONE
+# Less than a beat left when the take is armed (step 14: 2 steps to the bar): nothing is counted.
+playhead 14 wait bar
+assert state overlay=NONE
+# The pattern boundary counts the same way (step 54: 10 steps to step 0, three beats left).
+playhead 3 wait bar
+assert state overlay=NOTIFY msg=RECORDING_IN_4..
+playhead 54 wait pattern
+assert state msg=RECORDING_IN_4.._3..
+playhead stop
+assert state overlay=NONE
+
+# QA-REC-039 / QA-REC-042 (OS-SILENTMSG): F7 with no card write layer (no card in the slot, no
+# recorder attached) says NO CARD WRITE LAYER.
+tap f7
+assert state screen=RECORD overlay=NOTIFY msg=NO_CARD_WRITE_LAYER
+
+# QA-REC-039 / QA-REC-042: with a card in the slot and the take armed (not under review), F7 says
+# NO TAKE TO SAVE: F1 RECORDS ONE.
+card e2e_card
+wait 100
+playhead 3 wait bar
+assert state overlay=NOTIFY msg=RECORDING_IN_4..
+tap f7
+assert state screen=RECORD overlay=NOTIFY msg=NO_TAKE_TO_SAVE:_F1_RECORDS_ONE

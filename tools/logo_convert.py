@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""The boot logo: the project's PNG turned into an FT81x bitmap that lives in flash (stdlib only).
+"""The boot logo: the project's PNG turned into an FT81x bitmap whose raw-deflate stream lives in flash (stdlib only).
+
+OS-FLASHDIET A5: the bitmap's bytes are deflated by tools/deflate_pack.py (never Python's zlib) and the generated file
+stores the stream; the device inflates it at boot with core::Inflater.
 
 OS-003f, docs/specs/OS-003-ui-toolkit.md "003f - Boot logo". The source is ui/assets/boot_logo.png, a byte-exact copy
 of the project's logo.png and the only source of truth. The pipeline, every step deterministic (integer arithmetic only):
@@ -19,8 +22,10 @@ of the project's logo.png and the only source of truth. The pipeline, every step
   5. format      the smallest of L1, L2, L4 whose quantisation error (RMS in grey levels, against the native image) is at most
                  FORMAT_MAX_RMS; L4 if none is. Also reported: the error of the whole picture against the source, both at the
                  size it is shown on the screen (the native grid times the integer scale)
-  6. output      a C++ source with the pixels in a word-aligned const array, rows MSB first, and static_asserts that tie it to
-                 ui/boot_logo.h (the constants of the draw code); a ctest regenerates it and fails when the committed one differs
+  6. output      a C++ source with the pixels packed rows MSB first and deflated into a word-aligned const stream
+                 (OS-FLASHDIET A5: tools/deflate_pack.py makes the raw-deflate bytes, never Python's zlib), plus
+                 static_asserts that tie it to ui/boot_logo.h (the constants of the draw code); a ctest regenerates it
+                 and fails when the committed one differs
 
 Usage:
   logo_convert.py --png boot_logo.png --out boot_logo_data.cpp     (rewritten only when it differs)
@@ -39,6 +44,11 @@ import sys
 import tempfile
 import zlib
 from pathlib import Path
+
+# The build runs the converters as `python3 -I tools/logo_convert.py`, and -I keeps this script's directory off
+# sys.path, so add it to import the A2 encoder that sits beside this script.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import deflate_pack  # noqa: E402  the OS-FLASHDIET A2 deterministic raw-deflate encoder
 
 # ---- Tunables (each is a decision, written down here and echoed in the generated file) ---------------------------------
 
@@ -404,6 +414,14 @@ def convert(png_bytes, cells=FALLBACK_CELLS):
     res.data, res.stride = pack(codes, bits)
     pad = (-len(res.data)) % 4
     res.data += bytes(pad)
+    # OS-FLASHDIET A5: in flash the bitmap is a raw-deflate stream of these (whole-word) bytes, made by
+    # tools/deflate_pack.py with the 4 KiB window -- never Python's zlib, whose output changes with the library.
+    # boot_logo() hands the stream over; the boot upload and the few raw readers inflate it (core::Inflater).
+    stats = {}
+    res.z = deflate_pack.deflate(res.data, stats)
+    if stats["max_distance"] > deflate_pack.WINDOW:
+        raise LogoError("a match distance of %d, over the %d window" % (stats["max_distance"], deflate_pack.WINDOW))
+    res.z_size = len(res.z)
     res.recon = [[c * 255 // ((1 << bits) - 1) for c in row] for row in codes]
     res.screen_rms = screen_error(sat, cw, ch, res.recon, res.scale)
     res.tone_rms = tone_error(sat, cw, ch, res.recon)
@@ -427,6 +445,8 @@ def describe(res):
         lines.append("native: %dx%d, box filter over the central %d/%d of each cell" % (res.width, res.height, BOX_NUM, BOX_DEN))
     lines.append("format: %s (bits %d, BITMAP_LAYOUT %d), stride %d, %d bytes (%d with the padding to a word)"
                  % (res.format, res.bits, res.format_id, res.stride, res.stride * res.height, len(res.data)))
+    lines.append("stored: raw deflate (tools/deflate_pack.py, the %d-byte window), %d stream bytes for the %d raw bytes"
+                 % (deflate_pack.WINDOW, res.z_size, len(res.data)))
     lines.append("quantisation rms against the native image: " + ", ".join("%s %d.%02d" % (n, r // 100, r % 100) for n, r in res.formats)
                  + " (a format is kept at %d.00 or less)" % FORMAT_MAX_RMS)
     lines.append("against the source: tone (mean of each %dx%d patch) rms %d.%02d; pixel by pixel at the shown size x%d (%dx%d px) rms %d.%02d,"
@@ -447,27 +467,32 @@ def emit_cpp(res, source_name):
             "namespace o3os::ui {",
             "namespace {",
             "",
-            "// Uploaded with hal::Display::upload(), whose source must be word aligned: declared on the type (ADR 0011).",
+            "// OS-FLASHDIET A5: the bitmap lives in flash as a raw-deflate stream of its %d whole-word bytes" % len(res.data),
+            "// (tools/deflate_pack.py, the 4 KiB window), inflated at boot by core::Inflater like a glyph face",
+            "// (ui/src/assets.cpp). Word aligned like the faces' streams (ADR 0011): declared on the type and asserted.",
             "template <unsigned N>",
-            "struct alignas(4) Bitmap {",
+            "struct alignas(4) Stream {",
             "  std::uint8_t bytes[N];",
             "};",
             "",
-            "// %dx%d %s, stride %d, rows top to bottom, the leftmost pixel in the most significant bits." % (res.width, res.height, res.format, res.stride),
-            "constexpr Bitmap<%d> k_boot_logo = {{" % len(res.data)]
-    for j in range(0, len(res.data), 16):
-        out.append("    " + ", ".join("0x%02X" % b for b in res.data[j:j + 16]) + ",")
-    n = len(res.data)
+            "// %dx%d %s, stride %d, rows top to bottom, the leftmost pixel in the most significant bits: %d raw bytes," % (res.width, res.height, res.format, res.stride, len(res.data)),
+            "// %d stream bytes." % res.z_size]
+    n = (res.z_size + 3) & ~3  # whole words, as deflate_pack.py's emit_cpp pads (ADR 0011)
+    body = res.z + b"\x00" * (n - res.z_size)
+    out.append("constexpr Stream<%d> k_boot_logo_z = {{" % n)
+    for j in range(0, n, 16):
+        out.append("    " + ", ".join("0x%02X" % b for b in body[j:j + 16]) + ",")
+    raw = len(res.data)
     out += ["}};",
-            "static_assert(alignof(Bitmap<%d>) >= 4 && sizeof(Bitmap<%d>) == %d, \"boot logo: word aligned, whole words\");" % (n, n, n),
+            "static_assert(alignof(Stream<%d>) >= 4 && sizeof(Stream<%d>) == %d, \"boot logo stream: word aligned, whole words\");" % (n, n, n),
             "static_assert(kBootLogoW == %d && kBootLogoH == %d, \"ui/boot_logo.h and tools/logo_convert.py disagree on the size: update the header\");" % (res.width, res.height),
             "static_assert(static_cast<unsigned>(kBootLogoFormat) == %d, \"ui/boot_logo.h and tools/logo_convert.py disagree on the format\");" % res.format_id,
-            "static_assert(kBootLogoStride == %d && kBootLogoBytes == %d, \"ui/boot_logo.h and tools/logo_convert.py disagree on the layout\");" % (res.stride, n),
+            "static_assert(kBootLogoStride == %d && kBootLogoBytes == %d, \"ui/boot_logo.h and tools/logo_convert.py disagree on the layout\");" % (res.stride, raw),
             "static_assert(kBootLogoScale == %d, \"ui/boot_logo.h and tools/logo_convert.py disagree on the scale\");" % res.scale,
             "",
             "}  // namespace",
             "",
-            "BootLogo boot_logo() noexcept { return BootLogo{k_boot_logo.bytes, %d}; }" % n,
+            "BootLogo boot_logo() noexcept { return BootLogo{k_boot_logo_z.bytes, %d, kBootLogoBytes}; }" % res.z_size,
             "",
             "}  // namespace o3os::ui",
             ""]
@@ -697,12 +722,21 @@ def self_test():
     # -- The generated file: deterministic, aligned, tied to the header, and the staleness check sees a change.
     text = emit_cpp(res, "logo.png")
     check(text == emit_cpp(convert(png), "logo.png"), "the output is deterministic")
-    n = len(res.data)
-    check(text.count("struct alignas(4) Bitmap") == 1 and ("constexpr Bitmap<%d> k_boot_logo" % n) in text, "emit: one aligned array")
-    check("static_assert(alignof(Bitmap<%d>) >= 4" % n in text, "emit: alignment asserted")
+    zn = (res.z_size + 3) & ~3
+    check(text.count("struct alignas(4) Stream") == 1 and ("constexpr Stream<%d> k_boot_logo_z" % zn) in text, "emit: one aligned stream array")
+    check("static_assert(alignof(Stream<%d>) >= 4" % zn in text, "emit: alignment asserted")
     check("kBootLogoW == %d && kBootLogoH == %d" % (res.width, res.height) in text, "emit: the header's size is asserted")
+    check("kBootLogoStride == %d && kBootLogoBytes == %d" % (res.stride, len(res.data)) in text, "emit: the header's raw layout is asserted")
+    check("BootLogo{k_boot_logo_z.bytes, %d, kBootLogoBytes}" % res.z_size in text, "emit: boot_logo() returns the stream and the raw size")
     check(text.endswith("}  // namespace o3os::ui\n") and "\r" not in text, "emit: LF line ends, final newline")
-    check(len(res.data) % 4 == 0, "the array is whole words")
+    check(len(res.data) % 4 == 0 and zn % 4 == 0, "the raw bitmap and the stream are whole words")
+    # -- OS-FLASHDIET A5: the stored stream is deflate_pack's (never zlib's), deterministic, inside the 4 KiB window,
+    # and it inflates back to the exact raw bitmap (zlib is used only here, in the self-test).
+    stats = {}
+    z = deflate_pack.deflate(res.data, stats)
+    check(z == res.z and z == deflate_pack.deflate(res.data), "the logo's stream is deflate_pack's and deterministic")
+    check(stats["max_distance"] <= deflate_pack.WINDOW, "the logo's stream stays in the %d-byte window" % deflate_pack.WINDOW)
+    check(zlib.decompress(z, -12) == res.data, "the logo's stream round-trips to the raw bitmap byte for byte")
     with tempfile.TemporaryDirectory() as tmp:
         src = Path(tmp) / "logo.png"
         out = Path(tmp) / "data.cpp"

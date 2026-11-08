@@ -18,6 +18,7 @@ inline constexpr std::uint8_t kStop = 0xFC;
 inline constexpr std::uint8_t kActiveSense = 0xFE;
 inline constexpr std::uint8_t kSystemReset = 0xFF;
 
+inline constexpr std::uint8_t kQuarterFrame = 0xF1;  // OS-MTC: one data byte `0nnndddd`
 inline constexpr std::uint8_t kSongPosition = 0xF2;  // two data bytes, 7 bits each, least significant first
 inline constexpr std::uint8_t kSysExStart = 0xF0;
 inline constexpr std::uint8_t kSysExEnd = 0xF7;
@@ -105,6 +106,26 @@ constexpr std::uint32_t usb_event(std::uint8_t cable, const Msg& m) noexcept {
   return static_cast<std::uint32_t>((static_cast<std::uint32_t>(cable & 0x0Fu) << 4) | usb_cin(m)) |
          (static_cast<std::uint32_t>(m.b[0]) << 8) | (static_cast<std::uint32_t>(m.len > 1 ? m.b[1] : 0u) << 16) |
          (static_cast<std::uint32_t>(m.len > 2 ? m.b[2] : 0u) << 24);
+}
+
+// OS-MTC A3: a SysEx message as USB-MIDI event words, F0 + `n` data bytes + F7 cut in threes (chapter 4): code index 0x4 for a chunk of three that is not the last, then the last chunk by its
+// length: 0x5 (F7 alone), 0x6 (two bytes), 0x7 (three bytes). Writes (n + 2 + 2) / 3 words to `out` and returns that count; the data bytes are masked to 7 bits. `out` must hold
+// that many (a full frame, n = 8, is four: F0 7F 7F | 01 01 hh | mm ss ff | F7).
+constexpr std::uint32_t usb_sysex_events(std::uint8_t cable, const std::uint8_t* data, std::uint32_t n, std::uint32_t* out) noexcept {
+  const std::uint32_t bytes = n + 2u;
+  const std::uint32_t words = (bytes + 2u) / 3u;
+  std::uint32_t k = 0;  // index in the stream F0, data..., F7
+  for (std::uint32_t w = 0; w < words; ++w) {
+    std::uint8_t b[3] = {0, 0, 0};
+    std::uint32_t len = 0;
+    for (; len < 3u && k < bytes; ++len, ++k) {
+      b[len] = k == 0u ? kSysExStart : (k == bytes - 1u ? kSysExEnd : static_cast<std::uint8_t>(data[k - 1u] & 0x7Fu));
+    }
+    const std::uint8_t cin = len == 3u ? (k == bytes ? 0x7u : 0x4u) : (len == 2u ? 0x6u : 0x5u);
+    out[w] = static_cast<std::uint32_t>((static_cast<std::uint32_t>(cable & 0x0Fu) << 4) | cin) | (static_cast<std::uint32_t>(b[0]) << 8) | (static_cast<std::uint32_t>(b[1]) << 16) |
+             (static_cast<std::uint32_t>(b[2]) << 24);
+  }
+  return words;
 }
 
 }  // namespace o3os::midi

@@ -466,7 +466,7 @@ void FileScreen::render(const Model& model, const ViewState& view, Renderer& r, 
           text.append(kinds[i].full);
           r.text(x, ui::caps_y(t, Face::Label, line_y(i), f.row_pitch), text.c_str(), Color::Text, Face::Label);
         }
-      } else {  // more: EVERY kind, in the short form, run together and wrapped at the card's width (the worst case, all fourteen, fits three lines)
+      } else {  // more: EVERY kind, in the short form, run together and wrapped at the card's width (the worst case, all seventeen kinds since OS-CEWTENV W1's WT MOD, fits three lines)
         const unsigned room = static_cast<unsigned>((ui::kScreenW - x - 2 * m.pad) / cell_w_label(t));
         core::FixedString<96> text;
         unsigned row = 0;

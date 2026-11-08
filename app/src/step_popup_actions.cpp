@@ -8,7 +8,8 @@
 // is live, as on the parameters page, and resets the screens' windows and selection (wave_view_reset); an effect or a slicer job still running keeps its own slot, so no edit is lost.
 //
 // OS-PADS-B: the held Note button no longer shows a pad keyboard: its 48 pads are the note-entry settings (note_entry.h: ROOT, SCALE, JUMP, OCTAVE + SCALE LOCK), nothing is entered on the
-// release and the arrows and the encoder do nothing there. A short tap on Note is what it always was (the cursor goes to the Note column).
+// release and a short tap on Note is what it always was (the cursor goes to the Note column). OS-SCALES28 S2: the encoder and Up / Down walk the 39 scales there, as a ring in the official
+// order; the pads of row 2 keep their twelve.
 //
 // Here the hold is the gesture layer's (as the choosers of F1..F3), the popup is the StepPopup overlay (screens/step_popup_overlay.cpp), and the entry is an undo unit.
 // NEW OS BEHAVIOUR: the Note popup writes only when a pad (or an arrow) chose a note; the Fx list stops at
@@ -32,6 +33,12 @@ constexpr int kPadMax = static_cast<int>(model::edit::kPadCount) - 1;
 
 // The direction codes: Up, Right, Down, Left. The instrument and FX lists run down, a page is 12 (left and right).
 constexpr int kListStep[4] = {-1, 12, 1, -12};
+
+// The thunk context of the Vol / Fx entry (OS-FLASHDIET T1): the FX column under the cursor and the picked type.
+struct FxPick {
+  int column;
+  unsigned type;
+};
 
 bool on_pattern(const ViewState& v) noexcept { return v.screen == ScreenId::Pattern; }
 bool on_sample_screen(const ViewState& v) noexcept { return v.screen == ScreenId::Wave || v.screen == ScreenId::SampleEdit; }
@@ -82,7 +89,21 @@ bool bump(ActionContext& ctx, int delta) noexcept {
       v.popup.item = static_cast<std::int16_t>(to);
       return changed;
     }
-    default:  // Note: the settings are the pads'
+    case Kind::Note: {  // OS-SCALES28 S2: the encoder and Up / Down walk the 39 scales as a ring in the official order (Up -1, Down +1, one a detent, wrapping)
+      const int count = static_cast<int>(model::kNoteScaleMax) + 1;  // 39
+      const int cur = v.edit.entry.scale <= model::kNoteScaleMax ? static_cast<int>(v.edit.entry.scale) : 0;
+      int to = (cur + delta) % count;
+      if (to < 0) {
+        to += count;
+      }
+      if (to == cur) {
+        return false;
+      }
+      v.edit.entry.scale = static_cast<std::uint8_t>(to);
+      v.edit.apply_entry();  // the NOTES board follows the scale in force (with the lock on)
+      return true;
+    }
+    default:
       return false;
   }
 }
@@ -114,8 +135,9 @@ void enter(ActionContext& ctx) noexcept {
   pe::Edited e;
   switch (v.popup.kind) {
     case Kind::Instr: {
-      const unsigned instrument = static_cast<unsigned>(pe::clampi(v.instrument, 1, kInstrumentMax));
-      e = pe::edit_selection(ctx, [&](model::Step& s, const Rule& r, Last& l) { model::edit::instrument_set(s, instrument, r, l); });
+      unsigned instrument = static_cast<unsigned>(pe::clampi(v.instrument, 1, kInstrumentMax)); // the thunk context (non-const)
+      e = pe::edit_selection(
+          ctx, [](model::Step& s, const Rule& r, Last& l, void* p) { model::edit::instrument_set(s, *static_cast<const unsigned*>(p), r, l); }, &instrument);
       break;
     }
     case Kind::Vol:
@@ -125,7 +147,14 @@ void enter(ActionContext& ctx) noexcept {
         return;
       }
       const unsigned type = static_cast<unsigned>(model::fx::type_of_picker(v.popup.item));
-      e = pe::edit_selection(ctx, [&](model::Step& s, const Rule&, Last&) { model::edit::fx_type_set(s, static_cast<unsigned>(fx), type); });
+      FxPick pick{fx, type}; // the thunk context (non-const)
+      e = pe::edit_selection(
+          ctx,
+          [](model::Step& s, const Rule&, Last&, void* p) {
+            const FxPick& c = *static_cast<const FxPick*>(p);
+            model::edit::fx_type_set(s, static_cast<unsigned>(c.column), c.type);
+          },
+          &pick);
       break;
     }
     default:  // Note: the settings were changed live, there is nothing to enter

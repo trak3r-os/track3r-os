@@ -8,14 +8,15 @@
 
 namespace o3os::app {
 
+// (OS-DJ A1: the DJ page is a page of this screen; the slots' keys, pads and encoder are inert there, the DJ context's bindings are dj_actions.cpp's)
+// The Perform screen's slot page is in view: the mapped Perform CCs act here only (OS-MIDICCMAP Q5 a).
+bool on_perform(const ActionContext& ctx) noexcept { return ctx.view.screen == ScreenId::Perform && ctx.perform != nullptr && !ctx.view.dj_page(); }
+
 namespace {
 
 seq::PerformBank* bank_of(ActionContext& ctx) noexcept { return ctx.perform != nullptr ? &ctx.perform->bank : nullptr; }
 
-// (OS-DJ A1: the DJ page is a page of this screen; the slots' keys, pads and encoder are inert there, the DJ context's bindings are dj_actions.cpp's)
-bool on_perform(const ActionContext& ctx) noexcept { return ctx.view.screen == ScreenId::Perform && ctx.perform != nullptr && !ctx.view.dj_page(); }
-
-bool say(ActionContext& ctx, core::Severity severity, const char* text) noexcept { return ctx.view.notify.post(severity, text, "perform", ViewState::kMessageMs); }
+bool say(ActionContext& ctx, core::Severity severity, const char* text) noexcept { return say_tag(ctx, severity, text, "perform"); }
 
 // The function keys (OS-PERF2).
 constexpr unsigned kKeyHalf = 3;

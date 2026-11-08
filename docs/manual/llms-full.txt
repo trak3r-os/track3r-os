@@ -24,7 +24,7 @@ A release (GitHub, "Releases") has two files:
 - `track3r-os-<version>.ptf`: the update file. It is the device image in Intel HEX form under a `.ptf` name, which is what the Tracker's bootloader flashes. Its name never starts with `Polyend`, so it cannot be mistaken for an official file. For a first install through the reset button you rename your copy on the card (section 1).
 - `SHA256SUMS`: the checksum of the update file. Check the download before using it: `sha256sum -c SHA256SUMS`. The release notes also give the CRC-32 that `o3console.py --update --crc` asks for.
 
-The optional starter content (samples, wavetables, songs, starter projects, the bundled apps, licences) is a separate zip, `track3r-os-<version>.zip`. It is not part of this release. When you have it, unpack it into the root of the card. Its `README.txt` says what goes where.
+The optional starter content (samples, wavetables, songs, starter projects, the bundled apps, effect modules and sine instrument, the factory presets, the thirteen Sample Editor plugins in `Effects/`, licences) is a separate zip, `track3r-os-<version>.zip`. It is not part of this release. When you have it, unpack it into the root of the card. Its `README.txt` says what goes where. Its `modules/importers/` folder holds `tracker.tmod`, the importer module the firmware loads from the card to read MOD, S3M and OctaMED files on the File screen's IMPORT: without it an import of a module says **NO IMPORTER** and changes nothing, so keep the file on the card.
 
 The same image shows its version in Config, INFO (BUILD ID, for example `v0.5.0 (0271ab60bea6)`), on the boot screen, and in the `version` command of the USB `diag` console.
 
@@ -164,7 +164,11 @@ A starter zip is not part of this release. If you have one, you unpack it into t
 | In the zip | What it holds |
 |---|---|
 | `Firmware/` | the update file and its checksum |
-| `modules/apps/` | apps for the TOOLS screen. The TB-303, chip, FM and SID instruments are inside the firmware. The apps alone come in `track3r-os-<version>-apps.zip`, in the release `apps-v<version>`. |
+| `modules/apps/` | apps for the TOOLS screen. The TB-303, chip, FM and SID instruments are inside the firmware (their factory presets are in `modules/presets/`). The apps alone come in `track3r-os-<version>-apps.zip`, in the release `apps-v<version>`. |
+| `modules/effects/` | the effect modules for a track's insert |
+| `modules/instruments/` | the instrument modules that are not inside the firmware (Sine) |
+| `modules/importers/` | the importer module `tracker.tmod`, which the firmware loads from the card to read MOD, S3M and OctaMED files on IMPORT (File screen, F6). Without it an import says **NO IMPORTER** and changes nothing. |
+| `Effects/` | the Sample Editor plugins (`.ptfx`): Add Silence, Analog Kick, Chiptune, Multimode Filter, Stereo Delay, Stereo to Mono, Overdrive, Delay, Bitcrusher, Chorus, Flanger, Limiter and Three-Band EQ |
 | `Samples/` | a drum kit and other one-shots |
 | `WTABLE/` | wavetables |
 | `Songs/` | tracker songs for the importers |
@@ -280,8 +284,8 @@ Each soft key does what its label says on the screen in view. These are examples
 | `F3` | opens the JUMP chooser | shows the MST FX page | - |
 | `F4` | **FILL**: opens the Fill dialog | shows the STEMS page | QA-PAT-086 |
 | `F5` | **PREVIEW** | **CUE LVL**: goes to the cue level | - |
-| `F6` | **INVERT** | - | - |
-| `F7` | **TOOLS**: opens the tools list | **MUTE**: mutes the track under the cursor | - |
+| `F6` | **RE FILL** (**REPEAT**: the last fill or TOOLS apply again; the key reads **REPEAT** after a TOOLS apply) | - | QA-PAT-435 |
+| `F7` | **TOOLS**: opens the verb menu (pads 1-16 pick a verb); held + a pad runs the verb directly | **MUTE**: mutes the track under the cursor | QA-PAT-436, QA-PAT-456 |
 | `F8` | **UNDO** (`Shift` + `F8` is **REDO**) | **SOLO**: solos the track under the cursor | QA-PAT-089 |
 
 If a `Shift` + soft key has no label, it does nothing. It never acts as the plain key.
@@ -303,11 +307,12 @@ If a `Shift` + soft key has no label, it does nothing. It never acts as the plai
 | `Sample Recorder` | the Record screen | - |
 | `Song` | the Song screen, when you let go of the key. Held: the Song screen until you let go, then back to where you were ([Song](song.md)) | - |
 | `Pattern` | the Pattern screen, when you let go of the key. Held, with the encoder: the tempo, on any screen; held, with a pad: tap tempo (see [Tempo from any screen](#tempo-from-any-screen)) | QA-GLB-153, QA-GLB-155 |
-| `Shift` + `Pattern` | opens the Navigator; press `F8` (**GO**) to go to the screen you chose, or `F7` (**CLOSE**) to leave it | - |
+| `Song` + `Pattern`, or `Master` + `Song`, pressed together | opens the Navigator on any screen; press `F8` (**GO**) to go to the screen you chose, or `F7` (**CLOSE**) to leave it. Neither key does its own job, and the Song peek and the held volume and tempo turns stay off | QA-GLB-233 |
+| `Shift` + `Pattern` | lists the module apps that are not tools; `F1` or `F8` (**LAUNCH**) starts one, `Pattern` leaves the list. It was the Navigator before | QA-MOD-252 |
 | `Shift` + `Master` | steps to the next colour theme: Amiga, Black, White, then Amiga again. The THEME row on Config says the same. New in track3r-os. Not yet checked on the unit. | QA-GLB-157 |
 | `Shift` + `Config` | opens the help page of the screen you are on (see [The help page](#the-help-page)) | QA-GLB-141 |
 
-(Picture: Panel: Shift is ringed and Pattern is marked. Hold Shift, then press Pattern to open the Navigator.)
+(Picture: Panel: Song and Pattern are marked. Press both together to open the Navigator.)
 
 ## Tempo from any screen
 
@@ -346,13 +351,29 @@ These four keys select a column of the Pattern grid. They work on the Pattern sc
 | Key | Colour | What it does on Pattern | Ref |
 |---|---|---|---|
 | `Note` | teal | selects the Note column; hold it to open the note popup | - |
-| `Instr` | yellow | selects the Instr column; hold it to open the instrument list | - |
-| `Vol` | purple | selects the volume column. The step grid calls this column **VOL**. Hold the key to open its popup. | - |
+| `Instr` | yellow | selects the Instr column; hold it to open the instrument list. The tap acts when you let go of the key, so `Instr` with `Vol` or `Fx` is a chord and selects nothing | - |
+| `Vol` | purple | selects the volume column. The step grid calls this column **VOL**. Hold the key to open its popup. The tap acts when you let go of the key. | - |
 | `Fx` | cyan | selects the FX column; hold `Fx` and turn the encoder to change the FX type | - |
+
+### Learn a MIDI control
 
 Press `Vol` and `Fx` together to open Learn.
 
 (Picture: Panel: Vol and Fx are marked. Press both together to open Learn.)
+
+The Learn dialog works on the row under the cursor of the screen below. Move a MIDI control (a CC) and it binds to that row: the target line names the parameter, its instrument and the controller (`CC 74 PICKUP`). `F1` unbinds it, `F2` changes how the controller moves it (**MODE**: pickup, jump, relative), `F3` deletes the binding the list's cursor is on, `F4` clears them all (pressed twice), `F8` goes back. `F5` **FOLLOW** makes the binding follow the selected instrument instead of its own — the target line then reads `INS *` and the binding text ends `FOLLOW` — and `F5` again pins it back to its instrument. The key row names `F5` only when the target is an instrument parameter with a binding.
+
+Use your keyboard as a synth: bind the knobs on one instrument, press `F5` on each, then select any instrument — the same knobs now shape whichever instrument is selected. A binding follows instrument parameters only, and it acts only when the selected instrument has the row with its meaning (a sampler row on a MIDI instrument does nothing). A follow binding is saved with the project.
+
+### Put one parameter on the encoder
+
+Any row that Learn can bind can also sit on the encoder, without a MIDI controller. Put the cursor on the row (for example on the Instrument screen), press `Instr` and `Fx` together, and the strip says `ENCODER: <PARAM> INS <n>`. A row Learn cannot bind says `NO TARGET FOR ENCODER`. There is one encoder target in all: pressing the chord on another row replaces it, and pressing it on the same row again only shows the message again. There is no clear gesture. The target stays on that row and that instrument until you replace it or switch the unit off. It is not saved.
+
+To use it, hold `Instr` and `Vol` and turn the encoder, on any screen with no dialog open. Each click moves the row by one step; hold `Shift` for the coarse step. The strip shows `<PARAM> <value>`. Moves undo like a Learn knob. With no target the strip says `NO ENCODER TARGET (INSTR + FX2)`. While both keys are held the encoder does nothing else. Turning cancels the `Instr` popup and the `Vol` tap, so a turn never selects a column. Pressing the two keys without turning does nothing.
+
+Recording follows the Learn rule. In LIVE recording, with Record knob moves as FX on, a move writes the matching FX on the playing step (cutoff, panning, delay send, reverb send, overdrive and bit depth have one). In Edit with free recording, a move writes the FX on the cursor's step of the cursor's track, and one hold of the two keys is one undo unit. A row with no FX still moves the sound and records nothing: the strip says `REC FX: <PARAM> HAS NO FX` on the first move. Browse records nothing.
+
+New in track3r-os. Not yet checked on the unit.
 
 ## Edit block
 
@@ -365,19 +386,19 @@ Each key has a second label printed on it. `Shift` + the key runs that label.
 | `Delete` (second label: Backspace) | clears what the cursor column holds: the whole step in Note or Instr, the volume in Vol, the FX in Fx. With a block selected, it clears the highlighted columns, or whole steps when the block spans tracks. | `Shift` + `Delete` removes the step under the cursor and pulls the steps below up, to close a gap. It is the reverse of `Insert`, and works from the block's first step when a block is selected. | - |
 | `Up`, `Down`, `Left`, `Right` | move the cursor | `Shift` + `Up` or `Down` selects the block; `Shift` + `Left` or `Right` grows a block of columns one column at a time; past the last column it takes the next track whole | QA-PAT-007, QA-PAT-319 |
 
-A block can cover just some columns of one track. `Delete` and `Copy` then act on those columns only, while Fill and the TOOLS list always take whole steps, and the strip says **WHOLE STEPS** when they do.  See [Pattern](pattern.md).
+A block can cover just some columns of one track. `Delete` and `Copy` then act on those columns only, while Fill and the TOOLS menu always take whole steps, and the strip says **WHOLE STEPS** when they do.  See [Pattern](pattern.md).
 
 On the Song screen, `Insert` adds a slot, `Shift` + `Insert` adds a slot with a copy of the pattern, and `Delete` removes the slot, or clears the selected cells when the cursor is in the track map. `Shift` + `Delete` cuts instead: the slot (or the selected slots) goes into the slot clipboard and out of the list, and in the track map the selected cells go into the song clip and are cleared; `Shift` + `Copy` puts them back anywhere. Hold `Copy` and press `Up` or `Down` to move the slot (or the selected slots) one place, and keep the arrow held to go on. `Note` jumps to the next slot that holds the same pattern, and `Shift` + `Note` to the previous one. The cut, the move and the jump are new in track3r-os. On lists, `Shift` + `Up` and `Shift` + `Down` move one page.
 
 The second label Backspace is not what `Shift` + `Delete` does on Pattern: it pulls steps up and erases nothing backwards. The backspace is the plain `Delete` key on the on-screen keyboard. The pull is new in track3r-os.
 
-Most screen buttons act when you press them. `Pattern`, `Song` and `Master` act when you let go, because a hold can mean something else: `Shift` + `Pattern` opens the Navigator, and a hold of `Song` for 0.4 seconds shows the Song screen as a peek.  Playback does not stop when you change screen. Leaving Perform ends its effects, except when you go to the Mixer or Song; see [Perform](perform.md).
+Most screen buttons act when you press them. `Pattern`, `Song` and `Master` act when you let go, because a hold can mean something else: `Song` + `Pattern` and `Master` + `Song` open the Navigator and `Shift` + `Pattern` lists the module apps, and a hold of `Song` for 0.4 seconds shows the Song screen as a peek.  Playback does not stop when you change screen. Leaving Perform ends its effects, except when you go to the Mixer or Song; see [Perform](perform.md).
 
 The buttons have no lights. The screen shows the state instead, for example the mode chip and the red **REC** badge on Pattern.
 
-Some keys act on a tap and some only while you hold them. On Pattern, `F1` opens the pattern picker only while you hold it, so a tap opens nothing. On Pattern, `F2` and `F3` toggle a chooser with a tap. On Song, `F7` selects the tempo field, and a second tap taps the tempo. On the Mixer, `F1` on the MIXER page changes nothing.
+Some keys act on a tap and some only while you hold them. On Pattern, `F1` opens the pattern picker only while you hold it, so a tap opens nothing. On Pattern, `F7` held with a pad runs that verb without opening the menu, so a tap of `F7` opens the menu. On Pattern, `F2` and `F3` toggle a chooser with a tap. On Song, `F7` selects the tempo field, and a second tap taps the tempo. On the Mixer, `F1` on the MIXER page changes nothing.
 
-While a dialog or a list is open, it owns the key row: the row shows only the dialog's own keys, every other key is blank and does nothing, and `Shift` does not change the row. `F8` goes back. On the on-screen keyboard, `F8` keeps the text and `F7` cancels. Learn shows **BACK** on `F8` alone until it has a target or a binding. Fill shows **FILL** on `F1` and **BACK** on `F8`, and a running WAV export shows **CANCEL** on `F8`. The Navigator reads **GO** on `F1`, **CLOSE** on `F7` and **GO** on `F8`; with `Shift` held it reads only **CLOSE** and **GO**. The screen buttons do nothing until the dialog closes. New in track3r-os. Not yet checked on the unit. On Song, a question on the strip asks **ALL** (`F1`) or **UNIQUE** (`F2`), and any other key withdraws it. On Config, **APPLY** and **DEFAULTS** ask for a second press within a short time.
+While a dialog or a list is open, it owns the key row: the row shows only the dialog's own keys, every other key is blank and does nothing, and `Shift` does not change the row. `F8` goes back. On the on-screen keyboard, `F8` keeps the text and `F7` cancels. Learn shows **BACK** on `F8` alone until it has a target or a binding, and **FOLLOW** on `F5` when the target is a bound instrument parameter (see "Learn a MIDI control" above). Fill shows **FILL** on `F1` and **BACK** on `F8`, and a running WAV export shows **CANCEL** on `F8`. The Navigator reads **GO** on `F1`, **CLOSE** on `F7` and **GO** on `F8`; with `Shift` held it reads only **CLOSE** and **GO**. The screen buttons do nothing until the dialog closes. New in track3r-os. Not yet checked on the unit. On Song, a question on the strip asks **ALL** (`F1`) or **UNIQUE** (`F2`), and any other key withdraws it. On Config, **APPLY** and **DEFAULTS** ask for a second press within a short time.
 
 ## Transport
 
@@ -407,6 +428,8 @@ The pad mode stays until you change it and is not saved.
 | turn the encoder | changes the value under the cursor, or scrolls the list in view | - |
 | `Shift` + turn the encoder | a coarse step on the Instrument screen; a fine step on the Song screen | - |
 | turn the encoder quickly in a list | in File, Sample load, the Modules list and the module picker, a quick spin moves 4 rows a detent, then 8; a slow turn moves one. The Pattern cursor, every value and the `Shift` coarse steps are unchanged. New in track3r-os. Not yet checked on the unit. The numbers are being tuned. | QA-GLB-159 |
+
+With `Instr` and `Vol` both held, the encoder moves the parameter you picked with `Instr` and `Fx` and does nothing else (see "Put one parameter on the encoder" above). New in track3r-os. Not yet checked on the unit.
 
 The encoder has no push function.
 
@@ -491,11 +514,11 @@ The unit reads these keys when it starts. Hold them while you turn the unit on, 
 
 Status: draft
 
-Song is an editor, not only a list. Adding a slot with `F3` (**ADD SLOT**) works as before, and the new slot shares the pattern of the one you were on. New in track3r-os: a `*` marks slots that share a pattern, and `F5` (**UNIQUE**) gives a slot a copy of its own. `Right` steps from the list into a map of slots and tracks that you can copy, paste, clear and transpose, and `F6` (**TOOLS**) opens the block tools. The pads can pick slots, and holding `Song` shows the screen for a moment.
+Song is an editor, not only a list. Adding a slot with `F3` (**ADD SLOT**) works as before, and the new slot shares the pattern of the one you were on. New in track3r-os: a `*` marks slots that share a pattern, and `F5` (**UNIQUE**) gives a slot a copy of its own. `Right` steps from the list into a map of slots and tracks that you can copy, paste, clear and transpose, `F6` (**TOOLS**) opens the block tools, and the **TIMELINE** page is an editing grid with the same keys. The pads can pick slots, and holding `Song` shows the screen for a moment.
 
 ## What it is for
 
-Use Song to arrange patterns in time. Press `Song`. The order list holds the slots, and each slot holds one pattern number. The song plays the slots from the top. Press `Song` again for the **ARRANGEMENT** page, and again for the **TIMELINE** page, which draws the song as blocks along the page. Three pages in all; the header says which one you are on (**ORDER 1/3**, **ARRANGEMENT 2/3**, **TIMELINE 3/3**). The next press after **TIMELINE 3/3** goes back to **ORDER 1/3**.
+Use Song to arrange patterns in time. Press `Song`. The list holds the slots, and each slot holds one pattern number, the bar it starts at (**BAR**) and how many bars it lasts (**BARS**). The song plays the slots from the top. Press `Song` again for the **TIMELINE** page, which draws the song as blocks along the page. Two pages in all; the header says which one you are on (**LIST 1/2**, **TIMELINE 2/2**). The next press after **TIMELINE 2/2** goes back to **LIST 1/2**.
 
 ## How it works
 
@@ -504,12 +527,17 @@ Use Song to arrange patterns in time. Press `Song`. The order list holds the slo
 A pattern holds the notes. A slot is a place in the song that points at a pattern, like a playlist entry points at a track. Slots 1, 2, 1, 3 play verse, chorus, verse, bridge: pattern 1 is in the song twice.
 
 - **Stored:** the order list is saved with the project.
-- **Live:** `Play` or `F2` (**PLAY SNG**) plays from the selected slot. `F1` (**PLAY PAT**) loops only that slot's pattern. At the end of the list the song goes round to the first slot.  Not checked against the original firmware.
+- **Live:** `Play` or `F2` (**PLAY SNG**) plays from the selected slot. While it plays, a thin line under the **PAT** tile of the row that plays runs through the pattern with the playhead.  `F1` (**PLAY PAT**) loops only that slot's pattern. At the end of the list the song goes round to the first slot. In a lane of the TIMELINE page `F1` (**PREVIEW**) instead loops that slot's pattern with only the selected tracks (the rectangle) sounding; `F1` again, `Stop` or leaving the screen restores the solo set as it was. New in the Community OS.   Not checked against the original firmware.
 - **Jump:** while the song plays, `Rec` queues the cursor's slot. It starts after the pattern now playing, and the slot blinks until then. `Rec` on it again cancels.
+- **Loop:** select the slots with `Shift` + `Up` / `Down` (the cursor's slot alone is enough) and hold `F2`. The song starts at the first of them, and after the last it goes back to the first. The info line says **LOOP 03-06**. Edit the patterns and the list meanwhile: a slot you delete inside the loop shortens it, a slot you add inside it lengthens it. `Rec` on a slot outside the loop leaves it, so does `Stop`; hold `F2` on the same slots again to leave it and keep playing. A tap of `F2` still plays the song, now at the release of the key. New Community OS behaviour.
 
 ### Sharing a pattern
 
 `F3` (**ADD SLOT**) adds a slot with the same pattern number. Both slots now play one pattern, so a change made in Pattern is heard in both. Each sharing slot has a `*`, and the info line says, for example, **pattern 03 in 2 slots**. The other slots of the cursor's pattern also show their PAT number in a second ink.
+
+Hold `Copy` and press `F3` (**ADD EMPTY**) instead, and the new slot goes on the first free pattern number, one that does not exist yet: an empty slot, so a new section starts from silence, not from a copy. If the pattern pool is full the strip says **NO FREE PATTERN** and nothing is written. `F8` (**UNDO**) takes the slot back. New in track3r-os.
+
+On the TIMELINE page the blocks of sharing slots wear the same `*` at the right of the number.
 
 To split them, put the cursor on the slot and press `F5` (**UNIQUE**). It gets a copy at the first free pattern number, with the same name, lengths and steps, and the strip says, for example, **SLOT 04: PATTERN 05 (A COPY OF 04)**. `Shift` + `Insert` (**DUP PAT**) adds a new slot with a copy straight away. `Note` jumps to the next slot that holds the cursor's pattern, and `Shift` + `Note` to the previous.
 
@@ -518,6 +546,10 @@ Example: the second verse should have other drums. Put the cursor on it, press `
 ### The track map
 
 Press `Right` on the PAT column. The cursor moves into a grid: slots down, tracks across. A cell is one track of that slot's pattern. `Left` on track 1 returns to PAT.
+
+The list draws 12 tracks at a time, each cell 20 pixels wide. A project with more tracks scrolls them with the cursor: the **TRACKS** caption then says which ones you see, for example **TRACKS 5-16**.
+
+A muted track's cells are dim, so you see which tracks sound where you look. A solo does not dim them: only the mute does. New in track3r-os.
 
 - `Shift` + arrows select a block of slots and tracks.
 - `Copy` copies it (up to 32 cells). `Shift` + `Copy` pastes at the cursor, or tiles the clip over a selection. A paste never adds slots, and it never changes a track's length: steps past the end of a shorter track are dropped (**PASTED: 1 PATTERN, CLIPPED AT TRACK END**). A slot whose pattern does not exist yet gets a new one; if the pool is full the strip says **NO FREE PATTERN** and nothing is written.
@@ -545,7 +577,7 @@ In SLOTS mode pad n is slot n of the 48-slot page that holds the cursor. When st
 
 1. Press `Song`. The list shows the slots, with the cursor on the first.
 
-   (Picture: Song, ORDER page: the slots with their pattern numbers; the NAME column is empty until a pattern is named.)
+   (Picture: Song, LIST page: the slots with their pattern numbers; the NAME column is empty until a pattern is named.)
 
 2. Press `Shift` + `Insert`. A new slot appears with a copy of the pattern. The info line says **SHIFT+INS DUP**.
 
@@ -559,9 +591,9 @@ In SLOTS mode pad n is slot n of the 48-slot page that holds the cursor. When st
 
    (Picture: Song: the strip reports the copy made for the slot.)
 
-5. Press `Song` again. The **ARRANGEMENT** page lists the same slots with **START**, **BARS** and a **LENGTH** bar.
+5. Press `Song` again. The **TIMELINE** page draws the same slots as blocks as wide as they have bars. Press `Song` once more to come back to the list, where **BAR** and **BARS** give each slot's start and length.
 
-   (Picture: Song, ARRANGEMENT page: each slot with its start bar, its length in bars and a length bar.)
+   (Picture: Song, TIMELINE page: each slot as a block as wide as it has bars.)
 
 6. Press `F8` (**UNDO**). The slot points at the shared pattern again.
 
@@ -573,8 +605,7 @@ Not yet checked on the unit.
 
 | Area | What it shows |
 |---|---|
-| Main area | The order list: **POS**, **PAT**, **NAME** (12 characters) and **LEN**, and the `*` mark. The track map sits to the right. |
-| Arrangement | **START** (bar), **BARS** and a **LENGTH** bar for each slot. The info line gives the bars in all. |
+| Main area | The list: **POS**, **PAT**, **NAME** (12 characters), **BAR** (the bar the slot starts at), **BARS** (its length in bars) and the `*` mark. The track map sits to the right. The info line gives the slot, the bars in all and, for a shared pattern, **pattern nn in n slots**. |
 | Timeline | The slots as blocks as wide as they have bars, with the pattern's number and a strip in its colour, and a lane per track under them that shows how many notes the track plays, and a thin **ENERGY** row at the foot. The info line gives the cursor's slot, its start bar, its pattern and its length; while the song plays it gives the bars left before the next slot instead (see "Read the song on the Timeline page"). |
 | Info line | A note on the last key, or on the cursor's slot or track. |
 | Strip | Messages, for example **PATTERN 03 NAMED**. |
@@ -622,18 +653,30 @@ New in track3r-os. The Timeline page shows the song as you would draw it on pape
 
 Start on Song.
 
-1. Press `Song` until the header says **TIMELINE 3/3**. The blocks run from four slots before the cursor.
+1. Press `Song` until the header says **TIMELINE 2/2**. The blocks run from four slots before the cursor.
    A slot is as wide as it has bars (a bar is 16 steps). The page is always at least 16 bars wide, so a short song stays small and does not stretch.
-2. Look at the blocks. Each one carries its pattern's number, and under the number a short strip in the pattern's colour: there are four colours, so patterns 1 and 5 share one. The strip tells you when a pattern comes back; the number tells you which it is. A very narrow block (one bar in a long view) may be too small for a three-digit number. A slot whose pattern does not exist yet has a dim number and no strip.
+2. Look at the blocks. Each one carries its pattern's number, and under the number a short strip in the pattern's colour: there are four colours, so patterns 1 and 5 share one. The strip tells you when a pattern comes back; the number tells you which it is. A very narrow block (one bar in a long view) may be too small for a three-digit number. A slot whose pattern does not exist yet has a dim number and no strip. A block whose pattern another slot also holds wears a `*` at the right of its number, as the list's rows do.
 3. Look under the blocks. This is the note map: each track has a lane, and each slot shows a small tick for every step that holds a note, sixteen steps to a bar. You see the rhythm of each track, not only how busy it is. A step with only a volume, an effect or a note-off has no tick. A track that is shorter than the pattern stops where it stops. Patterns of different lengths use the same step width, so the ticks of a short and a long pattern line up with the bars. The ticks follow your edits in Pattern: edit one pattern and only its map changes. A slot whose pattern does not exist yet has no map.
-4. Press `Up`, `Down`, `Left` or `Right`. The cursor moves one slot and the white frame follows it. The info line says, for example, **timeline slot 02 bar 5 pattern 02 4 bars**.
+4. Press `Left` or `Right`. The cursor moves one slot and the white frame follows it. The info line says, for example, **timeline slot 02 bar 5 pattern 02 4 bars**.
 5. Press `Play`. A green bar under a block and a white line mark the slot and the step that play.
    The info line now counts down: **timeline NEXT IN 2 BARS cursor slot 02**. It counts the bars left in the pattern that plays, and the last bar says **1 BAR**.
-   When you queue a jump (put the cursor on another slot with `Up` or `Down`, then press `Rec`) it says **JUMP IN**. On the last slot, where the song starts again at slot 0, it says **LOOP IN**; a single pattern playing says **LOOP IN** too. Stop, and the line goes back to the cursor's slot.
+   When you queue a jump (put the cursor on another slot with `Left` or `Right`, then press `Rec`) it says **JUMP IN**. On the last slot, where the song starts again at slot 0, it says **LOOP IN**; a single pattern playing says **LOOP IN** too. Stop, and the line goes back to the cursor's slot.
 6. Look at the thin row **ENERGY** at the foot of the page. It has one column for each slot, as high as the slot is busy and loud: for each track, how many notes it plays, times how loud they are, times the track's volume. A muted track adds nothing, and while a track is soloed only the soloed tracks add. The tallest slot in view fills the row, so the curve shows the shape of the song around the cursor, not a level you can compare between two views.
 
 The page draws the tracks Pattern can show, at most 12, and at most 40 slots and 48 bars: with 12 tracks it shows 34 slots. The cursor's slot is always in view.
-The page does not edit anything: the keys work as on the other pages.
+
+### Edit on the Timeline page
+
+New in track3r-os. The Timeline page is an editing grid. It uses the list's map with the arrows turned: `Left` and `Right` walk the slots, `Up` and `Down` the tracks. The row of blocks is the whole slot; a lane is one track of one slot, a cell.
+
+Start on the Timeline page.
+
+1. Press `Down`. The cursor drops into lane 1 of the slot: the cell has a box and the lane's number is bright. `Up` on lane 1 goes back to the blocks.
+2. `Left` and `Right` keep the lane and move the slot. `Shift` + `Left` or `Right` select slots, `Shift` + `Up` or `Down` tracks; the block of cells you chose is on a band.
+3. `Copy`, `Shift` + `Copy`, `Delete`, `Shift` + `Delete`, `F5` (**UNIQUE**) and `F6` (**TOOLS**) do what they do in the list's map, including the questions on the strip. On the blocks they act on whole slots, as on PAT.
+4. Hold `Copy` and press `Left` or `Right` to move the slot along the song.
+
+The cursor is shared with the list: turn the page and it stays on the same slot and track. The Timeline has 12 lanes, so track 13 to 16 are edited on the list.
 
 Not yet checked on the unit: how the colours and the note map read on the panel, and the countdown against the sound.
 
@@ -641,7 +684,7 @@ Not yet checked on the unit: how the colours and the note map read on the panel,
 
 Start on any other screen.
 
-1. Hold `Song`. After 0.4 s the Song screen comes up. It opens on the page you left it on, for example **TIMELINE 3/3**.
+1. Hold `Song`. After 0.4 s the Song screen comes up. It opens on the page you left it on, for example **TIMELINE 2/2**.
 2. Let go. You return to the screen you came from, as you left it.
 
 Not yet checked on the unit.
@@ -664,7 +707,10 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 | Key | What it does | Ref |
 |---|---|---|
 | `F1` (**PLAY PAT**), `F2` (**PLAY SNG**) | play the slot's pattern in a loop, or the song from the selected slot | QA-SNG-043 |
+| `F1` (**PREVIEW**) in a lane of TIMELINE | loop the slot's pattern with only the rectangle's tracks sounding; `F1` again, `Stop` or leaving the screen ends the audition and restores the solo set; not an undo unit | QA-SNG-203, QA-SNG-204, QA-SNG-205, QA-SNG-206 |
+| hold `F2` | loop the selected slots; the same slots again take the loop back | QA-SNG-200, QA-SNG-201 |
 | `F3` (**ADD SLOT**), `Insert` | add a slot with the same pattern | QA-SNG-050 |
+| hold `Copy` + `F3` (**ADD EMPTY**) | add a slot on the first free pattern (an empty one); **NO FREE PATTERN** when the pool is full | QA-SNG-211 |
 | `F4` (**DEL SLOT**) | removes one slot, in the list and in the map too | QA-SNG-012, QA-SNG-028 |
 | `Delete` | removes one slot in the list. In the map it clears the cells of the selection instead | QA-SNG-012, QA-SNG-028 |
 | `F5` (**UNIQUE**) | give a shared slot its own copy | QA-SNG-034 |
@@ -672,11 +718,11 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 | `F7` (**TEMPO**) | put the encoder on the tempo (1 BPM a detent, `Shift` for 0.1); `F7` again taps the tempo, two taps under 1.5 s apart set it (40 to 800 BPM); `F8` takes the edit back | QA-SNG-062 |
 | `F8` (**UNDO**) | undo the last Song edit | QA-SNG-013 |
 | the encoder | change the slot's pattern number, or the tempo after `F7` | QA-SNG-062 |
-| `Right`, `Left` | enter and leave the map, walk the tracks | QA-SNG-020, QA-SNG-021 |
+| `Right`, `Left` | enter and leave the map, walk the tracks (on Timeline: `Down` and `Up`; `Left` and `Right` walk the slots) | QA-SNG-020, QA-SNG-021, QA-SNG-116 |
 | `Shift` + arrows | select slots and tracks | QA-SNG-022 |
 | `Copy`, `Shift` + `Copy` | copy, paste | QA-SNG-023, QA-SNG-024 |
 | `Shift` + `Delete` | cut | QA-SNG-053 |
-| hold `Copy` + `Up` or `Down` | move the slot or range | QA-SNG-056 |
+| hold `Copy` + `Up` or `Down` | move the slot or range (on Timeline: `Left` or `Right`) | QA-SNG-056, QA-SNG-133 |
 | `Note`, `Shift` + `Note` | next and previous use of the pattern | QA-SNG-058 |
 | `Rec` while playing | queue a jump to the cursor's slot | QA-SNG-043 |
 | `Shift` + `F1` to `F5` | jump the cursor to a quarter and to the end | QA-SNG-002 |
@@ -721,9 +767,11 @@ To set a level or a pan on the MIXER page, press `Left` or `Right` to pick the c
 
 ### What is an insert?
 
-An insert is an effect module placed on the sound of one track. The track's sound passes through the effect before it reaches the fader. Each track has two slots, **INS A** and **INS B**. A project holds up to four inserts. The picker lists the effect modules on the card, in the `modules/effects` folder.
+An insert is an effect module placed on the sound of one track. The track's sound passes through the effect before it reaches the fader. Each track has two slots, **INS A** and **INS B**. A project holds up to four inserts at once. The MASTER row has one insert too: it runs its effect twice, once for each side, so it counts as two of the four. The picker lists the effect modules on the card, in the `modules/effects` folder.
 
 Each insert takes some of the processor's time in every audio block. Its cell shows that share as `~N%` or `<1%` of the block, the measured cost of that insert. Until a block has measured it, the cell is blank.
+
+A **stereo** effect (an effect module of ABI 1.12 with a stereo shape) is marked **ST** on its cell and on its line of the picker. A **WIDENS** effect makes a stereo image out of a mono track, and each one that runs keeps one of the unit's four stereo voices for itself: with two WIDENS inserts on, a new stereo note beyond the second plays mono (its mid only), while a note that is already sounding keeps its stereo to the end of the note. Each insert costs one voice, so two WIDENS inserts in the two slots of one track cost two — only WIDENS effects reserve a slot. Bypass gives the voice back to the next note. A stereo-capable effect (one that only keeps a stereo sample's side signal) is marked **ST** too but reserves no voice, and neither does the master insert, whose pair still runs its effect twice, once per side (dual mono), until a stereo master insert lands. The console's `ins` totals line ends with the reservation, `stereo reserved N of 4`. New in track3r-os.
 
 **Bypass** keeps the insert in its slot and plays the track without it. The change is smooth, with no click. `F7` turns bypass on and off.
 
@@ -750,7 +798,7 @@ Below the tracks are three more rows. **LINE IN** is the audio input. Its row ha
 
 ### Sends: a second volume knob
 
-A send takes a copy of a track and feeds it to a shared effect. **SND A** is the delay and **SND B** is the reverb. The send amount is the instrument's **DELAY SEND** and **REVERB SEND**, from 0 to 100, on the SENDS page of Instrument. By default a send taps the track before its fader, so the fader does not change it. The project's SENDS setting can make the tap come after the fader. A return brings the effect's sound back to MAIN and CUE.
+A send takes a copy of a track and feeds it to a shared effect. **SND A** is the delay and **SND B** is the reverb. The send amount is the instrument's **DELAY SEND** and **REVERB SEND**, from 0 to 100, on the SENDS page of Instrument (on a module instrument, on its MIX page: `Shift` + `F2`). By default a send taps the track before its fader, so the fader does not change it. The project's SENDS setting can make the tap come after the fader. A return brings the effect's sound back to MAIN and CUE.
 
 - **Stored:** routes, levels, pans, names, the mutes and solos, and the effect settings are saved with the project.
 - **Live:** the meters.
@@ -821,6 +869,17 @@ You should see the picker close, the strip say **INSERT SET** and the cell show 
 
 Not yet checked on the unit.
 
+### Load a preset into an insert
+
+Start on the INSERTS page, with the cursor on a cell that holds an effect that has presets.
+
+1. Press `Params` to open the insert's page, then `F5` (**PRESET**). A list opens, titled **PRESET** and the module's name: the factory presets, then a **CARD** heading with the card's presets of the effect (`modules/presets/<module>/` on the card; `+ MORE ON CARD` past 128).
+2. Choose a preset with `Up`, `Down` or the encoder, and press `F1` (**LOAD**). `F8` (**BACK**) closes the list and loads nothing.  To save the values in force as a card preset instead, press `Shift` + `F5` (**SAVE**) on the page or in the list, type a name in the keyboard (**PRESET NAME**, the effect's name suggested) and press `F8`: the strip says **PRESET SAVED: <NAME>**, and a taken name gets **<name> 2**.
+
+You should see the strip say, for example, **PRESET DARK HALL LOADED**, and every row of the page show the preset's value. A preset sets every parameter: one that names only some leaves the others at the module's defaults.  The values are saved with the project and the insert sounds so at once. Like every change to an insert, a preset load is not an undo step. A card preset that names an unknown parameter says **PRESET <NAME> LOADED, <n> SKIPPED**; a damaged file says **PRESET DAMAGED**; a file of another module **PRESET OF <MODULE>**. An effect with no presets at all opens the list and it says **NO PRESETS, SHIFT+F5 SAVES**.  New in track3r-os.
+
+Not yet checked on the unit.
+
 ### Bypass or remove an insert
 
 Start on the INSERTS page, with the cursor on a cell that holds an insert.
@@ -830,6 +889,21 @@ Start on the INSERTS page, with the cursor on a cell that holds an insert.
 3. Press `Delete`. The strip says **INSERT DELETED**, and the cell is empty.
 
 `Delete` cannot be undone. Not yet checked on the unit.
+
+### Change an insert's settings
+
+New in track3r-os. An effect has settings of its own: the Drive effect, for example, has Shape, Drive, Tone, Mix and Output. Start on the INSERTS page, with the cursor on a cell that holds an insert.
+
+1. Press `F6` (**PARAMS**) or `Params`. The effect's page opens with its settings in rows, eight rows a page. The strip names the cell, for example `T1 B`.
+2. If the effect has more than one page, press `F1` to `F4` to choose it.
+3. Press `Up` or `Down` to a row, and turn the encoder. `Left` and `Right` change the value by one click, `Shift` makes the step coarse, and `Delete` puts the default back.
+4. Press `F6` (**BACK**), `Master` or any other screen button. The Mixer opens on INSERTS with the cursor on the same cell.
+
+You should see the value change on the row, and the track's sound change with it from the next audio block. The value is saved with the project.
+
+> **Careful**: A change here has no undo. `F8` says **NOTHING TO UNDO HERE**, and `Delete` on a row cannot be taken back either.
+
+On an empty cell `F6` and `Params` say **NO INSERT HERE** and open nothing. On the insert's page `F7`, `Shift` + `F6` and `Shift` + `F7` do nothing and their labels are blank.  On a bound MASTER cell `Params` opens the module's page with the strip saying `MASTER`, and an edit reaches both instances. On the other Mixer pages `Params` still opens the page of the instrument in view.  Not yet checked on the unit.
 
 ### Name a track
 
@@ -899,11 +973,12 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 | `F3` (**MST FX**) | the MASTER FX page. The card reads **MASTER LIMITER**, **ALWAYS ON**. | QA-MIX-002 |
 | `F4` (**STEMS**) | the STEMS page, one column for each source. The first row is **OUTPUTS**, the slots follow. With no stem map the page says so. | QA-MIX-034, QA-MIX-050 |
 | `F5` (**CUE LVL**) | goes to the CUE LEVEL row of the MASTER FX page, from any page; on that row it changes nothing | QA-MIX-035 |
-| `F6` | on STEMS, **APPLY**: the number of outputs you chose, after a second press within two seconds. On the MIXER, ROUTING and MASTER FX pages it opens **INSERTS**. | QA-MIX-036, QA-MIX-052, QA-MIX-055, QA-MIX-058 |
+| `F6` | on STEMS, **APPLY**: the number of outputs you chose, after a second press within two seconds. On the MIXER, ROUTING and MASTER FX pages it opens **INSERTS**. On INSERTS it is **PARAMS**: the settings page of the insert under the cursor (an empty cell says **NO INSERT HERE**); on that page it is **BACK**. | QA-MIX-036, QA-MIX-052, QA-MIX-055, QA-MIX-058, QA-MIX-108, QA-MIX-109 |
 | `F7` (**MUTE**) | mutes the track under the cursor, on MIXER, ROUTING and STEMS (the track of the column). On **SNDA** and **SNDB** it mutes the effect; on MASTER FX it mutes the bus of the DRY, REVERB or DELAY row; on STEMS **SA** and **SB** mute their effect. On **INSERTS**, **BYPASS** toggles the insert of the cell. Anywhere else the strip says why. | QA-MIX-003, QA-MIX-037, QA-MIX-038, QA-MIX-062 |
 | `F8` (**SOLO**) | solos the track under the cursor, on MIXER, ROUTING and STEMS. On MASTER FX, and on a bus, the strip says **TRACKS ONLY**. | QA-MIX-004, QA-MIX-037, QA-MIX-038 |
-| `Insert` | on INSERTS, on an empty cell, opens the picker of effect modules; on a taken cell the strip says **DELETE THE INSERT FIRST** | QA-MIX-059, QA-MIX-063 |
+| `Insert` | on INSERTS, on an empty cell, opens the picker of effect modules (on the MASTER row, for the master insert); on a taken cell the strip says **DELETE THE INSERT FIRST** | QA-MIX-059, QA-MIX-063, QA-MIX-084 |
 | `Delete` | on INSERTS, removes the insert of the cell | QA-MIX-064 |
+| `Params` | on INSERTS, on a taken cell, opens the insert's settings page (as `F6` does); `F6`, `Master` or any screen button leaves it. See [Change an insert's settings](#change-an-inserts-settings) | QA-MIX-073, QA-MIX-076, QA-MIX-077 |
 | `Up`, `Down`, `Left`, `Right` | on INSERTS, move between the cells; the MASTER row has one cell | QA-MIX-058 |
 | `Shift` + `F1` (**NAME**) | names the track under the cursor. On IN, SND A, SND B, CUE or MASTER, or on the MASTER FX page, the strip says **TRACKS ONLY**. | QA-MIX-010, QA-MIX-012 |
 | `Shift` + `F7` (**UNMUTE**) | unmutes every track | QA-MIX-003 |
@@ -918,7 +993,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 ## Good to know
 
 - A track with a **STEREO** instrument goes through an insert as one mono signal: while an insert is on, the second channel of the instrument is dropped. Bypass the insert to hear both channels again.
-- The MASTER row shows its cells but takes no insert: **MASTER INSERT: NOT YET**.
+- The MASTER row has one cell, the **master insert**. It runs on the whole mix, after the DJ filter and the kill EQ and before the limiter, so the limiter still catches what the effect adds. A mono effect runs on each side separately, with the same settings, and counts as **two** of the four inserts; a stereo effect (marked **ST** in the picker) runs once on both sides together and counts as **one**. Either way, with the four inserts taken, `Insert` on it says **INSERTS FULL**.
 - On a taken cell, `Insert` says **DELETE THE INSERT FIRST**.
 - With four inserts in the project, `Insert` says **INSERTS FULL**.
 - On an empty cell, `F7` says **NO INSERT HERE**.
@@ -928,6 +1003,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 - A bind right after the `Delete` of the same cell says **INSERT LEAVING: TRY AGAIN**. Wait a moment and try again.
 - `F7` says **NO CPU** when the block has no room for the effect.
 - The inserts are saved with the project. Not yet checked on the unit: that they are bound again when the project opens.
+- To move an insert's parameter with a MIDI controller, open its page with `Params`, put the cursor on a row, press `Vol` and `Fx` together (Learn) and turn the controller. A row the module marks as not learnable says **NO TARGET TO LEARN**. The binding is saved with the project. Not yet checked on the unit.
 
 > **Careful**: The Mixer has no undo. `F8` here is **SOLO**, and `F8` on Pattern, Song or Params does not bring a Mixer change back.
 
@@ -950,11 +1026,11 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 
 Status: draft
 
-Perform works on the whole pattern at once and live: nothing you do here is written into the steps. Twelve slots each hold one effect, and a pad press punches it in on the tracks you chose. You choose the tracks by holding `Shift` and using the top row of pads, not with screen keys. Three scenes, **HALF** and **DOUBLE** time, **NEXT PAT**, a pattern of its own for single tracks and **RESET** are new in track3r-os, and so is switching **LATCH** off. `Perform` pressed again opens the DJ page, which has [its own chapter](perform_dj.md).
+Perform works on the whole pattern at once and live: nothing you do here is written into the steps. Twelve slots each hold one effect, and a pad press punches it in on the tracks you chose. You choose the tracks by holding `Shift` and using the top row of pads, not with screen keys. Three scenes, **HALF** and **DOUBLE** time, **NEXT PAT**, a pattern of its own for single tracks and **RESET** are new in track3r-os, and so is switching **LATCH** off. `Perform` pressed again opens the DJ page, which has [its own chapter](perform_dj.md). Single tracks can play another pattern with the Shift keys (see [Give single tracks another pattern](#give-single-tracks-another-pattern)).
 
 ## What it is for
 
-Use Perform to change how the pattern sounds while it plays, with your hands, and to put it back by letting go. Press `Perform` to open it. Perform opens on the page you left it on: **SLOTS** the first time, or the [DJ page](perform_dj.md) if you left it there. Press `Perform` again to turn to the other page.
+Use Perform to change how the pattern sounds while it plays, with your hands, and to put it back by letting go. Press `Perform` to open it. Perform opens on the page you left it on: **SLOTS** the first time, or the [DJ page](perform_dj.md) if you left it there. Press `Perform` again to turn to the next page: SLOTS, DJ, then SLOTS again.
 
 ## How it works
 
@@ -1004,10 +1080,10 @@ Up and Down in EDIT choose a slot's effect from a list of 21. All of them act. T
 | **LOWPASS**, **HIPASS**, **BANDPASS** | the three filters. |
 | **VOL LFO**, **PAN LFO**, **TUNE LFO**, **FLT LFO**, **POS LFO** | change how fast the track's LFO runs for the volume (tremolo), the pan (auto-pan), the pitch (vibrato), the filter cutoff and the wavetable window or granular position. The value moves the speed up (+) or down (-) the instrument's speed list, from -23 to +23 for VOL LFO and -28 to +28 for the others. If the instrument already has an LFO there, its shape and amount stay and only the speed moves. If it does not (that target is Off or an envelope), the effect runs an LFO for the track at 1 step plus the value, with the shape and amount stored on the instrument's LFO rows (a new instrument: triangle, 50 %; a stored amount under 5 %, as older projects and imported instruments often have, runs as a triangle at 50 %); at 50 % VOL LFO swings the volume between silence and half, a peak of -6 dB, so raise the amount for more. FLT LFO needs a filter that is on (the instrument's own, or a held LOWPASS, HIPASS or BANDPASS), POS LFO only moves wavetable and granular instruments. The LFOs follow the tempo and keep running when the song is stopped. A step with the Filter LFO FX (35) on the same track gives way to FLT LFO while it is held. Sampler instruments only. |
 | **DELAY**, **REVERB** | open or close the track's send, -100 to +100. |
-| **STUTTER**, **PLAYMODE**, **PAT LEN** | repeat steps, play forward, back, ping-pong or random, and force a pattern length. |
+| **STUTTER**, **PLAYMODE**, **PAT LEN** | repeat steps, play the steps forward, back, ping-pong, at random or in one of the twenty custom orders **C1** to **C20**, and force a pattern length. |
 | **BITDEPTH**, **OVERDRV** | crush or distort the notes. 0 is clean. |
 
-A new slot of the five LFO speeds reads -8, -3 and +3: slow, medium and fast. The way **VOLUME**, **PANNING**, **TUNE**, the five LFO speeds, **DELAY**, **REVERB**, **PLAYBACK**, **BITDEPTH** and **OVERDRV** act, and the four names of **PLAYMODE**, are new in track3r-os. The names **STUTTER** and **PAT LEN** follow the official manual. Not checked against the original firmware: what the effects do there.
+A new slot of the five LFO speeds reads -8, -3 and +3: slow, medium and fast. The way **VOLUME**, **PANNING**, **TUNE**, the five LFO speeds, **DELAY**, **REVERB**, **PLAYBACK**, **BITDEPTH** and **OVERDRV** act, and the names of **PLAYMODE** (**FWD**, **BACK**, **PING**, **RND**, then **C1** to **C20**), are new in track3r-os. The names **STUTTER** and **PAT LEN** follow the official manual. Not checked against the original firmware: what the effects do there.
 
 ### Scenes
 
@@ -1015,7 +1091,7 @@ A scene is a snapshot of the twelve slots: the effect, the chosen row and the th
 
 ## Try it
 
-1. Press `Perform`. If the strip says **PAGE DJ**, press `Perform` once more. All 12 slots read **OFF** and no track is on.
+1. Press `Perform`. If the strip says **PAGE DJ**, press `Perform` again until the slots come up (their strip shows **TRACKS**, not a page). All 12 slots read **OFF** and no track is on.
 2. Hold `Shift` and press pad 1 and pad 2. Release `Shift`. **T1** and **T2** read **ON**.
 
    (Picture: Perform, SLOTS page: T1 and T2 are ON; the track boxes at the bottom show it.)
@@ -1080,6 +1156,16 @@ Start on the Perform screen.
 
 Use `Shift` + `Left` or `Right` to swap the slot with its neighbor. `Copy` copies the slot and `Shift` + `Copy` pastes it onto the picked slot.
 
+### Shuffle a track's steps
+
+Start on the Perform screen with a track on (hold `Shift` and use the top row of pads) and the pattern playing.
+
+1. Press `Rec` (**EDIT**), `Left` or `Right` to pick the slot, and `Up` or `Down` until the slot reads **PLAYMODE**. Press `Rec` again.
+2. Hold the second or third pad of the slot and turn the encoder right: the cell reads **FWD**, **BACK**, **PING**, **RND**, then **C1** up to **C20**. Let go: with **LATCH** on the row stays on.
+3. The tracks that are on now play their steps in the order the C order shuffles them to, looped over the track's length, instead of forward. The top pad of the slot ends it: the tracks play forward again.
+
+The twenty orders **C1** to **C20** are the official firmware's built-in shuffles (verified parity, F1-F11 of `docs/specs/OS-PERFMODES.md`): each step of the pattern is played in the order the list says, and some of them repeat steps on purpose (their rolls). The value is stored with the project.
+
 ### Play at half or double time
 
 Start on the Perform screen with the pattern playing.
@@ -1100,13 +1186,19 @@ At the last pattern it goes back to the first. If it cannot queue, the strip say
 
 ### Give single tracks another pattern
 
-Start on the Perform screen with the song playing and the tracks you want to change switched on (hold `Shift` and use the top row of pads).
+Any of the tracks that are on can play another pattern's track while the rest go on. Do it from the SLOTS page, with the Shift keys.
+
+**With the Shift keys on the SLOTS page.** Start with the song playing. The tracks that are on (hold `Shift` and use the top row of pads) change pattern with the keys below.
 
 1. Press `Shift` + `F7` (**TRK NEXT**) to send the tracks that are on to the next pattern of the song order. Or press `Shift` + `F4` or `F5` (**PICK -** or **PICK +**) until the strip shows the pattern you want, then press `Shift` + `F6` (**TRK PAT**).
 2. Watch the track boxes. A box that waits shows **>07** and blinks. Each track changes at the end of its own loop, so tracks of different lengths change at different times.
 3. Press `Shift` + `F8` (**TRK SONG**) to send the tracks that are on back to the pattern of the song.
 
-A track that is off is not touched and shows **OFF**, not a pattern number. The same press again takes a waiting change back. Queueing the pattern a track already plays pins it at once, so it keeps that pattern when the song goes on. A track that has changed keeps its pattern when the song goes on, until you press **TRK SONG**, stop, or restart the transport (`Play` while it plays, or resume). A random track has no loop end, and a track longer than its pattern is restarted when the pattern ends. Both change at the end of the song's pattern. A pick that is no longer a pattern of the project says **PATTERN IS GONE: PICK ANOTHER** and queues nothing. Nothing is saved in the project. With the song stopped the strip says **NOT PLAYING**; with no track on, **NO TRACK IS ON: HOLD SHIFT + TOP PADS**.
+In Song mode a track you changed stays on its pattern when the song goes to the next slot; the others follow the song.  `Stop` ends it. Leaving Perform for any screen except Master and Song sends every track that is not on the song back at once; Master and Song keep it. Nothing is saved in the project.  These keys, and the rules for Song, Stop and leaving, are new in track3r-os. Not yet checked on the unit.
+
+A track that is off is not touched and shows **OFF**, not a pattern number. The same press again takes a waiting change back. Queueing the pattern a track already plays pins it at once, so it keeps that pattern when the song goes on. A track that has changed keeps its pattern when the song goes on, until you press **TRK SONG** or **SONG**, stop, restart the transport (`Play` while it plays, or resume), or leave Perform for any screen but Master and Song: then every track on another pattern goes back to the song at once. A random track has no loop end, and a track longer than its pattern is restarted when the pattern ends. Both change at the end of the song's pattern. A pick that is no longer a pattern of the project says **PATTERN IS GONE: PICK ANOTHER** and queues nothing. Nothing is saved in the project. With the song stopped the strip says **NOT PLAYING**; with no track on, **NO TRACK IS ON: HOLD SHIFT + TOP PADS**.
+
+With **CC MAP** on (Config > MIDI), a control change **41 to 48** on the slot page does the same for one track: the track's number is the CC's (CC 41 is track 1) and the pattern is `cc + 1`, whatever tracks are on, loaded at that track's loop end. The same value again does not take a waiting queue back; after `Stop` and `Play` it is sent again; a pattern the project does not have says **CC 4x: NO PAT nnn** on the strip. See [Config: control the unit with the official CC numbers](config.md#control-the-unit-with-the-official-cc-numbers).
 
 New in track3r-os. Not yet checked on the unit; how the original firmware does it is an open research question.
 
@@ -1131,7 +1223,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 
 | Key | What it does | Ref |
 |---|---|---|
-| `Perform` | opens Perform; again, the DJ page | - |
+| `Perform` | opens Perform; again, the DJ page; again, the slots | QA-PRF-100 |
 | `F1` (**SCENE 1**), `F2`, `F3` | a tap recalls the scene; holding for about one second stores it | QA-PRF-003 |
 | `Shift` + `F1` (**STORE 1**), `F2`, `F3` | stores the scene at once; the release recalls nothing | QA-PRF-002 |
 | `Shift` + `F4` (**PICK -**), `F5` (**PICK +**) | pick the previous or next pattern of the project for **TRK PAT** | QA-PRF-147 |
@@ -1159,6 +1251,7 @@ The DJ page has its own key row: `F1` **BANK -**, `F2` **BANK +**, `F3` **CURVE*
 - **TUNE** adds to the instrument's tune and fine tune, and a sounding note follows at once. Amiga-engine instruments and modules do not follow it.
 - An effect that is on stays on through `Play`, `Stop`, the Mixer and Song, and an export is the same with and without it. When a held **VOLUME** -100 or a closed send ends, the sound is back within a few milliseconds, with no click.
 - **PLAYMODE** **PING** bounces over the track: 0 1 2 3 2 1 0 on four steps, so the end steps play once per pass. A different pattern, a pattern switch or a jump starts it again, and so does resuming after a pause. Not yet checked on the unit.
+- **PLAYMODE** **C1** to **C20** shuffle the track's steps (see [Shuffle a track's steps](#shuffle-a-tracks-steps)); like **PING**, an order walks the track's own length, and **PAT LEN** can shorten it.
 - A pad you hold while you go to the Mixer (`Master`) or Song is let go when you lift it there, so its value does not stay on.
 - A project that uses **BITDEPTH** or **OVERDRV** shows those two slots empty in an older build.
 - Not yet checked on the unit. Not checked against the original firmware, except where a line above says otherwise.
@@ -1183,7 +1276,7 @@ The DJ page turns the pattern that plays into something you mix by hand. You put
 
 ## What it is for
 
-Use the DJ page to play a set from one pattern after another: drums on A and a melody on B, a filter sweep into the next pattern, a stutter at the end of a bar. Press `Perform` to open [Perform](perform.md); it opens on the page you left it on, so the strip may already say **PAGE DJ**. If it shows the slots, press `Perform` again. Once more goes back to the slots.
+Use the DJ page to play a set from one pattern after another: drums on A and a melody on B, a filter sweep into the next pattern, a stutter at the end of a bar. Press `Perform` to open [Perform](perform.md); it opens on the page you left it on, so the strip may already say **PAGE DJ**. If it shows the slots, press `Perform` again. The next press after the DJ page goes back to the slots.
 
 ## How it works
 
@@ -1317,7 +1410,7 @@ Tap the same pad again to cancel. The queued pattern stays queued. If less than 
 Start on the DJ page, playing, with no loop recording.
 
 1. Tap `F5` (**SCR**). The strip says **SCR ON: THE ENCODER IS THE PLATTER**.
-2. Turn the encoder. The mix moves with it, and a turn back plays the mix backwards. The platter has a little weight, about a fortieth of a second: a very slow turn is a smooth glide, and a stop or a start is a short curve, never a click or a step. A quick forth-and-back scratch returns to the same place, within about one click, and a turn back after a hard flick follows the new direction at once.
+2. Turn the encoder. The mix moves with it, and a turn back plays the mix backwards. The platter has a little weight, about a fifteenth of a second: a very slow turn is a smooth glide that does not stop between two clicks, and a stop or a start is a short curve, never a click or a step. A quick forth-and-back scratch returns to the same place, within about two clicks, and a turn back after a hard flick follows the new direction at once. A fast turn is gently dulled by a low-pass filter, which tames the harshest aliasing of the high pitch.
 3. To backspin, flick the platter fast backwards and tap `F5` while it still spins. The record brakes in about half a second and the mix is live. A slow turn, or a hand held still, lets go at once.
 
 If the looper is recording, the strip says **NO ROOM: LOOPER IS RECORDING**; without free sample memory it says **NO ROOM FOR THE SCRATCH**.   Until the scratch ends, opening a project says **END THE SCRATCH FIRST**.
@@ -1625,11 +1718,42 @@ New in track3r-os (the original firmware's editor has neither). Both act on the 
 2. Press `Up` or `Down` to pick a row and turn the encoder to change its value. `Shift` + the encoder changes it in bigger steps.
 3. For the **FILTER**, set **TYPE** (low pass, high pass or band pass), **CUTOFF** in Hz and **RESONANCE** (the Q: 0.5 to 15). Press `F1` (**FILTER**). A low pass takes away what is above the cutoff, a high pass what is below.
 4. For the **COMPRESSOR**, set **THRESHOLD** (dB), **RATIO**, **ATTACK** and **RELEASE** in ms, **MAKEUP** (**AUTO**, or 0 to 24 dB) and **DETECTOR** (**PEAK** or **RMS**). Press `F2` (**COMPRESS**). Above the threshold the level comes down by the ratio. **AUTO** makeup brings a full-scale peak back to full scale.
-5. Press `F8` (**UNDO**) to take it back. Press `Sample Edit` again to return to the edit page.
+5. Press `F8` (**UNDO**) to take it back. Press `Sample Edit` again to reach the **PLUGINS** page (new in the Community OS; it lists the plugins in the card's `Effects` folder and their parameters; see **Run a plugin** below), and once more to return to the edit page.
 
 A long process, such as the compressor on a sample of tens of seconds, can be stopped: while the strip shows its progress the key row reads **CANCEL** on `F8`. Press it and the strip says **EDIT COMPRESSOR CANCELLED**. The sample stays exactly as it was and nothing is added to the undo steps. When the process has ended, `F8` is **UNDO** again.
 
 The filter starts from silence at the first frame of the selection, so a selection that starts in the middle of a loud sound may click at its start. The exception is a looping instrument whose processed range starts at its loop start (in practice a loop that starts at the first frame, with the whole sample or a selection from 0): the filter and the compressor first run over the end of the loop, so the loop wraps without a click. Edge handles do not snap to the loop markers. If the loop starts in the middle of the sample (a sustain loop) and you process the whole sample, a click can remain at the wrap; process from the loop start instead.  A long sample takes a while, the compressor longer than the filter (the time is not yet measured on the unit). Both are not yet checked on the unit: listen to the result before you keep it. The values you set stay until you switch the unit off.
+
+### Run a plugin
+
+New in track3r-os. A plugin is a small `.ptfx` file in the `Effects` folder at the root of the card. On the **PLUGINS** page (press `Sample Edit` twice) it works on the sample like the other processes.
+
+1. Copy the `.ptfx` files into `/Effects` on the card. Press `F2` (**RESCAN**) if the page was open when you did.
+2. Pick the plugin in the list on the left and its values on the right: `Up` and `Down` pick a row, the encoder changes it (`Shift` for bigger steps), `Delete` or `F3` (**DEFAULTS**) brings the plugin's own values back.
+3. Make a selection on the edit page first if you want the plugin to act on a part only. Press `F1` (**APPLY**). The strip shows **PLUGIN** and the plugin's name with a percentage, then **DONE**. Without a selection it acts on all of the sample.
+4. Press `F8` (**UNDO**) to take it back. While the strip shows the progress `F8` reads **CANCEL**: press it and the plugin stops and the sample stays as it was.
+
+The plugin is one undo step, like the other processes. The strip says why a plugin does not run:
+
+- **NO SAMPLE**: an effect needs a sample; the slot is empty.
+- **NOT FOR THIS TRACKER**: the file was made for another device.
+- **PTFX VERSION NOT SUPPORTED**, **PLUGIN FILE DAMAGED**, **PLUGIN QUARANTINED**: the row is greyed and the strip names the reason.
+- **THE EDIT COULD NOT BE KEPT**: there was no room to keep the result; the sample is as it was.
+- **PLUGINS RUN ON THE TRACKER**: the simulator can only run its demo **Mono Tool** (its **AMOUNT** is a gain); every other plugin needs the unit.
+
+A stereo sample stays stereo. A plugin made for both sides runs once on the left and the right together.  One made for a single channel runs twice, on the left and then on the right, and both sides change the same way.  **Stereo to Mono** makes the whole sample mono (the left side, whatever the selection), and `F8` brings the stereo one back.  A generator replaces a stereo sample with a mono one, and `F8` brings it back too.
+
+The plugin's values are kept for the last 8 plugins while the unit stays on; they are not saved with the project.
+
+Three kinds of plugin act differently from an effect:
+
+- **A generator** (tag **GEN**) makes a sound from nothing: up to two seconds, mono. It ignores the selection and replaces the whole sample, as one undo step: `F8` brings the old sample back. On an empty slot it needs no sample: the result goes in like a loaded sample and the instrument is named **Gen NN**, with NN the slot number as the screens show it; the strip says **GENERATED** (then the waveform preview line), and there is nothing to undo. A generator does not run on a stereo sample (make it mono first).
+- **A wavetable plugin** (tag **WT**) also sets the instrument's play mode to **WAVETABLE** after the run. `F8` takes the sound back and the play mode with it (the play mode and the wavetable window go back to what they were); `Shift` + `F8` does both again.
+- **A plugin that adds silence** makes the sample longer. Your start, loop and end points keep pointing at the same sound. `F8` brings back the old length and points.
+
+The strip also says **NO SAMPLE INSTRUMENT HERE** when you run a generator on an empty-looking slot that holds a MIDI or other non-sample instrument, and **NOTHING PRODUCED** when a generator made no sound.
+
+Status: the effect path is verified in the simulator and on the host; generators, the wavetable mode and Add Silence are verified on the host only (the simulator has no stand-in for them); all of it is still to be checked on the unit.
 
 ### Convert to an Amiga rate
 
@@ -1648,16 +1772,16 @@ The **COMPRESSOR** and the Amiga conversion work on one signal only. On a stereo
 
 The key row, and the row drawn while `Shift` is held. `-` means the key does nothing.
 
-| Key | Sample edit | FX page | With `Shift` |
-|---|---|---|---|
-| `F1` | **CROP** | **FILTER** | **AMG 8K** |
-| `F2` | **NORM** | **COMPRESS** | **AMG 16K** |
-| `F3` | **REVERSE** | - | **Q8** |
-| `F4` | **FADE IN** | - | **DC REM** |
-| `F5` | **FADE OUT** | - | **NEXT INS** |
-| `F6` | **AMP** | - | **SAVE WAV** |
-| `F7` | **PREVIEW** | **PREVIEW** | **PRV EDGE** |
-| `F8` | **UNDO** | **UNDO** | **REDO** |
+| Key | Sample edit | FX page | PLUGINS page | With `Shift` |
+|---|---|---|---|---|
+| `F1` | **CROP** | **FILTER** | **APPLY** | **AMG 8K** |
+| `F2` | **NORM** | **COMPRESS** | **RESCAN** | **AMG 16K** |
+| `F3` | **REVERSE** | - | **DEFAULTS** | **Q8** |
+| `F4` | **FADE IN** | - | - | **DC REM** |
+| `F5` | **FADE OUT** | - | - | **NEXT INS** |
+| `F6` | **AMP** | - | - | **SAVE WAV** |
+| `F7` | **PREVIEW** | **PREVIEW** | **PREVIEW** | **PRV EDGE** |
+| `F8` | **UNDO** | **UNDO** | **UNDO** | **REDO** |
 
 (Picture: Sample edit, Shift row: AMG 8K, AMG 16K, Q8, DC REM, NEXT INS, SAVE WAV, PRV EDGE, REDO.)
 
@@ -1670,6 +1794,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 | `F7` (**PREVIEW**) | Play the sample while held. | none yet |
 | `Left`, `Right`, the encoder, `Delete` | Pick an edge, move it, clear the selection. | none yet |
 | `F8` (**UNDO**, **CANCEL** while a process runs) | Take back the last process; while a process is running, stop it and leave the sample as it was. | QA-SED-004, QA-SED-023 |
+| PLUGINS page: `F1` (**APPLY**), `F2` (**RESCAN**), `F3` (**DEFAULTS**) | Run the picked plugin on the selection, or on all of the sample; read the `/Effects` folder again; bring the plugin's values back. | QA-SED-033, QA-SED-040, QA-SED-042 |
 | FX page: `F1` (**FILTER**), `F2` (**COMPRESS**) | Filter or compress the selection, or the whole sample. `Up`, `Down`, `Left`, `Right` pick a row, the encoder changes it. | QA-SED-019, QA-SED-020, QA-SED-021 |
 | `Shift` + `F1` (**AMG 8K**) | Convert to the Amiga rate of 8,287 Hz. | QA-SED-001 |
 | `Shift` + `F2` (**AMG 16K**) | Convert to the Amiga rate of 16,574 Hz. | QA-SED-001 |
@@ -1949,6 +2074,8 @@ The simulator has no recorder, so its scenario `record_walk.txt` checks only the
 | Key row | `F1` to `F8`. Under a loop review the whole row changes. |
 | Shift row | The labels drawn while `Shift` is held. See the table under "Keys on this screen". |
 
+The strip also carries a small chip for each of these that is switched on, after the STATE field: **MONITOR**, **REC** (**ARMED** while the take only waits for its start), **OVERDUB** (**UNDO** while a layer is being undone) and **LOOP** (the LOOP row is on, or a loop is under review). A chip that is off is not drawn, so a quick look at the top of the screen tells you what the next take will do.
+
 ## More tasks
 
 ### Record a sample
@@ -1981,6 +2108,8 @@ The **COUNT-IN** row, the last row of every page right after **LOOP**, sets **OF
 2. Press `F1`. With the transport stopped, the transport starts the pattern at once (not Config's count-in: the row replaces it for this take) and the strip counts the wait down: **RECORDING IN 4.. 3.. 2.. 1..**. With the transport running, the take waits for the next bar first.
 3. After N bars of music the take records, from the first step of the next bar, to the sample: from stop, from the first step of bar N+1; running, from the boundary after the next bar plus N bars.
 4. A **Stop** or `F1` during the count-in gives the take up, as during any wait.
+
+The count-in clicks even with **METRO** **Off** in Config: while it runs the metronome sounds on **MAIN** at the device's **METRO VOL** (the setting itself does not change), and when the count-in ends the engine gets the setting back; the click is never in the take.
 
 The row is dim while a take is armed or recording. It is a runtime setting only: nothing is stored, and a restart puts it back to **OFF**. With the row **OFF**, everything is exactly as before.
 
@@ -2191,6 +2320,26 @@ You should see **OPENING** and the project's name, then the Pattern screen with 
 
 At power-on the unit opens the project you had open last (the newest **RECENT** entry), and the strip says **PROJECT <NAME> OPENED**. If it cannot load, the unit starts with an empty project and the strip says **PROJECT <NAME> FAILED** and why, at every start until you open another project. With no card, or on the USB disk boot, nothing is opened. New in track3r-os. Not yet checked on the unit.
 
+### Open a project saved by tracker-ce
+
+New in track3r-os. tracker-ce is the open-source firmware that Polyend published for the Tracker. A project folder it saved opens here like an original-format folder, and its patterns keep what this OS can play. Start on the PROJECTS page, with the folder on the card.
+
+1. Press `F2` (**RESCAN**) if the folder is not in the list.
+2. Move the cursor to the folder and press `F1` (**OPEN**).
+3. Press `Play` and listen to the patterns.
+
+You should see **OPENING** and the folder's name, then the Pattern screen with **PROJECT <NAME> OPENED**.
+
+What changes on the way in:
+
+- **Tracks.** Patterns of 8, 12 and 16 tracks open. A 16-track pattern keeps tracks 13 to 16, and an export in the original format writes 12 tracks.
+- **Volume column.** It plays as the step's volume. A value above 100 plays as full volume.
+- **Micro-move column.** It becomes a [Micro-move](glossary.md) in the step's first free FX cell. The micro-move is left out when no FX cell is free, when a cell already holds a Micro-move, or when the other cell holds Random value 16.
+- **tracker-ce effects.** The tracker-ce effects **w**, **y** and **z** (amp envelope, filter envelope, grain length) are known and play, see [Effects](fx.md). Any other effect that only tracker-ce has shows `?` and its value in the cell, plays nothing, and stays in the project when you save. A number outside tracker-ce's list is cleared.
+- **A damaged pattern file** is skipped, and the rest of the folder opens.
+
+The load ends with one summary line, in the diag console log and in `diag sd` (see [Computer tools](computer_tools.md)). It names what was lost, for example `3 MICRO-MOVES NOT KEPT, 2 VALUES CHANGED`; the changed values are the volumes above 100 and the cleared effects together. A folder that lost nothing says neither part.  Not yet checked on the unit.
+
 ### Save a project, save a copy, or name it
 
 Start on the PROJECTS page.
@@ -2222,6 +2371,8 @@ A module is a song file from an Amiga or PC tracker: ProTracker (MOD), Scream Tr
 4. If the project has changes that no save has taken, press `F1` again, as for **OPEN**.
 
 You should see **IMPORTING** and the name, then **IMPORTED** and the name. The module replaces the project; **SAVE AS** names it. The OS reads the first bytes of the file, not its name, to know what it is. A file that no reader takes says **NOT A MODULE THIS OS READS**, asks nothing and changes nothing. A real module cut off inside its header or song list, or with no room for one pattern after its header, says the same, not a more precise reason; the project stays as it was. A name that says one format over bytes of another is refused the same way, except that a MOD and an S3M may swap names.  The oldest Soundtracker modules have 15 samples and no tag. They import when the name says MOD or says nothing, as a 4-channel song. Their own effect numbers are not handled.  New in track3r-os. Not yet checked on the unit.
+
+The MOD, S3M and MED readers are not in the firmware: they run from `modules/importers/tracker.tmod` on the card, which the starter zip of this release puts there. Without that file an import of a module fails at once with **IMPORT <NAME> FAILED: NO IMPORTER** and nothing is changed, and the REPORT page (**F8**) names the file to copy. A `tracker.tmod` of another firmware says **IMPORTER FOR OTHER FIRMWARE** the same way.
 
 ### Convert other module formats with OpenMPT
 
@@ -2423,7 +2574,7 @@ Modules are files on the card that add to the OS without a firmware update: soun
 
 ## What it is for
 
-Use a module instrument when a slot should be a synth, not a sample: pick it with `F4` (**MODULE**) on the Instrument screen. Use an app for a job on the pattern, such as a Euclidean rhythm, humanizing, or a MIDI monitor. Open the screen from the Navigator: `Shift` + `Pattern`, then **MODULES**.
+Use a module instrument when a slot should be a synth, not a sample: pick it with `F4` (**MODULE**) on the Instrument screen. Use an app for a job on the pattern, such as a Euclidean rhythm, humanizing, or a MIDI monitor. Open the screen from the Navigator: `Song` + `Pattern`, then **MODULES**.
 
 ## How it works
 
@@ -2449,7 +2600,7 @@ Example: put the TB-303 in slot 4, write a line on a track, then add a Glide to 
 
 Example: open Rhythm Gen from `F7` (**TOOLS**) on Pattern. It starts at your cursor, builds a rhythm with its rows, and **APPLY** writes it into the pattern. `F8` on Pattern takes it back.
 
-An app asks before its first launch of a boot when it edits the project or writes files: `F1` reads **LAUNCH?** and the strip says what it will do. Press `F1` again to start it. An app that only listens asks nothing.
+An app asks before its first launch of a boot when it edits the project or writes files: `F1` reads **LAUNCH?** and the strip says what it will do. Press `F1` again to start it. An app that only listens asks nothing, and an app opened from the Pattern's APPS page asks only when it writes files.
 
 ## Try it
 
@@ -2491,11 +2642,21 @@ Not yet checked on the unit.
 
 Start on any screen.
 
-1. Hold `Shift` and press `Pattern`. The Navigator opens.
+1. Press `Song` and `Pattern` together. The Navigator opens.
 2. Turn the encoder until **MODULES** is shown.
 3. Press `F8` (**GO**).
 
 You should see the list of apps on the card.
+
+### Start an app from anywhere
+
+Start on any screen. This is new in track3r-os.
+
+1. Press `Shift` + `Pattern`. A list titled **APPS** opens with the apps that are not tools: the scope, the tuner, the loudness meter, the MIDI monitor and the like. The tools (Chords, Humanize and the other pattern tools) stay on their own page, `F7` on Pattern.
+2. Turn the encoder to the app.
+3. Press `F1` or `F8` (**LAUNCH**). The app starts as it does from `F1` on the Modules screen, and asks you to press `F1` again when it writes files.
+
+You should see the app's page. `Pattern` or `Shift` + `Pattern` again closes the list without starting anything. With no such app the list says so. When you leave the app with `F8` you land on the Modules screen. Not yet checked on the unit.
 
 ### Put a module in an instrument slot
 
@@ -2515,11 +2676,25 @@ Start on the Instrument screen of a module instrument, for example the TB-303.
 
 1. Press `F1` to `F4` to choose a page.
 
-The key row and the page heading show the module's page names. The TB-303 has **SOUND** and **MODS**. The Chip has **TONE**, **ENV**, **PITCH** and **ARP**. The FM has **OP1** to **OP4**. Keys past the last page, and `F5`, are blank, and a blank key does nothing. The **PAGE** field in the header counts the module's pages: `P1` and `P2` on the TB-303, `P1` to `P4` on the Chip and the FM. A module without named pages shows `1-8`, `9-16` and so on.
+The key row and the page heading show the module's page names. The TB-303 has **SOUND** and **MODS**. The Chip has **TONE**, **ENV**, **PITCH** and **OSC/FX**. The FM has **OP1** to **OP4**. Keys past the last page are blank, and a blank key does nothing. `F5` is **PRESET**, described below. The **PAGE** field in the header counts the module's pages: `P1` and `P2` on the TB-303, `P1` to `P4` on the Chip and the FM. A module without named pages shows `1-8`, `9-16` and so on.
 
 2. Turn the encoder to change a value.
 
 Some values show a name instead of a number. The Chip's wave shows **PULSE**, **TRIANGLE**, **NOISE LONG** or **NOISE SHORT**. Its duty shows 12.5%, 25%, 50% or 75%. The FM's algorithm shows a routing such as `4>3>2>1`. The side pane gives the range in names too.
+
+Not yet checked on the unit.
+
+### Presets: load and save
+
+A module has presets: named sets of values for its parameters. Two kinds show in the same list: the module's factory presets, and the card's — the `.o3mp` files in `modules/presets/<module>/` on the card. Start on the page of a module instrument that has some, or on the page of an insert (see [the Mixer](mixer.md)). The built-in modules (TB-303, Chip, FM, SID) have no factory presets yet: their `F5` (**PRESET**) key opens the list, which says **NO PRESETS, SHIFT+F5 SAVES** when the card holds none either.
+
+1. Press `F5` (**PRESET**). A list opens over the page, titled with the module's name: the factory presets, each with how many values it gives, then a **CARD** heading with the card's presets of the module (at most 128 are listed; the list says **+ MORE ON CARD** when the folder holds more).
+2. Choose a preset with `Up`, `Down` or the encoder.
+3. Press `F1` (**LOAD**). `F8` (**BACK**) closes the list and loads nothing.
+
+You should see the list close and the strip say, for example, **PRESET SHORT LOADED** (a card preset that names a parameter the module does not have says **PRESET <NAME> LOADED, <n> SKIPPED**; a damaged file says **PRESET DAMAGED**, a file of another module **PRESET OF <MODULE>**). A preset sets every parameter of the module: a parameter the preset does not name goes back to the module's default, not what it was before. On an instrument the whole load is one undo step, so one `F8` (**UNDO**) on the page puts every value back. A module instrument that is not loaded has a blank `F5`, and a blank key does nothing. A sample instrument's `F5` is still its **SENDS** page. New in track3r-os.
+
+To save the values in force as a card preset, press `Shift` + `F5` (**SAVE**) on the module's page, or in the list. The on-screen keyboard opens (**PRESET NAME**) with the instrument's name — or the effect's name, on an insert's page — suggested; type a name and press `F8`. The strip says **PRESET SAVED: <NAME>** and the file `modules/presets/<module>/<name>.o3mp` is on the card. Nothing is ever replaced: a name that is taken gets **<name> 2**, and the strip says the name the file got. The folder holds one folder per module, so you can copy a module's presets to or from a computer as one folder (the files are the same `.o3mp` the [preset tool](computer_tools.md) reads); renaming or deleting them on the unit is not offered — do it on the computer.
 
 Not yet checked on the unit.
 
@@ -2530,9 +2705,9 @@ Start on the Pattern screen, with the cursor on the track and row you want to wo
 1. Press `F7` (**TOOLS**). The list holds **EXPORT PATTERN** and the tool apps, sorted by name.
 2. Choose an app and press `F1`. The app opens with its rows set to your cursor: pattern, track and row.
 
-The rows PATTERN, TRACK, ROW and ROWS (TRACKS on Humanize and Chords) are the target. In Rhythm Gen they are on the last page, reached with `Right`; in Chords, on the second page. Press `Down` to a row and turn the encoder. `Shift` + the encoder takes the coarse step. The encoder moves one step and stops at the ends of the pattern. `Delete` puts the value you opened on back. A pattern that does not exist reads **(EMPTY)**, and **APPLY** says so. **APPLY** writes at the track and rows the page shows, and nowhere else. After `F8` the rows read the cursor again. Opened from the Modules screen there is no cursor, and the rows are dim dashes.
+Humanize runs in the TOOLS panel beside the Pattern: it shows only its own rows and works on the block you selected, or on the cursor step. The rows PATTERN, TRACK, ROW and ROWS (TRACKS on Chords) are the target of the other apps, such as Chords and Rhythm Gen, which keep the full app screen. In Rhythm Gen they are on the last page, reached with `Right`; in Chords, on the second page. Press `Down` to a row and turn the encoder. `Shift` + the encoder takes the coarse step. The encoder moves one step and stops at the ends of the pattern. `Delete` puts the value you opened on back. A pattern that does not exist reads **(EMPTY)**, and **APPLY** says so. **APPLY** writes at the track and rows the page shows, and nowhere else. After `F8` the rows read the cursor again. Opened from the Modules screen there is no cursor, and the rows are dim dashes.
 
-Mutate and Morph work on a whole instrument instead. Their last row, **INSTRUMENT** (**INSTRUMENT A** on Morph), starts as the Pattern's current instrument. Turn the encoder to pick another one, 1 to 64, and the page shows that instrument's parameters. A slot that is not a sample or module instrument says **SAMPLE OR MODULE INSTRUMENTS ONLY**. `Delete` puts back the instrument you opened on, and **APPLY** changes the instrument the row shows.
+Mutate and Morph work on a whole instrument instead. Opened from TOOLS or from the Modules screen, they keep their own page, and their last row, **INSTRUMENT** (**INSTRUMENT A** on Morph), starts as the Pattern's current instrument. Turn the encoder to pick another one, 1 to 64, and the page shows that instrument's parameters. A slot that is not a sample or module instrument says **SAMPLE OR MODULE INSTRUMENTS ONLY**. `Delete` puts back the instrument you opened on, and **APPLY** changes the instrument the row shows.
 
 Not yet checked on the unit.
 
@@ -2579,7 +2754,8 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 
 | Key | What it does | Ref |
 |---|---|---|
-| `Shift` + `Pattern` (Navigator), then the encoder to **MODULES**, then `F8` (**GO**) | opens the Modules screen | QA-MOD-002 |
+| `Song` + `Pattern` (Navigator), then the encoder to **MODULES**, then `F8` (**GO**) | opens the Modules screen | QA-MOD-002 |
+| `Shift` + `Pattern`, then `F1` or `F8` (**LAUNCH**) | lists the apps that are not tools and starts the one you chose | QA-MOD-252, QA-MOD-253 |
 | `F1` (**LAUNCH**) | starts the app under the cursor | QA-MOD-002 |
 | `F2` (**RESCAN**) | looks at the card again. The strip says how many apps it found: **READ AGAIN: 3 APPS** | QA-MOD-001, QA-MOD-157 |
 | `Up`, `Down` | move one row | QA-MOD-060 |
@@ -2601,9 +2777,9 @@ The engine picker, on the Instrument screen:
 ## Good to know
 
 - While the picker is open, the other keys do nothing. `Pattern` does not leave the Instrument screen.
-- A module instrument cannot be copied. `Shift` + `F2` (**COPY**) says **A MODULE INSTRUMENT CANNOT BE COPIED**.
+- A module instrument cannot be copied. Its `Shift` + `F2` is **MIX** instead: the page with PANNING, DELAY SEND and REVERB SEND (see [Module sounds](module-sounds.md)).
 - A paste onto a slot that holds a module does nothing. The strip says **INS nn IS A MODULE: DELETE IT FIRST**, where `nn` is the slot number. Press `Shift` + `F4` (**DELETE**) first.
-- `SAVE` works for sample instruments only. On a module instrument the strip says **SAMPLE INSTRUMENTS ONLY**, and the card is not changed.
+- `SAVE` saves a sample instrument as a `.pti`. On a module instrument (or an insert's page) `Shift` + `F5` (**SAVE**) saves a preset instead — see [Presets](#presets-load-and-save); on a MIDI instrument the strip says **SAMPLE INSTRUMENTS ONLY**.
 - Deleting a module instrument with `Shift` + `F4` stops its sound. `F4` (**MODULE**) then says **RELOAD TO PUT A MODULE HERE**. Press `F8` twice to bring the module back.
 - A module built for an older track3r-os ignores Glide and Slide. Its notes play as ordinary notes.
 - Glide, Slide up and Slide down change the pitch of a module instrument. Arp plays only with a Chord in the other FX column. Chord alone plays the root. See [Step FX on module instruments](module-instrument-fx.md).
@@ -2700,7 +2876,18 @@ The filter mixes a low pass, a band pass and a high pass. **MODE** picks the mix
 
 The real chip has one filter shared by its three voices. Here every track has its own filter. After you release a key, a resonant filter rings on for a moment.
 
-Not yet checked on the unit: everything in this chapter.
+### PAN and the sends: the MIX page
+
+Every module instrument (TB-303, FM, Chip, SID, Sine and the built-in ones) has three rows of its own that belong to the OS, not to the module: **PANNING** (0 to 100, 50 is the centre), **DELAY SEND** and **REVERB SEND** (0 to 100, in steps of 10, 0 is no send). They sit on the **MIX** page. On the Instrument screen press `Shift` + `F2` (**MIX**); a page key or `Left` / `Right` brings back the module's pages.
+
+- The pan and the sends act when a note starts, and a change you make while the note rings is heard at once on the tracks that hold the module. The Panning step FX and the Perform PAN still add on top of the instrument's pan, as they do for a sample.
+- `F8` (**UNDO**) takes back an edit. The three values are saved with the project and loaded again.
+- A project saved earlier sounds the same: the pan reads 50 and both sends 0.
+- **RATE** (new in track3r-os): TB-303, FM, SID, Chip and Sine have a fourth row on the MIX page, **RATE** (FULL, 1/2, 1/4). At 1/2 or 1/4 the module is asked for half or a quarter of the samples and each one is held twice or four times: the sound turns crunchier and aliased on purpose, and the module costs about half or a quarter of its CPU. FULL is the sound you had before. Changing the row never cuts a note: while the instrument sounds the change waits, and once it is silent the instrument restarts with its parameters as they were (a note started in that instant, a few milliseconds, is skipped). RATE belongs to the instrument: it is saved with the project, a loaded project plays it, and **UNDO** and **REDO** step it like any other change. Putting another module on the slot starts it at FULL until you set RATE again.
+
+Not yet checked on the unit: the MIX page and its RATE row.
+
+Not yet checked on the unit: everything else in this chapter.
 
 ## Try it
 
@@ -2788,6 +2975,126 @@ The Sampler column is what the FX specs say; the module column is checked on the
 - [Effects in the pattern](fx.md): how to put an effect on a step.
 - [Modules](modules.md): module instruments and apps.
 - [TB-303, FM and Chip: new parameters](module-sounds.md): the built-in sounds.
+
+---
+
+# Insert effects: Fold, Env Filter, Phaser and Comp
+
+Status: draft
+
+New in track3r-os.  The official firmware has no effect that sits on one track. The Community OS has **inserts**, and four effect modules you can put in them: **Fold** (a wavefolder), **Env Filter** (an auto-wah), **Phaser** and **Comp** (a compressor that can also shape attacks). Each is a file on the card that you load once and then pick from the INSERTS page of the Mixer. All four were checked on the host by tests; none is checked on the unit yet, so how they sound on the hardware is still open.
+
+## What it is for
+
+Use an insert when one track needs its own treatment: fold a bass into a buzz, make a pluck open and close a filter, sweep a pad, or squeeze a drum bus. The effect hears that track only, before the track goes to the mix and the sends. The Perform effects act on the whole pattern; an insert stays on its track until you remove it. The steps to load a module and fill an insert slot are in [Mixer: put an effect on a track](mixer.md); this page says what each of the four does.
+
+## How it works
+
+An insert is a small effect in the signal path of one track. A track has two slots, **INS A** and **INS B**, and the sound goes through A, then B. Every one of these four has a **Mix** parameter: at 0 % you hear the track untouched, at 100 % only the effect. Pull Mix down to blend the effect in. Everything else is set on the parameter page of the insert.
+
+All four share one rule for loudness: **at their default settings none of them is louder than the track without it.** That is on purpose, so that putting one in does not push the master limiter. The price is that some of them make the track a little quieter. When that happens, raise the effect's output level (Output on Fold, Makeup on Comp). Past full scale the converter clips, so raise it in steps.
+
+A parameter you move does not click or zipper: the effect glides to the new value in a few milliseconds. That means you can turn a knob while the track plays, or bind the parameter to a MIDI controller with Learn (see the Mixer chapter).
+
+### Fold: a wavefolder
+Fold turns up the signal and, when it passes a ceiling, bends it back instead of cutting it off. A sine becomes a richer, buzzier tone; a loud sample gets a hollow, metallic edge. A quiet signal passes unchanged, so the effect only speaks when the track is loud enough.
+
+| Parameter | Range | Default | What it does |
+|---|---|---|---|
+| Fold | 0 to 24 dB | 9 | How hard the signal is pushed into the fold. At 9 dB, peaks above about 0.35 of full scale fold back; at 24 dB, above about 0.06. |
+| Symmetry | -100 to +100 % | 0 | At 0 the fold is even on both sides and sounds hollow (odd harmonics). Moving it folds one side first, which adds brighter, more nasal harmonics. |
+| Tone | 500 to 20000 Hz | 12000 | A low-pass after the fold. Lower it to take off the fizz of a hard fold. At the bottom it dulls the whole effect, not only the top. |
+| Mix | 0 to 100 % | 100 | Dry and folded sound. |
+| Output | -24 to +6 dB | 0 | Level of the result. A hard fold is quieter than the source, so this is the make-up. |
+
+Example: put Fold on a sine bass, set Fold to 15 dB and Tone to 4000 Hz. The bass keeps its note but gains a growl. Then slowly turn Symmetry up and hear the growl get more nasal.
+
+Good to know: with Fold at 9 dB and a track whose peaks are below -9 dBFS, you hear no change. Fold does not oversample, so at 24 dB on a bright sound some aliasing remains; use Tone to soften it. A view called **Curve** on the parameter page draws how the effect bends the signal.
+
+### Env Filter: a filter that follows the track
+Env Filter is an auto-wah. It measures how loud the track is and moves a filter with it: a loud hit opens the filter, and the sound dulls again as the hit fades. It reacts to the track's own level, so it plays along with the pattern.
+
+| Parameter | Range | Default | What it does |
+|---|---|---|---|
+| Mode | LP, BP, HP | LP | Low-pass, band-pass or high-pass. Switching glides (about 4 ms), with no click. |
+| Cutoff | 20 to 20000 Hz | 400 | Where the filter rests when the track is quiet. |
+| Range | -6 to +6 octaves | +4 | How far a loud hit moves the cutoff from Cutoff. Positive opens up, negative closes down. |
+| Resonance | 0 to 100 % | 0 | A peak at the cutoff. At 0 the filter is smooth. |
+| Attack | 0.5 to 200 ms | 5 | How fast the filter follows a rising level. |
+| Release | 5 to 2000 ms | 150 | How fast it falls back. |
+| Sens | 0 to +36 dB | +12 | How loud the track must be to open the filter fully. At +12 dB, a signal at -12 dBFS opens it all the way; a quiet passage stays dull. |
+| Mix | 0 to 100 % | 100 | Dry and filtered sound. |
+
+Example: on a drum track, leave the defaults and listen. Each hit opens the filter from 400 Hz toward 6 kHz and it closes in about a quarter of a second. Set Mode to BP and Resonance to 50 % for a vowel-like wah. Set Range to a negative number to make each hit close the filter instead.
+
+Good to know: at the defaults it acts as a low-pass, so a quiet track sounds duller, and that is the effect, not a fault. A high Resonance at a low cutoff rings for seconds after the sound stops, and a Resonance above 0 can be louder than the track. Env Filter hears only the track it sits on. It has no stereo. A **Response** view shows the filter curve at the resting cutoff and at its fully open one.
+
+### Phaser: moving notches
+Phaser passes the sound through a chain of all-pass stages and blends it with the original. Where they cancel, you hear moving notches: a slow swirl. A low-frequency oscillator (LFO) moves the notches up and down.
+
+| Parameter | Range | Default | What it does |
+|---|---|---|---|
+| Stages | 4 to 6 | 4 | The number of stages: 4 gives two notches, 6 gives three. A change jumps; it is not smooth. |
+| Period | 100 to 20000 ms | 2000 | How long one sweep takes. A period, not a rate: a high number is a slower sweep. |
+| Depth | 0 to 100 % | 60 | How wide the sweep is (plus or minus two octaves at 100 %). At 0 the notches stay still at Centre. |
+| Centre | 100 to 4000 Hz | 800 | The middle frequency of the sweep. |
+| Feedback | -90 to +90 % | 35 | Sends the output back to the input. Positive sharpens and rings the notches; negative sounds hollower. It is limited to 90 %, so it never runs away. |
+| Mix | 0 to 100 % | 50 | At 50 % the notches are deepest. At 100 % you hear a pure phase swirl with no notches (unless Feedback is up). |
+
+Example: put Phaser on a pad. The defaults give a gentle swirl through the mids. Set Period to 6000 ms for a slow sweep, raise Feedback to 70 % to make the notches ring, then try Stages 6 for a deeper, more complex swirl.
+
+Good to know: Phaser is mono. At the highest feedback and fastest sweep it stays stable and finite; a loud sound can ring for a second or two.
+
+### Comp: a compressor and a transient shaper
+Comp has two modes, set by **Mode**. In **COMP** (0) it turns down a signal that passes a threshold, so loud and quiet parts get closer. In **TRANSIENT** (1) it does not use a threshold: it boosts or cuts the attacks and the tails of a sound, whatever the level. The Mode row shows 0 or 1 for now, not the words. Since version 1.1.0 Comp is stereo-capable (one linked gain on L and R) and has a **Key** row: set it to another track and COMP ducks this track by that track's level.
+
+| Parameter | Range | Default | What it does |
+|---|---|---|---|
+| Threshold | -60 to 0 dB | -18 | COMP only. Where it starts to act, with a soft 6 dB knee centred on it. |
+| Ratio | 1 to 20 | 4 | COMP only. How hard it squeezes above the threshold. 1 does nothing. |
+| Attack | 0.1 to 100 ms | 10 | COMP: how fast it clamps down. TRANSIENT: how long an onset counts as an attack. |
+| Release | 10 to 1000 ms | 120 | COMP: how fast it lets go. TRANSIENT: how long a tail counts as a decay. |
+| Makeup | -24 to +24 dB | 0 | Level of the result. Compression makes the track quieter; raise this to bring it back. |
+| Mix | 0 to 100 % | 100 | Dry and processed sound. Around 50 % is parallel compression: the punch stays and the compressed body is added. |
+| Mode | 0 or 1 | 0 | 0 is COMP, 1 is TRANSIENT. |
+| Punch | -100 to +100 % | 0 | TRANSIENT only. Positive makes attacks louder, negative softer. |
+| Sustain | -100 to +100 % | 0 | TRANSIENT only. Positive makes tails louder, negative shortens them. |
+| Key | OFF, T1..T16 | OFF | The sidechain key: in COMP mode the detector follows that track's level (its block peak, after its own inserts and before its fader) instead of this track's, so a kick on T1 ducks this track while it plays. TRANSIENT ignores it. |
+
+Example, compress: on a snare, leave the defaults and lower Threshold to -30 dB; the loud hits come down and Makeup brings the level back. Example, shape: set Mode to 1 and Punch to +60 %; a soft drum gets a sharper click, at any volume. Set Sustain to -60 % to dry out a ringing sound. Example, duck: put Comp on a pad track, set Key to the kick's track; the pad dips every time the kick hits and comes back through Release.
+
+Good to know: at the defaults COMP never raises the level, so a track at Makeup 0 gets quieter, not louder. TRANSIENT with Punch and Sustain at 0 changes nothing, bit for bit. Its gain is limited to about 12 dB, and Makeup +24 dB can push a track over full scale. A Key naming the insert's own track does nothing (the unit does not measure a track for its own insert). While a track has no voice at all its insert is not called, so the first note after a gap can start at the old, ducked gain and recovers over about the Release time.
+
+## Try it
+
+Start with the module file `envfilter.tmod` in the `modules/effects` folder of the card, a project with a drum track on track 1, and the transport playing.
+
+1. Open **Master**, press `F6` (**INSERTS**), move the cursor to track 1, **INS A**, and press `Insert`.
+2. Pick **envfilter** in the list and press `F1`. The strip says **INSERT SET**.
+3. Listen. Each drum hit opens a dull filter and it closes after it. Press `F7` (**BYPASS**) to hear the track without it, and again to turn it on.
+4. Open the insert's parameter page with `Params`. Raise Resonance to 40 % and Range to +6.
+
+You should hear a sharper, more vocal sweep on every hit. When you stop the transport, the effect goes quiet after a moment (a high Resonance at a low cutoff takes longer).
+
+## More tasks
+
+### Swap an effect for another
+Press `Delete` on its cell, then `Insert` to pick the other one. The new insert starts from its default settings.
+
+### Tame a hot result
+Lower Fold, Resonance or Feedback first, then raise Output or Makeup in small steps. If the master limiter lights, lower the track's level in the MIXER.
+
+## Good to know
+
+- Put at most the effects you need: each insert uses part of the unit's processing time, and the amounts are not measured on the unit yet.
+- Each effect hears only the track it sits on.
+- Not checked on the unit: how any of the four sounds on the hardware, and how much processing each takes.
+
+## See also
+
+- [Mixer](mixer.md): the INSERTS page, bypass and Learn.
+- [Modules](modules.md): loading modules from the card.
+- [Perform](perform.md): effects for the whole pattern, played live.
 
 ---
 
@@ -2968,7 +3275,7 @@ You should see the setting act at once, with no restart. With **Pattern end**, h
 
 ### Choose where the unit listens and sends MIDI
 
-Start on the Config screen. Press `F1` (**MIDI**). The page has nine rows. Move to a row and turn the encoder. The defaults are DIN + USB for the ports, **All** for IN CHANNEL, 1 for OUT CHANNEL and **On** for both TRANSPORT rows.
+Start on the Config screen. Press `F1` (**MIDI**). The page has thirteen rows. Move to a row and turn the encoder. The defaults are DIN + USB for the ports, **All** for IN CHANNEL, **Off** for CC MAP, MTC OUT and MTC IN, 01 for MTC START, 1 for OUT CHANNEL and **On** for both TRANSPORT rows.
 
 | Row | Values | What it does |
 |---|---|---|
@@ -2977,9 +3284,13 @@ Start on the Config screen. Press `F1` (**MIDI**). The page has nine rows. Move 
 | CLOCK MODE | Off, Master, Slave | With CLOCK IN on Internal: Master sends the clock, Slave follows it |
 | TRANSP IN | Off, On | Off: the unit ignores Start, Continue, Stop and Song Position from the clock it follows. The default is **On**. |
 | TRANSP OUT | Off, On | Off: the unit sends no Start, Continue, Stop or Song Position. The clock still goes out. The default is **On**. |
+| MTC OUT | Off, 24 fps, 25 fps, 30 fps | MIDI Time Code for a computer program that follows time code and not MIDI clock, such as Logic Pro. The default is **Off**. |
+| MTC START | 00 to 23 hours | The hour of the time code at the first step of the song. The default is **01**, which is where Logic Pro puts bar 1. |
+| MTC IN | Off, DIN, USB | The unit follows the MIDI Time Code of that port: the song starts where the master is and runs with it. The default is **Off**. |
 | MIDI IN | DIN, USB, DIN + USB | The ports the unit listens to for notes and MIDI Learn |
 | MIDI OUT | DIN, USB, DIN + USB | The ports for clock, transport and notes of MIDI tracks |
 | IN CHANNEL | All, 1 to 16 | The channel it listens to |
+| CC MAP | Off, On | The official fixed CC map on the MIDI IN ports and IN CHANNEL. The default is **Off**, kept on the card |
 | OUT CHANNEL | 1 to 16 | The channel for notes of MIDI tracks |
 
 **TRANSPORT IN and TRANSPORT OUT** (the rows read TRANSP IN and TRANSP OUT, which is as long as a caption can be) are new on this firmware. They matter when the unit sends or follows a MIDI clock (CLOCK MODE Master or Slave, or CLOCK IN on USB or MIDI In jack). With CLOCK MODE **Off** they do nothing. A row set to **On** is how every unit worked before: the clock and the transport go together.
@@ -2988,6 +3299,41 @@ Start on the Config screen. Press `F1` (**MIDI**). The page has nine rows. Move 
 - **TRANSPORT IN Off**: the unit still follows the tempo of the clock, but a Start, Continue, Stop or Song Position from the master does nothing. Press `Play` and the unit starts on the master's next clock. A Stop from the master does not stop the unit. It stops by itself only if the master's clock goes quiet.
 
 A change takes effect at the next `Play`. If you turn TRANSPORT OUT to Off while the unit plays, the Stop of that run is still sent, so a device that got the Start is also stopped. The choice is kept on the card. `Delete` on a TRANSP row puts **On** back. Not yet checked on the unit.
+
+### Make Logic Pro follow the unit
+
+**New on this firmware.** MIDI Time Code (MTC) is a clock that counts hours, minutes, seconds and frames. Some programs, Logic Pro among them, follow it and cannot follow MIDI clock. With **MTC OUT** on, the unit sends it while it plays, so the program starts, stops and jumps with the unit.
+
+1. Press `F1` (**MIDI**) on the Config screen. Move to **MTC OUT** and turn the encoder to the frame rate your program uses: **24 fps**, **25 fps** or **30 fps**. The row reads the rate.
+2. Leave **MTC START** on **01**. The first step of the song is then 01:00:00:00, where Logic Pro puts bar 1. Turn it to **00** for a program or a project that starts at 00:00:00:00.
+3. In the program, choose the unit as the MIDI source for synchronization and set the same frame rate. Set the same tempo in the program as in the project: time code has no tempo.
+4. Press `Play`.
+
+You should see the program lock to the unit and run with it. The time code goes out on the ports of **MIDI OUT**, whatever **CLOCK MODE** is. It starts at once at `Play`, so the program may need a moment to lock and can miss the first part of the first second. `Stop` sends the time at which the unit stopped. The choice is kept on the card. Playing from the middle of a song sends the time of that step. The song's tempo changes are counted in, so the time stays right when the tempo moves. Not yet checked on the unit, and not yet checked with Logic Pro.
+
+### Let the unit follow a time code
+
+**New on this firmware.** With **MTC IN** on, the unit follows the MIDI Time Code of a computer program or a device, the other way round from **MTC OUT**. Use it when the program is the master and the unit plays along.
+
+1. Press `F1` (**MIDI**) on the Config screen. Move to **MTC IN** and turn the encoder to the port the time code arrives on: **DIN** or **USB**.
+2. Keep **MTC START** on the hour at which the program plays the first step of the song. The default **01** is 01:00:00:00.
+3. In the program, send MIDI Time Code to the unit. Press play in the program.
+
+You should see the row's card read `MTC` with the time, the frame rate and a state: **READING** while it listens, **ARMED** while the start waits, **LOCKED** when the unit runs with the master. It starts the song at the step the master is at, with the tempo and the swing that step has, and follows the master's speed a little (up to 6 percent), so a drift is pulled in over about a second and nothing jumps. If the master starts before 01:00:00:00, the unit waits for it and starts exactly there. If the master goes past the end of the song, the unit is silent and stays locked until the master moves back into the song. If the master stops, jumps or goes backwards, the unit stops, and starts again at the new time when it has read it. While the unit follows, `Play`, `Stop` and the song jumps do nothing: the master owns them, and the card reads **MTC IN: FOLLOWING**. If you press `Play` while the master is silent, the unit plays on its own clock, and the master takes over after you stop it. The song plays its own tempo changes. A tempo change on the unit itself, from Perform, moves the song away from the master until it starts again. **MTC IN** also turns the clock follow off, so CLOCK IN and CLOCK MODE **Slave** are ignored, and it mutes **MTC OUT**. The unit chases the song or the pattern that **Play Song** or **Play Pattern** would play. The choice is kept on the card. Not yet checked on the unit, and not yet checked with Logic Pro as the master.
+
+### Control the unit with the official CC numbers
+
+With **CC MAP** on **On**, a MIDI controller drives the unit with the official firmware's fixed control numbers, on the MIDI IN ports and the IN CHANNEL, with no Learn set-up. The map is a static table and it is off by default: a controller that sends these numbers for something else moves nothing until you turn the row on.
+
+| CC | What it moves | Value | Where |
+|---|---|---|---|
+| 71 to 78 | the VOLUME of track 1 to 8 | `cc * 100 / 127` | every screen |
+| 79, 80, 81 | the master DELAY, REVERB and DRY level | `cc * 100 / 127` | every screen |
+| 82 | the INPUT strip's level | `cc * 100 / 127` | every screen |
+| 51 to 62 | the value of Perform slot 1 to 12 | `min + cc * (max - min) / 127` of the slot's effect range | the Perform screen's slot page only |
+| 41 to 48 | the performance pattern of track 1 to 8 | `cc + 1` | the Perform screen's slot page only, while the song plays |
+
+A mapped CC moves its value at once (jump, no pickup) and is a final edit: no undo step, no FX step in a live take. A MIDI Learn binding wins over the map: if any binding of either store listens to the message (on its channel, or on every channel), the map ignores it — a Pickup binding that has not caught the knob still owns the message. The Perform CCs act only on the slot page of the Perform screen, not on its DJ page and not on any other screen. CC 41 to 48 queue the pattern on the one track the CC names, whatever tracks are on, and only while the sequencer plays; the same value again does not take a waiting queue back, and after `Stop` and `Play` it is sent again. A pattern the project does not have is refused with `CC 4x: NO PAT nnn` on the strip. The Perform slots and tracks are described in [Perform](perform.md). Not yet checked on the unit.
 
 ### Change the display, the pad lights and the notation
 
@@ -3000,7 +3346,7 @@ Press `F2` (**DISPLAY**). Move to a row and turn the encoder.
 | NUMBERING | From 0, From 1, Hex | How the step rows of the Pattern screen are numbered. The default is **From 1**. |
 | MIDDLE C | C-3, C-4, C-5, C-6 | The name of MIDI note 60 on the Pattern screen. The default is **C-5**. |
 | THEME | Amiga, Black, White | The colours of the screens. `Shift` + `Master` also steps to the next theme. |
-| STATUS LED | BLINK, OFF | Whether the status LED behind the F keys blinks its heartbeat. **OFF** stops the heartbeat only: a fault blink code still shows. Not saved: every boot starts with **BLINK**. |
+| STATUS LED | BLINK, OFF | Whether the status LED behind the F keys blinks its heartbeat. **OFF** stops the heartbeat and also keeps blink code 12 (the over-budget code, no fault) dark: a fault blink code still shows (new Community OS behaviour). Not saved: every boot starts with **BLINK**. |
 
 The five setting rows act at once, with nothing to apply.   NUMBERING and MIDDLE C show on the Pattern screen: with **From 0** the step rows count from 00, and with MIDDLE C on **C-4** a note that reads C-5 by default reads C-4.   The STATUS LED row is not a setting: it is a choice of this session (RAM only), so it is not saved to the card and every boot starts with **BLINK**; `Delete` puts **BLINK** back.
 
@@ -3158,10 +3504,10 @@ The console has more commands than this table. The table lists the ones that are
 | `ls` | a folder of the card, read only | for example `ls Projects` |
 | `fw` | the firmware files on the card, and the card's volume serial | also `fw put`, `fw rm`, `fw arm` and `fw update`. Use the tool for these, see below |
 | `radio` | the FM radio state, its last failure, its registers and pins | `radio retry` tries again |
-| `ins` | the inserts of the project: the totals of the insert stage, then one line for each bound insert with its track, slot, module, `on` or `bypassed`, and its cost | `ins bind <track> <slot> <module>` puts an effect on a track and loads the module from the card when it is not loaded yet; `ins unbind <track> <slot>` removes it; `ins bypass <track> <slot> on` or `off` bypasses it. A refusal says why and changes nothing: **DELETE THE INSERT FIRST** (the slot is taken), **NO INSERT HERE** (the slot is empty), **NOT AN EFFECT MODULE**, **MODULE MISSING**, **INSERTS FULL**. These are the INSERTS page's messages, see [Mixer](mixer.md)  |
+| `ins` | the inserts of the project: the totals of the insert stage, then one line for each bound insert with its track, slot, module, `on` or `bypassed`, and its cost | `ins bind <track> <slot> <module>` puts an effect on a track and loads the module from the card when it is not loaded yet; `ins unbind <track> <slot>` removes it; `ins bypass <track> <slot> on` or `off` bypasses it. For the master insert, which runs its effect twice (left and right) and so lists two lines, `master L` and `master R`, type `master` instead of the track and slot: `ins bind master <module>`, `ins unbind master`, `ins bypass master on`. A refusal says why and changes nothing: **DELETE THE INSERT FIRST** (the slot is taken), **NO INSERT HERE** (the slot is empty), **NOT AN EFFECT MODULE**, **MODULE MISSING**, **INSERTS FULL**. These are the INSERTS page's messages, see [Mixer](mixer.md)  |
 | `voices` | the sampler voices in use, the peak since boot, the steals and `advanced` | `advanced` counts the short stretches (one a block, about 690 a second for each) in which a voice on a muted track was moved along without being rendered. It stays at 0 while no track is muted. |
 | `rot` | the display orientation, `rot 0` to `rot 7` | not saved |
-| `status` | the status LED heartbeat: `status blink` or `status off` | not saved: every boot starts with blink; a fault code still blinks with off |
+| `status` | the status LED heartbeat: `status blink` or `status off` | not saved: every boot starts with blink; with off the over-budget code 12 stays dark too, a fault code still blinks (new Community OS behaviour) |
 | `state` | the app state as one `key=value` line | for example the screen, the cursor and play |
 | `shot` | the screen, as framed data | the tool `--shot` option asks for it |
 | `leds` | the pad LED levels, on one line | |
@@ -3275,6 +3621,8 @@ APPLY: the `F7` key on Config. On a USB row, the first press says what will happ
 
 USB AUDIO: the Config row that shows an audio device to the computer. Off gives STANDARD; On is the default.
 
+MTC (MIDI Time Code): a clock that counts hours, minutes, seconds and frames, for programs that follow time code and not MIDI clock. The unit sends it when **MTC OUT** on the Config MIDI page is on. It has no tempo.
+
 STANDARD: the USB mode of the unit with MIDI and serial only, and no audio device.
 
 USB return: the stereo stream that the computer sends to the unit over USB audio. The USB RETURN row of Config turns it on or off.
@@ -3296,6 +3644,8 @@ Step FX: an effect written on one step, in one of its two Fx cells. The info lin
 FX 2: the second FX column of a step. A Micro-move is written there.
 
 Micro-move: a command in FX 2 that records how late a live note was played inside its step. The grid shows it as m02.
+
+tracker-ce: the open-source firmware that Polyend published for the Tracker. A project folder it saved opens on the File screen; see [File](file.md).
 
 Sample: a recording of sound, read from a file on the card and loaded into an instrument.
 
@@ -3391,7 +3741,7 @@ Detune: a small shift of an FM operator's pitch from its ratio, in cents.
 
 App: a module you run from the Modules screen, for example MIDI Monitor or Tuner. Apps are experimental.
 
-Navigator: the list of screens that opens with `Shift` + `Pattern`. Turn the encoder to a screen and press `F8` (**GO**).
+Navigator: the list of screens that opens when you press `Song` and `Pattern` together (or `Master` and `Song`). Turn the encoder to a screen and press `F8` (**GO**).
 
 TOOLS: the `F7` key on Pattern. It opens a list of tools, among them EXPORT PATTERN and the apps that edit the project or write files.
 
@@ -3498,7 +3848,8 @@ The keys on one page. Each table names the chapter it comes from.
 | `Play` | starts or stops the pattern, from any screen |
 | `Rec` | on Pattern, turns STEP on or off; on Record, starts or stops the take |
 | `Shift` + `Rec` | on Pattern, turns LIVE on or off |
-| `Shift` + `Pattern` | opens the Navigator. `F8` (**GO**) opens the chosen screen; `F7` (**CLOSE**) leaves it |
+| `Song` + `Pattern`, or `Master` + `Song` | opens the Navigator. `F8` (**GO**) opens the chosen screen; `Pattern` leaves it |
+| `Shift` + `Pattern` | lists the module apps that are not tools. `F1` (**LAUNCH**) starts one; `Pattern` leaves it |
 | `Shift` + `Config` | opens the help page of the screen you are on. `Left` and `Right` turn the pages, `Up`, `Down` and the encoder scroll, any other key closes it |
 | `Shift` + `Master` | steps to the next colour theme: Amiga, Black, White.  |
 | `Shift` + `Power` | saves a screenshot to the card. `Power` held 2 seconds turns the unit off.  |
@@ -3506,7 +3857,8 @@ The keys on one page. Each table names the chapter it comes from.
 | `Pattern` held, then the encoder or a pad | the encoder changes the tempo, from any screen (a BPM a click, a tenth with `Shift` held first); pad taps tap the tempo. Letting go of `Pattern` after that opens nothing.  |
 | `Song` held | shows Song until you let go, then goes back to the screen you came from |
 | `Vol` and `Fx` together | opens Learn |
-| a screen button again | opens the next page of that screen: the FX page of Sample edit, the DJ page of Perform |
+| `Instr` and `Fx` together | makes the row under the cursor the encoder's target; `Instr` and `Vol` held, then the encoder, moves it (see "Put one parameter on the encoder" in the panel chapter) |
+| a screen button again | opens the next page of that screen: the FX and PLUGINS pages of Sample edit, the DJ page of Perform |
 | a soft key again | steps that key's windows, such as the six MOD destinations on Instrument |
 
 | Screen button | Opens | Chapter |
@@ -3536,6 +3888,7 @@ Held at power-on, until the strip shows the mode:
 |---|---|
 | `Up`, `Down`, `Left`, `Right` | move the cursor. `Up` on step 1 goes to the last step |
 | pad | in STEP, writes a note at the cursor; in WATCH, plays the sound |
+| MIDI CC bound by Learn | in LIVE, a knob bound to CUTOFF, PANNING, a send, OVERDRIVE or BIT DEPTH also writes its move as a step FX on the play line (QA-PAT-324) |
 | `Delete` | clears the cursor's entry, or the highlighted columns of the block |
 | `Shift` + `Delete` | pulls the steps below up, to close a gap |
 | `Insert` | inserts an empty step at the cursor; the steps below move down |
@@ -3545,8 +3898,8 @@ Held at power-on, until the strip shows the mode:
 | `Shift` + `Left` or `Right` | grows the block one column; past the last column it takes the next track whole, then a track at a time |
 | `F4` (**FILL**) | opens the Fill dialog |
 | `F5` (**PREVIEW**) | sounds the note under the cursor while held |
-| `F6` (**INVERT**) | reverses the steps of the block, track by track |
-| `F7` (**TOOLS**) | opens the TOOLS list: DUPLICATE, EXPAND, SHRINK, export and the tool apps |
+| `F6` (**RE FILL**) | repeats the last fill of the `F4` dialog or the last APPLY of the TOOLS dialog (the key then reads **REPEAT**) |
+| `F7` (**TOOLS**) | opens the verb menu: pads 1-16 pick a verb (INVERT is pad 9), `F6` opens EVENTS, **APPS >** (pad 16) lists the tool apps; DUPLICATE, EXPAND, SHRINK and the exports are pads 10 to 12, 14 and 15 |
 | `F8` (**UNDO**), `Shift` + `F8` (**REDO**) | take back and redo a pattern change |
 | `Note`, `Instr`, `Vol`, `Fx` | select the column; hold to open its popup |
 | `Note` + `Instr` | cycles the zoom: 5, 8 or 12 tracks |
@@ -3600,7 +3953,7 @@ The soft keys `F1` to `F8`, left to right, as the key row shows them.
 
 | Screen | Button | F1 to F8 |
 |---|---|---|
-| [Pattern](pattern.md) | `Pattern` | **PATTERN**, **LENGTH**, **JUMP**, **FILL**, **PREVIEW**, **INVERT**, **TOOLS**, **UNDO** |
+| [Pattern](pattern.md) | `Pattern` | **PATTERN**, **LENGTH**, **JUMP**, **FILL**, **PREVIEW**, **RE FILL**, **TOOLS**, **UNDO** |
 | [Instrument](instrument.md) | `Params` | **SAMPLE**, **VOICE**, **FILTER**, **MOD**, **SENDS**, **<INS**, **INS>**, **UNDO** |
 | [Sample load](sample_load.md) | `Sample Loader` | **LOAD**, **UP**, **ENTER**, **ADD**, **PLAY**, **RESCAN**, **WT AUTO**, **CH MIX** |
 | [Sample edit](sample_edit.md) | `Sample Editor` | **CROP**, **NORM**, **REVERSE**, **FADE IN**, **FADE OUT**, **AMP**, **PREVIEW**, **UNDO** |
@@ -3613,6 +3966,7 @@ The soft keys `F1` to `F8`, left to right, as the key row shows them.
 | Instrument | `F1` reads SAMPLE, SLICE, WT or GRAIN; `F6` and `F7` show the neighbours, such as `<06` and `08>` |
 | Sample edit, FX page (`Sample Editor` again) | `F1` **FILTER**, `F2` **COMPRESS** |
 | Record, loop review | `F1` **OVERDUB**, `F5` **UNDO LYR**, `F8` **LOOP ON** or **MUTED**; `F6` does nothing |
+| Perform, slot page, `Shift` held | `Shift` + `F4` **PICK -**, `F5` **PICK +**, `F6` **TRK PAT**, `F7` **TRK NEXT**, `F8` **TRK SONG**: another pattern on the tracks that are ON, at each track's loop end (see [Perform](perform.md)) |
 | Perform, DJ page | `F5` **SCR** (the encoder is the platter), `F6` **LATCH**, `F8` **RESET**; `Shift` + `F1` to `F8` do nothing |
 
 ---
@@ -3621,7 +3975,7 @@ The soft keys `F1` to `F8`, left to right, as the key row shows them.
 
 Status: draft
 
-Export writes what the unit plays to WAV files on the card, and the tools are spread over three screens: the EXPORT page of File, the TOOLS list of Pattern and the TOOLS dialog of Song. Song, pattern and stems exports work as the official manual describes. The stems are one WAV for each audio track that plays a note, plus the DELAY, REVERB and MIX files. The files are named differently: `Export/<PROJECT>/<PROJECT>_Song0001.wav`, and a second render takes the next number instead of a new folder.  **OG PROJECT** writes a folder in the original firmware's project format and is marked EXPERIMENTAL. Not checked against the original firmware: whether an official unit opens it.
+Export writes what the unit plays to WAV files on the card, and the tools are spread over three screens: the EXPORT page of File, the TOOLS menu of Pattern and the TOOLS dialog of Song. Song, pattern and stems exports work as the official manual describes. The stems are one WAV for each audio track that plays a note, plus the DELAY, REVERB and MIX files. The files are named differently: `Export/<PROJECT>/<PROJECT>_Song0001.wav`, and a second render takes the next number instead of a new folder.  **OG PROJECT** writes a folder in the original firmware's project format and is marked EXPERIMENTAL. Not checked against the original firmware: whether an official unit opens it.
 
 ## What it is for
 
@@ -3665,7 +4019,7 @@ This walk-through exports one pattern.
 | PATT STEMS nn | The same set, for the pattern nn. |
 | OG PROJECT | A project folder in the original firmware's format. EXPERIMENTAL. |
 
-The page is on the File screen, on the PROJECTS page, with `F7` (**EXPORT**). The card under the rows shows the file name `F1` will make. From the Pattern screen, the same WAV exports are in the TOOLS list.
+The page is on the File screen, on the PROJECTS page, with `F7` (**EXPORT**). The card under the rows shows the file name `F1` will make. From the Pattern screen, the same WAV exports are pads of the TOOLS menu.
 
 ## More tasks
 
@@ -3684,18 +4038,18 @@ You should see `SAVED EXPORT/<PROJECT>/<PROJECT>_P<n>_0001.WAV` when it ends. Ex
 
 Start on the Pattern screen, with the transport stopped.
 
-1. Press `F7` (**TOOLS**). The list opens, with **EXPORT PATTERN** first.
-2. Press `F1` (**EXPORT**) on **EXPORT PATTERN**.
+1. Press `F7` (**TOOLS**). The verb menu opens. **EXPORT PAT** is pad 15 (with a block, **EXPORT SEL** is pad 14).
+2. Press pad 15 (**EXPORT PAT**).
 
-The file is `<PROJECT>_P<n>_0001.WAV`, as on the EXPORT page.  While the view follows the play line (WATCH while playing, or LIVE), the list does not open and the strip says **STOP PLAYING TO OPEN TOOLS**. Press `Play` to stop, then `F7`.
+The file is `<PROJECT>_P<n>_0001.WAV`, as on the EXPORT page.  It opens in STEP and WATCH while the transport plays; only in LIVE it does not open and the strip says **THE PLAYHEAD HOLDS THE CURSOR IN LIVE** — leave LIVE, then press `F7`.
 
 ### Export a block of the pattern
 
 Start on the Pattern screen, in **STEP**.
 
 1. Select the block with `Shift` and the arrows.
-2. Press `F7` (**TOOLS**). The list shows **EXPORT SELECTION** below **EXPORT PATTERN** and the three pattern tools.
-3. Press `Down` four times to **EXPORT SELECTION**, then `F1` (**EXPORT**).
+2. Press `F7` (**TOOLS**). The verb menu opens, with **EXPORT SEL** on pad 14, next to **EXPORT PAT**.
+3. Press pad 14 (**EXPORT SEL**).
 
 You should see `SAVED EXPORT/<PROJECT>/<PROJECT>_SEL0001.WAV`. The file holds only the tracks of the block, from its first row to the end of its last row. The other tracks are muted in the file. A block that covers only some columns of a track still exports that track's whole steps.
 
@@ -3766,7 +4120,7 @@ The export refuses while a take is armed or recording, while a job, a load or a 
 | `Shift` + encoder | On PATTERN, moves eight patterns a turn.  |
 | `F1` (**EXPORT**) | Starts the chosen row.  |
 | `F8` (**CANCEL**) | Stops an export. The finished files stay.  |
-| `F7` (**TOOLS**), on Pattern | Opens the list with EXPORT PATTERN, and EXPORT SELECTION when a block is selected.  |
+| `F7` (**TOOLS**), on Pattern | Opens the verb menu; EXPORT PAT is pad 15, and EXPORT SEL is pad 14 when a block is selected.  |
 | `F6` (**TOOLS**), on Song | Opens the dialog over the selected slots. Its fourth OP is **EXPORT WAV**, and `F1` (**APPLY**) starts it.  |
 
 While an export runs, only `F8` works.
@@ -3797,7 +4151,7 @@ While an export runs, only `F8` works.
 - [File](file.md): saving, opening and the project folder on the card.
 - [Pattern](pattern.md): the Pattern screen, where EXPORT PATTERN and EXPORT SELECTION start.
 - [Song](song.md): the Song screen, where EXPORT WAV of slots starts.
-- [Fill and tools](pattern_tools.md): the TOOLS list in full.
+- [Fill and tools](pattern_tools.md): the TOOLS menu in full.
 
 ---
 
@@ -3899,8 +4253,23 @@ These effects read their value in words on the info line.
 | Glide | Slides from the last note on the track to this one. Value 0 is off. | `GLIDE 240 MS` for value 12  |
 | Overdrive | Drives the sound. Value 0 is clean. | `DRIVE 40 %` for value 40  |
 | Bit Depth | Lowers the bit depth. The range is 1 to 16, and 16 is off. | `BITS 8` for value 8  |
+| Chance | Decides per pass whether the step plays. 0..100 is a probability, 101..174 a condition (below). | `CHANCE 50 %` for value 50  |
 | Panning | Pans the note. Value 100 is hard right. It ends with its step. |  |
 | Volume LFO, Panning LFO, Finetune LFO, Position LFO | Start the track's LFO for the volume (tremolo), the pan (auto-pan), the pitch (vibrato) or the wavetable window or granular position, on a sampler instrument. These four did nothing before; they act now, as Filter LFO does. The value is the LFO's speed in the same list as the instrument's own LFO speed, from the slowest at 0: 0 to 23 for Volume LFO, 0 to 28 for the others. The shape and amount are the instrument's LFO for that target (an instrument with none: triangle, 50 %). Position LFO moves only a wavetable or granular instrument and does nothing on a plain sample. While a Perform LFO row is held on the track its speed wins, and the FX comes back when the row ends or is at 0. Panning LFO and Panning (31) on one track: while the LFO runs it wins, because it sets the pan every block (a Panning step after it is overridden too); when the LFO ends the instrument's pan is back, and Panning acts again at its next step. The LFO stops at the next transport start. Stop does not end it: a pad note played after Stop still gets the LFO until the next Play. |  |
+
+### Chance: what plays and what does not
+
+**Chance** on a step decides, once per pass of the pattern, whether that step plays at all. The value is a probability or a condition.
+
+| Value | What it means | Info line, with an example value |
+|---|---|---|
+| 0..100 | The step plays with that probability: 0 never, 50 half the passes, 100 always. | `CHANCE 50 %` for value 50 |
+| 101 | Plays when the track's last Chance condition fired. | `CHANCE WITH LAST` |
+| 102 | Plays when it did not. | `CHANCE NOT LAST` |
+| 103..138 | Play N passes, then skip M (N and M 1..6, counted in passes of the pattern). 103 is Play 1 / Skip 1: the step plays on every other pass. | `CHANCE PLAY 2 SKIP 3` for value 111 |
+| 139..174 | Skip N passes, then play M. | `CHANCE SKIP 6 PLAY 6` for value 174 |
+
+The encoder walks every value from 0 to 174. `Shift` + encoder walks 0..100, then 101, 102, 103, then by 6. The pads and a **Fill** with MODE RANDOM write 0..100 only; a Fill with CONSTANT or FROM..TO reaches 174. Fill RANDOM on Chance with FROM above 100 draws 100. A step whose Chance does not fire plays nothing of its own: no note, no effect of the step. New in track3r-os. Not yet checked on the unit.
 
 ### Look up a tracker effect
 
@@ -3925,6 +4294,18 @@ The tracker effects are at the end of the list, after Bit Depth. Each has a mark
 | Global Volume | `(` | 30 | `GVOL 48`. 64 is full.  |
 | Global Vol Slide | `)` | 40 | `GVSL +4`  |
 | Panbrello | `{` | 3A | `PANBR SPD 3 DEP 10`  |
+
+### Shape the envelopes and the grain length: w, y and z
+
+New in track3r-os, from the tracker-ce step effects `w`, `y` and `z`. They sit after the core effects in the list (96, 97, 98). Each acts on the instrument's own settings for this note and ends at the first row that does not hold it.
+
+| Effect | Mark | Value | What it does | Info line, with an example value |
+|---|---|---|---|---|
+| Amp Envelope | `w` | 88 | The high digit scales the amp envelope's duration, the low digit warps it (8 is none, 0 to 15). On an amp ADSR the digits are the attack and the decay. | `AMP ENV x8 WARP +0` for 88 |
+| Filter Envelope | `y` | 24 | The cutoff envelope's attack (high digit x 8 ms, at least 1) and decay (low digit x 8 ms). | `FLT ENV 16/32 MS` for 24 |
+| Grain Length | `z` | 32 | The grain length of a granular instrument, 0 to 100 (hex 00 to 64): 0 is 44 samples, 50 is 100 ms, 100 is 1 s, never longer than the sample. It acts when the next grain starts. FX1 wins over FX2 when both hold a z. The value is hex: 32 is 50. | `GRAIN 100 MS` for 32 (the start value) |
+
+`z` does nothing on an instrument that is not granular. Not yet checked on the unit.
 
 ## Keys on this screen
 
@@ -4115,7 +4496,9 @@ You should see the rows of the new mode. The waveform on the right follows each 
 |---|---|
 | WAVETABLE | WT POS, WT SIZE |
 | GRANULAR | GRAIN POS, GRAIN LENGTH, GRAIN SHAPE, GRAIN LOOP |
-| BEAT SLICE | SLICES, SLICE |
+| SLICE, BEAT SLICE | SLICES, SLICE, PLAY THRU |
+
+In **SLICE** and **BEAT SLICE**, **PLAY THRU** (the row after **SLICE**) turns play-through on: a slice then plays on through the following slices to the end of the sample, until the note ends or the sample does, instead of stopping at the next slice point; a note played in reverse starts at the sample end and runs down. It is `OFF` by default, one click of the encoder turns it `ON` (one undo step), and it is kept with the instrument when the project or the instrument is saved; in the other play modes the row is not there and the setting does nothing.
 
 ### Shape the sound: VOICE, FILTER and SENDS
 
@@ -4141,7 +4524,7 @@ You should see the shape under the rows. **LFO SHAPE**, **LFO SPEED**, **LFO AMO
 
 **LFO SPEED** has 29 tempo-sync values, from `128 steps` to `1/64 step`. The Volume destination has the last 24, from `24 steps`.
 
-A destination the instrument does not use is dimmed, not hidden, and the info line says why: `WAVETABLE ONLY`, `GRANULAR ONLY`, `FILTER OFF` or `SOURCE OFF: PICK ENVELOPE OR LFO`. A dim row can still be edited.
+A destination the instrument does not use is dimmed, not hidden, and the info line says why: `WAVETABLE OR GRANULAR` (the **WT Position** destination on another play mode), `GRANULAR ONLY`, `FILTER OFF` or `SOURCE OFF: PICK ENVELOPE OR LFO`. A dim row can still be edited.
 
 The LFOs of volume, pan, fine tune, cutoff and grain position also run while the transport is stopped, at the rate the tempo gives. Press `Play` with a pad held and the LFO goes on from where it is, with no jump.
 
@@ -4150,6 +4533,40 @@ The picture is a window of 16 steps (the label `16 STEPS` above it, the axis und
 **LFO SHAPE** has six waves: Rev Saw, Saw, Triangle, Square, Random and **Sine**. Sine is new in this firmware and is not on the original firmware. It is a smooth wave that rises from nothing to the amount at the middle of the period and falls back, and it works like the others: the same speeds, the same amount, all six destinations, and it can be changed while a note sounds. If you export to the original firmware's format, a Sine LFO is written as Triangle and the export page lists it as **SINE LFO**.
 
 Not yet checked on the unit.
+
+### Move a setting with a wavetable envelope or LFO
+
+New in this firmware: **SOURCE** has two more words after **LFO**, **WT Env** and **WT LFO**. They move a destination along one of the 256 wavetable contours instead of an ADSR or a plain LFO shape. Instruments that do not use them are unchanged, and they load and save as before. Not yet checked on the unit.
+
+1. Press `F4` (**MOD**) and move to a destination with `F4`, such as Panning.
+2. On **SOURCE** turn the encoder up past **LFO**: first **WT Env**, then **WT LFO**. Each click is one undo step.
+3. **WT Env** has eight rows: **SOURCE**, **WAVE**, **DURATION**, **WARP X**, **WARP Y**, **SUSTAIN**, **RELEASE** and **AMOUNT** (the amplitude destination has no **AMOUNT** row: seven rows). **WAVE** picks the contour, `F001` to `F128` and `U001` to `U128`. **DURATION** is 0.002 to 20.000 s in clicks of 10 ms. A change is heard from the next note, also when the pattern is stopped. The first time a destination switches to WT, **WAVE** may show an older shape number (`F001` to `F006`): turn it to pick the contour you want. **WARP X** and **WARP Y** bend the contour, from -7 to +7. **SUSTAIN** is `OFF` or 1 to 99 %.
+4. `F8` (**UNDO**) takes back the last change of one of these rows and nothing else.
+5. **WT LFO** has six rows: **SOURCE**, **WAVE**, **LFO SPEED**, **WARP X**, **WARP Y** and **LFO AMOUNT**. **WAVE** and the two warps are the same values as on **WT Env**: a destination keeps one of each.
+
+A change on these rows is heard from the next note, not on a note that is held. These rows cannot be bound to a MIDI controller. Turn **SOURCE** back to **LFO** and the **LFO SHAPE** row reads **Triangle**, whatever contour was set before.
+
+The plot above the rows draws the contour: **WT Env** over its **DURATION** (the length in milliseconds is written above the right edge), **WT LFO** over one cycle. **WARP X** and **WARP Y** bend the picture as they bend the sound, so you can see what the contour does before you play it.
+
+On a **Granular** instrument the fourth destination is **Gran Length**, the grain length, instead of **WT Position**: the header and the rows follow the play mode, and the same **SOURCE** words work on it. Switch the play mode in the editor and the destination keeps its source. An instrument loaded from an older project or an official firmware file that has a source on this destination while it is Granular shows **Off** there, because that source was meant for **WT Position**; set it again to use it as the grain length. The grain length source is a Community OS feature: an export for the official firmware does not carry it. Not yet checked on the unit.
+
+### Use your own contours from the card
+
+New in this firmware: the 128 user contours `U001` to `U128` can come from WAV files. Without files they hold the built-in shapes, so nothing changes until you add some. Not yet checked on the unit.
+
+1. On the card, make a folder called `Envelopes` at the top level and put WAV files in it, named by number: `001.wav` is `U001`, `002.wav` is `U002`, up to `128.wav`. `1.wav` works too.
+2. Put the card in, or open a project. The files are read then, never while you play. The strip says how it went, for example `ENVELOPES: 12 LOADED`.
+3. Pick `U001` (or the number you used) on **WAVE** of a **WT Env** or **WT LFO** row. The plot shows your contour.
+
+The rules for the files:
+
+- The file is PCM, 8, 16 or 24 bit. A stereo file uses its left channel. Float WAV files are refused and counted as `FLOAT` on the strip.
+- Any length up to 24,576 frames (0.55 s at 44.1 kHz) is stretched or squeezed to 128 points. A longer file is skipped.
+- A file that goes below zero is read as a wave from -1 to 1 and moved into 0 to 1. A file that stays at or above zero is used as it is.
+- Numbering starts at 1. If the folder has a `000.wav` or a `0.wav`, it starts at 0 instead: `000.wav` is `U001` and `127.wav` is `U128`. A number past `U128` is skipped.
+- A number with no file keeps its built-in contour. A file that cannot be read is skipped (`SKIPPED` on the strip) and the other files still load. If a file is gone the next time (another card, a deleted file), its contour goes back to the built-in one (`RESET`).
+
+A note that is already playing may keep the old shape until its next note. If you change the files while a project is loaded, a slot with a warp on its WT row keeps the old contour until you load the project again.
 
 ### Make a MIDI instrument
 
@@ -4177,7 +4594,7 @@ Not yet checked on the unit.
 
 ### Copy, paste and delete an instrument
 
-Start on a sample or MIDI instrument.
+Start on a sample or MIDI instrument. (On a module instrument `Shift` + `F2` is **MIX**, not COPY: it opens the page with the module's PANNING, DELAY SEND and REVERB SEND.)
 
 1. Press `Shift` + `F2` (**COPY**). The strip says `INS 05 COPIED`.
 2. Go to another slot and press `Shift` + `F3` (**PASTE**). The slot becomes a copy: its name, play mode and settings. A used slot is replaced; `F8` gives the old one back.
@@ -4230,7 +4647,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 | `F7` | **INS>** | **USED>** |
 | `F8` | **UNDO** | **REDO** |
 
-Three labels in the table are the ones the screen starts with, and they change as you work. `F1` follows the instrument: **SAMPLE**, **SLICE**, **WT** or **GRAIN** on a sample instrument (by its play mode), **MIDI** on a MIDI instrument, and the module's own page names on a module instrument. `F6` and `F7` show the numbers next to the instrument in view, such as `<06` and `08>`, and are dim where there is none. While `Shift` is held they show the nearest instruments that are in use.
+Three labels in the table are the ones the screen starts with, and they change as you work. `F1` follows the instrument: **SAMPLE**, **SLICE**, **WT** or **GRAIN** on a sample instrument (by its play mode), **MIDI** on a MIDI instrument, and the module's own page names on a module instrument, where `F5` is **PRESET**: it opens the module's list of presets (see [Modules and apps](modules.md)).  `F6` and `F7` show the numbers next to the instrument in view, such as `<06` and `08>`, and are dim where there is none. While `Shift` is held they show the nearest instruments that are in use.
 
 | Key | What it does | Ref |
 |---|---|---|
@@ -4238,13 +4655,13 @@ Three labels in the table are the ones the screen starts with, and they change a
 | `F1` (**SAMPLE**, **SLICE**, **WT** or **GRAIN**) | The source page of a sample instrument. The label follows the play mode. On a MIDI instrument, the MIDI page. | QA-INS-005, QA-INS-061 |
 | `F2` (**VOICE**) | The VOICE page, with the VEL> row. | QA-INS-082 |
 | `F3` (**FILTER**) | The FILTER page, with the CUTOFF row. | QA-INS-085 |
-| `F4` (**MOD**) | The MOD page: a SOURCE row and LFO rows for each destination. Pressed again, it moves to the next of the six destinations. | QA-INS-035, QA-INS-010 |
+| `F4` (**MOD**) | The MOD page: a SOURCE row (Off, Envelope, LFO, WT Env, WT LFO) and the rows of the source you pick, for each destination. Pressed again, it moves to the next of the six destinations. | QA-INS-035, QA-INS-010, QA-INS-294 |
 | `F5` (**SENDS**) | The SENDS page, with the OVERDRIVE row. | QA-INS-002 |
 | `F6` (**<NN**) | The previous instrument, such as `<06`. Dim at 1. | QA-INS-007 |
 | `F7` (**NN>**) | The next instrument, such as `02>`. Dim at 64. | QA-INS-007 |
 | `F8` (**UNDO**) | Takes back the last instrument change. | QA-INS-040 |
 | `Shift` + `F1` (**NAME**) | Renames the instrument. | QA-INS-050 |
-| `Shift` + `F2` (**COPY**) | Copies the instrument. | QA-INS-043 |
+| `Shift` + `F2` (**COPY**) | Copies the instrument. On a module instrument it is **MIX** and opens the pan and sends page; pressing it again goes back. | QA-INS-043, QA-INS-307 |
 | `Shift` + `F3` (**PASTE**) | Pastes the copy into the slot. | QA-INS-044, QA-INS-045 |
 | `Shift` + `F4` (**DELETE**) | Deletes the instrument at once. | QA-INS-030 |
 | `Shift` + `F5` (**SAVE**) | Saves a sample instrument as a `.pti` file. | QA-INS-052, QA-INS-054 |
@@ -4418,7 +4835,7 @@ Start with a new project. To hear the notes, put a sample on instrument 1 (see [
 |---|---|
 | Track headers | The number and name of each track, with its MUTE and SOLO tags. |
 | Grid | One row per step. Each track has the columns **Note**, **Instr**, **Vol** and **Fx**. The cursor row is always the 8th of the 16 rows, also on the first and last step; the rows past the ends are blank.  |
-| Info line | The record mode chip (**WATCH**, **STEP** or **LIVE**), then the track and the pattern name, such as `P01 intro`. |
+| Info line | The record mode chip (**WATCH**, **STEP** or **LIVE**) at the left edge, then the scale and the track, the pattern name such as `P01 intro`, and the pads' mode (`pads NOTES`, `pads TRACKS` and so on). A **METRO** chip and the hint for a block come after them, and `undo` and its depth stand at the right edge. |
 | Key row | `F1` to `F8`. `F1` to `F3` are **PATTERN**, **LENGTH** and **JUMP**. |
 | Shift row | The labels drawn while `Shift` is held: the pad octave and layouts. |
 
@@ -4436,6 +4853,10 @@ Start on the Pattern screen, in WATCH. The pattern can be stopped or playing.
 
 You should see the new notes in the grid.
 
+### Record knob moves as FX
+
+A knob that MIDI Learn bound to an instrument parameter also writes into the pattern while you record LIVE: each move becomes a step FX on the play line of the cursor's track. CUTOFF records as Low-, High- or Band-pass (27 / 28 / 29, by the instrument's FILTER TYPE), and PANNING, DELAY SEND, REVERB SEND, OVERDRIVE and BIT DEPTH record as their own FX (31, 30, 32, 38, 39). The FX goes to the column that already holds one of the same group, else to the first free column; another FX is never overwritten, and when both columns are taken the strip says **REC FX: NO FREE FX COLUMN**. At the take's first recorded FX the strip says **REC FX: CUTOFF** — the parameter's name. One value per step: a later move on the same step overwrites it, and the step's note, instrument and volume stay as they are. Only a binding of the selected instrument records, and only while the pattern records LIVE (not in STEP, stopped, during the count-in, or with the playhead in another pattern); TUNE records nothing. One Undo takes the whole take back, notes and FX together, and the instrument parameter stays where the knob left it. The encoder target (`Instr` and `Fx`, then `Instr` and `Vol` held with the encoder) records the same way, and also in STEP, on the cursor's step; a parameter with no FX equivalent says **REC FX: <name> HAS NO FX**. Outside a LIVE take a knob move changes nothing in the pattern. New in track3r-os.
+
 ### Select a block
 
 Start in STEP, WATCH (stopped or playing) or LIVE. A block is the steps and tracks you mark. Inside one track it can be just some columns: note with instrument (they go together), volume, FX1, FX2.
@@ -4445,8 +4866,9 @@ Start in STEP, WATCH (stopped or playing) or LIVE. A block is the steps and trac
 1. Hold `Shift` and press `Down`, `Up`, `Left` or `Right`. The block is highlighted from the cursor.
 2. Keep `Shift` and an arrow to extend the block.
 3. To mark columns, put the cursor on the first column you want, then hold `Shift` and press `Down` (more steps) or `Left` or `Right` (one column at a time).
+4. To select a whole column fast, put the cursor on step 1 in `Instr`, `Vol`, `FX1` or `FX2` and hold `Shift` while you press `Up`. The first press marks that column over every step of the track. A second press marks the whole track, and a third marks every track. On the `Note` column the first press already marks the whole track.
 
-You should see the block over the steps and tracks you chose, and over just the columns you chose while it stays in one track. `Shift` + `Right` past the last column takes the next track whole; from there `Shift` + `Left` or `Right` add or drop a whole track at a time.  The playhead does not move it. While the view follows the playhead (WATCH playing, LIVE) the block starts at the step the playhead is on at your first arrow press, and the cursor stays on the playhead.  `Delete` clears the highlighted columns and closes the block: every column for whole steps, only the note and instrument for a block in the Note column. `Shift` + `Insert` or a plain arrow also closes it.
+You should see the block over the steps and tracks you chose, and over just the columns you chose while it stays in one track. Over several tracks the cursor's track keeps the bright blue and the other tracks of the block are a slightly duller blue, so you can see which track the cursor is in.  `Shift` + `Right` past the last column takes the next track whole; from there `Shift` + `Left` or `Right` add or drop a whole track at a time.  The playhead does not move it. While the view follows the playhead (WATCH playing, LIVE) the block starts at the step the playhead is on at your first arrow press, and the cursor stays on the playhead.  `Delete` clears the highlighted columns and closes the block: every column for whole steps, only the note and instrument for a block in the Note column. `Shift` + `Insert` or a plain arrow also closes it. With a block on the `Instr`, `Vol`, `FX1` or `FX2` column, the encoder (and `Shift` + encoder) changes that column's values inside the block and nothing outside it.  The one-column block stays when you let go of `Shift`; `Shift` + `Down` from it makes a block of whole steps again.
 
 ### Copy and paste steps
 
@@ -4465,7 +4887,7 @@ You should see the copied steps. A block of columns copies and pastes those colu
 Start in STEP, with the cursor on a step.
 
 1. Press `Delete`. The step under the cursor is cleared, and the cursor moves on by **JUMP**.
-2. Hold `Shift` and press `Delete`. The steps below move up over the step under the cursor.
+2. Hold `Shift` and press `Delete`. The steps below move up over the step under the cursor, and the cursor moves on by **JUMP** like `Delete` does (it stops on the last row; with JUMP 0 it stays).
 3. Press `Insert`, then `Shift` + `Delete`. The pattern is as it was before.
 
 Holding `Delete` clears one step after another; each is one undo step.
@@ -4507,15 +4929,24 @@ The zoom cycles from 5 tracks to 8 and then to 12, and back to 5. Every level sh
 
 A tap of `Note` selects the Note column; a hold of half a second opens the Note popup.
 
+### Choose the key: hold `Note`
+
+Start on the Pattern screen. Hold `Note` for half a second: the **NOTE ENTRY** panel opens, and its top line names the key in force.
+
+1. Turn the encoder, or press `Up` or `Down`, to step through all 39 keys, one a detent, wrapping at both ends.
+2. Or press a pad of the second pad row: it holds twelve of the keys. For any of the other 27 no pad of the row is lit.
+
+You should see the top line name the key at every step, for example `C Hirajoshi - Jump 1 - Oct 3 - Lock off`, and the info line read `scale Hirajoshi C-4`.  Turn **SCALE LOCK** on (the last pad) and the pads and a MIDI keyboard snap to the key: a C# played in is written as the C of the key.  The key is saved with the project: save, switch the unit off and on, open the project again, and the panel opens on the same key.  Two pairs of keys have the same notes (Hung. minor and Gypsy minor, Diminished and Whole-half), and Todi keeps the standard notes of its name here.  The same 39 keys the original firmware lists under its Config's Notes scale are on this panel. New in track3r-os.
+
 ### Open the Navigator
 
 The Navigator is the list of screens.
 
-1. Hold `Shift`, press `Pattern`, and let both go. The Navigator opens (keys: [The panel](panel.md#screen-buttons)).
+1. Press `Song` and `Pattern` together, or `Master` and `Song`, and let both go. The Navigator opens on any screen (keys: [The panel](panel.md#screen-buttons)).
 2. Turn the encoder to the screen you want. `Shift` + turn moves a page.
 3. Press `F8` (**GO**). The screen opens.
 
-`F1` also opens it. `F7` (**CLOSE**) or `Pattern` leaves without a change.
+`F1` also opens it. `F7` (**CLOSE**) or `Pattern` leaves without a change. `Shift` + `Pattern` is not the Navigator any more: it lists your module apps (see [Modules](modules.md#start-an-app-from-anywhere)).
 
 ## Keys on this screen
 
@@ -4528,7 +4959,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 | `F3` | **JUMP** | **PIANO** |
 | `F4` | **FILL** | **ISO** |
 | `F5` | **PREVIEW** | **TRACKS** |
-| `F6` | **INVERT** | **PATS** |
+| `F6` | **RE FILL** | **PATS** |
 | `F7` | **TOOLS** | **VU** |
 | `F8` | **UNDO** | **REDO** |
 
@@ -4540,33 +4971,34 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 | `Play` | Starts and stops the pattern. In LIVE the cursor follows the playhead. | QA-PAT-004, QA-PAT-132 |
 | `Shift` + `Play` | Starts the pattern at the cursor's row. It never counts in. | QA-PAT-231, QA-PAT-234 |
 | `Up`, `Down`, `Left`, `Right` | Move the cursor. `Up` on step 1 wraps to the last step. | QA-PAT-219, QA-PAT-220, QA-PAT-221 |
-| `Shift` + arrows | Select a block. `Left` and `Right` add a column at a time inside a track. | QA-PAT-007, QA-PAT-319 |
+| `Shift` + arrows | Select a block. `Left` and `Right` add a column at a time inside a track. `Up` on step 1 marks the cursor's column, then the track, then every track. | QA-PAT-007, QA-PAT-319, QA-PAT-480 |
 | pad | In STEP, writes the note under the cursor; over a step that has a note it replaces the note and instrument and keeps the volume and effects. In the Instr column it picks the instrument instead (pad 10 is instrument 10) and the note stays. | QA-PAT-006, QA-PAT-222, QA-PAT-315 |
 | `Note`, `Instr`, `Vol`, `Fx` | Select the column. Hold for the popup of that column. | QA-PAT-224, QA-PAT-240 |
 | `Note` + `Instr` | Cycles the zoom: 5, 8 or 12 tracks. | QA-PAT-236 |
 | `Note` + `Left` or `Right` | Moves one whole track. | QA-PAT-239 |
-| `Shift` + `Note`, `Instr`, `Vol`, `Fx` | Jumps to a quarter of the pattern. | QA-PAT-244 |
+| hold `Note` | The **NOTE ENTRY** panel: the encoder and `Up` / `Down` walk the 39 keys as a ring, pad row 2 picks one of the twelve, the last pad is **SCALE LOCK**; the top line and the info line name the key. | QA-PAT-429, QA-PAT-430, QA-PAT-431, QA-PAT-432, QA-PAT-433, QA-PAT-434 |
+| `Shift` + `Note`, `Instr`, `Vol`, `Fx` | Jumps to a quarter of the pattern; with `Rec` on it also selects the steps it jumps over. | QA-PAT-244, QA-PAT-483 |
 | encoder | Changes the value under the cursor. | QA-PAT-251 |
 | `Shift` + encoder | Moves in big steps. See the table above. | QA-PAT-251, QA-PAT-252, QA-PAT-253 |
 | `Delete` | Clears the step. Hold to repeat. | QA-PAT-216 |
-| `Shift` + `Delete` | Pulls the steps below up. Hold to repeat. | QA-PAT-217, QA-PAT-229 |
+| `Shift` + `Delete` | Pulls the steps below up, then moves down by JUMP. Hold to repeat. | QA-PAT-217, QA-PAT-229 |
 | `Insert` | In STEP. With `Shift` + `Delete` after it, leaves the pattern as it was. | QA-PAT-229 |
 | `Copy` | Copies the block, or the step. | QA-PAT-226 |
 | `Shift` + `Copy` | Pastes the clip at the cursor, in STEP. | QA-PAT-227, QA-PAT-288 |
 | `F1` (**PATTERN**) | Hold: the chooser. Playing, a pick switches the pattern. A tap does nothing. With `F1` held, `Copy` copies the whole pattern and `Shift` + `Copy` writes it over the one shown. | QA-PAT-254, QA-PAT-255, QA-PAT-260, QA-PAT-285, QA-PAT-286 |
 | `F2` (**LENGTH**), `F3` (**JUMP**) | Hold to open a chooser. | QA-PAT-253 |
 | `F4` (**FILL**) | Opens the Fill dialog in Edit. | QA-PAT-086 |
-| `F7` (**TOOLS**) | Opens the TOOLS list: EXPORT PATTERN, DUPLICATE x2, EXPAND x2, SHRINK /2, and the tool apps. While the view follows the playhead the strip says STOP PLAYING TO OPEN TOOLS. | QA-PAT-160, QA-PAT-161, QA-PAT-280 |
+| `F7` (**TOOLS**) | Opens the verb menu: pads 1-16 pick a verb directly (**INVERT** is pad 9), `F1` (**RUN**) runs the verb under the cursor, `F8` (**BACK**) closes. `F6` (**EVENTS**) opens the event list. The last row, **APPS >** (pad 16), opens the APPS page with the tool apps only; DUPLICATE x2, EXPAND x2, SHRINK /2 and the exports are pads of the menu itself. It opens in STEP and WATCH while playing; only in LIVE the strip says THE PLAYHEAD HOLDS THE CURSOR IN LIVE. | QA-PAT-436, QA-PAT-437, QA-PAT-438, QA-PAT-439, QA-PAT-447, QA-PAT-160, QA-PAT-161, QA-PAT-448, QA-PAT-449, QA-PAT-280 |
 | `F8` (**UNDO**), `Shift` + `F8` (**REDO**) | Take back and redo the Pattern changes. | QA-PAT-246 |
 
-`F5` (**PREVIEW**) sounds the note under the cursor while you hold it. `F6` (**INVERT**) reverses the steps of the block, track by track; with no block the strip says **SELECT A BLOCK TO INVERT**, and outside STEP and LIVE it says **TURN EDIT ON**.  A tap of `F2` or `F3` opens its chooser, and a second tap closes it. A chooser shows its own name on `F1` to `F3` with the open one inverted and **BACK** on `F8`; in the **PATTERN** chooser `F1` reads **PATTERN**, and in TOOLS `F1` reads **RUN**. The step popup shows **CANCEL** on `F8` alone.
+`F5` (**PREVIEW**) sounds the note under the cursor while you hold it. `F6` (**RE FILL**) repeats the last apply with its settings: the last fill of the `F4` dialog (a random fill draws again), or the last `F1` (**APPLY**) of the TOOLS dialog (TRANSPOSE, INSTRUMENT, CLEAR) with the same amount, whichever you ran later; the key reads **REPEAT** after a TOOLS apply. A verb of the `F7` menu that has no dialog (ROTATE, INVERT, an export) is never repeated. Before any in the session, and after a new or opened project, the strip says **NOTHING TO REPEAT**; one undo unit, and outside STEP and LIVE with a fill done the strip says **FILL: TURN EDIT ON**.  INVERT is the verb menu's pad 9 (`F7`, then pad 9, or `F7` held + pad 9): with no block the strip says **SELECT A BLOCK TO INVERT**, and outside STEP and LIVE **TURN EDIT ON**.  A tap of `F2` or `F3` opens its chooser, and a second tap closes it. A chooser shows its own name on `F1` to `F3` with the open one inverted and **BACK** on `F8`; in the **PATTERN** chooser `F1` reads **PATTERN**, and in TOOLS `F1` reads **RUN**. The step popup shows **CANCEL** on `F8` alone.
 
 The Shift row sets the pads' octave and chooses what the pads do. The octave is the note-entry octave (saved with the project); the pad mode stays until you change it and is not saved. No key picks the STEP pad layout. New in track3r-os.
 
 | Key | Pads |
 |---|---|
 | `Shift` + `F1` (**OCTAVE**) | moves the pads' lowest C up one octave; after C9 it goes back to C0. The key shows the octave, for example **C3**. It applies to NOTES, PIANO and ISO |
-| `Shift` + `F2` (**NOTES**) | the usual note pads |
+| `Shift` + `F2` (**NOTES**) | the usual note pads. The LEDs show the scale: the root bright, the other notes of the scale dim, a note outside the scale dark. With SCALE LOCK on only the roots stand out |
 | `Shift` + `F3` (**PIANO**) | two octaves laid out like a piano |
 | `Shift` + `F4` (**ISO**) | each column a semitone, each row up a fourth |
 | `Shift` + `F5` (**TRACKS**) | each column is a track; rows for track, mute, mute mode and solo |
@@ -4582,7 +5014,7 @@ The octave is also the OCTAVE row of the note panel (hold `Note`) and the octave
 - In LIVE, the encoder and `Delete` edit the step under the playhead: the encoder moves its note by a semitone and `Delete` clears it. A plain arrow only moves the cursor one row off the playhead, changes no step, and the next step pulls the cursor back. The red **LIVE** chip is the only sign. New in track3r-os.
 - In the Instr column the encoder counts 1 to 48 and stops. One detent down from instrument 1 goes to 49, then on to 64 (MIDI channels 1 to 16); one detent up from 49 goes back to 1.
 - Undo works per screen: `F8` (**UNDO**) takes back the last change to the pattern and `Shift` + `F8` (**REDO**) redoes it. The strip says **NOTHING TO UNDO HERE** when none is left. A Song change is undone on Song. Making or deleting a pattern on Song clears the Pattern history (**PATTERN HISTORY CLEARED**).
-- `Up` on step 1 goes to the last step; holding `Up` or `Down` stops at the ends. `Shift` + `Note`, `Instr`, `Vol` or `Fx` jumps to row 1, 17, 33 or 49 of a 64-step pattern.
+- `Up` on step 1 goes to the last step; holding `Up` or `Down` stops at the ends. `Shift` + `Note`, `Instr`, `Vol` or `Fx` jumps to row 1, 17, 33 or 49 of a 64-step pattern.  While `Rec` has step entry on, the same keys also select the steps they jump over, from where you were to the step before the one you land on: from step 17, `Shift` + `Note` selects steps 1 to 16. `Delete`, copy and the encoder then work on them like on a `Shift` + arrow block, and a new jump replaces the block.
 - Count-in: with COUNT-IN on (PATTERN page of [Config](config.md)), `Shift` + `Rec` from stopped counts in first. `Rec` or `Shift` + `Rec` during the count-in cancels it. `Play` never counts in.
 - The zoom is not saved with the project: it survives a project load and starts at 5 tracks at power on.
 - New in track3r-os: the pad layouts, the quarter jumps, column blocks and the FX names in the cells.  The official firmware has its own record edit, live recording, an instant pattern switch and a view of 4 tracks. Here they work as this chapter says.  Not checked against the original firmware: the grid, the cursor keys, the copy keys and the `Shift` + encoder steps.
@@ -4591,7 +5023,7 @@ The octave is also the OCTAVE row of the note panel (hold `Note`) and the octave
 ## See also
 
 - [Effects in the pattern](fx.md): the effects in the Fx column, their values.
-- [Fill and tools](pattern_tools.md): FILL, and the TOOLS list of apps.
+- [Fill and tools](pattern_tools.md): FILL, and the TOOLS menu and its tool apps.
 - [Song](song.md): the order of the patterns, and the Song undo.
 - [Instrument](instrument.md): the sound that a note plays, and its pages.
 - [Export](export.md): WAV files of the song, a pattern, a block and the stems.
@@ -4602,11 +5034,11 @@ The octave is also the OCTAVE row of the note panel (hold `Note`) and the octave
 
 Status: draft
 
-These tools write a stretch of the pattern by a rule, where you would otherwise enter one step at a time. **FILL** (`F4`) writes notes, instruments, volumes or an effect on every Nth step, on a Euclid rhythm, on random steps or along a scale, with one value, along a ramp or at random. **TOOLS** (`F7`) lists three tools that double, spread or halve a pattern, and the apps on the card that edit the project. Holding `F1` with `Copy` copies one whole pattern onto another. The official firmware has a Fill dialog, duplicate, expand and shrink, and a whole-pattern copy too; here they work as this chapter says.  The apps in the TOOLS list are new in track3r-os.
+These tools write a stretch of the pattern by a rule, where you would otherwise enter one step at a time. **FILL** (`F4`) writes notes, instruments, volumes or an effect on every Nth step, on a Euclid rhythm, on random steps or along a scale, with one value, along a ramp or at random. The verb menu (`F7`) opens in the right-hand panel beside the grid (the right 300 px of the screen, `x 500..800`; while it is up the grid is drawn in the 500 px left of it — three tracks at the 5-track zoom — and scrolls so the block's first track stays in view) and picks a tool by pad — **INTERPOLATE** (4), **RANDOMISE** (5), **HUMANISE** (6), **ROTATE UP / DOWN** (7 / 8), **INVERT** (9), **DUPLICATE x2**, **EXPAND x2** and **SHRINK /2** (pads 10-12), and **APPS >** (pad 16) opens the list of the apps on the card that edit the project; hold `F7` and press a pad to run that verb without opening the menu. Holding `F1` with `Copy` copies one whole pattern onto another. The official firmware has a Fill dialog, duplicate, expand and shrink, and a whole-pattern copy too; here they work as this chapter says.  The apps in the TOOLS list are new in track3r-os.
 
 ## What it is for
 
-Use FILL to lay down a rhythm, a fade or a run of random notes in one go, then play with the result. Use TOOLS to change a pattern's length or to run an app on it. Both are on the [Pattern](pattern.md) screen, in STEP, with the transport stopped for the TOOLS list.
+Use FILL to lay down a rhythm, a fade or a run of random notes in one go, then play with the result. Use TOOLS to change a pattern's length or to run an app on it. Both are on the [Pattern](pattern.md) screen, in STEP, with the transport stopped for the APPS page.
 
 ## How it works
 
@@ -4614,7 +5046,7 @@ Use FILL to lay down a rhythm, a fade or a run of random notes in one go, then p
 
 A fill is a rule plus a value. The rule picks which steps get something, and the value says what they get. It is like stamping a pattern of dots on a strip of paper, then choosing the colour of the ink.
 
-The dialog is live, and it writes nothing. A line of steps under the rows shows the hits as **x**, with a count such as `4 OF 8 STEPS`. Nothing reaches the pattern until you press `F1` (**FILL**). Then the notes are stored in the pattern like any note, and the whole fill is one undo step. `F8` (**BACK**) leaves the dialog and ends it with no change.
+The dialog is live, and it writes nothing. A line of steps under the rows shows the hits as **x**, with a count such as `4 OF 8 STEPS`, and the footer under it names the target (`TRACK 1  ROWS 1-64` here). Nothing reaches the pattern until you press `F1` (**FILL**). Then the notes are stored in the pattern like any note, and the whole fill is one undo step. `F8` (**BACK**) leaves the dialog and ends it with no change.
 
 An example: choose EUCLID with 5 events and press `F1`. Five notes land spread as evenly as the track's steps allow, a rhythm you would not tap by hand. Press `F8` (**UNDO**) and the track is as it was.
 
@@ -4629,22 +5061,36 @@ The **TYPE** row is the rule:
 | RANDOM | **DENSITY** 0 picks none, 100 picks all, 30 picks about three in ten. |
 | SCALE | The notes of the scale from FROM to TO, going up, then repeating. No note twice in a row. Never above note 127. |
 
-The **MODE** row is the value. **CONST** writes one value (FROM). **RAMP** goes from FROM to TO over the hits, so a volume ramp from 127 to 0 is a fade-out. **RANDOM** picks a value from FROM to TO for each hit. **WHAT** chooses what is written: a note, an instrument, a volume, or the effect in **FX 1** or **FX 2**. **SCOPE** chooses the block, the track or the pattern. Each track counts its own steps, so its first step gets FROM and its last gets TO.
+The **MODE** row is the value. **CONST** writes one value (FROM). **RAMP** goes from FROM to TO over the hits, so a volume ramp from 127 to 0 is a fade-out. **RANDOM** picks a value from FROM to TO for each hit. **WHAT** chooses what is written: a note, an instrument, a volume, or the effect in **FX 1** or **FX 2**. Where the fill goes is the selection, and the footer of the dialog says it: a block, the whole track (**`Shift` + `Up`** on step 1), the whole pattern (again), or the cursor step alone. Each track counts its own steps, so its first step gets FROM and its last gets TO.
+
+The dialog keeps its rows until you switch the unit off, FROM included: reopen it and it reads what you left (the first time after switching on, FROM is the step under the cursor). Changing WHAT starts FROM and TO again. When the fill draws at random (TYPE RANDOM, or MODE RANDOM), `F2` (**VARY**) takes back the fill you just made and draws again, as long as you have not edited that pattern since; the dialog stays up, so `F2` again re-rolls.
 
 ### What are the tools?
 
-The TOOLS list holds three kinds of entry. The EXPORT entries are on [Export](export.md). The length tools, **DUPLICATE x2**, **EXPAND x2** and **SHRINK /2**, change a pattern's length in one press. The tool apps, such as RHYTHM GEN, are small programs on the card that write into the pattern.
+The TOOLS menu is the verb menu that `F7` opens. Its pads hold the length tools, **DUPLICATE x2** (pad 10), **EXPAND x2** (pad 11) and **SHRINK /2** (pad 12), which change a pattern's length in one press, and the two exports, on [Export](export.md). `F6` (**EVENTS**) lists the pattern's MIDI events, the track under the cursor or the selected block, as rows in time order (see [See a track as MIDI events](#see-a-track-as-midi-events)). The last pad, **APPS >** (pad 16), opens the APPS page, which lists the tool apps on the card and nothing else. The tool apps, such as RHYTHM GEN, are small programs that write into the pattern. The page opens on the first app. EVENTS opens while the transport plays in WATCH and STEP; in LIVE the playhead holds the cursor and the strip says **THE PLAYHEAD HOLDS THE CURSOR IN LIVE**.
 
-A tool is stored when you run it: it edits the pattern at once, and one `F8` (**UNDO**) takes back the whole change. An app asks first (**EDITS THE PROJECT (UNDOABLE): F1 AGAIN**). Leave an app with `F7` and `F8` together.  For example, EXPAND x2 on a short pattern makes one twice as long, at half speed, with a gap between every note, ready to fill the gaps by hand.
+A tool is stored when you run it: it edits the pattern at once, and one `F8` (**UNDO**) takes back the whole change. An app that only edits the pattern starts at once, with no question. Leave an app with `F7` and `F8` together.  For example, EXPAND x2 on a short pattern makes one twice as long, at half speed, with a gap between every note, ready to fill the gaps by hand.
+
+HUMANIZE, the one small tool app on the panel's list, opens in the same right-hand panel as the TOOLS dialog, beside the grid. The panel lists the app's own rows (TIME, VOL and SEED), with the one you are on between `<` and `>`; `Up` and `Down` choose the row, the encoder changes the value (`Shift` for a bigger step), and a footer names what the app works on: the selected block, or the step under the cursor. `F1` (**APPLY**) runs the app on that block in one undo step, with no question, and the app's answer (what it did, or why it did nothing) shows under the footer. The block is the target, so this app has no target rows. Every other app keeps its own page: MUTATE and MORPH (with their INSTRUMENT row), CHORDS and RHYTHM GEN (with the target rows), TAP CALC and SMF EXPORT. `F8` or `F7` and `F8` together close the panel and return to the pattern with the block as it was.
+
+### The block's hint on the info line
+
+In Edit, with a block selected, the info line says what it is and what the keys do to it: **BLOCK 16 STEPS  ENC: TRANSPOSE  F7: TOOLS  PAD: SET  DEL: CLEAR** (the parts that do not fit are left off, from the end; outside Edit — in WATCH — the line shows no hint, since the encoder, the pads and `Del` all need Edit). The encoder acts on the column under the cursor (TRANSPOSE on Note, INSTRUMENT, VOLUME, FX VALUE), and with `Shift` held on Note it reads **OCTAVE**; on an FX column the FX reading is still drawn after the hint; the verb menu (`F7`) holds TRANSPOSE and INSTRUMENT as dialog verbs (see [The TOOLS dialog over a block](#the-tools-dialog-over-a-block)).
+
+### The TOOLS dialog over a block
+
+The verb menu's **TRANSPOSE** (pad 1) and **INSTRUMENT** (pad 2) rows open the TOOLS dialog in the same right-hand panel, beside the grid instead of over it: the grid narrows to the 500 px left of the panel (three tracks at the 5-track zoom) and scrolls so the block's first track is the leftmost column, so the block stays visible while you choose (instead of running one step of the encoder's verb). It has the same shape as the Song screen's TOOLS dialog: an **OP** row (`Left` / `Right` flips TRANSPOSE, INSTRUMENT and CLEAR), the OP's value row — **AMOUNT** in semitones from -24 to +24 for TRANSPOSE (`Shift` + the encoder moves an octave, 12 st, a turn), **TO** the instrument 1..64 for INSTRUMENT, **WHAT** (NOTES, VOLUME, FX 1, FX 2, ALL) for CLEAR — and a footer that names the target (**BLOCK  TRACK 1  NOTE  ROWS 01-03**, or **STEP  TRACK 1  ROW 01** with no selection) and counts it (**3 STEPS  3 NOTES**). The rows keep their values while the unit is on.
+
+`F1` (**APPLY**) runs the tool over the block as one undo step: TRANSPOSE moves every note of the block by AMOUNT (cut, fade and off steps, and empty steps, are untouched) and the strip says **TRANSPOSED: 3 STEPS +12 ST**; INSTRUMENT sets every note to TO and says **INSTRUMENT SET: 3 STEPS 05**; CLEAR clears WHAT and says **CLEARED: N STEPS**. `F8` (**BACK**) leaves the dialog with nothing written. `F6` (**REPEAT**) repeats the last APPLY with the same amount, on the selection as it is now, as one undo step; after a fill, `F6` (**RE FILL**) repeats the fill. A block of only some columns takes TRANSPOSE on the Note column and INSTRUMENT on the Instr column; on any other column the strip says why (for example **TRANSPOSE: WHOLE STEPS OR THE NOTE COLUMN**) and no dialog opens, and CLEAR on such a block is refused with **CLEAR: WHOLE STEPS ONLY**, since it clears whole steps.
 
 ## Try it
 
 1. Press `Pattern`, then `Rec`. The chip reads **STEP**.
-2. Press `F4` (**FILL**). The Fill dialog opens.
+2. Hold `Shift` and press `Up` on step 1: the whole track is selected. Press `F4` (**FILL**). The Fill dialog opens, and its footer says where the fill goes: `TRACK 1  ROWS 1-64`.
 
-   (Picture: Pattern, Fill dialog: the rows SCOPE to VALUE, the line of steps that the rule picks, and FILL and BACK on the key row.)
+   (Picture: Pattern, Fill dialog: the rows, the steps line, the footer naming the track, FILL and BACK on the key row.)
 
-3. Press `Down` twice and `Right` twice, so TYPE reads **EUCLID**. Press `Down` and `Right` once more, so EVENTS reads 5. The line shows five hits.
+3. Press `Down` once and `Right` twice, so TYPE reads **EUCLID**. Press `Down` and `Right` once more, so EVENTS reads 5. The line shows five hits.
 
    (Picture: Pattern, Fill dialog set to EUCLID with 5 events: the line of steps marks the five hits.)
 
@@ -4652,8 +5098,8 @@ A tool is stored when you run it: it edits the pattern at once, and one `F8` (**
 
    (Picture: Pattern after the fill: notes on steps 1 and 8, the first two of the five hits, and the strip names the fill.)
 
-5. Press `F7` (**TOOLS**). The list opens, with **EXPORT PATTERN** first, then the length tools.
-6. Press `Down` twice, to **EXPAND x2**, and `F1` (**RUN**). The track is twice as long, and the strip says **EXPANDED: 64 STEPS**. Each note sits twice as far from step 1, so step 8 is empty now.
+5. Press `F7` (**TOOLS**). The verb menu opens, with the length tools **DUPLICATE x2**, **EXPAND x2** and **SHRINK /2** on pads 10 to 12.
+6. Press pad 11 (**EXPAND x2**). The track is twice as long, and the strip says **EXPANDED: 64 STEPS**. Each note sits twice as far from step 1, so step 8 is empty now.
 
    (Picture: Pattern after EXPAND x2: the length reads 64, and step 8 is empty now because its note moved further down.)
 
@@ -4665,7 +5111,6 @@ A tool is stored when you run it: it edits the pattern at once, and one `F8` (**
 
 | Row | What it sets |
 |---|---|
-| SCOPE | **BLOCK**, **TRACK** or **PATTERN**: where the fill goes. |
 | WHAT | **NOTE**, **INSTR**, **VOLUME**, **FX 1** or **FX 2**: what the fill writes. |
 | TYPE | **EVERY N**, **RANDOM**, **EUCLID** or **SCALE**: the rule. |
 | N | The step count for EVERY N and SCALE. It reads **EVENTS** for EUCLID, and **DENSITY** for RANDOM: how many steps get a value, from 0 to 100. |
@@ -4673,13 +5118,13 @@ A tool is stored when you run it: it edits the pattern at once, and one `F8` (**
 | KEY | For NOTE: the scale and its root in one row, such as `C# Dorian`. For FX 1 and FX 2 it reads **FX TYPE**: the effect to write. |
 | FROM, TO | The value, or the two ends of the ramp or the range. FROM reads **VALUE** in CONST, where TO is dim. |
 
-The rows that do not apply are dim. MODE is dim for NOTE with RANDOM or SCALE: those two rules choose the notes, and FROM and TO then set the window of notes they choose from. KEY is dim for INSTR and VOLUME. The dialog opens with FROM and TO taken from the cursor step: the note under it and an octave above, the instrument in hand, its volume (else 127) down to 0, or its FX type. The key row reads **FILL** on `F1` and **BACK** on `F8`.
+The rows that do not apply are dim. MODE is dim for NOTE with RANDOM or SCALE: those two rules choose the notes, and FROM and TO then set the window of notes they choose from. KEY is dim for INSTR and VOLUME. There is no SCOPE row: the selection is the target, and the footer under the rows names it — `BLOCK  TRACK 3  ROWS 1-16` for a block, `TRACK 3  ROWS 1-64` for the whole track of `Shift` + `Up` on step 1, `PATTERN  ALL TRACKS  ROWS 1-64` for the whole pattern, `STEP  TRACK 3  ROW 5` for the cursor step alone. The dialog opens with FROM and TO taken from the cursor step: the note under it and an octave above, the instrument in hand, its volume (else 127) down to 0, or its FX type. The key row reads **FILL** on `F1` and **BACK** on `F8`.
 
 ## More tasks
 
 ### Fill a track with a rule
 
-Start on the Pattern screen, in **STEP**. Put the cursor on the track.
+Start on the Pattern screen, in **STEP**. Hold `Shift` and press `Up` on step 1 to select the whole track (the footer of the dialog will read `TRACK 1  ROWS 1-64`).
 
 1. Press `F4` (**FILL**).
 2. Press `Down` to a row, then `Right` to change it. Set TYPE to the rule.
@@ -4690,7 +5135,7 @@ You should see the notes on the steps the rule picks. In WATCH the strip says **
 
 ### Fade a track out with a ramp
 
-Start on the Pattern screen, in **STEP**. Put the cursor on the track.
+Start on the Pattern screen, in **STEP**, with the track selected (`Shift` + `Up` on step 1).
 
 1. Press `F4` (**FILL**). Set WHAT to **VOLUME** and MODE to **RAMP**. FROM reads 127 and TO reads 0.
 
@@ -4703,7 +5148,7 @@ You should see the volume column fall from 7F to 00 over the track, and the stri
 
 ### Fill an effect column
 
-Start on the Pattern screen, in **STEP**. Put the cursor on the track.
+Start on the Pattern screen, in **STEP**, with the track selected (`Shift` + `Up` on step 1).
 
 1. Press `F4` (**FILL**). Set WHAT to **FX 1** or **FX 2**.
 2. Set FX TYPE (the row under MODE) to the effect, such as **Chance**. FROM and TO go to that effect's default value.
@@ -4717,7 +5162,7 @@ You should see the effect and a value on every step the rule picks, such as **FI
 Start on the Pattern screen, in **STEP**. Put the cursor on the first step of the block.
 
 1. Hold `Shift` and press `Down` seven times. This selects eight steps. Started on one column, the block covers that column only.
-2. Press `F4` (**FILL**). The SCOPE row reads **BLOCK**.
+2. Press `F4` (**FILL**). The footer reads **BLOCK  TRACK 1  ROWS 1-8**.
 3. Set TYPE to **EVERY N**, and N to 2. The line reads `x.x.x.x.` and the count reads `4 OF 8 STEPS`.
 4. Press `F1` (**FILL**). Steps 1, 3, 5 and 7 of the block get the note. Nothing outside the block changes.  A block that holds only some columns fills whole steps, and the strip begins **FILL: WHOLE STEPS**.
 
@@ -4725,12 +5170,12 @@ Start on the Pattern screen, in **STEP**. Put the cursor on the first step of th
 
 Start on the Pattern screen, with the transport stopped.
 
-1. Press `F7` (**TOOLS**). The list opens.
+1. Press `F7` (**TOOLS**), then pad 16 (**APPS >**). The APPS page opens, with the tool apps only.
 2. Press `Down` to the app, for example **RHYTHMGEN**.
-3. Press `F1` (**RUN**). The list says **EDITS THE PROJECT (UNDOABLE): F1 AGAIN**, and the key reads **RUN?**. Press `F1` again.
+3. Press `F1` (**RUN**). An app that only edits the project starts at once, with no question.
 4. Work in the app, then press `F7` and `F8` together. You are back on the Pattern screen.
 
-An app opens on the block you selected. It gets whole steps: a block of only some columns reaches it as the whole steps of its rows and tracks.  `F8` (**BACK**) closes the list without running anything.
+An app opens on the block you selected. It gets whole steps: a block of only some columns reaches it as the whole steps of its rows and tracks.  `F8` (**BACK**) closes the page without running anything.
 
 You should see the app's notes on the Pattern screen. One `F8` (**UNDO**) takes back everything the app wrote, and the strip says `UNDO RHYTHM GEN`.  The list shows the apps on the card that edit the project, sorted by name:
 
@@ -4742,13 +5187,42 @@ You should see the app's notes on the Pattern screen. One `F8` (**UNDO**) takes 
 | MORPH, MUTATE | Work on a whole instrument; see [Modules](modules.md#launch-an-app-on-the-pattern-you-are-editing). `F1` (**APPLY**) writes the change as one undo unit, and `F8` takes it back. MUTATE also has `F2` (**VARY**), which takes the next seed and applies it. MORPH has `F3` (**RESET**), which puts the instrument back as it was when the page opened.  |
 | TAPCALC | Measures a tempo from your taps. See [Modules](modules.md).  |
 
+### See a track as MIDI events
+
+Start on the Pattern screen, with the transport stopped. Select a block first to list its tracks and rows instead of the cursor's track.
+
+1. Press `F7` (**TOOLS**), then `F6` (**EVENTS**). The grid pane becomes the event list.
+2. One row per note, with its length in **LEN**; one per MIDI CC (`CC A` to `CC F`); one per note-off that ends no note above it. `Up` and `Down` move the row; `Left` and `Right` move across its fields.
+3. In Edit (`Rec`), the encoder changes the boxed field of the row — TIME by a microstep (a whole step with `Shift`), DATA by a semitone, VAL by 1, LEN by a step, TYPE to the next CC letter, CH to the next channel, IN to the next instrument — and a pad enters the pad's note on **DATA**, the 0..127 ramp on **VAL**, or sounds the row's step anywhere else. Each press writes the step and is one undo step.
+4. The columns read TIME (the step and the percent of it, so a micro-moved note reads `009.50`), CH, DATA (the note, or what the CC sends, such as `#074`, `PROG` or `--`), VAL, IN and FL. A note with nothing below it reads `>` in LEN and plays on past the track's end.
+5. Press `F1` (**FILTER**) to show every row, only the notes, or only the CC rows: the key reads `ALL 1/3`, `NOTE 2/3`, `CC 3/3`, and the count in the header follows.
+6. Hold `F5` (**PREVIEW**) to hear the row's step. While the pattern plays, a bar in the left margin marks the row of the step that is playing.
+7. Press `F8` (**BACK**): the grid cursor lands on the row's step, track and column.
+
+In WATCH the list is read-only and an edit key says **TURN EDIT ON**, writing nothing. An effect on the row's step that the row does not show, such as a chord, is named on the info line (`ALSO: CHORD 57B` for a Chord 47), and a gated note shows `G` with its gated length.  The event list refuses to open while the view follows the playhead (the strip says **STOP PLAYING TO OPEN EVENTS**), with no project (**NO PROJECT**), on a pattern the project does not have (**PATTERN IS EMPTY**); an empty scope opens an empty list (**NO EVENTS: INSERT ADDS ONE**), and an edit key on it says the same.  New in track3r-os. Not yet checked on the unit.
+
+### Add, delete and tidy events
+
+Start in the event list with Edit on (`Rec`). The list shows the steps of the pattern, so every key here writes ordinary steps: the grid, the file and the MIDI out see nothing new. A step holds one note and two FX columns, so a few moves are refused, and the strip says why.
+
+1. Press `Insert` on a note row. A copy of the note (note, instrument, volume) lands on the step where the note ends, and the cursor goes to the new row.
+   If the next step holds a note, or nothing ends the note, the strip says **NO FREE STEP AFTER THIS NOTE** and nothing is written.
+2. Press `Insert` on a CC row. The same CC letter and value land on the next step that has a free FX column.
+3. Press `Shift` + `Insert` to add the other kind on the row's step: a `CC A 000` on a note row, a note on a CC row whose step has no note. On an empty list `Insert` adds a note and `Shift` + `Insert` a `CC A`, on the first step of the track.
+4. Press `Delete` to clear the row. A note row clears its note, its volume and its end. A CC row clears its FX column only. If the deleted note ended the note above it, an OFF takes its place, so that note keeps its length.
+5. Press `F2` (**QUANT**) on a note row. A note up to 23 microsteps (47% of a step) late goes back to `.00`. A note later than that moves on to the next step at `.00`, with its end. The strip says why when the next step holds a note (**STEP 010 HOLDS A NOTE**). A CC row says **CC IS ON THE STEP**, because a CC has no time inside a step.
+6. Press `Shift` + `F2` (**QUANT ALL**) to do the same for every note and OFF row the filter shows, as one undo step. The strip says **QUANTISED 12**, or **QUANTISED 12, 2 LEFT (STEP TAKEN)** when two rows could not move. A run of late notes all move: the pass repeats while it frees steps.
+7. Press `F7` (**UNDO**) to take back the last edit without leaving the list, and `Shift` + `F7` (**REDO**) to do it again. The list shows the pattern again and the cursor stays on its event. `F8` (**UNDO**) on the grid takes back the same steps after you press `F8` (**BACK**).
+
+In WATCH every one of these keys says **TURN EDIT ON** and writes nothing.  Each key is one undo step, and **QUANT ALL** is one for the whole operation. A CC step with a micro-moved note still sends its CC at the start of the step, and only the note is late: that is why a CC row has no time inside a step. Not yet checked on the unit: the MIDI out of a note moved inside its step.  New in track3r-os.
+
 ### Double, spread or halve a pattern
 
 Start on the Pattern screen, with the transport stopped and Edit on (`Rec`).
 
-1. Press `F7` (**TOOLS**). The list opens with **EXPORT PATTERN**, then **DUPLICATE x2**, **EXPAND x2** and **SHRINK /2**.
-2. Press `Down` to the tool you want.
-3. Press `F1` (**RUN**). The list closes. With a block selected, the tool changes the tracks of the block. With none, it changes every track.
+1. Press `F7` (**TOOLS**). The verb menu opens with **DUPLICATE x2** (pad 10), **EXPAND x2** (pad 11) and **SHRINK /2** (pad 12).
+2. Press the pad of the tool you want.
+3. The menu closes and the tool runs. With a block selected, the tool changes the tracks of the block. With none, it changes every track.
 
 You should see the new length of the longest track in the strip, for example **EXPANDED: 64 STEPS**. Each track goes by its own length.  A block of only some columns counts as whole steps, and the strip ends **WHOLE STEPS**.
 
@@ -4781,42 +5255,61 @@ At the first or last pattern, `Left` or `Right` says **NO PREVIOUS PATTERN** or 
 | `Up`, `Down` | Choose a row in the Fill dialog. | QA-PAT-087 |
 | `Right`, encoder | Change the value of the row. | QA-PAT-087, QA-PAT-253 |
 | `Shift` + encoder | N moves four a turn. DENSITY moves ten a turn. FROM and TO move twelve for a note and ten for the rest. On KEY it steps the root. | QA-PAT-253, QA-PAT-308 |
-| `F1` (**FILL**) | Fills the track, or the block when SCOPE is BLOCK. | QA-PAT-088, QA-PAT-092 |
+| `F1` (**FILL**) | Fills the selection: the block, the track or the pattern selected with `Shift` + `Up` on step 1, or the cursor step alone. | QA-PAT-088, QA-PAT-092 |
+| `F2` (**VARY**) | Live while the fill draws at random (TYPE RANDOM, or MODE RANDOM): takes back the fill just made and draws again; the dialog stays up. | QA-PAT-451 |
 | `F8` (**BACK**) | Leaves the Fill dialog without a fill. | QA-PAT-086 |
-| `F7` (**TOOLS**) | Opens the list of tool apps. Refused while the view follows the playhead (the strip says STOP PLAYING TO OPEN TOOLS). | QA-PAT-160, QA-PAT-161 |
-| `Up`, `Down`, encoder | Choose a row in the TOOLS list. `Shift` + `Up` or `Down` moves a page of ten. | QA-PAT-160 |
+| `F7` (**TOOLS**) | Opens the verb menu in the right-hand panel beside the grid (pads 1-16 pick a verb, `F1` RUN, `F8` BACK); `F6` (**EVENTS**) opens the event list; **APPS >** (pad 16) turns the panel into the APPS page, the tool apps only. Held + a pad 1-16 runs that verb without opening the menu. It opens in STEP and WATCH while playing; refused only in LIVE (the strip says THE PLAYHEAD HOLDS THE CURSOR IN LIVE). | QA-PAT-436, QA-PAT-456, QA-PAT-160, QA-PAT-161, QA-PAT-448, QA-PAT-449 |
+| `F7`, pad 1 / pad 2 | Opens the TOOLS dialog in the right-hand panel beside the block on TRANSPOSE / INSTRUMENT: the OP row, the AMOUNT / TO row, the footer with the target and the count. | QA-PAT-457, QA-PAT-459 |
+| `Up`, `Down` | Choose a row in the TOOLS dialog. | QA-PAT-457 |
+| `Left`, `Right`, encoder | The row's value in the TOOLS dialog: the OP flips, AMOUNT moves a semitone, TO an instrument. In the HUMANIZE panel only the encoder changes the value. | QA-PAT-457, QA-PAT-461 |
+| `Shift` + encoder | The row's coarse step in the TOOLS dialog: an octave on AMOUNT, 8 on TO. | QA-PAT-458 |
+| `F1` (**APPLY**) | Runs the dialog's tool over the block as one undo step (`TRANSPOSED: 3 STEPS +12 ST`). | QA-PAT-458 |
+| `F8` (**BACK**) | Leaves the TOOLS dialog with nothing written. | QA-PAT-457 |
+| `F6` (**RE FILL**, **REPEAT** after an APPLY) | Repeats the last APPLY of the TOOLS dialog with the same amount, on the selection as it is now; after a fill, the fill (the later of the two wins). | QA-PAT-459 |
+| `Up`, `Down`, encoder | Choose a row on the APPS page. `Shift` + `Up` or `Down` moves a page of eight. | QA-PAT-160 |
 | `F1` (**RUN**) | Runs the chosen item. | QA-PAT-160 |
 | `F7` + `F8` | Leaves an app's page, back to the Pattern screen. | QA-PAT-165 |
 | `Left`, `Right`, with `F1` held | Pick the previous or the next pattern the project has. | QA-PAT-311 |
-| `F8` (**BACK**) | Closes the TOOLS list. | QA-PAT-276 |
+| `F8` (**BACK**) | Closes the APPS page. | QA-PAT-276 |
 | `Copy`, with `F1` held | Copies the pattern the chooser shows, whole. | QA-PAT-285 |
 | `Shift` + `Copy`, with `F1` held | Writes the copy over the pattern the chooser shows. | QA-PAT-286 |
 | `F8` (**UNDO**) | Takes back a fill, a tool, a whole-pattern paste, or everything an app wrote in one run. | QA-PAT-089, QA-PAT-166, QA-PAT-280, QA-PAT-287 |
+| `F7` (**TOOLS**), `F6` (**EVENTS**) | Opens the event list over the grid pane, on the cursor's track or the block. | QA-PAT-436, QA-PAT-400, QA-PAT-401, QA-PAT-409 |
+| `Up`, `Down`, encoder | The row of the list; `Shift` + `Up` / `Down` a page. | QA-PAT-400 |
+| `Left`, `Right` | The field of the row (TIME, TYPE, CH, DATA, VAL, LEN, IN). | QA-PAT-400 |
+| `F1` (**FILTER**) | Shows every row, only the notes, or only the CC rows. | QA-PAT-407 |
+| `F5` (**PREVIEW**), held | The row's step sounds. | - |
+| `Insert`, `Shift` + `Insert` | Copy the row (a note onto its end step, a CC onto the next free step), or add the other kind on its step. | QA-PAT-421 |
+| `Delete` | Clears the row; a note takes its end with it. | QA-PAT-422 |
+| `F2` (**QUANT**) | Snaps the row to the step: under 24 microsteps back to `.00`, else on to the next step. | QA-PAT-426, QA-PAT-428 |
+| `Shift` + `F2` (**QUANT ALL**) | Does the same for every note and OFF row the filter shows, as one undo step. | QA-PAT-427 |
+| `F7` (**UNDO**), `Shift` + `F7` (**REDO**) | Take back or redo a list edit; the list stays open. | QA-PAT-423 |
+| `F8` (**BACK**) | Closes the list; the grid cursor lands on the row's step, track and column. | QA-PAT-408 |
 
 ## Good to know
 
-- The TOOLS list does not open while the view follows the playhead (WATCH while playing, or LIVE). The strip says **STOP PLAYING TO OPEN TOOLS**. Stop the transport, then press `F7`.
+- The TOOLS menu does not open in LIVE, where the playhead holds the cursor. The strip says **THE PLAYHEAD HOLDS THE CURSOR IN LIVE**. Leave LIVE (`Shift` + `Rec`), then press `F7`. In WATCH it opens, but the edit entries say **TURN EDIT ON**. The event list does not open while the view follows the playhead (**STOP PLAYING TO OPEN EVENTS**).
 - `F8` undoes the Pattern area only. A song or Params edit stays, and when nothing is left the strip says **NOTHING TO UNDO HERE**.
-- With no tool app on the card, the list says **NO TOOL APPS ON THE CARD** under the line. The read-only apps, MIDI Monitor and Loudness VU, are not in the list.
-- The first `F1` on an app asks once. The app then starts at once until the unit restarts.
+- With no tool app on the card, the APPS page says **NO TOOL APPS ON THE CARD**. The read-only apps, MIDI Monitor and Loudness VU, are not on the page; the Modules screen lists them.
+- An app that writes files (it has the export files capability) asks once on its first `F1` from the page, then starts at once until the unit restarts. An app that only edits the project never asks.
 - `Shift` + `Fx` no longer repeats a fill. It jumps to row 49 of a 64-step pattern. Use `F4`.
 - The scales named on screen include these four. Not yet checked by ear on the unit.
 
 | Scale | Steps above the root |
 |---|---|
-| Melo Min | 0 2 3 5 7 9 11 |
-| Blues Maj | 0 2 3 4 7 9 |
+| Mel. minor | 0 2 3 5 7 9 11 |
+| Blues major | 0 2 3 4 7 9 |
 | Todi | 0 1 3 6 7 8 11 |
-| Gipsy | 0 2 3 6 7 8 11 |
+| Gypsy minor | 0 2 3 6 7 8 11 |
 
-- The official firmware has a Fill dialog, duplicate, expand and shrink, and a whole-pattern copy. Here the Fill dialog has its own rules and value modes, and the length tools and the copy are reached from the TOOLS list and with `F1` held.  The TOOLS list of apps is new in track3r-os.  Not checked against the original firmware: the Euclid rule, the scale list, and what its length tools and whole-pattern copy do in every detail.
+- The official firmware has a Fill dialog, duplicate, expand and shrink, and a whole-pattern copy. Here the Fill dialog has its own rules and value modes, and the length tools and the copy are reached from the TOOLS menu's pads and with `F1` held.  The APPS page of tool apps is new in track3r-os.  Not checked against the original firmware: the Euclid rule, the scale list, and what its length tools and whole-pattern copy do in every detail.
 - Not yet checked on the unit: the fill rules and the app edits. The simulator and host tests pass.
 
 ## See also
 
 - [Pattern](pattern.md): the record modes, the cursor and the block that a fill can use.
 - [Effects in the pattern](fx.md): the effects that the FX rows of a fill can write.
-- [Export](export.md): EXPORT PATTERN and EXPORT SELECTION, which are in the TOOLS list.
+- [Export](export.md): EXPORT PATTERN and EXPORT SELECTION, which are pads 14 and 15 of the TOOLS menu.
 - [Modules and apps](modules.md): installing apps on the card.
 
 ---
@@ -4842,7 +5335,7 @@ Items 1, 2 and 4 are features that are new in track3r-os.  The others exist on t
 5. **Power off.** As on the official unit, you hold the `Power` button on the rear panel. Here a line across the top fills over 2 seconds, and a press wakes the unit. Power off never saves the project: the strip warns **UNSAVED WORK** while you hold, so press `F4` (**SAVE**) first. The official firmware autosaves, and track3r-os saves nothing by itself. See [Getting started](getting_started.md#turn-the-unit-off).
 6. **Pattern.** The official unit has `Rec` for editing, live recording and an instant pattern switch. Here `Rec` turns step entry on, `Shift` + `Rec` turns live recording on, and holding `F1` while a pattern plays switches to another pattern at the next step, with no stop. See [Pattern](pattern.md).
 7. **Perform.** The `Perform` button opens 12 effect slots you play with the pads, live and not written into the steps, with three scenes to store a setup. The scenes are new in track3r-os. Not checked against the original firmware: the rest of the screen. See [Perform](perform.md).
-8. **Keys.** As on the official unit, hold `Master` and turn the encoder to set the master volume on any screen. The official unit also sets the tempo from any screen. Here, hold `Pattern` and turn the encoder, or tap pads while you hold it (new in track3r-os), and the Song screen has the tempo field (`F7`). New in track3r-os: hold `Shift` and press `Pattern` for the Navigator, a list of every screen, and press `Vol` and `Fx` together for MIDI Learn. Also new: `Shift` + `Config` opens a help page for the screen you are on, and `Shift` + `Power` saves a screenshot to the card. See [The panel](panel.md) and [Mixer](mixer.md).
+8. **Keys.** As on the official unit, hold `Master` and turn the encoder to set the master volume on any screen. The official unit also sets the tempo from any screen. Here, hold `Pattern` and turn the encoder, or tap pads while you hold it (new in track3r-os), and the Song screen has the tempo field (`F7`). New in track3r-os: press `Song` and `Pattern` together for the Navigator, a list of every screen, hold `Shift` and press `Pattern` for your module apps, and press `Vol` and `Fx` together for MIDI Learn. Also new: `Shift` + `Config` opens a help page for the screen you are on, and `Shift` + `Power` saves a screenshot to the card. See [The panel](panel.md) and [Mixer](mixer.md).
 
 ## New to trackers?
 

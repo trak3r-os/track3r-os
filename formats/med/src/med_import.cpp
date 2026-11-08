@@ -43,16 +43,8 @@ std::size_t piece_name(const char* block_name, std::uint32_t first, char* out) n
 
 }  // namespace
 
-const char* drop_group_name(unsigned index) noexcept {
-  static const char* const kNames[kDropGroupCount] = {
-      "annotation",        "notation",           "MIDI dumps",          "MMDInfo text",     "ARexx",
-      "MIDI 3x settings",  "echo",               "volume adjust",       "stereo separation", "extra songs",
-      "channel split",     "master volume",      "tracks without a slot", "commands",       "synth tables",
-      "hold and decay",    "default pitch",      "MIDI program",        "loop point",       "instruments refused",
-      "flow",
-  };
-  return index < kDropGroupCount ? kNames[index] : "";
-}
+// OS-FLASHDIET I3: drop_group_name (with its table) lives in formats/src/tracker_sniff.cpp now, so the image links it from formats
+// and this library does not have to be linked for the report's names.
 
 // ---- the job ----------------------------------------------------------------------------------------------------------
 

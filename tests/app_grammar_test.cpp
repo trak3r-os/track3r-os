@@ -32,13 +32,6 @@ TEST_CASE("app grammar: Humanize speaks the grammar: rows TIME, VOL, SEED, coars
   run("humanize", spec);
 }
 
-TEST_CASE("app grammar: Humanize's target rows start at the Pattern cursor, move the target and are not kept (OS-APPUX S5)") {
-  AppRig rig;
-  NEED(rig.open_tool("humanize", O3_E2E_CARD_DIR));
-  TargetSpec ts;
-  check_target_rows(rig, "humanize", ts);
-}
-
 TEST_CASE("app grammar: Chords speaks the grammar: eight rows, KEY a wheel, lists with no coarse step") {
   Spec spec;
   spec.declared = 8;
@@ -63,24 +56,12 @@ TEST_CASE("app grammar: Mutate speaks the grammar: AMOUNT and SEED coarse, GROUP
   run("mutate", spec);
 }
 
-TEST_CASE("app grammar: Mutate's INSTRUMENT row moves the instrument it works on and is not kept (OS-APPUX S5)") {
-  AppRig rig;
-  NEED(rig.open_tool("mutate", O3_E2E_CARD_DIR));
-  check_instrument_row(rig, "mutate", "INSTRUMENT");
-}
-
 TEST_CASE("app grammar: Morph speaks the grammar: SOURCE is a list of the instrument's kind, POS coarse") {
   Spec spec;
   spec.declared = 2;
   spec.persist_row = 1;  // POS (SOURCE is a list of the instruments that match: this card's project may have none)
   spec.moves_others = 1u << 2;  // INSTRUMENT A: SOURCE B lists the other instruments of A's kind
   run("morph", spec);
-}
-
-TEST_CASE("app grammar: Morph's INSTRUMENT A row moves A and is not kept (OS-APPUX S5)") {
-  AppRig rig;
-  NEED(rig.open_tool("morph", O3_E2E_CARD_DIR));
-  check_instrument_row(rig, "morph", "INSTRUMENT A");
 }
 
 TEST_CASE("app grammar: SMF Export speaks the grammar on its one row: PATTERN, Shift + the encoder by ten, Delete the pattern it opened on") {

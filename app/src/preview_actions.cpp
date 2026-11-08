@@ -21,7 +21,7 @@ namespace {
 constexpr std::uint8_t kSlice = 4;
 constexpr std::uint8_t kBeatSlice = 5;
 
-bool say(ActionContext& ctx, const char* text) noexcept { return ctx.view.notify.post(core::Severity::Info, text, "preview", ViewState::kMessageMs); }
+bool say(ActionContext& ctx, const char* text) noexcept { return say_tag(ctx, core::Severity::Info, text, "preview"); }
 
 // The frame Shift + Preview starts at, in the sample of `frames`.
 std::uint32_t cursor_frame(const ActionContext& ctx, const model::Instrument& in, std::uint32_t frames) noexcept {

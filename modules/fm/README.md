@@ -81,3 +81,5 @@ geometry (a line per modulation, a stub per carrier, modulators above their targ
 
 The cost is measured (above). Copy `fm.tmod` to `/modules/instruments/` on a test card, Instrument page F1 ENGINE, pick FM, play: the default electric piano, then each algorithm; sweep an operator's Level while holding a note (the modulation index follows with no
 zipper noise); read the `diag mod` timing of a held note (the budget row is 8 % of the audio CPU).
+
+RATE (OS-MODRATE, ABI 1.13): this module declares `O3M_FX_RATE` (`"rate": true` in `module.json`), so the MIX page offers FULL, 1/2 and 1/4: it is called for half or a quarter of the frames at 22050 or 11025 Hz and the OS holds each sample. Every rate is derived from `host->sample_rate` at `init`.

@@ -49,6 +49,7 @@ constexpr Theme kAmiga = {
         {84, 200, 92},    // Play
         {10, 24, 12},     // PlayText
         {190, 30, 30},    // Rec
+        {44, 92, 184},    // SelDim
     },
     {kFaces[0], kFaces[1], kFaces[2], kFaces[3]},
     kMetrics,
@@ -75,6 +76,7 @@ constexpr Theme kBlack = {
         {70, 220, 90},    // Play
         {0, 20, 0},       // PlayText
         {220, 52, 52},    // Rec
+        {44, 98, 200},    // SelDim
     },
     {kFaces[0], kFaces[1], kFaces[2], kFaces[3]},
     kMetrics,
@@ -102,6 +104,7 @@ constexpr Theme kWhite = {
         {28, 128, 52},    // Play
         {255, 255, 255},  // PlayText
         {196, 32, 32},    // Rec
+        {56, 100, 188},   // SelDim
     },
     {kFaces[0], kFaces[1], kFaces[2], kFaces[3]},
     kMetrics,

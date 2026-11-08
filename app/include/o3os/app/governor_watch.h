@@ -38,15 +38,22 @@ void append_block_cost(core::FixedString<N>& s, std::uint32_t cycles) noexcept {
     s.append("%");
   }
 }
-// The right-hand text of a cell of the Mixer's INSERTS page: OVER BUDGET (a net forced the instance to dry), else BYPASS (the record's flag), else NOT BOUND (a record with no instance while the build
-// has the host: `expect_bound`), and the measured cost after it ("BYPASS  ~2%") while an instance is bound and has one. Nothing is appended for a plain insert that was never measured.
+// The right-hand text of a cell of the Mixer's INSERTS page: ST first for a stereo effect (OS-INSFX-ABI2 A5), then OVER BUDGET (a net forced the instance to dry), else BYPASS (the record's flag),
+// else NOT BOUND (a record with no instance while the build has the host: `expect_bound`), and the measured cost after it ("BYPASS  ~2%") while an instance is bound and has one. Nothing is appended
+// for a plain insert that was never measured.
 template <std::size_t N>
-void append_insert_status(core::FixedString<N>& s, bool bypass, bool bound, bool forced, bool expect_bound, std::uint32_t cost) noexcept {
+void append_insert_status(core::FixedString<N>& s, bool bypass, bool bound, bool forced, bool expect_bound, std::uint32_t cost, bool st = false) noexcept {
+  if (st) {
+    s.append("ST");
+  }
   if (bound && forced) {
+    s.append(s.size() != 0u ? "  " : "");
     s.append("OVER BUDGET");
   } else if (bypass) {
+    s.append(s.size() != 0u ? "  " : "");
     s.append("BYPASS");
   } else if (!bound && expect_bound) {
+    s.append(s.size() != 0u ? "  " : "");
     s.append("NOT BOUND");
   }
   if (bound && cost != 0u) {

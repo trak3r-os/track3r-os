@@ -17,6 +17,10 @@ bool string_append_n(char* buf, std::size_t cap, std::size_t& len, const char* s
 bool string_append_z(char* buf, std::size_t cap, std::size_t& len, const char* src) noexcept;
 bool string_equals_z(const char* a, std::size_t a_len, const char* z) noexcept;
 
+// For the out-of-line writers that take (buf, cap, len) (app/text_format.h, app/fx_text.h; OS-FLASHDIET P2): a FixedString<N>'s storage without N, so
+// a formatter is one function whatever the capacity. A writer keeps the contract above: len <= cap, buf[len] == '\0'.
+struct FixedStringAccess;
+
 }  // namespace detail
 
 // String with a compile-time capacity of N characters (plus the terminator) and inline storage:
@@ -49,8 +53,20 @@ class FixedString {
   bool operator!=(const char* s) const noexcept { return !(*this == s); }
 
  private:
+  friend struct detail::FixedStringAccess;
   char buf_[N + 1] = {};
   std::size_t len_ = 0;
 };
+
+namespace detail {
+
+struct FixedStringAccess {
+  template <std::size_t N>
+  static char* buf(FixedString<N>& s) noexcept { return s.buf_; }
+  template <std::size_t N>
+  static std::size_t& len(FixedString<N>& s) noexcept { return s.len_; }
+};
+
+}  // namespace detail
 
 }  // namespace o3os::core

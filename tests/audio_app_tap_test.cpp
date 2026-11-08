@@ -409,3 +409,53 @@ TEST_CASE("app tap: linear levels") {
   CHECK(AppTap::linear_peak(l) == doctest::Approx(0.5f));
   CHECK(AppTap::linear_rms(l) == doctest::Approx(0.25f).epsilon(1e-6));
 }
+
+TEST_CASE("app tap: linear_rms reads the 64-bit sum as two 32-bit halves, within 1 ulp of the direct conversion (OS-FLASHDIET T3)") {
+  // The old expression: one uint64 -> float conversion (correctly rounded), then the same sqrt. The new one converts each 32-bit half (a single FPU conversion each, no
+  // __aeabi_ul2f); the result may differ by one ulp at most.
+  const auto old_rms = [](std::uint64_t sumsq, std::uint32_t frames) {
+    return std::sqrt(static_cast<float>(sumsq) / static_cast<float>(frames)) * (1.0f / 32768.0f);
+  };
+  const auto bits = [](float f) {
+    std::uint32_t u;
+    std::memcpy(&u, &f, 4);
+    return u;
+  };
+  const std::uint32_t frames_list[] = {1u, 2u, 63u, 64u, 65u, 128u, 1000u, AppTap::kMaxFrames, AppTap::kMaxFrames + 1u, 100000u};
+  const std::uint64_t max_sumsq = static_cast<std::uint64_t>(AppTap::kMaxFrames) * 32768ull * 32768ull;  // the largest sum a reader can fold
+  const std::uint64_t sumsq_list[] = {
+      0ull, 1ull, 2ull, 63ull, 64ull, 65ull, 0xffffffull, 0x1000000ull, 0x1000001ull, 0x7ffffffeull, 0x7fffffffell, 0x80000000ull, 0x80000001ull,
+      0xfffffffeull, 0xffffffffull, 0x100000000ull, 0x100000001ull, 0x1000000000000ull, max_sumsq / 2u, max_sumsq - 1u, max_sumsq, ~0ull,
+  };
+  Rng rng(0x7a9u);
+  std::uint64_t bad = 0;
+  std::uint64_t cases = 0;
+  const auto check = [&](std::uint64_t sumsq, std::uint32_t frames) {
+    AppTap::Levels l;
+    l.frames = frames;
+    l.sumsq = sumsq;
+    const float got = AppTap::linear_rms(l);
+    const float want = old_rms(sumsq, frames);
+    ++cases;
+    const std::uint32_t g = bits(got);
+    const std::uint32_t w = bits(want);
+    if (g != w && g != w + 1u && g + 1u != w) {  // positive floats: the bit patterns are the rank, one ulp apart at most
+      if (bad == 0u) {
+        MESSAGE("mismatch: sumsq=" << sumsq << " frames=" << frames << " got=" << got << " want=" << want);
+      }
+      ++bad;
+    }
+  };
+  for (const std::uint64_t sumsq : sumsq_list) {
+    for (const std::uint32_t frames : frames_list) {
+      check(sumsq, frames);
+    }
+  }
+  for (unsigned r = 0; r < 8192u; ++r) {  // random sums over the whole 64-bit range (the reachable ones are below max_sumsq, the rest only widen the proof)
+    const std::uint64_t sumsq = (static_cast<std::uint64_t>(rng.next()) << 32) | rng.next();
+    check(sumsq, frames_list[r % (sizeof frames_list / sizeof frames_list[0])]);
+    check(sumsq % (max_sumsq + 1u), AppTap::kMaxFrames);
+  }
+  MESSAGE("cases=" << cases << " beyond-1-ulp=" << bad);
+  CHECK(bad == 0u);
+}

@@ -573,4 +573,18 @@ std::size_t format_audio_start(std::uint8_t result, const AudioClockFault& fault
   return t.size();
 }
 
+std::size_t format_ptfx_quarantine(unsigned index, unsigned count, std::uint16_t id, const char* why, unsigned refused, char* out,
+                                   std::size_t cap) noexcept {
+  Text t(out, cap);
+  if (index >= count) {  // the closing line: the count and the full flag
+    t.str("ptfx quarantine ").dec(count).str("/16, full ");
+    yes_no(t, refused != 0u).str(", refused ").dec(refused);
+  } else {
+    t.str("ptfx q ").dec(index + 1u).str(" id 0x");
+    hex_digits(t, id, 4).chr(' ').str(why);
+  }
+  t.nl();
+  return t.size();
+}
+
 }  // namespace o3os::platform::mk66::console

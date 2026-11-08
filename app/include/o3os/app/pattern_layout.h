@@ -42,6 +42,27 @@ constexpr const PatternZoom& pattern_zoom(int level) noexcept {
   return kZoomTable[level >= 0 && level < kZoomLevels ? level : 0];
 }
 
+// The narrowest track column a zoom level's fields fit in, the one-pixel separator included: the fields' tiles plus their gaps, plus a
+// border each side. `make_pattern_layout` fits this in `track_w`; `pattern_tracks_fit` divides a pane's width by it.
+constexpr int pattern_track_min_w(const ui::Theme& theme, int zoom) noexcept {
+  const ui::Metrics& m = theme.metrics;
+  const PatternZoom& z = pattern_zoom(zoom);
+  const ui::FontGeometry face = theme.geometry(z.face);
+  const int cells[kLayoutFields] = {3, 2, 2, 3, 3};
+  int content = 0;
+  for (int i = 0; i < z.fields; ++i) {
+    content += cells[i] * face.cell_w + (i > 0 ? m.gap : 0);
+  }
+  return content + 2 * m.border;
+}
+
+// OS-PTOOLS2 S3p: the most track columns of `tracks` that fit a pane `width` wide at zoom level `zoom` (at least one). While the right-hand
+// panel is up the grid is drawn 500 px wide, so the 5-track zoom shows three tracks (the assumption of spec section 5).
+constexpr int pattern_tracks_fit(const ui::Theme& theme, int tracks, int zoom, int width) noexcept {
+  const int n = (width - theme.metrics.index_w) / pattern_track_min_w(theme, zoom);
+  return n < 1 ? 1 : (n > tracks ? tracks : n);
+}
+
 struct PatternLayout {
   ui::Rect strip;
   ui::Rect header;
@@ -89,7 +110,10 @@ struct PatternLayout {
 };
 
 // `rows` x `tracks` is the visible window (PatternView::kVisibleRows, kVisibleTracks); `zoom` the level of the Pattern grid (kZoomTable) whose face and fields the track column holds: the other screens pass the default.
-constexpr PatternLayout make_pattern_layout(const ui::Theme& theme, int rows, int tracks, int zoom = 0) noexcept {
+// `width` is the pane's width the grid is drawn in: the full screen by default, the 500 px left of the right-hand panel while that panel is
+// up (OS-PTOOLS2 S3p); the chrome bands stay full width, only the grid (and so the track columns) narrow. Pass `tracks` from
+// pattern_tracks_fit() when `width` is narrower, so the fields still fit a column.
+constexpr PatternLayout make_pattern_layout(const ui::Theme& theme, int rows, int tracks, int zoom = 0, int width = ui::kScreenW) noexcept {
   const ui::Metrics& m = theme.metrics;
   const ui::FontGeometry data = theme.geometry(ui::Face::Data);
   const ui::FontGeometry label = theme.geometry(ui::Face::Label);
@@ -105,12 +129,12 @@ constexpr PatternLayout make_pattern_layout(const ui::Theme& theme, int rows, in
   l.row_pitch = m.row_pitch;
   l.strip = {0, 0, ui::kScreenW, m.strip_h};
   l.header = {0, l.strip.y + l.strip.h, ui::kScreenW, m.header_h};
-  l.grid = {0, l.header.y + l.header.h, ui::kScreenW, rows * m.row_pitch};
+  l.grid = {0, l.header.y + l.header.h, width, rows * m.row_pitch};
   l.info = {0, l.grid.y + l.grid.h, ui::kScreenW, m.info_h};
   l.keys = {0, l.info.y + l.info.h, ui::kScreenW, m.keys_h};
 
   l.track0_x = m.index_w;
-  l.track_w = (ui::kScreenW - m.index_w) / tracks;
+  l.track_w = (width - m.index_w) / tracks;
   l.index_x = (m.index_w - 2 * data.cell_w) / 2;
 
   // Field tiles, in cells of the level's face: note 3, instrument 2, volume 2, FX1 3, FX2 3. The fields past `fields` are not shown: they take no room.

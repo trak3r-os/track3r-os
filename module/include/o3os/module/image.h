@@ -11,9 +11,11 @@
 //                  a multiple of 4 up to kMaxImageBytes, hot part within it, state up to kMaxStateBytes, at most kMaxParams
 //                  parameters, the descriptor inside the cold part and aligned), every reserved field zero (the module version, ABI 1.2, is any value when the file says
 //                  ABI 1.2 or later and a reserved word, zero, before; the capability mask reserved2[0], ABI 1.3, is any combination of O3M_CAPS_ABI_1_3 in an APP that says
-//                  ABI 1.3 or later (O3M_CAPS_ABI_1_4 from 1.4, O3M_CAPS_ABI_1_7 from 1.7) and a reserved word, zero, otherwise), and the length of
+//                  ABI 1.3 or later (O3M_CAPS_ABI_1_4 from 1.4, O3M_CAPS_ABI_1_7 from 1.7) and a reserved word, zero, otherwise; the layout tag reserved2[1], ABI 1.11, is the OS's own import
+//                  layout tag in a KIND 3 file that says ABI 1.11 or later, and a reserved word, zero, in every other file), and the length of
 //                  the whole file: header + image + 4 bytes a relocation, exactly. Kinds: instrument and effect; the app since ABI 1.1 (a 1.0
-//                  file that says app is refused).
+//                  file that says app is refused); the importer (kind 3) since ABI 1.11 (OS-FLASHDIET I1: a kind 3 file with a minor below 1.11 is an unknown kind, and one whose word 44 is not
+//                  the OS's tag is refused LayoutMismatch). check_header() is the header-only check: the app can call it before anything is placed.
 //   Relocator      the table's offsets: 4-byte aligned, strictly ascending (so none twice), the word inside the image and not
 //                  across the hot/cold border, the address in the word inside the image (one past its end allowed). Nothing is
 //                  written before it has passed; a word that fails is left as it was.
@@ -22,6 +24,12 @@
 //                  address (odd) inside the image, parameter defaults within their ranges.
 //                  ABI 1.8 (descriptor of 80 bytes; struct_size is per minor): pitch is code or zero; the page table (at most 4 pages of 1..8 parameters, the first at 0, ascending, covering the parameters; names of
 //                  at most 7 characters) and the label table (INT parameters only, count = max - min + 1 in 2..16, labels of at most 11 characters) lie in the image and obey those limits.
+//                  ABI 1.11 (descriptor of 84 bytes): the importer's table (kind 3 only; NULL in every other kind), checked in full: its size, the format list (1..O3M_IMPORTER_FORMATS_MAX entries
+//                  inside the image, each extension a string of at most 7 characters) and its five calls are Thumb addresses inside the image. A kind 3 module has no parameters and no views and makes no
+//                  sound (render, set_param, note_on and note_off may be NULL, as an app's).
+//                  ABI 1.12 (descriptor of 100 bytes; OS-INSFX-ABI2 A1): the fourth tail, `render_st` (Thumb code inside the image, an effect's only), `fx_flags` (O3M_FX_WIDENS only, and it needs render_st), the factory
+//                  presets (an instrument's or an effect's with parameters only: at most 32, each name 1..15 printable characters, 1..param_count values, all finite and inside their parameter's range) and the KEY parameter
+//                  flag (an effect's INT parameter 0..16 with no labels, at most two a module). An app and an importer carry the four members zero.
 //   crc32          of the header (its CRC field as zero), the image and the table, against the header's.
 // A module is trusted community code (ADR 0002: open modules, no signing, no sandbox): this is the robustness of the loader
 // against a damaged or truncated file and an honest mistake, not a defence against an attacker with a valid file.
@@ -79,6 +87,7 @@ enum class Status : std::uint8_t {
   BadRelocOffset, // the word is outside the image or across the hot/cold border
   BadRelocValue,  // the address in the word is outside the image
   BadDescriptor,  // read_desc found something wrong (see Desc check detail)
+  LayoutMismatch, // OS-FLASHDIET I1: a kind 3 file whose header word 44 is not this OS's import layout tag (the module was built against another step layout)
   NoMemory,       // the arenas cannot hold the module
   Busy,           // a load is already running
   BadName,        // not a file stem
@@ -108,6 +117,7 @@ inline constexpr const char* status_name(Status s) noexcept {
     case Status::BadRelocOffset: return "relocation outside the image";
     case Status::BadRelocValue: return "relocated address outside the image";
     case Status::BadDescriptor: return "bad descriptor";
+    case Status::LayoutMismatch: return "importer layout mismatch (word 44 is not this OS's tag)";
     case Status::NoMemory: return "no room for the module";
     case Status::Busy: return "a load is running";
     case Status::BadName: return "bad module name";
@@ -121,7 +131,7 @@ inline constexpr const char* status_name(Status s) noexcept {
 
 // A refusal that says the FILE is wrong (not the card, the memory or the caller): the module is quarantined for the rest of this boot.
 constexpr bool is_validation_failure(Status s) noexcept {
-  return s >= Status::TooShort && s <= Status::BadDescriptor;
+  return s >= Status::TooShort && s <= Status::LayoutMismatch;
 }
 
 // The descriptor as it is in the file, on a 32-bit target: every pointer a 32-bit address. Identical to o3m_module there
@@ -152,8 +162,49 @@ struct Labels32 {
   std::uint32_t names, count;  // `names`: the address of `count` string addresses
 };
 static_assert(sizeof(Labels32) == 8, "a label table entry is 2 words");
-// The descriptor's size for a module of ABI 1.`minor` (o3module.h O3M_MODULE_SIZE, on the 32-bit target).
-constexpr std::uint32_t desc_size(std::uint32_t minor) noexcept { return minor >= kPitchAbiMinor ? sizeof(Desc32) + sizeof(DescExt32) : sizeof(Desc32); }
+// ABI 1.11 (OS-FLASHDIET I1): the minor that published the importer kind (kind 3) and the descriptor's last member, `importer` (an address of the
+// o3m_importer table inside the image; NULL in every other kind). The file header's word 44 carries the layout tag for kind 3 from this minor on.
+inline constexpr std::uint8_t kImporterAbiMinor = 11;
+struct DescImp32 {
+  std::uint32_t importer;  // address of the importer's table, or 0
+};
+static_assert(sizeof(DescImp32) == 4, "the 1.11 tail of the descriptor is one word");
+// The importer's table as it is in the file (o3m_importer on a 32-bit target): size, formats, format_count, begin, step, read_pcm, report, close.
+struct Importer32 {
+  std::uint32_t size, formats, format_count, begin, step, read_pcm, report, close;
+};
+static_assert(sizeof(Importer32) == 32, "the importer's table is eight words");
+struct Format32 {
+  std::uint32_t ext;  // address of the extension string
+};
+static_assert(sizeof(Format32) == 4, "a format entry is one word");
+// ABI 1.12 (OS-INSFX-ABI2 A1): the minor that published the effect surface and the descriptor's last four members, appended after `importer`: render_st (Thumb address of the stereo render, or 0), fx_flags
+// (O3M_FX_*), presets (address of `preset_count` Preset32, or 0) and preset_count. A module of a lower minor has a descriptor that ends before them and they stay zero (they are not read).
+inline constexpr std::uint8_t kStereoAbiMinor = 12;
+// ABI 1.13 (OS-MODRATE S2): the minor that gave an instrument's fx_flags its O3M_FX_RATE bit (no layout change). Below it only an effect's WIDENS is a known bit.
+inline constexpr std::uint8_t kRateAbiMinor = 13;
+// The fx_flags bits a module of this kind and minor may set: an effect's O3M_FX_WIDENS, an instrument's O3M_FX_RATE from 1.13, nothing else (every other bit is 0).
+constexpr std::uint32_t fx_flags_allowed(std::uint32_t kind, std::uint32_t minor) noexcept {
+  return kind == O3M_KIND_EFFECT ? static_cast<std::uint32_t>(O3M_FX_WIDENS) : (kind == O3M_KIND_INSTRUMENT && minor >= kRateAbiMinor ? static_cast<std::uint32_t>(O3M_FX_RATE) : 0u);
+}
+struct DescFx32 {
+  std::uint32_t render_st;    // Thumb address of the stereo render, or 0 (a mono effect, and every other kind)
+  std::uint32_t fx_flags;     // O3M_FX_WIDENS (an effect), O3M_FX_RATE (an instrument of 1.13+) or 0
+  std::uint32_t presets;      // address of `preset_count` Preset32, or 0
+  std::uint32_t preset_count; // 0..O3M_PRESETS_MAX, zero exactly when `presets` is 0
+};
+static_assert(sizeof(DescFx32) == 16, "the 1.12 tail of the descriptor is 4 words");
+struct Preset32 {
+  std::uint32_t name;    // address of the preset's name
+  std::uint32_t values;  // address of `count` float32
+  std::uint32_t count;
+};
+static_assert(sizeof(Preset32) == 12, "a preset is 3 words");
+// The descriptor's size for a module of ABI 1.`minor` (o3module.h O3M_MODULE_SIZE, on the 32-bit target): 64 up to 1.7, 80 from 1.8, 84 from 1.11, 100 from 1.12.
+constexpr std::uint32_t desc_size(std::uint32_t minor) noexcept {
+  return static_cast<std::uint32_t>(sizeof(Desc32) + (minor >= kPitchAbiMinor ? sizeof(DescExt32) : 0u) + (minor >= kImporterAbiMinor ? sizeof(DescImp32) : 0u) +
+                                    (minor >= kStereoAbiMinor ? sizeof(DescFx32) : 0u));
+}
 
 // The views' table. ABI 1.9 (OS-KEYROWDLG S5) appends `keys` (Thumb address of the key-row call, or 0): the table is 20 bytes for a module that declares minor 8 or below and 24 from minor 9
 // (o3module.h O3M_UI_SIZE on the 32-bit target); the word past byte 20 is read only then.
@@ -209,9 +260,11 @@ class Relocator {
 const std::uint8_t* resolve(const o3m_file_header& h, const Placement& p, std::uint32_t addr, std::uint32_t length) noexcept;
 
 // Reads the descriptor of a placed, relocated module and checks it against the header and the image (see the top). `out` is
-// written whatever the verdict (a failed one is not to be used). struct_size must be the size of the declared minor's descriptor (64 up to 1.7, 80 from 1.8). `ext`, when given, gets the 1.8 members
-// (zeros for a lower minor) after the same checks: `pitch` is code or 0; the page table, the labels and their strings are inside the image and inside the limits of o3module.h (OS-INSTUI S10).
-Status read_desc(const o3m_file_header& h, const Placement& p, Desc32& out, DescExt32* ext = nullptr) noexcept;
+// written whatever the verdict (a failed one is not to be used). struct_size must be the size of the declared minor's descriptor (64 up to 1.7, 80 from 1.8, 84 from 1.11, 100 from 1.12). `ext`, when given, gets the 1.8 members
+// (zeros for a lower minor) after the same checks: `pitch` is code or 0; the page table, the labels and their strings are inside the image and inside the limits of o3module.h (OS-INSTUI S10). `imp`, when given, gets the
+// 1.11 member (zero below that minor): kind 3 requires it to be a valid importer table (see the top), every other kind requires it to be 0. `fx`, when given, gets the four 1.12 members (zeros below that minor)
+// after the checks listed at the top (render_st, fx_flags, the presets and the KEY flag).
+Status read_desc(const o3m_file_header& h, const Placement& p, Desc32& out, DescExt32* ext = nullptr, DescImp32* imp = nullptr, DescFx32* fx = nullptr) noexcept;
 
 // A parameter of a placed module, checked by read_desc() already; false when `index` is out of range.
 bool read_param(const o3m_file_header& h, const Placement& p, const Desc32& d, std::uint32_t index, Param32& out) noexcept;

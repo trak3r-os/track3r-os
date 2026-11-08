@@ -2,8 +2,21 @@
 //
 // MIDI in, the timing side (midi/in.h): the byte parser and the drain of the midiRt ring.
 #include <o3os/midi/in.h>
+#include <o3os/midi/mtc_in.h>
 
 namespace o3os::midi {
+
+namespace {
+// The full frame the SysEx data bytes `7F id 01 01 hh mm ss ff` spell, as the packed time of mtc::pack_full(); Pass when a field is out of range for its rate code.
+InParser::Out full_frame_out(const std::uint8_t* d) noexcept {
+  const std::uint8_t code = static_cast<std::uint8_t>((d[0] >> 5) & 3u);
+  const mtc::Time t{static_cast<std::uint8_t>(d[0] & 0x1Fu), d[1], d[2], d[3]};
+  if (!mtc::label_valid(t, code)) {
+    return InParser::Out{ByteKind::Pass, 0};
+  }
+  return InParser::Out{ByteKind::MtcFull, mtc::pack_full(t, code)};
+}
+}  // namespace
 
 InParser::Out InParser::feed(std::uint8_t b) noexcept {
   // A real-time byte may sit anywhere, between the bytes of a message too, and does not disturb it.
@@ -22,8 +35,22 @@ InParser::Out InParser::feed(std::uint8_t b) noexcept {
     }
   }
   if (is_status(b)) {
+    // The F7 of a full frame: eight data bytes of the right shape (the time itself is checked by full_frame_out).
+    Out end{ByteKind::Pass, 0};
+    if (mtc_ && b == kSysExEnd && sysex_ && sx_ok_ && sx_n_ == 8u) {
+      end = full_frame_out(sx_d_);
+    }
     sysex_ = b == kSysExStart;
+    sx_ok_ = mtc_ && sysex_;
+    sx_n_ = 0;
+    qf_ = false;
     have_ = 0;
+    if (mtc_ && b == kQuarterFrame) {
+      status_ = 0;  // a quarter frame is taken whole: its data byte is next, and it starts no running status
+      need_ = 0;
+      qf_ = true;
+      return Out{ByteKind::Consumed, 0};
+    }
     if (b == kSongPosition) {
       status_ = b;
       need_ = 2;
@@ -37,10 +64,30 @@ InParser::Out InParser::feed(std::uint8_t b) noexcept {
       status_ = b;
       need_ = data_bytes_of(b);
     }
-    return Out{ByteKind::Pass, 0};
+    return end;
   }
   // A data byte.
+  if (qf_) {
+    qf_ = false;
+    return Out{ByteKind::MtcQf, b};
+  }
   if (sysex_) {
+    if (sx_ok_) {
+      // Could this still be `7F <device id> 01 01 hh mm ss ff`? (the universal real-time header of a time code message, any device id)
+      const std::uint8_t n = sx_n_;
+      if (n == 0u) {
+        sx_ok_ = b == 0x7Fu;
+      } else if (n == 2u || n == 3u) {
+        sx_ok_ = b == 0x01u;
+      } else if (n >= 4u && n < 8u) {
+        sx_d_[n - 4u] = b;
+      } else if (n >= 8u) {
+        sx_ok_ = false;  // too long
+      }
+      if (sx_n_ < 9u) {
+        ++sx_n_;
+      }
+    }
     return Out{ByteKind::Pass, 0};
   }
   if (status_ == kSongPosition) {
@@ -69,8 +116,9 @@ void MidiIn::reset() noexcept {
 }
 
 MidiIn::Drained MidiIn::drain(RtInRing& ring, const ClockMap& map, ClockDll& dll, std::uint32_t max_items, TransportEvent* ev,
-                              std::uint32_t ev_cap, RtItem* pass, std::uint32_t pass_cap) noexcept {
+                              std::uint32_t ev_cap, RtItem* pass, std::uint32_t pass_cap, MtcEvent* mtc, std::uint32_t mtc_cap) noexcept {
   Drained d;
+  const bool mtc_on = cfg_.mtc_enabled && mtc != nullptr && mtc_cap != 0u;
   while (d.items < max_items) {
     RtItem it;
     if (have_held_) {
@@ -82,12 +130,15 @@ MidiIn::Drained MidiIn::drain(RtInRing& ring, const ClockMap& map, ClockDll& dll
 
     // Look at the byte without committing the parser, to know whether there is room for what it makes: a clock makes no output, a transport
     // byte one event, a byte that is not timing one `pass` entry. A byte that has no room waits (held) for the next block.
+    const bool mtc_port = mtc_on && port == static_cast<std::uint32_t>(cfg_.mtc_port);
+    parser_[port].set_mtc(mtc_port);
     InParser trial = parser_[port];
     const InParser::Out o = trial.feed(it.byte);
     const bool timing_port = cfg_.clock_enabled && port == static_cast<std::uint32_t>(cfg_.clock_port);
     const bool makes_event = timing_port && (o.kind == ByteKind::Stop || o.kind == ByteKind::Spp);
-    const bool makes_pass = o.kind == ByteKind::Pass;
-    if ((makes_event && d.events >= ev_cap) || (makes_pass && d.passed >= pass_cap)) {
+    const bool makes_mtc = o.kind == ByteKind::MtcQf || o.kind == ByteKind::MtcFull;  // only a parser told MTC is on says so
+    const bool makes_pass = o.kind == ByteKind::Pass || o.kind == ByteKind::MtcFull;  // the F7 of a full frame ends a SysEx the note path also gets
+    if ((makes_event && d.events >= ev_cap) || (makes_mtc && d.mtc >= mtc_cap) || (makes_pass && d.passed >= pass_cap)) {
       held_ = it;
       have_held_ = true;
       if (makes_pass) {
@@ -109,6 +160,22 @@ MidiIn::Drained MidiIn::drain(RtInRing& ring, const ClockMap& map, ClockDll& dll
         break;
       case ByteKind::Consumed:
         break;
+      case ByteKind::MtcQf:
+      case ByteKind::MtcFull: {
+        // The time code message began a byte time per byte before the stamp on DIN (the latency covers one byte, as for a clock); USB is stamped at the frame, as a clock is.
+        const std::uint32_t extra = port == static_cast<std::uint32_t>(Port::Din) ? static_cast<std::uint32_t>(din::kByteCycles) * (o.kind == ByteKind::MtcQf ? 1u : 9u) : 0u;
+        const std::uint32_t began = it.cycles - cfg_.latency_cycles[port] - extra;
+        if (o.kind == ByteKind::MtcQf) {
+          mtc[d.mtc++] = MtcEvent{MtcEvent::Kind::Qf, static_cast<std::uint8_t>(port), static_cast<std::uint8_t>(o.value), 0, 0, began};
+          ++stats_.mtc_qf;
+        } else {
+          pass[d.passed++] = it;
+          ++stats_.passed;
+          mtc[d.mtc++] = MtcEvent{MtcEvent::Kind::Full, static_cast<std::uint8_t>(port), 0, 0, o.value, began};
+          ++stats_.mtc_full;
+        }
+        break;
+      }
       case ByteKind::Clock:
       case ByteKind::Start:
       case ByteKind::Continue:

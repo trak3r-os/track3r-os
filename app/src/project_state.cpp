@@ -36,9 +36,10 @@ static_assert(model::kStemSlots == usb::kMaxChannels && model::kUsbModeMax == st
               "model/project_state.h mirrors usb/usb_types.h");
 static_assert(model::kMaxAppParams == O3M_PARAMS_MAX && model::kAppNameMax == model::kModuleNameMax, "model/project_state.h mirrors the module ABI");
 
-// OS-PERSIST2: the session state's ranges are the runtime's.
-static_assert(model::kNoteRootMax == 11 && model::kNoteScaleMax == kNoteScales - 1 && model::kNoteOctaveMax == kEntryOctaves - 1 && model::kNoteDefaultOctave == NoteEntry{}.octave,
+// OS-PERSIST2: the session state's ranges are the runtime's. OS-SCALES28: the scale is the official numbering 0..38 in both (model::kNoteScaleMax); the panel's twelve pads go through model::kNotePanelScales.
+static_assert(model::kNoteRootMax == 11 && model::kNoteScaleMax == 38 && model::kNoteOctaveMax == kEntryOctaves - 1 && model::kNoteDefaultOctave == NoteEntry{}.octave,
               "model/project_state.h mirrors app/note_entry.h (the default JUMP, PatternEdit::edit_step, is held equal by tests/persist2_test.cpp)");
+static_assert(sizeof model::kNotePanelScales == kNoteScales && model::kNotePanelScales[0] == 0, "the panel's twelve scales are the model's map (OS-SCALES28)");
 static_assert(model::kMuteModeMax == kMuteModes - 1 && model::kMaxTracks == kMixTracks, "model/project_state.h mirrors app/track_state.h");
 static_assert(model::kSceneCount == seq::kPerfScenes, "model/project_state.h mirrors seq/perform.h");
 static_assert(model::kNoteJumpMax == model::edit::kMaxEditStep, "a saved JUMP is the JUMP the editor plays (model/step_edit.h)");
@@ -361,6 +362,7 @@ bool play_mode_set(ActionContext& ctx, unsigned slot, unsigned target) noexcept 
   model::SamplerParams& s = edited.sampler;
   s.play_mode = static_cast<std::uint8_t>(target);
   s.sample_type = target == kPlayModeWavetable ? 1u : 0u;
+  model::wt_slot_follow_mode(edited);  // OS-CEWTENV W7b: slot 3 is the wavetable position or the grain length, its enable bit follows
   if (target == kPlayModeWavetable) {
     const unsigned size = wt_fit_size(s.wavetable_window_size, frames);
     if (size == 0u) {
