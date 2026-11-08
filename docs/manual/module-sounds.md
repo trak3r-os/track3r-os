@@ -7,7 +7,7 @@ Only the parameters this version adds are written here. Modules are not in the s
 
 Status: draft
 
-The TB-303 has a second page, **MODS**, with a tuning, an octave shift, an accent threshold, filter tracking and an accent decay. The FM has sixteen algorithms instead of eight, and a Detune that reaches a whole octave either way. The Chip's wave and duty can now follow a MIDI controller. SID is a new sound in the same family: a chip voice with its own filter on every track. All of this is new in track3r-os. A project saved earlier sounds the same, because every new value starts where the old sound is.
+The TB-303 has a second page, **MODS**, with a tuning, an octave shift, an accent threshold, filter tracking and an accent decay. The FM has sixteen algorithms instead of eight, and a Detune that reaches a whole octave either way. The Chip's wave and duty can now follow a MIDI controller, and the Chip has eight more waves. SID is a new sound in the same family: a chip voice with its own filter on every track. All of this is new in track3r-os. A project saved earlier sounds the same, because every new value starts where the old sound is.
 
 ## What it is for
 
@@ -59,6 +59,8 @@ The FM has four operators, which are four sine waves. A modulator is an operator
 <!-- sync: src=modules/chip/module.json qa=QA-MOD-141 -->
 
 **WAVE** and **DUTY** can now be bound to a MIDI controller with Learn (`Vol` and `Fx` together, see [The panel](panel.md)). Turning the controller steps through the four waves or the four duties. Before, these two rows refused Learn. <!-- QA-MOD-141 -->
+
+**Eight more waves.** In v1.2.0 the Chip has twelve waves, not four. Waves 0 to 3 are the pulse, triangle and two noises. Waves 4 to 11 are **2A03 PULSE**, **SID SAW/TRI**, **NOISE/LFSR**, **FM BELL**, **SUPER SQR**, **ZAP/LASER**, **ARP CHORD** and **CHIP DRUM**. The wave row shows the names. Ten new rows sit on the Chip's pages: **SHAPE** (the pulse width or the drop depth of the wave), **SUB OSC** (a triangle an octave down), **CUTOFF** and **RESONANCE** (a low-pass), **BITCRUSH**, **PWM DEPTH**, **PWM RATE**, **ENV AMT** (the envelope moves the cutoff), **DECIMATE** and **CHORD** (OFF, OCTAVE, FIFTH, MAJOR, MINOR, SUS4, MAJ7, MIN7: a four-step chord that replaces the two arpeggio notes). Some rows act on every wave; **SHAPE** and the two PWM rows act on waves 4 to 11 only. A project saved earlier sounds the same, because every new row starts at a neutral value. Not checked on the unit: how each wave sounds and what a voice costs in processing time. <!-- new Community OS behaviour; sources: modules/chip/README.md -->
 
 ### SID: a chip voice with four pages
 <!-- sync: src=modules/sid/module.json,modules/sid/sid_dsp.h qa=QA-MOD-210,QA-MOD-216,QA-MOD-217,QA-MOD-218 -->

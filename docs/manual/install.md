@@ -7,19 +7,23 @@ The release file is an Intel HEX image under a `.ptf` name, which is what the Tr
 
 > **Unofficial, at your own risk.** track3r-os is community firmware. It is not affiliated with or endorsed by Polyend. Installing it replaces the firmware in your unit. The bootloader that flashes it is separate from the firmware and is not touched by an update (`docs/hw/tracker-hardware-notes.md`, section 3), but nothing here is a guarantee. Read the whole page first.
 
+**Current release: v1.2.0** ([release notes](../release/v1.2.0.md)). It is tested on a computer and in the emulator and has **not yet been installed on a unit**: the unit smoke test is pending. The install steps below are the ones that worked for earlier releases.
+
 This page says what is established by observation on the maintainer's unit and by the repository's own tests, and marks the rest **not yet verified**. Where a step is not verified, do it only if you accept that risk and have a way back (see [Going back](#going-back-to-the-official-firmware)).
 
 ## What a release contains
 <!-- sync: src=tools/release/make_starter.py,tools/release/starter_manifest.json -->
 
-A release (GitHub, "Releases") has two files:
+A release (GitHub, "Releases") has four files (v1.2.0):
 
-- `track3r-os-<version>.ptf`: the update file. It is the device image in Intel HEX form under a `.ptf` name, which is what the Tracker's bootloader flashes. Its name never starts with `Polyend`, so it cannot be mistaken for an official file. For a first install through the reset button you rename your copy on the card (section 1).
-- `SHA256SUMS`: the checksum of the update file. Check the download before using it: `sha256sum -c SHA256SUMS`. The release notes also give the CRC-32 that `o3console.py --update --crc` asks for.
+- `track3r-os-v1.2.0.ptf`: the update file. It is the device image in Intel HEX form under a `.ptf` name, which is what the Tracker's bootloader flashes. Its name never starts with `Polyend`, so it cannot be mistaken for an official file. For a first install through the reset button you rename your copy on the card (section 1).
+- `track3r-os-v1.2.0-modules.zip`: every external module: the apps, the effects, the `sine` instrument, the `tracker` importer for MOD, S3M and MED, the factory presets, and the thirteen Sample Editor plugins (`.ptfx`, which go in `Effects/`).
+- `track3r-os-v1.2.0-examples.zip`: demo projects, a drum kit, wavetables, an OctaMED module and the licences of the files.
+- `SHA256SUMS`: the checksums of the three files. Check your download before using it: `sha256sum -c SHA256SUMS`. The release notes also give the CRC-32 that `o3console.py --update --crc` asks for.
 
-The optional starter content (samples, wavetables, songs, starter projects, the bundled apps, effect modules and sine instrument, the factory presets, the thirteen Sample Editor plugins in `Effects/`, licences) is a separate zip, `track3r-os-<version>.zip`. It is not part of this release. When you have it, unpack it into the root of the card. Its `README.txt` says what goes where. Its `modules/importers/` folder holds `tracker.tmod`, the importer module the firmware loads from the card to read MOD, S3M and OctaMED files on the File screen's IMPORT: without it an import of a module says **NO IMPORTER** and changes nothing, so keep the file on the card.
+**Unzip both zips at the root of the card.** The zips are optional for the firmware to run, but one file in them is needed: module import runs from `modules/importers/tracker.tmod`, and without it IMPORT of a MOD, S3M or OctaMED file says **NO IMPORTER** and changes nothing (your open project stays loaded). Keep that file on the card. Each zip's `README.txt` says what goes where.
 
-The same image shows its version in Config, INFO (BUILD ID, for example `v0.5.0 (0271ab60bea6)`), on the boot screen, and in the `version` command of the USB `diag` console.
+The same image shows its version in Config, INFO (BUILD ID, for example `v1.2.0 (be2d71258138)`), on the boot screen, and in the `version` command of the USB `diag` console.
 
 ## Before you start
 <!-- sync: src=platform/mk66/update/include/o3os/platform/mk66/update/path_guard.h,docs/hw/tracker-hardware-notes.md -->
@@ -28,7 +32,8 @@ The same image shows its version in Config, INFO (BUILD ID, for example `v0.5.0 
 2. **Have the official firmware file at hand.** Official images are named `PolyendTracker_<version>.ptf`. Get one from Polyend; their pages are linked from `docs/hw/tracker-hardware-notes.md` ([how to update](https://polyend.ladesk.com/220365-How-do-I-update-Trackers-firmware), [emergency flashing](https://polyend.ladesk.com/929798-How-do-I-perform-the-emergency-flashing-procedure)). The vendor's emergency-flashing page is also where the hidden reset button used below is described.
 3. **Use a normal card.** The Tracker needs a single FAT32 partition with an MBR. The track3r-os writer refuses exFAT volumes and cards with a write-protected CSD, and it never creates the `Firmware/` folder: it must already exist.
 4. **Settings.** The vendor tells users to create a new project after an update so that Config is initialised (the vendor's statement, not verified here). Config may start from defaults after a change of firmware in either direction. How the settings of track3r-os and the official firmware interact is **not yet verified**.
-5. **Power.** Use a stable USB power source and do not remove power or the card while the unit is updating. This is a precaution; how long the flashing takes and what the screen shows while it runs has not been recorded.
+5. **Image end (v1.2.0).** An image must end at or below 0xFF000: an image that reached the last 4 KiB flash sector (end 0x100000) hung a unit after the update, which handed over to the bootloader and did not come back. The update checker of the unit and the image check of the build now refuse such an image, and the v1.2.0 `.ptf` ends below the limit. If you build your own image, build it as a release build.
+6. **Power.** Use a stable USB power source and do not remove power or the card while the unit is updating. This is a precaution; how long the flashing takes and what the screen shows while it runs has not been recorded.
 
 ## 1. From the official firmware
 <!-- sync: src=platform/mk66/README.md,docs/hw/tracker-hardware-notes.md -->
@@ -86,7 +91,9 @@ A unit that already runs a track3r-os with the update dialog can also install a 
 
 The bootloader is separate from the application, so a broken or unwanted application does not remove the recovery path. The way back that has been proven on the unit is the hidden reset button with a single good `.ptf` in `Firmware/`.
 
-**Going back from v1.1.0 to v1.0.1 or v1.0.0** works through the on-device Update screen too. Those files are not padded to a 4 KiB sector, so the screen offers to pad a copy first (**PAD**), then installs the copy (see [Update](config.md)). The reset button as below, with the older file alone in `Firmware/`, works as well. <!-- QA-CFG-269 -->
+**Going back from v1.2.0 or v1.1.0 to v1.0.1 or v1.0.0** works through the on-device Update screen too. Those files are not padded to a 4 KiB sector, so the screen offers to pad a copy first (**PAD**), then installs the copy (see [Update](config.md)). The reset button as below, with the older file alone in `Firmware/`, works as well. <!-- QA-CFG-269 -->
+
+**Instrument files when you go back to v1.1.0.** A project that uses wavetable envelopes, Play Thru or a module RATE is saved with a newer instrument version (INST 1.6, 1.7 or 1.8). It opens in v1.1.0, but v1.1.0 loses those values on its next save. A project that uses none of them is written byte for byte as before, and projects saved by v1.1.0 open in v1.2.0. Keep a copy of such a project before you open it in an older version. Going back to the official firmware is a different step: see below. New Community OS behaviour; the project with INST 1.6 to 1.8 in v1.1.0 is not yet checked on a unit.
 
 1. Put the card on your computer. Move **every** `.ptf` out of `Firmware/` (the track3r-os files and any other).
 2. Copy the official `PolyendTracker_<version>.ptf` you kept (or downloaded from Polyend) into `Firmware/`, so that it is the only `.ptf` there.
@@ -102,7 +109,7 @@ track3r-os has its own update screen on the device (Config, INFO, `F8`; see [Upd
 - The unit does not start after an update: do the steps of [Going back](#going-back-to-the-official-firmware). It is the same recovery used for every hung test image.
 - The reset button flashed a file you did not expect: there was more than one `.ptf` in `Firmware/`. Leave exactly one.
 - The unit sits on the "emergency update" screen and does not flash: check that the file on the card is named `PolyendTracker_0.0.1.ptf` (not `track3r-os-<version>.ptf`) and that it is the only `.ptf` in `Firmware/`. Do not use the Polyend Tool app.
-- The pads do not answer after the install, while the buttons and the screen work: this happened with v1.0.0 on later units (plastic back; issue #1) and is fixed in v1.0.1, which a user with such a unit confirmed (2026-10-26). If your unit runs v1.0.0, install the current release (v1.1.0) the same way. If the pads still do not answer on v1.1.0, report it (OS-BUG-PADS). Open the [Input test](input_test.md) screen (hold `Shift`, `F1` and `F8` while you switch on) and press some pads. The board's status LED (a user saw it blinking behind the buttons under the screen) gives one short blink a second while track3r-os runs; 13 quick flashes after power-on, before that blink starts, mean a key scanner did not answer at boot. Report both in an issue with your model, and go back to the official firmware if you need the pads ([Going back](#going-back-to-the-official-firmware)).
+- The pads do not answer after the install, while the buttons and the screen work: this happened with v1.0.0 on later units (plastic back; issue #1) and is fixed in v1.0.1, which a user with such a unit confirmed (2026-10-26). If your unit runs v1.0.0, install the current release (v1.2.0) the same way. If the pads still do not answer on v1.2.0, report it (OS-BUG-PADS). Open the [Input test](input_test.md) screen (hold `Shift`, `F1` and `F8` while you switch on) and press some pads. The board's status LED (a user saw it blinking behind the buttons under the screen) gives one short blink a second while track3r-os runs; 13 quick flashes after power-on, before that blink starts, mean a key scanner did not answer at boot. Report both in an issue with your model, and go back to the official firmware if you need the pads ([Going back](#going-back-to-the-official-firmware)).
 - The unit is not found by `o3console.py`: check the USB cable, and that the unit runs track3r-os (the `diag` console is part of track3r-os).
 - Report problems with the version string from Config, INFO (or the `version` command) and the file name and SHA-256 you installed.
 
@@ -119,3 +126,4 @@ track3r-os has its own update screen on the device (Config, INFO, `F8`; see [Upd
 | The update screen of track3r-os (Config, INFO, `F8`) installing the official file | IMAGE OK reached with a track3r-os file; INSTALL not pressed; not tried with an official file |
 | Official firmware's update menu as a way back from track3r-os | not yet verified |
 | Settings and project compatibility between track3r-os and the official firmware | not yet verified |
+| The v1.2.0 file installing on a unit | not yet verified: the unit smoke test is pending |

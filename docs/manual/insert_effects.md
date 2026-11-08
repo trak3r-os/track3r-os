@@ -1,20 +1,20 @@
 <!-- manual-sync: b2a5b4d9 -->
-# Insert effects: Fold, Env Filter, Phaser and Comp
+# Insert effects: eleven effects for one track
 
 Status: draft
 
-New in track3r-os. <!-- og: new --> The official firmware has no effect that sits on one track. The Community OS has **inserts**, and four effect modules you can put in them: **Fold** (a wavefolder), **Env Filter** (an auto-wah), **Phaser** and **Comp** (a compressor that can also shape attacks). Each is a file on the card that you load once and then pick from the INSERTS page of the Mixer. All four were checked on the host by tests; none is checked on the unit yet, so how they sound on the hardware is still open.
+New in track3r-os. <!-- og: new --> The official firmware has no effect that sits on one track. The Community OS has **inserts**, and eleven effect modules you can put in them: **Drive** (saturation), **Crush** (bit and sample-rate reduction), **Biquad** (a filter), **Fold** (a wavefolder), **Env Filter** (an auto-wah), **Phaser**, **Comp** (a compressor that can also shape attacks and duck from another track), **Ping-Pong** (a tempo-synced stereo echo), **Wide** (a stereo widener), **Chorus** and **Autopan**. Each is a file on the card that you load once and then pick from the INSERTS page of the Mixer. All eleven were checked on the host by tests; none is checked on the unit yet, so how they sound on the hardware is still open.
 
 ## What it is for
 
-Use an insert when one track needs its own treatment: fold a bass into a buzz, make a pluck open and close a filter, sweep a pad, or squeeze a drum bus. The effect hears that track only, before the track goes to the mix and the sends. The Perform effects act on the whole pattern; an insert stays on its track until you remove it. The steps to load a module and fill an insert slot are in [Mixer: put an effect on a track](mixer.md); this page says what each of the four does.
+Use an insert when one track needs its own treatment: fold a bass into a buzz, make a pluck open and close a filter, sweep a pad, or squeeze a drum bus. The effect hears that track only, before the track goes to the mix and the sends. The Perform effects act on the whole pattern; an insert stays on its track until you remove it. The steps to load a module and fill an insert slot are in [Mixer: put an effect on a track](mixer.md); this page says what each of the eleven does.
 
 ## How it works
-<!-- sync: src=modules/effects/fold/README.md,modules/effects/envfilter/README.md,modules/effects/phaser/README.md,modules/effects/comp/README.md spec=docs/specs/OS-INSFX.md qa=QA-GLB-197,QA-GLB-198,QA-GLB-199,QA-GLB-201,QA-GLB-202,QA-GLB-203,QA-GLB-205,QA-GLB-206,QA-GLB-208 -->
+<!-- sync: src=modules/effects/fold/README.md,modules/effects/envfilter/README.md,modules/effects/phaser/README.md,modules/effects/comp/README.md spec=docs/specs/OS-INSFX.md,modules/effects/drive/README.md,modules/effects/crush/README.md,modules/effects/biquad/README.md,modules/effects/pingpong/README.md,modules/effects/wide/README.md,modules/effects/chorus/README.md,modules/effects/autopan/README.md qa=QA-GLB-197,QA-GLB-198,QA-GLB-199,QA-GLB-201,QA-GLB-202,QA-GLB-203,QA-GLB-205,QA-GLB-206,QA-GLB-208 -->
 
-An insert is a small effect in the signal path of one track. A track has two slots, **INS A** and **INS B**, and the sound goes through A, then B. Every one of these four has a **Mix** parameter: at 0 % you hear the track untouched, at 100 % only the effect. Pull Mix down to blend the effect in. Everything else is set on the parameter page of the insert.
+An insert is a small effect in the signal path of one track. A track has two slots, **INS A** and **INS B**, and the sound goes through A, then B. Almost every one has a **Mix** parameter: at 0 % you hear the track untouched, at 100 % only the effect. Pull Mix down to blend the effect in. Everything else is set on the parameter page of the insert.
 
-All four share one rule for loudness: **at their default settings none of them is louder than the track without it.** That is on purpose, so that putting one in does not push the master limiter. The price is that some of them make the track a little quieter. When that happens, raise the effect's output level (Output on Fold, Makeup on Comp). Past full scale the converter clips, so raise it in steps.
+Fold, Env Filter, Phaser and Comp share one rule for loudness: **at their default settings none of them is louder than the track without it.** (The echo, the widener, the chorus and the autopan add something, so they follow their own Mix or Width.) That is on purpose, so that putting one in does not push the master limiter. The price is that some of them make the track a little quieter. When that happens, raise the effect's output level (Output on Fold, Makeup on Comp). Past full scale the converter clips, so raise it in steps.
 
 A parameter you move does not click or zipper: the effect glides to the new value in a few milliseconds. That means you can turn a knob while the track plays, or bind the parameter to a MIDI controller with Learn (see the Mixer chapter).
 
@@ -87,6 +87,100 @@ Example, compress: on a snare, leave the defaults and lower Threshold to -30 dB;
 
 Good to know: at the defaults COMP never raises the level, so a track at Makeup 0 gets quieter, not louder. TRANSIENT with Punch and Sustain at 0 changes nothing, bit for bit. Its gain is limited to about 12 dB, and Makeup +24 dB can push a track over full scale. A Key naming the insert's own track does nothing (the unit does not measure a track for its own insert). While a track has no voice at all its insert is not called, so the first note after a gap can start at the old, ducked gain and recovers over about the Release time.
 
+### Drive: saturation
+Drive pushes the signal into a soft clipper. A little warms a sound; a lot gives a thick, crunchy distortion.
+
+| Parameter | Range | Default | What it does |
+|---|---|---|---|
+| Shape | 0 or 1 | 0 | 0 is SOFT (even on both sides). 1 is ASYM (one side clips harder, which adds even harmonics). The row shows the number; the view names it. |
+| Drive | 0 to 36 dB | 12 | How hard the signal hits the clipper. At 0 dB a quiet signal passes unchanged. |
+| Tone | 500 to 20000 Hz | 8000 | A low-pass after the clipper. Lower it to soften the fizz. |
+| Mix | 0 to 100 % | 100 | Dry and driven sound. |
+| Output | -24 to +6 dB | 0 | Level of the result. |
+
+Good to know: Drive does not oversample, so a high setting on a bright sound aliases. Use Tone to soften it. A **Curve** view draws the clipping curve.
+
+### Crush: bits and sample rate
+Crush makes the sound coarser, like an early sampler. **Bits** cuts the number of levels; **Rate** holds each value for several samples.
+
+| Parameter | Range | Default | What it does |
+|---|---|---|---|
+| Rate | 1 to 64 | 1 | How many samples each value is held. 1 holds nothing. It can be a fraction. |
+| Bits | 1 to 16 | 8 | The depth. 16 changes nothing; 8 gives 256 levels; 1 leaves only three. |
+| Mix | 0 to 100 % | 100 | Dry and crushed sound. |
+| Output | -24 to +6 dB | 0 | Level of the result. Low Bits lose level, so this is the make-up. |
+
+Good to know: silence stays silence. A view shows the staircase the Bits value makes.
+
+### Biquad: a plain filter
+Biquad is a resonant filter with a Mix. It sits at a fixed cutoff and does not follow the track.
+
+| Parameter | Range | Default | What it does |
+|---|---|---|---|
+| Mode | 0 to 3 | 0 | 0 low-pass, 1 high-pass, 2 band-pass, 3 notch. A change crossfades in about 25 ms. |
+| Cutoff | 20 to 20000 Hz | 1000 | The filter's corner or centre. |
+| Resonance | 0 to 100 % | 10 | A peak at the cutoff. At 10 % it is smooth; at 100 % it is sharp and can clip. |
+| Mix | 0 to 100 % | 100 | Dry and filtered sound. |
+
+Example: Mode 1 (high-pass) at 200 Hz takes the mud out of a pad. A **Response** view shows the curve.
+
+### Ping-Pong: a tempo-synced echo
+Ping-Pong repeats the sound and bounces the echoes between left and right. It follows the song's tempo. It is a stereo effect that **widens**.
+
+| Parameter | Range | Default | What it does |
+|---|---|---|---|
+| Sync | FREE, or a length from 8 steps down to 1/8 step | 3 steps | The echo time as a length in sequencer steps (a beat is 4 steps), so the echo stays on the grid at any BPM. FREE uses Time instead. |
+| Time | 10 to 1000 ms | 375 | The echo time while Sync is FREE. |
+| Feedback | 0 to 95 % | 45 | How much of the echo feeds back. It cannot run away. |
+| Low cut | 20 to 2000 Hz | 120 | Keeps bass out of the repeats. |
+| High cut | 1000 to 20000 Hz | 6000 | Darkens each repeat. |
+| Mix | 0 to 100 % | 35 | How much echo you hear. |
+| Width | 0 to 100 % | 100 | 100 sends echoes fully to alternate ears; 0 puts them in the middle. |
+
+Presets: 1/8 PING, DOTTED 8, SLAP, DUB, WIDE 16TH. Good to know: a time over one second is halved until it fits. Each instance holds a long delay line in module memory, so a fourth may be refused when other modules are loaded.
+
+### Wide: a stereo widener
+Wide gives a mono sound a stereo image. It adds a short, high-passed copy to the side only, so the mono sum stays the original. It **widens**.
+
+| Parameter | Range | Default | What it does |
+|---|---|---|---|
+| Width | 0 to 100 % | 50 | How much side is added. 0 changes nothing. |
+| Time | 2 to 30 ms | 12 | The delay of the copy. Longer sounds wider and more spaced. |
+| Low cut | 20 to 1000 Hz | 200 | Keeps the bass in the centre. |
+
+Presets: Subtle, Wide, Huge, Doubler.
+
+### Chorus: a stereo chorus
+Chorus mixes the sound with a slowly moving short delay, one for each ear. A mono sound becomes wide and shimmering. It **widens**.
+
+| Parameter | Range | Default | What it does |
+|---|---|---|---|
+| Period | 200 to 20000 ms | 1667 | How long one sweep takes. A higher number is slower. |
+| Depth | 0 to 100 % | 40 | How far the delay moves. |
+| Delay | 5 to 25 ms | 12 | The middle delay. |
+| Mix | 0 to 100 % | 50 | At 0 the sound is unchanged. At 100 you hear only the moving copy (a vibrato). |
+
+Presets: Classic, Slow Wide, Vibrato, Ensemble.
+
+### Autopan: a pan that swings
+Autopan swings the sound between left and right. It follows the tempo while the song plays. It **widens**.
+
+| Parameter | Range | Default | What it does |
+|---|---|---|---|
+| Sync | 0 to 15 | 3 | The cycle as a length in steps: 3 is one bar (16 steps), 7 is a beat, 11 is one step. 0 is FREE, and Period rules. |
+| Period | 100 to 20000 ms | 1000 | The cycle length while Sync is 0. |
+| Depth | 0 to 100 % | 70 | How far it swings. |
+| Shape | 0 to 2 | 0 | 0 sine, 1 triangle, 2 square (smoothed, so it does not click). |
+| Phase | 0 to 360 | 0 | Shifts where the swing starts. |
+| Headphone | 0 or 1 | 0 | 0 is for speakers and keeps the mono sum. 1 adds a delay cue for headphones and is not mono-compatible. |
+
+Presets: Slow Sine, Tri 8th, Square 16th, Gentle.
+
+### Presets and the CPU guard
+Comp (DUCK T1, PUMP T1, GLUE, PUNCH), Ping-Pong, Wide, Chorus and Autopan come with factory presets. Open the insert's page, press `F5` (**PRESET**), pick one and press `F1` (**LOAD**). The steps, and how to save your own to the card, are in [Mixer: load a preset into an insert](mixer.md).
+
+A project holds up to four inserts at once, and a master insert counts as two. Each running effect that **widens** (Ping-Pong, Wide, Chorus, Autopan) keeps one of the four stereo voices; Comp is stereo-capable and keeps none. If an insert would take too much processing time, the unit forces it to dry and the cell says **OVER BUDGET**. See [Mixer](mixer.md).
+
 ## Try it
 <!-- sync: src=modules/effects/envfilter/README.md,docs/qa/catalogue/global.md qa=QA-GLB-205,QA-GLB-208 -->
 
@@ -111,7 +205,7 @@ Lower Fold, Resonance or Feedback first, then raise Output or Makeup in small st
 
 - Put at most the effects you need: each insert uses part of the unit's processing time, and the amounts are not measured on the unit yet.
 - Each effect hears only the track it sits on.
-- Not checked on the unit: how any of the four sounds on the hardware, and how much processing each takes.
+- Not checked on the unit: how any of the eleven sounds on the hardware, and how much processing each takes.
 
 ## See also
 

@@ -26,10 +26,11 @@
 track3r-os replaces the software that runs on the Tracker. You keep the hardware you know: the pads, the encoder, the screen and the keys. On top of it you get a tracker that keeps growing:
 - **Your old projects open.** Projects saved by the original firmware still load.
 - **It speaks the classic formats.** It imports MOD, S3M and MED songs.
-- **You can add to it from the SD card.** New instruments, effects and small apps load as modules.
+- **You can add to it from the SD card.** New instruments, effects and small apps load as modules. Eleven effect modules work as inserts on a track or the master, modules keep presets on the card, and Sample Editor plugins (`.ptfx`) add effects to the sample.
+- **It can follow a DAW.** MIDI Time Code out and in, next to the MIDI clock.
 - **It is open.** Anyone can read the code, build it and improve it.
 
-**v1.1.0** is the current release (v1.0.1 and v1.0.0 came before). It runs on real hardware and is tested on a unit. The known issues are in the [release notes](docs/release/v1.1.0.md); what is open and what comes next is in [docs/roadmap/BACKLOG.md](docs/roadmap/BACKLOG.md).
+**v1.2.0** is the current release (v1.1.0, v1.0.1 and v1.0.0 came before). It is merged and tested on a computer and in the emulator; it has **not yet been installed on a unit**, and the unit smoke test is pending. v1.1.0 ran on real hardware and was tested on a unit. The known issues and what still needs a unit check are in the [release notes](docs/release/v1.2.0.md); what is open and what comes next is in [docs/roadmap/BACKLOG.md](docs/roadmap/BACKLOG.md).
 
 ## Screens
 
@@ -115,7 +116,7 @@ track3r-os replaces the software that runs on the Tracker. You keep the hardware
 
 ## Get started
 
-- **Download:** the [latest release](https://github.com/trak3r-os/track3r-os/releases/latest) has the firmware file (`track3r-os-v1.1.0.ptf`) and its checksum. The app modules are the [`apps-v1.0.0`](https://github.com/trak3r-os/track3r-os/releases/tag/apps-v1.0.0) release.
+- **Download:** the [latest release](https://github.com/trak3r-os/track3r-os/releases/latest) has the firmware file (`track3r-os-v1.2.0.ptf`), `track3r-os-v1.2.0-modules.zip` (the apps, effects, the sine instrument, the importer for MOD, S3M and MED, presets and the `.ptfx` plugins), `track3r-os-v1.2.0-examples.zip` and `SHA256SUMS`. Unzip both zips at the card root: import needs `modules/importers/tracker.tmod` from the modules zip.
 - **Install:** read the [install guide](docs/manual/install.md) first. It covers installing from the official firmware, updating, and going back.
 - **Learn it:** the [user manual](docs/manual/index.md), one chapter per screen.
 
