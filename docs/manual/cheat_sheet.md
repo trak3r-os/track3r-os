@@ -20,7 +20,7 @@ The keys on one page. Each table names the chapter it comes from.
 | `Pattern` held, then the encoder or a pad | the encoder changes the tempo, from any screen (a BPM a click, a tenth with `Shift` held first); pad taps tap the tempo. Letting go of `Pattern` after that opens nothing. <!-- QA-GLB-153, QA-GLB-154 --> |
 | `Song` held | shows Song until you let go, then goes back to the screen you came from |
 | `Vol` and `Fx` together | opens Learn |
-| `Instr` and `Fx` together | makes the row under the cursor the encoder's target; `Instr` and `Vol` held, then the encoder, moves it (see "Put one parameter on the encoder" in the panel chapter) |
+| `Instr` and `Fx` together | makes the row under the cursor the encoder's target, like a Learn binding with no MIDI controller; `Instr` and `Vol` held, then the encoder, moves it (see [Put one parameter on the encoder](panel.md#put-one-parameter-on-the-encoder)) |
 | a screen button again | opens the next page of that screen: the FX and PLUGINS pages of Sample edit, the DJ page of Perform |
 | a soft key again | steps that key's windows, such as the six MOD destinations on Instrument |
 
@@ -56,6 +56,7 @@ Held at power-on, until the strip shows the mode:
 | `Up`, `Down`, `Left`, `Right` | move the cursor. `Up` on step 1 goes to the last step |
 | pad | in STEP, writes a note at the cursor; in WATCH, plays the sound |
 | MIDI CC bound by Learn | in LIVE, a knob bound to CUTOFF, PANNING, a send, OVERDRIVE or BIT DEPTH also writes its move as a step FX on the play line (QA-PAT-324) |
+| the encoder as a Learn knob | the encoder target records the same way, in LIVE and in STEP (on the cursor's step); a parameter with no FX of its own moves the sound and records nothing (QA-GLB-231, QA-GLB-232) |
 | `Delete` | clears the cursor's entry, or the highlighted columns of the block |
 | `Shift` + `Delete` | pulls the steps below up, to close a gap |
 | `Insert` | inserts an empty step at the cursor; the steps below move down |

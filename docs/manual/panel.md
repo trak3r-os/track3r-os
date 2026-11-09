@@ -123,13 +123,25 @@ Use your keyboard as a synth: bind the knobs on one instrument, press `F5` on ea
 ### Put one parameter on the encoder
 <!-- sync: src=app/src/bindings.cpp,app/src/param_actions.cpp,app/src/rec_actions.cpp qa=QA-GLB-228,QA-GLB-229,QA-GLB-230,QA-GLB-231,QA-GLB-232 -->
 
+The encoder can work like a MIDI knob that you bound with Learn, with no MIDI controller. You pick a parameter once. Then you hold two keys and turn the encoder to move it, on any screen. It is a relative control: it has no CC number to set and no pickup, and every click moves the value one step.
+
 Any row that Learn can bind can also sit on the encoder, without a MIDI controller. Put the cursor on the row (for example on the Instrument screen), press `Instr` and `Fx` together, and the strip says `ENCODER: <PARAM> INS <n>`. A row Learn cannot bind says `NO TARGET FOR ENCODER`. There is one encoder target in all: pressing the chord on another row replaces it, and pressing it on the same row again only shows the message again. There is no clear gesture. The target stays on that row and that instrument until you replace it or switch the unit off. It is not saved. <!-- QA-GLB-228 -->
 
 To use it, hold `Instr` and `Vol` and turn the encoder, on any screen with no dialog open. Each click moves the row by one step; hold `Shift` for the coarse step. The strip shows `<PARAM> <value>`. Moves undo like a Learn knob. With no target the strip says `NO ENCODER TARGET (INSTR + FX2)`. While both keys are held the encoder does nothing else. Turning cancels the `Instr` popup and the `Vol` tap, so a turn never selects a column. Pressing the two keys without turning does nothing. <!-- QA-GLB-229, QA-GLB-230 -->
 
 Recording follows the Learn rule. In LIVE recording, with Record knob moves as FX on, a move writes the matching FX on the playing step (cutoff, panning, delay send, reverb send, overdrive and bit depth have one). In Edit with free recording, a move writes the FX on the cursor's step of the cursor's track, and one hold of the two keys is one undo unit. A row with no FX still moves the sound and records nothing: the strip says `REC FX: <PARAM> HAS NO FX` on the first move. Browse records nothing. <!-- QA-GLB-231, QA-GLB-232 -->
 
-New in track3r-os. Not yet checked on the unit.
+The encoder target differs from a Learn binding in four ways. It is not listed in Learn and it is not saved with the project: it is gone when you switch the unit off. It is one parameter, not a list. It stays on the instrument you picked, so it does not follow the selected instrument as a Learn binding does with `F5` (**FOLLOW**). <!-- QA-GLB-228 -->
+
+Try it. Start on the Instrument screen.
+
+1. Press `F3` (**FILTER**) and put the cursor on CUTOFF. <!-- QA-GLB-228 -->
+2. Press `Instr` and `Fx` together. The strip says **ENCODER: CUTOFF INS 1**, with your instrument's number. <!-- QA-GLB-228 -->
+3. Press `Pattern` to leave the screen. Press `Play` so a sound is playing.
+4. Hold `Instr` and `Vol` and turn the encoder. The strip says **CUTOFF** and its value, and you hear the filter move. <!-- QA-GLB-229 -->
+5. Let go of both keys. The encoder does its usual job again, and the target stays set. <!-- QA-GLB-229 -->
+
+New in track3r-os. Recording in LIVE and STEP has been checked on the unit. Not yet checked on the unit: how easy the two-key hold is to press, the popups it cancels, and how long the strip messages stay.
 
 ## Edit block
 <!-- sync: src=app/src/step_actions.cpp,app/src/bindings.cpp qa=QA-PAT-007,QA-PAT-319,QA-PAT-320,QA-PAT-321,QA-SNG-003,QA-SNG-012,QA-SNG-028,QA-SNG-053,QA-SNG-054,QA-SNG-056,QA-SNG-057,QA-SNG-058,QA-GLB-014 -->

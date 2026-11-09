@@ -375,13 +375,25 @@ Use your keyboard as a synth: bind the knobs on one instrument, press `F5` on ea
 
 ### Put one parameter on the encoder
 
+The encoder can work like a MIDI knob that you bound with Learn, with no MIDI controller. You pick a parameter once. Then you hold two keys and turn the encoder to move it, on any screen. It is a relative control: it has no CC number to set and no pickup, and every click moves the value one step.
+
 Any row that Learn can bind can also sit on the encoder, without a MIDI controller. Put the cursor on the row (for example on the Instrument screen), press `Instr` and `Fx` together, and the strip says `ENCODER: <PARAM> INS <n>`. A row Learn cannot bind says `NO TARGET FOR ENCODER`. There is one encoder target in all: pressing the chord on another row replaces it, and pressing it on the same row again only shows the message again. There is no clear gesture. The target stays on that row and that instrument until you replace it or switch the unit off. It is not saved.
 
 To use it, hold `Instr` and `Vol` and turn the encoder, on any screen with no dialog open. Each click moves the row by one step; hold `Shift` for the coarse step. The strip shows `<PARAM> <value>`. Moves undo like a Learn knob. With no target the strip says `NO ENCODER TARGET (INSTR + FX2)`. While both keys are held the encoder does nothing else. Turning cancels the `Instr` popup and the `Vol` tap, so a turn never selects a column. Pressing the two keys without turning does nothing.
 
 Recording follows the Learn rule. In LIVE recording, with Record knob moves as FX on, a move writes the matching FX on the playing step (cutoff, panning, delay send, reverb send, overdrive and bit depth have one). In Edit with free recording, a move writes the FX on the cursor's step of the cursor's track, and one hold of the two keys is one undo unit. A row with no FX still moves the sound and records nothing: the strip says `REC FX: <PARAM> HAS NO FX` on the first move. Browse records nothing.
 
-New in track3r-os. Not yet checked on the unit.
+The encoder target differs from a Learn binding in four ways. It is not listed in Learn and it is not saved with the project: it is gone when you switch the unit off. It is one parameter, not a list. It stays on the instrument you picked, so it does not follow the selected instrument as a Learn binding does with `F5` (**FOLLOW**).
+
+Try it. Start on the Instrument screen.
+
+1. Press `F3` (**FILTER**) and put the cursor on CUTOFF.
+2. Press `Instr` and `Fx` together. The strip says **ENCODER: CUTOFF INS 1**, with your instrument's number.
+3. Press `Pattern` to leave the screen. Press `Play` so a sound is playing.
+4. Hold `Instr` and `Vol` and turn the encoder. The strip says **CUTOFF** and its value, and you hear the filter move.
+5. Let go of both keys. The encoder does its usual job again, and the target stays set.
+
+New in track3r-os. Recording in LIVE and STEP has been checked on the unit. Not yet checked on the unit: how easy the two-key hold is to press, the popups it cancels, and how long the strip messages stay.
 
 ## Edit block
 
@@ -3807,6 +3819,10 @@ Title: the name of a project, shown in the header. It is not the folder name, an
 
 RECENT: the first rows of the PROJECTS list. They are the last five projects you opened or saved, newest first.
 
+MIDI Learn: binding a MIDI control to the parameter under the cursor. Press `Vol` and `Fx` together, then move the control. A knob that sends a CC (a control change, the message a knob or fader sends) is the usual control. See [Learn a MIDI control](panel.md#learn-a-midi-control).
+
+Encoder target: the one parameter that the encoder moves while you hold `Instr` and `Vol`. Press `Instr` and `Fx` together on a row to make it the target. It acts like a Learn knob but is not saved. See [Put one parameter on the encoder](panel.md#put-one-parameter-on-the-encoder).
+
 Purge: removing the instruments that no step, FX or Learn binding uses. Press `Shift` + `F7` (**PURGE**) on the PROJECTS page, twice.
 
 USB disk mode: the mode in which the unit shows its card to a computer as a disk. Hold `Shift`, `F1` and `F7` together while you turn the unit on, or use the CARD AS DISK row of Config. See [USB disk](usb_disk.md).
@@ -3961,7 +3977,7 @@ The keys on one page. Each table names the chapter it comes from.
 | `Pattern` held, then the encoder or a pad | the encoder changes the tempo, from any screen (a BPM a click, a tenth with `Shift` held first); pad taps tap the tempo. Letting go of `Pattern` after that opens nothing.  |
 | `Song` held | shows Song until you let go, then goes back to the screen you came from |
 | `Vol` and `Fx` together | opens Learn |
-| `Instr` and `Fx` together | makes the row under the cursor the encoder's target; `Instr` and `Vol` held, then the encoder, moves it (see "Put one parameter on the encoder" in the panel chapter) |
+| `Instr` and `Fx` together | makes the row under the cursor the encoder's target, like a Learn binding with no MIDI controller; `Instr` and `Vol` held, then the encoder, moves it (see [Put one parameter on the encoder](panel.md#put-one-parameter-on-the-encoder)) |
 | a screen button again | opens the next page of that screen: the FX and PLUGINS pages of Sample edit, the DJ page of Perform |
 | a soft key again | steps that key's windows, such as the six MOD destinations on Instrument |
 
@@ -3993,6 +4009,7 @@ Held at power-on, until the strip shows the mode:
 | `Up`, `Down`, `Left`, `Right` | move the cursor. `Up` on step 1 goes to the last step |
 | pad | in STEP, writes a note at the cursor; in WATCH, plays the sound |
 | MIDI CC bound by Learn | in LIVE, a knob bound to CUTOFF, PANNING, a send, OVERDRIVE or BIT DEPTH also writes its move as a step FX on the play line (QA-PAT-324) |
+| the encoder as a Learn knob | the encoder target records the same way, in LIVE and in STEP (on the cursor's step); a parameter with no FX of its own moves the sound and records nothing (QA-GLB-231, QA-GLB-232) |
 | `Delete` | clears the cursor's entry, or the highlighted columns of the block |
 | `Shift` + `Delete` | pulls the steps below up, to close a gap |
 | `Insert` | inserts an empty step at the cursor; the steps below move down |
@@ -4788,6 +4805,7 @@ Three labels in the table are the ones the screen starts with, and they change a
 - An empty slot has no parameter rows. It shows the type chooser: `F1` **SAMPLE**, `F2` **MIDI**, `F3` **PASTE** (dim until you copy an instrument), `F4` **MODULE** (opens the engine picker: `F1` **SELECT**, `F8` **BACK**) and `F5` **LOAD**. A load makes the instrument anew. `F1` opens Sample load aimed at this slot, and the Instrument screen comes back on it after the load.
 - On an empty slot `Shift` shows `<10`, the nearest instrument in use, and `USED>` is dim when none follows. **NAME** to **SAVE** are dim, and so is **PASTE** while nothing is copied.
 - Change instrument with `F7` or `Stop` and a held note ends on the instrument that started it. A pad released later is silent.
+- Any row with a value can sit on the encoder: put the cursor on it and press `Instr` and `Fx` together, then hold `Instr` and `Vol` and turn the encoder from any screen. See [Put one parameter on the encoder](panel.md#put-one-parameter-on-the-encoder).
 - A MIDI CC learned on a parameter, such as the cutoff, is one undo step for the whole sweep. `F8` on the Instrument screen brings the value back.
 - A project saved with MIDI fields opens in an older build with the instrument whole and the twelve MIDI fields at their defaults.
 - A row that does not apply is dimmed, and the info line says why.
@@ -4959,7 +4977,7 @@ You should see the new notes in the grid.
 
 ### Record knob moves as FX
 
-A knob that MIDI Learn bound to an instrument parameter also writes into the pattern while you record LIVE: each move becomes a step FX on the play line of the cursor's track. CUTOFF records as Low-, High- or Band-pass (27 / 28 / 29, by the instrument's FILTER TYPE), and PANNING, DELAY SEND, REVERB SEND, OVERDRIVE and BIT DEPTH record as their own FX (31, 30, 32, 38, 39). The FX goes to the column that already holds one of the same group, else to the first free column; another FX is never overwritten, and when both columns are taken the strip says **REC FX: NO FREE FX COLUMN**. At the take's first recorded FX the strip says **REC FX: CUTOFF** — the parameter's name. One value per step: a later move on the same step overwrites it, and the step's note, instrument and volume stay as they are. Only a binding of the selected instrument records, and only while the pattern records LIVE (not in STEP, stopped, during the count-in, or with the playhead in another pattern); TUNE records nothing. One Undo takes the whole take back, notes and FX together, and the instrument parameter stays where the knob left it. The encoder target (`Instr` and `Fx`, then `Instr` and `Vol` held with the encoder) records the same way, and also in STEP, on the cursor's step; a parameter with no FX equivalent says **REC FX: <name> HAS NO FX**. Outside a LIVE take a knob move changes nothing in the pattern. New in track3r-os.
+A knob that MIDI Learn bound to an instrument parameter also writes into the pattern while you record LIVE: each move becomes a step FX on the play line of the cursor's track. CUTOFF records as Low-, High- or Band-pass (27 / 28 / 29, by the instrument's FILTER TYPE), and PANNING, DELAY SEND, REVERB SEND, OVERDRIVE and BIT DEPTH record as their own FX (31, 30, 32, 38, 39). The FX goes to the column that already holds one of the same group, else to the first free column; another FX is never overwritten, and when both columns are taken the strip says **REC FX: NO FREE FX COLUMN**. At the take's first recorded FX the strip says **REC FX: CUTOFF** — the parameter's name. One value per step: a later move on the same step overwrites it, and the step's note, instrument and volume stay as they are. Only a binding of the selected instrument records, and only while the pattern records LIVE (not in STEP, stopped, during the count-in, or with the playhead in another pattern); TUNE records nothing. One Undo takes the whole take back, notes and FX together, and the instrument parameter stays where the knob left it. The encoder target (see [Put one parameter on the encoder](panel.md#put-one-parameter-on-the-encoder)) records the same way, and also in STEP, on the cursor's step; a parameter with no FX equivalent says **REC FX: <name> HAS NO FX**. Outside a LIVE take a knob move changes nothing in the pattern. New in track3r-os.
 
 ### Select a block
 

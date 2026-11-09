@@ -120,6 +120,10 @@ Title: the name of a project, shown in the header. It is not the folder name, an
 
 RECENT: the first rows of the PROJECTS list. They are the last five projects you opened or saved, newest first.
 
+MIDI Learn: binding a MIDI control to the parameter under the cursor. Press `Vol` and `Fx` together, then move the control. A knob that sends a CC (a control change, the message a knob or fader sends) is the usual control. See [Learn a MIDI control](panel.md#learn-a-midi-control).
+
+Encoder target: the one parameter that the encoder moves while you hold `Instr` and `Vol`. Press `Instr` and `Fx` together on a row to make it the target. It acts like a Learn knob but is not saved. See [Put one parameter on the encoder](panel.md#put-one-parameter-on-the-encoder).
+
 Purge: removing the instruments that no step, FX or Learn binding uses. Press `Shift` + `F7` (**PURGE**) on the PROJECTS page, twice.
 
 USB disk mode: the mode in which the unit shows its card to a computer as a disk. Hold `Shift`, `F1` and `F7` together while you turn the unit on, or use the CARD AS DISK row of Config. See [USB disk](usb_disk.md).
