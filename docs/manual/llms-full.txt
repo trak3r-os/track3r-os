@@ -393,7 +393,7 @@ Try it. Start on the Instrument screen.
 4. Hold `Instr` and `Vol` and turn the encoder. The strip says **CUTOFF** and its value, and you hear the filter move.
 5. Let go of both keys. The encoder does its usual job again, and the target stays set.
 
-New in track3r-os. Recording in LIVE and STEP has been checked on the unit. Not yet checked on the unit: how easy the two-key hold is to press, the popups it cancels, and how long the strip messages stay.
+New in track3r-os.
 
 ## Edit block
 
