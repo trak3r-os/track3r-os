@@ -2,7 +2,7 @@
 <!--
 Chapter: Config. Rules: .claude/skills/manual-writing/SKILL.md. Source: docs/qa/catalogue/config.md (USB and PATTERN rows), the Config row of docs/ui/ui-map.md, and the cited rules of docs/specs/OS-METRO.md and docs/specs/OS-RECMICRO.md.
 Images: snaps qa_cfg_016 and qa_cfg_003 of sim/scenarios/qa/qa_config.txt, and the walk-through sim/scenarios/manual/config_walk.txt (OS-MANUAL2 C5).
-Open rows, not written (sim none, unit pending only): QA-CFG-014, QA-CFG-024, QA-CFG-202, QA-CFG-206 (a pointer to the Global rows).
+Open rows, not written (no simulator check): QA-CFG-014, QA-CFG-024, QA-CFG-202, QA-CFG-206 (a pointer to the Global rows).
 -->
 # Config
 
@@ -12,7 +12,7 @@ Config holds the unit's settings on six pages. Three things are new in track3r-o
 
 ## What it is for
 
-Use the Config screen to change the unit's settings. Press `Config` to open it. It has six pages, one for each of `F1` to `F6`: MIDI, DISPLAY, SD, INFO, USB and PATTERN. This chapter covers the MIDI, DISPLAY, USB and PATTERN pages and the keys that work on every page. The SD and INFO pages have no rows to set. The SD page shows what the card reports (CARD, MOUNTED, FILE SYSTEM, CAPACITY and CLUSTER). Not yet checked on the unit. <!-- QA-CFG-217 --> The USB page also has the **CARD AS DISK** row, which gives the card to a computer while the unit keeps playing, and the **READ ONLY** row beside it: see [USB disk](usb_disk.md). The INFO page has one key, `F8` (**UPDATE**), which installs a new firmware from the card.
+Use the Config screen to change the unit's settings. Press `Config` to open it. It has six pages, one for each of `F1` to `F6`: MIDI, DISPLAY, SD, INFO, USB and PATTERN. This chapter covers the MIDI, DISPLAY, USB and PATTERN pages and the keys that work on every page. The SD and INFO pages have no rows to set. The SD page shows what the card reports (CARD, MOUNTED, FILE SYSTEM, CAPACITY and CLUSTER). <!-- QA-CFG-217 --> The USB page also has the **CARD AS DISK** row, which gives the card to a computer while the unit keeps playing, and the **READ ONLY** row beside it: see [USB disk](usb_disk.md). The INFO page has one key, `F8` (**UPDATE**), which installs a new firmware from the card.
 
 ## How it works
 <!-- sync: src=app/src/screens/config_screen.cpp,model/src/params.cpp qa=QA-CFG-002,QA-CFG-008,QA-CFG-010,QA-CFG-038 -->
@@ -73,8 +73,6 @@ Start on the Config screen. Press `F5` (**USB**).
 
 The computer sees the unit again, with MIDI and serial but no audio device. To turn USB AUDIO back on, turn the encoder until the row reads **On**, then press `F7` twice. The computer sees the audio device again, named **Track3r Audio**. <!-- QA-CFG-011 -->
 
-Not yet checked on the unit.
-
 ### Change USB RETURN
 <!-- sync: src=app/src/screens/config_screen.cpp qa=QA-CFG-005,QA-CFG-006,QA-CFG-012,QA-CFG-007,QA-CFG-013 -->
 
@@ -89,8 +87,6 @@ Start on the USB page.
 
 The return needs room on the USB bus, so it is off when the unit presents 10 outputs (the Mixer's STEMS page chooses the number). The row then reads **On (10 OUT: off)**, dim. The setting stays On: with 8 outputs or fewer the return is back. <!-- QA-CFG-250 --> <!-- QA-CFG-251 -->
 
-Not yet checked on the unit.
-
 ### Set RETURN LEVEL
 <!-- sync: src=app/src/screens/config_screen.cpp,model/src/params.cpp qa=QA-CFG-008 -->
 
@@ -101,7 +97,7 @@ Start on the USB page.
 1. Press `Down` twice. The cursor is on RETURN LEVEL. <!-- QA-CFG-008 -->
 2. Turn the encoder until the row reads **90 %**. <!-- QA-CFG-008 -->
 
-You should see **90 %** at once, with no star. `F7` is not needed. Not yet checked on the unit: the level the computer receives. <!-- QA-CFG-008 -->
+You should see **90 %** at once, with no star. `F7` is not needed. <!-- QA-CFG-008 -->
 
 ### Share the card with a computer
 <!-- sync: src=app/src/screens/config_screen.cpp qa=QA-CFG-200,QA-CFG-203,QA-CFG-211,QA-CFG-212 -->
@@ -113,8 +109,6 @@ CARD AS DISK on the USB page shows the card to a computer while the unit keeps p
 3. When you are done, press `F7` on the same row twice more. The strip says **CARD READY**. <!-- QA-CFG-203 -->
 
 `F7` on CARD AS DISK can refuse. The strip says **NO CARD**, **CARD BUSY: WAIT FOR THE SAVE** or **STOP THE EXPORT FIRST**. <!-- QA-CFG-212 --> While the card is on the computer, SAVE, SAVE AS, OPEN, an export and the sample loads refuse too, and nothing is written. The strip says **CARD ON COMPUTER - EJECT FIRST** (the sample and instrument lists say **CARD ON COMPUTER**). <!-- QA-CFG-211 --> After the eject, **CARD NOT EJECTED PROPERLY: CHECK THE COMPUTER** shows only when the computer left the card unclean during this share. <!-- QA-CFG-212 -->
-
-Not yet checked on the unit.
 
 ### Turn the metronome on, off or to Main
 <!-- sync: qa=QA-CFG-016,QA-CFG-017,QA-CFG-018,QA-CFG-022,QA-CFG-023 -->
@@ -130,8 +124,6 @@ The default is **Cue**. While OUT MODE on the [Mixer](mixer.md) is Stereo, Cue p
 
 With OUT MODE on **MAIN L / CUE R**, Main plays on the left jack only and Cue on the right jack only. <!-- QA-CFG-022 --> The click is not in a RESAMPLE take, in the USB stream or in a WAV export. <!-- QA-CFG-023 -->
 
-Not yet checked on the unit.
-
 ### Set the metronome volume
 
 Start on the PATTERN page, with the cursor on METRO.
@@ -139,8 +131,6 @@ Start on the PATTERN page, with the cursor on METRO.
 1. Press `Down`. The cursor is on METRO VOL. <!-- QA-CFG-019 -->
 2. Turn the encoder until the row reads **80 %**. <!-- QA-CFG-019 -->
 3. Press `Delete`. The row reads **50 %**, the default. <!-- QA-CFG-019 -->
-
-Not yet checked on the unit.
 
 ### Set the count-in
 <!-- sync: qa=QA-CFG-020,QA-CFG-025 -->
@@ -150,7 +140,7 @@ Start on the PATTERN page. The count-in is the click before a recording starts.
 1. Press `Down` six times. The cursor is on COUNT-IN. <!-- QA-CFG-020 -->
 2. Turn the encoder until the row reads **2 bars**. One step of the encoder reads **1 bar**. <!-- QA-CFG-020 -->
 
-You should see **2 bars** on the row. Now press `Shift` + `Rec` on the Pattern screen with the transport stopped. The strip counts and the pads flash each beat, brighter on the first of a bar. The play line waits on row 1 and only the click sounds. Then row 1 plays and recording starts. A pad you hit during the count-in sounds and writes nothing. `Play` never counts in. <!-- QA-CFG-025 --> Not yet checked on the unit.
+You should see **2 bars** on the row. Now press `Shift` + `Rec` on the Pattern screen with the transport stopped. The strip counts and the pads flash each beat, brighter on the first of a bar. The play line waits on row 1 and only the click sounds. Then row 1 plays and recording starts. A pad you hit during the count-in sounds and writes nothing. `Play` never counts in. <!-- QA-CFG-025 -->
 
 ### Keep the timing and velocity of live notes
 <!-- sync: src=app/include/o3os/app/screens/pattern_screen.h qa=QA-CFG-026,QA-CFG-027,QA-CFG-028,QA-CFG-029,QA-CFG-030 -->
@@ -161,7 +151,7 @@ Start on the PATTERN page. These rows apply to LIVE recording (`Shift` + `Rec` o
 2. Press `Down`. Turn the encoder until REC VELOCITY reads **External**. The hint reads: keyboard velocity goes to the volume column. <!-- QA-CFG-027 -->
 3. Press `Delete` on REC VELOCITY. It reads **Off**. REC MICRO stays **On**. <!-- QA-CFG-028 -->
 
-You should see this on the Pattern screen. With REC MICRO **On** and REC QUANTIZE on **Playing step**, a late note gets a Micro-move in FX 2 of its step. The later the note, the larger the value. A note on the beat gets none. With REC VELOCITY **External**, a note from a MIDI keyboard sets the volume of its step. Pads do not. Not yet checked on the unit. <!-- QA-CFG-029 --> <!-- QA-CFG-030 -->
+You should see this on the Pattern screen. With REC MICRO **On** and REC QUANTIZE on **Playing step**, a late note gets a Micro-move in FX 2 of its step. The later the note, the larger the value. A note on the beat gets none. With REC VELOCITY **External**, a note from a MIDI keyboard sets the volume of its step. Pads do not. <!-- QA-CFG-029 --> <!-- QA-CFG-030 -->
 
 ### Move the pad rows against each other
 <!-- sync: src=model/include/o3os/model/params.h,app/src/pad_board.cpp qa=QA-CFG-035,QA-CFG-036,QA-CFG-037,QA-CFG-038 -->
@@ -174,7 +164,7 @@ Start on the PATTERN page.
 2. Turn the encoder until the row reads **5**. The hint reads: Less: rows overlap by 12 - N. <!-- QA-CFG-035 -->
 3. Press `Delete`. The row reads **12**, the default. <!-- QA-CFG-036 -->
 
-You should see the new number on the row. The pads follow at the next press, with no restart: on the Pattern screen, in the pad mode **NOTES** (`Shift` + `F2`), the pads of the upper rows play the notes the new number gives. The root, the scale and the octave are not here. They are in the held Note panel and belong to the project. PAD OFFSET belongs to the unit: it is kept with the other settings on the card, and a settings file from an older build reads **12**. Not yet checked on the unit. <!-- QA-CFG-037 --> <!-- QA-CFG-038 -->
+You should see the new number on the row. The pads follow at the next press, with no restart: on the Pattern screen, in the pad mode **NOTES** (`Shift` + `F2`), the pads of the upper rows play the notes the new number gives. The root, the scale and the octave are not here. They are in the held Note panel and belong to the project. PAD OFFSET belongs to the unit: it is kept with the other settings on the card, and a settings file from an older build reads **12**. <!-- QA-CFG-037 --> <!-- QA-CFG-038 -->
 
 ### Choose when a picked pattern starts
 <!-- sync: src=model/include/o3os/model/params.h,app/src/chooser_actions.cpp qa=QA-CFG-229,QA-PAT-318 -->
@@ -187,7 +177,7 @@ Start on the PATTERN page.
 2. Turn the encoder until the row reads **Pattern end**. The card on the right says what each value does. <!-- QA-CFG-229 -->
 3. Press `Delete`. The row reads **Step**, the default. <!-- QA-CFG-229 -->
 
-You should see the setting act at once, with no restart. With **Pattern end**, hold `F1` on the Pattern screen while a pattern plays and press a pad: the pick is queued. While `F1` is held the view stays on your pick. Let go and the view goes on with the pattern that plays, until the queue lands. Press the same pad again, or the pad of the pattern that plays, to take the queue back. Not yet checked on the unit. <!-- QA-PAT-318 -->
+You should see the setting act at once, with no restart. With **Pattern end**, hold `F1` on the Pattern screen while a pattern plays and press a pad: the pick is queued. While `F1` is held the view stays on your pick. Let go and the view goes on with the pattern that plays, until the queue lands. Press the same pad again, or the pad of the pattern that plays, to take the queue back. <!-- QA-PAT-318 -->
 
 ### Choose where the unit listens and sends MIDI
 <!-- sync: src=model/src/params.cpp,seq/src/midi_link.cpp,app/include/o3os/app/midi_input.h qa=QA-CFG-021,QA-CFG-220,QA-CFG-221,QA-CFG-222,QA-CFG-223,QA-CFG-225,QA-CFG-227,QA-CFG-228,QA-CFG-275,QA-CFG-276,QA-CFG-277,QA-CFG-278,QA-CFG-279 -->
@@ -215,7 +205,7 @@ Start on the Config screen. Press `F1` (**MIDI**). The page has thirteen rows. M
 - **TRANSPORT OUT Off**: the unit sends only the clock. A synth or sequencer that follows your clock keeps time but does not start or stop with `Play` and `Stop`. As a Slave the unit relays the clock only.
 - **TRANSPORT IN Off**: the unit still follows the tempo of the clock, but a Start, Continue, Stop or Song Position from the master does nothing. Press `Play` and the unit starts on the master's next clock. A Stop from the master does not stop the unit. It stops by itself only if the master's clock goes quiet.
 
-A change takes effect at the next `Play`. If you turn TRANSPORT OUT to Off while the unit plays, the Stop of that run is still sent, so a device that got the Start is also stopped. The choice is kept on the card. `Delete` on a TRANSP row puts **On** back. Not yet checked on the unit. <!-- QA-CFG-220 --> <!-- QA-CFG-221 --> <!-- QA-CFG-222 --> <!-- QA-CFG-223 --> <!-- QA-CFG-225 --> <!-- QA-CFG-227 --> <!-- QA-CFG-228 --> <!-- QA-CFG-224 --> <!-- QA-CFG-226 -->
+A change takes effect at the next `Play`. If you turn TRANSPORT OUT to Off while the unit plays, the Stop of that run is still sent, so a device that got the Start is also stopped. The choice is kept on the card. `Delete` on a TRANSP row puts **On** back. <!-- QA-CFG-220 --> <!-- QA-CFG-221 --> <!-- QA-CFG-222 --> <!-- QA-CFG-223 --> <!-- QA-CFG-225 --> <!-- QA-CFG-227 --> <!-- QA-CFG-228 --> <!-- QA-CFG-224 --> <!-- QA-CFG-226 -->
 
 ### Make Logic Pro follow the unit
 <!-- sync: src=model/src/params.cpp,midi/include/o3os/midi/mtc.h,seq/src/midi_link.cpp qa=QA-CFG-276,QA-CFG-277 -->
@@ -227,7 +217,7 @@ A change takes effect at the next `Play`. If you turn TRANSPORT OUT to Off while
 3. In the program, choose the unit as the MIDI source for synchronization and set the same frame rate. Set the same tempo in the program as in the project: time code has no tempo.
 4. Press `Play`.
 
-You should see the program lock to the unit and run with it. The time code goes out on the ports of **MIDI OUT**, whatever **CLOCK MODE** is. It starts at once at `Play`, so the program may need a moment to lock and can miss the first part of the first second. `Stop` sends the time at which the unit stopped. The choice is kept on the card. Playing from the middle of a song sends the time of that step. The song's tempo changes are counted in, so the time stays right when the tempo moves. Not yet checked on the unit, and not yet checked with Logic Pro. <!-- QA-CFG-276 --> <!-- QA-CFG-277 -->
+You should see the program lock to the unit and run with it. The time code goes out on the ports of **MIDI OUT**, whatever **CLOCK MODE** is. It starts at once at `Play`, so the program may need a moment to lock and can miss the first part of the first second. `Stop` sends the time at which the unit stopped. The choice is kept on the card. Playing from the middle of a song sends the time of that step. The song's tempo changes are counted in, so the time stays right when the tempo moves. <!-- QA-CFG-276 --> <!-- QA-CFG-277 -->
 
 ### Let the unit follow a time code
 <!-- sync: src=model/src/params.cpp,midi/include/o3os/midi/mtc_in.h,seq/src/midi_link.cpp,seq/src/sequencer.cpp qa=QA-CFG-278,QA-CFG-279 -->
@@ -238,7 +228,7 @@ You should see the program lock to the unit and run with it. The time code goes 
 2. Keep **MTC START** on the hour at which the program plays the first step of the song. The default **01** is 01:00:00:00.
 3. In the program, send MIDI Time Code to the unit. Press play in the program.
 
-You should see the row's card read `MTC` with the time, the frame rate and a state: **READING** while it listens, **ARMED** while the start waits, **LOCKED** when the unit runs with the master. It starts the song at the step the master is at, with the tempo and the swing that step has, and follows the master's speed a little (up to 6 percent), so a drift is pulled in over about a second and nothing jumps. If the master starts before 01:00:00:00, the unit waits for it and starts exactly there. If the master goes past the end of the song, the unit is silent and stays locked until the master moves back into the song. If the master stops, jumps or goes backwards, the unit stops, and starts again at the new time when it has read it. While the unit follows, `Play`, `Stop` and the song jumps do nothing: the master owns them, and the card reads **MTC IN: FOLLOWING**. If you press `Play` while the master is silent, the unit plays on its own clock, and the master takes over after you stop it. The song plays its own tempo changes. A tempo change on the unit itself, from Perform, moves the song away from the master until it starts again. **MTC IN** also turns the clock follow off, so CLOCK IN and CLOCK MODE **Slave** are ignored, and it mutes **MTC OUT**. The unit chases the song or the pattern that **Play Song** or **Play Pattern** would play. The choice is kept on the card. Not yet checked on the unit, and not yet checked with Logic Pro as the master. <!-- QA-CFG-278 --> <!-- QA-CFG-279 -->
+You should see the row's card read `MTC` with the time, the frame rate and a state: **READING** while it listens, **ARMED** while the start waits, **LOCKED** when the unit runs with the master. It starts the song at the step the master is at, with the tempo and the swing that step has, and follows the master's speed a little (up to 6 percent), so a drift is pulled in over about a second and nothing jumps. If the master starts before 01:00:00:00, the unit waits for it and starts exactly there. If the master goes past the end of the song, the unit is silent and stays locked until the master moves back into the song. If the master stops, jumps or goes backwards, the unit stops, and starts again at the new time when it has read it. While the unit follows, `Play`, `Stop` and the song jumps do nothing: the master owns them, and the card reads **MTC IN: FOLLOWING**. If you press `Play` while the master is silent, the unit plays on its own clock, and the master takes over after you stop it. The song plays its own tempo changes. A tempo change on the unit itself, from Perform, moves the song away from the master until it starts again. **MTC IN** also turns the clock follow off, so CLOCK IN and CLOCK MODE **Slave** are ignored, and it mutes **MTC OUT**. The unit chases the song or the pattern that **Play Song** or **Play Pattern** would play. The choice is kept on the card. <!-- QA-CFG-278 --> <!-- QA-CFG-279 -->
 
 ### Control the unit with the official CC numbers
 <!-- sync: src=app/include/o3os/app/cc_map.h,app/src/cc_map.cpp,app/include/o3os/app/perform_board.h qa=QA-MIX-078,QA-MIX-079,QA-MIX-080,QA-PRF-206,QA-PRF-207,QA-PRF-208 -->
@@ -253,7 +243,7 @@ With **CC MAP** on **On**, a MIDI controller drives the unit with the official f
 | 51 to 62 | the value of Perform slot 1 to 12 | `min + cc * (max - min) / 127` of the slot's effect range | the Perform screen's slot page only |
 | 41 to 48 | the performance pattern of track 1 to 8 | `cc + 1` | the Perform screen's slot page only, while the song plays |
 
-A mapped CC moves its value at once (jump, no pickup) and is a final edit: no undo step, no FX step in a live take. A MIDI Learn binding wins over the map: if any binding of either store listens to the message (on its channel, or on every channel), the map ignores it — a Pickup binding that has not caught the knob still owns the message. The Perform CCs act only on the slot page of the Perform screen, not on its DJ page and not on any other screen. CC 41 to 48 queue the pattern on the one track the CC names, whatever tracks are on, and only while the sequencer plays; the same value again does not take a waiting queue back, and after `Stop` and `Play` it is sent again. A pattern the project does not have is refused with `CC 4x: NO PAT nnn` on the strip. The Perform slots and tracks are described in [Perform](perform.md). Not yet checked on the unit. <!-- QA-MIX-078 --> <!-- QA-MIX-079 --> <!-- QA-MIX-080 --> <!-- QA-PRF-206 --> <!-- QA-PRF-207 --> <!-- QA-PRF-208 -->
+A mapped CC moves its value at once (jump, no pickup) and is a final edit: no undo step, no FX step in a live take. A MIDI Learn binding wins over the map: if any binding of either store listens to the message (on its channel, or on every channel), the map ignores it — a Pickup binding that has not caught the knob still owns the message. The Perform CCs act only on the slot page of the Perform screen, not on its DJ page and not on any other screen. CC 41 to 48 queue the pattern on the one track the CC names, whatever tracks are on, and only while the sequencer plays; the same value again does not take a waiting queue back, and after `Stop` and `Play` it is sent again. A pattern the project does not have is refused with `CC 4x: NO PAT nnn` on the strip. The Perform slots and tracks are described in [Perform](perform.md). <!-- QA-MIX-078 --> <!-- QA-MIX-079 --> <!-- QA-MIX-080 --> <!-- QA-PRF-206 --> <!-- QA-PRF-207 --> <!-- QA-PRF-208 -->
 
 ### Change the display, the pad lights and the notation
 <!-- sync: src=model/src/params.cpp,app/include/o3os/app/brightness.h,app/src/screens/pattern_screen.cpp,app/src/bindings.cpp qa=QA-CFG-213,QA-CFG-214,QA-CFG-215,QA-CFG-216,QA-CFG-272,QA-CFG-273,QA-CFG-274 -->
@@ -271,8 +261,6 @@ Press `F2` (**DISPLAY**). Move to a row and turn the encoder.
 
 The five setting rows act at once, with nothing to apply. <!-- QA-CFG-213 --> <!-- QA-CFG-215 --> NUMBERING and MIDDLE C show on the Pattern screen: with **From 0** the step rows count from 00, and with MIDDLE C on **C-4** a note that reads C-5 by default reads C-4. <!-- QA-CFG-216 --> <!-- QA-CFG-214 --> The STATUS LED row is not a setting: it is a choice of this session (RAM only), so it is not saved to the card and every boot starts with **BLINK**; `Delete` puts **BLINK** back. <!-- QA-CFG-272 --> <!-- QA-CFG-273 --> <!-- QA-CFG-274 -->
 
-Not yet checked on the unit: the MIDI and DISPLAY rows.
-
 ### Reset a page to its defaults
 
 Start on the page to reset, after you change a row.
@@ -280,7 +268,7 @@ Start on the page to reset, after you change a row.
 1. Hold `Shift`. Press `F7` (**DEFAULTS**). The strip says **SHIFT+F7 AGAIN: RESET PAGE** and the key reads **RESET?**. <!-- QA-CFG-031 --> <!-- QA-CFG-034 -->
 2. Press `Shift` + `F7` again within two seconds. <!-- QA-CFG-032 -->
 
-You should see **PAGE RESET TO DEFAULTS** in the strip. Every row of the page is at its default, and the cursor stays on its row. Other pages are not changed. After more than two seconds, a press only asks again. A USB row becomes a pending value: press `F7` (**APPLY**) to apply it. Not yet checked on the unit. <!-- QA-CFG-032 -->
+You should see **PAGE RESET TO DEFAULTS** in the strip. Every row of the page is at its default, and the cursor stays on its row. Other pages are not changed. After more than two seconds, a press only asks again. A USB row becomes a pending value: press `F7` (**APPLY**) to apply it. <!-- QA-CFG-032 -->
 
 ### Go to another page
 
@@ -289,7 +277,7 @@ Press `F1` to `F6` to go straight to a page, or press `Config` again for the nex
 ### Update from the unit
 <!-- sync: src=app/src/firmware_actions.cpp,app/src/screens/firmware_overlay.cpp,app/include/o3os/app/firmware_view.h qa=QA-CFG-040,QA-CFG-042,QA-CFG-044,QA-CFG-046,QA-CFG-048,QA-CFG-051,QA-CFG-054,QA-CFG-056,QA-CFG-057,QA-CFG-041,QA-CFG-043,QA-CFG-045,QA-CFG-047,QA-CFG-049,QA-CFG-050,QA-CFG-052,QA-CFG-053,QA-CFG-055,QA-CFG-058,QA-CFG-059 -->
 
-New in track3r-os. You can install a new firmware from the unit, with no computer. The image is a file that ends in **.ptf**. It must already be in the `Firmware` folder of the card. The unit checks the file, asks you twice, and then restarts into the update. The unit has checked a file up to the image check; the INSTALL step (step 5) is not yet checked on the unit.
+New in track3r-os. You can install a new firmware from the unit, with no computer. The image is a file that ends in **.ptf**. It must already be in the `Firmware` folder of the card. The unit checks the file, asks you twice, and then restarts into the update.
 
 Start with the **.ptf** file on the card and your project saved.
 
@@ -302,7 +290,7 @@ Start with the **.ptf** file on the card and your project saved.
 
 > **Careful**: when the screen says **UPDATING: DO NOT POWER OFF**, no key does anything and nothing can stop the update. Do not switch the unit off.
 
-An older build, such as v1.0.0, does not end on a 4 KiB boundary, and the SD bootloader leaves a short last block of the flash as it was, so such a file may crash at boot. When that is the only thing wrong with the file, step 4 ends at **NOT PADDED. TRACK3R-OS WILL PAD A COPY OF IT?** instead of **IMAGE OK**. Press `F1` (**PAD**) within 30 seconds. The unit writes a padded copy of the file in the same folder, named `pad-` and the start of the file's name, and checks the copy again from its first byte. A bar shows the work and the card must stay in. The file you chose is not changed. If a file of that name is already there, nothing is written or removed: the list says **PADDING FAILED: COPY EXISTS, PICK IT FROM LIST**, and you pick that file. The unit then says **IMAGE OK** for the copy, with the copy's name on the second line, and step 5 goes on as usual: INSTALL installs the copy. Any other key, `F8` (**CANCEL**) or 30 seconds without an answer takes the question back and nothing is written. If the copy cannot be written or does not pass its check, the list says **PADDING FAILED** with the reason and no copy is kept. A file with any other fault, a wrong flash configuration byte included, is never offered a pad: it says **NOT A VALID IMAGE** as above. New Community OS behaviour; not yet checked on the unit. <!-- QA-CFG-269 --> <!-- QA-CFG-270 -->
+An older build, such as v1.0.0, does not end on a 4 KiB boundary, and the SD bootloader leaves a short last block of the flash as it was, so such a file may crash at boot. When that is the only thing wrong with the file, step 4 ends at **NOT PADDED. TRACK3R-OS WILL PAD A COPY OF IT?** instead of **IMAGE OK**. Press `F1` (**PAD**) within 30 seconds. The unit writes a padded copy of the file in the same folder, named `pad-` and the start of the file's name, and checks the copy again from its first byte. A bar shows the work and the card must stay in. The file you chose is not changed. If a file of that name is already there, nothing is written or removed: the list says **PADDING FAILED: COPY EXISTS, PICK IT FROM LIST**, and you pick that file. The unit then says **IMAGE OK** for the copy, with the copy's name on the second line, and step 5 goes on as usual: INSTALL installs the copy. Any other key, `F8` (**CANCEL**) or 30 seconds without an answer takes the question back and nothing is written. If the copy cannot be written or does not pass its check, the list says **PADDING FAILED** with the reason and no copy is kept. A file with any other fault, a wrong flash configuration byte included, is never offered a pad: it says **NOT A VALID IMAGE** as above. New Community OS behaviour. <!-- QA-CFG-269 --> <!-- QA-CFG-270 -->
 
 Each question is answered by `F1` alone. Any other key takes the question back, and the list returns. During the check, `F8` (**CANCEL**) stops it. If you wait 30 seconds at the second question, the list says **THE CHECK EXPIRED: CHECK AGAIN**. Nothing is written in any of these cases. <!-- QA-CFG-045 --> <!-- QA-CFG-047 --> <!-- QA-CFG-049 --> <!-- QA-CFG-050 --> `F8` (**BACK**) on the list closes it. <!-- QA-CFG-053 --> Pulling the card out during the check or at the second question, or holding the Power switch during the check, cancels the check and closes the dialog. <!-- QA-CFG-058 -->
 

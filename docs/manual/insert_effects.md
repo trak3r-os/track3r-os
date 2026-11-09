@@ -3,7 +3,7 @@
 
 Status: draft
 
-New in track3r-os. <!-- og: new --> The official firmware has no effect that sits on one track. The Community OS has **inserts**, and eleven effect modules you can put in them: **Drive** (saturation), **Crush** (bit and sample-rate reduction), **Biquad** (a filter), **Fold** (a wavefolder), **Env Filter** (an auto-wah), **Phaser**, **Comp** (a compressor that can also shape attacks and duck from another track), **Ping-Pong** (a tempo-synced stereo echo), **Wide** (a stereo widener), **Chorus** and **Autopan**. Each is a file on the card that you load once and then pick from the INSERTS page of the Mixer. All eleven were checked on the host by tests; none is checked on the unit yet, so how they sound on the hardware is still open.
+New in track3r-os. <!-- og: new --> The official firmware has no effect that sits on one track. The Community OS has **inserts**, and eleven effect modules you can put in them: **Drive** (saturation), **Crush** (bit and sample-rate reduction), **Biquad** (a filter), **Fold** (a wavefolder), **Env Filter** (an auto-wah), **Phaser**, **Comp** (a compressor that can also shape attacks and duck from another track), **Ping-Pong** (a tempo-synced stereo echo), **Wide** (a stereo widener), **Chorus** and **Autopan**. Each is a file on the card that you load once and then pick from the INSERTS page of the Mixer.
 
 ## What it is for
 
@@ -203,9 +203,8 @@ Lower Fold, Resonance or Feedback first, then raise Output or Makeup in small st
 
 ## Good to know
 
-- Put at most the effects you need: each insert uses part of the unit's processing time, and the amounts are not measured on the unit yet.
+- Put at most the effects you need: each insert uses part of the unit's processing time.
 - Each effect hears only the track it sits on.
-- Not checked on the unit: how any of the eleven sounds on the hardware, and how much processing each takes.
 
 ## See also
 

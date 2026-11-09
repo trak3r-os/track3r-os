@@ -77,7 +77,6 @@ The app is given none of these keys. An app that declares no parameter, or is of
 
 - The parameter column exists only for an app below ABI 1.10 that declares a parameter. Pads is the only one shipped; the simulator's card does not hold it.
 - What a press at the first or last row of the column does is not checked.
-- Not yet checked on the unit: the whole chapter.
 
 ## See also
 

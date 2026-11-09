@@ -255,4 +255,4 @@ Verdict against the thresholds of Q3 / section 5:
 
 **Decision (maintainer, 2026-10-18): the merge is accepted despite the M miss.** The 5k target was a proposed threshold (Q3), the remaining figure is 972 cycles (0.37 % of the block) over it, every other criterion passes, and H went from over budget to in budget.
 
-**Still unit pending** (not run in this session; the QA rows stay `unit pending`): the listening checks 5.7 (a) to (g) (QA-MIX-020 to QA-MIX-028), the byte compare of a stem and a selection export against the baseline image's files (QA-MIX-024), and a dense-event scene (microtiming or ratchets on muted tracks; the worst block of A against B). The tester needs a project that holds the dense scene to run it on both images.
+**More testing needed** (not run in this session; the QA rows say `more testing needed`): the listening checks 5.7 (a) to (g) (QA-MIX-020 to QA-MIX-028), the byte compare of a stem and a selection export against the baseline image's files (QA-MIX-024), and a dense-event scene (microtiming or ratchets on muted tracks; the worst block of A against B). The tester needs a project that holds the dense scene to run it on both images.

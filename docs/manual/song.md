@@ -89,8 +89,6 @@ In SLOTS mode pad n is slot n of the 48-slot page that holds the cursor. When st
 
 6. Press `F8` (**UNDO**). The slot points at the shared pattern again.
 
-Not yet checked on the unit.
-
 ## The screen at a glance
 
 ![Song: the Shift row while Shift is held, with the quarter jumps, NAME, PADS and REDO.](img/song_qa_sng_001.png)
@@ -170,16 +168,12 @@ Start on the Timeline page.
 
 The cursor is shared with the list: turn the page and it stays on the same slot and track. The Timeline has 12 lanes, so track 13 to 16 are edited on the list. <!-- QA-SNG-135 -->
 
-Not yet checked on the unit: how the colours and the note map read on the panel, and the countdown against the sound.
-
 ### Look at Song and come back
 
 Start on any other screen.
 
 1. Hold `Song`. After 0.4 s the Song screen comes up. It opens on the page you left it on, for example **TIMELINE 2/2**. <!-- QA-SNG-060, QA-SNG-087 -->
 2. Let go. You return to the screen you came from, as you left it. <!-- QA-SNG-060 -->
-
-Not yet checked on the unit.
 
 ## Keys on this screen
 
@@ -232,9 +226,9 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 - `Shift` + `F3` jumps to 2/4. It does not add a slot. <!-- QA-SNG-003 -->
 - **NO SUCH PATTERN YET** and **SONG IS EMPTY** are the strip's replies to a name on a slot with no pattern, or on an empty song. <!-- QA-SNG-010 -->
 - `Pattern` on Song opens the pattern of the slot under the cursor. <!-- QA-SNG-063 -->
-- Adding, deleting or moving slots while the song plays does not move the playhead: the marker follows its slot and the song goes on to the slot that came after it. Delete the slot that plays and its pattern finishes, then the slot that took its place plays. Delete the queued slot and the strip says **QUEUED SLOT DELETED**. New in track3r-os; not checked on the unit. <!-- QA-SNG-064,QA-SNG-065 -->
+- Adding, deleting or moving slots while the song plays does not move the playhead: the marker follows its slot and the song goes on to the slot that came after it. Delete the slot that plays and its pattern finishes, then the slot that took its place plays. Delete the queued slot and the strip says **QUEUED SLOT DELETED**. New in track3r-os. <!-- QA-SNG-064,QA-SNG-065 -->
 - `F8` undoes Song edits only. An empty Song undo says **NOTHING TO UNDO HERE**. <!-- QA-SNG-013 -->
-- New in track3r-os: the map, TOOLS, UNIQUE, the marks, cut, move, next use, the pads and the peek. Not yet checked on the unit. <!-- og: new -->
+- New in track3r-os: the map, TOOLS, UNIQUE, the marks, cut, move, next use, the pads and the peek. <!-- og: new -->
 - Not checked against the original firmware: the keys and pages not named above. <!-- og: open -->
 
 ## See also

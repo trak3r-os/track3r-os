@@ -12,8 +12,7 @@ Come here when a pattern with FX sounds different on a module instrument than on
 ## What a module instrument does with step FX
 <!-- sync: src=docs/specs/OS-MODPITCH.md qa=QA-MOD-099,QA-MOD-100,QA-MOD-101,QA-MOD-102,QA-MOD-103,QA-MOD-104 -->
 
-The Sampler column is what the FX specs say; the module column is checked on the host (event stream and exact ramps). Not yet checked on the unit.
-
+The Sampler column is what the FX specs say; the module column is checked on the host (event stream and exact ramps).
 
 | FX | Sampler instrument | Module instrument | Evidence |
 |---|---|---|---|

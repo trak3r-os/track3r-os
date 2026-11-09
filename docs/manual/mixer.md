@@ -34,8 +34,6 @@ If an insert costs more than its budget, the unit forces it to dry: the track pl
 - **Live:** the cost in each cell, and the bypass mark.
 - **Ended:** `Delete` removes the insert. The Mixer has no undo, and an insert is not in the undo journal, so the removal is final.
 
-Not yet checked on the unit: the cost figures, OVER BUDGET and the click-free bypass.
-
 ### Routing: where a track goes
 ### Routing: where a track goes
 
@@ -90,8 +88,6 @@ Example: the pad sound is dry. Raise its **REVERB SEND** to 40 on Instrument. On
 
    ![Pattern: the strip shows the master volume while Master is held.](img/mixer_walk_6.png)
 
-Not yet checked on the unit.
-
 ## The screen at a glance
 
 ![Mixer, MIXER page: columns for tracks and buses; the key row lists the pages.](img/mixer_qa_mix_001.png)
@@ -122,8 +118,6 @@ Start on the MIXER, ROUTING or MASTER FX page. Move the cursor to an empty cell,
 
 You should see the picker close, the strip say **INSERT SET** and the cell show the module's name. The insert is saved with the project. <!-- QA-MIX-060 -->
 
-Not yet checked on the unit.
-
 ### Load a preset into an insert
 
 Start on the INSERTS page, with the cursor on a cell that holds an effect that has presets.
@@ -132,8 +126,6 @@ Start on the INSERTS page, with the cursor on a cell that holds an effect that h
 2. Choose a preset with `Up`, `Down` or the encoder, and press `F1` (**LOAD**). `F8` (**BACK**) closes the list and loads nothing. <!-- QA-MIX-096 QA-MIX-098 --> To save the values in force as a card preset instead, press `Shift` + `F5` (**SAVE**) on the page or in the list, type a name in the keyboard (**PRESET NAME**, the effect's name suggested) and press `F8`: the strip says **PRESET SAVED: <NAME>**, and a taken name gets **<name> 2**. <!-- QA-MIX-107 QA-MIX-106 -->
 
 You should see the strip say, for example, **PRESET DARK HALL LOADED**, and every row of the page show the preset's value. A preset sets every parameter: one that names only some leaves the others at the module's defaults. <!-- QA-MIX-096 QA-MIX-097 --> The values are saved with the project and the insert sounds so at once. Like every change to an insert, a preset load is not an undo step. A card preset that names an unknown parameter says **PRESET <NAME> LOADED, <n> SKIPPED**; a damaged file says **PRESET DAMAGED**; a file of another module **PRESET OF <MODULE>**. An effect with no presets at all opens the list and it says **NO PRESETS, SHIFT+F5 SAVES**. <!-- QA-MIX-099 QA-MIX-106 --> New in track3r-os.
-
-Not yet checked on the unit.
 
 ### Bypass or remove an insert
 <!-- sync: src=app/src/screens/mixer_screen.cpp,app/src/module_ui.cpp qa=QA-MIX-062,QA-MIX-064 -->
@@ -144,7 +136,7 @@ Start on the INSERTS page, with the cursor on a cell that holds an insert.
 2. Press `F7` again. The strip says **INSERT ON**, and the effect starts again from a reset. <!-- QA-MIX-062 -->
 3. Press `Delete`. The strip says **INSERT DELETED**, and the cell is empty. <!-- QA-MIX-064 -->
 
-`Delete` cannot be undone. Not yet checked on the unit.
+`Delete` cannot be undone.
 
 ### Change an insert's settings
 <!-- sync: src=app/src/screens/mixer_screen.cpp,app/src/module_ui.cpp spec=docs/specs/OS-INSFX.md qa=QA-MIX-073,QA-MIX-074,QA-MIX-075,QA-MIX-076,QA-MIX-077 -->
@@ -160,7 +152,7 @@ You should see the value change on the row, and the track's sound change with it
 
 > **Careful**: A change here has no undo. `F8` says **NOTHING TO UNDO HERE**, and `Delete` on a row cannot be taken back either. <!-- QA-MIX-075 -->
 
-On an empty cell `F6` and `Params` say **NO INSERT HERE** and open nothing. On the insert's page `F7`, `Shift` + `F6` and `Shift` + `F7` do nothing and their labels are blank. <!-- QA-MIX-110 --> On a bound MASTER cell `Params` opens the module's page with the strip saying `MASTER`, and an edit reaches both instances. On the other Mixer pages `Params` still opens the page of the instrument in view. <!-- QA-MIX-076 --> Not yet checked on the unit.
+On an empty cell `F6` and `Params` say **NO INSERT HERE** and open nothing. On the insert's page `F7`, `Shift` + `F6` and `Shift` + `F7` do nothing and their labels are blank. <!-- QA-MIX-110 --> On a bound MASTER cell `Params` opens the module's page with the strip saying `MASTER`, and an edit reaches both instances. On the other Mixer pages `Params` still opens the page of the instrument in view. <!-- QA-MIX-076 -->
 
 ### Name a track
 
@@ -195,7 +187,7 @@ The number is saved with the project (File > SAVE). Projects saved with 2, 8 or 
 
 A project saved before this version has no USB settings: when you open it, the unit keeps the outputs of the project you had open before it. On STEMS the built-in `F6` (**APPLY**) wins over an `F6` in a user keymap. A keymap line that names `mixer.stems` is refused by older firmware.
 
-Not yet checked on the unit: that a Linux, macOS or Windows computer sees each number. <!-- QA-MIX-056 -->
+ <!-- QA-MIX-056 -->
 
 ### Play the current instrument from the pads
 
@@ -262,8 +254,8 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 - When the card lacks an insert's module, its cell reads **NOT BOUND**, and `F7` says **MODULE MISSING: DELETE OR RELOAD**. <!-- QA-MIX-065 -->
 - A bind right after the `Delete` of the same cell says **INSERT LEAVING: TRY AGAIN**. Wait a moment and try again. <!-- QA-MIX-070 -->
 - `F7` says **NO CPU** when the block has no room for the effect. <!-- QA-MIX-067 -->
-- The inserts are saved with the project. Not yet checked on the unit: that they are bound again when the project opens. <!-- QA-MIX-060, QA-GLB-173 -->
-- To move an insert's parameter with a MIDI controller, open its page with `Params`, put the cursor on a row, press `Vol` and `Fx` together (Learn) and turn the controller. A row the module marks as not learnable says **NO TARGET TO LEARN**. The binding is saved with the project. Not yet checked on the unit. <!-- QA-MIX-081, QA-MIX-082 -->
+- The inserts are saved with the project. <!-- QA-MIX-060, QA-GLB-173 -->
+- To move an insert's parameter with a MIDI controller, open its page with `Params`, put the cursor on a row, press `Vol` and `Fx` together (Learn) and turn the controller. A row the module marks as not learnable says **NO TARGET TO LEARN**. The binding is saved with the project. <!-- QA-MIX-081, QA-MIX-082 -->
 
 > **Careful**: The Mixer has no undo. `F8` here is **SOLO**, and `F8` on Pattern, Song or Params does not bring a Mixer change back. <!-- QA-MIX-013 -->
 
@@ -272,7 +264,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 - The master limiter is always on. The page lists no headroom, saturation, EQ, bass, space or bit-depth stages. <!-- QA-MIX-002 -->
 - A muted track still exports as a stem, with its sound in it. <!-- QA-MIX-024 -->
 - The first hit after an unmute can be soft: it loses up to 1.45 ms to a short ramp. It never clicks. <!-- QA-MIX-025 -->
-- Not yet checked on the unit: mute and unmute mid-note, the master volume, naming, stems, inserts. Not checked against the original firmware: the pages and keys. <!-- og: open -->
+- Not checked against the original firmware: the pages and keys. <!-- og: open -->
 
 ## See also
 

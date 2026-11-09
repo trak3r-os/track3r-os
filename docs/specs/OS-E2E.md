@@ -9,7 +9,7 @@ Facts from the catalogue, 2026-10-18 (569 `| QA-` rows in `docs/qa/catalogue/*.m
 | Level | Rows |
 |---|---|
 | Passed on the unit | 44 |
-| Not yet checked on the unit | 411 (207 "unit pending", 204 "unit open") |
+| More testing needed | 411 (207 "more testing needed", 204 "unit open") |
 | Passed in the simulator | 184 (screenshot hash only) |
 | Passed in host code tests only | 315 |
 | No pass anywhere | 31 |

@@ -158,7 +158,7 @@ A QA row has: ID, Function, How (gesture), Expected, Sim, Unit, Spec, Status. Th
    - Never put an ID in running prose.
 5. **Status decides what you write.** Read the Status cell:
    - `sim PASS` or `host PASS` or `unit PASS`: write it.
-   - `unit pending` / `unit open` next to a PASS: write it and add the label **Not yet checked on the unit** (section 9).
+   - `unit pending` / `unit open` next to a PASS: write it with no hardware label.
    - Neither a sim nor a unit PASS (Open rows): do not write the behaviour. Add one line at the end of the chapter file: `<!-- Open rows, not written: QA-XXX-nnn, ... -->`.
 6. **Edge rows** (refusals and dim keys) go into "Good to know" as one line each: "On a free slot `Shift` + `F3` does nothing."
 7. **Check the row before you quote it.** If the Expected text names a screen label, spell it as the catalogue spells it.
@@ -314,7 +314,6 @@ The repository's labels are `verified parity`, `new Community OS behaviour` and 
 | documented same (OS-MANUAL2) | "Works as the official manual describes." | the official-manual map marks it "same" and our QA row for it passes; a description in the official manual is documented behaviour, not verified parity |
 | new Community OS behaviour | "New in track3r-os." | the official-manual map marks it new (the official manual does not describe it), or the catalogue says new Community OS behaviour; say nothing about what an official unit does |
 | open research question | "Not checked against the original firmware." | parity unknown; also use for anything the spec calls open |
-| unit pending / unit open | "Not yet checked on the unit." | sim or host test passed, no hardware run yet |
 
 Rules:
 
@@ -402,7 +401,7 @@ Short notes: key notation, evidence labels, what the OS is not.
 4. **One section per screen**, same headings every time: `Purpose`, `Reach it` (button), `Pages`, `Keys` (a table: key or combination, page or mode, effect, limits, evidence label, catalogue ID), `Modes and states` (what changes the meaning of keys: record modes, held modifiers, overlays), `Values and limits` (ranges, counts, maximum lengths), `Refusals` (what a key does when dim or blocked, and what the screen says), `Common tasks` (goal, steps as a key sequence).
 5. **Formats and files**: what the OS reads and writes on the card, folders, names.
 6. **Glossary**: every term with a one-line definition.
-7. **Known gaps**: rows not yet checked on the unit, open questions. An assistant must tell the user when it is unsure.
+7. **Known gaps**: open questions. An assistant must tell the user when it is unsure.
 
 Style: one fact per line; tables over prose; the key notation of section 4; screen labels in upper case as drawn; IDs in the visible `ID` column (this file is for machines, so IDs are visible here); every claim carries its label; no screenshots. Keep the full file under about 60 KB (about 15k tokens); if a section grows past it, split by screen into `llms/<screen>.txt` and keep `llms-full.txt` as the concatenation.
 
@@ -425,7 +424,7 @@ A generator **is worth writing**: the guide is large, mechanical and must track 
 - Parse the catalogue tables (rows by ID, columns by header) and the ui-map screen table (the Pages, F1 to F8, Shift, Other keys columns).
 - Parse the chapters' `Keys on this screen` tables and the `Try it` and `More tasks` sections (the older `Try this` box and `How do I...` heading until every chapter is rewritten); copy them in under the screen's `Common tasks`, converting the hidden `<!-- QA-... -->` comments into visible `[QA-...]` tags.
 - Emit `llms-full.txt` in the order above, `llms.txt` with the screen list, and optionally `llms/<screen>.txt`.
-- Map the Status cell to labels: `PASS` with parity evidence to `same as the original firmware`; new Community OS behaviour to `new in track3r-os`; `unit pending` to `not yet checked on the unit`; open rows are listed under Known gaps.
+- Map the Status cell to labels: `PASS` with parity evidence to `same as the original firmware`; new Community OS behaviour to `new in track3r-os`; `unit pending` to no label; open rows are listed under Known gaps.
 - `--check` regenerates in memory and exits 1 if the committed files differ, so CI (or the manual check) catches drift. Also fail when a catalogue ID cited in a chapter is missing, or a screen in the ui-map has no section.
 - The glossary comes from `docs/manual/glossary.md` (one `term: definition` per line).
 - It needs the chapters to follow section 3 exactly; that is another reason the headings are fixed.

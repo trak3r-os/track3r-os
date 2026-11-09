@@ -1,6 +1,6 @@
 # Hands list for the v1.0.0 session
 
-The maintainer's checklist for the hands session before v1.0.0. It is built from the catalogue rows whose Unit cell says `manual:` (a bare or code-quoted marker) and whose status is still `unit pending` or `unit open`. Each row goes into one group. The HANDS items (91) are split four ways:
+The maintainer's checklist for the hands session before v1.0.0. It is built from the catalogue rows whose Unit cell says `manual:` (a bare or code-quoted marker) and whose status is still `more testing needed` or `unit open`. Each row goes into one group. The HANDS items (91) are split four ways:
 
 - **T1, the battery already covers it**: the Unit cell names a `qa_*.json` step.
 - **T2, console and shot**: keys, the encoder or pads through `o3console`, then a unit shot read by a person or the orchestrator.
@@ -206,6 +206,6 @@ The CONSOLE rows, by screen. A later slice turns them into HIL steps.
 
 ## Coverage notes
 
-- **Source filter.** The 121 rows are the catalogue rows with a `manual:` Unit cell, `unit pending` or `unit open`. Rows whose Unit cell is the legacy `by hand` form are not in the source (for example QA-FIL-088 and QA-CFG-200, 201 and 203 to 211); the maintainer may want them added.
+- **Source filter.** The 121 rows are the catalogue rows with a `manual:` Unit cell, `more testing needed` or `unit open`. Rows whose Unit cell is the legacy `by hand` form are not in the source (for example QA-FIL-088 and QA-CFG-200, 201 and 203 to 211); the maintainer may want them added.
 - **Covered, not repeated.** Real power off and on: QA-GLB-102, QA-GLB-103 and QA-GLB-117 carry the manual press steps. DJ detents: QA-PRF-101. DJ platter and backspin: the manual steps of QA-PRF-133, QA-PRF-134 and QA-PRF-135 (their Unit cell starts with a test, so the source filter does not take them).
 - **Not run here.** No firmware was built or flashed for this list; no unit was touched.

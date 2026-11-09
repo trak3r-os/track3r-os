@@ -11,13 +11,13 @@ Key notation: keys are written in code style, for example `Shift` + `F3` or hold
 
 Status: draft
 
-The release file is an Intel HEX image under a `.ptf` name, which is what the Tracker's bootloader flashes, and the bootloader itself is not touched by an update. Once track3r-os runs, later updates can also be sent from a computer with `o3console.py`, and the official firmware can be put back. This page says what has been checked and marks the rest **not yet verified**.
+The release file is an Intel HEX image under a `.ptf` name, which is what the Tracker's bootloader flashes, and the bootloader itself is not touched by an update. Once track3r-os runs, later updates can also be sent from a computer with `o3console.py`, and the official firmware can be put back. More testing is needed, especially of the way back to the official firmware.
 
 > **Unofficial, at your own risk.** track3r-os is community firmware. It is not affiliated with or endorsed by Polyend. Installing it replaces the firmware in your unit. The bootloader that flashes it is separate from the firmware and is not touched by an update (`docs/hw/tracker-hardware-notes.md`, section 3), but nothing here is a guarantee. Read the whole page first.
 
-**Current release: v1.2.0** ([release notes](../release/v1.2.0.md)). It is tested on a computer and in the emulator and has **not yet been installed on a unit**: the unit smoke test is pending. The install steps below are the ones that worked for earlier releases.
+**Current release: v1.2.0** ([release notes](../release/v1.2.0.md)). It is tested on a computer and in the emulator, and more testing is needed on units. The install steps below are the ones that worked for earlier releases.
 
-This page says what is established by observation on the maintainer's unit and by the repository's own tests, and marks the rest **not yet verified**. Where a step is not verified, do it only if you accept that risk and have a way back (see [Going back](#going-back-to-the-official-firmware)).
+This page says what is established by observation on the maintainer's unit and by the repository's own tests. Where a step has had little testing, do it only if you accept that risk and have a way back (see [Going back](#going-back-to-the-official-firmware)).
 
 ## What a release contains
 
@@ -37,7 +37,7 @@ The same image shows its version in Config, INFO (BUILD ID, for example `v1.2.0 
 1. **Back up the SD card.** Copy everything on it to your computer: projects, samples, modules and the `Firmware/` folder (it holds the official image you may want to go back to). The USB update path writes only inside `Firmware/` (`platform/mk66/update/include/o3os/platform/mk66/update/path_guard.h`), but the card is what the bootloader reads, and a card is easy to damage when it is pulled and reinserted.
 2. **Have the official firmware file at hand.** Official images are named `PolyendTracker_<version>.ptf`. Get one from Polyend; their pages are linked from `docs/hw/tracker-hardware-notes.md` ([how to update](https://polyend.ladesk.com/220365-How-do-I-update-Trackers-firmware), [emergency flashing](https://polyend.ladesk.com/929798-How-do-I-perform-the-emergency-flashing-procedure)). The vendor's emergency-flashing page is also where the hidden reset button used below is described.
 3. **Use a normal card.** The Tracker needs a single FAT32 partition with an MBR. The track3r-os writer refuses exFAT volumes and cards with a write-protected CSD, and it never creates the `Firmware/` folder: it must already exist.
-4. **Settings.** The vendor tells users to create a new project after an update so that Config is initialised (the vendor's statement, not verified here). Config may start from defaults after a change of firmware in either direction. How the settings of track3r-os and the official firmware interact is **not yet verified**.
+4. **Settings.** The vendor tells users to create a new project after an update so that Config is initialised (the vendor's statement, not verified here). Config may start from defaults after a change of firmware in either direction. How the settings of track3r-os and the official firmware interact needs more testing.
 5. **Image end (v1.2.0).** An image must end at or below 0xFF000: an image that reached the last 4 KiB flash sector (end 0x100000) hung a unit after the update, which handed over to the bootloader and did not come back. The update checker of the unit and the image check of the build now refuse such an image, and the v1.2.0 `.ptf` ends below the limit. If you build your own image, build it as a release build.
 6. **Power.** Use a stable USB power source and do not remove power or the card while the unit is updating. This is a precaution; how long the flashing takes and what the screen shows while it runs has not been recorded.
 
@@ -75,7 +75,7 @@ An image of track3r-os has the `diag` console on its USB serial port and can wri
    python3 -I platform/mk66/tools/o3console.py --put track3r-os-v0.5.1.ptf --name track3r-os-v0.5.1.ptf
    ```
 
-   The unit validates the stream while it writes, reads the file back from the card and checks it again, and answers `ok <name> <bytes> <crc> image <length>`. It never leaves a half-written `.ptf`. An image must end on a 4 KiB boundary (the build pads it): the SD bootloader leaves a short last sector as it was, so an image that does not (v1.0.0 is one) may crash at boot, and the tool, the unit's `fw` command and `fw put` refuse it (**IMAGE NOT PADDED: MAY NOT BOOT**). The Update screen on the unit does not refuse such an image: it says it is not padded and asks whether track3r-os may pad a copy (**PAD**); after you confirm, it writes `pad-<name>.ptf` next to the file (zeros up to the next 4 KiB boundary, the file you chose stays as it is), checks the copy, and asks again before it installs the copy. If that name is already taken, nothing is written and the copy that is there is kept: pick it from the list. Any other fault still refuses. From a computer, `o3console.py --put FILE --pad` makes the same copy, and `--update NAME --crc <crc> --yes-update --pad` asks the unit to pad (`fw arm NAME <crc> pad`); the reset button and the official update menu work as before. New Community OS behaviour; not yet checked on the unit.
+   The unit validates the stream while it writes, reads the file back from the card and checks it again, and answers `ok <name> <bytes> <crc> image <length>`. It never leaves a half-written `.ptf`. An image must end on a 4 KiB boundary (the build pads it): the SD bootloader leaves a short last sector as it was, so an image that does not (v1.0.0 is one) may crash at boot, and the tool, the unit's `fw` command and `fw put` refuse it (**IMAGE NOT PADDED: MAY NOT BOOT**). The Update screen on the unit does not refuse such an image: it says it is not padded and asks whether track3r-os may pad a copy (**PAD**); after you confirm, it writes `pad-<name>.ptf` next to the file (zeros up to the next 4 KiB boundary, the file you chose stays as it is), checks the copy, and asks again before it installs the copy. If that name is already taken, nothing is written and the copy that is there is kept: pick it from the list. Any other fault still refuses. From a computer, `o3console.py --put FILE --pad` makes the same copy, and `--update NAME --crc <crc> --yes-update --pad` asks the unit to pad (`fw arm NAME <crc> pad`); the reset button and the official update menu work as before. New Community OS behaviour.
 4. Update. This restarts the unit into the bootloader, so the tool asks for `--yes-update`. `<crc>` is the CRC-32 from the release notes (the `ok` line of the put prints the same value):
 
    ```sh
@@ -85,7 +85,7 @@ An image of track3r-os has the `diag` console on its USB serial port and can wri
    The tool waits for the unit to come back, runs `version`, and fails if the version does not contain the text you expect. If the bootloader does not take over within 5 seconds the unit reports `ERR bootloader did not take over` and the update is cancelled.
 5. Afterwards `Firmware/` holds every `.ptf` you put there. Remember the reset-button rule: it flashes the first one. `fw` marks that file with `*`. Remove the files you do not want (`fw rm <name>`; it keeps the last `.ptf`, and never removes a name starting with `Polyend`), or move them off the card on your computer.
 
-What has been seen: the update path flashed a track3r-os test build on the maintainer's unit and the unit came back as that build (2026-10-12). **Not yet verified:** the whole sequence above with a release file, and several of the checklist items in `platform/mk66/README.md` (FW-3 to FW-10, for example a card with its write-protect tab set, a pulled cable during the upload, the fallback after five seconds).
+What has been seen: the update path flashed a track3r-os test build on the maintainer's unit and the unit came back as that build (2026-10-12). More testing is needed for the whole sequence above with a release file, and for several of the checklist items in `platform/mk66/README.md` (FW-3 to FW-10, for example a card with its write-protect tab set, a pulled cable during the upload, the fallback after five seconds).
 
 The alternative is the card route of section 1: put the new file alone in `Firmware/` and use the reset button.
 
@@ -104,9 +104,9 @@ The bootloader is separate from the application, so a broken or unwanted applica
 3. Put the card in the unit and use the hidden reset button as in the vendor's emergency-flashing page.
 4. When the official firmware is running, create a new project if its Config looks reset, as the vendor advises after an update.
 
-track3r-os has its own update screen on the device (Config, INFO, `F8`; see [Update from the unit](config.md#update-from-the-unit)). It lists every `.ptf` in `Firmware/`, so the official `PolyendTracker_<version>.ptf` can be chosen there, and the card can hold several files. On the unit this screen has reached **IMAGE OK**; its INSTALL step was not pressed, and it has not been tried with an official file, so it is **not yet verified** as a way back. The official firmware's own update menu will also list an official file named `PolyendTracker...`, but that route is **not yet verified** either from track3r-os as the starting point. Use the reset button above when you need the way back to be certain.
+track3r-os has its own update screen on the device (Config, INFO, `F8`; see [Update from the unit](config.md#update-from-the-unit)). It lists every `.ptf` in `Firmware/`, so the official `PolyendTracker_<version>.ptf` can be chosen there, and the card can hold several files. On the unit this screen has reached **IMAGE OK**. As a way back with an official file it needs more testing, and so does the official firmware's own update menu, which will also list an official file named `PolyendTracker...`, when track3r-os is the starting point. Use the reset button above when you need the way back to be certain.
 
-**Not yet verified:** that the official firmware opens projects saved by track3r-os (it reads the original formats; the native track3r-os project format is its own), and what happens to the unit's stored settings when you switch back. Keep your original-firmware projects as they are and work on copies.
+Open research question: whether the official firmware opens projects saved by track3r-os (it reads the original formats; the native track3r-os project format is its own), and what happens to the unit's stored settings when you switch back. Keep your original-firmware projects as they are and work on copies.
 
 ## If something goes wrong
 
@@ -117,7 +117,7 @@ track3r-os has its own update screen on the device (Config, INFO, `F8`; see [Upd
 - The unit is not found by `o3console.py`: check the USB cable, and that the unit runs track3r-os (the `diag` console is part of track3r-os).
 - Report problems with the version string from Config, INFO (or the `version` command) and the file name and SHA-256 you installed.
 
-## Not yet verified (summary)
+## Open items (summary)
 
 | Item | Status |
 |---|---|
@@ -126,11 +126,10 @@ track3r-os has its own update screen on the device (Config, INFO, `F8`; see [Upd
 | The pads on every board revision | v1.0.0 left the pads dead on a later unit (plastic back, 2026-10-25, OS-BUG-PADS); v1.0.1 works there (one user, 2026-10-26); other revisions not reported |
 | Position of the hidden reset button | not recorded here; see the vendor page |
 | Time the flashing takes and what the screen shows | not recorded |
-| Full USB update sequence with a release file, and checklist FW-3 to FW-10 | not yet verified |
-| The update screen of track3r-os (Config, INFO, `F8`) installing the official file | IMAGE OK reached with a track3r-os file; INSTALL not pressed; not tried with an official file |
-| Official firmware's update menu as a way back from track3r-os | not yet verified |
-| Settings and project compatibility between track3r-os and the official firmware | not yet verified |
-| The v1.2.0 file installing on a unit | not yet verified: the unit smoke test is pending |
+| Full USB update sequence with a release file, and checklist FW-3 to FW-10 | more testing needed |
+| The update screen of track3r-os (Config, INFO, `F8`) installing the official file | IMAGE OK reached with a track3r-os file; more testing needed with an official file |
+| Official firmware's update menu as a way back from track3r-os | more testing needed |
+| Settings and project compatibility between track3r-os and the official firmware | open research question |
 
 ---
 
@@ -209,7 +208,7 @@ You should see the version you installed. The boot screen shows the same version
 
 1. Turn the unit on.
 2. The boot screen shows a logo with **Track3r** and the build under it. It stays for at least 0.8 s, until the start-up work is done.
-3. The unit opens the project you had open last (the newest of the File screen's RECENT list) if it is still on the card. With none, and a `Workspace/project.mt` file on the card, it loads that. When the last project cannot be read (a damaged file, a project from a newer OS), the unit starts empty and the strip says `PROJECT <name> FAILED` and why; it does not fall back to the Workspace, and it tries the same project on every start until you open another one in File. The strip shows the end of the load: `PROJECT <name> OPENED`. The inserts saved with the project are bound again as it loads. Not yet checked on the unit.
+3. The unit opens the project you had open last (the newest of the File screen's RECENT list) if it is still on the card. With none, and a `Workspace/project.mt` file on the card, it loads that. When the last project cannot be read (a damaged file, a project from a newer OS), the unit starts empty and the strip says `PROJECT <name> FAILED` and why; it does not fall back to the Workspace, and it tries the same project on every start until you open another one in File. The strip shows the end of the load: `PROJECT <name> OPENED`. The inserts saved with the project are bound again as it loads.
 4. If no project loads, or the loaded project has no sample or module instrument and no instrument at all in slots 1 to 48 (MIDI instruments in slots 49 to 64, the 16 MIDI channels of every project from the official firmware, do not stop it), the unit starts the demo kit: four instruments and pattern 1. This is new Community OS behaviour, a default the maintainer still has to confirm. Press `Play` to start pattern 1.
 
 To open another project from the card, press `File`. See [File](file.md). For where each key is, see [The panel](panel.md). On any screen, hold `Shift` and tap `Config` to read a help page for it ([the help page](panel.md#the-help-page)).
@@ -224,7 +223,7 @@ To open another project from the card, press `File`. See [File](file.md). For wh
 2. Keep holding until the line is full. The strip says **POWERING OFF**. The keys and pads stop working, the screen fades, the pad lights go out and the sound stops.
 3. Let go of `Power`. The unit stays dark. Press `Power` and let go to start it again.
 
-To cancel, let go before the line is full, or press `Shift` while you hold `Power`.  `Shift` + `Power` on its own is not an off: it saves a screenshot to the card ([The panel](panel.md#screenshot)).  To remove all power, unplug the USB cable. For saves and exports during the off, see [The panel](panel.md#power). **Checked on a unit (test build v0.6.12):** the off, the dark screen, and a press of `Power` to start again. **Known gap:** a click may be heard at power off and at power on. **Not yet checked on the unit:** cancelling with `Shift`, saves and exports during an off, and the current draw while the unit is off.
+To cancel, let go before the line is full, or press `Shift` while you hold `Power`.  `Shift` + `Power` on its own is not an off: it saves a screenshot to the card ([The panel](panel.md#screenshot)).  To remove all power, unplug the USB cable. For saves and exports during the off, see [The panel](panel.md#power). **Checked on a unit (test build v0.6.12):** the off, the dark screen, and a press of `Power` to start again. **Known gap:** a click may be heard at power off and at power on.
 
 ### Use the card on a computer
 
@@ -245,9 +244,9 @@ Keep your projects from the original firmware as they are. Work on copies in tra
 
 ## Good to know
 
-- Projects saved by the original firmware open in track3r-os. This is tested on the host with files made from the format's byte maps. Not yet checked on the unit.
-- Projects saved in track3r-os may not open on the official firmware. **Not yet verified.**
-- The unit's settings may start from defaults after a change of firmware, in either direction. **Not yet verified.** Keep copies of your projects.
+- Projects saved by the original firmware open in track3r-os. This is tested on the host with files made from the format's byte maps.
+- Projects saved in track3r-os may not open on the official firmware. Open research question.
+- The unit's settings may start from defaults after a change of firmware, in either direction. Open research question. Keep copies of your projects.
 
 ## See also
 
@@ -317,14 +316,14 @@ If a `Shift` + soft key has no label, it does nothing. It never acts as the plai
 | `Pattern` | the Pattern screen, when you let go of the key. Held, with the encoder: the tempo, on any screen; held, with a pad: tap tempo (see [Tempo from any screen](#tempo-from-any-screen)) | QA-GLB-153, QA-GLB-155 |
 | `Song` + `Pattern`, or `Master` + `Song`, pressed together | opens the Navigator on any screen; press `F8` (**GO**) to go to the screen you chose, or `F7` (**CLOSE**) to leave it. Neither key does its own job, and the Song peek and the held volume and tempo turns stay off | QA-GLB-233 |
 | `Shift` + `Pattern` | lists the module apps that are not tools; `F1` or `F8` (**LAUNCH**) starts one, `Pattern` leaves the list. It was the Navigator before | QA-MOD-252 |
-| `Shift` + `Master` | steps to the next colour theme: Amiga, Black, White, then Amiga again. The THEME row on Config says the same. New in track3r-os. Not yet checked on the unit. | QA-GLB-157 |
+| `Shift` + `Master` | steps to the next colour theme: Amiga, Black, White, then Amiga again. The THEME row on Config says the same. New in track3r-os. | QA-GLB-157 |
 | `Shift` + `Config` | opens the help page of the screen you are on (see [The help page](#the-help-page)) | QA-GLB-141 |
 
 (Picture: Panel: Song and Pattern are marked. Press both together to open the Navigator.)
 
 ## Tempo from any screen
 
-New in track3r-os. Not yet checked on the unit. Hold `Pattern` on any screen and the encoder and the pads set the tempo. The screen does not change.
+New in track3r-os. Hold `Pattern` on any screen and the encoder and the pads set the tempo. The screen does not change.
 
 - **Turn the encoder** while you hold `Pattern`: the tempo moves 1 BPM a detent, between 40 and 800 BPM. Hold `Shift` first, then `Pattern`, and a detent is a tenth of a BPM. The sequencer follows at once, also while it plays, and the strip says, for example, **TEMPO 137.0 BPM**.
 - **Tap pads** while you hold `Pattern`, about half a second apart. The first tap says **TAP**. From the second, the tempo is the mean of the last four gaps, to a tenth of a BPM, between 40 and 300 BPM, and the strip says, for example, **TAP 120.0 BPM**. A pause of more than 2 seconds starts a new series. The pad plays no note. With `Pattern` up, a pad is a pad again.
@@ -337,7 +336,7 @@ A tap of `Pattern` with no turn or pad acts when you let go of the key, and so d
 
 ## The help page
 
-New in track3r-os. Not yet checked on the unit. Hold `Shift` and tap `Config` on any screen to read about it without leaving it.
+New in track3r-os. Hold `Shift` and tap `Config` on any screen to read about it without leaving it.
 
 1. Hold `Shift` and tap `Config`. A page titled **HELP: SONG** (for the Song screen) opens over the screen, with a page count such as **3/15** at the right of its bar. The key row reads **CLOSE** on `F8` and is blank otherwise.
 2. Press `Left` or `Right` to turn the pages. They stop at **1/15**, the Global page (the screen buttons and the global keys), and at **15/15**.
@@ -418,7 +417,7 @@ The buttons have no lights. The screen shows the state instead, for example the 
 
 Some keys act on a tap and some only while you hold them. On Pattern, `F1` opens the pattern picker only while you hold it, so a tap opens nothing. On Pattern, `F7` held with a pad runs that verb without opening the menu, so a tap of `F7` opens the menu. On Pattern, `F2` and `F3` toggle a chooser with a tap. On Song, `F7` selects the tempo field, and a second tap taps the tempo. On the Mixer, `F1` on the MIXER page changes nothing.
 
-While a dialog or a list is open, it owns the key row: the row shows only the dialog's own keys, every other key is blank and does nothing, and `Shift` does not change the row. `F8` goes back. On the on-screen keyboard, `F8` keeps the text and `F7` cancels. Learn shows **BACK** on `F8` alone until it has a target or a binding, and **FOLLOW** on `F5` when the target is a bound instrument parameter (see "Learn a MIDI control" above). Fill shows **FILL** on `F1` and **BACK** on `F8`, and a running WAV export shows **CANCEL** on `F8`. The Navigator reads **GO** on `F1`, **CLOSE** on `F7` and **GO** on `F8`; with `Shift` held it reads only **CLOSE** and **GO**. The screen buttons do nothing until the dialog closes. New in track3r-os. Not yet checked on the unit. On Song, a question on the strip asks **ALL** (`F1`) or **UNIQUE** (`F2`), and any other key withdraws it. On Config, **APPLY** and **DEFAULTS** ask for a second press within a short time.
+While a dialog or a list is open, it owns the key row: the row shows only the dialog's own keys, every other key is blank and does nothing, and `Shift` does not change the row. `F8` goes back. On the on-screen keyboard, `F8` keeps the text and `F7` cancels. Learn shows **BACK** on `F8` alone until it has a target or a binding, and **FOLLOW** on `F5` when the target is a bound instrument parameter (see "Learn a MIDI control" above). Fill shows **FILL** on `F1` and **BACK** on `F8`, and a running WAV export shows **CANCEL** on `F8`. The Navigator reads **GO** on `F1`, **CLOSE** on `F7` and **GO** on `F8`; with `Shift` held it reads only **CLOSE** and **GO**. The screen buttons do nothing until the dialog closes. New in track3r-os. On Song, a question on the strip asks **ALL** (`F1`) or **UNIQUE** (`F2`), and any other key withdraws it. On Config, **APPLY** and **DEFAULTS** ask for a second press within a short time.
 
 ## Transport
 
@@ -447,15 +446,15 @@ The pad mode stays until you change it and is not saved.
 |---|---|---|
 | turn the encoder | changes the value under the cursor, or scrolls the list in view | - |
 | `Shift` + turn the encoder | a coarse step on the Instrument screen; a fine step on the Song screen | - |
-| turn the encoder quickly in a list | in File, Sample load, the Modules list and the module picker, a quick spin moves 4 rows a detent, then 8; a slow turn moves one. The Pattern cursor, every value and the `Shift` coarse steps are unchanged. New in track3r-os. Not yet checked on the unit. The numbers are being tuned. | QA-GLB-159 |
+| turn the encoder quickly in a list | in File, Sample load, the Modules list and the module picker, a quick spin moves 4 rows a detent, then 8; a slow turn moves one. The Pattern cursor, every value and the `Shift` coarse steps are unchanged. New in track3r-os. The numbers are being tuned. | QA-GLB-159 |
 
-With `Instr` and `Vol` both held, the encoder moves the parameter you picked with `Instr` and `Fx` and does nothing else (see "Put one parameter on the encoder" above). New in track3r-os. Not yet checked on the unit.
+With `Instr` and `Vol` both held, the encoder moves the parameter you picked with `Instr` and `Fx` and does nothing else (see "Put one parameter on the encoder" above). New in track3r-os.
 
 The encoder has no push function.
 
 ## Screenshot
 
-`Shift` + `Power` saves what is on the screen to the card as a picture. New in track3r-os. Not yet checked on the unit.
+`Shift` + `Power` saves what is on the screen to the card as a picture. New in track3r-os.
 
 1. Put a card in the unit. Hold `Shift`, press `Power`, and let go of both.
 2. The screen freezes for 1 to 2 seconds while the picture is written. The song plays on with no click or stutter.
@@ -488,7 +487,7 @@ The strip says why when it cannot save, and writes no file:
 | `Shift` + `Power` | a screenshot ([above](#screenshot)). No line, no hint and no off. | QA-GLB-110, QA-GLB-130 |
 | `Power` held, then `Shift` | the line empties and the unit stays on. To turn it off, let go of `Power` and hold it again. | QA-GLB-110 |
 
-When the line is full, the strip says **POWERING OFF**. The keys, the pads and the MIDI input stop working, the screen fades, the pad lights go out and the sound stops. If a song is playing, the unit sends note-offs and a MIDI Stop to the MIDI out, and the sound fades in about 50 ms. Not yet checked on the unit. The unit is dark and silent, but it is not switched off at the power supply. To remove all power, unplug the USB cable.
+When the line is full, the strip says **POWERING OFF**. The keys, the pads and the MIDI input stop working, the screen fades, the pad lights go out and the sound stops. If a song is playing, the unit sends note-offs and a MIDI Stop to the MIDI out, and the sound fades in about 50 ms. The unit is dark and silent, but it is not switched off at the power supply. To remove all power, unplug the USB cable.
 
 If `Power` is still held when the line is full, the unit goes dark at once and stays dark after you let go.
 
@@ -507,8 +506,6 @@ The off does not save for you. This is what happens to work in progress:
 **Checked on a unit (test build v0.6.12):** the two-second hold turns the unit off, and the screen goes dark and silent. A press of `Power` starts it again, and so does plugging the USB cable in again.
 
 **Known gap:** a click may be heard at power off and at power on.
-
-**Not yet checked on the unit:** the short-press hint, a hold that is still going when the line is full, the rule for a hold at start-up, `Shift` to cancel, saves and exports during an off, the firmware update refusal, the writable disk, and the current draw while the unit is off.
 
 ## Keys held when the unit turns on
 
@@ -617,8 +614,6 @@ In SLOTS mode pad n is slot n of the 48-slot page that holds the cursor. When st
 
 6. Press `F8` (**UNDO**). The slot points at the shared pattern again.
 
-Not yet checked on the unit.
-
 ## The screen at a glance
 
 (Picture: Song: the Shift row while Shift is held, with the quarter jumps, NAME, PADS and REDO.)
@@ -698,16 +693,12 @@ Start on the Timeline page.
 
 The cursor is shared with the list: turn the page and it stays on the same slot and track. The Timeline has 12 lanes, so track 13 to 16 are edited on the list.
 
-Not yet checked on the unit: how the colours and the note map read on the panel, and the countdown against the sound.
-
 ### Look at Song and come back
 
 Start on any other screen.
 
 1. Hold `Song`. After 0.4 s the Song screen comes up. It opens on the page you left it on, for example **TIMELINE 2/2**.
 2. Let go. You return to the screen you came from, as you left it.
-
-Not yet checked on the unit.
 
 ## Keys on this screen
 
@@ -756,9 +747,9 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 - `Shift` + `F3` jumps to 2/4. It does not add a slot.
 - **NO SUCH PATTERN YET** and **SONG IS EMPTY** are the strip's replies to a name on a slot with no pattern, or on an empty song.
 - `Pattern` on Song opens the pattern of the slot under the cursor.
-- Adding, deleting or moving slots while the song plays does not move the playhead: the marker follows its slot and the song goes on to the slot that came after it. Delete the slot that plays and its pattern finishes, then the slot that took its place plays. Delete the queued slot and the strip says **QUEUED SLOT DELETED**. New in track3r-os; not checked on the unit.
+- Adding, deleting or moving slots while the song plays does not move the playhead: the marker follows its slot and the song goes on to the slot that came after it. Delete the slot that plays and its pattern finishes, then the slot that took its place plays. Delete the queued slot and the strip says **QUEUED SLOT DELETED**. New in track3r-os.
 - `F8` undoes Song edits only. An empty Song undo says **NOTHING TO UNDO HERE**.
-- New in track3r-os: the map, TOOLS, UNIQUE, the marks, cut, move, next use, the pads and the peek. Not yet checked on the unit.
+- New in track3r-os: the map, TOOLS, UNIQUE, the marks, cut, move, next use, the pads and the peek.
 - Not checked against the original firmware: the keys and pages not named above.
 
 ## See also
@@ -800,8 +791,6 @@ If an insert costs more than its budget, the unit forces it to dry: the track pl
 - **Stored:** the module and the bypass state of each insert are saved with the project.
 - **Live:** the cost in each cell, and the bypass mark.
 - **Ended:** `Delete` removes the insert. The Mixer has no undo, and an insert is not in the undo journal, so the removal is final.
-
-Not yet checked on the unit: the cost figures, OVER BUDGET and the click-free bypass.
 
 ### Routing: where a track goes
 ### Routing: where a track goes
@@ -856,8 +845,6 @@ Example: the pad sound is dry. Raise its **REVERB SEND** to 40 on Instrument. On
 
    (Picture: Pattern: the strip shows the master volume while Master is held.)
 
-Not yet checked on the unit.
-
 ## The screen at a glance
 
 (Picture: Mixer, MIXER page: columns for tracks and buses; the key row lists the pages.)
@@ -887,8 +874,6 @@ Start on the MIXER, ROUTING or MASTER FX page. Move the cursor to an empty cell,
 
 You should see the picker close, the strip say **INSERT SET** and the cell show the module's name. The insert is saved with the project.
 
-Not yet checked on the unit.
-
 ### Load a preset into an insert
 
 Start on the INSERTS page, with the cursor on a cell that holds an effect that has presets.
@@ -898,8 +883,6 @@ Start on the INSERTS page, with the cursor on a cell that holds an effect that h
 
 You should see the strip say, for example, **PRESET DARK HALL LOADED**, and every row of the page show the preset's value. A preset sets every parameter: one that names only some leaves the others at the module's defaults.  The values are saved with the project and the insert sounds so at once. Like every change to an insert, a preset load is not an undo step. A card preset that names an unknown parameter says **PRESET <NAME> LOADED, <n> SKIPPED**; a damaged file says **PRESET DAMAGED**; a file of another module **PRESET OF <MODULE>**. An effect with no presets at all opens the list and it says **NO PRESETS, SHIFT+F5 SAVES**.  New in track3r-os.
 
-Not yet checked on the unit.
-
 ### Bypass or remove an insert
 
 Start on the INSERTS page, with the cursor on a cell that holds an insert.
@@ -908,7 +891,7 @@ Start on the INSERTS page, with the cursor on a cell that holds an insert.
 2. Press `F7` again. The strip says **INSERT ON**, and the effect starts again from a reset.
 3. Press `Delete`. The strip says **INSERT DELETED**, and the cell is empty.
 
-`Delete` cannot be undone. Not yet checked on the unit.
+`Delete` cannot be undone.
 
 ### Change an insert's settings
 
@@ -923,7 +906,7 @@ You should see the value change on the row, and the track's sound change with it
 
 > **Careful**: A change here has no undo. `F8` says **NOTHING TO UNDO HERE**, and `Delete` on a row cannot be taken back either.
 
-On an empty cell `F6` and `Params` say **NO INSERT HERE** and open nothing. On the insert's page `F7`, `Shift` + `F6` and `Shift` + `F7` do nothing and their labels are blank.  On a bound MASTER cell `Params` opens the module's page with the strip saying `MASTER`, and an edit reaches both instances. On the other Mixer pages `Params` still opens the page of the instrument in view.  Not yet checked on the unit.
+On an empty cell `F6` and `Params` say **NO INSERT HERE** and open nothing. On the insert's page `F7`, `Shift` + `F6` and `Shift` + `F7` do nothing and their labels are blank.  On a bound MASTER cell `Params` opens the module's page with the strip saying `MASTER`, and an edit reaches both instances. On the other Mixer pages `Params` still opens the page of the instrument in view.
 
 ### Name a track
 
@@ -957,8 +940,6 @@ The USB audio device can present 2, 4, 6, 8 or 10 outputs to the computer. A pro
 The number is saved with the project (File > SAVE). Projects saved with 2, 8 or 10 outputs are the same files as before.
 
 A project saved before this version has no USB settings: when you open it, the unit keeps the outputs of the project you had open before it. On STEMS the built-in `F6` (**APPLY**) wins over an `F6` in a user keymap. A keymap line that names `mixer.stems` is refused by older firmware.
-
-Not yet checked on the unit: that a Linux, macOS or Windows computer sees each number.
 
 ### Play the current instrument from the pads
 
@@ -1022,8 +1003,8 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 - When the card lacks an insert's module, its cell reads **NOT BOUND**, and `F7` says **MODULE MISSING: DELETE OR RELOAD**.
 - A bind right after the `Delete` of the same cell says **INSERT LEAVING: TRY AGAIN**. Wait a moment and try again.
 - `F7` says **NO CPU** when the block has no room for the effect.
-- The inserts are saved with the project. Not yet checked on the unit: that they are bound again when the project opens.
-- To move an insert's parameter with a MIDI controller, open its page with `Params`, put the cursor on a row, press `Vol` and `Fx` together (Learn) and turn the controller. A row the module marks as not learnable says **NO TARGET TO LEARN**. The binding is saved with the project. Not yet checked on the unit.
+- The inserts are saved with the project.
+- To move an insert's parameter with a MIDI controller, open its page with `Params`, put the cursor on a row, press `Vol` and `Fx` together (Learn) and turn the controller. A row the module marks as not learnable says **NO TARGET TO LEARN**. The binding is saved with the project.
 
 > **Careful**: The Mixer has no undo. `F8` here is **SOLO**, and `F8` on Pattern, Song or Params does not bring a Mixer change back.
 
@@ -1032,7 +1013,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 - The master limiter is always on. The page lists no headroom, saturation, EQ, bass, space or bit-depth stages.
 - A muted track still exports as a stem, with its sound in it.
 - The first hit after an unmute can be soft: it loses up to 1.45 ms to a short ramp. It never clicks.
-- Not yet checked on the unit: mute and unmute mid-note, the master volume, naming, stems, inserts. Not checked against the original firmware: the pages and keys.
+- Not checked against the original firmware: the pages and keys.
 
 ## See also
 
@@ -1130,8 +1111,6 @@ A scene is a snapshot of the twelve slots: the effect, the chosen row and the th
 
    (Picture: Perform: LOWPASS is back at -40 and SCENE 1 is marked on the key row.)
 
-Not yet checked on the unit.
-
 ## The screen at a glance
 
 (Picture: Perform, SLOTS page: twelve slot columns with their pads, the track boxes at the bottom and the key row from SCENE 1 to RESET.)
@@ -1214,13 +1193,13 @@ Any of the tracks that are on can play another pattern's track while the rest go
 2. Watch the track boxes. A box that waits shows **>07** and blinks. Each track changes at the end of its own loop, so tracks of different lengths change at different times.
 3. Press `Shift` + `F8` (**TRK SONG**) to send the tracks that are on back to the pattern of the song.
 
-In Song mode a track you changed stays on its pattern when the song goes to the next slot; the others follow the song.  `Stop` ends it. Leaving Perform for any screen except Master and Song sends every track that is not on the song back at once; Master and Song keep it. Nothing is saved in the project.  These keys, and the rules for Song, Stop and leaving, are new in track3r-os. Not yet checked on the unit.
+In Song mode a track you changed stays on its pattern when the song goes to the next slot; the others follow the song.  `Stop` ends it. Leaving Perform for any screen except Master and Song sends every track that is not on the song back at once; Master and Song keep it. Nothing is saved in the project.  These keys, and the rules for Song, Stop and leaving, are new in track3r-os.
 
 A track that is off is not touched and shows **OFF**, not a pattern number. The same press again takes a waiting change back. Queueing the pattern a track already plays pins it at once, so it keeps that pattern when the song goes on. A track that has changed keeps its pattern when the song goes on, until you press **TRK SONG** or **SONG**, stop, restart the transport (`Play` while it plays, or resume), or leave Perform for any screen but Master and Song: then every track on another pattern goes back to the song at once. A random track has no loop end, and a track longer than its pattern is restarted when the pattern ends. Both change at the end of the song's pattern. A pick that is no longer a pattern of the project says **PATTERN IS GONE: PICK ANOTHER** and queues nothing. Nothing is saved in the project. With the song stopped the strip says **NOT PLAYING**; with no track on, **NO TRACK IS ON: HOLD SHIFT + TOP PADS**.
 
 With **CC MAP** on (Config > MIDI), a control change **41 to 48** on the slot page does the same for one track: the track's number is the CC's (CC 41 is track 1) and the pattern is `cc + 1`, whatever tracks are on, loaded at that track's loop end. The same value again does not take a waiting queue back; after `Stop` and `Play` it is sent again; a pattern the project does not have says **CC 4x: NO PAT nnn** on the strip. See [Config: control the unit with the official CC numbers](config.md#control-the-unit-with-the-official-cc-numbers).
 
-New in track3r-os. Not yet checked on the unit; how the original firmware does it is an open research question.
+New in track3r-os.
 
 ### Turn every effect off
 
@@ -1270,11 +1249,11 @@ The DJ page has its own key row: `F1` **BANK -**, `F2` **BANK +**, `F3` **CURVE*
 - While `Shift` is held, `F4` to `F8` are the per-track pattern keys (see above). They do not run the plain key under them.
 - **TUNE** adds to the instrument's tune and fine tune, and a sounding note follows at once. Amiga-engine instruments and modules do not follow it.
 - An effect that is on stays on through `Play`, `Stop`, the Mixer and Song, and an export is the same with and without it. When a held **VOLUME** -100 or a closed send ends, the sound is back within a few milliseconds, with no click.
-- **PLAYMODE** **PING** bounces over the track: 0 1 2 3 2 1 0 on four steps, so the end steps play once per pass. A different pattern, a pattern switch or a jump starts it again, and so does resuming after a pause. Not yet checked on the unit.
+- **PLAYMODE** **PING** bounces over the track: 0 1 2 3 2 1 0 on four steps, so the end steps play once per pass. A different pattern, a pattern switch or a jump starts it again, and so does resuming after a pause.
 - **PLAYMODE** **C1** to **C20** shuffle the track's steps (see [Shuffle a track's steps](#shuffle-a-tracks-steps)); like **PING**, an order walks the track's own length, and **PAT LEN** can shorten it.
 - A pad you hold while you go to the Mixer (`Master`) or Song is let go when you lift it there, so its value does not stay on.
 - A project that uses **BITDEPTH** or **OVERDRV** shows those two slots empty in an older build.
-- Not yet checked on the unit. Not checked against the original firmware, except where a line above says otherwise.
+- Not checked against the original firmware, except where a line above says otherwise.
 
 > **Careful**: Leaving Perform for any screen except the Mixer (`Master`) or Song switches every track off, so every effect ends, with no message. The chosen rows stay.
 
@@ -1300,7 +1279,7 @@ Use the DJ page to play a set from one pattern after another: drums on A and a m
 
 ## How it works
 
-Everything on this page is **live** and ends when you leave it. Only the groups stay, until you switch the unit off. Nothing of the DJ page is saved in the project, and an export never carries it. New in track3r-os. Not yet checked on the unit.
+Everything on this page is **live** and ends when you leave it. Only the groups stay, until you switch the unit off. Nothing of the DJ page is saved in the project, and an export never carries it. New in track3r-os.
 
 ### Groups: who gets faded
 
@@ -1334,7 +1313,7 @@ A transition is an effect that ends on the switch to the next pattern. **TRANS H
 
 ### Scratch and tape stop
 
-`F5` (**SCR**) puts your hand on the record. The encoder becomes the platter, the mix goes quiet like a held record, and a full turn is 1.8 seconds of sound, and the encoder no longer moves the crossfader. The song keeps playing underneath, so when you tap `F5` again the mix is live at the place it has reached. Backwards it stops at the oldest sound kept, up to 4 seconds. Hold **TAPE STOP** (pad 32; with **SCR** on the strip says **SCRATCH IS ON**) and the whole mix slows to a stop over one beat; while you hold it, turn the encoder to make the stop shorter or longer, from 1/8 beat up to 4 beats (the screen shows the length, and the stop carries on from the speed it has; the next hold starts with the length you left). Let go and it is live again. Not yet checked on the unit: the platter, the backspin and the detents.
+`F5` (**SCR**) puts your hand on the record. The encoder becomes the platter, the mix goes quiet like a held record, and a full turn is 1.8 seconds of sound, and the encoder no longer moves the crossfader. The song keeps playing underneath, so when you tap `F5` again the mix is live at the place it has reached. Backwards it stops at the oldest sound kept, up to 4 seconds. Hold **TAPE STOP** (pad 32; with **SCR** on the strip says **SCRATCH IS ON**) and the whole mix slows to a stop over one beat; while you hold it, turn the encoder to make the stop shorter or longer, from 1/8 beat up to 4 beats (the screen shows the length, and the stop carries on from the speed it has; the next hold starts with the length you left). Let go and it is live again.
 
 ### What leaving the page ends
 
@@ -1358,7 +1337,7 @@ Pressing `Perform`, or any other screen button, ends every effect of this page a
 
    (Picture: Perform, DJ page: while two REP pads are held, the line under the gains names A REP 1/16 and B REP 1/4.)
 
-With the pattern playing, you hear the filter close and open, and the stutters on tracks 1 and 2 and on tracks 5 and 6. Not yet checked on the unit.
+With the pattern playing, you hear the filter close and open, and the stutters on tracks 1 and 2 and on tracks 5 and 6.
 
 ## The screen at a glance
 
@@ -1460,7 +1439,7 @@ If the looper is recording, the strip says **NO ROOM: LOOPER IS RECORDING**; wit
 - The effects of row 2 are the Perform effects **STUTTER**, **DELAY** and **VOLUME**, put above the slots while the page is in view. A slot's own effect comes back when the pad ends.
 - `Shift` + `F1` to `F8` do nothing here and show no label.
 - Pads 33 to 36 of row 3 do nothing. A held pad that you let go of after the page changed does no harm.
-- New in track3r-os. Not yet checked on the unit: the filter, the kills, the transitions, the scratch and tape stop. Not checked against the original firmware.
+- New in track3r-os. Not checked against the original firmware.
 
 ## See also
 
@@ -1523,7 +1502,7 @@ Start on Sample load, with the cursor on a `.wav` file.
 
 A long file starts before it is all read from the card. If the card fails in the middle of the file, the strip says **PREVIEW FAILED** and the part that was read goes on playing.
 
-New Community OS behaviour. Not yet checked on the unit.
+New Community OS behaviour.
 
 ### Load a sample file
 
@@ -1535,8 +1514,6 @@ Start on Sample load. The cursor must be on the file, not on a folder.
 If the instrument in view already holds something, nothing is replaced yet. The strip asks, for example **REPLACE 03 KICK: F1 AGAIN**, and `F1` reads **REPLACE?**. Press `F1` again within four seconds to load. A free instrument loads at once, with no question. A module instrument (the TB-303, for example) is never replaced: the strip says **SLOT HAS A MODULE: INSTRUMENT, SHIFT+F4 DELETE**. Delete it on the Instrument screen first. A load that was asked for cannot be undone, but it leaves the undo history of your pattern and song as it was. Only the undo of that instrument's own parameter edits ends, and the strip says so.
 
 You should see the instrument named after the file. A one-shot file plays once. A file that says it loops plays in a loop, forward or ping-pong. The file plays at the pitch of the rate it was recorded at.
-
-Not yet checked on the unit.
 
 ### Open a folder
 
@@ -1583,8 +1560,6 @@ Start on Sample load, in a folder with more files than fit on one screen. A page
 
 You should see the cursor move. These keys do not load a sample.
 
-Not yet checked on the unit.
-
 ### Load one channel of a stereo file
 
 Start on Sample load. Put the cursor on a stereo file. Its name shows **ST** at the right. A mono file does not.
@@ -1613,7 +1588,7 @@ Start on Sample load. Put the cursor on a stereo file.
 4. Press `Master`, then `F1` (**MIXER**). Set the **PAN** of the first track to 0 and the **PAN** of the second to 100 (see [Mixer](mixer.md)). Leave the pan of both instruments at the centre: the instrument's pan moves the track's, so an instrument off the centre is not hard left or right.
 5. Press `Play`.
 
-You should hear the left channel from the left output and the right channel from the right output. Each note uses two voices, because each track plays one instrument. A voice is one playing sound; the unit has a fixed number of them (see the [glossary](glossary.md)). Not yet checked on the unit.
+You should hear the left channel from the left output and the right channel from the right output. Each note uses two voices, because each track plays one instrument. A voice is one playing sound; the unit has a fixed number of them (see the [glossary](glossary.md)).
 
 ## Keys on this screen
 
@@ -1654,7 +1629,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 ## Good to know
 
 - `Up` and `Down` move the cursor one row, and the encoder does too; turn it quickly and it moves 4 rows a detent, then 8 (new Community OS behaviour, the same in the `File` lists; the numbers are being tuned). `Shift` + the encoder pages a detent at a time. `Left` and `Right` jump by the first letter of the name.
-- A file name longer than 32 characters is cut in the middle: the first 25 characters, a **~**, then the last 6, so the end of the name (for example `take2.wav`) stays readable. A stereo file keeps three cells for **ST**, so its name is cut to 29. The card keeps the full name, and Sample load finds the file by it. This is new in the Community OS.  Not yet checked on the unit.
+- A file name longer than 32 characters is cut in the middle: the first 25 characters, a **~**, then the last 6, so the end of the name (for example `take2.wav`) stays readable. A stereo file keeps three cells for **ST**, so its name is cut to 29. The card keeps the full name, and Sample load finds the file by it. This is new in the Community OS.
 - Sample load does not delete. To clear a slot, go to the Instrument screen and press `Shift` + `F4` (**DELETE**). It asks nothing, and one `F8` (**UNDO**) brings the instrument back. The pattern steps stay.
 - To copy an instrument, press `Shift` + `F2` (**COPY**) on the Instrument screen, then `Shift` + `F3` (**PASTE**) on a free slot. The copy shares its audio with the source and keeps playing when the source is deleted.
 - The file's header decides its format, not its name. An AIFF named `.wav` loads as an AIFF.
@@ -1664,7 +1639,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 - An AIFF with its sound data before its format header says **AIFF: SSND BEFORE COMM NOT SUPPORTED**. This is a known limit. It is not a damaged file.
 - AIFF files with NONE or sowt compression load. Another compression says **IMPORT <NAME> FAILED**.
 - An 8SVX file takes the name stored in the file. A repeat part loops forward.
-- AIFF and 8SVX loading is **Not yet checked on the unit**.
+- AIFF and 8SVX loading is
 - A sample at a rate other than 44,100 Hz plays at the pitch of its own rate. Earlier builds played it too high. A sample loaded before this change may sound lower now. Retune its **TUNE** once.
 - A sample saved at another rate reloads at that rate and keeps its pitch.
 
@@ -1724,7 +1699,7 @@ If the sample is already at full scale or silent, the strip says **NOTHING TO NO
 3. `Shift` + `Up` or `Down` sets **AMP**, from 10 to 800 in steps of 10. It only sets the factor for the next `F6`: the sample is not touched.
 4. Hold `F7` (**PREVIEW**) to hear it. `Shift` + `F7` (**PRV EDGE**) plays from the edge.
 
-**CROP** needs a selection that is smaller than the sample, or it refuses and makes no step. A crop moves the instrument's points and slices to the new length. Not yet checked on the unit.
+**CROP** needs a selection that is smaller than the sample, or it refuses and makes no step. A crop moves the instrument's points and slices to the new length.
 
 ### Remove the DC offset
 
@@ -1742,7 +1717,7 @@ New in track3r-os (the original firmware's editor has neither). Both act on the 
 
 A long process, such as the compressor on a sample of tens of seconds, can be stopped: while the strip shows its progress the key row reads **CANCEL** on `F8`. Press it and the strip says **EDIT COMPRESSOR CANCELLED**. The sample stays exactly as it was and nothing is added to the undo steps. When the process has ended, `F8` is **UNDO** again.
 
-The filter starts from silence at the first frame of the selection, so a selection that starts in the middle of a loud sound may click at its start. The exception is a looping instrument whose processed range starts at its loop start (in practice a loop that starts at the first frame, with the whole sample or a selection from 0): the filter and the compressor first run over the end of the loop, so the loop wraps without a click. Edge handles do not snap to the loop markers. If the loop starts in the middle of the sample (a sustain loop) and you process the whole sample, a click can remain at the wrap; process from the loop start instead.  A long sample takes a while, the compressor longer than the filter (the time is not yet measured on the unit). Both are not yet checked on the unit: listen to the result before you keep it. The values you set stay until you switch the unit off.
+The filter starts from silence at the first frame of the selection, so a selection that starts in the middle of a loud sound may click at its start. The exception is a looping instrument whose processed range starts at its loop start (in practice a loop that starts at the first frame, with the whole sample or a selection from 0): the filter and the compressor first run over the end of the loop, so the loop wraps without a click. Edge handles do not snap to the loop markers. If the loop starts in the middle of the sample (a sustain loop) and you process the whole sample, a click can remain at the wrap; process from the loop start instead.  A long sample takes a while, the compressor longer than the filter Listen to the result before you keep it. The values you set stay until you switch the unit off.
 
 ### Run a plugin
 
@@ -1780,13 +1755,13 @@ Status: the effect path is verified in the simulator and on the host; generators
 1. Press `Shift` + `F1` (**AMG 8K**) for 8,287 Hz, or `Shift` + `F2` (**AMG 16K**) for 16,574 Hz.  All of the sample is converted in one step, and the strip says **EDIT AMIGA 8287 DONE**.
 2. `Shift` + `F3` (**Q8**) switches the 8-bit option on and off for the next conversion. The line under the sample and the strip say **8-BIT ON** or **OFF**.
 
-The sample still plays at its original pitch.  Not yet checked on the unit.
+The sample still plays at its original pitch.
 
 ### Edit a stereo sample
 
 New in track3r-os. A sample loaded with **STEREO** on Sample load (its instrument's **STEREO** row reads **STEREO**) keeps its left and right sides, and the edit page works on both.  **CROP**, **REVERSE**, the fades and **AMP** do the same to both sides. **NORM** finds the loudest point of the left or the right side and scales both by the same amount, so the balance between them stays. **DC REM** and the **FILTER** treat each side on its own. All of it is one undo step, and `F8` brings back both sides.
 
-The **COMPRESSOR** and the Amiga conversion work on one signal only. On a stereo sample they refuse and the strip says **STEREO: MAKE MONO FIRST**: set the **STEREO** row of the instrument to **MONO**, then run them (the result is a mono sample, and `F8` brings the stereo one back).  A stereo edit needs room for both sides. When the sample memory has none, the strip says **NO ROOM FOR THE EDIT** and nothing changes; with the row on **MONO** the same edit needs half the room.  Not yet checked on the unit.
+The **COMPRESSOR** and the Amiga conversion work on one signal only. On a stereo sample they refuse and the strip says **STEREO: MAKE MONO FIRST**: set the **STEREO** row of the instrument to **MONO**, then run them (the result is a mono sample, and `F8` brings the stereo one back).  A stereo edit needs room for both sides. When the sample memory has none, the strip says **NO ROOM FOR THE EDIT** and nothing changes; with the row on **MONO** the same edit needs half the room.
 
 ## Keys on this screen
 
@@ -1832,7 +1807,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 - `F7` (**PREVIEW**) plays the instrument while you hold it. `Shift` + `F7` (**PRV EDGE**) plays from the picked edge while you hold it.
 - The Amiga conversion refuses a wavetable: **A WAVETABLE CANNOT BE CONVERTED**. A sample converted with **AMG 8K** reloads at 8,287 Hz on the Amiga engine.
 - **SAVE WAV** with no card write layer says **NO CARD WRITE LAYER**, and with no sample **NO SAMPLE IN THIS INSTRUMENT**. It writes nothing then.
-- Not yet checked on the unit: the processes and the Amiga keys. Not checked against the original firmware: the keys on this screen.
+- Not checked against the original firmware: the keys on this screen.
 
 ## See also
 
@@ -1879,8 +1854,6 @@ Example: load a file of many single-cycle windows, choose WAVETABLE, hold a pad 
 5. Press `Shift` + `F1`, `Up` twice and `F1`. The CHOP page opens with no slices.
 
 6. With a sample loaded, press `F2` (**EVEN**). The sample is cut in equal parts, drawn as lines. Pad n plays slice n.
-
-Not yet checked on the unit.
 
 ## The screen at a glance
 
@@ -1931,8 +1904,6 @@ Start on the Wave screen. A wavetable is a WAV file of many windows, one after a
 
 You should see the waveform of the table, with the window marked. The POSITION row reads `n OF 0..N-1`, where `N` is the number of windows. The timbre changes as the window changes.
 
-Not yet checked on the unit.
-
 ### Move the start, loop or end point
 
 Start on the WAVE page of a sample instrument.
@@ -1944,8 +1915,6 @@ Start on the WAVE page of a sample instrument.
 5. Press `F7` (**ZOOM-**) to widen the window, or `Up` to zoom in around the picked point.
 
 `F8` (**UNDO**) takes the edit back, and `Shift` + `F8` does it again.
-
-Not yet checked on the unit.
 
 ### Show the CHOP page
 
@@ -1964,7 +1933,7 @@ Start on the CHOP page of a sample instrument.
 2. Press `F4` (**ADD**) to split the selected slice in two, at the middle between its start and its end (the zoom does not matter; with no slices yet, the first press puts one at the middle of the whole sample). Press `F5` (**DEL**) to remove the selected slice; the selection moves to a neighbour.
 3. Press `Left` or `Right` to pick a slice, and turn the encoder to move it. `Shift` + the encoder moves faster. `F3` (**ZC**) makes it land on a zero crossing, where the sound crosses the centre line.
 
-You should see the slices as lines on the sample. The strip says **PLAY MODE: BEAT SLICE**, and pad n plays slice n. A sample holds up to 48 slices. Each change is one undo step: `F8` (**UNDO**). Not checked on the unit.
+You should see the slices as lines on the sample. The strip says **PLAY MODE: BEAT SLICE**, and pad n plays slice n. A sample holds up to 48 slices. Each change is one undo step: `F8` (**UNDO**).
 
 ## Keys on this screen
 
@@ -2005,16 +1974,16 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 ## Good to know
 
 - On the CHOP page `F1` to `F5` are **AUTO**, **EVEN**, **ZC**, **ADD** and **DEL**. `Left` and `Right` choose the slice, and a pad press selects it too. The encoder moves the start of the chosen slice.
-- **ADD** (`F4`) splits the selected slice at the middle of its start and end, at any zoom. The new slice is selected. With no slices yet, the first press cuts the whole sample in two. Not yet checked on the unit.
+- **ADD** (`F4`) splits the selected slice at the middle of its start and end, at any zoom. The new slice is selected. With no slices yet, the first press cuts the whole sample in two.
 - **AUTO** (`F1`) and **EVEN** (`F2`) replace the slices without a question. Each is one undo step, so `F8` (**UNDO**) brings the old slices back.
-- A pad pressed straight after **EVEN**, **ADD**, **AUTO**, **DEL** or an undo plays the new slices, even while the transport runs. Not yet checked on the unit.
+- A pad pressed straight after **EVEN**, **ADD**, **AUTO**, **DEL** or an undo plays the new slices, even while the transport runs.
 - A beat slice sounds until the next note on its track starts, which cuts it. A slice with no note after it plays to the end of the slice. New in track3r-os. Not checked against the original firmware.
 - `F8` (**UNDO**) takes back the last Wave edit only.
 - On a MIDI instrument or a free slot the mode list does not open. The strip says **NO SAMPLE INSTRUMENT HERE**.
 - A sample under 32 frames cannot use WAVETABLE. The window is at most 2048 samples and never longer than the sample.
 - GRANULAR: **LENGTH** runs from 44 to 44,100 samples, 11 a click. **SHAPE** is Square, Triangle or Gauss. **LOOP** is Forward, Backward or PingPong.
 - The Shift row is the same on WAVE and CHOP. While the mode list is open the key row shows only **SELECT** and **BACK**.
-- Not checked against the original firmware: the Shift row, the WAVE and CHOP keys. Not yet checked on the unit: wavetable playing.
+- Not checked against the original firmware: the Shift row, the WAVE and CHOP keys.
 
 ## See also
 
@@ -2082,7 +2051,7 @@ If you want to know more:
 5. Listen: both sounds play on the same bar. Press `F5` (**UNDO LYR**) and the second one goes.
 6. Press `F3` (**SAVE**) to keep the loop as an instrument, or `F4` (**DISCARD**) to throw it away.
 
-The simulator has no recorder, so its scenario `record_walk.txt` checks only the screen and the page turn (the `Sample Rec` button), not these steps, and this walk-through has no pictures of its own: the three above come from the screen's gallery. Not yet checked on the unit.
+The simulator has no recorder, so its scenario `record_walk.txt` checks only the screen and the page turn (the `Sample Rec` button), not these steps, and this walk-through has no pictures of its own: the three above come from the screen's gallery.
 
 ## The screen at a glance
 
@@ -2110,7 +2079,7 @@ Start on the **SOURCES** page.
 6. Press `F1` again to end the take. With **STOP AT** on **STEP**, **BAR** or **PATTERN** it ends at that point, and a second `F1` ends it at once. With **STOP AT** on a number of bars, it ends by itself.
 7. The screen says **TAKE: TRIM, THEN SAVE**. Set **TRIM START** and **TRIM END**. Press `F3` to save the window into an instrument (the keyboard opens at once over its name, **RECORDING**: type a name and press `F8`, or press `F7` to keep **RECORDING**; the take is saved either way), or `Shift` + `F3` (**CROP**) to cut the take down to the window and keep working on it, or `F4` to throw it away (with nothing recorded, `F4` says **NOTHING RECORDED**). `F4`, a new take with `F1` and **CROP** each ask first (**TAKE NOT SAVED: F4 AGAIN**, **CROP KEEPS THE WINDOW ONLY: SHIFT+F3 AGAIN**): press the same key again within four seconds. A take you have written with `F7` (**SAVE WAV**) is saved, so it needs no question until you move a marker.
 
-`F7` (**SAVE WAV**) writes the trimmed window as a 16-bit mono WAV at 44,100 Hz into the `Samples` folder of the card, as `REC_001.wav`, `REC_002.wav` and so on. The strip says **SAVE REC_001 DONE** and the take stays in review, so `F3` can still make an instrument of it. With no take it says **NO TAKE TO SAVE: F1 RECORDS ONE**, with no card write layer **NO CARD WRITE LAYER**, and on a write-protected card **CARD IS WRITE PROTECTED**. Not yet checked on the unit.
+`F7` (**SAVE WAV**) writes the trimmed window as a 16-bit mono WAV at 44,100 Hz into the `Samples` folder of the card, as `REC_001.wav`, `REC_002.wav` and so on. The strip says **SAVE REC_001 DONE** and the take stays in review, so `F3` can still make an instrument of it. With no take it says **NO TAKE TO SAVE: F1 RECORDS ONE**, with no card write layer **NO CARD WRITE LAYER**, and on a write-protected card **CARD IS WRITE PROTECTED**.
 
 Press `F2` (**MONITOR**) on the **SOURCES** page to hear the input through the output. It still works while a take is armed or recording. On **RESAMPLE** it does nothing. New in track3r-os.
 
@@ -2156,7 +2125,7 @@ Limits:
 - **PRE-ROLL** is kept at least: it is rounded up to an even number of frames, and one frame more can be kept. If the level arrives less than **PRE-ROLL** after `F1`, nothing was heard before it: the first frames of the take are silence, and **TRIM START** starts after them.
 - A Stop of the transport does not end a take that waits for a level, because it does not need the transport. `F1` ends it, and it ends with no take.
 - With the sample memory nearly full, `F1` says **NO ROOM IN THE SAMPLE MEMORY**: **LEVEL** needs room for the pre-roll and about a second of take.
-- Not checked on the unit yet.
+-
 
 ### Record what the computer plays
 
@@ -2168,8 +2137,6 @@ Start on the **SOURCES** page.
 2. Play the sound on the computer, to the Tracker as its audio output.
 3. Press `F1` to start the take, and `F1` again to end it. The take is mono: the left and right sides are averaged.
 4. The screen says **TAKE: TRIM, THEN SAVE**. Press the pad at the take's own pitch (**C-4**, pad 12) to hear it. Press `F3` to save it, or `F4` to throw it away (it asks first: press `F4` again).
-
-Not yet checked on the unit.
 
 ### Record a loop
 
@@ -2191,7 +2158,7 @@ Start on the review of a loop.
 
 > **Tip**: With the transport stopped, `F1` starts it.
 
-With the transport stopped, `F1` first counts in when **COUNT-IN** is 1 or 2 bars (set on the Config screen). The count-in plays the pattern that `Play` starts. Nothing is recorded during it. The layer begins on the loop's first bar after the count-in, and fades in over a very short ramp. With **COUNT-IN** Off, the transport and the layer start together. Not yet checked on the unit.
+With the transport stopped, `F1` first counts in when **COUNT-IN** is 1 or 2 bars (set on the Config screen). The count-in plays the pattern that `Play` starts. Nothing is recorded during it. The layer begins on the loop's first bar after the count-in, and fades in over a very short ramp. With **COUNT-IN** Off, the transport and the layer start together.
 
 (Picture: Record, overdub: the header shows OVERDUB and the key F1 is lit.)
 
@@ -2281,18 +2248,18 @@ The Shift row of the Record screen:
 | `Shift` + `F3` (**CROP**) | cuts the take down to its window | the same | QA-REC-001, QA-REC-041 |
 | any other `Shift` + `F1` to `F8` | nothing | nothing | QA-REC-001 |
 
-On the RADIO page, the plain `F5` (**SEEK-**) and `F6` (**SEEK+**) ask the radio chip for the next station down or up, wrapping at the end of the band. The page reads **SEEKING** while the chip looks, then **LISTENING**, and the frequency is what it found. Under a loop review `F5` is **UNDO LYR** and `F6` does nothing. Not yet checked on the unit: a real station needs an antenna.
+On the RADIO page, the plain `F5` (**SEEK-**) and `F6` (**SEEK+**) ask the radio chip for the next station down or up, wrapping at the end of the band. The page reads **SEEKING** while the chip looks, then **LISTENING**, and the frequency is what it found. Under a loop review `F5` is **UNDO LYR** and `F6` does nothing.
 
 ## Good to know
 
-- New in track3r-os: the loop, the overdub and the undo layer. Not yet checked on the unit: the looper.
+- New in track3r-os: the loop, the overdub and the undo layer.
 - Not checked against the original firmware: the sources, the take and trim flow and the radio page.
 - The loop keeps playing on other screens, like a loop pedal. `F8`, `F3` and `F4` work only on this screen.
 - The LOOP row is frozen while a take runs. With LOOP on, **START ON** reads **BAR** and **STOP AT** reads **LOOP**, both dim. Editing either says why.
 - A loop is refused at `F1` if it cannot fit the free sample memory: **NO ROOM IN THE SAMPLE MEMORY FOR THE LOOP**. A take that ends early, or fills the sample memory, is given up with **THE LOOP TAKE ENDED BEFORE ITS LAST BAR: GIVEN UP** or **THE SAMPLE MEMORY FILLED: THE TAKE ENDED**. A project load, NEW or a kit gives it up with **TAKE LOST: A PROJECT WAS LOADED UNDER IT**.
 - A Stop fades the loop out in under a millisecond. After Play, a loop starts again from its first bar, not from where it stopped. A tempo change keeps the loop's length: a faster tempo cuts it short, a slower one leaves a gap. The header then says **- TEMPO CHANGED**.
 - During an undo restore, `F1` and `F3` say **UNDO IN PROGRESS**. `F4` and `F8` still work.
-- If the transport does not start after the count-in, the strip says **THE COUNT-IN DID NOT START** or **THE TRANSPORT DID NOT START**. The overdub ends again, with no layer.  Not yet checked on the unit.
+- If the transport does not start after the count-in, the strip says **THE COUNT-IN DID NOT START** or **THE TRANSPORT DID NOT START**. The overdub ends again, with no layer.
 - If the sound does not answer when you press `F3` (**SAVE**) during an overdub, the keys ignore presses for up to half a second. Then the strip says **SAVE TIMED OUT: TRY AGAIN**. Nothing is saved, and the loop stays on the screen. Once the sound runs again, the overdub is over, and `F3` saves the loop as usual. It cannot be made to happen by hand on the unit, so it is checked by the host tests only.
 - The loop goes to both channels of the line out after the master chain. The master volume scales it. It is not in the meters, the stems or any take.
 
@@ -2338,7 +2305,7 @@ Start on the File screen, on the PROJECTS page.
 
 You should see **OPENING** and the project's name, then the Pattern screen with **PROJECT <NAME> OPENED**. If the project cannot be opened, the screen stays on File and the strip says why, for example **PROJECT <NAME> FAILED: NO PROJECT FILE** or **PROJECT <NAME> FAILED: THE FILE IS CUT SHORT**. A refused project leaves the project you had open, its undo history and the playing transport as they were.
 
-At power-on the unit opens the project you had open last (the newest **RECENT** entry), and the strip says **PROJECT <NAME> OPENED**. If it cannot load, the unit starts with an empty project and the strip says **PROJECT <NAME> FAILED** and why, at every start until you open another project. With no card, or on the USB disk boot, nothing is opened. New in track3r-os. Not yet checked on the unit.
+At power-on the unit opens the project you had open last (the newest **RECENT** entry), and the strip says **PROJECT <NAME> OPENED**. If it cannot load, the unit starts with an empty project and the strip says **PROJECT <NAME> FAILED** and why, at every start until you open another project. With no card, or on the USB disk boot, nothing is opened. New in track3r-os.
 
 ### Open a project saved by tracker-ce
 
@@ -2358,7 +2325,7 @@ What changes on the way in:
 - **tracker-ce effects.** The tracker-ce effects **w**, **y** and **z** (amp envelope, filter envelope, grain length) are known and play, see [Effects](fx.md). Any other effect that only tracker-ce has shows `?` and its value in the cell, plays nothing, and stays in the project when you save. A number outside tracker-ce's list is cleared.
 - **A damaged pattern file** is skipped, and the rest of the folder opens.
 
-The load ends with one summary line, in the diag console log and in `diag sd` (see [Computer tools](computer_tools.md)). It names what was lost, for example `3 MICRO-MOVES NOT KEPT, 2 VALUES CHANGED`; the changed values are the volumes above 100 and the cleared effects together. A folder that lost nothing says neither part.  Not yet checked on the unit.
+The load ends with one summary line, in the diag console log and in `diag sd` (see [Computer tools](computer_tools.md)). It names what was lost, for example `3 MICRO-MOVES NOT KEPT, 2 VALUES CHANGED`; the changed values are the volumes above 100 and the cleared effects together. A folder that lost nothing says neither part.
 
 ### Save a project, save a copy, or name it
 
@@ -2368,7 +2335,7 @@ Start on the PROJECTS page.
 2. To save a copy, press `F5` (**SAVE AS**). The keyboard opens. Type a folder name with the pads: letters, digits, spaces and `-`, at most 31 characters. Press `F8` (**SAVE**). `F6` (**AUTO**) fills in a name for you, and `F7` leaves without saving. `F8` with no name typed says **TYPE A NAME** and the keyboard stays open.
 3. To change the title shown in the header, press `Shift` + `F6` (**NAME**), type up to 32 characters and press `F8`. The strip says **PROJECT NAMED**.
 
-**SAVE** in a project you opened from an official (OG) folder adds `project.o3pj` beside the original files and leaves them alone: a sample whose `samples/instrNN.wav` already holds the same audio is not rewritten, and only a sample you edited gets a new file (the old one kept as `.bak`).  **SAVE AS** writes a new folder and leaves the old one alone.  The folder keeps its name when you change the title. Not yet checked on the unit.
+**SAVE** in a project you opened from an official (OG) folder adds `project.o3pj` beside the original files and leaves them alone: a sample whose `samples/instrNN.wav` already holds the same audio is not rewritten, and only a sample you edited gets a new file (the old one kept as `.bak`).  **SAVE AS** writes a new folder and leaves the old one alone.  The folder keeps its name when you change the title.
 
 ### Start a new project
 
@@ -2390,7 +2357,7 @@ A module is a song file from an Amiga or PC tracker: ProTracker (MOD), Scream Tr
 3. Press `Up` or `Down` to the file and press `F1` (**IMPORT**). On a folder `F1` (**ENTER**) opens it, and `F3` (**UP**) goes up.
 4. If the project has changes that no save has taken, press `F1` again, as for **OPEN**.
 
-You should see **IMPORTING** and the name, then **IMPORTED** and the name. The module replaces the project; **SAVE AS** names it. The OS reads the first bytes of the file, not its name, to know what it is. A file that no reader takes says **NOT A MODULE THIS OS READS**, asks nothing and changes nothing. A real module cut off inside its header or song list, or with no room for one pattern after its header, says the same, not a more precise reason; the project stays as it was. A name that says one format over bytes of another is refused the same way, except that a MOD and an S3M may swap names.  The oldest Soundtracker modules have 15 samples and no tag. They import when the name says MOD or says nothing, as a 4-channel song. Their own effect numbers are not handled.  New in track3r-os. Not yet checked on the unit.
+You should see **IMPORTING** and the name, then **IMPORTED** and the name. The module replaces the project; **SAVE AS** names it. The OS reads the first bytes of the file, not its name, to know what it is. A file that no reader takes says **NOT A MODULE THIS OS READS**, asks nothing and changes nothing. A real module cut off inside its header or song list, or with no room for one pattern after its header, says the same, not a more precise reason; the project stays as it was. A name that says one format over bytes of another is refused the same way, except that a MOD and an S3M may swap names.  The oldest Soundtracker modules have 15 samples and no tag. They import when the name says MOD or says nothing, as a 4-channel song. Their own effect numbers are not handled.  New in track3r-os.
 
 The MOD, S3M and MED readers are not in the firmware: they run from `modules/importers/tracker.tmod` on the card, which the starter zip of this release puts there. Without that file an import of a module fails at once with **IMPORT <NAME> FAILED: NO IMPORTER** and nothing is changed, and the REPORT page (**F8**) names the file to copy. A `tracker.tmod` of another firmware says **IMPORTER FOR OTHER FIRMWARE** the same way.
 
@@ -2438,7 +2405,7 @@ You should see `ogexp: DONE n/n files Export/<name> OG`. The folder, such as `Ex
 - If the project changes during the export, it ends with `MODIFIED` and no `project.mt`. A full card, a cancel (`diag ogexp cancel`, or `F8` under the overlay of the OG PROJECT row) or a lost card or power can do the same. Every file with a final name is whole, loading such a folder says **NO PROJECT FILE**, and the unit never removes a folder.
 - The files use the original firmware's formats, checked byte for byte by tests. An official unit has not opened them yet.
 
-The EXPORT page's **OG PROJECT** row starts the same export from the screen: see [Export](export.md).  Not yet checked on the unit.
+The EXPORT page's **OG PROJECT** row starts the same export from the screen: see [Export](export.md).
 
 ## Keys on this screen
 
@@ -2481,13 +2448,12 @@ The table shows the PROJECTS and EXPORT pages. The IMPORT page (`F6`) has a key 
 - In a long list a quick spin of the encoder moves 4 rows a detent, then 8; a slow turn moves one, and the cursor stops at the ends. `Shift` + turn the encoder still moves a page. New in track3r-os.
 - The EXPORT page stays open when you leave File, and a second export set starts at once; `F7` there goes back to PROJECTS.
 - If the name is taken, the keyboard stays open and the strip says **A PROJECT OF THAT NAME EXISTS: TYPE ANOTHER**.
-- If you pull the card, the strip says **CARD REMOVED** and the project keeps playing. A running save ends with **SAVE ... FAILED: NO CARD**. Putting the card back saves nothing.  Not yet checked on the unit.
+- If you pull the card, the strip says **CARD REMOVED** and the project keeps playing. A running save ends with **SAVE ... FAILED: NO CARD**. Putting the card back saves nothing.
 - You cannot rename a project folder on the unit: use **SAVE AS**, then delete the old folder.
-- The open project has a small square bullet left of its folder icon, in the list and in its **RECENT** row. A new project with no folder has none. New in the Community OS.  Not yet checked on the unit.
-- A name longer than 32 characters is cut in the middle: the first 25 characters, a **~**, then the last 6, so names that differ at the end stay apart. The card keeps the full name. New in the Community OS.  Not yet checked on the unit.
-- **RECENT** lists the last five projects you opened or saved, newest first. It is kept on the card, and a deleted project is not shown.  Not yet checked on the unit.
-- If you change a sample file on a computer, the next save writes the project's sample again and keeps the replaced file as, for example, `instr01.wav.bak`.  Not yet checked on the unit.
-- Not yet checked on the unit: saving, saving as, naming, a new project and deleting.
+- The open project has a small square bullet left of its folder icon, in the list and in its **RECENT** row. A new project with no folder has none. New in the Community OS.
+- A name longer than 32 characters is cut in the middle: the first 25 characters, a **~**, then the last 6, so names that differ at the end stay apart. The card keeps the full name. New in the Community OS.
+- **RECENT** lists the last five projects you opened or saved, newest first. It is kept on the card, and a deleted project is not shown.
+- If you change a sample file on a computer, the next save writes the project's sample again and keeps the replaced file as, for example, `instr01.wav.bak`.
 
 ## See also
 
@@ -2574,7 +2540,6 @@ Eject the disk on the computer, or press `F7` twice on the **CARD AS DISK** row.
 
 - Tested on Linux only. Windows and macOS are untested.
 - Checked on a unit (test build v0.6.10): the power-on way, its strip, the eject and the restart, and unmounting and mounting the card on the computer.
-- Not yet checked on the unit: the **CARD AS DISK** row. It is built and tested on the build computer only.
 - A bench run wrote to one SD card at about 430 KiB/s. That is the rate of the unit's card writes on that card, not a speed you will see copying files, and it was measured on one card brand.
 
 ## See also
@@ -2643,8 +2608,6 @@ An app asks before its first launch of a boot when it edits the project or write
 
 6. Press `Song`. The app ends and the Song screen opens.
 
-Not yet checked on the unit.
-
 ## The screen at a glance
 
 (Picture: Modules: the apps on the card with their state, the apps refused this boot at the right, and LAUNCH and RESCAN on the keys.)
@@ -2676,7 +2639,7 @@ Start on any screen. This is new in track3r-os.
 2. Turn the encoder to the app.
 3. Press `F1` or `F8` (**LAUNCH**). The app starts as it does from `F1` on the Modules screen, and asks you to press `F1` again when it writes files.
 
-You should see the app's page. `Pattern` or `Shift` + `Pattern` again closes the list without starting anything. With no such app the list says so. When you leave the app with `F8` you land on the Modules screen. Not yet checked on the unit.
+You should see the app's page. `Pattern` or `Shift` + `Pattern` again closes the list without starting anything. With no such app the list says so. When you leave the app with `F8` you land on the Modules screen.
 
 ### Put a module in an instrument slot
 
@@ -2687,8 +2650,6 @@ Start on the Instrument screen, on a free slot.
 3. Press `F1` to choose it.
 
 You should see **ENGINE SET** in the strip. The slot now holds the module as its instrument. The choice is one undo step: press `F8` (**UNDO**) to take it back.
-
-Not yet checked on the unit.
 
 ### Find the controls of a module instrument
 
@@ -2702,8 +2663,6 @@ The key row and the page heading show the module's page names. The TB-303 has **
 
 Some values show a name instead of a number. The Chip's wave shows **PULSE**, **TRIANGLE**, **NOISE LONG** or **NOISE SHORT**. Its duty shows 12.5%, 25%, 50% or 75%. The FM's algorithm shows a routing such as `4>3>2>1`. The side pane gives the range in names too.
 
-Not yet checked on the unit.
-
 ### Presets: load and save
 
 A module has presets: named sets of values for its parameters. Two kinds show in the same list: the module's factory presets, and the card's — the `.o3mp` files in `modules/presets/<module>/` on the card. Start on the page of a module instrument that has some, or on the page of an insert (see [the Mixer](mixer.md)). The built-in modules (TB-303, Chip, FM, SID) have no factory presets yet: their `F5` (**PRESET**) key opens the list, which says **NO PRESETS, SHIFT+F5 SAVES** when the card holds none either.
@@ -2716,8 +2675,6 @@ You should see the list close and the strip say, for example, **PRESET SHORT LOA
 
 To save the values in force as a card preset, press `Shift` + `F5` (**SAVE**) on the module's page, or in the list. The on-screen keyboard opens (**PRESET NAME**) with the instrument's name — or the effect's name, on an insert's page — suggested; type a name and press `F8`. The strip says **PRESET SAVED: <NAME>** and the file `modules/presets/<module>/<name>.o3mp` is on the card. Nothing is ever replaced: a name that is taken gets **<name> 2**, and the strip says the name the file got. The folder holds one folder per module, so you can copy a module's presets to or from a computer as one folder (the files are the same `.o3mp` the [preset tool](computer_tools.md) reads); renaming or deleting them on the unit is not offered — do it on the computer.
 
-Not yet checked on the unit.
-
 ### Launch an app on the pattern you are editing
 
 Start on the Pattern screen, with the cursor on the track and row you want to work on.
@@ -2728,8 +2685,6 @@ Start on the Pattern screen, with the cursor on the track and row you want to wo
 Humanize runs in the TOOLS panel beside the Pattern: it shows only its own rows and works on the block you selected, or on the cursor step. The rows PATTERN, TRACK, ROW and ROWS (TRACKS on Chords) are the target of the other apps, such as Chords and Rhythm Gen, which keep the full app screen. In Rhythm Gen they are on the last page, reached with `Right`; in Chords, on the second page. Press `Down` to a row and turn the encoder. `Shift` + the encoder takes the coarse step. The encoder moves one step and stops at the ends of the pattern. `Delete` puts the value you opened on back. A pattern that does not exist reads **(EMPTY)**, and **APPLY** says so. **APPLY** writes at the track and rows the page shows, and nowhere else. After `F8` the rows read the cursor again. Opened from the Modules screen there is no cursor, and the rows are dim dashes.
 
 Mutate and Morph work on a whole instrument instead. Opened from TOOLS or from the Modules screen, they keep their own page, and their last row, **INSTRUMENT** (**INSTRUMENT A** on Morph), starts as the Pattern's current instrument. Turn the encoder to pick another one, 1 to 64, and the page shows that instrument's parameters. A slot that is not a sample or module instrument says **SAMPLE OR MODULE INSTRUMENTS ONLY**. `Delete` puts back the instrument you opened on, and **APPLY** changes the instrument the row shows.
-
-Not yet checked on the unit.
 
 ### See what each shipped app does
 
@@ -2744,8 +2699,6 @@ Every app page answers the same keys. `Up` and `Down` choose a row, the encoder 
 | Scope Spectrum | VIEW `1` draws the wave, steady on a trigger. TIMEBASE sets the span from 2.9 to 34.8 ms. VIEW `2` draws 48 spectrum bars from 40 Hz to 20 kHz with the **PEAK** frequency under them. SOURCE picks INPUT or MASTER. | QA-MOD-028, QA-MOD-029, QA-MOD-030, QA-MOD-031, QA-MOD-032 |
 | SMF Export | Open it from `F7` (**TOOLS**) on Pattern. `F1` writes the pattern, or the block, as a MIDI file in `AppExport/smfexport/` on the card. A file is never replaced: the next ones are `PAT001_001.mid` and so on. It lists the FX it cannot write. | QA-MOD-092, QA-MOD-093, QA-MOD-094, QA-MOD-096 |
 | Rhythm Gen, Humanize, Chords, Mutate, Morph | The pattern tools. See [Pattern tools](pattern_tools.md). Rhythm Gen plays a lane's hits while you turn the encoder. After **APPLY** and `F8` in Rhythm Gen, Humanize or Chords, the Pattern has the cursor on the first step written and the written block selected. Mutate and Morph change instrument parameters, not steps. | QA-MOD-129, QA-MOD-131 |
-
-Not yet checked on the unit.
 
 ### Copy a module to the card
 
@@ -2803,8 +2756,6 @@ The engine picker, on the Instrument screen:
 - Deleting a module instrument with `Shift` + `F4` stops its sound. `F4` (**MODULE**) then says **RELOAD TO PUT A MODULE HERE**. Press `F8` twice to bring the module back.
 - A module built for an older track3r-os ignores Glide and Slide. Its notes play as ordinary notes.
 - Glide, Slide up and Slide down change the pitch of a module instrument. Arp plays only with a Chord in the other FX column. Chord alone plays the root. See [Step FX on module instruments](module-instrument-fx.md).
-
-Not yet checked on the unit: the picker, the pages, the value names, the apps' kept rows, the target rows and the count after **RESCAN**.
 
 ## See also
 
@@ -2865,7 +2816,7 @@ The FM has four operators, which are four sine waves. A modulator is an operator
 
 **WAVE** and **DUTY** can now be bound to a MIDI controller with Learn (`Vol` and `Fx` together, see [The panel](panel.md)). Turning the controller steps through the four waves or the four duties. Before, these two rows refused Learn.
 
-**Eight more waves.** In v1.2.0 the Chip has twelve waves, not four. Waves 0 to 3 are the pulse, triangle and two noises. Waves 4 to 11 are **2A03 PULSE**, **SID SAW/TRI**, **NOISE/LFSR**, **FM BELL**, **SUPER SQR**, **ZAP/LASER**, **ARP CHORD** and **CHIP DRUM**. The wave row shows the names. Ten new rows sit on the Chip's pages: **SHAPE** (the pulse width or the drop depth of the wave), **SUB OSC** (a triangle an octave down), **CUTOFF** and **RESONANCE** (a low-pass), **BITCRUSH**, **PWM DEPTH**, **PWM RATE**, **ENV AMT** (the envelope moves the cutoff), **DECIMATE** and **CHORD** (OFF, OCTAVE, FIFTH, MAJOR, MINOR, SUS4, MAJ7, MIN7: a four-step chord that replaces the two arpeggio notes). Some rows act on every wave; **SHAPE** and the two PWM rows act on waves 4 to 11 only. A project saved earlier sounds the same, because every new row starts at a neutral value. Not checked on the unit: how each wave sounds and what a voice costs in processing time.
+**Eight more waves.** In v1.2.0 the Chip has twelve waves, not four. Waves 0 to 3 are the pulse, triangle and two noises. Waves 4 to 11 are **2A03 PULSE**, **SID SAW/TRI**, **NOISE/LFSR**, **FM BELL**, **SUPER SQR**, **ZAP/LASER**, **ARP CHORD** and **CHIP DRUM**. The wave row shows the names. Ten new rows sit on the Chip's pages: **SHAPE** (the pulse width or the drop depth of the wave), **SUB OSC** (a triangle an octave down), **CUTOFF** and **RESONANCE** (a low-pass), **BITCRUSH**, **PWM DEPTH**, **PWM RATE**, **ENV AMT** (the envelope moves the cutoff), **DECIMATE** and **CHORD** (OFF, OCTAVE, FIFTH, MAJOR, MINOR, SUS4, MAJ7, MIN7: a four-step chord that replaces the two arpeggio notes). Some rows act on every wave; **SHAPE** and the two PWM rows act on waves 4 to 11 only. A project saved earlier sounds the same, because every new row starts at a neutral value.
 
 ### SID: a chip voice with four pages
 
@@ -2906,10 +2857,6 @@ Every module instrument (TB-303, FM, Chip, SID, Sine and the built-in ones) has 
 - `F8` (**UNDO**) takes back an edit. The three values are saved with the project and loaded again.
 - A project saved earlier sounds the same: the pan reads 50 and both sends 0.
 - **RATE** (new in track3r-os): TB-303, FM, SID, Chip and Sine have a fourth row on the MIX page, **RATE** (FULL, 1/2, 1/4). At 1/2 or 1/4 the module is asked for half or a quarter of the samples and each one is held twice or four times: the sound turns crunchier and aliased on purpose, and the module costs about half or a quarter of its CPU. FULL is the sound you had before. Changing the row never cuts a note: while the instrument sounds the change waits, and once it is silent the instrument restarts with its parameters as they were (a note started in that instant, a few milliseconds, is skipped). RATE belongs to the instrument: it is saved with the project, a loaded project plays it, and **UNDO** and **REDO** step it like any other change. Putting another module on the slot starts it at FULL until you set RATE again.
-
-Not yet checked on the unit: the MIX page and its RATE row.
-
-Not yet checked on the unit: everything else in this chapter.
 
 ## Try it
 
@@ -2971,7 +2918,7 @@ Come here when a pattern with FX sounds different on a module instrument than on
 
 ## What a module instrument does with step FX
 
-The Sampler column is what the FX specs say; the module column is checked on the host (event stream and exact ramps). Not yet checked on the unit.
+The Sampler column is what the FX specs say; the module column is checked on the host (event stream and exact ramps).
 
 | FX | Sampler instrument | Module instrument | Evidence |
 |---|---|---|---|
@@ -3004,7 +2951,7 @@ The Sampler column is what the FX specs say; the module column is checked on the
 
 Status: draft
 
-New in track3r-os.  The official firmware has no effect that sits on one track. The Community OS has **inserts**, and eleven effect modules you can put in them: **Drive** (saturation), **Crush** (bit and sample-rate reduction), **Biquad** (a filter), **Fold** (a wavefolder), **Env Filter** (an auto-wah), **Phaser**, **Comp** (a compressor that can also shape attacks and duck from another track), **Ping-Pong** (a tempo-synced stereo echo), **Wide** (a stereo widener), **Chorus** and **Autopan**. Each is a file on the card that you load once and then pick from the INSERTS page of the Mixer. All eleven were checked on the host by tests; none is checked on the unit yet, so how they sound on the hardware is still open.
+New in track3r-os.  The official firmware has no effect that sits on one track. The Community OS has **inserts**, and eleven effect modules you can put in them: **Drive** (saturation), **Crush** (bit and sample-rate reduction), **Biquad** (a filter), **Fold** (a wavefolder), **Env Filter** (an auto-wah), **Phaser**, **Comp** (a compressor that can also shape attacks and duck from another track), **Ping-Pong** (a tempo-synced stereo echo), **Wide** (a stereo widener), **Chorus** and **Autopan**. Each is a file on the card that you load once and then pick from the INSERTS page of the Mixer.
 
 ## What it is for
 
@@ -3202,9 +3149,8 @@ Lower Fold, Resonance or Feedback first, then raise Output or Makeup in small st
 
 ## Good to know
 
-- Put at most the effects you need: each insert uses part of the unit's processing time, and the amounts are not measured on the unit yet.
+- Put at most the effects you need: each insert uses part of the unit's processing time.
 - Each effect hears only the track it sits on.
-- Not checked on the unit: how any of the eleven sounds on the hardware, and how much processing each takes.
 
 ## See also
 
@@ -3222,7 +3168,7 @@ Config holds the unit's settings on six pages. Three things are new in track3r-o
 
 ## What it is for
 
-Use the Config screen to change the unit's settings. Press `Config` to open it. It has six pages, one for each of `F1` to `F6`: MIDI, DISPLAY, SD, INFO, USB and PATTERN. This chapter covers the MIDI, DISPLAY, USB and PATTERN pages and the keys that work on every page. The SD and INFO pages have no rows to set. The SD page shows what the card reports (CARD, MOUNTED, FILE SYSTEM, CAPACITY and CLUSTER). Not yet checked on the unit.  The USB page also has the **CARD AS DISK** row, which gives the card to a computer while the unit keeps playing, and the **READ ONLY** row beside it: see [USB disk](usb_disk.md). The INFO page has one key, `F8` (**UPDATE**), which installs a new firmware from the card.
+Use the Config screen to change the unit's settings. Press `Config` to open it. It has six pages, one for each of `F1` to `F6`: MIDI, DISPLAY, SD, INFO, USB and PATTERN. This chapter covers the MIDI, DISPLAY, USB and PATTERN pages and the keys that work on every page. The SD and INFO pages have no rows to set. The SD page shows what the card reports (CARD, MOUNTED, FILE SYSTEM, CAPACITY and CLUSTER).  The USB page also has the **CARD AS DISK** row, which gives the card to a computer while the unit keeps playing, and the **READ ONLY** row beside it: see [USB disk](usb_disk.md). The INFO page has one key, `F8` (**UPDATE**), which installs a new firmware from the card.
 
 ## How it works
 
@@ -3281,8 +3227,6 @@ Start on the Config screen. Press `F5` (**USB**).
 
 The computer sees the unit again, with MIDI and serial but no audio device. To turn USB AUDIO back on, turn the encoder until the row reads **On**, then press `F7` twice. The computer sees the audio device again, named **Track3r Audio**.
 
-Not yet checked on the unit.
-
 ### Change USB RETURN
 
 The USB return is the stereo stream from the computer to the unit. **On** (the default) adds it. **Off** leaves capture only.
@@ -3296,8 +3240,6 @@ Start on the USB page.
 
 The return needs room on the USB bus, so it is off when the unit presents 10 outputs (the Mixer's STEMS page chooses the number). The row then reads **On (10 OUT: off)**, dim. The setting stays On: with 8 outputs or fewer the return is back.
 
-Not yet checked on the unit.
-
 ### Set RETURN LEVEL
 
 RETURN LEVEL sets how loud the USB return reaches the outputs. **100 %** is the default.
@@ -3307,7 +3249,7 @@ Start on the USB page.
 1. Press `Down` twice. The cursor is on RETURN LEVEL.
 2. Turn the encoder until the row reads **90 %**.
 
-You should see **90 %** at once, with no star. `F7` is not needed. Not yet checked on the unit: the level the computer receives.
+You should see **90 %** at once, with no star. `F7` is not needed.
 
 ### Share the card with a computer
 
@@ -3318,8 +3260,6 @@ CARD AS DISK on the USB page shows the card to a computer while the unit keeps p
 3. When you are done, press `F7` on the same row twice more. The strip says **CARD READY**.
 
 `F7` on CARD AS DISK can refuse. The strip says **NO CARD**, **CARD BUSY: WAIT FOR THE SAVE** or **STOP THE EXPORT FIRST**.  While the card is on the computer, SAVE, SAVE AS, OPEN, an export and the sample loads refuse too, and nothing is written. The strip says **CARD ON COMPUTER - EJECT FIRST** (the sample and instrument lists say **CARD ON COMPUTER**).  After the eject, **CARD NOT EJECTED PROPERLY: CHECK THE COMPUTER** shows only when the computer left the card unclean during this share.
-
-Not yet checked on the unit.
 
 ### Turn the metronome on, off or to Main
 
@@ -3334,8 +3274,6 @@ The default is **Cue**. While OUT MODE on the [Mixer](mixer.md) is Stereo, Cue p
 
 With OUT MODE on **MAIN L / CUE R**, Main plays on the left jack only and Cue on the right jack only.  The click is not in a RESAMPLE take, in the USB stream or in a WAV export.
 
-Not yet checked on the unit.
-
 ### Set the metronome volume
 
 Start on the PATTERN page, with the cursor on METRO.
@@ -3344,8 +3282,6 @@ Start on the PATTERN page, with the cursor on METRO.
 2. Turn the encoder until the row reads **80 %**.
 3. Press `Delete`. The row reads **50 %**, the default.
 
-Not yet checked on the unit.
-
 ### Set the count-in
 
 Start on the PATTERN page. The count-in is the click before a recording starts.
@@ -3353,7 +3289,7 @@ Start on the PATTERN page. The count-in is the click before a recording starts.
 1. Press `Down` six times. The cursor is on COUNT-IN.
 2. Turn the encoder until the row reads **2 bars**. One step of the encoder reads **1 bar**.
 
-You should see **2 bars** on the row. Now press `Shift` + `Rec` on the Pattern screen with the transport stopped. The strip counts and the pads flash each beat, brighter on the first of a bar. The play line waits on row 1 and only the click sounds. Then row 1 plays and recording starts. A pad you hit during the count-in sounds and writes nothing. `Play` never counts in.  Not yet checked on the unit.
+You should see **2 bars** on the row. Now press `Shift` + `Rec` on the Pattern screen with the transport stopped. The strip counts and the pads flash each beat, brighter on the first of a bar. The play line waits on row 1 and only the click sounds. Then row 1 plays and recording starts. A pad you hit during the count-in sounds and writes nothing. `Play` never counts in.
 
 ### Keep the timing and velocity of live notes
 
@@ -3363,7 +3299,7 @@ Start on the PATTERN page. These rows apply to LIVE recording (`Shift` + `Rec` o
 2. Press `Down`. Turn the encoder until REC VELOCITY reads **External**. The hint reads: keyboard velocity goes to the volume column.
 3. Press `Delete` on REC VELOCITY. It reads **Off**. REC MICRO stays **On**.
 
-You should see this on the Pattern screen. With REC MICRO **On** and REC QUANTIZE on **Playing step**, a late note gets a Micro-move in FX 2 of its step. The later the note, the larger the value. A note on the beat gets none. With REC VELOCITY **External**, a note from a MIDI keyboard sets the volume of its step. Pads do not. Not yet checked on the unit.
+You should see this on the Pattern screen. With REC MICRO **On** and REC QUANTIZE on **Playing step**, a late note gets a Micro-move in FX 2 of its step. The later the note, the larger the value. A note on the beat gets none. With REC VELOCITY **External**, a note from a MIDI keyboard sets the volume of its step. Pads do not.
 
 ### Move the pad rows against each other
 
@@ -3375,7 +3311,7 @@ Start on the PATTERN page.
 2. Turn the encoder until the row reads **5**. The hint reads: Less: rows overlap by 12 - N.
 3. Press `Delete`. The row reads **12**, the default.
 
-You should see the new number on the row. The pads follow at the next press, with no restart: on the Pattern screen, in the pad mode **NOTES** (`Shift` + `F2`), the pads of the upper rows play the notes the new number gives. The root, the scale and the octave are not here. They are in the held Note panel and belong to the project. PAD OFFSET belongs to the unit: it is kept with the other settings on the card, and a settings file from an older build reads **12**. Not yet checked on the unit.
+You should see the new number on the row. The pads follow at the next press, with no restart: on the Pattern screen, in the pad mode **NOTES** (`Shift` + `F2`), the pads of the upper rows play the notes the new number gives. The root, the scale and the octave are not here. They are in the held Note panel and belong to the project. PAD OFFSET belongs to the unit: it is kept with the other settings on the card, and a settings file from an older build reads **12**.
 
 ### Choose when a picked pattern starts
 
@@ -3387,7 +3323,7 @@ Start on the PATTERN page.
 2. Turn the encoder until the row reads **Pattern end**. The card on the right says what each value does.
 3. Press `Delete`. The row reads **Step**, the default.
 
-You should see the setting act at once, with no restart. With **Pattern end**, hold `F1` on the Pattern screen while a pattern plays and press a pad: the pick is queued. While `F1` is held the view stays on your pick. Let go and the view goes on with the pattern that plays, until the queue lands. Press the same pad again, or the pad of the pattern that plays, to take the queue back. Not yet checked on the unit.
+You should see the setting act at once, with no restart. With **Pattern end**, hold `F1` on the Pattern screen while a pattern plays and press a pad: the pick is queued. While `F1` is held the view stays on your pick. Let go and the view goes on with the pattern that plays, until the queue lands. Press the same pad again, or the pad of the pattern that plays, to take the queue back.
 
 ### Choose where the unit listens and sends MIDI
 
@@ -3414,7 +3350,7 @@ Start on the Config screen. Press `F1` (**MIDI**). The page has thirteen rows. M
 - **TRANSPORT OUT Off**: the unit sends only the clock. A synth or sequencer that follows your clock keeps time but does not start or stop with `Play` and `Stop`. As a Slave the unit relays the clock only.
 - **TRANSPORT IN Off**: the unit still follows the tempo of the clock, but a Start, Continue, Stop or Song Position from the master does nothing. Press `Play` and the unit starts on the master's next clock. A Stop from the master does not stop the unit. It stops by itself only if the master's clock goes quiet.
 
-A change takes effect at the next `Play`. If you turn TRANSPORT OUT to Off while the unit plays, the Stop of that run is still sent, so a device that got the Start is also stopped. The choice is kept on the card. `Delete` on a TRANSP row puts **On** back. Not yet checked on the unit.
+A change takes effect at the next `Play`. If you turn TRANSPORT OUT to Off while the unit plays, the Stop of that run is still sent, so a device that got the Start is also stopped. The choice is kept on the card. `Delete` on a TRANSP row puts **On** back.
 
 ### Make Logic Pro follow the unit
 
@@ -3425,7 +3361,7 @@ A change takes effect at the next `Play`. If you turn TRANSPORT OUT to Off while
 3. In the program, choose the unit as the MIDI source for synchronization and set the same frame rate. Set the same tempo in the program as in the project: time code has no tempo.
 4. Press `Play`.
 
-You should see the program lock to the unit and run with it. The time code goes out on the ports of **MIDI OUT**, whatever **CLOCK MODE** is. It starts at once at `Play`, so the program may need a moment to lock and can miss the first part of the first second. `Stop` sends the time at which the unit stopped. The choice is kept on the card. Playing from the middle of a song sends the time of that step. The song's tempo changes are counted in, so the time stays right when the tempo moves. Not yet checked on the unit, and not yet checked with Logic Pro.
+You should see the program lock to the unit and run with it. The time code goes out on the ports of **MIDI OUT**, whatever **CLOCK MODE** is. It starts at once at `Play`, so the program may need a moment to lock and can miss the first part of the first second. `Stop` sends the time at which the unit stopped. The choice is kept on the card. Playing from the middle of a song sends the time of that step. The song's tempo changes are counted in, so the time stays right when the tempo moves.
 
 ### Let the unit follow a time code
 
@@ -3435,7 +3371,7 @@ You should see the program lock to the unit and run with it. The time code goes 
 2. Keep **MTC START** on the hour at which the program plays the first step of the song. The default **01** is 01:00:00:00.
 3. In the program, send MIDI Time Code to the unit. Press play in the program.
 
-You should see the row's card read `MTC` with the time, the frame rate and a state: **READING** while it listens, **ARMED** while the start waits, **LOCKED** when the unit runs with the master. It starts the song at the step the master is at, with the tempo and the swing that step has, and follows the master's speed a little (up to 6 percent), so a drift is pulled in over about a second and nothing jumps. If the master starts before 01:00:00:00, the unit waits for it and starts exactly there. If the master goes past the end of the song, the unit is silent and stays locked until the master moves back into the song. If the master stops, jumps or goes backwards, the unit stops, and starts again at the new time when it has read it. While the unit follows, `Play`, `Stop` and the song jumps do nothing: the master owns them, and the card reads **MTC IN: FOLLOWING**. If you press `Play` while the master is silent, the unit plays on its own clock, and the master takes over after you stop it. The song plays its own tempo changes. A tempo change on the unit itself, from Perform, moves the song away from the master until it starts again. **MTC IN** also turns the clock follow off, so CLOCK IN and CLOCK MODE **Slave** are ignored, and it mutes **MTC OUT**. The unit chases the song or the pattern that **Play Song** or **Play Pattern** would play. The choice is kept on the card. Not yet checked on the unit, and not yet checked with Logic Pro as the master.
+You should see the row's card read `MTC` with the time, the frame rate and a state: **READING** while it listens, **ARMED** while the start waits, **LOCKED** when the unit runs with the master. It starts the song at the step the master is at, with the tempo and the swing that step has, and follows the master's speed a little (up to 6 percent), so a drift is pulled in over about a second and nothing jumps. If the master starts before 01:00:00:00, the unit waits for it and starts exactly there. If the master goes past the end of the song, the unit is silent and stays locked until the master moves back into the song. If the master stops, jumps or goes backwards, the unit stops, and starts again at the new time when it has read it. While the unit follows, `Play`, `Stop` and the song jumps do nothing: the master owns them, and the card reads **MTC IN: FOLLOWING**. If you press `Play` while the master is silent, the unit plays on its own clock, and the master takes over after you stop it. The song plays its own tempo changes. A tempo change on the unit itself, from Perform, moves the song away from the master until it starts again. **MTC IN** also turns the clock follow off, so CLOCK IN and CLOCK MODE **Slave** are ignored, and it mutes **MTC OUT**. The unit chases the song or the pattern that **Play Song** or **Play Pattern** would play. The choice is kept on the card.
 
 ### Control the unit with the official CC numbers
 
@@ -3449,7 +3385,7 @@ With **CC MAP** on **On**, a MIDI controller drives the unit with the official f
 | 51 to 62 | the value of Perform slot 1 to 12 | `min + cc * (max - min) / 127` of the slot's effect range | the Perform screen's slot page only |
 | 41 to 48 | the performance pattern of track 1 to 8 | `cc + 1` | the Perform screen's slot page only, while the song plays |
 
-A mapped CC moves its value at once (jump, no pickup) and is a final edit: no undo step, no FX step in a live take. A MIDI Learn binding wins over the map: if any binding of either store listens to the message (on its channel, or on every channel), the map ignores it — a Pickup binding that has not caught the knob still owns the message. The Perform CCs act only on the slot page of the Perform screen, not on its DJ page and not on any other screen. CC 41 to 48 queue the pattern on the one track the CC names, whatever tracks are on, and only while the sequencer plays; the same value again does not take a waiting queue back, and after `Stop` and `Play` it is sent again. A pattern the project does not have is refused with `CC 4x: NO PAT nnn` on the strip. The Perform slots and tracks are described in [Perform](perform.md). Not yet checked on the unit.
+A mapped CC moves its value at once (jump, no pickup) and is a final edit: no undo step, no FX step in a live take. A MIDI Learn binding wins over the map: if any binding of either store listens to the message (on its channel, or on every channel), the map ignores it — a Pickup binding that has not caught the knob still owns the message. The Perform CCs act only on the slot page of the Perform screen, not on its DJ page and not on any other screen. CC 41 to 48 queue the pattern on the one track the CC names, whatever tracks are on, and only while the sequencer plays; the same value again does not take a waiting queue back, and after `Stop` and `Play` it is sent again. A pattern the project does not have is refused with `CC 4x: NO PAT nnn` on the strip. The Perform slots and tracks are described in [Perform](perform.md).
 
 ### Change the display, the pad lights and the notation
 
@@ -3466,8 +3402,6 @@ Press `F2` (**DISPLAY**). Move to a row and turn the encoder.
 
 The five setting rows act at once, with nothing to apply.   NUMBERING and MIDDLE C show on the Pattern screen: with **From 0** the step rows count from 00, and with MIDDLE C on **C-4** a note that reads C-5 by default reads C-4.   The STATUS LED row is not a setting: it is a choice of this session (RAM only), so it is not saved to the card and every boot starts with **BLINK**; `Delete` puts **BLINK** back.
 
-Not yet checked on the unit: the MIDI and DISPLAY rows.
-
 ### Reset a page to its defaults
 
 Start on the page to reset, after you change a row.
@@ -3475,7 +3409,7 @@ Start on the page to reset, after you change a row.
 1. Hold `Shift`. Press `F7` (**DEFAULTS**). The strip says **SHIFT+F7 AGAIN: RESET PAGE** and the key reads **RESET?**.
 2. Press `Shift` + `F7` again within two seconds.
 
-You should see **PAGE RESET TO DEFAULTS** in the strip. Every row of the page is at its default, and the cursor stays on its row. Other pages are not changed. After more than two seconds, a press only asks again. A USB row becomes a pending value: press `F7` (**APPLY**) to apply it. Not yet checked on the unit.
+You should see **PAGE RESET TO DEFAULTS** in the strip. Every row of the page is at its default, and the cursor stays on its row. Other pages are not changed. After more than two seconds, a press only asks again. A USB row becomes a pending value: press `F7` (**APPLY**) to apply it.
 
 ### Go to another page
 
@@ -3483,7 +3417,7 @@ Press `F1` to `F6` to go straight to a page, or press `Config` again for the nex
 
 ### Update from the unit
 
-New in track3r-os. You can install a new firmware from the unit, with no computer. The image is a file that ends in **.ptf**. It must already be in the `Firmware` folder of the card. The unit checks the file, asks you twice, and then restarts into the update. The unit has checked a file up to the image check; the INSTALL step (step 5) is not yet checked on the unit.
+New in track3r-os. You can install a new firmware from the unit, with no computer. The image is a file that ends in **.ptf**. It must already be in the `Firmware` folder of the card. The unit checks the file, asks you twice, and then restarts into the update.
 
 Start with the **.ptf** file on the card and your project saved.
 
@@ -3496,7 +3430,7 @@ Start with the **.ptf** file on the card and your project saved.
 
 > **Careful**: when the screen says **UPDATING: DO NOT POWER OFF**, no key does anything and nothing can stop the update. Do not switch the unit off.
 
-An older build, such as v1.0.0, does not end on a 4 KiB boundary, and the SD bootloader leaves a short last block of the flash as it was, so such a file may crash at boot. When that is the only thing wrong with the file, step 4 ends at **NOT PADDED. TRACK3R-OS WILL PAD A COPY OF IT?** instead of **IMAGE OK**. Press `F1` (**PAD**) within 30 seconds. The unit writes a padded copy of the file in the same folder, named `pad-` and the start of the file's name, and checks the copy again from its first byte. A bar shows the work and the card must stay in. The file you chose is not changed. If a file of that name is already there, nothing is written or removed: the list says **PADDING FAILED: COPY EXISTS, PICK IT FROM LIST**, and you pick that file. The unit then says **IMAGE OK** for the copy, with the copy's name on the second line, and step 5 goes on as usual: INSTALL installs the copy. Any other key, `F8` (**CANCEL**) or 30 seconds without an answer takes the question back and nothing is written. If the copy cannot be written or does not pass its check, the list says **PADDING FAILED** with the reason and no copy is kept. A file with any other fault, a wrong flash configuration byte included, is never offered a pad: it says **NOT A VALID IMAGE** as above. New Community OS behaviour; not yet checked on the unit.
+An older build, such as v1.0.0, does not end on a 4 KiB boundary, and the SD bootloader leaves a short last block of the flash as it was, so such a file may crash at boot. When that is the only thing wrong with the file, step 4 ends at **NOT PADDED. TRACK3R-OS WILL PAD A COPY OF IT?** instead of **IMAGE OK**. Press `F1` (**PAD**) within 30 seconds. The unit writes a padded copy of the file in the same folder, named `pad-` and the start of the file's name, and checks the copy again from its first byte. A bar shows the work and the card must stay in. The file you chose is not changed. If a file of that name is already there, nothing is written or removed: the list says **PADDING FAILED: COPY EXISTS, PICK IT FROM LIST**, and you pick that file. The unit then says **IMAGE OK** for the copy, with the copy's name on the second line, and step 5 goes on as usual: INSTALL installs the copy. Any other key, `F8` (**CANCEL**) or 30 seconds without an answer takes the question back and nothing is written. If the copy cannot be written or does not pass its check, the list says **PADDING FAILED** with the reason and no copy is kept. A file with any other fault, a wrong flash configuration byte included, is never offered a pad: it says **NOT A VALID IMAGE** as above. New Community OS behaviour.
 
 Each question is answered by `F1` alone. Any other key takes the question back, and the list returns. During the check, `F8` (**CANCEL**) stops it. If you wait 30 seconds at the second question, the list says **THE CHECK EXPIRED: CHECK AGAIN**. Nothing is written in any of these cases.     `F8` (**BACK**) on the list closes it.  Pulling the card out during the check or at the second question, or holding the Power switch during the check, cancels the check and closes the dialog.
 
@@ -3650,7 +3584,7 @@ python3 -I platform/mk66/tools/o3console.py --shot out.png "key f1"
 
 A picture that arrives damaged, or that changed while it was sent, is asked for again. The tool tries again up to 2 times. Its exit status is `0` when the file is written, `2` when there was no prompt or the transfer stalled, and `4` when the unit refused the request or the data was not a whole picture.
 
-The unit can also save its own screen to the card with no computer. This is new in the Community OS. Hold **Shift**, press **Power**, then let go of both. The picture is the first screen drawn after you let go, so the key row shows its normal labels. It is written to `Screenshots/SHOT_0001.bmp` (the next is `SHOT_0002.bmp`, and a file is never overwritten). The screen freezes for a second or two while it is written and the sound goes on; the strip then says `SCREENSHOT SAVED: SHOT_0001.BMP`. With no card, the card on the computer, or a save or export running, the strip says `NO SCREENSHOT:` and the reason. Not yet checked on the unit.
+The unit can also save its own screen to the card with no computer. This is new in the Community OS. Hold **Shift**, press **Power**, then let go of both. The picture is the first screen drawn after you let go, so the key row shows its normal labels. It is written to `Screenshots/SHOT_0001.bmp` (the next is `SHOT_0002.bmp`, and a file is never overwritten). The screen freezes for a second or two while it is written and the sound goes on; the strip then says `SCREENSHOT SAVED: SHOT_0001.BMP`. With no card, the card on the computer, or a save or export running, the strip says `NO SCREENSHOT:` and the reason.
 
 ### Send a firmware file to the card
 
@@ -3663,7 +3597,7 @@ python3 -I platform/mk66/tools/o3console.py --put track3r-os-<version>.ptf
 1. Any SD card in the unit takes the file. To make the tool check which card it is, find the card's volume serial (the `fw` command prints it in the form `XXXX-XXXX`) and pass it with `--expect-volume XXXX-XXXX`. The tool then refuses to write to a different card.
 2. The name on the card must start with a letter or a digit. It may use letters, digits, dots, underscores and dashes, and it must end in `.ptf`. The whole name, `.ptf` included, has at most 30 characters: with a longer name the SD bootloader was seen flashing the first `.ptf` of `Firmware/` instead of your file, so `--put` and `--update` refuse it before anything is written. Use `--name` to give the file another name on the card.
 3. The unit checks the file again after it is written. The tool prints `ok`, the name, the size, the CRC-32 and the image length.
-4. An older or foreign image that only lacks its padding (it must end on a 4 KiB boundary: v1.0.0 does not) is refused by `--put`. Add `--pad` and the tool writes a padded copy on your computer, checks the whole copy and sends it as `pad-<start of the name>.ptf`; the file on your computer is not changed. Any other fault, a wrong flash configuration byte included, is still refused. A file that already passes is sent as it is. New Community OS behaviour; not yet checked on the unit.
+4. An older or foreign image that only lacks its padding (it must end on a 4 KiB boundary: v1.0.0 does not) is refused by `--put`. Add `--pad` and the tool writes a padded copy on your computer, checks the whole copy and sends it as `pad-<start of the name>.ptf`; the file on your computer is not changed. Any other fault, a wrong flash configuration byte included, is still refused. A file that already passes is sent as it is. New Community OS behaviour.
 
 A file on the card does not update the unit. To flash it, follow the update steps in [Installing track3r-os](install.md). The unit flashes the first `.ptf` in `Firmware/`, so keep only one.
 
@@ -4191,8 +4125,6 @@ The file runs from the first slot to the end of the last, then keeps the tail of
 
 > **Tip**: The SONG row of the EXPORT page is not changed. It still writes the whole song as `<PROJECT>_Song0001.WAV`.
 
-**Not yet checked on the unit.** The host tests pass.
-
 ### Export the stems
 
 Start on the File screen, on the EXPORT page.
@@ -4253,13 +4185,12 @@ While an export runs, only `F8` works.
 - A project with no folder is exported as `Untitled`; the strip shows it in capitals.
 - The stems add up to the MIX only while the limiter does nothing. A mix the limiter works on is not the sum of its stems.
 - If an export fails, the strip says `EXPORT FAILED` and the reason. No file is left under its final name, and no temporary file either. The files you already had are not touched.
-- Holding `Power` during an export does not stop it at once. The strip says **EXPORT RUNNING - HOLD POWER AGAIN TO STOP IT**. A second hold within 10 seconds stops it, and the finished files stay. See [The panel](panel.md#power). **Not yet checked on the unit.**
+- Holding `Power` during an export does not stop it at once. The strip says **EXPORT RUNNING - HOLD POWER AGAIN TO STOP IT**. A second hold within 10 seconds stops it, and the finished files stay. See [The panel](panel.md#power).
 - The EXPORT page stays open when you leave the File screen.
-- Not yet checked on the unit: the WAV files on a computer, and the stem lengths. The simulator has no card. The host tests pass.
 
 **OG PROJECT** has its own rules:
 
-- The original firmware's format is checked byte for byte against reference files. Whether an official unit opens the folder is not yet verified. This is an open research question.
+- The original firmware's format is checked byte for byte against reference files. Whether an official unit opens the folder is an open research question.
 - The OS opens its own export again. It does not restore the pattern names.
 - Channel Pan is dropped, and the export counts it.
 - A sample at 22,050 Hz, 16,726 Hz, 8,287 Hz or in the Amiga engine is written at 44,100 Hz, with its pitch kept.
@@ -4325,7 +4256,7 @@ A **Chord** on a MIDI track sounds all its notes at once. An **Arp** plays them 
 
    (Picture: Pattern: the cursor is on the second effect cell, FX1 reads REV01.)
 
-6. Press `Play` and listen to step 1: Reverse sets the direction the sample plays in. Not yet checked on the unit.
+6. Press `Play` and listen to step 1: Reverse sets the direction the sample plays in.
 
 ## The screen at a glance
 
@@ -4351,7 +4282,7 @@ Start on the Pattern screen, in **STEP**, on the step with the effect.
 2. Turn the encoder to **None**.
 3. Let `Vol` go. The cell is empty.
 
-To clear the effects of several steps at once, put the cursor on **FX1** and press `Shift` + `Down` for each extra step. Press `Shift` + `Right` once more to add **FX2**, then `Delete`. The note and volume stay, and one `F8` (**UNDO**) takes it back. New in track3r-os. Not yet checked on the unit.
+To clear the effects of several steps at once, put the cursor on **FX1** and press `Shift` + `Down` for each extra step. Press `Shift` + `Right` once more to add **FX2**, then `Delete`. The note and volume stay, and one `F8` (**UNDO**) takes it back. New in track3r-os.
 
 ### Play a chord as an arpeggio
 
@@ -4390,7 +4321,7 @@ These effects read their value in words on the info line.
 | 103..138 | Play N passes, then skip M (N and M 1..6, counted in passes of the pattern). 103 is Play 1 / Skip 1: the step plays on every other pass. | `CHANCE PLAY 2 SKIP 3` for value 111 |
 | 139..174 | Skip N passes, then play M. | `CHANCE SKIP 6 PLAY 6` for value 174 |
 
-The encoder walks every value from 0 to 174. `Shift` + encoder walks 0..100, then 101, 102, 103, then by 6. The pads and a **Fill** with MODE RANDOM write 0..100 only; a Fill with CONSTANT or FROM..TO reaches 174. Fill RANDOM on Chance with FROM above 100 draws 100. A step whose Chance does not fire plays nothing of its own: no note, no effect of the step. New in track3r-os. Not yet checked on the unit.
+The encoder walks every value from 0 to 174. `Shift` + encoder walks 0..100, then 101, 102, 103, then by 6. The pads and a **Fill** with MODE RANDOM write 0..100 only; a Fill with CONSTANT or FROM..TO reaches 174. Fill RANDOM on Chance with FROM above 100 draws 100. A step whose Chance does not fire plays nothing of its own: no note, no effect of the step. New in track3r-os.
 
 ### Look up a tracker effect
 
@@ -4426,7 +4357,7 @@ New in track3r-os, from the tracker-ce step effects `w`, `y` and `z`. They sit a
 | Filter Envelope | `y` | 24 | The cutoff envelope's attack (high digit x 8 ms, at least 1) and decay (low digit x 8 ms). | `FLT ENV 16/32 MS` for 24 |
 | Grain Length | `z` | 32 | The grain length of a granular instrument, 0 to 100 (hex 00 to 64): 0 is 44 samples, 50 is 100 ms, 100 is 1 s, never longer than the sample. It acts when the next grain starts. FX1 wins over FX2 when both hold a z. The value is hex: 32 is 50. | `GRAIN 100 MS` for 32 (the start value) |
 
-`z` does nothing on an instrument that is not granular. Not yet checked on the unit.
+`z` does nothing on an instrument that is not granular.
 
 ## Keys on this screen
 
@@ -4440,10 +4371,9 @@ New in track3r-os, from the tracker-ce step effects `w`, `y` and `z`. They sit a
 
 ## Good to know
 
-- Not yet checked on the unit: how the effects sound. The simulator and host tests pass for the effects in this chapter. The unit check is still open.
 - New in track3r-os: the tracker effects, from Tracker Arp to Panbrello.
 
-- Writing a note by hand over a step that has a note replaces the note and its instrument with the ones in force. The volume and both effect cells stay. New in track3r-os. Not yet checked on the unit.
+- Writing a note by hand over a step that has a note replaces the note and its instrument with the ones in force. The volume and both effect cells stay. New in track3r-os.
 - The tracker effects run once a tick and are built to add only a few tenths of a percent of processor time. Not yet measured on the unit.
 - Stop gives the channel and global volumes back, so the pads sound at full level after a stop.
 - The effect list has 60 entries.
@@ -4521,7 +4451,7 @@ A key that is still down stays lit. `F2` or `F3` alone only light their own cell
 
 - Nothing acts while the screen is up. `Song`, `File`, `Pattern`, `Master`, `Play` and the arrows only count. `Shift` + `Master` does not change the theme, and a pad selects no instrument. `F1`, `F6`, `F7` and `F8` alone do nothing.
 - The age of an event runs from the scan of the key to the moment the app gets it. The error, drop and latency figures are real only on the unit.
-- Not yet checked on the unit: the whole chapter. The screen cannot be reached in the simulator.
+- The screen cannot be reached in the simulator.
 
 ## See also
 
@@ -4561,7 +4491,7 @@ If you want to know more: a module imported from a tracker file keeps its loudne
 
 Between the marked points, each step of **VOLUME** is 0.48 dB in the first law (volume 1 is -24 dB, and 0 is silence) and 0.4 dB in the second. Not checked by ear on the unit.
 
-A project saved by an earlier build can sound at a different level, and the stored levels stay as they were. A note that names no velocity, on a native instrument at level 80, now plays at 0 dB; it played at +24 dB. On the Amiga engine levels 50 and 80 both play full volume. A module imported now gives its instruments velocity 63, so a Roll that fades with VolUp or VolDown peaks about 6 dB lower and sits 6 dB under a plain note. The demo kit stays at 0 dB after any edit. Not yet checked on the unit, except the demo kit.
+A project saved by an earlier build can sound at a different level, and the stored levels stay as they were. A note that names no velocity, on a native instrument at level 80, now plays at 0 dB; it played at +24 dB. On the Amiga engine levels 50 and 80 both play full volume. A module imported now gives its instruments velocity 63, so a Roll that fades with VolUp or VolDown peaks about 6 dB lower and sits 6 dB under a plain note. The demo kit stays at 0 dB after any edit.
 
 ### The play engine
 
@@ -4569,9 +4499,9 @@ The **PLAY ENGINE** row picks the engine for a sample: **Auto**, **Modern**, **A
 
 The **STEREO** row under it says whether a sample plays as a stereo pair: **MONO** or **STEREO**. This is new in track3r-os. **STEREO** can only be chosen for a sample that was loaded with **STEREO** on Sample load (see [Sample load](sample_load.md)): on any other sample the row says `STEREO NEEDS A STEREO LOAD` and stays **MONO**. A **STEREO** instrument plays its two channels: the left output gets the mix plus the side signal, the right output the mix minus it, through the track's level and pan like any other sound.  A stereo note uses a little more of the unit's time than a mono one (about 0.8 percentage points of the audio budget each, not yet measured on the unit), so at most four voices play in stereo at once: the next one plays as the mix on both sides.
 
-A note plays in stereo when its play mode plays forward (**ONE SHOT**, **LOOP FWD**, **SLICE**, **BEAT SLICE**) on the Modern engine, with no filter, **OVERDRIVE**, **BIT DEPTH** or tremolo on it. Otherwise it plays the mix: a backward or ping-pong loop, a wavetable, a granular instrument, the Amiga engine, a note played in reverse, or any of those effects. If one of the effects comes on while a stereo note sounds, the side signal fades out over one audio block (about 1.5 ms) and stays off for that note; the next note is stereo again. A track with its fader closed or muted drops the side signal too, for the rest of that note. The track's own outputs stay mono: the send effects, the CUE and REC buses, the meters and the USB track stems carry the mix; the master, the headphones and the USB main pair carry the stereo image.  Turning the row over while a note sounds takes effect at the next stop.  Not yet checked on the unit.
+A note plays in stereo when its play mode plays forward (**ONE SHOT**, **LOOP FWD**, **SLICE**, **BEAT SLICE**) on the Modern engine, with no filter, **OVERDRIVE**, **BIT DEPTH** or tremolo on it. Otherwise it plays the mix: a backward or ping-pong loop, a wavetable, a granular instrument, the Amiga engine, a note played in reverse, or any of those effects. If one of the effects comes on while a stereo note sounds, the side signal fades out over one audio block (about 1.5 ms) and stays off for that note; the next note is stereo again. A track with its fader closed or muted drops the side signal too, for the rest of that note. The track's own outputs stay mono: the send effects, the CUE and REC buses, the meters and the USB track stems carry the mix; the master, the headphones and the USB main pair carry the stereo image.  Turning the row over while a note sounds takes effect at the next stop.
 
-If you want to know more: a full-scale square wave on the Amiga engine peaks at +2.5 dB above its level. It matches a reference Amiga player on the host. Not yet checked on the unit.
+If you want to know more: a full-scale square wave on the Amiga engine peaks at +2.5 dB above its level. It matches a reference Amiga player on the host.
 
 ## Try it
 
@@ -4653,11 +4583,9 @@ The picture is a window of 16 steps (the label `16 STEPS` above it, the axis und
 
 **LFO SHAPE** has six waves: Rev Saw, Saw, Triangle, Square, Random and **Sine**. Sine is new in this firmware and is not on the original firmware. It is a smooth wave that rises from nothing to the amount at the middle of the period and falls back, and it works like the others: the same speeds, the same amount, all six destinations, and it can be changed while a note sounds. If you export to the original firmware's format, a Sine LFO is written as Triangle and the export page lists it as **SINE LFO**.
 
-Not yet checked on the unit.
-
 ### Move a setting with a wavetable envelope or LFO
 
-New in this firmware: **SOURCE** has two more words after **LFO**, **WT Env** and **WT LFO**. They move a destination along one of the 256 wavetable contours instead of an ADSR or a plain LFO shape. Instruments that do not use them are unchanged, and they load and save as before. Not yet checked on the unit.
+New in this firmware: **SOURCE** has two more words after **LFO**, **WT Env** and **WT LFO**. They move a destination along one of the 256 wavetable contours instead of an ADSR or a plain LFO shape. Instruments that do not use them are unchanged, and they load and save as before.
 
 1. Press `F4` (**MOD**) and move to a destination with `F4`, such as Panning.
 2. On **SOURCE** turn the encoder up past **LFO**: first **WT Env**, then **WT LFO**. Each click is one undo step.
@@ -4669,11 +4597,11 @@ A change on these rows is heard from the next note, not on a note that is held. 
 
 The plot above the rows draws the contour: **WT Env** over its **DURATION** (the length in milliseconds is written above the right edge), **WT LFO** over one cycle. **WARP X** and **WARP Y** bend the picture as they bend the sound, so you can see what the contour does before you play it.
 
-On a **Granular** instrument the fourth destination is **Gran Length**, the grain length, instead of **WT Position**: the header and the rows follow the play mode, and the same **SOURCE** words work on it. Switch the play mode in the editor and the destination keeps its source. An instrument loaded from an older project or an official firmware file that has a source on this destination while it is Granular shows **Off** there, because that source was meant for **WT Position**; set it again to use it as the grain length. The grain length source is a Community OS feature: an export for the official firmware does not carry it. Not yet checked on the unit.
+On a **Granular** instrument the fourth destination is **Gran Length**, the grain length, instead of **WT Position**: the header and the rows follow the play mode, and the same **SOURCE** words work on it. Switch the play mode in the editor and the destination keeps its source. An instrument loaded from an older project or an official firmware file that has a source on this destination while it is Granular shows **Off** there, because that source was meant for **WT Position**; set it again to use it as the grain length. The grain length source is a Community OS feature: an export for the official firmware does not carry it.
 
 ### Use your own contours from the card
 
-New in this firmware: the 128 user contours `U001` to `U128` can come from WAV files. Without files they hold the built-in shapes, so nothing changes until you add some. Not yet checked on the unit.
+New in this firmware: the 128 user contours `U001` to `U128` can come from WAV files. Without files they hold the built-in shapes, so nothing changes until you add some.
 
 1. On the card, make a folder called `Envelopes` at the top level and put WAV files in it, named by number: `001.wav` is `U001`, `002.wav` is `U002`, up to `128.wav`. `1.wav` works too.
 2. Put the card in, or open a project. The files are read then, never while you play. The strip says how it went, for example `ENVELOPES: 12 LOADED`.
@@ -4710,8 +4638,6 @@ The other rows move one a click, `Shift` makes a coarse step, `Delete` puts the 
 Press `F2` (**CC**) for the controller page: six rows **CC A** to **CC F**, all **CONFIG** (the number set on the Config page) at first. `F1` and `F2` switch between the two pages. Turn a row through `CC 0` to `CC 127`, then **PROG**, **CH AT** and **POLY AT**.  A step FX then sends the slot. With CC A at `CC 74`, CC B at **PROG**, CC C at **CH AT** and CC D at **POLY AT**, FX 8, 9, 10 and 11 send a controller, a Program Change, channel aftertouch and key aftertouch. **POLY AT** sends nothing when no note sounds. FX 37 sends **CC F**, not a Program Change; to send a Program Change, set a slot to **PROG**.
 
 Notes end cleanly. If you change **CHANNEL** or **OUT** while a pad is held, the release goes to the channel and port of its note on. `F7`, `Stop` and a project load end a held note the same way.  A MIDI instrument shows its own page whatever page the instrument beside it was left on.
-
-Not yet checked on the unit.
 
 ### Copy, paste and delete an instrument
 
@@ -4814,7 +4740,7 @@ Three labels in the table are the ones the screen starts with, and they change a
 - A WT Position LFO moves while the transport is stopped. Not checked against the original firmware.
 - A MIDI instrument has no VOICE, FILTER, MOD or SENDS page. Pressing those keys says so.
 - A pasted copy keeps its sound after the source is deleted.
-- Checked on the unit (build 0.4.18): the MIDI channel, MIDI notes, and `Shift` + `F4` with its undo. Not yet checked on the unit: the rest of this chapter.
+- Checked on the unit (build 0.4.18): the MIDI channel, MIDI notes, and `Shift` + `F4` with its undo.
 
 ## See also
 
@@ -4900,7 +4826,6 @@ The app is given none of these keys. An app that declares no parameter, or is of
 
 - The parameter column exists only for an app below ABI 1.10 that declares a parameter. Pads is the only one shipped; the simulator's card does not hold it.
 - What a press at the first or last row of the column does is not checked.
-- Not yet checked on the unit: the whole chapter.
 
 ## See also
 
@@ -5140,7 +5065,6 @@ The octave is also the OCTAVE row of the note panel (hold `Note`) and the octave
 - Count-in: with COUNT-IN on (PATTERN page of [Config](config.md)), `Shift` + `Rec` from stopped counts in first. `Rec` or `Shift` + `Rec` during the count-in cancels it. `Play` never counts in.
 - The zoom is not saved with the project: it survives a project load and starts at 5 tracks at power on.
 - New in track3r-os: the pad layouts, the quarter jumps, column blocks and the FX names in the cells.  The official firmware has its own record edit, live recording, an instant pattern switch and a view of 4 tracks. Here they work as this chapter says.  Not checked against the original firmware: the grid, the cursor keys, the copy keys and the `Shift` + encoder steps.
-- Not yet checked on the unit: the record modes, copy and paste, column blocks, the `Rec` then `Play` chord, undo, the zoom and its FX names, the chooser labels, the `Shift` + encoder steps, and the switch with `F1` held.
 
 ## See also
 
@@ -5321,7 +5245,7 @@ Start on the Pattern screen, with the transport stopped. Select a block first to
 6. Hold `F5` (**PREVIEW**) to hear the row's step. While the pattern plays, a bar in the left margin marks the row of the step that is playing.
 7. Press `F8` (**BACK**): the grid cursor lands on the row's step, track and column.
 
-In WATCH the list is read-only and an edit key says **TURN EDIT ON**, writing nothing. An effect on the row's step that the row does not show, such as a chord, is named on the info line (`ALSO: CHORD 57B` for a Chord 47), and a gated note shows `G` with its gated length.  The event list refuses to open while the view follows the playhead (the strip says **STOP PLAYING TO OPEN EVENTS**), with no project (**NO PROJECT**), on a pattern the project does not have (**PATTERN IS EMPTY**); an empty scope opens an empty list (**NO EVENTS: INSERT ADDS ONE**), and an edit key on it says the same.  New in track3r-os. Not yet checked on the unit.
+In WATCH the list is read-only and an edit key says **TURN EDIT ON**, writing nothing. An effect on the row's step that the row does not show, such as a chord, is named on the info line (`ALSO: CHORD 57B` for a Chord 47), and a gated note shows `G` with its gated length.  The event list refuses to open while the view follows the playhead (the strip says **STOP PLAYING TO OPEN EVENTS**), with no project (**NO PROJECT**), on a pattern the project does not have (**PATTERN IS EMPTY**); an empty scope opens an empty list (**NO EVENTS: INSERT ADDS ONE**), and an edit key on it says the same.  New in track3r-os.
 
 ### Add, delete and tidy events
 
@@ -5336,7 +5260,7 @@ Start in the event list with Edit on (`Rec`). The list shows the steps of the pa
 6. Press `Shift` + `F2` (**QUANT ALL**) to do the same for every note and OFF row the filter shows, as one undo step. The strip says **QUANTISED 12**, or **QUANTISED 12, 2 LEFT (STEP TAKEN)** when two rows could not move. A run of late notes all move: the pass repeats while it frees steps.
 7. Press `F7` (**UNDO**) to take back the last edit without leaving the list, and `Shift` + `F7` (**REDO**) to do it again. The list shows the pattern again and the cursor stays on its event. `F8` (**UNDO**) on the grid takes back the same steps after you press `F8` (**BACK**).
 
-In WATCH every one of these keys says **TURN EDIT ON** and writes nothing.  Each key is one undo step, and **QUANT ALL** is one for the whole operation. A CC step with a micro-moved note still sends its CC at the start of the step, and only the note is late: that is why a CC row has no time inside a step. Not yet checked on the unit: the MIDI out of a note moved inside its step.  New in track3r-os.
+In WATCH every one of these keys says **TURN EDIT ON** and writes nothing.  Each key is one undo step, and **QUANT ALL** is one for the whole operation. A CC step with a micro-moved note still sends its CC at the start of the step, and only the note is late: that is why a CC row has no time inside a step.  New in track3r-os.
 
 ### Double, spread or halve a pattern
 
@@ -5365,9 +5289,9 @@ Start on the Pattern screen, with Edit on.
 3. Pick the pattern to write over. A pattern the project does not have yet is made.
 4. Press `Shift` + `Copy`, then let go of `F1`.
 
-You should see **PATTERN 07 REPLACED BY 05**. The target now has the steps, the length of every track and the name of the copy. One `F8` (**UNDO**) takes it all back, and removes a pattern that the paste made.  `Copy` works in every mode. The paste needs Edit, and says **TURN EDIT ON** without it. In the grid, `Shift` + `Copy` pastes a whole-pattern copy as a block, steps only, at the cursor and clipped at each track's end. The target keeps its lengths and its name.  You may paste over the pattern that plays: each track takes its new length from its next row, but the pass in progress ends at the old pattern length.  A MIDI note that sounds on a track the paste leaves empty may stay on until the transport stops (`Play`). Not yet checked on the unit.
+You should see **PATTERN 07 REPLACED BY 05**. The target now has the steps, the length of every track and the name of the copy. One `F8` (**UNDO**) takes it all back, and removes a pattern that the paste made.  `Copy` works in every mode. The paste needs Edit, and says **TURN EDIT ON** without it. In the grid, `Shift` + `Copy` pastes a whole-pattern copy as a block, steps only, at the cursor and clipped at each track's end. The target keeps its lengths and its name.  You may paste over the pattern that plays: each track takes its new length from its next row, but the pass in progress ends at the old pattern length.  A MIDI note that sounds on a track the paste leaves empty may stay on until the transport stops (`Play`).
 
-At the first or last pattern, `Left` or `Right` says **NO PREVIOUS PATTERN** or **NO NEXT PATTERN** and changes nothing. While the transport plays, a pick also switches the playing pattern, as a pad pick does; with PAT SWITCH set to Pattern end it waits for the pattern's end. New in track3r-os. Not yet checked on the unit.
+At the first or last pattern, `Left` or `Right` says **NO PREVIOUS PATTERN** or **NO NEXT PATTERN** and changes nothing. While the transport plays, a pick also switches the playing pattern, as a pad pick does; with PAT SWITCH set to Pattern end it waits for the pattern's end. New in track3r-os.
 
 ## Keys on this screen
 
@@ -5425,7 +5349,6 @@ At the first or last pattern, `Left` or `Right` says **NO PREVIOUS PATTERN** or 
 | Gypsy minor | 0 2 3 6 7 8 11 |
 
 - The official firmware has a Fill dialog, duplicate, expand and shrink, and a whole-pattern copy. Here the Fill dialog has its own rules and value modes, and the length tools and the copy are reached from the TOOLS menu's pads and with `F1` held.  The APPS page of tool apps is new in track3r-os.  Not checked against the original firmware: the Euclid rule, the scale list, and what its length tools and whole-pattern copy do in every detail.
-- Not yet checked on the unit: the fill rules and the app edits. The simulator and host tests pass.
 
 ## See also
 

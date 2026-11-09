@@ -32,7 +32,7 @@ Written from the two tester reports (TESTER-1 on v1.0.0-fqa.1, TESTER-2 on v1.0.
 | T3 (17 items), fqa.1 | measured over the USB capture | 12 PASS; 2 inconclusive (QA-PRF-026, 027); 3 NOT RUN |
 | Changed screens, fqa.2 (TESTER-2 §2) | Params source visual, Wave after File OPEN, console tempo | PASS; Amiga shots of changed screens done |
 
-Catalogue status on this branch (the `Status` column of `docs/qa/catalogue/*.md`, 880 rows): 44 `unit PASS`, 478 `unit pending`. The tester's battery and console results are not yet written into the rows; that is the next catalogue step, not part of this report.
+Catalogue status on this branch (the `Status` column of `docs/qa/catalogue/*.md`, 880 rows): 44 `unit PASS`, 478 `more testing needed`. The tester's battery and console results are not yet written into the rows; that is the next catalogue step, not part of this report.
 
 ## 3. Firmware defects found and fixed
 

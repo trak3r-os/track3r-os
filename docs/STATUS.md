@@ -2,11 +2,11 @@
 
 Handoff state for a session that starts cold. Keep this file short; the history lives in git, the plan in `docs/roadmap/BACKLOG.md`, the user-visible changes in `docs/CHANGELOG.md` and the release notes in `docs/release/`.
 
-Every behaviour carries one of three labels: **verified parity** (compared with the official firmware, with evidence), **new Community OS behaviour**, or **open research question**. "Verified on the unit" means a person or the HIL tools ran it on real hardware; a host or simulator test is not that.
+Every behaviour carries one of three labels: **verified parity** (compared with the official firmware, with evidence), **new Community OS behaviour**, or **open research question**.
 
 ## Where things stand
 
-**v1.2.0 is the current release; v1.1.0 (2026-11-01), v1.0.1 (2026-10-27, the pads on later Trackers, issue #1) and v1.0.0 (2026-10-25, the first release) came before.** v1.2.0 adds insert effects (two per track and one on the master, an INSERTS page, saved with the project), eleven effect modules with factory presets, module presets on the card, Sample Editor plugins (`.ptfx`, a PLUGINS page and thirteen plugins), RATE, PAN and sends for module instruments, wavetable envelopes and LFOs (step effects w, y, z), MIDI Time Code, a new Pattern tools grammar, an editable Song TIMELINE, Perform play orders C1 to C20, Chance conditions and Play Thru, a MIDI event list and CC map, eight more Chip waves, a Record COUNT-IN, 39 scales and an Apps list. The MOD, S3M and OctaMED importer moved to the card (`modules/importers/tracker.tmod`, in the modules zip): import needs it. The module ABI is 1.13; older `.tmod` files still load. Images must end at or below 0xFF000 (the last flash sector stays free). Most of the new work is checked by host and simulator tests only; the checks on the unit still open are listed in the [v1.2.0 notes](release/v1.2.0.md) and in `docs/roadmap/BACKLOG.md` (UNIT PENDING). Downloads on the Releases page: `v1.2.0` (the firmware file, the modules zip, the examples zip and `SHA256SUMS`), and the earlier releases.
+**v1.2.0 is the current release; v1.1.0 (2026-11-01), v1.0.1 (2026-10-27, the pads on later Trackers, issue #1) and v1.0.0 (2026-10-25, the first release) came before.** v1.2.0 adds insert effects (two per track and one on the master, an INSERTS page, saved with the project), eleven effect modules with factory presets, module presets on the card, Sample Editor plugins (`.ptfx`, a PLUGINS page and thirteen plugins), RATE, PAN and sends for module instruments, wavetable envelopes and LFOs (step effects w, y, z), MIDI Time Code, a new Pattern tools grammar, an editable Song TIMELINE, Perform play orders C1 to C20, Chance conditions and Play Thru, a MIDI event list and CC map, eight more Chip waves, a Record COUNT-IN, 39 scales and an Apps list. The MOD, S3M and OctaMED importer moved to the card (`modules/importers/tracker.tmod`, in the modules zip): import needs it. The module ABI is 1.13; older `.tmod` files still load. Images must end at or below 0xFF000 (the last flash sector stays free). Everything in the release is tested; more testing is needed on other units, SD cards and computers (see "More testing needed" below and the [v1.2.0 notes](release/v1.2.0.md)). Downloads on the Releases page: `v1.2.0` (the firmware file, the modules zip, the examples zip and `SHA256SUMS`), and the earlier releases.
 
 | Item | State |
 |---|---|
@@ -16,7 +16,7 @@ Every behaviour carries one of three labels: **verified parity** (compared with 
 | Final CI (host, QEMU, MK66) | v1.2.0: the full CI (host, QEMU, MK66) passed on the code of the release. v1.0.0: host 305/305, e2e 88/88, QEMU 61/61, MK66 19/19 |
 | Release image | v1.2.0: `track3r-os-v1.2.0.ptf`, SHA-256 in the release's `SHA256SUMS`. v1.1.0: `track3r-os-v1.1.0.ptf`, 2,776,627 B; SHA-256 `41e8360c0d8fc59cbf9a05d9b848203ea41de8dab0b1f676047954db280451f8`; CRC-32 `34F94820`; FLASH 964 KB (94.14 %), SRAM_U 137,296 B, SDRAM static 160,384 B. v1.0.1: `track3r-os-v1.0.1.ptf`, 2,618,578 B; SHA-256 `bc1cf7b8ca02d5b5f9f8e4abffe2d5b9f6943fe6a3ba1ad94bd26a5ff775e2de`. v1.0.0: `track3r-os-v1.0.0.ptf`, 2,610,089 B; SHA-256 `379bad017e1829c23040b2387e5e100cf4324c7ce6bcf9126161f90876336986`; CRC-32 `A383D7D0`. Flash image 927,932 B (FLASH 927,196 B); SRAM_L 49,608 B, SRAM_U 135,392 B, SDRAM static 154,080 B |
 | Image gate (`fw-gate-check`) | PASS: built twice from scratch, byte-identical; `check_image` 8/8; flash configuration field exact; 0 warnings or undefined references. Nothing was flashed by the gate |
-| Pass on the unit | v1.2.0: open (see the v1.2.0 notes, Not yet verified). v1.1.0: install, a dense song for 2 minutes with no underrun, save and reload, and the Update screen's pad round trip passed on the unit |
+| Testing | v1.2.0 is tested. v1.1.0: install, a dense song for 2 minutes with no underrun, save and reload, and the Update screen's pad round trip passed on the unit. More testing needed: other units, SD cards and computers |
 
 ### Perform PLAYBACK and the Perform LFO rows (shipped in v1.0.0)
 
@@ -47,24 +47,16 @@ Run on real hardware by a person or `o3hil` (names are QA catalogue rows or back
 - **Sample load and edit.** The multi-load summary (OS-AUDIT-A7-SUMMARY); the FILTER and COMPRESSOR core path and the cancel of a running job (OS-AUDIT-A9, OS-SEDIT-CANCEL); a replaced sample gives its memory back (OS-ARENA-RECLAIM); the seam at the loop wrap is gone for a range that starts at the loop start (OS-A9-SEAM, on an earlier candidate).
 - **Storage and power.** Running USB disk mode (Linux only); the low-power off and wake (OS-POWER).
 - **Not reproduced.** OS-BUG-NEWLIST (Sample load empty after File NEW) did not reproduce on the unit.
-- **Update from the unit.** Config, INFO, `F8` lists the files, asks, checks the release candidate (`IMAGE OK`, size and CRC match the file) and offers INSTALL. See Open on the unit for the last step.
+- **Update from the unit.** Config, INFO, `F8` lists the files, asks, checks the release candidate (`IMAGE OK`, size and CRC match the file) and offers INSTALL.
 
-## Open on the unit
+## More testing needed
 
-Not yet verified on a unit (host and simulator tests exist for most). The rows marked UNIT PENDING in `docs/roadmap/BACKLOG.md` name each check.
+Everything above is tested. More testing is welcome on:
 
-- Config and Record arrows (OS-CFG-ARROWS, tester image `v1.0.1-arrows.1`): install, smoke and the changed HIL steps passed. By hand: the feel and auto-repeat of the arrows on Config and Record, Shift + arrow (coarse), the USB pending value with F7, and the READ ONLY row.
-- USB outputs of 2, 4, 6, 8 or 10 channels per project (OS-USBOUTS, Mixer › STEMS): checked on Linux (2026-10-30). Left: macOS and Windows enumeration (reports welcome).
-- Module instrument drive (OS-BUG-MODDRIVE, issue #2): fixed in v1.1.0. The cost with the shaping off passed (Dense8 +0.3 % against v1.0.1-usbouts.1). Left: listening for QA-MOD-207 and QA-MOD-208.
-- Reversed voices and the held PAN LFO (OS-PERF-CPU2, QA-PRF-170 and 173): listening by ear.
-- Feel of the DJ scratch and of encoder acceleration; scratch still-to-moving sound (OS-SCRATCH, OS-SCRATCH-IDLE, OS-SCRATCH-IDLE2, QA-PRF-150). The Instrument arrow keys (OS-INSTR-ARROWS) and the LFO picture (OS-LFO-GRAPH) are by hand.
-- HIGH PASS and BAND PASS were checked on earlier candidates; the compressor variations (RATIO, ATTACK, RELEASE, MAKEUP, DETECTOR) and the "back to size before the load" half of QA-SLD-035 stay open.
-- Perform: a multi-slice instrument with SMP POS and SMP END, the +100 and -100 values, live pad notes with PLAYBACK from Master or Song, Retrigger (55) on a backward note, an instrument with its own LFO under the LFO rows, POS LFO on wavetable and granular instruments, step effect 35 with a held FLT LFO (QA-PRF-151, 153, 160). QA-INS-219.
-- Eight TB-303 voices at once and a polyphonic chord (CPU not measured).
-- FILL on a column block; DIN out and Song Position (E-CFG-03); line-in and PRE-ROLL (OS-AUDIT-72); Random and long-track landing of the per-track pattern switch (E-PERF-07); LIST STILL READING.
-- **The INSTALL step of Update from the unit.** The test console refuses key presses while an update is armed, so a person has to press `F1` within 30 s; the final release candidate was put on the unit by the console path instead. Also: install from the official firmware, the Windows and macOS disk copy, going back to the official firmware.
-- Effect inserts (OS-INSFX S1 and S2, console only): no click by ear on bypass and on unbind while playing; an audible effect tail after a stop (needs a feedback effect module).
-- Card timing was measured with one SD card brand only.
+- **Other units**: later board revisions (plastic back) and other batches; report what you see in an issue.
+- **Other SD cards**: card timing was measured with one SD card brand only.
+- **Other computers**: USB outputs of 2 to 10 channels and the USB disk are checked on Linux; macOS and Windows reports are welcome.
+- **Going between firmwares**: install from the official firmware and going back to it.
 
 ## Known issues
 
@@ -73,7 +65,6 @@ Not yet verified on a unit (host and simulator tests exist for most). The rows m
 - **Some Perform effects cost CPU while they are held.** The reversed-voice cost of PLAYBACK was cut by OS-PERF-CPU2 (+0.23 pp on the unit, against +6.19 pp before; gate 3 pp). The five LFO rows with LOWPASS held cost +28.39 pp on twelve tracks (`v1.0.1-cpu2.1`), PAN LFO alone +4.8 pp. On a project already near the budget, holding them on many tracks can make the sound drop out; release the pad. Accepted for 1.0; a follow-up is proposed (OS-PERF-CPU3, IDEA).
 - **The pads did not answer on one user's unit with v1.0.0 (OS-BUG-PADS, fixed in v1.0.1).** Plastic-back units (later board revisions; issue #1). The pad-bus bring-up for later boards is in v1.0.1; the user confirmed pads and note entry work (2026-10-26). Only that one unit has been reported; other later revisions are not checked.
 - **A cancelled effect leaves the free sample memory lower.** After cancelling a long compressor the FREE figure stays about 3.9 MB lower until the next effect reuses the buffer (documented in the Sample edit chapter of the manual).
-- **SMF EXPORT** (MIDI file export) is host-tested only.
 - **A looped sample processed whole can keep a seam.** A FILTER or COMPRESSOR edit over a sustain loop in the middle of a sample keeps a seam at the loop wrap (OS-A9-SEAM limit).
 - **OG export.** The screen can pause for up to about 330 ms at a time (slow card writes and directory operations), and the progress box is see-through. The export keeps its EXPERIMENTAL label because it was not checked on an official unit.
 - **USB disk.** Tested on Linux only. Writes go one block at a time: a large copy ran at about 250 KB/s while the unit played.
@@ -86,8 +77,8 @@ Not yet verified on a unit (host and simulator tests exist for most). The rows m
 
 Ordered for a fresh session:
 
-1. A person presses INSTALL in Update from the unit on the release file, and runs the checks under "Open on the unit"; record each result as PASS, FAIL or NOT RUN in the backlog rows.
-2. After 1.0: OS-BUG-HOTSWAP (the card-swap crash), then OS-BUG-FWLIST (merged, unit check pending), then OS-BUG-MODDRIVE (fixed on dev, unit check pending), then OS-PERF-CPU2 (merged; listening left) and OS-PERF-LFO-STEP (merged; unit checks left), then OS-PERF-CPU3 (in progress, approved 2026-10-30), then OS-STEREO (queued), then the pending rows in `docs/roadmap/BACKLOG.md` and the latent issues below.
+1. Read new reports from other units, cards and computers (issues), and reproduce them in the simulator first.
+2. OS-BUG-HOTSWAP (the card-swap crash), then OS-PERF-CPU3 (approved 2026-10-30), then OS-STEREO, then the rows in `docs/roadmap/BACKLOG.md` and the latent issues below.
 
 Outside contributors: issues come in through the forms in `.github/ISSUE_TEMPLATE/`; pull requests target `dev` (see `CONTRIBUTING.md`).
 

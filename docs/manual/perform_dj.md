@@ -13,7 +13,7 @@ Use the DJ page to play a set from one pattern after another: drums on A and a m
 ## How it works
 <!-- sync: src=app/src/dj_actions.cpp,app/include/o3os/app/dj.h,audio/src/graph.cpp spec=docs/specs/OS-DJ.md qa=QA-PRF-100,QA-PRF-104,QA-PRF-106,QA-PRF-114,QA-PRF-117,QA-PRF-127,QA-PRF-132,QA-PRF-138,QA-PRF-112,QA-PRF-126,QA-PRF-129,QA-PRF-133,QA-PRF-134,QA-PRF-135,QA-PRF-136,QA-PRF-142,QA-PRF-144,QA-PRF-150 -->
 
-Everything on this page is **live** and ends when you leave it. Only the groups stay, until you switch the unit off. Nothing of the DJ page is saved in the project, and an export never carries it. New in track3r-os. Not yet checked on the unit. <!-- QA-PRF-106 --> <!-- QA-PRF-108 --> <!-- og: new -->
+Everything on this page is **live** and ends when you leave it. Only the groups stay, until you switch the unit off. Nothing of the DJ page is saved in the project, and an export never carries it. New in track3r-os. <!-- QA-PRF-106 --> <!-- QA-PRF-108 --> <!-- og: new -->
 
 ### Groups: who gets faded
 
@@ -47,7 +47,7 @@ A transition is an effect that ends on the switch to the next pattern. **TRANS H
 
 ### Scratch and tape stop
 
-`F5` (**SCR**) puts your hand on the record. The encoder becomes the platter, the mix goes quiet like a held record, and a full turn is 1.8 seconds of sound, and the encoder no longer moves the crossfader. The song keeps playing underneath, so when you tap `F5` again the mix is live at the place it has reached. Backwards it stops at the oldest sound kept, up to 4 seconds. Hold **TAPE STOP** (pad 32; with **SCR** on the strip says **SCRATCH IS ON**) and the whole mix slows to a stop over one beat; while you hold it, turn the encoder to make the stop shorter or longer, from 1/8 beat up to 4 beats (the screen shows the length, and the stop carries on from the speed it has; the next hold starts with the length you left). Let go and it is live again. Not yet checked on the unit: the platter, the backspin and the detents. <!-- QA-PRF-133 --> <!-- QA-PRF-134 --> <!-- QA-PRF-136 --> <!-- QA-PRF-144 -->
+`F5` (**SCR**) puts your hand on the record. The encoder becomes the platter, the mix goes quiet like a held record, and a full turn is 1.8 seconds of sound, and the encoder no longer moves the crossfader. The song keeps playing underneath, so when you tap `F5` again the mix is live at the place it has reached. Backwards it stops at the oldest sound kept, up to 4 seconds. Hold **TAPE STOP** (pad 32; with **SCR** on the strip says **SCRATCH IS ON**) and the whole mix slows to a stop over one beat; while you hold it, turn the encoder to make the stop shorter or longer, from 1/8 beat up to 4 beats (the screen shows the length, and the stop carries on from the speed it has; the next hold starts with the length you left). Let go and it is live again. <!-- QA-PRF-133 --> <!-- QA-PRF-134 --> <!-- QA-PRF-136 --> <!-- QA-PRF-144 -->
 
 ### What leaving the page ends
 
@@ -72,7 +72,7 @@ Pressing `Perform`, or any other screen button, ends every effect of this page a
 
    ![Perform, DJ page: while two REP pads are held, the line under the gains names A REP 1/16 and B REP 1/4.](img/perform_dj_walk_7.png)
 
-With the pattern playing, you hear the filter close and open, and the stutters on tracks 1 and 2 and on tracks 5 and 6. Not yet checked on the unit.
+With the pattern playing, you hear the filter close and open, and the stutters on tracks 1 and 2 and on tracks 5 and 6.
 
 ## The screen at a glance
 <!-- sync: src=app/src/screens/perform_screen.cpp qa=QA-PRF-100 -->
@@ -177,7 +177,7 @@ If the looper is recording, the strip says **NO ROOM: LOOPER IS RECORDING**; wit
 - The effects of row 2 are the Perform effects **STUTTER**, **DELAY** and **VOLUME**, put above the slots while the page is in view. A slot's own effect comes back when the pad ends. <!-- QA-PRF-127 -->
 - `Shift` + `F1` to `F8` do nothing here and show no label. <!-- QA-PRF-141 -->
 - Pads 33 to 36 of row 3 do nothing. A held pad that you let go of after the page changed does no harm.
-- New in track3r-os. Not yet checked on the unit: the filter, the kills, the transitions, the scratch and tape stop. Not checked against the original firmware.
+- New in track3r-os. Not checked against the original firmware.
 
 ## See also
 

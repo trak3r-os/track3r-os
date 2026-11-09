@@ -174,7 +174,7 @@ Start on the Pattern screen, with the transport stopped. Select a block first to
 6. Hold `F5` (**PREVIEW**) to hear the row's step. While the pattern plays, a bar in the left margin marks the row of the step that is playing. <!-- QA-PAT-410 -->
 7. Press `F8` (**BACK**): the grid cursor lands on the row's step, track and column. <!-- QA-PAT-408 -->
 
-In WATCH the list is read-only and an edit key says **TURN EDIT ON**, writing nothing. An effect on the row's step that the row does not show, such as a chord, is named on the info line (`ALSO: CHORD 57B` for a Chord 47), and a gated note shows `G` with its gated length. <!-- QA-PAT-406 --> The event list refuses to open while the view follows the playhead (the strip says **STOP PLAYING TO OPEN EVENTS**), with no project (**NO PROJECT**), on a pattern the project does not have (**PATTERN IS EMPTY**); an empty scope opens an empty list (**NO EVENTS: INSERT ADDS ONE**), and an edit key on it says the same. <!-- QA-PAT-409, QA-PAT-424 --> New in track3r-os. Not yet checked on the unit. <!-- QA-PAT-400..420, QA-PAT-424 -->
+In WATCH the list is read-only and an edit key says **TURN EDIT ON**, writing nothing. An effect on the row's step that the row does not show, such as a chord, is named on the info line (`ALSO: CHORD 57B` for a Chord 47), and a gated note shows `G` with its gated length. <!-- QA-PAT-406 --> The event list refuses to open while the view follows the playhead (the strip says **STOP PLAYING TO OPEN EVENTS**), with no project (**NO PROJECT**), on a pattern the project does not have (**PATTERN IS EMPTY**); an empty scope opens an empty list (**NO EVENTS: INSERT ADDS ONE**), and an edit key on it says the same. <!-- QA-PAT-409, QA-PAT-424 --> New in track3r-os. <!-- QA-PAT-400..420, QA-PAT-424 -->
 
 ### Add, delete and tidy events
 <!-- sync: src=app/src/events_actions.cpp,model/src/event_list.cpp spec=docs/specs/OS-MIDIREC.md qa=QA-PAT-421,QA-PAT-422,QA-PAT-423,QA-PAT-424,QA-PAT-425,QA-PAT-426,QA-PAT-427,QA-PAT-428 -->
@@ -190,7 +190,7 @@ Start in the event list with Edit on (`Rec`). The list shows the steps of the pa
 6. Press `Shift` + `F2` (**QUANT ALL**) to do the same for every note and OFF row the filter shows, as one undo step. The strip says **QUANTISED 12**, or **QUANTISED 12, 2 LEFT (STEP TAKEN)** when two rows could not move. A run of late notes all move: the pass repeats while it frees steps. <!-- QA-PAT-427 -->
 7. Press `F7` (**UNDO**) to take back the last edit without leaving the list, and `Shift` + `F7` (**REDO**) to do it again. The list shows the pattern again and the cursor stays on its event. `F8` (**UNDO**) on the grid takes back the same steps after you press `F8` (**BACK**). <!-- QA-PAT-423 -->
 
-In WATCH every one of these keys says **TURN EDIT ON** and writes nothing. <!-- QA-PAT-424 --> Each key is one undo step, and **QUANT ALL** is one for the whole operation. A CC step with a micro-moved note still sends its CC at the start of the step, and only the note is late: that is why a CC row has no time inside a step. Not yet checked on the unit: the MIDI out of a note moved inside its step. <!-- QA-PAT-425 --> New in track3r-os. <!-- QA-PAT-421..423, QA-PAT-426..428 -->
+In WATCH every one of these keys says **TURN EDIT ON** and writes nothing. <!-- QA-PAT-424 --> Each key is one undo step, and **QUANT ALL** is one for the whole operation. A CC step with a micro-moved note still sends its CC at the start of the step, and only the note is late: that is why a CC row has no time inside a step. <!-- QA-PAT-425 --> New in track3r-os. <!-- QA-PAT-421..423, QA-PAT-426..428 -->
 
 ### Double, spread or halve a pattern
 
@@ -219,9 +219,9 @@ Start on the Pattern screen, with Edit on.
 3. Pick the pattern to write over. A pattern the project does not have yet is made.
 4. Press `Shift` + `Copy`, then let go of `F1`. <!-- QA-PAT-286 -->
 
-You should see **PATTERN 07 REPLACED BY 05**. The target now has the steps, the length of every track and the name of the copy. One `F8` (**UNDO**) takes it all back, and removes a pattern that the paste made. <!-- QA-PAT-287 --> `Copy` works in every mode. The paste needs Edit, and says **TURN EDIT ON** without it. In the grid, `Shift` + `Copy` pastes a whole-pattern copy as a block, steps only, at the cursor and clipped at each track's end. The target keeps its lengths and its name. <!-- QA-PAT-288 --> You may paste over the pattern that plays: each track takes its new length from its next row, but the pass in progress ends at the old pattern length. <!-- QA-PAT-289 --> A MIDI note that sounds on a track the paste leaves empty may stay on until the transport stops (`Play`). Not yet checked on the unit.
+You should see **PATTERN 07 REPLACED BY 05**. The target now has the steps, the length of every track and the name of the copy. One `F8` (**UNDO**) takes it all back, and removes a pattern that the paste made. <!-- QA-PAT-287 --> `Copy` works in every mode. The paste needs Edit, and says **TURN EDIT ON** without it. In the grid, `Shift` + `Copy` pastes a whole-pattern copy as a block, steps only, at the cursor and clipped at each track's end. The target keeps its lengths and its name. <!-- QA-PAT-288 --> You may paste over the pattern that plays: each track takes its new length from its next row, but the pass in progress ends at the old pattern length. <!-- QA-PAT-289 --> A MIDI note that sounds on a track the paste leaves empty may stay on until the transport stops (`Play`).
 
-At the first or last pattern, `Left` or `Right` says **NO PREVIOUS PATTERN** or **NO NEXT PATTERN** and changes nothing. While the transport plays, a pick also switches the playing pattern, as a pad pick does; with PAT SWITCH set to Pattern end it waits for the pattern's end. New in track3r-os. Not yet checked on the unit. <!-- QA-PAT-311, QA-PAT-318 -->
+At the first or last pattern, `Left` or `Right` says **NO PREVIOUS PATTERN** or **NO NEXT PATTERN** and changes nothing. While the transport plays, a pick also switches the playing pattern, as a pad pick does; with PAT SWITCH set to Pattern end it waits for the pattern's end. New in track3r-os. <!-- QA-PAT-311, QA-PAT-318 -->
 
 ## Keys on this screen
 
@@ -279,8 +279,7 @@ At the first or last pattern, `Left` or `Right` says **NO PREVIOUS PATTERN** or 
 | Todi | 0 1 3 6 7 8 11 |
 | Gypsy minor | 0 2 3 6 7 8 11 |
 
-- The official firmware has a Fill dialog, duplicate, expand and shrink, and a whole-pattern copy. Here the Fill dialog has its own rules and value modes, and the length tools and the copy are reached from the TOOLS menu's pads and with `F1` held. <!-- og: different --> The APPS page of tool apps is new in track3r-os. <!-- og: new --> Not checked against the original firmware: the Euclid rule, the scale list, and what its length tools and whole-pattern copy do in every detail. <!-- og: open -->
-- Not yet checked on the unit: the fill rules and the app edits. The simulator and host tests pass. <!-- QA-PAT-086..095, QA-PAT-160..213 -->
+- The official firmware has a Fill dialog, duplicate, expand and shrink, and a whole-pattern copy. Here the Fill dialog has its own rules and value modes, and the length tools and the copy are reached from the TOOLS menu's pads and with `F1` held. <!-- og: different --> The APPS page of tool apps is new in track3r-os. <!-- og: new --> Not checked against the original firmware: the Euclid rule, the scale list, and what its length tools and whole-pattern copy do in every detail. <!-- og: open --> <!-- QA-PAT-086..095, QA-PAT-160..213 -->
 
 ## See also
 

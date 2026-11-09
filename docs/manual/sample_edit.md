@@ -36,7 +36,6 @@ Start on Sample edit. With no selection, a process acts on all of the sample.
 
 You should see the selection in frames on the info line. `Delete` clears it.
 
-
 ### Normalize and take it back
 <!-- sync: src=app/src/sample_edit_actions.cpp qa=QA-SED-002,QA-SED-004 -->
 
@@ -44,7 +43,6 @@ You should see the selection in frames on the info line. `Delete` clears it.
 2. Press `F8` (**UNDO**) to get the sample back exactly. `Shift` + `F8` (**REDO**) does it again. <!-- QA-SED-004 -->
 
 If the sample is already at full scale or silent, the strip says **NOTHING TO NORMALISE**.
-
 
 ### Crop, reverse, fade or change the volume
 <!-- sync: src=app/src/sample_edit_actions.cpp qa=QA-SED-005,QA-SED-006,QA-SED-007,QA-SED-008,QA-SED-009,QA-SED-010,QA-SED-011,QA-SED-015 -->
@@ -54,7 +52,7 @@ If the sample is already at full scale or silent, the strip says **NOTHING TO NO
 3. `Shift` + `Up` or `Down` sets **AMP**, from 10 to 800 in steps of 10. It only sets the factor for the next `F6`: the sample is not touched. <!-- QA-SED-011 -->
 4. Hold `F7` (**PREVIEW**) to hear it. `Shift` + `F7` (**PRV EDGE**) plays from the edge. <!-- QA-SED-010, QA-SED-015 -->
 
-**CROP** needs a selection that is smaller than the sample, or it refuses and makes no step. A crop moves the instrument's points and slices to the new length. Not yet checked on the unit.
+**CROP** needs a selection that is smaller than the sample, or it refuses and makes no step. A crop moves the instrument's points and slices to the new length.
 
 ### Remove the DC offset
 <!-- sync: src=app/src/sample_edit_actions.cpp qa=QA-SED-003 -->
@@ -74,7 +72,7 @@ New in track3r-os (the original firmware's editor has neither). Both act on the 
 
 A long process, such as the compressor on a sample of tens of seconds, can be stopped: while the strip shows its progress the key row reads **CANCEL** on `F8`. Press it and the strip says **EDIT COMPRESSOR CANCELLED**. The sample stays exactly as it was and nothing is added to the undo steps. When the process has ended, `F8` is **UNDO** again. <!-- QA-SED-023 -->
 
-The filter starts from silence at the first frame of the selection, so a selection that starts in the middle of a loud sound may click at its start. The exception is a looping instrument whose processed range starts at its loop start (in practice a loop that starts at the first frame, with the whole sample or a selection from 0): the filter and the compressor first run over the end of the loop, so the loop wraps without a click. Edge handles do not snap to the loop markers. If the loop starts in the middle of the sample (a sustain loop) and you process the whole sample, a click can remain at the wrap; process from the loop start instead. <!-- QA-SED-022 --> A long sample takes a while, the compressor longer than the filter (the time is not yet measured on the unit). Both are not yet checked on the unit: listen to the result before you keep it. The values you set stay until you switch the unit off.
+The filter starts from silence at the first frame of the selection, so a selection that starts in the middle of a loud sound may click at its start. The exception is a looping instrument whose processed range starts at its loop start (in practice a loop that starts at the first frame, with the whole sample or a selection from 0): the filter and the compressor first run over the end of the loop, so the loop wraps without a click. Edge handles do not snap to the loop markers. If the loop starts in the middle of the sample (a sustain loop) and you process the whole sample, a click can remain at the wrap; process from the loop start instead. <!-- QA-SED-022 --> A long sample takes a while, the compressor longer than the filter Listen to the result before you keep it. The values you set stay until you switch the unit off.
 
 ### Run a plugin
 <!-- sync: src=app/src/sample_edit_actions.cpp,app/src/ptfx_page.cpp,app/src/app.cpp qa=QA-SED-033,QA-SED-034,QA-SED-035,QA-SED-036,QA-SED-037,QA-SED-038,QA-SED-039,QA-SED-040,QA-SED-041,QA-SED-042,QA-SED-043,QA-SED-044,QA-SED-045 -->
@@ -114,14 +112,14 @@ Status: the effect path is verified in the simulator and on the host; generators
 1. Press `Shift` + `F1` (**AMG 8K**) for 8,287 Hz, or `Shift` + `F2` (**AMG 16K**) for 16,574 Hz. <!-- QA-SED-001 --> All of the sample is converted in one step, and the strip says **EDIT AMIGA 8287 DONE**. <!-- QA-SED-012 -->
 2. `Shift` + `F3` (**Q8**) switches the 8-bit option on and off for the next conversion. The line under the sample and the strip say **8-BIT ON** or **OFF**. <!-- QA-SED-013 -->
 
-The sample still plays at its original pitch. <!-- QA-SLD-009 --> Not yet checked on the unit.
+The sample still plays at its original pitch. <!-- QA-SLD-009 -->
 
 ### Edit a stereo sample
 <!-- sync: src=app/src/sample_edit_actions.cpp,app/src/app.cpp qa=QA-SED-024,QA-SED-025,QA-SED-026 -->
 
 New in track3r-os. A sample loaded with **STEREO** on Sample load (its instrument's **STEREO** row reads **STEREO**) keeps its left and right sides, and the edit page works on both. <!-- QA-SED-024 --> **CROP**, **REVERSE**, the fades and **AMP** do the same to both sides. **NORM** finds the loudest point of the left or the right side and scales both by the same amount, so the balance between them stays. **DC REM** and the **FILTER** treat each side on its own. All of it is one undo step, and `F8` brings back both sides.
 
-The **COMPRESSOR** and the Amiga conversion work on one signal only. On a stereo sample they refuse and the strip says **STEREO: MAKE MONO FIRST**: set the **STEREO** row of the instrument to **MONO**, then run them (the result is a mono sample, and `F8` brings the stereo one back). <!-- QA-SED-025 --> A stereo edit needs room for both sides. When the sample memory has none, the strip says **NO ROOM FOR THE EDIT** and nothing changes; with the row on **MONO** the same edit needs half the room. <!-- QA-SED-026 --> Not yet checked on the unit.
+The **COMPRESSOR** and the Amiga conversion work on one signal only. On a stereo sample they refuse and the strip says **STEREO: MAKE MONO FIRST**: set the **STEREO** row of the instrument to **MONO**, then run them (the result is a mono sample, and `F8` brings the stereo one back). <!-- QA-SED-025 --> A stereo edit needs room for both sides. When the sample memory has none, the strip says **NO ROOM FOR THE EDIT** and nothing changes; with the row on **MONO** the same edit needs half the room. <!-- QA-SED-026 -->
 
 ## Keys on this screen
 
@@ -173,7 +171,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 - `F7` (**PREVIEW**) plays the instrument while you hold it. `Shift` + `F7` (**PRV EDGE**) plays from the picked edge while you hold it. <!-- QA-SED-010, QA-SED-015 -->
 - The Amiga conversion refuses a wavetable: **A WAVETABLE CANNOT BE CONVERTED**. A sample converted with **AMG 8K** reloads at 8,287 Hz on the Amiga engine. <!-- QA-SLD-010 -->
 - **SAVE WAV** with no card write layer says **NO CARD WRITE LAYER**, and with no sample **NO SAMPLE IN THIS INSTRUMENT**. It writes nothing then. <!-- QA-SED-014 -->
-- Not yet checked on the unit: the processes and the Amiga keys. Not checked against the original firmware: the keys on this screen. <!-- og: open -->
+- Not checked against the original firmware: the keys on this screen. <!-- og: open -->
 
 ## See also
 

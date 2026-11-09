@@ -64,7 +64,7 @@ A key that is still down stays lit. `F2` or `F3` alone only light their own cell
 
 - Nothing acts while the screen is up. `Song`, `File`, `Pattern`, `Master`, `Play` and the arrows only count. `Shift` + `Master` does not change the theme, and a pad selects no instrument. `F1`, `F6`, `F7` and `F8` alone do nothing. <!-- QA-INP-008 -->
 - The age of an event runs from the scan of the key to the moment the app gets it. The error, drop and latency figures are real only on the unit.
-- Not yet checked on the unit: the whole chapter. The screen cannot be reached in the simulator.
+- The screen cannot be reached in the simulator.
 
 ## See also
 

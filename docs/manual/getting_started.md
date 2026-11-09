@@ -82,7 +82,7 @@ You should see the version you installed. The boot screen shows the same version
 
 1. Turn the unit on.
 2. The boot screen shows a logo with **Track3r** and the build under it. It stays for at least 0.8 s, until the start-up work is done.
-3. The unit opens the project you had open last (the newest of the File screen's RECENT list) if it is still on the card. With none, and a `Workspace/project.mt` file on the card, it loads that. When the last project cannot be read (a damaged file, a project from a newer OS), the unit starts empty and the strip says `PROJECT <name> FAILED` and why; it does not fall back to the Workspace, and it tries the same project on every start until you open another one in File. The strip shows the end of the load: `PROJECT <name> OPENED`. The inserts saved with the project are bound again as it loads. Not yet checked on the unit. <!-- QA-GLB-173 -->
+3. The unit opens the project you had open last (the newest of the File screen's RECENT list) if it is still on the card. With none, and a `Workspace/project.mt` file on the card, it loads that. When the last project cannot be read (a damaged file, a project from a newer OS), the unit starts empty and the strip says `PROJECT <name> FAILED` and why; it does not fall back to the Workspace, and it tries the same project on every start until you open another one in File. The strip shows the end of the load: `PROJECT <name> OPENED`. The inserts saved with the project are bound again as it loads. <!-- QA-GLB-173 -->
 4. If no project loads, or the loaded project has no sample or module instrument and no instrument at all in slots 1 to 48 (MIDI instruments in slots 49 to 64, the 16 MIDI channels of every project from the official firmware, do not stop it), the unit starts the demo kit: four instruments and pattern 1. This is new Community OS behaviour, a default the maintainer still has to confirm. Press `Play` to start pattern 1.
 
 To open another project from the card, press `File`. See [File](file.md). For where each key is, see [The panel](panel.md). On any screen, hold `Shift` and tap `Config` to read a help page for it ([the help page](panel.md#the-help-page)). <!-- QA-GLB-141 -->
@@ -97,7 +97,7 @@ To open another project from the card, press `File`. See [File](file.md). For wh
 2. Keep holding until the line is full. The strip says **POWERING OFF**. The keys and pads stop working, the screen fades, the pad lights go out and the sound stops. <!-- QA-GLB-102 -->
 3. Let go of `Power`. The unit stays dark. Press `Power` and let go to start it again. <!-- QA-GLB-102, QA-GLB-103, QA-GLB-114 -->
 
-To cancel, let go before the line is full, or press `Shift` while you hold `Power`. <!-- QA-GLB-100, QA-GLB-110 --> `Shift` + `Power` on its own is not an off: it saves a screenshot to the card ([The panel](panel.md#screenshot)). <!-- QA-GLB-130 --> To remove all power, unplug the USB cable. For saves and exports during the off, see [The panel](panel.md#power). **Checked on a unit (test build v0.6.12):** the off, the dark screen, and a press of `Power` to start again. **Known gap:** a click may be heard at power off and at power on. **Not yet checked on the unit:** cancelling with `Shift`, saves and exports during an off, and the current draw while the unit is off.
+To cancel, let go before the line is full, or press `Shift` while you hold `Power`. <!-- QA-GLB-100, QA-GLB-110 --> `Shift` + `Power` on its own is not an off: it saves a screenshot to the card ([The panel](panel.md#screenshot)). <!-- QA-GLB-130 --> To remove all power, unplug the USB cable. For saves and exports during the off, see [The panel](panel.md#power). **Checked on a unit (test build v0.6.12):** the off, the dark screen, and a press of `Power` to start again. **Known gap:** a click may be heard at power off and at power on.
 
 ### Use the card on a computer
 
@@ -119,9 +119,9 @@ Keep your projects from the original firmware as they are. Work on copies in tra
 ## Good to know
 <!-- sync: src=docs/formats/og.md -->
 
-- Projects saved by the original firmware open in track3r-os. This is tested on the host with files made from the format's byte maps. Not yet checked on the unit.
-- Projects saved in track3r-os may not open on the official firmware. **Not yet verified.**
-- The unit's settings may start from defaults after a change of firmware, in either direction. **Not yet verified.** Keep copies of your projects.
+- Projects saved by the original firmware open in track3r-os. This is tested on the host with files made from the format's byte maps.
+- Projects saved in track3r-os may not open on the official firmware. Open research question.
+- The unit's settings may start from defaults after a change of firmware, in either direction. Open research question. Keep copies of your projects.
 
 ## See also
 

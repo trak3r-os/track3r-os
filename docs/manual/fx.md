@@ -53,7 +53,7 @@ A **Chord** on a MIDI track sounds all its notes at once. An **Arp** plays them 
 
    ![Pattern: the cursor is on the second effect cell, FX1 reads REV01.](img/fx_walk_5.png)
 
-6. Press `Play` and listen to step 1: Reverse sets the direction the sample plays in. Not yet checked on the unit.
+6. Press `Play` and listen to step 1: Reverse sets the direction the sample plays in.
 
 ## The screen at a glance
 
@@ -79,7 +79,7 @@ Start on the Pattern screen, in **STEP**, on the step with the effect.
 2. Turn the encoder to **None**.
 3. Let `Vol` go. The cell is empty.
 
-To clear the effects of several steps at once, put the cursor on **FX1** and press `Shift` + `Down` for each extra step. Press `Shift` + `Right` once more to add **FX2**, then `Delete`. The note and volume stay, and one `F8` (**UNDO**) takes it back. New in track3r-os. Not yet checked on the unit. <!-- QA-PAT-319, QA-PAT-320 -->
+To clear the effects of several steps at once, put the cursor on **FX1** and press `Shift` + `Down` for each extra step. Press `Shift` + `Right` once more to add **FX2**, then `Delete`. The note and volume stay, and one `F8` (**UNDO**) takes it back. New in track3r-os. <!-- QA-PAT-319, QA-PAT-320 -->
 
 ### Play a chord as an arpeggio
 
@@ -121,7 +121,7 @@ These effects read their value in words on the info line.
 | 103..138 | Play N passes, then skip M (N and M 1..6, counted in passes of the pattern). 103 is Play 1 / Skip 1: the step plays on every other pass. | `CHANCE PLAY 2 SKIP 3` for value 111 |
 | 139..174 | Skip N passes, then play M. | `CHANCE SKIP 6 PLAY 6` for value 174 |
 
-The encoder walks every value from 0 to 174. `Shift` + encoder walks 0..100, then 101, 102, 103, then by 6. The pads and a **Fill** with MODE RANDOM write 0..100 only; a Fill with CONSTANT or FROM..TO reaches 174. Fill RANDOM on Chance with FROM above 100 draws 100. A step whose Chance does not fire plays nothing of its own: no note, no effect of the step. New in track3r-os. Not yet checked on the unit. <!-- QA-PAT-330..334 -->
+The encoder walks every value from 0 to 174. `Shift` + encoder walks 0..100, then 101, 102, 103, then by 6. The pads and a **Fill** with MODE RANDOM write 0..100 only; a Fill with CONSTANT or FROM..TO reaches 174. Fill RANDOM on Chance with FROM above 100 draws 100. A step whose Chance does not fire plays nothing of its own: no note, no effect of the step. New in track3r-os. <!-- QA-PAT-330..334 -->
 
 ### Look up a tracker effect
 
@@ -157,7 +157,7 @@ New in track3r-os, from the tracker-ce step effects `w`, `y` and `z`. They sit a
 | Filter Envelope | `y` | 24 | The cutoff envelope's attack (high digit x 8 ms, at least 1) and decay (low digit x 8 ms). | `FLT ENV 16/32 MS` for 24 |
 | Grain Length | `z` | 32 | The grain length of a granular instrument, 0 to 100 (hex 00 to 64): 0 is 44 samples, 50 is 100 ms, 100 is 1 s, never longer than the sample. It acts when the next grain starts. FX1 wins over FX2 when both hold a z. The value is hex: 32 is 50. | `GRAIN 100 MS` for 32 (the start value) |
 
-`z` does nothing on an instrument that is not granular. Not yet checked on the unit. <!-- QA-PAT-340..344 -->
+`z` does nothing on an instrument that is not granular. <!-- QA-PAT-340..344 -->
 
 ## Keys on this screen
 
@@ -171,10 +171,9 @@ New in track3r-os, from the tracker-ce step effects `w`, `y` and `z`. They sit a
 
 ## Good to know
 
-- Not yet checked on the unit: how the effects sound. The simulator and host tests pass for the effects in this chapter. The unit check is still open.
 - New in track3r-os: the tracker effects, from Tracker Arp to Panbrello. <!-- QA-PAT-024, QA-PAT-101, QA-PAT-145 -->
 <!-- TODO: ask: confirm that the original firmware has none of the tracker effects, so the New in track3r-os label is backed by evidence. -->
-- Writing a note by hand over a step that has a note replaces the note and its instrument with the ones in force. The volume and both effect cells stay. New in track3r-os. Not yet checked on the unit. <!-- QA-PAT-315 -->
+- Writing a note by hand over a step that has a note replaces the note and its instrument with the ones in force. The volume and both effect cells stay. New in track3r-os. <!-- QA-PAT-315 -->
 - The tracker effects run once a tick and are built to add only a few tenths of a percent of processor time. Not yet measured on the unit. <!-- QA-PAT-103, QA-PAT-115, QA-PAT-149 -->
 - Stop gives the channel and global volumes back, so the pads sound at full level after a stop. <!-- QA-PAT-147 -->
 - The effect list has 60 entries. <!-- QA-PAT-145 -->

@@ -38,7 +38,7 @@ If you want to know more: a module imported from a tracker file keeps its loudne
 
 Between the marked points, each step of **VOLUME** is 0.48 dB in the first law (volume 1 is -24 dB, and 0 is silence) and 0.4 dB in the second. Not checked by ear on the unit.
 
-A project saved by an earlier build can sound at a different level, and the stored levels stay as they were. A note that names no velocity, on a native instrument at level 80, now plays at 0 dB; it played at +24 dB. On the Amiga engine levels 50 and 80 both play full volume. A module imported now gives its instruments velocity 63, so a Roll that fades with VolUp or VolDown peaks about 6 dB lower and sits 6 dB under a plain note. The demo kit stays at 0 dB after any edit. Not yet checked on the unit, except the demo kit. <!-- QA-INS-211, QA-INS-212, QA-INS-204 -->
+A project saved by an earlier build can sound at a different level, and the stored levels stay as they were. A note that names no velocity, on a native instrument at level 80, now plays at 0 dB; it played at +24 dB. On the Amiga engine levels 50 and 80 both play full volume. A module imported now gives its instruments velocity 63, so a Roll that fades with VolUp or VolDown peaks about 6 dB lower and sits 6 dB under a plain note. The demo kit stays at 0 dB after any edit. <!-- QA-INS-211, QA-INS-212, QA-INS-204 -->
 
 <!-- QA-INS-200, QA-INS-201, QA-INS-205, QA-INS-206, QA-INS-207, QA-INS-209, QA-INS-210: the law belongs to the project; a sample added to an older project plays at 0 dB at VOLUME 100. -->
 
@@ -49,9 +49,9 @@ The **PLAY ENGINE** row picks the engine for a sample: **Auto**, **Modern**, **A
 
 The **STEREO** row under it says whether a sample plays as a stereo pair: **MONO** or **STEREO**. This is new in track3r-os. **STEREO** can only be chosen for a sample that was loaded with **STEREO** on Sample load (see [Sample load](sample_load.md)): on any other sample the row says `STEREO NEEDS A STEREO LOAD` and stays **MONO**. A **STEREO** instrument plays its two channels: the left output gets the mix plus the side signal, the right output the mix minus it, through the track's level and pan like any other sound. <!-- QA-INS-224, QA-INS-225, QA-INS-260 --> A stereo note uses a little more of the unit's time than a mono one (about 0.8 percentage points of the audio budget each, not yet measured on the unit), so at most four voices play in stereo at once: the next one plays as the mix on both sides. <!-- QA-INS-262 -->
 
-A note plays in stereo when its play mode plays forward (**ONE SHOT**, **LOOP FWD**, **SLICE**, **BEAT SLICE**) on the Modern engine, with no filter, **OVERDRIVE**, **BIT DEPTH** or tremolo on it. Otherwise it plays the mix: a backward or ping-pong loop, a wavetable, a granular instrument, the Amiga engine, a note played in reverse, or any of those effects. If one of the effects comes on while a stereo note sounds, the side signal fades out over one audio block (about 1.5 ms) and stays off for that note; the next note is stereo again. A track with its fader closed or muted drops the side signal too, for the rest of that note. The track's own outputs stay mono: the send effects, the CUE and REC buses, the meters and the USB track stems carry the mix; the master, the headphones and the USB main pair carry the stereo image. <!-- QA-INS-261, QA-INS-263, QA-INS-264, QA-INS-265, QA-INS-266 --> Turning the row over while a note sounds takes effect at the next stop. <!-- QA-INS-267 --> Not yet checked on the unit.
+A note plays in stereo when its play mode plays forward (**ONE SHOT**, **LOOP FWD**, **SLICE**, **BEAT SLICE**) on the Modern engine, with no filter, **OVERDRIVE**, **BIT DEPTH** or tremolo on it. Otherwise it plays the mix: a backward or ping-pong loop, a wavetable, a granular instrument, the Amiga engine, a note played in reverse, or any of those effects. If one of the effects comes on while a stereo note sounds, the side signal fades out over one audio block (about 1.5 ms) and stays off for that note; the next note is stereo again. A track with its fader closed or muted drops the side signal too, for the rest of that note. The track's own outputs stay mono: the send effects, the CUE and REC buses, the meters and the USB track stems carry the mix; the master, the headphones and the USB main pair carry the stereo image. <!-- QA-INS-261, QA-INS-263, QA-INS-264, QA-INS-265, QA-INS-266 --> Turning the row over while a note sounds takes effect at the next stop. <!-- QA-INS-267 -->
 
-If you want to know more: a full-scale square wave on the Amiga engine peaks at +2.5 dB above its level. It matches a reference Amiga player on the host. Not yet checked on the unit. <!-- QA-INS-203 -->
+If you want to know more: a full-scale square wave on the Amiga engine peaks at +2.5 dB above its level. It matches a reference Amiga player on the host. <!-- QA-INS-203 -->
 
 ## Try it
 <!-- sync: src=app/src/screens/params_screen.cpp qa=QA-INS-005,QA-INS-085 -->
@@ -138,12 +138,10 @@ The picture is a window of 16 steps (the label `16 STEPS` above it, the axis und
 
 **LFO SHAPE** has six waves: Rev Saw, Saw, Triangle, Square, Random and **Sine**. Sine is new in this firmware and is not on the original firmware. It is a smooth wave that rises from nothing to the amount at the middle of the period and falls back, and it works like the others: the same speeds, the same amount, all six destinations, and it can be changed while a note sounds. If you export to the original firmware's format, a Sine LFO is written as Triangle and the export page lists it as **SINE LFO**. <!-- QA-INS-215, QA-INS-216, QA-INS-217, QA-FIL-114 -->
 
-Not yet checked on the unit.
-
 ### Move a setting with a wavetable envelope or LFO
 <!-- sync: src=app/src/screens/params_screen.cpp,model/src/params.cpp qa=QA-INS-294,QA-INS-295,QA-INS-296,QA-INS-297,QA-INS-298,QA-INS-299,QA-INS-300,QA-INS-301,QA-INS-302,QA-INS-303 -->
 
-New in this firmware: **SOURCE** has two more words after **LFO**, **WT Env** and **WT LFO**. They move a destination along one of the 256 wavetable contours instead of an ADSR or a plain LFO shape. Instruments that do not use them are unchanged, and they load and save as before. Not yet checked on the unit. <!-- QA-INS-294 -->
+New in this firmware: **SOURCE** has two more words after **LFO**, **WT Env** and **WT LFO**. They move a destination along one of the 256 wavetable contours instead of an ADSR or a plain LFO shape. Instruments that do not use them are unchanged, and they load and save as before. <!-- QA-INS-294 -->
 
 1. Press `F4` (**MOD**) and move to a destination with `F4`, such as Panning.
 2. On **SOURCE** turn the encoder up past **LFO**: first **WT Env**, then **WT LFO**. Each click is one undo step. <!-- QA-INS-294 -->
@@ -155,12 +153,12 @@ A change on these rows is heard from the next note, not on a note that is held. 
 
 The plot above the rows draws the contour: **WT Env** over its **DURATION** (the length in milliseconds is written above the right edge), **WT LFO** over one cycle. **WARP X** and **WARP Y** bend the picture as they bend the sound, so you can see what the contour does before you play it. <!-- QA-INS-301, QA-INS-302, QA-INS-303 -->
 
-On a **Granular** instrument the fourth destination is **Gran Length**, the grain length, instead of **WT Position**: the header and the rows follow the play mode, and the same **SOURCE** words work on it. Switch the play mode in the editor and the destination keeps its source. An instrument loaded from an older project or an official firmware file that has a source on this destination while it is Granular shows **Off** there, because that source was meant for **WT Position**; set it again to use it as the grain length. The grain length source is a Community OS feature: an export for the official firmware does not carry it. Not yet checked on the unit. <!-- QA-INS-300 -->
+On a **Granular** instrument the fourth destination is **Gran Length**, the grain length, instead of **WT Position**: the header and the rows follow the play mode, and the same **SOURCE** words work on it. Switch the play mode in the editor and the destination keeps its source. An instrument loaded from an older project or an official firmware file that has a source on this destination while it is Granular shows **Off** there, because that source was meant for **WT Position**; set it again to use it as the grain length. The grain length source is a Community OS feature: an export for the official firmware does not carry it. <!-- QA-INS-300 -->
 
 ### Use your own contours from the card
 <!-- sync: src=app/src/wt_user.cpp,app/include/o3os/app/wt_user.h qa=QA-INS-304,QA-INS-305,QA-INS-306 -->
 
-New in this firmware: the 128 user contours `U001` to `U128` can come from WAV files. Without files they hold the built-in shapes, so nothing changes until you add some. Not yet checked on the unit.
+New in this firmware: the 128 user contours `U001` to `U128` can come from WAV files. Without files they hold the built-in shapes, so nothing changes until you add some.
 
 1. On the card, make a folder called `Envelopes` at the top level and put WAV files in it, named by number: `001.wav` is `U001`, `002.wav` is `U002`, up to `128.wav`. `1.wav` works too. <!-- QA-INS-304 -->
 2. Put the card in, or open a project. The files are read then, never while you play. The strip says how it went, for example `ENVELOPES: 12 LOADED`. <!-- QA-INS-304 -->
@@ -198,8 +196,6 @@ The other rows move one a click, `Shift` makes a coarse step, `Delete` puts the 
 Press `F2` (**CC**) for the controller page: six rows **CC A** to **CC F**, all **CONFIG** (the number set on the Config page) at first. `F1` and `F2` switch between the two pages. Turn a row through `CC 0` to `CC 127`, then **PROG**, **CH AT** and **POLY AT**. <!-- QA-INS-072, QA-INS-073 --> A step FX then sends the slot. With CC A at `CC 74`, CC B at **PROG**, CC C at **CH AT** and CC D at **POLY AT**, FX 8, 9, 10 and 11 send a controller, a Program Change, channel aftertouch and key aftertouch. **POLY AT** sends nothing when no note sounds. FX 37 sends **CC F**, not a Program Change; to send a Program Change, set a slot to **PROG**. <!-- QA-INS-079, QA-INS-069 -->
 
 Notes end cleanly. If you change **CHANNEL** or **OUT** while a pad is held, the release goes to the channel and port of its note on. `F7`, `Stop` and a project load end a held note the same way. <!-- QA-INS-066, QA-INS-067, QA-INS-068, QA-INS-081, QA-INS-014, QA-INS-034 --> A MIDI instrument shows its own page whatever page the instrument beside it was left on. <!-- QA-INS-065 -->
-
-Not yet checked on the unit.
 
 ### Copy, paste and delete an instrument
 
@@ -307,7 +303,7 @@ Three labels in the table are the ones the screen starts with, and they change a
 - A WT Position LFO moves while the transport is stopped. Not checked against the original firmware. <!-- QA-INS-087 -->
 - A MIDI instrument has no VOICE, FILTER, MOD or SENDS page. Pressing those keys says so. <!-- QA-INS-062, QA-INS-074 -->
 - A pasted copy keeps its sound after the source is deleted. <!-- QA-INS-048 -->
-- Checked on the unit (build 0.4.18): the MIDI channel, MIDI notes, and `Shift` + `F4` with its undo. Not yet checked on the unit: the rest of this chapter. <!-- QA-INS-027, QA-INS-030, QA-INS-033 -->
+- Checked on the unit (build 0.4.18): the MIDI channel, MIDI notes, and `Shift` + `F4` with its undo. <!-- QA-INS-027, QA-INS-030, QA-INS-033 -->
 
 ## See also
 

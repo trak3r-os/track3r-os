@@ -159,7 +159,7 @@ Unit result (tester, 2026-10-18; bench images of dev 744cdc9 as A = slice 1 and 
 | H (half muted) | 107,207 | 96,136 | -11,071 (-4.24 pp) |
 | S (one soloed) | 56,057 | 38,932 | -17,125 (-6.56 pp) |
 
-U passes (within +-1.2 pp). Underruns 0 in 8 visits. Blocks over budget in H: about 24 a window on A (27, 24, 23, 24), 0 on B; arm U holds about 690 on both images (the baseline's own, B not worse). M(B) minus the floor is 5,972 against the 5,000 target: a miss of 972 (per visit 8,522, 5,699, 5,232, 4,438). `diag voices` `advanced` rose in M (+4,208 a second) and H (+2,788), flat in U and the floor. **The maintainer accepted the merge on 2026-10-18 despite the M miss** (`docs/specs/OS-ODD11.md` section 14). Still unit pending: listening (QA-MIX-020 to 028), the export byte compare (QA-MIX-024), a dense-event scene.
+U passes (within +-1.2 pp). Underruns 0 in 8 visits. Blocks over budget in H: about 24 a window on A (27, 24, 23, 24), 0 on B; arm U holds about 690 on both images (the baseline's own, B not worse). M(B) minus the floor is 5,972 against the 5,000 target: a miss of 972 (per visit 8,522, 5,699, 5,232, 4,438). `diag voices` `advanced` rose in M (+4,208 a second) and H (+2,788), flat in U and the floor. **The maintainer accepted the merge on 2026-10-18 despite the M miss** (`docs/specs/OS-ODD11.md` section 14). More testing needed: listening (QA-MIX-020 to 028), the export byte compare (QA-MIX-024), a dense-event scene.
 
 ## OS-PERFFX P0 (2026-10-18; `docs/specs/OS-PERFFX.md` section 7): the Perform layer reaches the voices whole
 

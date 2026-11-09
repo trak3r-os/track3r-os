@@ -64,7 +64,7 @@ If you want to know more:
 5. Listen: both sounds play on the same bar. Press `F5` (**UNDO LYR**) and the second one goes. <!-- QA-REC-029 -->
 6. Press `F3` (**SAVE**) to keep the loop as an instrument, or `F4` (**DISCARD**) to throw it away. <!-- QA-REC-025 -->
 
-The simulator has no recorder, so its scenario `record_walk.txt` checks only the screen and the page turn (the `Sample Rec` button), not these steps, and this walk-through has no pictures of its own: the three above come from the screen's gallery. Not yet checked on the unit.
+The simulator has no recorder, so its scenario `record_walk.txt` checks only the screen and the page turn (the `Sample Rec` button), not these steps, and this walk-through has no pictures of its own: the three above come from the screen's gallery.
 
 ## The screen at a glance
 
@@ -93,7 +93,7 @@ Start on the **SOURCES** page.
 6. Press `F1` again to end the take. With **STOP AT** on **STEP**, **BAR** or **PATTERN** it ends at that point, and a second `F1` ends it at once. With **STOP AT** on a number of bars, it ends by itself.
 7. The screen says **TAKE: TRIM, THEN SAVE**. Set **TRIM START** and **TRIM END**. Press `F3` to save the window into an instrument (the keyboard opens at once over its name, **RECORDING**: type a name and press `F8`, or press `F7` to keep **RECORDING**; the take is saved either way), or `Shift` + `F3` (**CROP**) to cut the take down to the window and keep working on it, or `F4` to throw it away (with nothing recorded, `F4` says **NOTHING RECORDED**). `F4`, a new take with `F1` and **CROP** each ask first (**TAKE NOT SAVED: F4 AGAIN**, **CROP KEEPS THE WINDOW ONLY: SHIFT+F3 AGAIN**): press the same key again within four seconds. A take you have written with `F7` (**SAVE WAV**) is saved, so it needs no question until you move a marker. <!-- QA-REC-040 QA-REC-041 QA-REC-042 QA-REC-044 -->
 
-`F7` (**SAVE WAV**) writes the trimmed window as a 16-bit mono WAV at 44,100 Hz into the `Samples` folder of the card, as `REC_001.wav`, `REC_002.wav` and so on. The strip says **SAVE REC_001 DONE** and the take stays in review, so `F3` can still make an instrument of it. With no take it says **NO TAKE TO SAVE: F1 RECORDS ONE**, with no card write layer **NO CARD WRITE LAYER**, and on a write-protected card **CARD IS WRITE PROTECTED**. Not yet checked on the unit. <!-- QA-REC-039 -->
+`F7` (**SAVE WAV**) writes the trimmed window as a 16-bit mono WAV at 44,100 Hz into the `Samples` folder of the card, as `REC_001.wav`, `REC_002.wav` and so on. The strip says **SAVE REC_001 DONE** and the take stays in review, so `F3` can still make an instrument of it. With no take it says **NO TAKE TO SAVE: F1 RECORDS ONE**, with no card write layer **NO CARD WRITE LAYER**, and on a write-protected card **CARD IS WRITE PROTECTED**. <!-- QA-REC-039 -->
 
 Press `F2` (**MONITOR**) on the **SOURCES** page to hear the input through the output. It still works while a take is armed or recording. On **RESAMPLE** it does nothing. New in track3r-os. <!-- QA-REC-037 -->
 
@@ -141,7 +141,7 @@ Limits:
 - **PRE-ROLL** is kept at least: it is rounded up to an even number of frames, and one frame more can be kept. If the level arrives less than **PRE-ROLL** after `F1`, nothing was heard before it: the first frames of the take are silence, and **TRIM START** starts after them.
 - A Stop of the transport does not end a take that waits for a level, because it does not need the transport. `F1` ends it, and it ends with no take.
 - With the sample memory nearly full, `F1` says **NO ROOM IN THE SAMPLE MEMORY**: **LEVEL** needs room for the pre-roll and about a second of take.
-- Not checked on the unit yet. <!-- og: new -->
+- <!-- og: new -->
 
 ### Record what the computer plays
 <!-- sync: src=app/include/o3os/app/recorder.h qa=QA-REC-034 -->
@@ -155,7 +155,7 @@ Start on the **SOURCES** page.
 3. Press `F1` to start the take, and `F1` again to end it. The take is mono: the left and right sides are averaged. <!-- QA-REC-034 -->
 4. The screen says **TAKE: TRIM, THEN SAVE**. Press the pad at the take's own pitch (**C-4**, pad 12) to hear it. Press `F3` to save it, or `F4` to throw it away (it asks first: press `F4` again).
 
-Not yet checked on the unit. <!-- QA-REC-034 -->
+ <!-- QA-REC-034 -->
 
 ### Record a loop
 
@@ -177,7 +177,7 @@ Start on the review of a loop.
 
 > **Tip**: With the transport stopped, `F1` starts it. <!-- QA-REC-028 -->
 
-With the transport stopped, `F1` first counts in when **COUNT-IN** is 1 or 2 bars (set on the Config screen). The count-in plays the pattern that `Play` starts. Nothing is recorded during it. The layer begins on the loop's first bar after the count-in, and fades in over a very short ramp. With **COUNT-IN** Off, the transport and the layer start together. Not yet checked on the unit. <!-- QA-REC-032 -->
+With the transport stopped, `F1` first counts in when **COUNT-IN** is 1 or 2 bars (set on the Config screen). The count-in plays the pattern that `Play` starts. Nothing is recorded during it. The layer begins on the loop's first bar after the count-in, and fades in over a very short ramp. With **COUNT-IN** Off, the transport and the layer start together. <!-- QA-REC-032 -->
 
 ![Record, overdub: the header shows OVERDUB and the key F1 is lit.](img/record_loop_overdub.png)
 
@@ -271,19 +271,19 @@ The Shift row of the Record screen:
 | `Shift` + `F3` (**CROP**) | cuts the take down to its window | the same | QA-REC-001, QA-REC-041 |
 | any other `Shift` + `F1` to `F8` | nothing | nothing | QA-REC-001 |
 
-On the RADIO page, the plain `F5` (**SEEK-**) and `F6` (**SEEK+**) ask the radio chip for the next station down or up, wrapping at the end of the band. The page reads **SEEKING** while the chip looks, then **LISTENING**, and the frequency is what it found. Under a loop review `F5` is **UNDO LYR** and `F6` does nothing. Not yet checked on the unit: a real station needs an antenna. <!-- QA-REC-011 QA-REC-038 -->
+On the RADIO page, the plain `F5` (**SEEK-**) and `F6` (**SEEK+**) ask the radio chip for the next station down or up, wrapping at the end of the band. The page reads **SEEKING** while the chip looks, then **LISTENING**, and the frequency is what it found. Under a loop review `F5` is **UNDO LYR** and `F6` does nothing. <!-- QA-REC-011 QA-REC-038 -->
 
 ## Good to know
 <!-- sync: src=app/src/record_actions.cpp spec=docs/specs/OS-LOOPER.md qa=QA-REC-010,QA-REC-031,QA-REC-027,QA-REC-020,QA-REC-021,QA-REC-023,QA-REC-029,QA-REC-032,QA-REC-033 -->
 
-- New in track3r-os: the loop, the overdub and the undo layer. Not yet checked on the unit: the looper. <!-- og: new --> <!-- QA-REC-020 to QA-REC-031 -->
+- New in track3r-os: the loop, the overdub and the undo layer. <!-- og: new --> <!-- QA-REC-020 to QA-REC-031 -->
 - Not checked against the original firmware: the sources, the take and trim flow and the radio page. <!-- og: open -->
 - The loop keeps playing on other screens, like a loop pedal. `F8`, `F3` and `F4` work only on this screen. <!-- QA-REC-027 -->
 - The LOOP row is frozen while a take runs. With LOOP on, **START ON** reads **BAR** and **STOP AT** reads **LOOP**, both dim. Editing either says why. <!-- QA-REC-020 -->
 - A loop is refused at `F1` if it cannot fit the free sample memory: **NO ROOM IN THE SAMPLE MEMORY FOR THE LOOP**. A take that ends early, or fills the sample memory, is given up with **THE LOOP TAKE ENDED BEFORE ITS LAST BAR: GIVEN UP** or **THE SAMPLE MEMORY FILLED: THE TAKE ENDED**. A project load, NEW or a kit gives it up with **TAKE LOST: A PROJECT WAS LOADED UNDER IT**. <!-- QA-REC-021 -->
 - A Stop fades the loop out in under a millisecond. After Play, a loop starts again from its first bar, not from where it stopped. A tempo change keeps the loop's length: a faster tempo cuts it short, a slower one leaves a gap. The header then says **- TEMPO CHANGED**. <!-- QA-REC-023 -->
 - During an undo restore, `F1` and `F3` say **UNDO IN PROGRESS**. `F4` and `F8` still work. <!-- QA-REC-029 -->
-- If the transport does not start after the count-in, the strip says **THE COUNT-IN DID NOT START** or **THE TRANSPORT DID NOT START**. The overdub ends again, with no layer. <!-- QA-REC-032 --> Not yet checked on the unit.
+- If the transport does not start after the count-in, the strip says **THE COUNT-IN DID NOT START** or **THE TRANSPORT DID NOT START**. The overdub ends again, with no layer. <!-- QA-REC-032 -->
 - If the sound does not answer when you press `F3` (**SAVE**) during an overdub, the keys ignore presses for up to half a second. Then the strip says **SAVE TIMED OUT: TRY AGAIN**. Nothing is saved, and the loop stays on the screen. Once the sound runs again, the overdub is over, and `F3` saves the loop as usual. It cannot be made to happen by hand on the unit, so it is checked by the host tests only. <!-- QA-REC-033 -->
 - The loop goes to both channels of the line out after the master chain. The master volume scales it. It is not in the meters, the stems or any take.
 

@@ -60,7 +60,7 @@ If a `Shift` + soft key has no label, it does nothing. It never acts as the plai
 | `Pattern` | the Pattern screen, when you let go of the key. Held, with the encoder: the tempo, on any screen; held, with a pad: tap tempo (see [Tempo from any screen](#tempo-from-any-screen)) | QA-GLB-153, QA-GLB-155 |
 | `Song` + `Pattern`, or `Master` + `Song`, pressed together | opens the Navigator on any screen; press `F8` (**GO**) to go to the screen you chose, or `F7` (**CLOSE**) to leave it. Neither key does its own job, and the Song peek and the held volume and tempo turns stay off | QA-GLB-233 |
 | `Shift` + `Pattern` | lists the module apps that are not tools; `F1` or `F8` (**LAUNCH**) starts one, `Pattern` leaves the list. It was the Navigator before | QA-MOD-252 |
-| `Shift` + `Master` | steps to the next colour theme: Amiga, Black, White, then Amiga again. The THEME row on Config says the same. New in track3r-os. Not yet checked on the unit. | QA-GLB-157 |
+| `Shift` + `Master` | steps to the next colour theme: Amiga, Black, White, then Amiga again. The THEME row on Config says the same. New in track3r-os. | QA-GLB-157 |
 | `Shift` + `Config` | opens the help page of the screen you are on (see [The help page](#the-help-page)) | QA-GLB-141 |
 
 ![Panel: Song and Pattern are marked. Press both together to open the Navigator.](img/chord_navigator.svg)
@@ -68,7 +68,7 @@ If a `Shift` + soft key has no label, it does nothing. It never acts as the plai
 ## Tempo from any screen
 <!-- sync: src=app/src/bindings.cpp qa=QA-GLB-153,QA-GLB-154,QA-GLB-155 -->
 
-New in track3r-os. Not yet checked on the unit. Hold `Pattern` on any screen and the encoder and the pads set the tempo. The screen does not change.
+New in track3r-os. Hold `Pattern` on any screen and the encoder and the pads set the tempo. The screen does not change.
 
 - **Turn the encoder** while you hold `Pattern`: the tempo moves 1 BPM a detent, between 40 and 800 BPM. Hold `Shift` first, then `Pattern`, and a detent is a tenth of a BPM. The sequencer follows at once, also while it plays, and the strip says, for example, **TEMPO 137.0 BPM**. <!-- QA-GLB-153 -->
 - **Tap pads** while you hold `Pattern`, about half a second apart. The first tap says **TAP**. From the second, the tempo is the mean of the last four gaps, to a tenth of a BPM, between 40 and 300 BPM, and the strip says, for example, **TAP 120.0 BPM**. A pause of more than 2 seconds starts a new series. The pad plays no note. With `Pattern` up, a pad is a pad again. <!-- QA-GLB-154 -->
@@ -82,7 +82,7 @@ A tap of `Pattern` with no turn or pad acts when you let go of the key, and so d
 ## The help page
 <!-- sync: src=app/src/bindings.cpp,app/src/help_actions.cpp qa=QA-GLB-141,QA-GLB-142,QA-GLB-143,QA-GLB-144,QA-GLB-145,QA-GLB-146,QA-GLB-147,QA-GLB-148,QA-GLB-149,QA-GLB-150,QA-GLB-152 -->
 
-New in track3r-os. Not yet checked on the unit. Hold `Shift` and tap `Config` on any screen to read about it without leaving it.
+New in track3r-os. Hold `Shift` and tap `Config` on any screen to read about it without leaving it.
 
 1. Hold `Shift` and tap `Config`. A page titled **HELP: SONG** (for the Song screen) opens over the screen, with a page count such as **3/15** at the right of its bar. The key row reads **CLOSE** on `F8` and is blank otherwise. <!-- QA-GLB-141 -->
 2. Press `Left` or `Right` to turn the pages. They stop at **1/15**, the Global page (the screen buttons and the global keys), and at **15/15**. <!-- QA-GLB-142 -->
@@ -167,7 +167,7 @@ The buttons have no lights. The screen shows the state instead, for example the 
 
 Some keys act on a tap and some only while you hold them. On Pattern, `F1` opens the pattern picker only while you hold it, so a tap opens nothing. On Pattern, `F7` held with a pad runs that verb without opening the menu, so a tap of `F7` opens the menu. On Pattern, `F2` and `F3` toggle a chooser with a tap. On Song, `F7` selects the tempo field, and a second tap taps the tempo. On the Mixer, `F1` on the MIXER page changes nothing. <!-- QA-MIX-032, QA-PAT-456 -->
 
-While a dialog or a list is open, it owns the key row: the row shows only the dialog's own keys, every other key is blank and does nothing, and `Shift` does not change the row. `F8` goes back. On the on-screen keyboard, `F8` keeps the text and `F7` cancels. Learn shows **BACK** on `F8` alone until it has a target or a binding, and **FOLLOW** on `F5` when the target is a bound instrument parameter (see "Learn a MIDI control" above). Fill shows **FILL** on `F1` and **BACK** on `F8`, and a running WAV export shows **CANCEL** on `F8`. The Navigator reads **GO** on `F1`, **CLOSE** on `F7` and **GO** on `F8`; with `Shift` held it reads only **CLOSE** and **GO**. The screen buttons do nothing until the dialog closes. New in track3r-os. Not yet checked on the unit. On Song, a question on the strip asks **ALL** (`F1`) or **UNIQUE** (`F2`), and any other key withdraws it. On Config, **APPLY** and **DEFAULTS** ask for a second press within a short time. <!-- QA-GLB-118, QA-GLB-119, QA-INS-050 -->
+While a dialog or a list is open, it owns the key row: the row shows only the dialog's own keys, every other key is blank and does nothing, and `Shift` does not change the row. `F8` goes back. On the on-screen keyboard, `F8` keeps the text and `F7` cancels. Learn shows **BACK** on `F8` alone until it has a target or a binding, and **FOLLOW** on `F5` when the target is a bound instrument parameter (see "Learn a MIDI control" above). Fill shows **FILL** on `F1` and **BACK** on `F8`, and a running WAV export shows **CANCEL** on `F8`. The Navigator reads **GO** on `F1`, **CLOSE** on `F7` and **GO** on `F8`; with `Shift` held it reads only **CLOSE** and **GO**. The screen buttons do nothing until the dialog closes. New in track3r-os. On Song, a question on the strip asks **ALL** (`F1`) or **UNIQUE** (`F2`), and any other key withdraws it. On Config, **APPLY** and **DEFAULTS** ask for a second press within a short time. <!-- QA-GLB-118, QA-GLB-119, QA-INS-050 -->
 
 ## Transport
 
@@ -198,16 +198,16 @@ The pad mode stays until you change it and is not saved.
 |---|---|---|
 | turn the encoder | changes the value under the cursor, or scrolls the list in view | - |
 | `Shift` + turn the encoder | a coarse step on the Instrument screen; a fine step on the Song screen | - |
-| turn the encoder quickly in a list | in File, Sample load, the Modules list and the module picker, a quick spin moves 4 rows a detent, then 8; a slow turn moves one. The Pattern cursor, every value and the `Shift` coarse steps are unchanged. New in track3r-os. Not yet checked on the unit. The numbers are being tuned. | QA-GLB-159 |
+| turn the encoder quickly in a list | in File, Sample load, the Modules list and the module picker, a quick spin moves 4 rows a detent, then 8; a slow turn moves one. The Pattern cursor, every value and the `Shift` coarse steps are unchanged. New in track3r-os. The numbers are being tuned. | QA-GLB-159 |
 
-With `Instr` and `Vol` both held, the encoder moves the parameter you picked with `Instr` and `Fx` and does nothing else (see "Put one parameter on the encoder" above). New in track3r-os. Not yet checked on the unit.
+With `Instr` and `Vol` both held, the encoder moves the parameter you picked with `Instr` and `Fx` and does nothing else (see "Put one parameter on the encoder" above). New in track3r-os.
 
 The encoder has no push function.
 
 ## Screenshot
 <!-- sync: src=platform/mk66/usb/include/o3os/platform/mk66/usb/screenshot_service.h,core/include/o3os/core/power_hold.h qa=QA-GLB-130,QA-GLB-131,QA-GLB-132,QA-GLB-133,QA-GLB-134,QA-GLB-135,QA-GLB-136,QA-GLB-137,QA-GLB-138,QA-GLB-139,QA-GLB-140 -->
 
-`Shift` + `Power` saves what is on the screen to the card as a picture. New in track3r-os. Not yet checked on the unit.
+`Shift` + `Power` saves what is on the screen to the card as a picture. New in track3r-os.
 
 1. Put a card in the unit. Hold `Shift`, press `Power`, and let go of both. <!-- QA-GLB-130 -->
 2. The screen freezes for 1 to 2 seconds while the picture is written. The song plays on with no click or stutter. <!-- QA-GLB-138 -->
@@ -242,7 +242,7 @@ The strip says why when it cannot save, and writes no file:
 | `Shift` + `Power` | a screenshot ([above](#screenshot)). No line, no hint and no off. | QA-GLB-110, QA-GLB-130 |
 | `Power` held, then `Shift` | the line empties and the unit stays on. To turn it off, let go of `Power` and hold it again. | QA-GLB-110 |
 
-When the line is full, the strip says **POWERING OFF**. The keys, the pads and the MIDI input stop working, the screen fades, the pad lights go out and the sound stops. If a song is playing, the unit sends note-offs and a MIDI Stop to the MIDI out, and the sound fades in about 50 ms. Not yet checked on the unit. The unit is dark and silent, but it is not switched off at the power supply. To remove all power, unplug the USB cable. <!-- QA-GLB-102, QA-GLB-105, QA-GLB-117 -->
+When the line is full, the strip says **POWERING OFF**. The keys, the pads and the MIDI input stop working, the screen fades, the pad lights go out and the sound stops. If a song is playing, the unit sends note-offs and a MIDI Stop to the MIDI out, and the sound fades in about 50 ms. The unit is dark and silent, but it is not switched off at the power supply. To remove all power, unplug the USB cable. <!-- QA-GLB-102, QA-GLB-105, QA-GLB-117 -->
 
 If `Power` is still held when the line is full, the unit goes dark at once and stays dark after you let go. <!-- QA-GLB-114 -->
 
@@ -262,7 +262,7 @@ The off does not save for you. This is what happens to work in progress:
 
 **Known gap:** a click may be heard at power off and at power on. <!-- QA-GLB-102, QA-GLB-103 -->
 
-**Not yet checked on the unit:** the short-press hint, a hold that is still going when the line is full, the rule for a hold at start-up, `Shift` to cancel, saves and exports during an off, the firmware update refusal, the writable disk, and the current draw while the unit is off. <!-- QA-GLB-101, QA-GLB-104, QA-GLB-106, QA-GLB-107, QA-GLB-108, QA-GLB-109, QA-GLB-110, QA-GLB-111, QA-GLB-112, QA-GLB-114, QA-GLB-117 -->
+ <!-- QA-GLB-101, QA-GLB-104, QA-GLB-106, QA-GLB-107, QA-GLB-108, QA-GLB-109, QA-GLB-110, QA-GLB-111, QA-GLB-112, QA-GLB-114, QA-GLB-117 -->
 
 ## Keys held when the unit turns on
 

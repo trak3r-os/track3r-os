@@ -60,7 +60,7 @@ The FM has four operators, which are four sine waves. A modulator is an operator
 
 **WAVE** and **DUTY** can now be bound to a MIDI controller with Learn (`Vol` and `Fx` together, see [The panel](panel.md)). Turning the controller steps through the four waves or the four duties. Before, these two rows refused Learn. <!-- QA-MOD-141 -->
 
-**Eight more waves.** In v1.2.0 the Chip has twelve waves, not four. Waves 0 to 3 are the pulse, triangle and two noises. Waves 4 to 11 are **2A03 PULSE**, **SID SAW/TRI**, **NOISE/LFSR**, **FM BELL**, **SUPER SQR**, **ZAP/LASER**, **ARP CHORD** and **CHIP DRUM**. The wave row shows the names. Ten new rows sit on the Chip's pages: **SHAPE** (the pulse width or the drop depth of the wave), **SUB OSC** (a triangle an octave down), **CUTOFF** and **RESONANCE** (a low-pass), **BITCRUSH**, **PWM DEPTH**, **PWM RATE**, **ENV AMT** (the envelope moves the cutoff), **DECIMATE** and **CHORD** (OFF, OCTAVE, FIFTH, MAJOR, MINOR, SUS4, MAJ7, MIN7: a four-step chord that replaces the two arpeggio notes). Some rows act on every wave; **SHAPE** and the two PWM rows act on waves 4 to 11 only. A project saved earlier sounds the same, because every new row starts at a neutral value. Not checked on the unit: how each wave sounds and what a voice costs in processing time. <!-- new Community OS behaviour; sources: modules/chip/README.md -->
+**Eight more waves.** In v1.2.0 the Chip has twelve waves, not four. Waves 0 to 3 are the pulse, triangle and two noises. Waves 4 to 11 are **2A03 PULSE**, **SID SAW/TRI**, **NOISE/LFSR**, **FM BELL**, **SUPER SQR**, **ZAP/LASER**, **ARP CHORD** and **CHIP DRUM**. The wave row shows the names. Ten new rows sit on the Chip's pages: **SHAPE** (the pulse width or the drop depth of the wave), **SUB OSC** (a triangle an octave down), **CUTOFF** and **RESONANCE** (a low-pass), **BITCRUSH**, **PWM DEPTH**, **PWM RATE**, **ENV AMT** (the envelope moves the cutoff), **DECIMATE** and **CHORD** (OFF, OCTAVE, FIFTH, MAJOR, MINOR, SUS4, MAJ7, MIN7: a four-step chord that replaces the two arpeggio notes). Some rows act on every wave; **SHAPE** and the two PWM rows act on waves 4 to 11 only. A project saved earlier sounds the same, because every new row starts at a neutral value. <!-- new Community OS behaviour; sources: modules/chip/README.md -->
 
 ### SID: a chip voice with four pages
 <!-- sync: src=modules/sid/module.json,modules/sid/sid_dsp.h qa=QA-MOD-210,QA-MOD-216,QA-MOD-217,QA-MOD-218 -->
@@ -103,10 +103,6 @@ Every module instrument (TB-303, FM, Chip, SID, Sine and the built-in ones) has 
 - `F8` (**UNDO**) takes back an edit. The three values are saved with the project and loaded again. <!-- QA-INS-308 QA-INS-311 -->
 - A project saved earlier sounds the same: the pan reads 50 and both sends 0. <!-- QA-INS-311 -->
 - **RATE** (new in track3r-os): TB-303, FM, SID, Chip and Sine have a fourth row on the MIX page, **RATE** (FULL, 1/2, 1/4). At 1/2 or 1/4 the module is asked for half or a quarter of the samples and each one is held twice or four times: the sound turns crunchier and aliased on purpose, and the module costs about half or a quarter of its CPU. FULL is the sound you had before. Changing the row never cuts a note: while the instrument sounds the change waits, and once it is silent the instrument restarts with its parameters as they were (a note started in that instant, a few milliseconds, is skipped). RATE belongs to the instrument: it is saved with the project, a loaded project plays it, and **UNDO** and **REDO** step it like any other change. Putting another module on the slot starts it at FULL until you set RATE again. <!-- QA-INS-312 QA-INS-313 -->
-
-Not yet checked on the unit: the MIX page and its RATE row.
-
-Not yet checked on the unit: everything else in this chapter.
 
 ## Try it
 <!-- sync: src=modules/tb303/module.json,modules/tb303/tb303_dsp.h qa=QA-MOD-145,QA-MOD-146,QA-MOD-147,QA-MOD-148 -->

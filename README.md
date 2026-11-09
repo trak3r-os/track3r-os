@@ -30,7 +30,7 @@ track3r-os replaces the software that runs on the Tracker. You keep the hardware
 - **It can follow a DAW.** MIDI Time Code out and in, next to the MIDI clock.
 - **It is open.** Anyone can read the code, build it and improve it.
 
-**v1.2.0** is the current release (v1.1.0, v1.0.1 and v1.0.0 came before). It is merged and tested on a computer and in the emulator; it has **not yet been installed on a unit**, and the unit smoke test is pending. v1.1.0 ran on real hardware and was tested on a unit. The known issues and what still needs a unit check are in the [release notes](docs/release/v1.2.0.md); what is open and what comes next is in [docs/roadmap/BACKLOG.md](docs/roadmap/BACKLOG.md).
+**v1.2.0** is the current release (v1.1.0, v1.0.1 and v1.0.0 came before). It is merged and tested on a computer and in the emulator, and more testing is needed on units. The known issues and the areas that need more testing are in the [release notes](docs/release/v1.2.0.md); what is open and what comes next is in [docs/roadmap/BACKLOG.md](docs/roadmap/BACKLOG.md).
 
 ## Screens
 

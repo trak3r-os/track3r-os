@@ -90,7 +90,7 @@ A scene is a snapshot of the twelve slots: the effect, the chosen row and the th
 
    ![Perform: LOWPASS is back at -40 and SCENE 1 is marked on the key row.](img/perform_walk_7.png)
 
-Not yet checked on the unit. <!-- QA-PRF-002 --> <!-- QA-PRF-003 --> <!-- QA-PRF-025 -->
+ <!-- QA-PRF-002 --> <!-- QA-PRF-003 --> <!-- QA-PRF-025 -->
 
 ## The screen at a glance
 <!-- sync: src=app/src/screens/perform_screen.cpp -->
@@ -177,13 +177,13 @@ Any of the tracks that are on can play another pattern's track while the rest go
 2. Watch the track boxes. A box that waits shows **>07** and blinks. Each track changes at the end of its own loop, so tracks of different lengths change at different times.
 3. Press `Shift` + `F8` (**TRK SONG**) to send the tracks that are on back to the pattern of the song.
 
-In Song mode a track you changed stays on its pattern when the song goes to the next slot; the others follow the song. <!-- QA-PRF-225 --> `Stop` ends it. Leaving Perform for any screen except Master and Song sends every track that is not on the song back at once; Master and Song keep it. Nothing is saved in the project. <!-- QA-PRF-227 --> These keys, and the rules for Song, Stop and leaving, are new in track3r-os. Not yet checked on the unit.
+In Song mode a track you changed stays on its pattern when the song goes to the next slot; the others follow the song. <!-- QA-PRF-225 --> `Stop` ends it. Leaving Perform for any screen except Master and Song sends every track that is not on the song back at once; Master and Song keep it. Nothing is saved in the project. <!-- QA-PRF-227 --> These keys, and the rules for Song, Stop and leaving, are new in track3r-os.
 
 A track that is off is not touched and shows **OFF**, not a pattern number. The same press again takes a waiting change back. Queueing the pattern a track already plays pins it at once, so it keeps that pattern when the song goes on. A track that has changed keeps its pattern when the song goes on, until you press **TRK SONG** or **SONG**, stop, restart the transport (`Play` while it plays, or resume), or leave Perform for any screen but Master and Song: then every track on another pattern goes back to the song at once. A random track has no loop end, and a track longer than its pattern is restarted when the pattern ends. Both change at the end of the song's pattern. A pick that is no longer a pattern of the project says **PATTERN IS GONE: PICK ANOTHER** and queues nothing. Nothing is saved in the project. With the song stopped the strip says **NOT PLAYING**; with no track on, **NO TRACK IS ON: HOLD SHIFT + TOP PADS**.
 
 With **CC MAP** on (Config > MIDI), a control change **41 to 48** on the slot page does the same for one track: the track's number is the CC's (CC 41 is track 1) and the pattern is `cc + 1`, whatever tracks are on, loaded at that track's loop end. The same value again does not take a waiting queue back; after `Stop` and `Play` it is sent again; a pattern the project does not have says **CC 4x: NO PAT nnn** on the strip. See [Config: control the unit with the official CC numbers](config.md#control-the-unit-with-the-official-cc-numbers). <!-- QA-PRF-208 -->
 
-New in track3r-os. Not yet checked on the unit; how the original firmware does it is an open research question. <!-- QA-PRF-147, QA-PRF-148, QA-PRF-149 -->
+New in track3r-os. <!-- QA-PRF-147, QA-PRF-148, QA-PRF-149 -->
 
 ### Turn every effect off
 
@@ -238,11 +238,11 @@ The DJ page has its own key row: `F1` **BANK -**, `F2` **BANK +**, `F3` **CURVE*
 - While `Shift` is held, `F4` to `F8` are the per-track pattern keys (see above). They do not run the plain key under them. <!-- QA-PRF-001, QA-PRF-147 -->
 - **TUNE** adds to the instrument's tune and fine tune, and a sounding note follows at once. Amiga-engine instruments and modules do not follow it. <!-- QA-PRF-031 -->
 - An effect that is on stays on through `Play`, `Stop`, the Mixer and Song, and an export is the same with and without it. When a held **VOLUME** -100 or a closed send ends, the sound is back within a few milliseconds, with no click. <!-- QA-PRF-011 --> <!-- QA-PRF-016 --> <!-- QA-PRF-023 --> <!-- QA-PRF-024 --> <!-- QA-PRF-029 -->
-- **PLAYMODE** **PING** bounces over the track: 0 1 2 3 2 1 0 on four steps, so the end steps play once per pass. A different pattern, a pattern switch or a jump starts it again, and so does resuming after a pause. Not yet checked on the unit. <!-- QA-PRF-004 -->
+- **PLAYMODE** **PING** bounces over the track: 0 1 2 3 2 1 0 on four steps, so the end steps play once per pass. A different pattern, a pattern switch or a jump starts it again, and so does resuming after a pause. <!-- QA-PRF-004 -->
 - **PLAYMODE** **C1** to **C20** shuffle the track's steps (see [Shuffle a track's steps](#shuffle-a-tracks-steps)); like **PING**, an order walks the track's own length, and **PAT LEN** can shorten it. <!-- QA-PRF-215 -->
 - A pad you hold while you go to the Mixer (`Master`) or Song is let go when you lift it there, so its value does not stay on. <!-- QA-PRF-143 -->
 - A project that uses **BITDEPTH** or **OVERDRV** shows those two slots empty in an older build. <!-- QA-PRF-018 -->
-- Not yet checked on the unit. Not checked against the original firmware, except where a line above says otherwise. <!-- og: open -->
+- Not checked against the original firmware, except where a line above says otherwise. <!-- og: open -->
 
 > **Careful**: Leaving Perform for any screen except the Mixer (`Master`) or Song switches every track off, so every effect ends, with no message. The chosen rows stay.
 

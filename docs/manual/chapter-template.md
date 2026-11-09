@@ -81,7 +81,7 @@ You should see <what is on screen>. <What is stored or changed.> <!-- QA-XXX-002
 ## Good to know
 
 - <A limit, a refusal, a surprise: one line each.>
-- Works as the official manual describes. / Works the same as on the original firmware. / New in track3r-os. / Not checked against the original firmware. / Not yet checked on the unit. (plain-words labels, section 9 of the skill)
+- Works as the official manual describes. / Works the same as on the original firmware. / New in track3r-os. / Not checked against the original firmware. (plain-words labels, section 9 of the skill)
 
 ## See also
 

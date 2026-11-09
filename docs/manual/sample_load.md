@@ -34,7 +34,6 @@ Use Sample load to put a sound file from the card into an instrument. Browse the
 > 2. Press `F1` (**LOAD**).
 > 3. The instrument takes its name from the file.
 
-
 ## More tasks
 
 ### Choose the instrument that gets the file
@@ -62,7 +61,7 @@ Start on Sample load, with the cursor on a `.wav` file.
 
 A long file starts before it is all read from the card. If the card fails in the middle of the file, the strip says **PREVIEW FAILED** and the part that was read goes on playing.
 
-New Community OS behaviour. Not yet checked on the unit.
+New Community OS behaviour.
 
 ### Load a sample file
 
@@ -74,8 +73,6 @@ Start on Sample load. The cursor must be on the file, not on a folder.
 If the instrument in view already holds something, nothing is replaced yet. The strip asks, for example **REPLACE 03 KICK: F1 AGAIN**, and `F1` reads **REPLACE?**. Press `F1` again within four seconds to load. A free instrument loads at once, with no question. A module instrument (the TB-303, for example) is never replaced: the strip says **SLOT HAS A MODULE: INSTRUMENT, SHIFT+F4 DELETE**. Delete it on the Instrument screen first. A load that was asked for cannot be undone, but it leaves the undo history of your pattern and song as it was. Only the undo of that instrument's own parameter edits ends, and the strip says so. <!-- QA-SLD-019, QA-SLD-020 -->
 
 You should see the instrument named after the file. A one-shot file plays once. A file that says it loops plays in a loop, forward or ping-pong. The file plays at the pitch of the rate it was recorded at.
-
-Not yet checked on the unit.
 
 ### Open a folder
 <!-- sync: src=app/src/sample_actions.cpp qa=QA-SLD-017,QA-SLD-025,QA-SLD-026,QA-SLD-027 -->
@@ -125,8 +122,6 @@ Start on Sample load, in a folder with more files than fit on one screen. A page
 
 You should see the cursor move. These keys do not load a sample.
 
-Not yet checked on the unit.
-
 ### Load one channel of a stereo file
 <!-- sync: src=app/include/o3os/app/sample_load_view.h qa=QA-SLD-011,QA-SLD-012,QA-SLD-013,QA-FIL-131,QA-FIL-132,QA-FIL-133,QA-FIL-134 -->
 
@@ -157,7 +152,7 @@ Start on Sample load. Put the cursor on a stereo file.
 4. Press `Master`, then `F1` (**MIXER**). Set the **PAN** of the first track to 0 and the **PAN** of the second to 100 (see [Mixer](mixer.md)). Leave the pan of both instruments at the centre: the instrument's pan moves the track's, so an instrument off the centre is not hard left or right. <!-- QA-FIL-123 -->
 5. Press `Play`. <!-- QA-FIL-124 -->
 
-You should hear the left channel from the left output and the right channel from the right output. Each note uses two voices, because each track plays one instrument. A voice is one playing sound; the unit has a fixed number of them (see the [glossary](glossary.md)). Not yet checked on the unit.
+You should hear the left channel from the left output and the right channel from the right output. Each note uses two voices, because each track plays one instrument. A voice is one playing sound; the unit has a fixed number of them (see the [glossary](glossary.md)).
 
 ## Keys on this screen
 
@@ -204,7 +199,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 ## Good to know
 
 - `Up` and `Down` move the cursor one row, and the encoder does too; turn it quickly and it moves 4 rows a detent, then 8 (new Community OS behaviour, the same in the `File` lists; the numbers are being tuned). `Shift` + the encoder pages a detent at a time. `Left` and `Right` jump by the first letter of the name. <!-- QA-SLD-001, QA-SLD-015, QA-SLD-016, QA-SLD-031 -->
-- A file name longer than 32 characters is cut in the middle: the first 25 characters, a **~**, then the last 6, so the end of the name (for example `take2.wav`) stays readable. A stereo file keeps three cells for **ST**, so its name is cut to 29. The card keeps the full name, and Sample load finds the file by it. This is new in the Community OS. <!-- QA-SLD-029 --> Not yet checked on the unit.
+- A file name longer than 32 characters is cut in the middle: the first 25 characters, a **~**, then the last 6, so the end of the name (for example `take2.wav`) stays readable. A stereo file keeps three cells for **ST**, so its name is cut to 29. The card keeps the full name, and Sample load finds the file by it. This is new in the Community OS. <!-- QA-SLD-029 -->
 - Sample load does not delete. To clear a slot, go to the Instrument screen and press `Shift` + `F4` (**DELETE**). It asks nothing, and one `F8` (**UNDO**) brings the instrument back. The pattern steps stay. <!-- QA-INS-030 -->
 - To copy an instrument, press `Shift` + `F2` (**COPY**) on the Instrument screen, then `Shift` + `F3` (**PASTE**) on a free slot. The copy shares its audio with the source and keeps playing when the source is deleted. <!-- QA-INS-044, QA-INS-048 -->
 - The file's header decides its format, not its name. An AIFF named `.wav` loads as an AIFF. <!-- QA-SLD-006 -->
@@ -214,7 +209,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 - An AIFF with its sound data before its format header says **AIFF: SSND BEFORE COMM NOT SUPPORTED**. This is a known limit. It is not a damaged file. <!-- QA-SLD-014 -->
 - AIFF files with NONE or sowt compression load. Another compression says **IMPORT <NAME> FAILED**. <!-- QA-SLD-003 -->
 - An 8SVX file takes the name stored in the file. A repeat part loops forward. <!-- QA-SLD-004 -->
-- AIFF and 8SVX loading is **Not yet checked on the unit**. <!-- QA-SLD-002 QA-SLD-003 QA-SLD-004 -->
+- AIFF and 8SVX loading is <!-- QA-SLD-002 QA-SLD-003 QA-SLD-004 -->
 - A sample at a rate other than 44,100 Hz plays at the pitch of its own rate. Earlier builds played it too high. A sample loaded before this change may sound lower now. Retune its **TUNE** once. <!-- QA-SLD-007 QA-SLD-008 -->
 - A sample saved at another rate reloads at that rate and keeps its pitch. <!-- QA-SLD-010 -->
 

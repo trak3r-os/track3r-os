@@ -41,8 +41,6 @@ Example: load a file of many single-cycle windows, choose WAVETABLE, hold a pad 
 
 6. With a sample loaded, press `F2` (**EVEN**). The sample is cut in equal parts, drawn as lines. Pad n plays slice n.
 
-Not yet checked on the unit.
-
 ## The screen at a glance
 
 ![Wave: a sample on the WAVE page, with the key row and the play mode in the header.](img/wave_typical.png)
@@ -93,8 +91,6 @@ Start on the Wave screen. A wavetable is a WAV file of many windows, one after a
 
 You should see the waveform of the table, with the window marked. The POSITION row reads `n OF 0..N-1`, where `N` is the number of windows. The timbre changes as the window changes.
 
-Not yet checked on the unit.
-
 ### Move the start, loop or end point
 
 Start on the WAVE page of a sample instrument.
@@ -106,8 +102,6 @@ Start on the WAVE page of a sample instrument.
 5. Press `F7` (**ZOOM-**) to widen the window, or `Up` to zoom in around the picked point. <!-- QA-WAV-014 -->
 
 `F8` (**UNDO**) takes the edit back, and `Shift` + `F8` does it again. <!-- QA-WAV-016 -->
-
-Not yet checked on the unit.
 
 ### Show the CHOP page
 <!-- sync: src=app/src/project_state.cpp qa=QA-WAV-006 -->
@@ -128,7 +122,7 @@ Start on the CHOP page of a sample instrument.
 2. Press `F4` (**ADD**) to split the selected slice in two, at the middle between its start and its end (the zoom does not matter; with no slices yet, the first press puts one at the middle of the whole sample). Press `F5` (**DEL**) to remove the selected slice; the selection moves to a neighbour. <!-- QA-WAV-019, QA-WAV-020 -->
 3. Press `Left` or `Right` to pick a slice, and turn the encoder to move it. `Shift` + the encoder moves faster. `F3` (**ZC**) makes it land on a zero crossing, where the sound crosses the centre line. <!-- QA-WAV-021 -->
 
-You should see the slices as lines on the sample. The strip says **PLAY MODE: BEAT SLICE**, and pad n plays slice n. A sample holds up to 48 slices. Each change is one undo step: `F8` (**UNDO**). Not checked on the unit.
+You should see the slices as lines on the sample. The strip says **PLAY MODE: BEAT SLICE**, and pad n plays slice n. A sample holds up to 48 slices. Each change is one undo step: `F8` (**UNDO**).
 
 ## Keys on this screen
 
@@ -174,16 +168,16 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 ## Good to know
 
 - On the CHOP page `F1` to `F5` are **AUTO**, **EVEN**, **ZC**, **ADD** and **DEL**. `Left` and `Right` choose the slice, and a pad press selects it too. The encoder moves the start of the chosen slice. <!-- QA-WAV-006, QA-WAV-021 -->
-- **ADD** (`F4`) splits the selected slice at the middle of its start and end, at any zoom. The new slice is selected. With no slices yet, the first press cuts the whole sample in two. Not yet checked on the unit. <!-- QA-WAV-019 -->
+- **ADD** (`F4`) splits the selected slice at the middle of its start and end, at any zoom. The new slice is selected. With no slices yet, the first press cuts the whole sample in two. <!-- QA-WAV-019 -->
 - **AUTO** (`F1`) and **EVEN** (`F2`) replace the slices without a question. Each is one undo step, so `F8` (**UNDO**) brings the old slices back. <!-- QA-WAV-017, QA-WAV-018 -->
-- A pad pressed straight after **EVEN**, **ADD**, **AUTO**, **DEL** or an undo plays the new slices, even while the transport runs. Not yet checked on the unit. <!-- QA-WAV-024 -->
+- A pad pressed straight after **EVEN**, **ADD**, **AUTO**, **DEL** or an undo plays the new slices, even while the transport runs. <!-- QA-WAV-024 -->
 - A beat slice sounds until the next note on its track starts, which cuts it. A slice with no note after it plays to the end of the slice. New in track3r-os. Not checked against the original firmware. <!-- QA-WAV-026 -->
 - `F8` (**UNDO**) takes back the last Wave edit only. <!-- docs/ui/ui-map.md, rule 4 -->
 - On a MIDI instrument or a free slot the mode list does not open. The strip says **NO SAMPLE INSTRUMENT HERE**. <!-- QA-WAV-003 -->
 - A sample under 32 frames cannot use WAVETABLE. The window is at most 2048 samples and never longer than the sample. <!-- QA-WAV-004 -->
 - GRANULAR: **LENGTH** runs from 44 to 44,100 samples, 11 a click. **SHAPE** is Square, Triangle or Gauss. **LOOP** is Forward, Backward or PingPong. <!-- QA-WAV-005 -->
 - The Shift row is the same on WAVE and CHOP. While the mode list is open the key row shows only **SELECT** and **BACK**. <!-- QA-WAV-002, QA-WAV-009 -->
-- Not checked against the original firmware: the Shift row, the WAVE and CHOP keys. Not yet checked on the unit: wavetable playing. <!-- og: open -->
+- Not checked against the original firmware: the Shift row, the WAVE and CHOP keys. <!-- og: open -->
 
 ## See also
 

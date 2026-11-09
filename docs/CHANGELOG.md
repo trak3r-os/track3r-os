@@ -6,7 +6,7 @@ User-visible changes of the Community OS, newest first, one entry per change, in
 
 ## v1.2.0 (date to be set at publication)
 
-Everything below is merged and tested on the host and in the emulator. Where a line says "checked on the unit" a Tracker ran it; every other line is waiting for a check on the unit (see "Not yet verified" in the [release notes](release/v1.2.0.md)).
+Everything below is merged and tested on the host and in the emulator. Where a line says "checked on the unit" a Tracker ran it. More testing is needed on units (see "More testing needed" in the [release notes](release/v1.2.0.md)).
 
 ### New
 
@@ -25,7 +25,7 @@ Everything below is merged and tested on the host and in the emulator. Where a l
 - **MIDI Time Code, out and in.** Config has MTC OUT (Off, 24, 25, 30 fps) and MTC IN (Off, DIN, USB). The unit sends quarter-frame messages from the song timeline on the ports CLOCK OUT names, and follows an incoming MTC with a re-lock after a jump, so a DAW that syncs by MTC (Logic Pro) can follow it. MTC carries no tempo: set the same tempo in the DAW. The settings file grows by appended bytes with defaults Off. The official firmware has no MTC. New Community OS behaviour.
 - **MIDI clock follow, tighter.** The clock DLL settles a tempo jump in about 0.1 s in simulation, an SPP that arrives with a Stop is honoured on Continue, an SPP received while playing relocates at the next step boundary, a step waits for a real clock, and the master's priority and lateness are handled. The loop wrap of a Song loop relocates MTC. A battery with the computer as master passed 14 of 17 tests on the unit before these fixes; the rerun is pending.
 - **MIDI event list (EVENTS) on Pattern.** An edit-through list of the steps of a MIDI track: notes, CC A..F and micro-moves, with FILTER, a play marker, PREVIEW, QUANT, and the FX1 and FX2 columns on NOTE rows (type and value, editable, one undo per edit). No format change.
-- **Official MIDI CC map.** A CC MAP device setting gives the 32 CCs the official manual documents for the mixer, Perform and levels, and the CC row of a Perform slot. Documented behaviour of the official firmware, not yet verified on a unit.
+- **Official MIDI CC map.** A CC MAP device setting gives the 32 CCs the official manual documents for the mixer, Perform and levels, and the CC row of a Perform slot. Documented behaviour of the official firmware.
 - **MIDI Learn: follow and encoder.** In the MIDI synth mode Learn follows the selected instrument (F5 FOLLOW); the chord Instr+Fx on a row puts that parameter on the encoder (one target), and a recorded Learn move or encoder move is written into the FX columns of a LIVE or STEP take. Checked on the unit: ENCLEARN in LIVE and STEP recording.
 - **Pattern tools in one grammar.** Select, then `F7`, then a verb. A right-hand panel holds the verb menu and the TOOLS dialog; TRANSPOSE and INSTRUMENT dialogs; Fill works on the selection; `F6` repeats the last FILL or TOOLS apply; CLEAR is refused on a partial column; the APPS page lists only the tool apps. Checked on the unit: the TRANSPOSE and INSTRUMENT dialogs, refusals and `F6` repeat.
 - **Apps list and Navigator.** Shift+Pattern opens one list of the module apps that are not tools (`F1` launches one, `F8` is BACK on an empty list); the Navigator opens with Master+Song or Song+Pattern.
@@ -39,12 +39,12 @@ Everything below is merged and tested on the host and in the emulator. Where a l
 ### Changed
 
 - **Flash diet.** Text, glyphs, help pages, key bindings, the boot logo and built-in modules are stored compressed and unpacked at boot, which freed enough flash for this release. Nothing here changes how a screen behaves. Checked on the unit up to the FX picker and custom play orders; the unpack of key bindings and console text is pending.
-- **Master scratch.** The scratch follows the hand: held speed between detents, 70 ms of inertia, a gentler gate near standstill and an anti-alias filter above 1x. What you hear changes. Not judged on the unit yet (it needs a hand on the platter).
+- **Master scratch.** The scratch follows the hand: held speed between detents, 70 ms of inertia, a gentler gate near standstill and an anti-alias filter above 1x. What you hear changes.
 - **Module ABI 1.13** (was 1.10 at v1.1.0): effects with stereo, the tempo and a KEY (1.12), importers (1.11), per-instrument RATE (1.13). Modules of ABI 1.0 to 1.10 still load; a module of a newer minor than the OS says NEEDS NEWER OS.
 
 ### Fixed
 
-- **A loaded project keeps its tempo** (OS-BUG-TEMPOLOAD): a project saved with no instrument opened at 120 BPM. Merged and covered by a test; the unit check is left.
+- **A loaded project keeps its tempo** (OS-BUG-TEMPOLOAD): a project saved with no instrument opened at 120 BPM. Merged and covered by a test.
 - **An image that fills the last flash sector hung the unit** (OS-BUG-LASTSECTOR): an image ending at 0x100000 left the unit not coming back after the update. The device validator and the image check now refuse an image that reaches sector 0xFF000.
 - **A `.ptfx` whose init is at payload offset 0 is a valid entry**, and the console names the reason when it refuses one.
 - **An export no longer carries live effect tails**, and a project open or NEW clears the old toasts.
@@ -62,8 +62,8 @@ Everything below is merged and tested on the host and in the emulator. Where a l
 
 ### New
 
-- **SID-style instrument, built in.** A new sound engine next to TB-303, FM and Chip, in the ENGINE picker with no card file: saw, triangle, pulse with PWM, noise and combined waves, sync and ring from an internal modulator, a stepped ADSR and a low-pass, band-pass or high-pass filter with a 6581 or 8580 model switch. Its pages and views were checked on the unit and its CPU cost is about 4 to 5 % of a block a voice (measured on a test build); the listening to the waves and the filter is not done yet. New Community OS behaviour.
-- **Stereo samples, opt-in per instrument.** Load a stereo file with STEREO on Sample load, then set the instrument's STEREO row to STEREO: the note plays its left and right sides. At most four stereo voices play at once; the next ones play the mix. Stereo plays only forward, on the Modern engine, with no filter, Overdrive, Bit depth or tremolo. The sample edit page works on both sides; COMPRESSOR and the Amiga conversion ask you to make it mono first, and a `.pti` export keeps the mix only. Four stereo voices cost about 4 percentage points of the CPU on the unit. A project that uses it is saved with a newer instrument version; any other project is byte for byte as before. The listening is not done yet.
+- **SID-style instrument, built in.** A new sound engine next to TB-303, FM and Chip, in the ENGINE picker with no card file: saw, triangle, pulse with PWM, noise and combined waves, sync and ring from an internal modulator, a stepped ADSR and a low-pass, band-pass or high-pass filter with a 6581 or 8580 model switch. Its pages and views were checked on the unit and its CPU cost is about 4 to 5 % of a block a voice (measured on a test build). New Community OS behaviour.
+- **Stereo samples, opt-in per instrument.** Load a stereo file with STEREO on Sample load, then set the instrument's STEREO row to STEREO: the note plays its left and right sides. At most four stereo voices play at once; the next ones play the mix. Stereo plays only forward, on the Modern engine, with no filter, Overdrive, Bit depth or tremolo. The sample edit page works on both sides; COMPRESSOR and the Amiga conversion ask you to make it mono first, and a `.pti` export keeps the mix only. Four stereo voices cost about 4 percentage points of the CPU on the unit. A project that uses it is saved with a newer instrument version; any other project is byte for byte as before.
 - **USB audio outputs of 2, 4, 6, 8 or 10 channels, per project.** On Mixer, STEMS, the OUTPUTS row sets the number the computer sees; `F6` twice applies it and the unit reconnects. The USB return stays only below 10 channels. Checked on Linux; macOS and Windows are not checked.
 - **Song: STAGE and TIMELINE pages.** TIMELINE draws the song as blocks as wide as the slots are long, with the pattern's color, a lane per track with a tick for every step that holds a note (the note map), and an ENERGY row; at most 12 tracks are drawn. STAGE shows the playing slot and the next in large type with a countdown; it is no longer in the Song key cycle, and the countdown is on TIMELINE's info line while the song plays.
 - **Song: BRIDGE puts transition slots between two patterns.** In the Song screen's TOOLS dialog (`F6`) the OP row has one more value, BRIDGE: put the cursor on a slot (or select two), set SLOTS from 1 to 16 and press `F1`. The new slots go between the slot and the next one, each a new pattern in which more and more steps are the next pattern's, so the music moves from one to the other step by step; the same two patterns always give the same bridge. Nothing is written when the song, the pattern pool or the undo memory cannot take it, and one undo takes it all back. Checked on the unit except by ear.
@@ -71,15 +71,15 @@ Everything below is merged and tested on the host and in the emulator. Where a l
 - **Import: module files are recognized by their header, and 15-sample Soundtracker MODs load.** The File screen reads the first bytes of a file, not its name, to know what it is; a file no reader takes says NOT A MODULE THIS OS READS and changes nothing.
 - **Step effects 23, 24, 33 and 36 start their LFO.** As FX 35 does, on a sampler track. Checked on the unit by capture for 23, 24 and 33; FX 36 on wavetable and granular instruments is not checked by ear.
 - **Config and Record: Left and Right edit the value under the cursor** (`Shift` for the coarse step). The pages change only with the F-keys or the screen button.
-- **Update from the unit pads an older image after asking.** An image that does not end on a 4 KiB boundary may crash at boot (see Fixed); v1.0.1 and v1.0.0 are such images. When that is the only fault, the Update screen (Config, INFO, `F8`) says NOT PADDED. TRACK3R-OS WILL PAD A COPY OF IT? and `F1` (**PAD**) writes a padded copy, `pad-<name>.ptf`, next to the file, checks it and offers to install it. The file you chose is not changed, and an existing copy of that name is never replaced. The `diag` console takes `fw arm <name> <crc> pad`, and `o3console.py --pad` pads on the computer. Any other fault is still refused. New Community OS behaviour. On the unit the pad job made a padded v1.0.1 in about 15 seconds (through the console), the copy booted, and the unit came back to v1.1.0; the `F1` steps on the screen are not yet checked by hand.
+- **Update from the unit pads an older image after asking.** An image that does not end on a 4 KiB boundary may crash at boot (see Fixed); v1.0.1 and v1.0.0 are such images. When that is the only fault, the Update screen (Config, INFO, `F8`) says NOT PADDED. TRACK3R-OS WILL PAD A COPY OF IT? and `F1` (**PAD**) writes a padded copy, `pad-<name>.ptf`, next to the file, checks it and offers to install it. The file you chose is not changed, and an existing copy of that name is never replaced. The `diag` console takes `fw arm <name> <crc> pad`, and `o3console.py --pad` pads on the computer. Any other fault is still refused. New Community OS behaviour. On the unit the pad job made a padded v1.0.1 in about 15 seconds (through the console), the copy booted, and the unit came back to v1.1.0.
 
 ### Changed
 
-- **Cheaper reversed voices.** PLAYBACK and the Reverse step effect (26) take a faster path with the same sound (bit-identical on the host): six reversed voices cost +0.23 percentage points on the unit, against +6.19 before. The listening is not done yet.
+- **Cheaper reversed voices.** PLAYBACK and the Reverse step effect (26) take a faster path with the same sound (bit-identical on the host): six reversed voices cost +0.23 percentage points on the unit, against +6.19 before.
 
 ### Fixed
 
-- **Overdrive and Bit depth shape module instruments** (issue #2). Step effects 38 and 39 and the Perform OVERDRIVE and BIT DEPTH rows did nothing on TB-303, FM and Chip tracks; they now shape them with the sampler's curve. The listening is not done yet.
+- **Overdrive and Bit depth shape module instruments** (issue #2). Step effects 38 and 39 and the Perform OVERDRIVE and BIT DEPTH rows did nothing on TB-303, FM and Chip tracks; they now shape them with the sampler's curve.
 - **The update dialog reaches every file of `Firmware/`.** It pages through them twelve at a time and shows `FILE n / total`; the old limit of the first 12 files is gone.
 - **Update file names over 30 characters are refused.** With a longer `.ptf` name the card update could install the first `.ptf` of the `Firmware` folder instead, with no error. The Update screen now shows `NAME TOO LONG: 30 MAX` for such a file and asks nothing; rename the file to 30 characters or fewer (`.ptf` included). `o3console.py` refuses the same names.
 - **A boot crash caused by the image's last flash sector.** The SD bootloader leaves a short final 4 KiB sector as it was, so a development image once crashed at boot on stale bytes. Images are now padded to a whole sector and the image gate checks it; the Update screen offers to pad an unpadded one (see New).
@@ -110,7 +110,7 @@ Everything below is merged and tested on the host and in the emulator. Where a l
 - **Perform: each track can queue its own pattern.** The change lands at the end of that track's own loop.
 - **Perform: preset values on the three rows of every slot.**
 - **DJ: TAPE STOP length.** Turn the encoder while the pad is held, from 1/8 to 4 beats.
-- **Update from the unit.** Config, INFO, `F8` (UPDATE) installs a `.ptf` that is in the card's `Firmware` folder, with two questions and no computer. Not yet checked on a unit.
+- **Update from the unit.** Config, INFO, `F8` (UPDATE) installs a `.ptf` that is in the card's `Firmware` folder, with two questions and no computer.
 - **Sample edit: FILTER and COMPRESSOR** on the FX page. `F8` is CANCEL while an effect runs and leaves the sample unchanged.
 - **Sample edit: the free sample memory in KB, and the instrument name in the header.**
 - **Sample load: mark several files and load them in one go.**

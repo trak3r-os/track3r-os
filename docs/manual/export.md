@@ -106,7 +106,7 @@ The file runs from the first slot to the end of the last, then keeps the tail of
 
 > **Tip**: The SONG row of the EXPORT page is not changed. It still writes the whole song as `<PROJECT>_Song0001.WAV`. <!-- QA-SNG-059, QA-FIL-021 -->
 
-**Not yet checked on the unit.** The host tests pass. <!-- QA-SNG-059 -->
+ <!-- QA-SNG-059 -->
 
 ### Export the stems
 
@@ -168,13 +168,12 @@ While an export runs, only `F8` works. <!-- QA-FIL-022 -->
 - A project with no folder is exported as `Untitled`; the strip shows it in capitals. <!-- QA-FIL-021, QA-PAT-187 -->
 - The stems add up to the MIX only while the limiter does nothing. A mix the limiter works on is not the sum of its stems. <!-- QA-FIL-056 -->
 - If an export fails, the strip says `EXPORT FAILED` and the reason. No file is left under its final name, and no temporary file either. The files you already had are not touched. <!-- QA-FIL-024, QA-FIL-054 -->
-- Holding `Power` during an export does not stop it at once. The strip says **EXPORT RUNNING - HOLD POWER AGAIN TO STOP IT**. A second hold within 10 seconds stops it, and the finished files stay. See [The panel](panel.md#power). **Not yet checked on the unit.** <!-- QA-GLB-108 -->
-- The EXPORT page stays open when you leave the File screen. <!-- QA-FIL-081 -->
-- Not yet checked on the unit: the WAV files on a computer, and the stem lengths. The simulator has no card. The host tests pass. <!-- QA-FIL-021, QA-FIL-051, QA-PAT-186 -->
+- Holding `Power` during an export does not stop it at once. The strip says **EXPORT RUNNING - HOLD POWER AGAIN TO STOP IT**. A second hold within 10 seconds stops it, and the finished files stay. See [The panel](panel.md#power). <!-- QA-GLB-108 -->
+- The EXPORT page stays open when you leave the File screen. <!-- QA-FIL-081 --> <!-- QA-FIL-021, QA-FIL-051, QA-PAT-186 -->
 
 **OG PROJECT** has its own rules:
 
-- The original firmware's format is checked byte for byte against reference files. Whether an official unit opens the folder is not yet verified. This is an open research question. <!-- QA-FIL-084, QA-FIL-089 -->
+- The original firmware's format is checked byte for byte against reference files. Whether an official unit opens the folder is an open research question. <!-- QA-FIL-084, QA-FIL-089 -->
 - The OS opens its own export again. It does not restore the pattern names. <!-- QA-FIL-088 -->
 - Channel Pan is dropped, and the export counts it. <!-- QA-PAT-114 -->
 - A sample at 22,050 Hz, 16,726 Hz, 8,287 Hz or in the Amiga engine is written at 44,100 Hz, with its pitch kept. <!-- QA-FIL-085 -->

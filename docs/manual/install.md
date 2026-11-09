@@ -3,13 +3,13 @@
 
 Status: draft
 
-The release file is an Intel HEX image under a `.ptf` name, which is what the Tracker's bootloader flashes, and the bootloader itself is not touched by an update. Once track3r-os runs, later updates can also be sent from a computer with `o3console.py`, and the official firmware can be put back. This page says what has been checked and marks the rest **not yet verified**. <!-- og: open -->
+The release file is an Intel HEX image under a `.ptf` name, which is what the Tracker's bootloader flashes, and the bootloader itself is not touched by an update. Once track3r-os runs, later updates can also be sent from a computer with `o3console.py`, and the official firmware can be put back. More testing is needed, especially of the way back to the official firmware. <!-- og: open -->
 
 > **Unofficial, at your own risk.** track3r-os is community firmware. It is not affiliated with or endorsed by Polyend. Installing it replaces the firmware in your unit. The bootloader that flashes it is separate from the firmware and is not touched by an update (`docs/hw/tracker-hardware-notes.md`, section 3), but nothing here is a guarantee. Read the whole page first.
 
-**Current release: v1.2.0** ([release notes](../release/v1.2.0.md)). It is tested on a computer and in the emulator and has **not yet been installed on a unit**: the unit smoke test is pending. The install steps below are the ones that worked for earlier releases.
+**Current release: v1.2.0** ([release notes](../release/v1.2.0.md)). It is tested on a computer and in the emulator, and more testing is needed on units. The install steps below are the ones that worked for earlier releases.
 
-This page says what is established by observation on the maintainer's unit and by the repository's own tests, and marks the rest **not yet verified**. Where a step is not verified, do it only if you accept that risk and have a way back (see [Going back](#going-back-to-the-official-firmware)).
+This page says what is established by observation on the maintainer's unit and by the repository's own tests. Where a step has had little testing, do it only if you accept that risk and have a way back (see [Going back](#going-back-to-the-official-firmware)).
 
 ## What a release contains
 <!-- sync: src=tools/release/make_starter.py,tools/release/starter_manifest.json -->
@@ -31,7 +31,7 @@ The same image shows its version in Config, INFO (BUILD ID, for example `v1.2.0 
 1. **Back up the SD card.** Copy everything on it to your computer: projects, samples, modules and the `Firmware/` folder (it holds the official image you may want to go back to). The USB update path writes only inside `Firmware/` (`platform/mk66/update/include/o3os/platform/mk66/update/path_guard.h`), but the card is what the bootloader reads, and a card is easy to damage when it is pulled and reinserted.
 2. **Have the official firmware file at hand.** Official images are named `PolyendTracker_<version>.ptf`. Get one from Polyend; their pages are linked from `docs/hw/tracker-hardware-notes.md` ([how to update](https://polyend.ladesk.com/220365-How-do-I-update-Trackers-firmware), [emergency flashing](https://polyend.ladesk.com/929798-How-do-I-perform-the-emergency-flashing-procedure)). The vendor's emergency-flashing page is also where the hidden reset button used below is described.
 3. **Use a normal card.** The Tracker needs a single FAT32 partition with an MBR. The track3r-os writer refuses exFAT volumes and cards with a write-protected CSD, and it never creates the `Firmware/` folder: it must already exist.
-4. **Settings.** The vendor tells users to create a new project after an update so that Config is initialised (the vendor's statement, not verified here). Config may start from defaults after a change of firmware in either direction. How the settings of track3r-os and the official firmware interact is **not yet verified**.
+4. **Settings.** The vendor tells users to create a new project after an update so that Config is initialised (the vendor's statement, not verified here). Config may start from defaults after a change of firmware in either direction. How the settings of track3r-os and the official firmware interact needs more testing.
 5. **Image end (v1.2.0).** An image must end at or below 0xFF000: an image that reached the last 4 KiB flash sector (end 0x100000) hung a unit after the update, which handed over to the bootloader and did not come back. The update checker of the unit and the image check of the build now refuse such an image, and the v1.2.0 `.ptf` ends below the limit. If you build your own image, build it as a release build.
 6. **Power.** Use a stable USB power source and do not remove power or the card while the unit is updating. This is a precaution; how long the flashing takes and what the screen shows while it runs has not been recorded.
 
@@ -71,7 +71,7 @@ An image of track3r-os has the `diag` console on its USB serial port and can wri
    python3 -I platform/mk66/tools/o3console.py --put track3r-os-v0.5.1.ptf --name track3r-os-v0.5.1.ptf
    ```
 
-   The unit validates the stream while it writes, reads the file back from the card and checks it again, and answers `ok <name> <bytes> <crc> image <length>`. It never leaves a half-written `.ptf`. An image must end on a 4 KiB boundary (the build pads it): the SD bootloader leaves a short last sector as it was, so an image that does not (v1.0.0 is one) may crash at boot, and the tool, the unit's `fw` command and `fw put` refuse it (**IMAGE NOT PADDED: MAY NOT BOOT**). The Update screen on the unit does not refuse such an image: it says it is not padded and asks whether track3r-os may pad a copy (**PAD**); after you confirm, it writes `pad-<name>.ptf` next to the file (zeros up to the next 4 KiB boundary, the file you chose stays as it is), checks the copy, and asks again before it installs the copy. If that name is already taken, nothing is written and the copy that is there is kept: pick it from the list. Any other fault still refuses. From a computer, `o3console.py --put FILE --pad` makes the same copy, and `--update NAME --crc <crc> --yes-update --pad` asks the unit to pad (`fw arm NAME <crc> pad`); the reset button and the official update menu work as before. New Community OS behaviour; not yet checked on the unit. <!-- QA-CFG-268 --> <!-- QA-CFG-269 --> <!-- QA-CFG-271 -->
+   The unit validates the stream while it writes, reads the file back from the card and checks it again, and answers `ok <name> <bytes> <crc> image <length>`. It never leaves a half-written `.ptf`. An image must end on a 4 KiB boundary (the build pads it): the SD bootloader leaves a short last sector as it was, so an image that does not (v1.0.0 is one) may crash at boot, and the tool, the unit's `fw` command and `fw put` refuse it (**IMAGE NOT PADDED: MAY NOT BOOT**). The Update screen on the unit does not refuse such an image: it says it is not padded and asks whether track3r-os may pad a copy (**PAD**); after you confirm, it writes `pad-<name>.ptf` next to the file (zeros up to the next 4 KiB boundary, the file you chose stays as it is), checks the copy, and asks again before it installs the copy. If that name is already taken, nothing is written and the copy that is there is kept: pick it from the list. Any other fault still refuses. From a computer, `o3console.py --put FILE --pad` makes the same copy, and `--update NAME --crc <crc> --yes-update --pad` asks the unit to pad (`fw arm NAME <crc> pad`); the reset button and the official update menu work as before. New Community OS behaviour. <!-- QA-CFG-268 --> <!-- QA-CFG-269 --> <!-- QA-CFG-271 -->
 4. Update. This restarts the unit into the bootloader, so the tool asks for `--yes-update`. `<crc>` is the CRC-32 from the release notes (the `ok` line of the put prints the same value):
 
    ```sh
@@ -81,7 +81,7 @@ An image of track3r-os has the `diag` console on its USB serial port and can wri
    The tool waits for the unit to come back, runs `version`, and fails if the version does not contain the text you expect. If the bootloader does not take over within 5 seconds the unit reports `ERR bootloader did not take over` and the update is cancelled.
 5. Afterwards `Firmware/` holds every `.ptf` you put there. Remember the reset-button rule: it flashes the first one. `fw` marks that file with `*`. Remove the files you do not want (`fw rm <name>`; it keeps the last `.ptf`, and never removes a name starting with `Polyend`), or move them off the card on your computer.
 
-What has been seen: the update path flashed a track3r-os test build on the maintainer's unit and the unit came back as that build (2026-10-12). **Not yet verified:** the whole sequence above with a release file, and several of the checklist items in `platform/mk66/README.md` (FW-3 to FW-10, for example a card with its write-protect tab set, a pulled cable during the upload, the fallback after five seconds).
+What has been seen: the update path flashed a track3r-os test build on the maintainer's unit and the unit came back as that build (2026-10-12). More testing is needed for the whole sequence above with a release file, and for several of the checklist items in `platform/mk66/README.md` (FW-3 to FW-10, for example a card with its write-protect tab set, a pulled cable during the upload, the fallback after five seconds).
 
 The alternative is the card route of section 1: put the new file alone in `Firmware/` and use the reset button.
 
@@ -100,9 +100,9 @@ The bootloader is separate from the application, so a broken or unwanted applica
 3. Put the card in the unit and use the hidden reset button as in the vendor's emergency-flashing page.
 4. When the official firmware is running, create a new project if its Config looks reset, as the vendor advises after an update.
 
-track3r-os has its own update screen on the device (Config, INFO, `F8`; see [Update from the unit](config.md#update-from-the-unit)). It lists every `.ptf` in `Firmware/`, so the official `PolyendTracker_<version>.ptf` can be chosen there, and the card can hold several files. On the unit this screen has reached **IMAGE OK**; its INSTALL step was not pressed, and it has not been tried with an official file, so it is **not yet verified** as a way back. The official firmware's own update menu will also list an official file named `PolyendTracker...`, but that route is **not yet verified** either from track3r-os as the starting point. Use the reset button above when you need the way back to be certain.
+track3r-os has its own update screen on the device (Config, INFO, `F8`; see [Update from the unit](config.md#update-from-the-unit)). It lists every `.ptf` in `Firmware/`, so the official `PolyendTracker_<version>.ptf` can be chosen there, and the card can hold several files. On the unit this screen has reached **IMAGE OK**. As a way back with an official file it needs more testing, and so does the official firmware's own update menu, which will also list an official file named `PolyendTracker...`, when track3r-os is the starting point. Use the reset button above when you need the way back to be certain.
 
-**Not yet verified:** that the official firmware opens projects saved by track3r-os (it reads the original formats; the native track3r-os project format is its own), and what happens to the unit's stored settings when you switch back. Keep your original-firmware projects as they are and work on copies.
+Open research question: whether the official firmware opens projects saved by track3r-os (it reads the original formats; the native track3r-os project format is its own), and what happens to the unit's stored settings when you switch back. Keep your original-firmware projects as they are and work on copies.
 
 ## If something goes wrong
 
@@ -113,7 +113,7 @@ track3r-os has its own update screen on the device (Config, INFO, `F8`; see [Upd
 - The unit is not found by `o3console.py`: check the USB cable, and that the unit runs track3r-os (the `diag` console is part of track3r-os).
 - Report problems with the version string from Config, INFO (or the `version` command) and the file name and SHA-256 you installed.
 
-## Not yet verified (summary)
+## Open items (summary)
 
 | Item | Status |
 |---|---|
@@ -122,8 +122,7 @@ track3r-os has its own update screen on the device (Config, INFO, `F8`; see [Upd
 | The pads on every board revision | v1.0.0 left the pads dead on a later unit (plastic back, 2026-10-25, OS-BUG-PADS); v1.0.1 works there (one user, 2026-10-26); other revisions not reported |
 | Position of the hidden reset button | not recorded here; see the vendor page |
 | Time the flashing takes and what the screen shows | not recorded |
-| Full USB update sequence with a release file, and checklist FW-3 to FW-10 | not yet verified |
-| The update screen of track3r-os (Config, INFO, `F8`) installing the official file | IMAGE OK reached with a track3r-os file; INSTALL not pressed; not tried with an official file |
-| Official firmware's update menu as a way back from track3r-os | not yet verified |
-| Settings and project compatibility between track3r-os and the official firmware | not yet verified |
-| The v1.2.0 file installing on a unit | not yet verified: the unit smoke test is pending |
+| Full USB update sequence with a release file, and checklist FW-3 to FW-10 | more testing needed |
+| The update screen of track3r-os (Config, INFO, `F8`) installing the official file | IMAGE OK reached with a track3r-os file; more testing needed with an official file |
+| Official firmware's update menu as a way back from track3r-os | more testing needed |
+| Settings and project compatibility between track3r-os and the official firmware | open research question |

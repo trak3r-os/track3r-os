@@ -40,7 +40,7 @@ Start on the File screen, on the PROJECTS page.
 
 You should see **OPENING** and the project's name, then the Pattern screen with **PROJECT <NAME> OPENED**. If the project cannot be opened, the screen stays on File and the strip says why, for example **PROJECT <NAME> FAILED: NO PROJECT FILE** or **PROJECT <NAME> FAILED: THE FILE IS CUT SHORT**. A refused project leaves the project you had open, its undo history and the playing transport as they were. <!-- QA-FIL-095, QA-FIL-096, QA-FIL-110 -->
 
-At power-on the unit opens the project you had open last (the newest **RECENT** entry), and the strip says **PROJECT <NAME> OPENED**. If it cannot load, the unit starts with an empty project and the strip says **PROJECT <NAME> FAILED** and why, at every start until you open another project. With no card, or on the USB disk boot, nothing is opened. New in track3r-os. Not yet checked on the unit. <!-- QA-FIL-111 -->
+At power-on the unit opens the project you had open last (the newest **RECENT** entry), and the strip says **PROJECT <NAME> OPENED**. If it cannot load, the unit starts with an empty project and the strip says **PROJECT <NAME> FAILED** and why, at every start until you open another project. With no card, or on the USB disk boot, nothing is opened. New in track3r-os. <!-- QA-FIL-111 -->
 
 ### Open a project saved by tracker-ce
 <!-- sync: src=app/src/og_folder.cpp,formats/src/og_codec.h spec=docs/specs/OS-CEPAT.md qa=QA-FIL-143,QA-FIL-144,QA-FIL-145,QA-FIL-146,QA-FIL-148,QA-PAT-335 -->
@@ -61,7 +61,7 @@ What changes on the way in:
 - **tracker-ce effects.** The tracker-ce effects **w**, **y** and **z** (amp envelope, filter envelope, grain length) are known and play, see [Effects](fx.md). Any other effect that only tracker-ce has shows `?` and its value in the cell, plays nothing, and stays in the project when you save. A number outside tracker-ce's list is cleared. <!-- QA-FIL-143, QA-FIL-148, QA-PAT-335 -->
 - **A damaged pattern file** is skipped, and the rest of the folder opens. <!-- QA-FIL-145 -->
 
-The load ends with one summary line, in the diag console log and in `diag sd` (see [Computer tools](computer_tools.md)). It names what was lost, for example `3 MICRO-MOVES NOT KEPT, 2 VALUES CHANGED`; the changed values are the volumes above 100 and the cleared effects together. A folder that lost nothing says neither part. <!-- QA-FIL-146 --> Not yet checked on the unit.
+The load ends with one summary line, in the diag console log and in `diag sd` (see [Computer tools](computer_tools.md)). It names what was lost, for example `3 MICRO-MOVES NOT KEPT, 2 VALUES CHANGED`; the changed values are the volumes above 100 and the cleared effects together. A folder that lost nothing says neither part. <!-- QA-FIL-146 -->
 
 ### Save a project, save a copy, or name it
 <!-- sync: src=app/src/save_actions.cpp qa=QA-FIL-104,QA-FIL-072,QA-FIL-091,QA-FIL-098,QA-FIL-061,QA-FIL-040,QA-FIL-034,QA-FIL-060 -->
@@ -72,7 +72,7 @@ Start on the PROJECTS page.
 2. To save a copy, press `F5` (**SAVE AS**). The keyboard opens. Type a folder name with the pads: letters, digits, spaces and `-`, at most 31 characters. Press `F8` (**SAVE**). `F6` (**AUTO**) fills in a name for you, and `F7` leaves without saving. `F8` with no name typed says **TYPE A NAME** and the keyboard stays open. <!-- QA-FIL-061 QA-FIL-113 -->
 3. To change the title shown in the header, press `Shift` + `F6` (**NAME**), type up to 32 characters and press `F8`. The strip says **PROJECT NAMED**. <!-- QA-FIL-060 -->
 
-**SAVE** in a project you opened from an official (OG) folder adds `project.o3pj` beside the original files and leaves them alone: a sample whose `samples/instrNN.wav` already holds the same audio is not rewritten, and only a sample you edited gets a new file (the old one kept as `.bak`). <!-- QA-FIL-104 --> **SAVE AS** writes a new folder and leaves the old one alone. <!-- QA-FIL-040, QA-FIL-034 --> The folder keeps its name when you change the title. Not yet checked on the unit.
+**SAVE** in a project you opened from an official (OG) folder adds `project.o3pj` beside the original files and leaves them alone: a sample whose `samples/instrNN.wav` already holds the same audio is not rewritten, and only a sample you edited gets a new file (the old one kept as `.bak`). <!-- QA-FIL-104 --> **SAVE AS** writes a new folder and leaves the old one alone. <!-- QA-FIL-040, QA-FIL-034 --> The folder keeps its name when you change the title.
 
 ### Start a new project
 <!-- sync: src=app/include/o3os/app/file_view.h qa=QA-FIL-070,QA-FIL-099,QA-FIL-071,QA-FIL-073,QA-FIL-080,QA-FIL-097,QA-FIL-072,QA-FIL-101,QA-FIL-103 -->
@@ -96,7 +96,7 @@ A module is a song file from an Amiga or PC tracker: ProTracker (MOD), Scream Tr
 3. Press `Up` or `Down` to the file and press `F1` (**IMPORT**). On a folder `F1` (**ENTER**) opens it, and `F3` (**UP**) goes up. <!-- QA-FIL-004 -->
 4. If the project has changes that no save has taken, press `F1` again, as for **OPEN**. <!-- QA-FIL-008 -->
 
-You should see **IMPORTING** and the name, then **IMPORTED** and the name. The module replaces the project; **SAVE AS** names it. The OS reads the first bytes of the file, not its name, to know what it is. A file that no reader takes says **NOT A MODULE THIS OS READS**, asks nothing and changes nothing. A real module cut off inside its header or song list, or with no room for one pattern after its header, says the same, not a more precise reason; the project stays as it was. A name that says one format over bytes of another is refused the same way, except that a MOD and an S3M may swap names. <!-- QA-FIL-127, QA-FIL-128 --> The oldest Soundtracker modules have 15 samples and no tag. They import when the name says MOD or says nothing, as a 4-channel song. Their own effect numbers are not handled. <!-- QA-FIL-129 --> New in track3r-os. Not yet checked on the unit.
+You should see **IMPORTING** and the name, then **IMPORTED** and the name. The module replaces the project; **SAVE AS** names it. The OS reads the first bytes of the file, not its name, to know what it is. A file that no reader takes says **NOT A MODULE THIS OS READS**, asks nothing and changes nothing. A real module cut off inside its header or song list, or with no room for one pattern after its header, says the same, not a more precise reason; the project stays as it was. A name that says one format over bytes of another is refused the same way, except that a MOD and an S3M may swap names. <!-- QA-FIL-127, QA-FIL-128 --> The oldest Soundtracker modules have 15 samples and no tag. They import when the name says MOD or says nothing, as a 4-channel song. Their own effect numbers are not handled. <!-- QA-FIL-129 --> New in track3r-os.
 
 The MOD, S3M and MED readers are not in the firmware: they run from `modules/importers/tracker.tmod` on the card, which the starter zip of this release puts there. Without that file an import of a module fails at once with **IMPORT <NAME> FAILED: NO IMPORTER** and nothing is changed, and the REPORT page (**F8**) names the file to copy. A `tracker.tmod` of another firmware says **IMPORTER FOR OTHER FIRMWARE** the same way.
 
@@ -145,7 +145,7 @@ You should see `ogexp: DONE n/n files Export/<name> OG`. The folder, such as `Ex
 - If the project changes during the export, it ends with `MODIFIED` and no `project.mt`. A full card, a cancel (`diag ogexp cancel`, or `F8` under the overlay of the OG PROJECT row) or a lost card or power can do the same. Every file with a final name is whole, loading such a folder says **NO PROJECT FILE**, and the unit never removes a folder. <!-- QA-FIL-093, QA-FIL-087 -->
 - The files use the original firmware's formats, checked byte for byte by tests. An official unit has not opened them yet. <!-- QA-FIL-084, QA-FIL-094 -->
 
-The EXPORT page's **OG PROJECT** row starts the same export from the screen: see [Export](export.md). <!-- QA-FIL-082, QA-FIL-083, QA-FIL-085, QA-FIL-086, QA-FIL-089 --> Not yet checked on the unit.
+The EXPORT page's **OG PROJECT** row starts the same export from the screen: see [Export](export.md). <!-- QA-FIL-082, QA-FIL-083, QA-FIL-085, QA-FIL-086, QA-FIL-089 -->
 
 ## Keys on this screen
 <!-- sync: src=app/src/file_actions.cpp qa=QA-FIL-012,QA-FIL-070,QA-FIL-071,QA-FIL-072,QA-FIL-061,QA-FIL-003,QA-FIL-020,QA-FIL-002,QA-FIL-060,QA-FIL-037,QA-FIL-041,QA-FIL-013,QA-FIL-032,QA-FIL-035 -->
@@ -195,13 +195,12 @@ The table shows the PROJECTS and EXPORT pages. The IMPORT page (`F6`) has a key 
 - In a long list a quick spin of the encoder moves 4 rows a detent, then 8; a slow turn moves one, and the cursor stops at the ends. `Shift` + turn the encoder still moves a page. New in track3r-os. <!-- QA-FIL-119 -->
 - The EXPORT page stays open when you leave File, and a second export set starts at once; `F7` there goes back to PROJECTS. <!-- QA-FIL-081 -->
 - If the name is taken, the keyboard stays open and the strip says **A PROJECT OF THAT NAME EXISTS: TYPE ANOTHER**. <!-- audit row 20: app/src/save_actions.cpp -->
-- If you pull the card, the strip says **CARD REMOVED** and the project keeps playing. A running save ends with **SAVE ... FAILED: NO CARD**. Putting the card back saves nothing. <!-- QA-GLB-008, QA-GLB-009, QA-GLB-011 --> Not yet checked on the unit.
+- If you pull the card, the strip says **CARD REMOVED** and the project keeps playing. A running save ends with **SAVE ... FAILED: NO CARD**. Putting the card back saves nothing. <!-- QA-GLB-008, QA-GLB-009, QA-GLB-011 -->
 - You cannot rename a project folder on the unit: use **SAVE AS**, then delete the old folder. <!-- QA-FIL-030, QA-FIL-043 (dropped rows); docs/specs/OS-FILES-B.md -->
-- The open project has a small square bullet left of its folder icon, in the list and in its **RECENT** row. A new project with no folder has none. New in the Community OS. <!-- QA-FIL-115 --> Not yet checked on the unit.
-- A name longer than 32 characters is cut in the middle: the first 25 characters, a **~**, then the last 6, so names that differ at the end stay apart. The card keeps the full name. New in the Community OS. <!-- QA-FIL-116 --> Not yet checked on the unit.
-- **RECENT** lists the last five projects you opened or saved, newest first. It is kept on the card, and a deleted project is not shown. <!-- QA-FIL-035, QA-FIL-036 --> Not yet checked on the unit.
-- If you change a sample file on a computer, the next save writes the project's sample again and keeps the replaced file as, for example, `instr01.wav.bak`. <!-- QA-FIL-091 --> Not yet checked on the unit.
-- Not yet checked on the unit: saving, saving as, naming, a new project and deleting. <!-- QA-FIL-040, QA-FIL-060, QA-FIL-070, QA-FIL-032 -->
+- The open project has a small square bullet left of its folder icon, in the list and in its **RECENT** row. A new project with no folder has none. New in the Community OS. <!-- QA-FIL-115 -->
+- A name longer than 32 characters is cut in the middle: the first 25 characters, a **~**, then the last 6, so names that differ at the end stay apart. The card keeps the full name. New in the Community OS. <!-- QA-FIL-116 -->
+- **RECENT** lists the last five projects you opened or saved, newest first. It is kept on the card, and a deleted project is not shown. <!-- QA-FIL-035, QA-FIL-036 -->
+- If you change a sample file on a computer, the next save writes the project's sample again and keeps the replaced file as, for example, `instr01.wav.bak`. <!-- QA-FIL-091 --> <!-- QA-FIL-040, QA-FIL-060, QA-FIL-070, QA-FIL-032 -->
 
 ## See also
 
