@@ -6,7 +6,7 @@ Level B (a new instrument module through the existing ABI 1.8; no core change, n
 
 - Chip is the structure to copy and then diverge from: `modules/chip/` (`chip.cpp`, `chip_dsp.h`, `module.json`, `tests/chip_test.cpp`, README). Its pitch runs at control rate every 32 samples: 3-step arpeggio, sweep, vibrato, and the host's slide / glide through `O3M_NOTE_RAMP`. The pulse uses PolyBLEP, the noise is a sample-and-hold of an LFSR at 16 × the note frequency, and there are two views. Measured cost: 2.3 to 2.8 % of a block per sounding voice (`docs/architecture/cpu-budget.md`).
 - ABI limits (`module/sdk/o3module.h`): 32 parameters, 4 pages of 8, 16 labels per enum, 8 views. The host gives a module `exp2_f`, `log2_f`, `sin_f`, `cos_f` and the draw table, but no filter. The module therefore carries its own filter.
-- The built-in modules TB-303, Chip and FM are embedded in flash through `O3M_BUILTIN_STEMS` (modules/CMakeLists.txt:184, `tools/o3m_embed.py`), and `modules/builtin/NOTICES.txt` lists them.
+- (Historical, 2026-11-10: OS-FLASHDIET-ROOM R3 moved all four to the card; `O3M_BUILTIN_STEMS` now feeds the tests only.) The built-in modules TB-303, Chip and FM are embedded in flash through `O3M_BUILTIN_STEMS` (modules/CMakeLists.txt:184, `tools/o3m_embed.py`), and `modules/builtin/NOTICES.txt` lists them.
 - FLASH is 939,548 B after OS-IMPORT-ANY (mk66 report). The `.ramfunc_l` module slab is 14 KiB and shared by all modules; Chip's hot part uses 2,096 B of it.
 
 ## Decisions (orchestrator, 2026-10-30; defaults, to confirm by the maintainer)

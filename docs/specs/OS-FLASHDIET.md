@@ -4,7 +4,7 @@ Status: decided and queued 2026-11-05 (Q1-Q5 a); specified 2026-11-05, not imple
 
 ## Maintainer decisions (taken 2026-11-05)
 
-**Decided by the maintainer 2026-11-05: Q1 a, Q2 a, Q3 a, Q4 a, Q5 a (every recommended default): a version-locked importer kind for first-party modules; MOD, S3M and MED move to the card, the sample readers stay; the four built-in instruments stay in flash, compressed; LTO parked as research (R2); phase 2 right after phase 1. Queued.**
+**Q3 was reversed by the maintainer on 2026-11-10 (section 11): the four built-in instruments leave the image for the SD content zip.** **Decided by the maintainer 2026-11-05: Q1 a, Q2 a, Q3 a (reversed, see above), Q4 a, Q5 a (every recommended default): a version-locked importer kind for first-party modules; MOD, S3M and MED move to the card, the sample readers stay; the four built-in instruments stay in flash, compressed; LTO parked as research (R2); phase 2 right after phase 1. Queued.**
 
 **Taken 2026-11-05 (relayed by the orchestrator):** an importer may depend on a file on the card ("un importador puede depender de un fichero en la tarjeta, no problem"). The MOD / S3M / MED importers may move to an importer `.tmod` on the card; the spec says what a user without the file sees and how the starter zip ships it (3.6, slice I3).
 
@@ -427,3 +427,31 @@ Rules that hold for every slice: no change to a persistent format, no golden reg
 - P8. Start with the strings of `platform/mk66/src/app_main.cpp`, `app/src/screens/config_screen.cpp`, `platform/mk66/usb/src/diag_text.cpp` (sizes in 10.5); reuse the P5 text blob and its lookup. Unit check: Config screen, diag screen, boot messages.
 - P9. Start with: `audio/CMakeLists.txt:46-52` (`set_source_files_properties(... COMPILE_OPTIONS "-O3")` under `if(O3OS_CROSS)`), `docs/architecture/cpu-budget.md`, `platform/mk66/include/o3os/platform/mk66/bench_report.h:22` (the `Kernel` enum: delay, reverb, reverb_full, limiter, limiter_q, dj, worst, stages, strips). Take a baseline of every row on the unit before the change, change one file at a time, repeat the rows; `master_scratch` and `loop_player` have no row of their own: use `worst` and `diag cpu` with the DJ scratch and a loop on. Level C: a risk review plus one independent review, and the tester's numbers go into the commit message.
 - Report per slice: the two images' content bytes before and after (the P-slice's own delta), SRAM_L, SRAM_U, SDRAM_STATIC, the tests run, and the unit check left.
+
+## 11. OS-FLASHDIET-ROOM (2026-11-10): room for OS-MIDIREC-P1
+
+Q3 is reversed by the maintainer (2026-11-10): the four built-in instrument modules (TB-303, chip, FM, SID) are no longer in the image. This is the old reserve R6 of 10.5, taken as slice R3 of the item OS-FLASHDIET-ROOM. Level B with a risk note; branch `feat/OS-FLASHDIET-ROOM`, measured on dev 58fa5e59 against the same tree plus the change (arm-none-eabi-gcc 15.3.1, `tools/remote_ci.sh mk66`).
+
+| Slice | What | State |
+|---|---|---|
+| R1 | `kBuiltinTable` deflated (P6, 10.6 step 6) | already merged on dev as P6 (a89f9373, merge 01100654); nothing to do here |
+| R2 | developer-text pool (diag, bench and console strings of dev-only paths) | **not done**: about 2-3 KB estimated (about 5 KB of text, gross), diminishing returns after R3; left as a candidate |
+| R3 | the four built-ins leave the image | done |
+
+R3 as built (**new Community OS behaviour**):
+
+- `platform/mk66/src/app_main.cpp` no longer calls `ModuleSet::set_builtins`; with no table the ENGINE picker lists card modules (ON CARD) and a project that uses a missing module shows it greyed with MODULE NOT ON THE CARD (the existing `PickResult::Missing` path, `tests/module_ui_test.cpp`). The `mod notice` console command, `module_notices_page` and its text id are removed (the licence texts travel with the card files).
+- `o3m_builtin` is now test only: the host tests and the QEMU suites still use the table, the image does not link it. `module/src/builtin_notices.cpp` and the loader glue stay (about 0.8 KB; removing them is a follow-up).
+- The starter zip (`tools/release/make_starter.py`) carries `modules/instruments/{tb303,chip,fm,sid}.tmod` plus `modules/instruments/NOTICES.txt` and the licence texts in `LICENSES/` (Open303 MIT for the TB-303, tracker-ce MIT for the chip engine); `tests/starter_test.py` checks the list. The Config INFO page says "MIT, R. Schmidt (card module)" for the Open303 row.
+- Docs: manual (modules, getting started, install, module sounds), SDK README, `THIRD_PARTY.md`, OS-CECHIP and OS-SID specs, QA rows QA-MOD-210, QA-MOD-236 reworded and QA-MOD-255 new, the HIL module sheet (the `mod notice` step is gone).
+
+Measured (release image `o3os`, then the bench image):
+
+| Image | FLASH before | FLASH after | Image end before / after | SRAM_U | SDRAM_STATIC |
+|---|---|---|---|---|---|
+| release | 1004 KB | 968 KB (-36 KB, -0x9000 B) | 0xFB000 / 0xF2000 | 138784 B, 0 | 163968 B (-32 B) |
+| bench | 1 MB (end 0x100000, over the 0xFF000 limit) | 992 KB | 0x100000 / 0xF8000 | 138784 B, 0 | 165920 B (-32 B) |
+
+SRAM_L is unchanged (49232 B). Both images now end at or below 0xFF000 (`check_image.py`: all 10 checks pass). The release image has about 36 KB more room than before; the bench image fits again.
+
+Left open: on the unit, a project saved with a built-in synth must show it greyed until the four files from the starter zip are on the card, and each synth must load from the card and sound; the bench image loads the TB-303 and needs the card file too. Unit images use `O3OS_BENCH=OFF`.

@@ -10,7 +10,8 @@ root of the SD card. It holds:
   Firmware/<name>.ptf and .sha256   the update file given with --ptf
   modules/apps/*.tmod               the apps listed in the manifest, taken from --modules-dir (a build directory's modules/)
   modules/effects/*.tmod            the effect modules (track inserts) listed in the manifest
-  modules/instruments/*.tmod        the instrument modules that are not inside the firmware (sine; TB-303, chip, FM and SID are built in)
+  modules/instruments/*.tmod        the instrument modules (TB-303, chip, FM, SID and sine; the four synths are not inside the firmware, OS-FLASHDIET-ROOM R3)
+  modules/instruments/NOTICES.txt   the licence notices of the TB-303 (Open303) and chip (tracker-ce) code; the two texts are in LICENSES/ too
   modules/presets/<id>/*.o3mp       the factory preset packs of the manifest's `presets` list (modules/<id>/presets.json)
   modules/importers/*.tmod          the importer modules listed in the manifest (tracker: MOD / S3M / MED import, OS-FLASHDIET I3)
   Effects/*.ptfx                    the Sample Editor plugins of the manifest's `ptfx` list, built from modules/ptfx and taken from --ptfx-dir (OS-PTFXPACK)
@@ -77,6 +78,14 @@ PTFX_LICENCE = "MIT"
 PTFX_FOLDER = "Effects/"
 PTFX_LICENCE_TEXT = "LICENSES/MIT-tracker-ce.txt"
 PTFX_LICENCE_SRC = os.path.join("modules", "ptfx", "LICENSE-tracker-ce.txt")      # relative to the repository root
+# OS-FLASHDIET-ROOM R3: the four synths (TB-303, chip, FM, SID) are card modules, not in the image. Their code carries the Open303 and tracker-ce
+# licences, so the zip ships those texts next to them (modules/instruments/NOTICES.txt) and in LICENSES/. The set is checked against
+# O3M_BUILTIN_STEMS of modules/CMakeLists.txt by tests/starter_test.py.
+CARD_SYNTHS = ("tb303", "chip", "fm", "sid")
+SYNTH_NOTICES = os.path.join("modules", "builtin", "NOTICES.txt")                  # relative to the repository root
+SYNTH_NOTICES_DEST = "modules/instruments/NOTICES.txt"
+SYNTH_LICENCES = ((os.path.join("modules", "tb303", "LICENSE-Open303.txt"), "LICENSES/Open303-MIT.txt", b"Robin Schmidt"),
+                  (os.path.join("modules", "chip", "LICENSE-tracker-ce.txt"), "LICENSES/CHIP-tracker-ce-MIT.txt", b"Polyend"))
 STEM_RE = r"[A-Za-z0-9_]{1,31}"
 
 
@@ -411,6 +420,28 @@ def ptfx_licence_text(repo_root=None):
     return data
 
 
+def synth_notices(manifest, repo_root=None):
+    """The licence files of the card synths: {path: bytes}, empty when the manifest lists none of them. The joined text is what the firmware image
+    carried before R3 (notices, then each licence, blank line between)."""
+    if not set(CARD_SYNTHS) & set(manifest["modules"]["instruments"]):
+        return {}
+    out, joined = {}, b""
+    for rel in (SYNTH_NOTICES,) + tuple(s[0] for s in SYNTH_LICENCES):
+        try:
+            with open(os.path.join(repo_root or ROOT, rel), "rb") as f:
+                data = f.read()
+        except OSError as e:
+            raise StarterError("cannot read the licence text %s: %s" % (rel, e))
+        joined += data.rstrip() + b"\n\n"
+        for src, dest, needle in SYNTH_LICENCES:
+            if rel == src:
+                if needle not in data:
+                    raise StarterError("%s is not the licence text it should be (no %r in it)" % (rel, needle.decode()))
+                out[dest] = data
+    out[SYNTH_NOTICES_DEST] = joined.rstrip() + b"\n"
+    return out
+
+
 # ---- documents ------------------------------------------------------------------------------------------------------------
 
 def licence_texts_generated(used):
@@ -434,7 +465,7 @@ def licence_texts_generated(used):
     return out
 
 
-def credits_text(version, files, generated, ptfx=()):
+def credits_text(version, files, generated, ptfx=(), synths=False):
     lines = ["track3r-os %s starter content: credits and licences" % version, "=" * 60, "",
              "Everything in this archive may be copied and passed on under the licence shown for it. The full texts are in LICENSES/.", "",
              "Our own content (CC0 1.0, by the track3r-os contributors; LICENSES/CC0-1.0.txt)", "-" * 60]
@@ -443,6 +474,13 @@ def credits_text(version, files, generated, ptfx=()):
         if n:
             lines.append("  %-30s %2d file(s): %s" % (prefix, n, what))
     lines += ["", "The firmware (Firmware/) and the modules (modules/) are track3r-os: GPL-3.0-or-later (the module SDK and its two example modules, Pads and Sine, are MIT).", ""]
+    if synths:
+        lines += ["MIT: the TB-303 and chip instrument modules (modules/instruments/tb303.tmod, chip.tmod; the FM and SID modules are our own)", "-" * 60,
+                  "tb303.tmod is a single-precision port of the algorithms and constants of Open303 (github.com/maddanio/open303), Copyright (c) 2009",
+                  "Robin Schmidt (www.rs-met.com), MIT licence: LICENSES/Open303-MIT.txt. chip.tmod ports the CHIP synth engine of Polyend Tracker",
+                  "Community Edition (github.com/polyend/tracker-ce, core/synth/engines/ChiptuneSynthVoice.cpp), Copyright (c) 2020-2026 Polyend",
+                  "Sp. z o.o. and Polyend Tracker Community Edition Contributors, MIT licence with the conditions of its Part 2:",
+                  "LICENSES/CHIP-tracker-ce-MIT.txt. Both texts, and the notice of the other two modules, are also in modules/instruments/NOTICES.txt.", ""]
     if ptfx:
         lines += ["%s: MIT License of Polyend Tracker Community Edition (%s)" % (PTFX_LICENCE, PTFX_LICENCE_TEXT), "-" * 60,
                   "Sample Editor plugins in Effects/ (.ptfx), built from modules/ptfx of the track3r-os source, which has each one's notice.",
@@ -499,8 +537,9 @@ modules/apps/        apps for the TOOLS screen (.tmod): Chords, Humanize, Loudne
                      example app), Rhythm Gen, Scope, SMF export, Tap tempo and Tuner.
 modules/effects/     effect modules (.tmod) for a track's insert: Autopan, Biquad filter, Stereo chorus, Comp, Crush, Drive,
                      Env filter, Fold, Phaser, Ping-pong, Wide.
-modules/instruments/ instrument modules (.tmod) that are not inside the firmware: Sine (the SDK's example voice). The instrument
-                     modules TB-303, chip, FM and SID are inside the firmware.
+modules/instruments/ instrument modules (.tmod): TB-303, Chip, FM, SID and Sine (the SDK's example voice). The four synths are
+                     not inside the firmware: without their files a project that uses one says the module is missing. NOTICES.txt
+                     next to them has the licence texts of the TB-303 and Chip code.
 modules/presets/     factory preset packs (.o3mp) for TB-303, chip, FM and SID, one folder per module.
 modules/importers/   the importer modules (.tmod): tracker.tmod is what reads MOD, S3M and OctaMED files on IMPORT (File screen,
                      F6). Without it an import says NO IMPORTER; copy it from this archive if it is missing on the card.
@@ -583,6 +622,8 @@ def build_entries(manifest, version, ptf_path, modules_dir, cache, offline, ptfx
     entries["Firmware/" + ptf_name + ".sha256"] = ("%s  %s\n" % (sha256_hex(ptf), ptf_name)).encode()
 
     entries.update(collect_modules(manifest, modules_dir))
+    synth_files = synth_notices(manifest, repo_root)
+    entries.update(synth_files)
     entries.update(collect_presets(manifest))
     ptfx_files, ptfx_info = collect_ptfx(manifest, ptfx_dir, repo_root)
     entries.update(ptfx_files)
@@ -607,7 +648,7 @@ def build_entries(manifest, version, ptf_path, modules_dir, cache, offline, ptfx
         if dest in entries:
             raise StarterError("LICENSES text %s is both fetched and generated" % dest)
         entries[dest] = text.encode("utf-8")
-    entries["LICENSES/CREDITS.txt"] = credits_text(version, manifest["files"], generated, ptfx_info).encode("utf-8")
+    entries["LICENSES/CREDITS.txt"] = credits_text(version, manifest["files"], generated, ptfx_info, bool(synth_files)).encode("utf-8")
     entries["README.txt"] = readme_text(version, ptf_name, bool(ptfx_files)).encode("utf-8")
     entries["SHA256SUMS"] = sums_text(entries).encode("utf-8")
     return entries, record

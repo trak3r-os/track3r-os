@@ -159,8 +159,7 @@ target_compile_definitions(o3os PRIVATE O3OS_POWER_VLPR_OFF=$<BOOL:${O3OS_POWER_
 target_compile_definitions(platform_mk66_pure PRIVATE O3OS_SD_HIGH_SPEED=$<BOOL:${O3OS_SD_HIGH_SPEED}>)
 target_link_libraries(o3os PRIVATE usb)
 target_link_libraries(o3os PRIVATE platform_mk66_pure audio midi hal core)
-# OS-012d: the TB-303, chip and FM modules as .tmod bytes in flash (modules/CMakeLists.txt, tools/o3m_embed.py), loaded by the module loader like the card's files.
-target_link_libraries(o3os PRIVATE o3m_builtin)
+# OS-FLASHDIET-ROOM R3: the TB-303, chip, FM and SID modules are no longer in the image (they were o3m_builtin, OS-012d); the SD content zip carries them (tools/release/make_starter.py).
 o3os_strict_warnings(o3os)
 target_compile_definitions(o3os PRIVATE
   O3OS_FAULT_DRILL=$<BOOL:${O3OS_MK66_FAULT_DRILL}>
@@ -197,7 +196,7 @@ if(O3OS_BENCH AND O3OS_BENCH_ARCHIVE)
   target_include_directories(o3os_bench_archive_objs PRIVATE $<TARGET_PROPERTY:o3os,INCLUDE_DIRECTORIES>)
   target_compile_definitions(o3os_bench_archive_objs PRIVATE $<TARGET_PROPERTY:o3os,COMPILE_DEFINITIONS>)
   target_compile_options(o3os_bench_archive_objs PRIVATE $<TARGET_PROPERTY:o3os,COMPILE_OPTIONS>)
-  target_link_libraries(o3os_bench_archive_objs PRIVATE usb platform_mk66_pure audio midi hal core o3m_builtin app ui eve seq model)
+  target_link_libraries(o3os_bench_archive_objs PRIVATE usb platform_mk66_pure audio midi hal core app ui eve seq model)
   add_dependencies(o3os_bench_archive_objs o3os_build_info)
 endif()
 

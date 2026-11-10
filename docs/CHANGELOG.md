@@ -4,6 +4,7 @@ User-visible changes of the Community OS, newest first, one entry per change, in
 
 ## Unreleased
 
+- **TB-303, Chip, FM and SID are card modules now, no longer inside the firmware image** (frees 36 KB of flash for new features). Copy `modules/instruments/` and `LICENSES/` from the starter zip to the card; without them a project that uses one of these instruments loads with the instrument muted and the ENGINE picker shows `MODULE NOT ON THE CARD`. Overwrite older copies on the card: an older `chip.tmod` (1.0.0) would now be used and lacks Chip waves 4..11. More testing needed.
 - **Master + Insert opens the Mixer's INSERTS page** from any screen (issue #5). Insert now acts when it is let go, or 40 ms after the press, so the two keys can be pressed together. Checked on the unit.
 - **Shift + pad plays the instrument on the Instrument screen** instead of selecting it (issue #9), so you can hold Shift for the encoder's coarse step and still play the pads; F6 and F7 change the instrument. Checked on the unit.
 - **Slice pads play their own slice** (issue #7): on the CHOP page pad n plays slice n in SLICE and BEAT SLICE modes, whatever slice the pattern's Slice FX left on the track, and the Slice FX now picks a slice in SLICE mode too. Pads checked on the unit; the Slice FX in SLICE mode needs more testing.

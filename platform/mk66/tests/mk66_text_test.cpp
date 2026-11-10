@@ -104,7 +104,7 @@ TEST_CASE("mk66 text: spot checks against the literals of the old source") {
   CHECK(std::strcmp(console_text(mk66::txt::usb_request_5),
                     "usb: DISK mode is held by the boot disk until a restart, nothing changed: ") == 0);
   CHECK(std::strcmp(console_text(mk66::txt::power_9), "usage: power [press|release|pin|off [dry]]\n") == 0);
-  CHECK(std::strcmp(console_text(mk66::txt::mod_5), "mod: notices unreadable\n") == 0);
+  CHECK(std::strcmp(console_text(mk66::txt::mod_4), "mod: not bound, or the queue is full\n") == 0);
   CHECK(std::strcmp(bench_pool_text(mk66::btxt::k_voice), "one sampler voice, a block (the longest plain sample; takes track 16)") == 0);
   CHECK(std::strcmp(bench_pool_text(mk66::btxt::b_bench_usage_1),
                     "usage: bench <kernel|all> [blocks 1..4096, default 64] [alias|direct|sram]   |   bench disk reset|clean\n") == 0);

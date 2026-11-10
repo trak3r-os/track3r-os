@@ -103,7 +103,6 @@ mod_1	mod: more lines than the listing shows (cpu perf off drops the perf lines)
 mod_2	mod: load started by the console
 mod_3	usage: mod note <1..64> <0..127> [1..127]\n
 mod_4	mod: not bound, or the queue is full\n
-mod_5	mod: notices unreadable\n
 mod_6	usage: mod set <1..64> <parameter 0..31> <value>\n
 mod_7	mod gov: this image has no module voices\n
 mod_8	usage: mod gov [thr <50..95> | budget <10..100>]\n
@@ -112,7 +111,7 @@ mod_10	mod gov: budget is refused outside 10..100 (percent of the block)\n
 mod_11	mod gov: recent worst render 
 mod_12	%), without the modules 
 mod_13	mod gov: new voices admitted 
-mod_14	usage: mod | mod load <name> | mod bind <1..64> <name> | mod note <1..64> <note> [vel] | mod off <1..64> | mod set <1..64> <id> <value> | mod preset <1..64> <1..32> | mod presets <stem> | mod psave <1..64> <name...> | mod pload <1..64> <name...> | mod gov [thr <50..95> | budget <10..100>] | mod notice [line]\n
+mod_14	usage: mod | mod load <name> | mod bind <1..64> <name> | mod note <1..64> <note> [vel] | mod off <1..64> | mod set <1..64> <id> <value> | mod preset <1..64> <1..32> | mod presets <stem> | mod psave <1..64> <name...> | mod pload <1..64> <name...> | mod gov [thr <50..95> | budget <10..100>]\n
 radio_1	radio: this image has no radio\n
 radio_2	radio: power-up started again from the reset; `radio` shows how it went\n
 radio_3	radio: retry refused, a take from the radio is armed or recording (the reset would record silence); stop it first. State only:\n

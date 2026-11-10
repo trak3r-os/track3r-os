@@ -144,8 +144,14 @@ def test_manifest(ms, root):
     dirs = lambda sub: sorted(d for d in os.listdir(os.path.join(root, "modules", sub)) if os.path.isdir(os.path.join(root, "modules", sub, d)))
     check(real["modules"]["effects"] == dirs("effects"), "the manifest lists every folder of modules/effects: %s" % dirs("effects"))
     check(real["modules"]["apps"] == [d for d in dirs("apps") if d != "common"], "the manifest lists every app of modules/apps (common is a header library)")
-    check(real["modules"]["instruments"] == ["sine"], "the only instrument module outside the firmware is sine")
-    check(not builtin & set(real["modules"]["instruments"] + real["modules"]["effects"] + real["modules"]["apps"]), "no built-in module is packed to the card")
+    # OS-FLASHDIET-ROOM R3: the four synths are not in the image any more, so the zip carries them (and their licence texts) with sine.
+    check(sorted(real["modules"]["instruments"]) == sorted(builtin | {"sine"}), "the instrument modules are the four synths and sine")
+    check(set(ms.CARD_SYNTHS) == builtin, "make_starter.py CARD_SYNTHS is the O3M_BUILTIN_STEMS set")
+    check(not builtin & set(real["modules"]["effects"] + real["modules"]["apps"]), "a synth is listed under instruments only")
+    notices = ms.synth_notices(real, root)
+    check(sorted(notices) == ["LICENSES/CHIP-tracker-ce-MIT.txt", "LICENSES/Open303-MIT.txt", "modules/instruments/NOTICES.txt"], "the synths' licence files are packed")
+    check(b"Open303" in notices["modules/instruments/NOTICES.txt"] and b"Part 2" in notices["modules/instruments/NOTICES.txt"], "NOTICES.txt has both texts")
+    check(ms.synth_notices(fake_manifest(), root) == {}, "no synth in the manifest, no synth notices")
     for kind in ("apps", "instruments", "effects", "importers"):
         for stem in real["modules"][kind]:
             check(re.search(r"o3m_add_module\(%s\b" % stem, cmake) is not None, "modules/CMakeLists.txt builds the %s module %s" % (kind, stem))

@@ -322,11 +322,6 @@ const o3m_module* insert_bench_module(bool stereo = false) noexcept;  // `diag b
 // OS-CEWTENV W3a (`diag bench wt`): the sample arena's free bytes (the recorder's room), main loop only.
 std::uint32_t sample_arena_free_bytes() noexcept;
 #endif
-// OS-012d: the licence notices of the built-in modules, for `diag mod notice` (OS-FLASHDIET P1: a deflate stream in flash, streamed through the shared asset decoder, so main loop
-// only and never across passes). Calls `sink` for lines [first, first + max_lines): pieces of a line (text, n, false) and its end (nullptr, 0, true); `more`: text follows the page, `next`:
-// the line a following page starts at. False when the stream could not be read.
-using NoticeSink = void (*)(void* ctx, const char* text, std::size_t n, bool eol) noexcept;
-bool module_notices_page(unsigned first, unsigned max_lines, NoticeSink sink, void* ctx, bool& more, unsigned& next) noexcept;
 // OS-PERF3 (`diag cache check`): how many bytes of the sample arena hold loaded PCM (the demo kit or a project's samples), from the start of the arena.
 std::uint32_t sample_pcm_bytes() noexcept;
 bool module_audition(unsigned slot, unsigned note, unsigned velocity, bool on) noexcept;

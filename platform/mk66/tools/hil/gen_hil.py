@@ -837,14 +837,13 @@ mods = [
 ] + clear_overlays() + [
     RUN("_play"), W(1.0), RUN("_stop"), W(1.0),
     CMD("mod", expect=r"mod: slab \d+/\d+ B, module memory", note="the module system's first line"),
-    CMD("mod notice", expect=r"(?i)licen[cs]e|copyright|MIT|GPL|BSD", soft=True, note="(soft: the notices of the built-in modules)"),
 ]
 # Free slots of t-v16 (instruments 33..35): a console bind on a slot that holds a project instrument (t-v16's 49..64 are MIDI) is refused (OS-BUGS4: the gate follows the project)
 for slot, stem, note_no in ((33, "tb303", 36), (34, "chip", 48), (35, "fm", 48), (36, "sid", 48)):
     mods += [
-        SAY("built-in module %s on instrument %d" % (stem, slot)),
+        SAY("card module %s on instrument %d" % (stem, slot)),
         CMD("mod load %s" % stem, expect=r"mod: %s: (started|already loaded)" % stem),
-        CMD("mod", expect=r"mod: %s (v\d+\.\d+\.\d+|unversioned) ABI" % stem, within=10, poll=1.0, note="it is in the listing once its (built-in) load is done"),
+        CMD("mod", expect=r"mod: %s (v\d+\.\d+\.\d+|unversioned) ABI" % stem, within=10, poll=1.0, note="it is in the listing once its (card) load is done"),
         CMD("mod bind %d %s" % (slot, stem), expect=r"mod: bind (ok|that instrument is bound already)", note="(a second run finds it bound already: fine)"),
         MIX({"channels": {"MST L": {}}, "snap": "before_" + stem}),
         CMD("mod note %d %d 110" % (slot, note_no), expect=r"mod: note queued"),
@@ -868,7 +867,7 @@ mods += [
     CMD("cpu", expect=r"underrun 0\b"),
     K("pattern", gap=0.4),
 ]
-add("modules", "built-in modules: `mod` listing, load tb303 / chip / fm / sid, bind each to a free instrument (33..36), `mod note` sounds on track 16 (meters rise), `mod off`, the engine picker opens", mods,
+add("modules", "card modules: `mod` listing, load tb303 / chip / fm / sid, bind each to a free instrument (33..36), `mod note` sounds on track 16 (meters rise), `mod off`, the engine picker opens", mods,
     finally_=clear_overlays() + [K("pattern", gap=0.4), CMD("mod off 33"), CMD("mod off 34"), CMD("mod off 35"), CMD("mod off 36"), RUN("_stop")])
 
 # ======================================================================================================================================

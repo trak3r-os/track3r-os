@@ -28,8 +28,10 @@ python3 -I tools/release/make_starter.py --version 0.7.0 --ptf <track3r-os-0.7.0
   - Apps: every folder of `modules/apps` except `common` (a header library): chords, humanize, loudness, midimon, morph, mutate, pads (the SDK's
     example app), rhythmgen, scope, smfexport, tapcalc, tuner.
   - Effects: every folder of `modules/effects` (autopan, biquad, chorus, comp, crush, drive, envfilter, fold, phaser, pingpong, wide).
-  - Instruments: `sine` (the SDK's example voice, MIT). TB-303, chip, FM and SID are inside the firmware (`O3M_BUILTIN_STEMS` in `modules/CMakeLists.txt`)
-    and are not packed; their factory presets are (`presets`).
+  - Instruments: `tb303`, `chip`, `fm`, `sid` and `sine` (the SDK's example voice, MIT). The four synths are not inside the firmware (OS-FLASHDIET-ROOM R3):
+    the card is where a unit gets them, so a project that uses one without its file says the module is missing. Their licence texts are packed
+    next to them (`modules/instruments/NOTICES.txt`: the notice, Open303's MIT text and tracker-ce's, as the image carried them before) and in
+    `LICENSES/` (`Open303-MIT.txt`, `CHIP-tracker-ce-MIT.txt`); `CREDITS.txt` names them. Their factory presets are packed too (`presets`).
   - Importers: `tracker` (OS-FLASHDIET I3), the MOD / S3M / MED reader the firmware loads from the card on IMPORT, so the zip must carry it.
   - `.ptfx` plugins (OS-PTFXPACK): the thirteen folders of `modules/ptfx`, built by the CMake target `o3_ptfx` (`tools/ptfx_pack.py`) and copied to
     `Effects/`: the six `editor-fx-sdk` examples of polyend/tracker-ce (add_silence, analog_kick_gen, chiptune_gen, multimode_filter, stereo_delay,
@@ -43,7 +45,7 @@ python3 -I tools/release/make_starter.py --version 0.7.0 --ptf <track3r-os-0.7.0
     integer gain, a test ramp), which are not tools for a user. A plugin from another tracker-ce component is never packed without the
     maintainer's approval of that component.
   - `tests/starter_test.py` (ctest `starter_python`) holds the committed lists to `modules/`: a new effect or app that is not in the manifest, or
-    a built-in module that is packed, fails it.
+    a synth of `O3M_BUILTIN_STEMS` that is not packed (or whose licence text is missing), fails it.
 - Third-party files are listed in `starter_manifest.json` and fetched into a cache (`OUT/cache`, named by SHA-256). A download whose SHA-256 differs
   fails the run. Allowed licences: `CC0-1.0`, `Public-Domain`, `CC-BY-4.0`, `GPL-3.0`; anything else is refused. A file with `modarchive_id` has its
   licence re-read on the module's Mod Archive page; a changed licence or an unreadable page fails the run.

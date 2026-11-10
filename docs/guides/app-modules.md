@@ -279,7 +279,7 @@ Result for Pad Count: `Pad Count, 828 B file: hot 0 B, cold 704 B, 15 relocation
 ### 2.9 Versioning and the ABI rules
 
 - **ABI version** (1.2 now) says what OS and module must agree on. A module loads when its **major equals the OS's and its minor is not above the OS's**. Additions (a flag, a trailing member of `o3m_host`, a new kind, a function at the end of the draw API) bump the minor; anything else bumps the major.
-- **Module version** (`X.Y.Z`, `--version`, needs `"abi": "1.2"`) is yours. The OS reads it for one decision: a card copy replaces a built-in module of the same name only if it is strictly newer. No built-in app exists today, so for an app it is informational. Raise it on every release.
+- **Module version** (`X.Y.Z`, `--version`, needs `"abi": "1.2"`) is yours. The OS reads it for one decision: a card copy replaces a built-in module of the same name only if it is strictly newer (the unit image has no built-in module since OS-FLASHDIET-ROOM R3, so on the unit it is informational). Raise it on every release.
 - Before using a member a later version added, check `o3m_host.size` and `o3m_draw_api.size`/`version`.
 - Parameter order is frozen once published. Add at the end, or ship a new name.
 - Your 1.0, 1.1 and 1.2 file keeps loading and running under 1.3 (built and tested in H1): its capability word is 0, an app that declares less than ABI 1.3 is lent no new table, and `init()` has the signature it always had. The Pads example is packed as ABI 1.2 for exactly this test.

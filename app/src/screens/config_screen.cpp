@@ -118,7 +118,7 @@ constexpr Licence kLicences[] = {
     {"SPLEEN FONT", "BSD-2-Clause, F. Cambus"},
     {"TERMINUS FONT", "SIL OFL 1.1, D. Zhekov"},
     {"FATFS", "ChaN licence (BSD-style)"},
-    {"OPEN303 TB-303", "MIT, R. Schmidt (built in; mod notice)"},
+    {"OPEN303 TB-303", "MIT, R. Schmidt (card module)"},
 };
 
 }  // namespace

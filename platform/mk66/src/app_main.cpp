@@ -908,7 +908,7 @@ void make_modules() noexcept {
   hooks.enter = &stamp_module;
   hooks.log = &module_log;
   m->voices.set_hooks(hooks);
-  m->set.set_builtins(module::kBuiltinModules, module::kBuiltinModuleCount);  // OS-012d: the TB-303, chip, FM and SID, bytes in flash, loaded like a card's file (module/builtin.h)
+  // OS-FLASHDIET-ROOM R3: no built-in table (module/builtin.h): the TB-303, chip, FM and SID are card modules (modules/instruments/ of the SD content zip).
   m->ui.attach(m->set, m->loader, m->voices);  // OS-012b
   m->ui.attach_inserts(g_insert_host);          // OS-INSFX S4: the Mixer's INSERTS page and `diag ins` share one path to the host and the project
   m->ui.set_storage(&storage::device::storage());
@@ -2814,13 +2814,6 @@ const char* ptfx_run(unsigned n, const float* values) noexcept {
 }
 
 const char* ptfx_run_why() noexcept { return g_app != nullptr ? g_app->ptfx_not_ready_why() : nullptr; }
-
-bool module_notices_page(unsigned first, unsigned max_lines, NoticeSink sink, void* ctx, bool& more, unsigned& next) noexcept {
-  const module::NoticePage p = module::notices_page(module::kBuiltinNotices, ui::asset_inflater(), first, max_lines, sink, ctx);
-  more = p.more;
-  next = p.next;
-  return p.ok;
-}
 
 const char* module_bind(unsigned slot, const char* stem) noexcept {
 #if !O3OS_AUDIO_TEST

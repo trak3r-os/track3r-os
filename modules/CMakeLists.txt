@@ -332,11 +332,12 @@ if(TARGET o3m_chorus_test)
   add_dependencies(o3m_chorus_test o3m_chorus_gen)
 endif()
 
-# OS-012d: the built-in modules. The packed .tmod files of the TB-303, chip, FM and SID go into a generated table (tools/o3m_embed.py: OS-FLASHDIET A3, each file's
-# 64-byte header raw and the rest deflated by tools/deflate_pack.py, our own deterministic encoder -- never Python's zlib, whose bytes would depend on the build
-# machine's library) that the images link (o3m_builtin) and hand to module::ModuleSet::set_builtins; module/builtin.h says how they meet the card's copies. The notices
-# the code in them requires (builtin/NOTICES.txt and Open303's licence text) are in the same file as a string. Without the cross compiler there are no .tmod files: the
-# table is empty and the tests that need it say so.
+# OS-012d: the built-in module table, TEST ONLY since OS-FLASHDIET-ROOM R3: no image links o3m_builtin any more (the TB-303, chip, FM and SID are card modules, modules/instruments/
+# of the SD content zip, tools/release/make_starter.py), but the host tests and the QEMU suites still run the real .tmod bytes through it. The packed .tmod files go into a generated
+# table (tools/o3m_embed.py: OS-FLASHDIET A3, each file's 64-byte header raw and the rest deflated by tools/deflate_pack.py, our own deterministic encoder -- never Python's zlib,
+# whose bytes would depend on the build machine's library) that a test hands to module::ModuleSet::set_builtins; module/builtin.h says how they meet the card's copies. The notices
+# (builtin/NOTICES.txt and the licence texts) are in the same file as a string; the card carries them next to the module files. Without the cross compiler there are no .tmod files:
+# the table is empty and the tests that need it say so.
 set(O3M_BUILTIN_STEMS tb303 chip fm sid)
 set(O3M_BUILTIN_CPP "${CMAKE_CURRENT_BINARY_DIR}/builtin_modules.cpp")
 set(O3M_BUILTIN_NOTICES builtin/NOTICES.txt tb303/LICENSE-Open303.txt chip/LICENSE-tracker-ce.txt)

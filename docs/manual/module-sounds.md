@@ -11,7 +11,7 @@ The TB-303 has a second page, **MODS**, with a tuning, an octave shift, an accen
 
 ## What it is for
 
-Come here when a built-in sound needs more than its first page gives. Examples are a bass line that must match the tuning of a song, accents on only the hardest notes, or an FM bell that is not a whole-number multiple of the note. You reach everything on the Instrument screen of a module instrument. To put a module in a slot, see [Modules](modules.md).
+Come here when a synth sound needs more than its first page gives. Examples are a bass line that must match the tuning of a song, accents on only the hardest notes, or an FM bell that is not a whole-number multiple of the note. You reach everything on the Instrument screen of a module instrument. To put a module in a slot, see [Modules](modules.md).
 
 ## How it works
 <!-- sync: src=modules/tb303/module.json,modules/fm/module.json,modules/chip/module.json qa=QA-MOD-144 -->
@@ -97,7 +97,7 @@ The real chip has one filter shared by its three voices. Here every track has it
 
 ### PAN and the sends: the MIX page
 
-Every module instrument (TB-303, FM, Chip, SID, Sine and the built-in ones) has three rows of its own that belong to the OS, not to the module: **PANNING** (0 to 100, 50 is the centre), **DELAY SEND** and **REVERB SEND** (0 to 100, in steps of 10, 0 is no send). They sit on the **MIX** page. On the Instrument screen press `Shift` + `F2` (**MIX**); a page key or `Left` / `Right` brings back the module's pages. <!-- QA-INS-307 -->
+Every module instrument (TB-303, FM, Chip, SID and Sine) has three rows of its own that belong to the OS, not to the module: **PANNING** (0 to 100, 50 is the centre), **DELAY SEND** and **REVERB SEND** (0 to 100, in steps of 10, 0 is no send). They sit on the **MIX** page. On the Instrument screen press `Shift` + `F2` (**MIX**); a page key or `Left` / `Right` brings back the module's pages. <!-- QA-INS-307 -->
 
 - The pan and the sends act when a note starts, and a change you make while the note rings is heard at once on the tracks that hold the module. The Panning step FX and the Perform PAN still add on top of the instrument's pan, as they do for a sample. <!-- QA-INS-309 QA-INS-310 -->
 - `F8` (**UNDO**) takes back an edit. The three values are saved with the project and loaded again. <!-- QA-INS-308 QA-INS-311 -->

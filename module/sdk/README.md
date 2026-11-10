@@ -61,12 +61,12 @@ run on the device. The hardware checks that are still open are listed at the end
    32-bit absolute address. Then `o3m_gen.py verify module.json acid.tmod` reads the file back with the generator's own reader and says every way it differs from the manifest.
 6. **Install.** Copy the file to the card: `/modules/instruments/acid.tmod`, `/modules/effects/`, `/modules/apps/` or, for an importer (kind 3, ABI 1.11), `/modules/importers/`. The file name (without `.tmod`) is the module's name
    in the project and everywhere (at most 31 characters, no `/ \ : * ? " < > |`); a name is one module on a card (the OS looks in `instruments/`, `effects/`, `apps/` in that order).
-   **Built-in modules (OS-012d) and the module version (OS-MODVER).** The firmware image carries the TB-303, chip, FM and SID as `.tmod` bytes in flash and loads them with the same loader (same
-   checks, same slab and SDRAM arenas), so they are in the ENGINE picker with no card. A file of the same name on the card is tried first and **wins only when it is valid, of the same kind and
-   has a higher module version than the built-in one** (the version is in the file's header, see below; the four built-ins are 1.0.0). An equal version, an older one and an unversioned file
-   (version 0) all keep the built-in module, so a copy left on the card does not shadow a fixed built-in module after a firmware update; to override one, ship a higher version. Otherwise, or when
-   the card's file is broken, the built-in copy is used and the card's file is not quarantined (`mod` lists "card tb303 v1.0.0 not newer than built-in v1.0.0", `mod load` says the same).
-   Delete the card's file to get the built-in module back. `diag mod notice` prints the licence notices the image carries.
+   **The four instrument synths are card modules (OS-FLASHDIET-ROOM R3) and the module version (OS-MODVER).** The firmware image no longer carries the TB-303, chip, FM and SID: the SD content zip
+   ships their `.tmod` files in `modules/instruments/` (with their licence texts, `NOTICES.txt` and `LICENSES/`), and they are loaded like any other file by the same loader (same checks, same slab and
+   SDRAM arenas). With no card, or without the file, the ENGINE picker does not list one, and a project that uses one shows it greyed as "MODULE NOT ON THE CARD" (nothing sounds in its place).
+   The module version is in the file's header, see below. A module host may still hand `ModuleSet::set_builtins` a table of `.tmod` bytes in flash (`module/builtin.h`: the host tests and the QEMU
+   suites do): a card file of the same name is then tried first and **wins only when it is valid, of the same kind and has a higher module version than the built-in one**; an equal, an older or an
+   unversioned (0) file keeps the built-in module (`mod` lists "card tb303 v1.0.0 not newer than built-in v1.0.0"). The unit image sets no table.
    **Giving a module a version.** `o3m_pack.py build ... --version 1.2.0` (CMake: `o3m_add_module(acid SOURCES ... VERSION 1.2.0)`) writes it into the header: `X.Y.Z` with whole numbers, major 0..65535,
    minor and patch 0..255, no leading zeros; the default `0.0.0` is "unversioned". Versions compare as numbers (major, then minor, then patch). A module that carries a version declares ABI 1.2
    (`"abi": "1.2"` in `module.json`, then regenerate; by hand, build against this SDK): the packer refuses a version on a module that declares less, because an OS of ABI 1.1 would refuse the file

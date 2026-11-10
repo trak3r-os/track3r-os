@@ -1,5 +1,6 @@
-Built-in modules of track3r-os (TB-303, chip, FM, SID): .tmod files inside the
-firmware image, loaded like the same file from the SD card.
+Instrument modules of track3r-os (TB-303, chip, FM, SID): .tmod files in
+modules/instruments/ of the SD content zip (they were inside the firmware image
+before OS-FLASHDIET-ROOM R3; the unit tests still embed them).
 
 tb303: a single-precision port of the algorithms and constants of Open303
 (github.com/maddanio/open303), whose licence follows.

@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "comment": "The third-party content of the starter zip (OS-STARTER). tools/release/make_starter.py downloads each file, checks the SHA-256 and refuses any licence outside its allow-list. Files are pinned by commit, never by a branch name. Our own generated content (tools/release/gen) is not listed here: it is CC0 and goes to LICENSES/CREDITS.txt by the script.",
-  "modules": {"apps": ["chords", "humanize", "loudness", "midimon", "morph", "mutate", "pads", "rhythmgen", "scope", "smfexport", "tapcalc", "tuner"], "instruments": ["sine"], "effects": ["autopan", "biquad", "chorus", "comp", "crush", "drive", "envfilter", "fold", "phaser", "pingpong", "wide"], "importers": ["tracker"]},
+  "modules": {"apps": ["chords", "humanize", "loudness", "midimon", "morph", "mutate", "pads", "rhythmgen", "scope", "smfexport", "tapcalc", "tuner"], "instruments": ["chip", "fm", "sid", "sine", "tb303"], "effects": ["autopan", "biquad", "chorus", "comp", "crush", "drive", "envfilter", "fold", "phaser", "pingpong", "wide"], "importers": ["tracker"]},
   "presets": ["tb303", "fm", "chip", "sid"],
   "ptfx": ["add_silence", "analog_kick_gen", "chiptune_gen", "multimode_filter", "stereo_delay", "stereo_to_mono", "overdrive", "delay", "bitcrusher", "chorus", "flanger", "limiter", "eq3"],
   "files": [

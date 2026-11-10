@@ -81,7 +81,7 @@ track3r-os replaces the software that runs on the Tracker. You keep the hardware
   - **sample instruments**, with one shot, loop, slices, beat slices, wavetable and granular playback, on a modern engine or an Amiga-style one;
   - **MIDI instruments**, which play your other gear;
   - **module instruments**, loaded from the card.
-- **Built-in synth modules:** a TB-303-style bass line, an FM synth and a chip-tune voice.
+- **Synth modules (on the SD content zip):** a TB-303-style bass line, an FM synth, a chip-tune voice and a SID voice.
 - **Per instrument:** filter, envelopes, LFO, glide, overdrive and bit depth.
 - **Samples in any common format and rate:** WAV, AIFF and IFF 8SVX, at any sample rate, always in tune. On a stereo file you choose left, right or both.
 

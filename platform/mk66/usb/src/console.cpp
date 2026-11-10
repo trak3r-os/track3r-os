@@ -1030,27 +1030,6 @@ void cmd_mod(shell::Shell& sh, const shell::Args& a) {
     sh.out().text(appimg::module_audition(slot - 1u, note, vel, true) ? "mod: note queued\n" : text(txt::mod_4));
   } else if (std::strcmp(sub, "off") == 0 && a.argc == 3 && parse_dec(a.argv[2], 64u, slot) && slot != 0u) {
     sh.out().text(appimg::module_audition(slot - 1u, 0, 0, false) ? "mod: off queued\n" : text(txt::mod_4));
-  } else if (std::strcmp(sub, "notice") == 0 && (a.argc == 2 || a.argc == 3) && (a.argc == 2 || parse_dec(a.argv[2], 1000u, slot))) {
-    // OS-012d: the licence notices of the built-in modules (module/builtin.h), kMaxLines lines from line `slot` (0: the first); the next call's number is printed when there is more.
-    // OS-FLASHDIET P1: the text is a deflate stream, decoded as it is printed (appimg::module_notices_page); the shell runs in the main loop.
-    bool more = false;
-    unsigned next = 0;
-    const bool ok = appimg::module_notices_page(
-        slot, kMaxLines,
-        [](void* ctx, const char* text, std::size_t len, bool eol) noexcept {
-          auto& out = *static_cast<shell::Output*>(ctx);
-          if (eol) {
-            out.nl();
-          } else {
-            out.text(text, len);
-          }
-        },
-        &sh.out(), more, next);
-    if (!ok) {
-      sh.out().text(text(txt::mod_5));
-    } else if (more) {
-      sh.out().text("mod: more: mod notice ").dec(next).nl();
-    }
   } else if (std::strcmp(sub, "set") == 0 && a.argc == 5 && parse_dec(a.argv[2], 64u, slot) && slot != 0u) {
     std::uint32_t id = 0;
     float value = 0.0f;

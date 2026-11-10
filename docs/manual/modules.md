@@ -6,7 +6,7 @@ Chapter: Modules (deep). Rules: .claude/skills/manual-writing/SKILL.md. Sources:
 
 Status: draft
 
-Modules are files on the card that add to the OS without a firmware update: sound engines for instrument slots, and apps that edit the pattern or show you what the unit is doing. The TB-303, Chip, FM and SID engines are built in and need no card; every other module is a `.tmod` file. The **MODULES** screen lists the apps. Module instruments and apps are new in track3r-os. <!-- og: new -->
+Modules are files on the card that add to the OS without a firmware update: sound engines for instrument slots, and apps that edit the pattern or show you what the unit is doing. The TB-303, Chip, FM and SID engines are `.tmod` files like the others: the SD content zip puts them in `modules/instruments/` (they are not in the firmware, which keeps the flash free), so copy the zip's content to the card before you pick one; a project that uses one without its file shows it greyed. The **MODULES** screen lists the apps. Module instruments and apps are new in track3r-os. <!-- og: new -->
 
 ## What it is for
 
@@ -99,7 +99,7 @@ You should see the app's page. `Pattern` or `Shift` + `Pattern` again closes the
 
 Start on the Instrument screen, on a free slot.
 
-1. Press `F4` (**MODULE**). The picker opens and lists the instrument modules on the card. Each row ends with its state: **BUILT IN** for the TB-303, Chip, FM and SID engines (no card file needed), **ON CARD** for a module that has a file on the card. <!-- QA-INS-029, QA-MOD-236 -->
+1. Press `F4` (**MODULE**). The picker opens and lists the instrument modules on the card. Each row ends with its state: **ON CARD** for a module that has a file on the card, **LOADED** once it is running. The four synths (TB-303, Chip, FM, SID) appear here once their files are in `modules/instruments/`. <!-- QA-INS-029, QA-MOD-236 -->
 2. Turn the encoder to a module. `Shift` + `Down` and `Shift` + `Up` move ten rows at a time. <!-- QA-MOD-061 -->
 3. Press `F1` to choose it. <!-- QA-INS-029 -->
 

@@ -17,11 +17,11 @@ This page says what is established by observation on the maintainer's unit and b
 A release (GitHub, "Releases") has four files (v1.2.0):
 
 - `track3r-os-v1.2.0.ptf`: the update file. It is the device image in Intel HEX form under a `.ptf` name, which is what the Tracker's bootloader flashes. Its name never starts with `Polyend`, so it cannot be mistaken for an official file. For a first install through the reset button you rename your copy on the card (section 1).
-- `track3r-os-v1.2.0-modules.zip`: every external module: the apps, the effects, the `sine` instrument, the `tracker` importer for MOD, S3M and MED, the factory presets, and the thirteen Sample Editor plugins (`.ptfx`, which go in `Effects/`).
+- `track3r-os-v1.2.0-modules.zip`: every external module: the apps, the effects, the instruments (`tb303`, `chip`, `fm`, `sid`, `sine`; they are not inside the firmware) with their licence texts, the `tracker` importer for MOD, S3M and MED, the factory presets, and the thirteen Sample Editor plugins (`.ptfx`, which go in `Effects/`).
 - `track3r-os-v1.2.0-examples.zip`: demo projects, a drum kit, wavetables, an OctaMED module and the licences of the files.
 - `SHA256SUMS`: the checksums of the three files. Check your download before using it: `sha256sum -c SHA256SUMS`. The release notes also give the CRC-32 that `o3console.py --update --crc` asks for.
 
-**Unzip both zips at the root of the card.** The zips are optional for the firmware to run, but one file in them is needed: module import runs from `modules/importers/tracker.tmod`, and without it IMPORT of a MOD, S3M or OctaMED file says **NO IMPORTER** and changes nothing (your open project stays loaded). Keep that file on the card. Each zip's `README.txt` says what goes where.
+**Unzip both zips at the root of the card.** The zips are optional for the firmware to run, but two kinds of file in them matter: the instrument modules (a project that uses the TB-303, Chip, FM or SID says **MODULE NOT ON THE CARD** without its file in `modules/instruments/`) and the importer: module import runs from `modules/importers/tracker.tmod`, and without it IMPORT of a MOD, S3M or OctaMED file says **NO IMPORTER** and changes nothing (your open project stays loaded). Keep these files on the card. Each zip's `README.txt` says what goes where.
 
 The same image shows its version in Config, INFO (BUILD ID, for example `v1.2.0 (be2d71258138)`), on the boot screen, and in the `version` command of the USB `diag` console.
 
