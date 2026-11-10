@@ -49,7 +49,7 @@ set(O3OS_LABEL_RULES
   "^unit_audio$" "audio"
   "^unit_seq$" "seq"
   "^unit_(plot|ui|apps)$" "app"
-  "^unit_rest$" "core,app"
+  "^unit_rest_[0-9]of[0-9]$" "core,app"
   "^(contrast|budget|translate_fallback|boot_logo|plot|plot_budget|plot_bench_smoke)$" "app"
   "^audio_bench_smoke$" "audio"
   "^seq_bench_smoke$" "seq"

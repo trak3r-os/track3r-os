@@ -269,6 +269,9 @@ class Env:
             for p in self._cmake_files():
                 t = read(p)
                 names.update(re.findall(r"add_test\(\s*NAME\s+([A-Za-z0-9_]+)", t))
+                # a shard loop: add_test(NAME x_${k}of6) stands for x_1of6 .. x_6of6
+                for pre, n in re.findall(r"add_test\(\s*NAME\s+([A-Za-z0-9_]+)\$\{\w+\}of(\d+)\b", t):
+                    names.update("%s%dof%s" % (pre, i, n) for i in range(1, int(n) + 1))
                 names.update("o3m_%s_test" % n for n in re.findall(r"o3m_add_test\(\s*([A-Za-z0-9_]+)", t))
             self._ctest = names
         return self._ctest

@@ -676,7 +676,7 @@ depend on whether the checkout sits inside a tree that has one; `O3OS_CI_FIXTURE
 
 The host unit binary runs as several ctests instead of one (a single run was 157 s under ASan + UBSan): `unit_fuzz`, `unit_usb`,
 `unit_model`, `unit_formats`, `unit_plot`, `unit_audio`, `unit_seq`, `unit_ui`, `unit_apps` (each a list of source-file patterns,
-`tests/CMakeLists.txt`; a pattern that matches no file stops the configure) and `unit_rest`, every case no pattern names, so a new
+`tests/CMakeLists.txt`; a pattern that matches no file stops the configure) and `unit_rest_1of6`..`unit_rest_6of6`, every case no pattern names (cut in six by first letter of the file, the sixth the exclusion of the rest), so a new
 `*_test.cpp` joins it by itself, and `unit_cover`, which checks with doctest's `--count` that the groups hold every case exactly once
 and that none is empty. The verdict ctests `contrast`, `budget`, `translate_fallback`, `mk66_memmap`, `plot` and `plot_budget` still
 re-run their cases on their own, as before.

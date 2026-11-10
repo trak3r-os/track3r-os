@@ -4,7 +4,7 @@
 usage: unit_cover.py <command...> -- <doctest filter option>...
 
 <command...> is the unit binary with its runner prefix, if any; each filter option (`--source-file=...` or
-`--source-file-exclude=...`) is one group's filter, as its ctest passes it. The binary is asked for `--count`, which lists
+`--source-file-exclude=...`, or several joined by `|` when the ctest passes more than one) is one group's filter, as its ctest passes it. The binary is asked for `--count`, which lists
 nothing and runs nothing: first without a filter (the total), then once per group. The check passes when no group is empty
 and the counts add up to the total. A case in two groups makes the sum too large, a case in none too small, a pattern that
 matches nothing leaves its group at 0.
@@ -17,7 +17,7 @@ COUNT = re.compile(r"unskipped test cases passing the current filters: (\d+)")
 
 
 def count(command, option):
-    argv = command + ["--count"] + ([option] if option else [])
+    argv = command + ["--count"] + (option.split("|") if option else [])
     done = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=False)
     found = COUNT.search(done.stdout)
     if done.returncode != 0 or not found:

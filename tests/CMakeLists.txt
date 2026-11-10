@@ -351,10 +351,33 @@ foreach(group IN LISTS o3os_unit_groups)
 endforeach()
 # OS-MODPRESET P1: preset_format_test reads the corpus that preset_python writes (below): ctest runs that test first, also for `ctest -R unit_formats`.
 set_tests_properties(unit_formats PROPERTIES FIXTURES_REQUIRED preset_corpus)
+# unit_rest is cut in six ctests that run side by side (2026-11-10): in one piece it took about 115 s on the build machine, 340 s under
+# load, the longest single ctest of a host run. Measured per file under the sanitizers (137 s in all): scenario_test 25 s, the other
+# s* files 20 s, m* 27 s, f* 27 s (fat_fs_storage 24 s), a..e 20 s, everything else 19 s. Shards 1..5 name their files by the first
+# letter; shard 6 is the exclusion of the groups and of shards 1..5, so a new file still lands somewhere by itself. unit_cover gets
+# each shard's two options joined by `|` and checks that the shards and the groups partition the binary.
 list(JOIN o3os_unit_all "," filter)
-add_test(NAME unit_rest COMMAND ${runner} $<TARGET_FILE:o3os_tests> "--source-file-exclude=${filter}")
-set_tests_properties(unit_rest PROPERTIES TIMEOUT 600 FAIL_REGULAR_EXPRESSION "test cases: +0 ")
-list(APPEND o3os_unit_cover_groups "--source-file-exclude=${filter}")
+set(o3os_rest_1 */tests/scenario_test.cpp)
+set(o3os_rest_2 */tests/s*)
+set(o3os_rest_3 */tests/m*)
+set(o3os_rest_4 */tests/f*)
+set(o3os_rest_5 */tests/a* */tests/b* */tests/c* */tests/d* */tests/e*)
+set(o3os_rest_named "")
+foreach(k RANGE 1 5)
+  list(JOIN o3os_rest_${k} "," own)
+  set(excl "${filter}")
+  if(k EQUAL 2)
+    set(excl "${filter},*/tests/scenario_test.cpp")
+  endif()
+  add_test(NAME unit_rest_${k}of6 COMMAND ${runner} $<TARGET_FILE:o3os_tests> "--source-file=${own}" "--source-file-exclude=${excl}")
+  set_tests_properties(unit_rest_${k}of6 PROPERTIES TIMEOUT 300 FAIL_REGULAR_EXPRESSION "test cases: +0 ")
+  list(APPEND o3os_unit_cover_groups "--source-file=${own}|--source-file-exclude=${excl}")
+  list(APPEND o3os_rest_named ${o3os_rest_${k}})
+endforeach()
+list(JOIN o3os_rest_named "," named)
+add_test(NAME unit_rest_6of6 COMMAND ${runner} $<TARGET_FILE:o3os_tests> "--source-file-exclude=${filter},${named}")
+set_tests_properties(unit_rest_6of6 PROPERTIES TIMEOUT 300 FAIL_REGULAR_EXPRESSION "test cases: +0 ")
+list(APPEND o3os_unit_cover_groups "--source-file-exclude=${filter},${named}")
 
 # OS-CECHIP C1: the CHIP oracle. cechip_oracle_sha: the vendored original is byte for byte what third_party/tracker-ce-chip/PROVENANCE.md records (a cmake
 # script, no build). cechip_oracle: its cases of the unit binary on their own, so that the verdict is a line of its own (they also run in unit_audio).
