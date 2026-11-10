@@ -297,6 +297,12 @@ TEST_CASE("sgtl5000 stop (OS-POWER P1): the DAC ramps to silence first, the key 
   std::uint32_t wait_ms = 0;
   unsigned key_at = 0;
   unsigned power_at = 0;
+  // OS-BUG-POWERPOP: the VAG ramps down ALONE first (the output stages still powered, SMALL_POP on) and the ramp is waited out BEFORE the stages are powered down.
+  unsigned vag_off_at = 0;
+  unsigned stages_off_at = 0;
+  bool ramp_waited = false;
+  CHECK((codec.ref & sg::kRefCtrlSmallPop) != 0u);  // the slow ramp is on when the stop starts
+  CHECK((codec.ana_power & sg::kAnaPowerVag) != 0u);
   const bool ok = sg::run_stop(
       [&](const sg::Step& s) {
         if (writes == 0) {
@@ -311,9 +317,20 @@ TEST_CASE("sgtl5000 stop (OS-POWER P1): the DAC ramps to silence first, the key 
         if (key_low) {
           CHECK(codec.dac_muted());  // the DAC was ramped down before the key fell
         }
+        const auto ana_before = codec.ana_power;
         codec.write(s.reg, s.value);
         if (s.reg == sg::kAnaPower) {
           power_at = writes;
+          if (s.value == sg::kAnaPowerVagOff) {
+            vag_off_at = writes;
+            CHECK(ana_before == 0x40FF);  // what the power-up plan left before this write: everything up
+            CHECK((s.value & sg::kAnaPowerOutputs) == (sg::kAnaPowerOutputs & ~sg::kAnaPowerVag));  // HP, DAC, capless HP, line out stay powered while the VAG ramps
+            CHECK(s.wait_ms == sg::kVagRampDownWaitMs);
+          } else {
+            stages_off_at = writes;
+            CHECK(vag_off_at != 0u);  // the VAG ramp started before the stages went
+            CHECK(ramp_waited);       // and ran its time first
+          }
           CHECK(key_low);                    // the key is LOW before the VAG goes
           CHECK(codec.outputs_muted());
           CHECK(codec.dac_muted());
@@ -331,15 +348,25 @@ TEST_CASE("sgtl5000 stop (OS-POWER P1): the DAC ramps to silence first, the key 
       [&](std::uint32_t ms) {
         ++waits;
         wait_ms += ms;
-        CHECK_FALSE(key_low);  // the ramp is waited out before the key
-        CHECK(writes == 1u);
+        if (waits == 1u) {
+          CHECK_FALSE(key_low);  // the DAC's ramp is waited out before the key
+          CHECK(writes == 1u);
+          CHECK(ms == sg::kDacRampWaitMs);
+        } else {
+          CHECK(key_low);
+          CHECK(codec.ana_power == sg::kAnaPowerVagOff);  // the VAG ramp runs now, the stages still on it
+          CHECK(ms == sg::kVagRampDownWaitMs);
+          ramp_waited = true;
+        }
       });
   CHECK(ok);
   CHECK(writes == 1u + sg::kMuteCount + sg::kPowerDownCount);
-  CHECK(waits == 1u);
-  CHECK(wait_ms == sg::kDacRampWaitMs);
+  CHECK(waits == 2u);
+  CHECK(wait_ms == sg::kDacRampWaitMs + sg::kVagRampDownWaitMs);
   CHECK(key_at == 1u);
-  CHECK(power_at == writes - 1u);  // CHIP_ANA_POWER is the last write
+  CHECK(vag_off_at == writes - 2u);   // the VAG alone first, then its ramp's wait
+  CHECK(stages_off_at == writes - 1u);  // the final CHIP_ANA_POWER is the last write
+  CHECK(power_at == writes - 1u);
   // where it ends
   CHECK(codec.outputs_muted());
   CHECK(codec.dac_muted());

@@ -164,16 +164,27 @@ inline constexpr unsigned kMuteCount = sizeof(kMute) / sizeof(kMute[0]);
 //      so the amplifier key's fall (which with sound playing could click: it is the one that mute() takes first, for the update path's quiet hand-over) is on silence;
 //   2. the amplifier key goes LOW (the caller's, a GPIO write);
 //   3. kMute: the line out and the headphone muted, the DAC muted again (a no-op when the ramp has done);
-//   4. kPowerDown: the headphone volume to its floor, the DAC volume muted, and CHIP_ANA_POWER back to the value the power-up plan starts from (kAnaPowerDown: the reference bias on, the
-//      headphone, DAC, capless headphone, line out and the VAG powered down), so the analogue stage is off with the key already LOW.
+//   4. kPowerDown: the headphone volume to its floor, the DAC volume muted; then the VAG's own power-down ramp (OS-BUG-POWERPOP): CHIP_ANA_POWER with VAG_POWERUP (bit 7) cleared and the headphone, DAC,
+//      capless headphone and line out still powered (kAnaPowerVagOff), and a wait for the ramp (kVagRampDownWaitMs); only then CHIP_ANA_POWER back to the value the power-up plan starts from
+//      (kAnaPowerDown: the reference bias on, the headphone, DAC, capless headphone, line out and the VAG powered down), so the analogue stage is off with the key already LOW.
+//   Why the VAG goes alone and first: the data sheet's CHIP_ANA_POWER VAG_POWERUP bit starts the output ramp when set and the power-down ramp when cleared, and CHIP_REF_CTRL SMALL_POP (bit 0, set by the
+//   power-up plan: kRefCtrl 0x01F3) slows that ramp (about 400 ms) to keep it from popping. The headphone and line-out stages sit on the VAG: one write that drops the VAG together with the output stages
+//   (0x4060 straight from 0x40FF) removes that level in a step, the pop of a power-off with headphones or the line out connected. The I2S stays on (zeros, the DAC muted) until the ramp has run.
+//   Every wait is a constant (the soft mute's 50 ms, the VAG ramp's 500 ms).
 // The only write before the key falls is the DAC's soft mute; from the key's fall on every step leaves the outputs muted, and the key is LOW before the first step that touches the analogue power.
 // The order is one function, run_stop(), which the image and the test both run (tests/mk66_sgtl5000_test.cpp, on the register model above).
 inline constexpr std::uint16_t kAnaPowerDown = 0x4060;  // the power-up plan's first CHIP_ANA_POWER value: "nothing else powered" (no output, no VAG, no ADC)
 static_assert((kAnaPowerDown & kAnaPowerOutputs) == 0u, "the stop's CHIP_ANA_POWER powers none of the outputs or the VAG");
+inline constexpr std::uint16_t kAnaPowerVag = 1u << 7;  // CHIP_ANA_POWER VAG_POWERUP
+inline constexpr std::uint16_t kAnaPowerVagOff = 0x40FF & ~kAnaPowerVag;  // the power-up plan's 0x40FF with the VAG alone cleared: the power-down ramp starts, the output stages follow it
+static_assert((kAnaPowerVagOff & kAnaPowerVag) == 0u && (kAnaPowerVagOff & kAnaPowerOutputs) != 0u, "the ramp step drops the VAG and keeps the output stages powered");
+inline constexpr std::uint16_t kRefCtrlSmallPop = 1u << 0;  // CHIP_REF_CTRL SMALL_POP: the slow VAG ramp
+inline constexpr std::uint16_t kVagRampDownWaitMs = 500;    // as the power-up's wait: about 400 ms with SMALL_POP
 inline constexpr Step kSoftMute = {kAdcDacCtrl, kAdcDacMuted, kDacRampWaitMs};
 inline constexpr Step kPowerDown[] = {
     {kAnaHpCtrl, hp_ctrl(kHpVolMin), 0},
     {kDacVol, static_cast<std::uint16_t>((kDacVolMuted << 8) | kDacVolMuted), 0},
+    {kAnaPower, kAnaPowerVagOff, kVagRampDownWaitMs},
     {kAnaPower, kAnaPowerDown, 0},
 };
 inline constexpr unsigned kPowerDownCount = sizeof(kPowerDown) / sizeof(kPowerDown[0]);
@@ -190,6 +201,9 @@ bool run_stop(Write&& write, KeyLow&& key_low, Wait&& wait) {
   }
   for (const Step& step : kPowerDown) {
     ok = write(step) && ok;
+    if (step.wait_ms != 0u) {
+      wait(step.wait_ms);
+    }
   }
   return ok;
 }

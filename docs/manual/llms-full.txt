@@ -315,6 +315,7 @@ If a `Shift` + soft key has no label, it does nothing. It never acts as the plai
 | `Song` | the Song screen, when you let go of the key. Held: the Song screen until you let go, then back to where you were ([Song](song.md)) | - |
 | `Pattern` | the Pattern screen, when you let go of the key. Held, with the encoder: the tempo, on any screen; held, with a pad: tap tempo (see [Tempo from any screen](#tempo-from-any-screen)) | QA-GLB-153, QA-GLB-155 |
 | `Song` + `Pattern`, or `Master` + `Song`, pressed together | opens the Navigator on any screen; press `F8` (**GO**) to go to the screen you chose, or `F7` (**CLOSE**) to leave it. Neither key does its own job, and the Song peek and the held volume and tempo turns stay off | QA-GLB-233 |
+| `Master` + `Insert`, pressed together | opens the Mixer on its **INSERTS** page from any screen (on the Mixer it goes to INSERTS). Neither key does its own job. New in track3r-os. | QA-MIX-112 |
 | `Shift` + `Pattern` | lists the module apps that are not tools; `F1` or `F8` (**LAUNCH**) starts one, `Pattern` leaves the list. It was the Navigator before | QA-MOD-252 |
 | `Shift` + `Master` | steps to the next colour theme: Amiga, Black, White, then Amiga again. The THEME row on Config says the same. New in track3r-os. | QA-GLB-157 |
 | `Shift` + `Config` | opens the help page of the screen you are on (see [The help page](#the-help-page)) | QA-GLB-141 |
@@ -411,7 +412,7 @@ On the Song screen, `Insert` adds a slot, `Shift` + `Insert` adds a slot with a 
 
 The second label Backspace is not what `Shift` + `Delete` does on Pattern: it pulls steps up and erases nothing backwards. The backspace is the plain `Delete` key on the on-screen keyboard. The pull is new in track3r-os.
 
-Most screen buttons act when you press them. `Pattern`, `Song` and `Master` act when you let go, because a hold can mean something else: `Song` + `Pattern` and `Master` + `Song` open the Navigator and `Shift` + `Pattern` lists the module apps, and a hold of `Song` for 0.4 seconds shows the Song screen as a peek.  Playback does not stop when you change screen. Leaving Perform ends its effects, except when you go to the Mixer or Song; see [Perform](perform.md).
+Most screen buttons act when you press them. `Pattern`, `Song`, `Master` and `Insert` act when you let go (or 40 ms after the press), because a hold can mean something else: `Song` + `Pattern` and `Master` + `Song` open the Navigator, `Master` + `Insert` opens the Mixer on INSERTS (press both within 40 ms of each other; a slower press is a `Master` tap, then `Insert`) and `Shift` + `Pattern` lists the module apps, and a hold of `Song` for 0.4 seconds shows the Song screen as a peek.  Playback does not stop when you change screen. Leaving Perform ends its effects, except when you go to the Mixer or Song; see [Perform](perform.md).
 
 The buttons have no lights. The screen shows the state instead, for example the mode chip and the red **REC** badge on Pattern.
 
@@ -768,7 +769,7 @@ The Mixer has five pages, and three are not a fader strip. **ROUTING** decides w
 
 ## What it is for
 
-Use the Mixer to set levels and pans, route tracks, mute and solo, put effects on tracks, and watch the master limiter. Press `Master`. `F1` to `F4` pick the page, with the cursor on its first row. `F6` opens **INSERTS** from the MIXER, ROUTING and MASTER FX pages; on **STEMS** it is **APPLY**. Pressing `Master` again turns to the next page.
+Use the Mixer to set levels and pans, route tracks, mute and solo, put effects on tracks, and watch the master limiter. Press `Master`. `F1` to `F4` pick the page, with the cursor on its first row. `F6` opens **INSERTS** from the MIXER, ROUTING and MASTER FX pages; on **STEMS** it is **APPLY**. Pressing `Master` again turns to the next page. `Master` and `Insert` together open the Mixer straight on **INSERTS** from any screen (new in track3r-os).
 
 To set a level or a pan on the MIXER page, press `Left` or `Right` to pick the column and `Up` or `Down` to pick the field (level or pan). Turn the encoder to set the value. `Shift` makes the step coarse. `Delete` puts back the default.
 
@@ -3903,6 +3904,7 @@ The keys on one page. Each table names the chapter it comes from.
 | `Rec` | on Pattern, turns STEP on or off; on Record, starts or stops the take |
 | `Shift` + `Rec` | on Pattern, turns LIVE on or off |
 | `Song` + `Pattern`, or `Master` + `Song` | opens the Navigator. `F8` (**GO**) opens the chosen screen; `Pattern` leaves it |
+| `Master` + `Insert` | opens the Mixer on its INSERTS page, from any screen |
 | `Shift` + `Pattern` | lists the module apps that are not tools. `F1` (**LAUNCH**) starts one; `Pattern` leaves it |
 | `Shift` + `Config` | opens the help page of the screen you are on. `Left` and `Right` turn the pages, `Up`, `Down` and the encoder scroll, any other key closes it |
 | `Shift` + `Master` | steps to the next colour theme: Amiga, Black, White.  |
@@ -3987,7 +3989,7 @@ The soft keys with `Shift` held. `-` means the key does nothing. On Pattern, `Sh
 | `Shift` + `Right` or `Left` | Sample load: marks the file under the cursor and steps down (Right), or clears the marks (Left). **LOAD** and **ADD** then load every marked file |
 | `Shift` + `Right` or `Left` | Instrument: the row's coarse step up or down, as `Shift` + encoder. Plain `Right` and `Left` are one click |
 | `Shift` + `Note`, `Instr`, `Vol`, `Fx` | Pattern: jumps to a quarter of the pattern. On Song `Shift` + `Note` jumps to the previous slot with the same pattern |
-| `Shift` + pad | Instrument: selects the instrument on that pad |
+| `Shift` + pad | Instrument: plays the instrument in view, as a pad alone does (change the instrument with `F6` and `F7`) |
 | `Shift`, held alone | Pattern: the pads show the TRACKS layout while held |
 
 | `Shift` + encoder | One click moves |
@@ -4476,7 +4478,7 @@ An instrument is one of the 64 slots of the project, and it is stored with the p
 
 Nothing here "ends" by itself: a value stays until you change it. `Delete` puts the row under the cursor back to its default, `Shift` + `Delete` sets every row to its default, and `F8` (**UNDO**) takes back the last change. A sweep of the encoder on one row is one undo step, and a pause of 1.5 seconds starts a new one.
 
-The pads play the instrument in view, so you hear each change while you hold a pad. Example: on a sample instrument, open the FILTER page, move to **CUTOFF**, hold a pad and turn the encoder. The filter closes under your finger, and one `F8` puts it back.
+The pads play the instrument in view, so you hear each change while you hold a pad. `Shift` + pad plays it too (new Community OS behaviour), so you can hold `Shift` for the coarse step of the encoder and still tap the pads; the instrument itself changes with `F6` and `F7`.  Example: on a sample instrument, open the FILTER page, move to **CUTOFF**, hold a pad and turn the encoder. The filter closes under your finger, and one `F8` puts it back.
 
 ### The volume law
 
@@ -4722,7 +4724,7 @@ Three labels in the table are the ones the screen starts with, and they change a
 | encoder | Changes the value under the cursor. | QA-INS-019, QA-INS-085 |
 | `Shift` + encoder | A coarse step. On CHANNEL, each click moves four. | QA-INS-064 |
 | pad | Plays the instrument in view. On a MIDI instrument it sends a note. | QA-INS-013, QA-INS-033 |
-| `Shift` + pad | Selects the instrument on that pad, with no sound. | QA-INS-012 |
+| `Shift` + pad | Plays the instrument in view, as a pad alone does, so you can hold `Shift` for a coarse step and tap pads together. It does not change the instrument: use `F6` and `F7`, or `Shift` + `F6` and `Shift` + `F7`. New Community OS behaviour. | QA-INS-012 |
 
 ## Good to know
 

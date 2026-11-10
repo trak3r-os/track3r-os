@@ -74,19 +74,14 @@
   },
   {
    "keys": [
-    "+shift"
+    "f6"
    ],
-   "gap": 0.3
-  },
-  {
-   "pad": 0,
-   "note": "Shift + pad selects instrument 1 (a bare pad on Params plays it: OS-INSTUI S2), so that one detent down is 49"
-  },
-  {
-   "keys": [
-    "-shift"
-   ],
-   "gap": 0.3
+   "until": {
+    "instrument": "1"
+   },
+   "max": 50,
+   "gap": 0.15,
+   "note": "F6 steps down to instrument 1 (Shift + pad plays it, it does not select), so that one detent down is 49"
   },
   {
    "state": {

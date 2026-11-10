@@ -13,7 +13,7 @@ wait 20
 # QA-MIX-058: F6 on the Mixer opens the INSERTS page: a grid of the tracks and MASTER by INS A and INS B, the module name in each cell, a bypassed one marked; the soft key row reads MIXER ... INSERTS BYPASS SOLO.
 tap master
 wait 20
-# QA-MIX-111 (OS-MIXINS): on the MIXER page a small accent dot follows the name of each track with an insert: T1 (two inserts) and T3; T2 and the rest have none.
+# QA-MIX-111 (OS-MIXINS): on the MIXER page an accent bar sits under the name of each track with an insert: T1 (two inserts) and T3; T2 and the rest have none.
 snap qa_ins_028
 tap f6
 wait 20

@@ -222,6 +222,7 @@ const std::vector<ActionEntry>& action_states() {
       A("mixer.coarse"),
       A("mixer.cue"),
       A("mixer.edit"),
+      A("mixer.inserts"),  // OS-MIXINSKEY: from the demo's screen it switches to the Mixer and sets INSERTS
       A("mixer.master_vol"),
       A("mixer.mute"),
       A("mixer.mute_none", {kMixTouched}),

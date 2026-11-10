@@ -458,6 +458,26 @@ TEST_CASE("og samples: slice mode binds the selected slice, beat slice binds the
   CHECK(d.length == 100000u - static_cast<std::uint32_t>(10000.0f * (100000.0f / 65535.0f)));
   CHECK(d.data + d.length == pcm + 100000u);
   sl.slice_thru = 0;
+  // OS-BUG-SLICEPAD: with room for a table the Slice mode is the whole sample and the table, the selected slice in slice_sel (the voices play it at the note's pitch; the Slice FX and a
+  // pad's slice pick another). Without the table (above) it keeps the window.
+  sl.sampler.slices[2] = 30000;
+  sl.sampler.selected_slice = 1;
+  CHECK(slice_table_samples(sl) == 8u);
+  std::int16_t sl_table[8];
+  d = make_sample_desc(sl, pcm, 100000, &approx, sl_table);
+  CHECK_FALSE(approx);
+  CHECK(d.beat_slice);
+  CHECK(d.data == pcm);
+  CHECK(d.length == 100000u);
+  CHECK(d.slice_count == 3u);
+  CHECK(d.slice_sel == 1u);
+  CHECK(bound(d.slices, 1) == static_cast<std::uint32_t>(10000.0f * (100000.0f / 65535.0f)));
+  CHECK(bound(d.slices, 3) == 100000u);
+  sl.sampler.slice_count = 0;  // no slices: no table, the whole sample
+  CHECK(slice_table_samples(sl) == 0u);
+  d = make_sample_desc(sl, pcm, 100000, &approx, sl_table);
+  CHECK_FALSE(d.beat_slice);
+  CHECK(d.slice_sel == 0xFFu);
 
   // Beat slice (5): the table has slice_count + 1 boundaries, as two halves each, the last one the length; a slice that fits no table is the whole sample.
   o3os::model::Instrument bs = sample_instrument(5);
@@ -467,11 +487,11 @@ TEST_CASE("og samples: slice mode binds the selected slice, beat slice binds the
   bs.sampler.slices[2] = 40000;
   CHECK(slice_table_samples(bs) == 8u);
   CHECK(slice_table_samples(sample_instrument(5)) == 0u);  // no slices: no table
-  CHECK(slice_table_samples(sl) == 0u);                    // only a beat slice has one
   std::int16_t table[8];
   d = make_sample_desc(bs, pcm, 100000, &approx, table);
   CHECK_FALSE(approx);
   CHECK(d.beat_slice);
+  CHECK(d.slice_sel == 0xFFu);  // a beat slice picks the slice from the note
   CHECK(d.data == pcm);
   CHECK(d.length == 100000u);
   CHECK(d.slice_count == 3u);

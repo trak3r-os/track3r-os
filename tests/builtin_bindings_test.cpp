@@ -339,8 +339,9 @@ TEST_CASE("builtin bindings: every Shift binding is one of these, and none of th
   expected.push_back(line("record", "tap", "right", "record.coarse", 1));
   expected.push_back(line("instrument.empty", "tap", "left", "instrument.turn", -1));  // the empty slot's chooser: Shift + arrow is the plain arrow (no value to step)
   expected.push_back(line("instrument.empty", "tap", "right", "instrument.turn", 1));
-  // OS-INSTUI S1, S2: Shift + pad selects without a sound; Shift + F1..F5 are NAME .. SAVE (placeholders until S5 / S7), Shift + F6 / F7 the nearest instrument in use.
-  expected.push_back("instrument tap shift+pad* instrument.select @id+1\n");
+  // OS-INSTUI S1, S2: Shift + F1..F5 are NAME .. SAVE (placeholders until S5 / S7), Shift + F6 / F7 the nearest instrument in use.
+  // OS-SHIFTPAD: Shift + pad plays the instrument in view like a plain pad (it no longer selects).
+  expected.push_back("instrument tap shift+pad* instrument.pad @id\n");
   {
     static constexpr const char* kShiftRow[5] = {"instrument.name", "instrument.copy", "instrument.paste", "instrument.delete", "instrument.save"};  // OS-INSTUI S5, S7
     for (int n = 0; n < 5; ++n) {
@@ -772,6 +773,31 @@ TEST_CASE("builtin bindings: Master + Song and Song + Pattern open the Navigator
   }
   CHECK(resolve_in(picker, core::GestureKind::Tap, Button::F8, false).action == core::action_id("module.picker_f8"));
   CHECK(resolve_in(picker, core::GestureKind::Tap, Button::F1, false).action == core::action_id("module.pick"));
+}
+
+TEST_CASE("builtin bindings: Master + Insert opens the Mixer INSERTS page from every screen, in either order; the plain Insert keeps its own actions (OS-MIXINSKEY)") {
+  const core::BindingSet set{{core::BindingView{nullptr, 0}, core::BindingView{nullptr, 0}, app::builtin_bindings()}};
+  const Chain pattern{"pattern", {Context::PatternEdit, Context::Pattern, Context::Global}, false};
+  const Chain song{"song", {Context::Song, Context::Global}, false};
+  const Chain instrument{"instrument", {Context::Instrument, Context::Global}, false};
+  const Chain stems{"stems", {Context::MixerStems, Context::Mixer, Context::Global}, false};
+  const Chain inserts{"inserts", {Context::MixerInserts, Context::Mixer, Context::Global}, false};
+  const Chain navigator{"navigator", {Context::Navigator, Context::Global}, true};
+  for (const Chain* c : {&pattern, &song, &instrument, &stems, &inserts}) {
+    CHECK_MESSAGE(core::chord_bound(set, chain_of(*c), app::button_ref(Button::Master), app::button_ref(Button::Insert)), c->what);
+    CHECK_MESSAGE(core::chord_bound(set, chain_of(*c), app::button_ref(Button::Insert), app::button_ref(Button::Master)), c->what);
+    for (int swap = 0; swap < 2; ++swap) {
+      const core::Trigger t = swap == 0 ? core::chord(app::button_ref(Button::Master), app::button_ref(Button::Insert)) : core::chord(app::button_ref(Button::Insert), app::button_ref(Button::Master));
+      const core::Resolution r = core::resolve(set, chain_of(*c), core::Gesture{0, t.gesture, t.input, t.modifier, 0});
+      CHECK_MESSAGE((r.status == core::Resolution::Status::Bound && r.action == core::action_id("mixer.inserts")), c->what << " chord " << swap);
+    }
+  }
+  CHECK_FALSE(core::chord_bound(set, chain_of(navigator), app::button_ref(Button::Master), app::button_ref(Button::Insert)));  // a capturing context hides Global's chord
+  // The plain Insert is unchanged where it was bound.
+  CHECK(resolve_in(pattern, core::GestureKind::Tap, Button::Insert, false).action == core::action_id("step.insert"));
+  CHECK(resolve_in(song, core::GestureKind::Tap, Button::Insert, false).action == core::action_id("song.add_slot"));
+  CHECK(resolve_in(stems, core::GestureKind::Tap, Button::Insert, false).action == core::action_id("mixer.stem_set"));
+  CHECK(resolve_in(pattern, core::GestureKind::Tap, Button::Master, false).action == core::action_id("nav.screen"));
 }
 
 TEST_CASE("builtin bindings: F8 is UNDO and Shift + F8 REDO on Pattern (every mode) and Song, and Back in the overlays (OS-002c)") {

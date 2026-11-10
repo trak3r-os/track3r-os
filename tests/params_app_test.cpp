@@ -106,14 +106,8 @@ struct Rig {
     input.push(core::make_pad_event(clock.now(), static_cast<std::uint8_t>(index), 0));
     pass(1);
   }
-  // OS-INSTUI O3: Shift + a pad selects the instrument without a sound (a pad alone plays it).
-  void shift_pad(unsigned index) {
-    press(Button::Shift);
-    pass(1);
-    pad(index);
-    release(Button::Shift);
-    pass(1);
-  }
+  // Instrument `index` (0-based) in view (Shift + pad plays since OS-SHIFTPAD: the instrument changes on F6 / F7 or through the action).
+  void select_instrument(unsigned index) { (void)invoke("instrument.select", static_cast<ActionArg>(index + 1u)); }
   DispatchResult invoke(const char* name, ActionArg arg = 0) { return app->invoke(core::action_id(name), arg); }
   // The notification at the head of the queue (also while a modal overlay holds it back), "" when there is none.
   std::string note() const { return app->state().notify.empty() ? std::string() : std::string(app->state().notify.head().text.c_str()); }
@@ -206,9 +200,9 @@ TEST_CASE("params screen: the Params button reaches it, its pages and rows come 
   rig.tap(Button::F3);
   rig.tap(Button::Params);
   CHECK(page() == ip::GroupSource);
-  // The instrument is the one Shift + a pad selected.
+  // The instrument is the one the action selected.
   rig.tap(Button::F3);
-  rig.shift_pad(3);
+  rig.select_instrument(3);
   CHECK(app::kParamsScreen.focus_param(m, v) == core::param_id(ParamKind::Instrument, 3, ip::FilterEnable));
   // OS-SHIFTROW: Shift + F1..F5 are the Shift row's (NAME .. SAVE wait for S5 / S7: they say so), and never the plain page key.
   rig.tap(Button::F4);
@@ -250,7 +244,7 @@ TEST_CASE("params screen: PLAY ENGINE is a row of the VOICE page the encoder edi
   const unsigned slot = first_sample_slot(rig.project());
   NEED(slot < model::kMaxInstruments);
   set_rate(rig, slot, 8287);
-  rig.shift_pad(slot);
+  rig.select_instrument(slot);
   rig.go_to(ip::GroupSource, 9);  // (the last row of the source page, whatever the mode: O5; STEREO since OS-STEREO step 2, PLAY ENGINE is the one above it)
   rig.tap(Button::Up);
   const ParamId id = inst(slot, ip::PlayEngine);
@@ -281,7 +275,7 @@ TEST_CASE("params screen: a sample too fast for Paula refuses AMIGA with CONVERT
   Rig rig;
   const unsigned slot = first_sample_slot(rig.project());
   NEED(slot < model::kMaxInstruments);
-  rig.shift_pad(slot);
+  rig.select_instrument(slot);
   rig.go_to(ip::GroupSource, 9);  // (the last row of the source page, whatever the mode: O5; STEREO since OS-STEREO step 2, PLAY ENGINE is the one above it)
   rig.tap(Button::Up);
   const auto engine = [&]() { return rig.project().instrument(slot)->engine; };
@@ -470,7 +464,7 @@ TEST_CASE("params edit: a free slot, no project and a full ring are each said or
   {
     Rig rig;
     rig.go_to(ip::GroupVoice, 0);
-    rig.shift_pad(15);  // instrument 16: the demo has ten
+    rig.select_instrument(15);  // instrument 16: the demo has ten
     rig.clear_notes();
     rig.heard();
     rig.turn(3);

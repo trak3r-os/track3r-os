@@ -101,13 +101,9 @@ class SimAudio::Preview final : public app::PreviewSink {
   void preview(unsigned instrument, unsigned note) noexcept override {
     (void)push(audio::LiveEvent{audio::LiveKind::On, audio::kLiveSourcePreview, 0, clamp7(note), clamp_instrument(instrument), audio::kLiveVelocityDefault, 0, 0});
   }
-  void pad_down(unsigned pad, unsigned track, unsigned instrument, unsigned note) noexcept override {
-    if (pad >= app::PadBoard::kPads) {
-      return;
-    }
-    if (push(audio::LiveEvent{audio::LiveKind::On, audio::kLiveSourcePad, static_cast<std::uint8_t>(pad), clamp7(note), clamp_instrument(instrument), audio::kLiveVelocityDefault, clamp_track(track), 0})) {
-      held_ |= std::uint64_t{1} << pad;
-    }
+  void pad_down(unsigned pad, unsigned track, unsigned instrument, unsigned note) noexcept override { pad_on(pad, track, instrument, note, 0); }
+  void slice_pad_down(unsigned pad, unsigned track, unsigned instrument, unsigned note, unsigned slice) noexcept override {
+    pad_on(pad, track, instrument, note, static_cast<std::uint8_t>(slice + 1u > 255u ? 0u : slice + 1u));  // the event's channel is the pad's slice + 1 (live_notes.h)
   }
   void take_pad_down(unsigned pad, unsigned track, unsigned note) noexcept override {
     if (pad >= app::PadBoard::kPads) {
@@ -173,6 +169,15 @@ class SimAudio::Preview final : public app::PreviewSink {
   std::uint32_t dropped() const noexcept { return dropped_; }
 
  private:
+  void pad_on(unsigned pad, unsigned track, unsigned instrument, unsigned note, std::uint8_t channel) noexcept {  // channel: the pad's slice + 1, 0 none (live_notes.h)
+    if (pad >= app::PadBoard::kPads) {
+      return;
+    }
+    if (push(audio::LiveEvent{audio::LiveKind::On, audio::kLiveSourcePad, static_cast<std::uint8_t>(pad), clamp7(note), clamp_instrument(instrument), audio::kLiveVelocityDefault, clamp_track(track),
+                              channel})) {
+      held_ |= std::uint64_t{1} << pad;
+    }
+  }
   static audio::LiveEvent all_notes_off() noexcept { return audio::LiveEvent{audio::LiveKind::AllOff, audio::kLiveAllSources, 0, 0, 0, 0, 0, 0}; }
   static std::uint8_t clamp7(unsigned v) noexcept { return static_cast<std::uint8_t>(v > 127u ? 127u : v); }
   static std::uint8_t clamp_instrument(unsigned v) noexcept { return static_cast<std::uint8_t>(v >= 1u && v <= audio::kSampleSlots ? v : 0u); }

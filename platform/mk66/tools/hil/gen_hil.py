@@ -321,9 +321,9 @@ add("pattern_edit_undo", "Pattern in Edit: note, instrument, volume and FX of a 
 # ======================================================================================================================================
 # 3. pad_modes
 # ======================================================================================================================================
-# Instrument 1 selected on the Params screen: Shift + pad 0 (OS-INSTUI S2: a bare pad there PLAYS the instrument in view, so the old "pad 0 selects it" held only when instrument 1 was already in view,
-# which a start from another instrument's page (the MIDI page of 49, say) broke: OS-HILSCEN2).
-SELECT_1 = [K("+shift", gap=0.3), PAD(0, note="Shift + pad selects instrument 1"), K("-shift", gap=0.3)]
+# Instrument 1 selected on the Params screen: F6 (instrument.step -1, dim at 1, no wrap) until the state says 1. Shift + pad no longer selects there (OS-SHIFTPAD: it plays like a bare pad), and
+# the HIL console only injects keys, pads and encoder turns, so F6/F7 are the way to move the instrument from whichever one a former run left in view (OS-HILSCEN2).
+SELECT_1 = [K("f6", until={"instrument": "1"}, max=50, gap=0.15, note="F6 steps down to instrument 1 (dim there; Shift + pad plays, it does not select)")]
 
 
 def shift_pick(fkey):
@@ -450,9 +450,9 @@ def cpu_window(arm):
 
 def filter_on_16():
     steps = [pad_mode_notes(), ST({"pads": "NOTES"}, within=2), K("params", gap=0.4), ST({"screen": "INSTRUMENT"}, within=3),
-             SAY("FILTER On on the 16 instruments of t-v16 (saved Off): Shift + pad selects the instrument, F2 then F3 puts the cursor on the FILTER row, one detent turns it On (a second one changes nothing)")]
+             SAY("FILTER On on the 16 instruments of t-v16 (saved Off): F6 down to instrument 1 then F7 up one at a time, F2 then F3 puts the cursor on the FILTER row, one detent turns it On (a second one changes nothing)")]
     for n in range(1, 17):
-        steps += [K("+shift", gap=0.3), PAD(n - 1), K("-shift", gap=0.3), ST({"screen": "INSTRUMENT", "instrument": str(n)}, within=2),
+        steps += ([*SELECT_1] if n == 1 else [K("f7", gap=0.3)]) + [ST({"screen": "INSTRUMENT", "instrument": str(n)}, within=2),
                   K("f2", gap=0.3), K("f3", gap=0.3), ST({"page": "~^[12]$"}, within=2, note="(FILTER page, cursor on its first row: FILTER; page 1 on a BEAT SLICE instrument, page 2 on a Source-first one)" if n == 1 else None), ENC(1, gap=0.3)]
     return steps + [SHOT("filter_on_16", note="(a picture for the report: instrument 16, FILTER On)"), K("pattern", gap=0.4), ST({"screen": "PATTERN"}, within=3)]
 
@@ -622,10 +622,10 @@ add("qa_cpu_wt", "OS-CEWTENV W3a (3.10): the CPU of the cutoff WT Env on the uni
 # 5. slices_pads (OS-SLICEFIX)
 # ======================================================================================================================================
 sl = start_on_pattern() + [pad_mode_notes(), ST({"pads": "NOTES"}, within=2), RUN("_play"), W(1.0), RUN("_stop"),
-                           SAY("every instrument 1..16 of t-v16: selected on PARAMS by Shift + its pad, three pads played on Pattern; `inst n` soft-reports which are beat slices")]
+                           SAY("every instrument 1..16 of t-v16: selected on PARAMS by F6 down to 1 then F7 up, three pads played on Pattern; `inst n` soft-reports which are beat slices")]
 for n in range(1, 17):
     sl += [
-        K("params", gap=0.4), K("+shift", gap=0.3), PAD(n - 1, note="instrument %d (Shift + pad selects it: a bare pad on Params plays the instrument in view, OS-INSTUI S2)" % n), K("-shift", gap=0.3),
+        K("params", gap=0.4), *([*SELECT_1] if n == 1 else [K("f7", gap=0.3, note="instrument %d (F7 steps up from the previous one; Shift + pad plays, it does not select)" % n)]),
         ST({"screen": "INSTRUMENT", "instrument": str(n)}, within=2),
         K("pattern", gap=0.4), ST({"screen": "PATTERN"}, within=2),
         CMD("inst %d" % n, expect=r"inst %02d: mode \d+" % n, soft=True, note="(soft: a sample instrument is bound)"),
@@ -1164,7 +1164,7 @@ add("midi_notes_ready", "setup for MANUAL.md: t-v16 loaded, Pattern in Browse wi
                           K("rec", gap=0.4, if_state={"mode": "0"}), ST({"mode": "3"}, within=2),
                           K("left", repeat=130, gap=0.1), K("right", repeat=5, gap=0.15), ST({"track": "1", "col": "NOTE"}, within=3),
                           K("params", gap=0.5), *SELECT_1, ST({"instrument": "1"}, within=2), K("pattern", gap=0.5), ST({"screen": "PATTERN", "mode": "3", "track": "1"}, within=3)])
-LEARN_ROW = [K("params", gap=0.5), ST({"screen": "INSTRUMENT"}, within=3), K("f2", gap=0.4), ST({"page": "0"}, within=2), K("up", repeat=6, gap=0.12), *SELECT_1, ST({"instrument": "1"}, within=2)]
+LEARN_ROW = [K("params", gap=0.5), ST({"screen": "INSTRUMENT"}, within=3), *SELECT_1, ST({"instrument": "1"}, within=2), K("f2", gap=0.4), ST({"page": "0"}, within=2), K("up", repeat=6, gap=0.12)]
 add("learn_open", "setup for MANUAL.md: Params page VOICE, row VOLUME of instrument 1, the Learn overlay open (FX1 + FX2); then send a CC from the PC and run learn_close", start_on_pattern() + LEARN_ROW + [
     K("+vol", "+fx", gap=0.0), K("-fx", "-vol", gap=0.1), ST({"overlay": "LEARN"}, within=3), SHOT("learn_open")])
 add("learn_close", "setup for MANUAL.md: close the Learn overlay (F8) and show the page: the bound CC moves VOLUME of instrument 1 with the pickup", [

@@ -2,7 +2,7 @@
 //
 // OS-INSTUI S2b, the app side (O2 for MIDI): the Instrument screen's pads on a MIDI instrument, with a PreviewSink that does what the platform's does (a pad's note-on and its release on the
 // live queue) in front of the real render path (Engine, MidiLink, MidiOut, the DIN emitter and the USB ring: support/live_midi_rig.h). Every way the instrument can change under a held pad
-// (F6 / F7, Shift + F6 / F7, a pick from the Instr-hold list, Shift + pad), a project load, a stop, a lost input and leaving the screen: every note-on on the wire has its note-off on the same
+// (F6 / F7, Shift + F6 / F7, a pick from the Instr-hold list), a project load, a stop, a lost input and leaving the screen: every note-on on the wire has its note-off on the same
 // channel and note, and none is sent twice. The render-level rules are audio_live_midi_test.cpp's.
 #include <doctest/doctest.h>
 
@@ -155,17 +155,16 @@ TEST_CASE("inst live midi: a pad on a MIDI instrument sends its note on the chan
   CHECK(same_notes_on_both_ports(rig.live));
 }
 
-TEST_CASE("inst live midi: Shift + a pad selects a MIDI instrument without a note, and the next pad plays it") {
+TEST_CASE("inst live midi: Shift + a pad plays a MIDI instrument like a plain pad and does not select (OS-SHIFTPAD)") {
   Rig rig;
-  rig.shift_pad(6);  // instrument 7: channel 16
-  CHECK(rig.app->state().instrument == 7);
+  rig.select(7);  // channel 16
   rig.live.settle();
   CHECK(rig.live.notes().empty());
-  rig.pad_down(0);
+  rig.shift_pad(0);
   rig.live.blocks(3);
-  NEED(rig.live.notes().size() == 1u);
+  CHECK(rig.app->state().instrument == 7);
+  NEED(rig.live.notes().size() >= 1u);
   CHECK(rig.live.notes()[0].ch == 15);
-  rig.pad_up(0);
   rig.live.settle();
   CHECK(LiveMidiRig::balanced(rig.live.notes()));
 }
@@ -181,7 +180,6 @@ TEST_CASE("inst live midi: every change of instrument under a held pad ends its 
       {"Shift + F7", [](Rig& r) { r.shift_tap(Button::F7); }},
       {"Shift + F6", [](Rig& r) { r.shift_tap(Button::F6); }},
       {"a pick from the list", [](Rig& r) { r.select(20); }},
-      {"Shift + pad", [](Rig& r) { r.shift_pad(12); }},
   };
   for (const Path& path : paths) {
     CAPTURE(path.name);

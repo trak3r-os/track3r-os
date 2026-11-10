@@ -282,6 +282,7 @@ constexpr core::ActionId kMixerParams = core::action_id("mixer.params");
 constexpr core::ActionId kMixerMute = core::action_id("mixer.mute");
 constexpr core::ActionId kMixerSolo = core::action_id("mixer.solo");
 constexpr core::ActionId kMixerPage = core::action_id("mixer.page");
+constexpr core::ActionId kMixerInserts = core::action_id("mixer.inserts");  // OS-MIXINSKEY
 constexpr core::ActionId kMixerCue = core::action_id("mixer.cue");
 constexpr core::ActionId kMixerApply = core::action_id("mixer.apply");  // OS-USBOUTS
 constexpr core::ActionId kPerformPad = core::action_id("perform.pad");
@@ -446,6 +447,9 @@ constexpr core::Binding kBase[] = {
     bind(kGlobal, tap(button_ref(Button::Pattern), kShift), kAppsOpen),
     bind(kGlobal, chord(button_ref(Button::Master), button_ref(Button::Song)), kNavigatorOpen),
     bind(kGlobal, chord(button_ref(Button::Song), button_ref(Button::Pattern)), kNavigatorOpen),
+    // OS-MIXINSKEY (new Community OS behaviour, public issue #5): Master + Insert, either press order, opens the Mixer on its INSERTS page from any screen. A chord: neither Master's tap (the page cycle) nor
+    // Insert's own tap (step.insert, song.add_slot, mixer.stem_set) follows; the plain Insert keeps its bindings, and Master held + the encoder is still the master volume.
+    bind(kGlobal, chord(button_ref(Button::Master), button_ref(Button::Insert)), kMixerInserts),
     // OS-HELP: Shift + Config opens the help page of the screen in view. Global, so every screen reaches it, Config included (a binding that names the modifier wins over the plain Config above it);
     // a modal overlay's context captures it, so under a dialog or the Navigator it does nothing. The app page (ModuleApp) captures too, so it binds the chord for itself, below.
     bind(kGlobal, tap(button_ref(Button::Config), kShift), kHelpOpen),
@@ -972,7 +976,7 @@ constexpr core::Binding kBase[] = {
     bind(kInstrumentEmptyCtx, tap(button_ref(Button::Left), kShift), kInstrumentTurn, ArgFrom::Fixed, -1),  // (Shift + arrow is the coarse step of a used slot; here it is the plain arrow, there is no value to step)
     bind(kInstrumentEmptyCtx, tap(button_ref(Button::Right), kShift), kInstrumentTurn, ArgFrom::Fixed, 1),
     bind(kInstrumentCtx, tap(pad_ref(core::kAnyId)), kInstrumentPad, ArgFrom::InputId, 0),
-    bind(kInstrumentCtx, tap(pad_ref(core::kAnyId), kShift), kInstrument, ArgFrom::InputId, 1),  // Shift + pad selects the instrument without a sound, as Wave's (O3)
+    bind(kInstrumentCtx, tap(pad_ref(core::kAnyId), kShift), kInstrumentPad, ArgFrom::InputId, 0),  // OS-SHIFTPAD: Shift + pad plays like a plain pad, so Shift + encoder and pads work together (O3); the instrument changes on F6/F7
     bind(kInstrumentCtx, hold(button_ref(Button::Instr)), kPopupOpen, ArgFrom::Fixed, 0),  // OS-FU3: the instrument list
     bind(kInstrumentCtx, tap(button_ref(Button::F1)), kInstrumentPage, ArgFrom::Fixed, 0),
     bind(kInstrumentCtx, tap(button_ref(Button::F2)), kInstrumentPage, ArgFrom::Fixed, 1),

@@ -169,7 +169,7 @@ bool AmigaVoices::note_on(unsigned track, unsigned note, unsigned slot, unsigned
     data += from;
     length = span;
     loops = false;
-    pitch_note = kRootNote;
+    pitch_note = d.slice_sel == kNoForcedSlice ? kRootNote : note;  // OS-BUG-SLICEPAD: the Slice mode follows the note's pitch
   }
   unsigned vi = find(track);
   if (vi == kNone) {

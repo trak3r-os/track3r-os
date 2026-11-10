@@ -22,7 +22,7 @@ An instrument is one of the 64 slots of the project, and it is stored with the p
 
 Nothing here "ends" by itself: a value stays until you change it. `Delete` puts the row under the cursor back to its default, `Shift` + `Delete` sets every row to its default, and `F8` (**UNDO**) takes back the last change. A sweep of the encoder on one row is one undo step, and a pause of 1.5 seconds starts a new one. <!-- QA-INS-021, QA-INS-032, QA-INS-085 -->
 
-The pads play the instrument in view, so you hear each change while you hold a pad. Example: on a sample instrument, open the FILTER page, move to **CUTOFF**, hold a pad and turn the encoder. The filter closes under your finger, and one `F8` puts it back.
+The pads play the instrument in view, so you hear each change while you hold a pad. `Shift` + pad plays it too (new Community OS behaviour), so you can hold `Shift` for the coarse step of the encoder and still tap the pads; the instrument itself changes with `F6` and `F7`. <!-- QA-INS-012 --> Example: on a sample instrument, open the FILTER page, move to **CUTOFF**, hold a pad and turn the encoder. The filter closes under your finger, and one `F8` puts it back.
 
 ### The volume law
 <!-- sync: src=audio/src/graph.cpp qa=QA-INS-202,QA-INS-203,QA-INS-200,QA-INS-201,QA-INS-205,QA-INS-206,QA-INS-207,QA-INS-209,QA-INS-210 -->
@@ -285,7 +285,7 @@ Three labels in the table are the ones the screen starts with, and they change a
 | encoder | Changes the value under the cursor. | QA-INS-019, QA-INS-085 |
 | `Shift` + encoder | A coarse step. On CHANNEL, each click moves four. | QA-INS-064 |
 | pad | Plays the instrument in view. On a MIDI instrument it sends a note. | QA-INS-013, QA-INS-033 |
-| `Shift` + pad | Selects the instrument on that pad, with no sound. | QA-INS-012 |
+| `Shift` + pad | Plays the instrument in view, as a pad alone does, so you can hold `Shift` for a coarse step and tap pads together. It does not change the instrument: use `F6` and `F7`, or `Shift` + `F6` and `Shift` + `F7`. New Community OS behaviour. | QA-INS-012 |
 
 ## Good to know
 

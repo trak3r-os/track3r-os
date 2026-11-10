@@ -72,11 +72,32 @@ void slice_points(const model::SamplerParams& p, unsigned k, unsigned& from, uns
   to = (n > 1u && k != n - 1u && k + 1u < model::kSlices) ? p.slices[k + 1u] : 65535u;
 }
 
+// The whole sample and its slice table (slice and beat slice modes): the voices pick the slice. Without a table (no slices) or room for one the whole sample is the slice (`approximated` when slices were asked).
+void bind_slice_table(audio::SampleDesc& d, const model::Instrument& in, const std::int16_t* pcm, std::uint32_t frames, std::int16_t* slice_table, bool* approximated) noexcept {
+  const model::SamplerParams& p = in.sampler;
+  d.data = pcm;
+  d.length = frames;
+  d.beat_slice = true;
+  d.slice_thru = in.slice_thru != 0u ? 1u : 0u;  // OS-CEPLAYTHRU P2: beat_slice_span ends a slice at the sample end with it (the Slice FX, the chop pads and the Amiga voices follow)
+  const unsigned n = slice_count_of(p);
+  if (n != 0u && slice_table != nullptr) {
+    for (unsigned i = 0; i <= n; ++i) {
+      const std::uint32_t b = i < n ? at_point(p.slices[i], frames) : frames;
+      slice_table[2u * i] = static_cast<std::int16_t>(static_cast<std::uint16_t>(b & 0xFFFFu));
+      slice_table[2u * i + 1u] = static_cast<std::int16_t>(static_cast<std::uint16_t>(b >> 16));
+    }
+    d.slice_count = static_cast<std::uint8_t>(n);
+    d.slices = reinterpret_cast<const std::uint16_t*>(slice_table);  // the same 16-bit objects, read unsigned: the voices' view of the halves
+  } else if (n != 0u && approximated != nullptr) {
+    *approximated = true;  // no room for the table: the whole sample at the root's pitch
+  }
+}
+
 }  // namespace
 
 std::uint32_t slice_table_samples(const model::Instrument& in) noexcept {
   const model::SamplerParams& p = in.sampler;
-  return (p.play_mode == kPlayBeatSlice && slice_count_of(p) != 0u) ? 2u * (slice_count_of(p) + 1u) : 0u;
+  return ((p.play_mode == kPlayBeatSlice || p.play_mode == kPlaySlice) && slice_count_of(p) != 0u) ? 2u * (slice_count_of(p) + 1u) : 0u;
 }
 
 bool sample_desc_reads(unsigned field) noexcept {
@@ -154,6 +175,13 @@ audio::SampleDesc make_sample_desc(const model::Instrument& in, const std::int16
   }
   switch (p.play_mode) {
     case kPlaySlice: {  // the selected slice, at the note's pitch; the instrument's own start and end are not used
+      // OS-BUG-SLICEPAD: with a table the descriptor is the whole sample and the table, the selected slice its `slice_sel` (the voices play it at the note's pitch, and the Slice FX or a pad's own slice picks another);
+      // with no slices, or no room for the table, the window below (the whole sample, or the slice's part) as before.
+      if (slice_count_of(p) != 0u && slice_table != nullptr) {
+        bind_slice_table(d, in, pcm, frames, slice_table, approximated);
+        d.slice_sel = static_cast<std::uint8_t>(p.selected_slice < model::kSlices ? p.selected_slice : model::kSlices - 1u);
+        break;
+      }
       unsigned from = 0;
       unsigned to = 0;
       slice_points(p, p.selected_slice, from, to);
@@ -174,22 +202,7 @@ audio::SampleDesc make_sample_desc(const model::Instrument& in, const std::int16
       break;
     }
     case kPlayBeatSlice: {  // the whole sample and the slices' boundaries: the voices pick the slice from the note
-      d.data = pcm;
-      d.length = frames;
-      d.beat_slice = true;
-      d.slice_thru = in.slice_thru != 0u ? 1u : 0u;  // OS-CEPLAYTHRU P2: beat_slice_span ends a slice at the sample end with it (the Slice FX, the chop pads and the Amiga voices follow)
-      const unsigned n = slice_count_of(p);
-      if (n != 0u && slice_table != nullptr) {
-        for (unsigned i = 0; i <= n; ++i) {
-          const std::uint32_t b = i < n ? at_point(p.slices[i], frames) : frames;
-          slice_table[2u * i] = static_cast<std::int16_t>(static_cast<std::uint16_t>(b & 0xFFFFu));
-          slice_table[2u * i + 1u] = static_cast<std::int16_t>(static_cast<std::uint16_t>(b >> 16));
-        }
-        d.slice_count = static_cast<std::uint8_t>(n);
-        d.slices = reinterpret_cast<const std::uint16_t*>(slice_table);  // the same 16-bit objects, read unsigned: the voices' view of the halves
-      } else if (n != 0u && approximated != nullptr) {
-        *approximated = true;  // no room for the table: the whole sample at the root's pitch
-      }
+      bind_slice_table(d, in, pcm, frames, slice_table, approximated);
       break;
     }
     case kPlayWavetable: {  // the current window as an oscillator; start and end are not used

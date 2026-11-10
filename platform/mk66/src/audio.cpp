@@ -372,9 +372,9 @@ void Mk66Audio::mute() noexcept {
 }
 
 // OS-POWER P1 (docs/specs/OS-POWER.md 4.1 A2, 4.6): the one stop of the audio path. There was none: stop_hardware() ran only when start() failed, and mute() leaves the I2S and the eDMA running.
-// The codec first, click-free by construction (sgtl5000.h run_stop: the DAC through its own soft ramp, the 50 ms of it, then the amplifier key LOW, then the outputs and the DAC muted and the
+// The codec first, click-free by construction (sgtl5000.h run_stop: the DAC through its own soft ramp, the 50 ms of it, then the amplifier key LOW, then the outputs and the DAC muted, the VAG ramped down alone (500 ms) and the
 // analogue stage powered down), then the hardware: the I2S transmitter and receiver, the two eDMA channels, the two interrupt lines (a render block in flight has finished: this is the main
-// thread, and a render that has not started is not pended again). Main thread only; it blocks for about 70 ms (the I2C writes and the ramp), the caller keeps the display serviced.
+// thread, and a render that has not started is not pended again). Main thread only; it blocks for about 570 ms (the I2C writes, the DAC ramp and the VAG ramp: OS-BUG-POWERPOP), the caller keeps the display serviced.
 // Idempotent, and plain when the path never started (the boot disk mode, a failed bring-up: the key is already LOW and nothing runs). It never touches the block callback, the DSP or the voices.
 // The caller has set the power-off latch (appimg::power_off_latched) BEFORE this: with the I2S stopped the block counter stands still, which the audio poll of main.cpp would call a stall, and
 // nothing may reopen the outputs (open_wanted).

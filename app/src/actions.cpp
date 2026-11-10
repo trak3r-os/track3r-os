@@ -350,6 +350,7 @@ constexpr ActionDef kActions[] = {
     make_action("mixer.mute_none", mixer_mute_none, kEditOnce),
     make_action("mixer.solo_none", mixer_solo_none, kEditOnce),
     make_action("mixer.page", mixer_page, kFocus),
+    make_action("mixer.inserts", mixer_inserts, kFocus),  // OS-MIXINSKEY
     make_action("mixer.cue", mixer_cue, kFocus),
     make_action("mixer.apply", mixer_apply, kFocus),
     // OS-011b: the Perform screen. The slots are runtime state (not undoable); the bank tells the engine.

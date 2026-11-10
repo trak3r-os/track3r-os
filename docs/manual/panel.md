@@ -59,6 +59,7 @@ If a `Shift` + soft key has no label, it does nothing. It never acts as the plai
 | `Song` | the Song screen, when you let go of the key. Held: the Song screen until you let go, then back to where you were ([Song](song.md)) | - |
 | `Pattern` | the Pattern screen, when you let go of the key. Held, with the encoder: the tempo, on any screen; held, with a pad: tap tempo (see [Tempo from any screen](#tempo-from-any-screen)) | QA-GLB-153, QA-GLB-155 |
 | `Song` + `Pattern`, or `Master` + `Song`, pressed together | opens the Navigator on any screen; press `F8` (**GO**) to go to the screen you chose, or `F7` (**CLOSE**) to leave it. Neither key does its own job, and the Song peek and the held volume and tempo turns stay off | QA-GLB-233 |
+| `Master` + `Insert`, pressed together | opens the Mixer on its **INSERTS** page from any screen (on the Mixer it goes to INSERTS). Neither key does its own job. New in track3r-os. | QA-MIX-112 |
 | `Shift` + `Pattern` | lists the module apps that are not tools; `F1` or `F8` (**LAUNCH**) starts one, `Pattern` leaves the list. It was the Navigator before | QA-MOD-252 |
 | `Shift` + `Master` | steps to the next colour theme: Amiga, Black, White, then Amiga again. The THEME row on Config says the same. New in track3r-os. | QA-GLB-157 |
 | `Shift` + `Config` | opens the help page of the screen you are on (see [The help page](#the-help-page)) | QA-GLB-141 |
@@ -161,7 +162,7 @@ On the Song screen, `Insert` adds a slot, `Shift` + `Insert` adds a slot with a 
 
 The second label Backspace is not what `Shift` + `Delete` does on Pattern: it pulls steps up and erases nothing backwards. The backspace is the plain `Delete` key on the on-screen keyboard. The pull is new in track3r-os.
 
-Most screen buttons act when you press them. `Pattern`, `Song` and `Master` act when you let go, because a hold can mean something else: `Song` + `Pattern` and `Master` + `Song` open the Navigator and `Shift` + `Pattern` lists the module apps, and a hold of `Song` for 0.4 seconds shows the Song screen as a peek. <!-- QA-MIX-031, QA-SNG-060, QA-SNG-061 --> Playback does not stop when you change screen. Leaving Perform ends its effects, except when you go to the Mixer or Song; see [Perform](perform.md). <!-- QA-PRF-011 -->
+Most screen buttons act when you press them. `Pattern`, `Song`, `Master` and `Insert` act when you let go (or 40 ms after the press), because a hold can mean something else: `Song` + `Pattern` and `Master` + `Song` open the Navigator, `Master` + `Insert` opens the Mixer on INSERTS (press both within 40 ms of each other; a slower press is a `Master` tap, then `Insert`) and `Shift` + `Pattern` lists the module apps, and a hold of `Song` for 0.4 seconds shows the Song screen as a peek. <!-- QA-MIX-031, QA-SNG-060, QA-SNG-061 --> Playback does not stop when you change screen. Leaving Perform ends its effects, except when you go to the Mixer or Song; see [Perform](perform.md). <!-- QA-PRF-011 -->
 
 The buttons have no lights. The screen shows the state instead, for example the mode chip and the red **REC** badge on Pattern. <!-- QA-PAT-001 -->
 

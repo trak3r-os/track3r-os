@@ -239,3 +239,21 @@ tap f1
 wait 20
 snap pattern_picker_octave
 release shift
+
+# OS-MIXINSKEY: Master + Insert (either order) opens the Mixer on its INSERTS page from any screen; neither Master's tap (the page cycle) nor Insert's own follows at the release.
+tap song
+press master
+press insert
+release insert
+release master
+wait 450
+snap mixer_inserts_chord
+assert state screen=MIXER page=4
+press insert
+press master
+release master
+release insert
+wait 450
+assert state screen=MIXER page=4
+tap pattern
+assert state screen=PATTERN

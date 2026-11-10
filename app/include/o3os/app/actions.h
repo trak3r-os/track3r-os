@@ -48,6 +48,12 @@ class PreviewSink {
     (void)track;
     preview(instrument, note);
   }
+  // OS-BUG-SLICEPAD: a pad of the Slice play mode: the note is the pitch it plays at (the Wave screen sends the root's), `slice` 0..47 the pad's own slice, which the voices play whatever the instrument's selected slice and the
+  // pattern's Slice FX are. A sink that does not know it plays the pad as pad_down().
+  virtual void slice_pad_down(unsigned pad, unsigned track, unsigned instrument, unsigned note, unsigned slice) noexcept {
+    (void)slice;
+    pad_down(pad, track, instrument, note);
+  }
   virtual void pad_up(unsigned pad) noexcept { (void)pad; }  // the pad's release (a raw input event: every pad release, whether or not it started a note)
   // A note from the MIDI keyboard, after the device settings MIDI IN and IN CHANNEL let it through: the selected track and the last used instrument play it. `velocity` 1..127, `channel` 1..16 (the one it came on:
   // named by the export's refusal while the note is held, nothing plays differently).

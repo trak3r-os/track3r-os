@@ -11,6 +11,7 @@
 #include <o3os/audio/graph.h>
 #include <o3os/ui/components.h>
 
+#include <algorithm>
 #include <cstring>
 
 namespace o3os::app {
@@ -295,10 +296,12 @@ void draw_mixer_page(const Model& model, const ViewState& view, Renderer& r, Rec
     if (!hidden({x, l.label_y, l.col_w, pitch})) {
       r.text(x + (l.col_w - cap_w) / 2, cap_y, text.c_str(), is_sel ? Color::SelText : (muted(model, c) ? Color::TextDim : Color::Text), Face::Label);
     }
-    // OS-MIXINS: a dot after the name of a track that has an insert (either slot; a bypassed one counts)
+    // OS-MIXINS: an accent bar under the name of a track that has an insert (either slot; a bypassed one counts).
+    // It sits in the pad between the caption row and the fader (3 of its 4 px), so it covers nothing; Accent (orange)
+    // reads on both the pane and the selected column's blue.
     if (track && model.project != nullptr && (model.project->find_insert(c, 0u) != nullptr || model.project->find_insert(c, 1u) != nullptr)) {
-      const int dot = m.gap + 1;
-      const Rect mark = {x + (l.col_w + cap_w) / 2 + m.gap, l.label_y + (pitch - dot) / 2, dot, dot};
+      const int bar_w = std::min(cap_w + 8, l.col_w);
+      const Rect mark = {x + (l.col_w - bar_w) / 2, l.label_y + pitch, bar_w, 3};
       if (!hidden(mark)) {
         r.panel(mark, Color::Accent);
       }

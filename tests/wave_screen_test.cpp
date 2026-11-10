@@ -67,6 +67,11 @@ class FakePreview final : public app::PreviewSink {
   std::uint32_t position = 0;  // the word the render would publish
   void hold_note(bool on, unsigned, unsigned instrument, unsigned) noexcept override { holds.push_back(on ? static_cast<int>(instrument) : -static_cast<int>(instrument)); }
   void audition(bool on, unsigned) noexcept override { auditions.push_back(on); }
+  std::vector<unsigned> slice_pads;  // OS-BUG-SLICEPAD: the slice of every slice-mode pad press
+  void slice_pad_down(unsigned pad, unsigned track, unsigned instrument, unsigned note, unsigned slice) noexcept override {
+    slice_pads.push_back(slice);
+    PreviewSink::slice_pad_down(pad, track, instrument, note, slice);
+  }
   std::uint32_t live_position() const noexcept override { return position; }
 };
 
@@ -533,6 +538,25 @@ TEST_CASE("chop: pads play slice n and select it, Shift + pad selects without a 
   // The WAVE page has no opinion.
   rig.tap(Button::SamplePlay);
   CHECK_FALSE(rig.app->pad_lights(roles));
+}
+
+TEST_CASE("chop: in slice mode pad n plays slice n at the root's pitch through slice_pad_down, a pad past the slices plays the board's note (OS-BUG-SLICEPAD)") {
+  Rig rig;
+  rig.chop();
+  rig.invoke("wave.even", 0);  // 16 slices
+  model::Instrument in = rig.inst();
+  in.sampler.play_mode = 4;  // slice
+  NEED(rig.arena->project.set_instrument(kSlot, in) == model::Status::Ok);
+  rig.preview.played.clear();
+  rig.pad(3);
+  NEED(rig.preview.slice_pads.size() == 1u);
+  CHECK(rig.preview.slice_pads[0] == 3u);
+  NEED(rig.preview.played.size() == 1u);
+  CHECK(rig.preview.played[0].second == 60u);
+  rig.pad(20);  // past the last slice: the instrument's selected slice at the board's note
+  CHECK(rig.preview.slice_pads.size() == 1u);
+  NEED(rig.preview.played.size() == 2u);
+  CHECK(rig.preview.played[1].second == rig.app->state().edit.pads.note(20));
 }
 
 TEST_CASE("wave: an instrument that is not in beat slice mode plays the pad board's note from a pad, not a slice") {

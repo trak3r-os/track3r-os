@@ -1910,7 +1910,7 @@ bool VoicePool::note_on(unsigned track, unsigned note, unsigned slot, unsigned v
   unsigned pitch_note = note;
   bool loops = s.loop_end - s.loop_start >= 2u;  // set_sample made it valid or zeroed it
   if (s.beat_slice) {
-    pitch_note = kRootNote;
+    pitch_note = s.slice_sel == kNoForcedSlice ? kRootNote : note;  // OS-BUG-SLICEPAD: the Slice mode (a selected slice) follows the note's pitch
     loops = false;
     std::uint32_t from = 0, span = s.length;
     if (!beat_slice_span(s, note, forced_slice_[track], from, span)) {

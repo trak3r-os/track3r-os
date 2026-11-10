@@ -39,11 +39,12 @@ tap f3
 tap params
 snap qa_ins_011
 
-# QA-INS-012: Shift + a pad selects the instrument without a sound (pad 2 is instrument 3).
+# QA-INS-012: Shift + a pad plays the instrument in view and does not select it (OS-SHIFTPAD; the simulator plays no pad audio, so the picture shows instrument 10 as it was). The later rows start from instrument 3, so the action picks it (it used to be the pad).
 press shift
 pad 2
 release shift
 snap qa_ins_012
+action instrument.select 3
 
 # QA-INS-015: F1 on a sample instrument opens the source page (OS-INSTUI S3): ONE SHOT has PLAY MODE and PLAY ENGINE.
 tap f1

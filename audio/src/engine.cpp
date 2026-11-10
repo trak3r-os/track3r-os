@@ -355,6 +355,25 @@ void Engine::play_live() noexcept {
         const unsigned slot = e.instrument != 0u ? e.instrument - 1u : kSampleSlots;  // instrument 1..64 is slot 0..63; 0 names none
         const unsigned note = e.note > 127u ? 127u : e.note;
         const unsigned velocity = e.velocity == kLiveVelocityDefault ? kVelocityDefault : (e.velocity > 127u ? 127u : e.velocity);
+        // OS-BUG-SLICEPAD: a live note is played by its own slice, not by the Slice FX the pattern left on its track: for the note's span the track's forced slice is the pad's (a pad event's channel =
+        // slice + 1, 0 none) or none, and what the pattern had is put back at the end of the case (a MIDI event's channel is a MIDI channel, not a slice).
+        struct ForcedSlice {
+          VoicePool* pool;
+          unsigned track;
+          unsigned saved;
+          ~ForcedSlice() {
+            if (saved == kNoForcedSlice) {
+              pool->clear_forced_slice(track);
+            } else {
+              pool->set_forced_slice(track, saved);
+            }
+          }
+        } forced{voices_, s.track, voices_->forced_slice(s.track)};
+        if (e.source == kLiveSourcePad && e.channel != 0u) {
+          voices_->set_forced_slice(s.track, e.channel - 1u);
+        } else {
+          voices_->clear_forced_slice(s.track);
+        }
         if (amiga_ != nullptr && slot < kSampleSlots && voices_->sample(slot).engine == kEngineAmiga) {  // an Amiga instrument (OS-005h)
           if (!live_amiga_on(s.track, note, slot, velocity)) {
             (void)held.end(e.source, e.key);

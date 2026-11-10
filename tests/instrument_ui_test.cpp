@@ -511,12 +511,88 @@ TEST_CASE("instrument ui: a pad plays the instrument in view on the live-note pa
   CHECK(rig.app->state().inst_pads == 0u);
 }
 
-TEST_CASE("instrument ui: Shift + a pad selects the instrument without a sound (O3)") {
+// OS-SHIFTPAD: Shift + pad is a plain pad on this screen (it no longer selects); F6 / F7 and Shift + F6 / F7 change the instrument.
+TEST_CASE("instrument ui: Shift + a pad plays the instrument in view like a plain pad and does not select (OS-SHIFTPAD)") {
   Rig rig;
-  rig.shift_pad(8);
-  CHECK(rig.instrument() == 9);
-  CHECK(rig.log.downs.empty());
+  rig.select(3);
+  rig.press(Button::Shift);
+  rig.pass(1);
+  rig.pad_down(5);
+  NEED(rig.log.downs.size() == 1u);
+  CHECK(rig.log.downs[0].pad == 5u);
+  CHECK(rig.log.downs[0].instrument == 3u);
+  CHECK(rig.log.downs[0].note == rig.app->state().edit.pads.note(5));
+  CHECK(rig.app->state().inst_pads == (std::uint64_t{1} << 5));
+  CHECK(rig.instrument() == 3);
+  rig.pad_up(5);
+  rig.release(Button::Shift);
+  rig.pass(1);
+  NEED(rig.log.ups.size() == 1u);
+  CHECK(rig.log.ups[0].pad == 5u);
   CHECK(rig.app->state().inst_pads == 0u);
+  CHECK(rig.instrument() == 3);
+  // The same through the helper (press Shift, tap the pad, release Shift): the instrument in view sounds, nothing is selected.
+  rig.log.downs.clear();
+  rig.log.ups.clear();
+  rig.shift_pad(8);
+  CHECK(rig.instrument() == 3);
+  NEED(rig.log.downs.size() == 1u);
+  CHECK(rig.log.downs[0].pad == 8u);
+  CHECK(rig.log.downs[0].instrument == 3u);
+  CHECK(rig.log.ups.size() == 1u);
+  CHECK(rig.app->state().inst_pads == 0u);
+}
+
+TEST_CASE("instrument ui: the release ends a Shift + pad note even when Shift is let go first (OS-SHIFTPAD)") {
+  Rig rig;
+  rig.select(3);
+  rig.press(Button::Shift);
+  rig.pass(1);
+  rig.pad_down(5);
+  rig.release(Button::Shift);
+  rig.pass(1);
+  CHECK(rig.log.ups.empty());  // still held
+  CHECK(rig.app->state().inst_pads == (std::uint64_t{1} << 5));
+  rig.pad_up(5);
+  NEED(rig.log.ups.size() == 1u);
+  CHECK(rig.log.ups[0].pad == 5u);
+  CHECK(rig.app->state().inst_pads == 0u);
+  CHECK(rig.instrument() == 3);
+}
+
+TEST_CASE("instrument ui: Shift pressed after the pad changes nothing, and Shift + encoder edits while a pad is held (OS-SHIFTPAD)") {
+  Rig rig;
+  rig.select(3);
+  rig.tap(Button::F3);  // FILTER
+  rig.tap(Button::Down);
+  rig.tap(Button::Down);
+  const auto focus = [&] { return app::kParamsScreen.focus_param(rig.app->model(), rig.app->state()); };
+  const auto value = [&] { return rig.project().get_param(focus()); };
+  const auto turn = [&](int detents) {
+    rig.input.push(core::make_encoder_event(rig.clock.now(), 0, static_cast<std::int16_t>(detents)));
+    rig.pass(1);
+  };
+  rig.pad_down(5);
+  NEED(rig.log.downs.size() == 1u);
+  rig.press(Button::Shift);
+  rig.pass(1);
+  CHECK(rig.log.downs.size() == 1u);  // no second note
+  CHECK(rig.log.ups.empty());
+  CHECK(rig.app->state().inst_pads == (std::uint64_t{1} << 5));
+  // Shift + encoder is the coarse step while the pad is still down.
+  const float v0 = value();
+  turn(1);
+  const float coarse = value();
+  CHECK(coarse > v0);
+  rig.release(Button::Shift);
+  rig.pass(2000);
+  turn(1);
+  CHECK((value() - coarse) < (coarse - v0));  // a plain detent is finer than the Shift one
+  CHECK(rig.log.ups.empty());
+  rig.pad_up(5);
+  NEED(rig.log.ups.size() == 1u);
+  CHECK(rig.app->state().inst_pads == 0u);
+  CHECK(rig.instrument() == 3);
 }
 
 TEST_CASE("instrument ui: a beat slice instrument plays slice n on pad n; PIANO plays its own keys and its jump pads are dead (O4)") {

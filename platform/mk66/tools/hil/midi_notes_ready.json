@@ -21,9 +21,7 @@
   {"keys": ["right"], "gap": 0.15, "repeat": 5},
   {"state": {"track": "1", "col": "NOTE"}, "within": 3},
   {"keys": ["params"], "gap": 0.5},
-  {"keys": ["+shift"], "gap": 0.3},
-  {"pad": 0, "note": "Shift + pad selects instrument 1"},
-  {"keys": ["-shift"], "gap": 0.3},
+  {"keys": ["f6"], "gap": 0.15, "until": {"instrument": "1"}, "max": 50, "note": "F6 steps down to instrument 1 (dim there; Shift + pad plays, it does not select)"},
   {"state": {"instrument": "1"}, "within": 2},
   {"keys": ["pattern"], "gap": 0.5},
   {"state": {"screen": "PATTERN", "mode": "3", "track": "1"}, "within": 3}

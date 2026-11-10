@@ -273,6 +273,57 @@ TEST_CASE("voices: a beat slice plays the slice the note names, at the root's pi
   }
 }
 
+// OS-BUG-SLICEPAD: the plain Slice mode (4) is a table descriptor whose slice is the selected one (slice_sel), played at the note's pitch; the Slice FX picks another slice, and the
+// pitch is still the note's.
+TEST_CASE("voices: a Slice mode descriptor plays its selected slice at the note's pitch, the Slice FX and a pad's slice pick another (OS-BUG-SLICEPAD)") {
+  static std::int16_t ramp[1000];
+  static std::uint16_t table[2 * 5];
+  static std::int16_t out[4 * kBlk];
+  for (std::uint32_t i = 0; i < 1000; ++i) {
+    ramp[i] = static_cast<std::int16_t>(static_cast<int>(i) * 30 - 15000);
+  }
+  put_bounds(table, {0, 250, 600, 600, 1000});  // slices 0 [0, 250), 1 [250, 600), 2 empty, 3 [600, 1000)
+  SampleDesc d{ramp, 1000, 0, 0, 65536};
+  d.beat_slice = true;
+  d.slice_count = 4;
+  d.slices = table;
+  d.slice_sel = 1;
+  const auto play = [&](unsigned note, unsigned fx) {
+    VoicePool& p = pool();
+    p.set_sample(0, d);
+    if (fx != o3os::audio::kNoForcedSlice) {
+      p.set_forced_slice(0, fx);
+    }
+    p.note_on(0, note, 0, 127);
+    render_blocks(p, out, 2);
+  };
+  // The selected slice at the root's pitch, whatever the note's number is in the slice range (24..27 would be a Beat Slice pick).
+  play(60, o3os::audio::kNoForcedSlice);
+  for (std::uint32_t k = o3os::audio::kAttackSamples; k < 120; ++k) {
+    CHECK(out[k] == ramp[250 + k]);
+  }
+  // An octave up reads the slice twice as fast: the pitch is the note's, not the root's.
+  play(72, o3os::audio::kNoForcedSlice);
+  for (std::uint32_t k = o3os::audio::kAttackSamples; k < 120; ++k) {
+    CHECK(out[k] == ramp[250 + 2 * k]);
+  }
+  // The Slice FX names another slice and wins over the selected one; the pitch stays the note's.
+  play(72, 3);
+  for (std::uint32_t k = o3os::audio::kAttackSamples; k < 100; ++k) {
+    CHECK(out[k] == ramp[600 + 2 * k]);
+  }
+  play(60, 0);
+  for (std::uint32_t k = o3os::audio::kAttackSamples; k < 120; ++k) {
+    CHECK(out[k] == ramp[k]);
+  }
+  // A selected slice past the table is the last one.
+  d.slice_sel = 9;
+  play(60, o3os::audio::kNoForcedSlice);
+  for (std::uint32_t k = o3os::audio::kAttackSamples; k < 120; ++k) {
+    CHECK(out[k] == ramp[600 + k]);
+  }
+}
+
 // OS-CEPLAYTHRU P2: with the descriptor's slice_thru, beat_slice_span ends a slice at the sample end instead of the next bound — the note's slice and the Slice FX's forced one both.
 TEST_CASE("voices: beat_slice_span with play through ends the slice at the sample end, forced slice too (OS-CEPLAYTHRU P2)") {
   static std::uint16_t table[2 * 4];

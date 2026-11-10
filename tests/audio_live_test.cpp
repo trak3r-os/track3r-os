@@ -314,6 +314,77 @@ TEST_CASE("live: no more than kLivePerBlock events a block, the rest waits, and 
   CHECK(e.live_held() == o3os::audio::kLiveMax);
 }
 
+// OS-BUG-SLICEPAD: a live note is not played by the pattern's Slice FX state of its track (a pad press picked the slice the last pattern step had left on the selected track, then the track
+// after it, which has none, played the right one), and a pad that carries a slice (a LiveEvent's channel = slice + 1) plays that slice, in Slice and Beat Slice descriptors alike.
+TEST_CASE("live: a pad plays its own slice, not the Slice FX state of its track, which is left as it was (OS-BUG-SLICEPAD)") {
+  static std::int16_t steps[3000];  // three slices of 1000 samples, each its own level
+  for (unsigned i = 0; i < 3000; ++i) {
+    steps[i] = static_cast<std::int16_t>(4000 * (1 + static_cast<int>(i / 1000)));
+  }
+  static std::uint16_t table[2 * 4];
+  const std::uint32_t bounds[4] = {0, 1000, 2000, 3000};
+  for (unsigned i = 0; i < 4; ++i) {
+    table[2 * i] = static_cast<std::uint16_t>(bounds[i] & 0xFFFFu);
+    table[2 * i + 1] = static_cast<std::uint16_t>(bounds[i] >> 16);
+  }
+  static o3os::test::StaticSlot<Engine> engine_slot;
+  static o3os::audio::TapMem taps;
+  static o3os::test::StaticSlot<VoicePool> pool_slot;
+  static LiveBox box;
+  box.notes = LiveNotes{};
+  Engine& e = engine_slot.make(&fake_cycles, taps);
+  VoicePool& p = pool_slot.make();
+  SampleDesc d{steps, 3000, 0, 0, 65536};
+  d.beat_slice = true;
+  d.slice_count = 3;
+  d.slices = table;
+  p.set_sample(0, d);                  // instrument 1: a Beat Slice descriptor (note 24 + n picks slice n)
+  SampleDesc sel = d;
+  sel.slice_sel = 1;                   // instrument 2: the Slice mode, slice index 1 is selected
+  p.set_sample(1, sel);
+  e.attach_voices(&p);
+  e.attach_live(&box);
+  Rig r;
+  const auto level = [&](unsigned track) {
+    const std::int16_t* f = p.feed(track);
+    return f != nullptr ? static_cast<int>(f[haudio::kBlock - 1]) : -1;
+  };
+
+  // Points 1, 4 and 5: the pattern's Slice FX left slice 2 on track 4; the pad's own slice (note 24 + 0) plays, and the track's state is as it was.
+  p.set_forced_slice(4, 2);
+  CHECK(box.queue.push(on(kLiveSourcePad, 3, 24, 1, 4)));
+  render(e, r);
+  CHECK(level(4) == 4000);
+  CHECK(p.forced_slice(4) == 2u);
+  CHECK(box.queue.push(off(kLiveSourcePad, 3)));
+  for (unsigned i = 0; i < 6; ++i) {
+    render(e, r);
+  }
+  CHECK(box.queue.push(on(kLiveSourcePad, 3, 25, 1, 4)));  // the same pad again: slice 1, wherever the Slice FX is
+  render(e, r);
+  CHECK(level(4) == 8000);
+  CHECK(p.forced_slice(4) == 2u);
+  p.clear_forced_slices();
+  CHECK(box.queue.push(all_off(kLiveSourcePad)));
+  for (unsigned i = 0; i < 6; ++i) {
+    render(e, r);
+  }
+
+  // Points 2 and 3: a pad of the Slice mode carries its slice (channel = slice + 1) and the note is the board's; the selected slice plays for an event that carries none.
+  LiveEvent pad = on(kLiveSourcePad, 7, 60, 2, 0);
+  pad.channel = 3;  // slice 2
+  CHECK(box.queue.push(pad));
+  render(e, r);
+  CHECK(level(0) == 12000);
+  CHECK(box.queue.push(off(kLiveSourcePad, 7)));
+  for (unsigned i = 0; i < 6; ++i) {
+    render(e, r);
+  }
+  CHECK(box.queue.push(on(kLiveSourcePad, 8, 60, 2, 0)));  // no pad slice: the selected one (slice 1)
+  render(e, r);
+  CHECK(level(0) == 8000);
+}
+
 TEST_CASE("live: a Chop pad plays the slice of its number, as the voices read a note") {
   // The app asks for note kSliceRootNote + n for pad n of a beat slice instrument (wave_actions.cpp pad()); the voices read slice = note - kSliceRootNote, so
   // the pad, the note and the slice are one number. Pad 0 is the root note, the 48 pads reach the 48 slices the instrument can have.

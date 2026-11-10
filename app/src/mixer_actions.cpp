@@ -582,6 +582,23 @@ bool mixer_page(ActionContext& ctx, core::ActionArg arg) noexcept {
   return true;
 }
 
+// OS-MIXINSKEY (new Community OS behaviour): Master + Insert, on any screen, opens the Mixer on its INSERTS page (public issue #5). On the Mixer already it only goes to the page; the cursor row is kept
+// when the page was already on show. The chord takes both buttons' taps with it (the gesture layer), so the Master tap (the page cycle) does not follow at the release.
+bool mixer_inserts(ActionContext& ctx, core::ActionArg) noexcept {
+  const bool from_elsewhere = ctx.view.screen != ScreenId::Mixer;
+  if (from_elsewhere && !switch_screen(screen_registry(), ctx.model, ctx.view, ScreenId::Mixer)) {
+    return false;
+  }
+  std::uint8_t& page = ctx.view.page[screen_index(ScreenId::Mixer)];
+  const auto inserts = static_cast<std::uint8_t>(MixerPage::Inserts);
+  if (page != inserts) {
+    page = inserts;
+    ctx.view.mixer.row = 0;
+    return true;
+  }
+  return from_elsewhere;
+}
+
 // F6 APPLY on the STEMS page (OS-USBOUTS): the pending OUTPUTS value goes to the USB driver. The port re-enumerates (the computer drops the device for a moment), so the key asks first and the same
 // key again within kResetWindowMs does it (the pattern of Config's F7 APPLY). A refusal (the driver is busy, DISK) keeps the pending value and says so. Elsewhere, or with nothing pending, nothing happens.
 bool mixer_apply(ActionContext& ctx, core::ActionArg) noexcept {

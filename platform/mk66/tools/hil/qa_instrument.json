@@ -117,7 +117,7 @@
    "note": "QA-INS-011: the Params button again goes to F1 (VOICE until S3), it does not cycle"
   },
   {
-   "say": "QA-INS-013 (a pad plays the instrument in view): select a looping or long sample instrument with F6/F7, hold a pad: the instrument sounds at the pad's pitch and keeps sounding while the pad is held; let go: it ends. A beat slice instrument plays slice n on pad n. Shift+pad selects the instrument and makes no sound (QA-INS-012)"
+   "say": "QA-INS-013 (a pad plays the instrument in view): select a looping or long sample instrument with F6/F7, hold a pad: the instrument sounds at the pad's pitch and keeps sounding while the pad is held; let go: it ends. A beat slice instrument plays slice n on pad n. Shift + pad does the same as a pad (it does not select). QA-INS-012: hold Shift, turn the encoder (the coarse step) and tap pads together: each pad sounds and ends at its release, also when Shift is let go first; the instrument in view does not change"
   },
   {
    "pad": 5,
@@ -169,7 +169,7 @@
    "say": "QA-INS-022: hold a pad: it sounds the table's first window as an oscillator at the pad's pitch. Down to WT POS and turn the encoder while the pad is held: the timbre changes live, window by window (WT POS stops at the last window, N-1). Down to WT SIZE and turn it one click down: the size halves (1024), the position doubles, the window marked on the sample is half as wide; at 32 it stops. Delete on WT SIZE: back to 2048"
   },
   {
-   "say": "QA-INS-022: F7 or a pad (Shift + pad) to a short sample instrument if there is one of fewer than 32 frames (a one-click sample): PLAY MODE to Wavetable says WAVETABLE NEEDS A SAMPLE OF 32 FRAMES and the mode stays; F8 UNDO on a normal wavetable edit restores One shot"
+   "say": "QA-INS-022: F7 to a short sample instrument if there is one of fewer than 32 frames (a one-click sample): PLAY MODE to Wavetable says WAVETABLE NEEDS A SAMPLE OF 32 FRAMES and the mode stays; F8 UNDO on a normal wavetable edit restores One shot"
   },
   {
    "say": "QA-INS-023 (granular and slices): on a longer sample (from /AIFF or /MOD) PLAY MODE to Granular: GRAIN POS reads seconds, GRAIN LENGTH samples (11 per click), GRAIN SHAPE Square / Triangle / Gauss, GRAIN LOOP Forward / Backward / PingPong; the grain is marked on the sample and follows each edit; a held pad plays a grain cloud at GRAIN POS and the position moves live. PLAY MODE to Beat slice with no slices: the strip says BEAT SLICE: NO SLICES, AUTO OR EVEN ON WAVE and SLICE is dimmed with the reason on the info line"
@@ -219,7 +219,7 @@
     "params"
    ],
    "gap": 0.6,
-   "note": "QA-INS-025: open the Params page (button Params) and go to a free slot with F7 / Shift + pad"
+   "note": "QA-INS-025: open the Params page (button Params) and go to a free slot with F7"
   },
   {
    "say": "QA-INS-025: on a free slot the page is the type chooser: F1 SAMPLE, F2 MIDI (A MIDI INSTRUMENT ON CHANNEL 1), F3 PASTE (dim until something is copied: NOTHING COPIED: SHIFT+F2 ON AN INSTRUMENT), F4 MODULE, F5 LOAD (lit: LOAD AN INSTRUMENT FILE (.PTI) FROM THE CARD); no rows; the encoder does nothing; Shift shows DELETE dim"
@@ -355,7 +355,7 @@
    "wait": 0.5
   },
   {
-   "say": "QA-INS-034 (no hanging MIDI note, every path): hold pad 5, then press F7 WHILE it is held. The note-off of the pad must appear on the monitor AT the F7 (before you let go), on the channel of the instrument that was in view when the pad went down; the pad's later release adds nothing. Then the same with F6, Shift+F7, Shift+F6 and a pad pick from the Instr-hold list; a Shift+pad pick likewise"
+   "say": "QA-INS-034 (no hanging MIDI note, every path): hold pad 5, then press F7 WHILE it is held. The note-off of the pad must appear on the monitor AT the F7 (before you let go), on the channel of the instrument that was in view when the pad went down; the pad's later release adds nothing. Then the same with F6, Shift+F7, Shift+F6 and a pad pick from the Instr-hold list"
   },
   {
    "pad": 5,

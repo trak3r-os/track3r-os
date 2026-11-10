@@ -6,7 +6,7 @@
 //
 //   Idle     waiting for a commit. At the commit the refusals (4.2) are asked and, if none, the stages begin. A refusal changes nothing: the line empties, the strip says why for 3 s.
 //   Quiet    A   the engine is stopped (the transport, the live notes, the metronome), the power-off latch is set, the input is locked; wait kQuietMs for the Stop to reach the render.
-//   Mute     A2  the codec is muted through its soft ramp, the amplifier key goes LOW, the I2S and the eDMA stop (PowerHost::audio_down, bounded, blocks the main loop for about 70 ms).
+//   Mute     A2  the codec is muted through its soft ramp, the amplifier key goes LOW, the I2S and the eDMA stop (PowerHost::audio_down, bounded, blocks the main loop for about 570 ms (OS-BUG-POWERPOP: 50 ms soft mute, 500 ms VAG ramp)).
 //   Card     B   the device settings are flushed; a save in flight is waited for up to kSaveWaitMs, then cancelled (unless it is committing); a job that is committing is waited for up to kCardHardCapMs.
 //   Unmount  C   the card is released once card_busy() is false, or at kCardHardCapMs (counted from the start of B).
 //   Usb      D   the log line, kUsbDrainMs for the DIN out ring and the CDC to leave, then USB off.
@@ -47,7 +47,7 @@ class PowerHost {
   virtual void export_cancel() noexcept = 0;    // the second hold: the export's normal cancel
   // A: sets the power-off latch FIRST (nothing reopens the outputs, the audio stall detector stands down), locks the input, stops the transport, the live notes, the metronome and the app's jobs.
   virtual void quiesce_engine() noexcept = 0;
-  // A2: the click-free mute and the audio stop. Blocks the main loop for about 70 ms (all I2C), the display serviced meanwhile.
+  // A2: the click-free mute and the audio stop. Blocks the main loop for about 570 ms (I2C and the two ramps), the display serviced meanwhile.
   virtual void audio_down() noexcept = 0;
   // B: the device settings are written now rather than 1.5 s after the last change (asked once, at the start of B). save_busy(): a save job (or the settings flush) runs. save_committing(): it has begun to
   // read back or rename and cannot be cancelled. save_cancel(): the job in flight is cancelled (its Temp removed; the old file stays whole) and no settings flush follows.

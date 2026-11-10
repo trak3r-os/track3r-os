@@ -4,6 +4,12 @@ User-visible changes of the Community OS, newest first, one entry per change, in
 
 ## Unreleased
 
+- **Master + Insert opens the Mixer's INSERTS page** from any screen (issue #5). Insert now acts when it is let go, or 40 ms after the press, so the two keys can be pressed together. Checked on the unit.
+- **Shift + pad plays the instrument on the Instrument screen** instead of selecting it (issue #9), so you can hold Shift for the encoder's coarse step and still play the pads; F6 and F7 change the instrument. Checked on the unit.
+- **Slice pads play their own slice** (issue #7): on the CHOP page pad n plays slice n in SLICE and BEAT SLICE modes, whatever slice the pattern's Slice FX left on the track, and the Slice FX now picks a slice in SLICE mode too. Pads checked on the unit; the Slice FX in SLICE mode needs more testing.
+- **Quieter power-off** (issue #8): the codec's reference voltage now ramps down on its own, with the outputs still powered, before the rest of the codec powers off; the power-off takes about half a second longer. More testing needed: the pop has to be judged by ear.
+- **Mixer: a bar under the name of each track that has an insert** on the MIXER page. More testing needed.
+
 ## v1.2.0 (date to be set at publication)
 
 Everything below is merged and tested on the host and in the emulator. Where a line says "checked on the unit" a Tracker ran it. More testing is needed on units (see "More testing needed" in the [release notes](release/v1.2.0.md)).

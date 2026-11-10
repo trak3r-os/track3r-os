@@ -61,7 +61,7 @@ struct LiveEvent {
   std::uint8_t instrument;
   std::uint8_t velocity;
   std::uint8_t track;  // On: the track the search starts from, 0..15 (the selected one)
-  std::uint8_t channel;  // On of kLiveSourceMidi: the MIDI channel 1..16 it came on, 0 otherwise. Only named in a message (the export's refusal): no behaviour reads it
+  std::uint8_t channel;  // On of kLiveSourceMidi: the MIDI channel 1..16 it came on, only named in a message (the export's refusal). On of kLiveSourcePad: slice + 1 (0 none), the pad's own slice of a Slice mode instrument (OS-BUG-SLICEPAD, Engine::play_live). 0 otherwise
 };
 static_assert(sizeof(LiveEvent) == 8, "LiveEvent is two words");
 static_assert(std::is_trivially_copyable<LiveEvent>::value, "LiveEvent is copied bytewise through the ring");

@@ -8,7 +8,7 @@ The Mixer has five pages, and three are not a fader strip. **ROUTING** decides w
 
 ## What it is for
 
-Use the Mixer to set levels and pans, route tracks, mute and solo, put effects on tracks, and watch the master limiter. Press `Master`. `F1` to `F4` pick the page, with the cursor on its first row. `F6` opens **INSERTS** from the MIXER, ROUTING and MASTER FX pages; on **STEMS** it is **APPLY**. Pressing `Master` again turns to the next page. <!-- QA-MIX-031, QA-MIX-032, QA-MIX-033, QA-MIX-034, QA-MIX-036, QA-MIX-058 -->
+Use the Mixer to set levels and pans, route tracks, mute and solo, put effects on tracks, and watch the master limiter. Press `Master`. `F1` to `F4` pick the page, with the cursor on its first row. `F6` opens **INSERTS** from the MIXER, ROUTING and MASTER FX pages; on **STEMS** it is **APPLY**. Pressing `Master` again turns to the next page. `Master` and `Insert` together open the Mixer straight on **INSERTS** from any screen (new in track3r-os). <!-- QA-MIX-112, QA-MIX-031, QA-MIX-032, QA-MIX-033, QA-MIX-034, QA-MIX-036, QA-MIX-058 -->
 
 To set a level or a pan on the MIXER page, press `Left` or `Right` to pick the column and `Up` or `Down` to pick the field (level or pan). Turn the encoder to set the value. `Shift` makes the step coarse. `Delete` puts back the default.
 

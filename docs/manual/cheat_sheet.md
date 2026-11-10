@@ -12,6 +12,7 @@ The keys on one page. Each table names the chapter it comes from.
 | `Rec` | on Pattern, turns STEP on or off; on Record, starts or stops the take |
 | `Shift` + `Rec` | on Pattern, turns LIVE on or off |
 | `Song` + `Pattern`, or `Master` + `Song` | opens the Navigator. `F8` (**GO**) opens the chosen screen; `Pattern` leaves it |
+| `Master` + `Insert` | opens the Mixer on its INSERTS page, from any screen |
 | `Shift` + `Pattern` | lists the module apps that are not tools. `F1` (**LAUNCH**) starts one; `Pattern` leaves it |
 | `Shift` + `Config` | opens the help page of the screen you are on. `Left` and `Right` turn the pages, `Up`, `Down` and the encoder scroll, any other key closes it |
 | `Shift` + `Master` | steps to the next colour theme: Amiga, Black, White. <!-- QA-GLB-157 --> |
@@ -104,7 +105,7 @@ The soft keys with `Shift` held. `-` means the key does nothing. On Pattern, `Sh
 | `Shift` + `Right` or `Left` | Sample load: marks the file under the cursor and steps down (Right), or clears the marks (Left). **LOAD** and **ADD** then load every marked file |
 | `Shift` + `Right` or `Left` | Instrument: the row's coarse step up or down, as `Shift` + encoder. Plain `Right` and `Left` are one click |
 | `Shift` + `Note`, `Instr`, `Vol`, `Fx` | Pattern: jumps to a quarter of the pattern. On Song `Shift` + `Note` jumps to the previous slot with the same pattern |
-| `Shift` + pad | Instrument: selects the instrument on that pad |
+| `Shift` + pad | Instrument: plays the instrument in view, as a pad alone does (change the instrument with `F6` and `F7`) |
 | `Shift`, held alone | Pattern: the pads show the TRACKS layout while held |
 
 | `Shift` + encoder | One click moves |

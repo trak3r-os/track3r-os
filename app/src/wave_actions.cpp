@@ -22,6 +22,7 @@ constexpr int kLaneColumns = 768;       // the lane's width: a click of the enco
 constexpr int kCoarse = 16;
 constexpr int kMaxDetents = 1 << 16;
 constexpr std::uint8_t kBeatSlice = 5;  // play mode 5 of the OG instrument file (beat slice): its pads play the slices
+constexpr std::uint8_t kSlicePlay = 4;  // play mode 4 (slice): pad n plays slice n (OS-BUG-SLICEPAD), at the sample's own pitch
 
 bool say(ActionContext& ctx, core::Severity severity, const char* text) noexcept {
   return say_tag(ctx, severity, text, "wave");
@@ -171,9 +172,16 @@ bool pad(ActionContext& ctx, core::ActionArg arg, bool sound) noexcept {
   }
   if (sound && ctx.preview != nullptr) {
     const bool beat = in != nullptr && in->sampler.play_mode == kBeatSlice;
-    // A beat slice instrument plays slice (note - kSliceRootNote), so pad n is note 24 + n; anything else plays the pad board's note.
-    ctx.preview->pad_down(static_cast<unsigned>(arg), static_cast<unsigned>(ctx.view.pattern.track()), static_cast<unsigned>(ctx.view.instrument),
-                          beat ? audio::kSliceRootNote + static_cast<unsigned>(arg) : ctx.view.edit.pads.note(static_cast<unsigned>(arg)));
+    const unsigned pad_no = static_cast<unsigned>(arg);
+    const unsigned track = static_cast<unsigned>(ctx.view.pattern.track());
+    const unsigned instrument = static_cast<unsigned>(ctx.view.instrument);
+    if (in != nullptr && in->sampler.play_mode == kSlicePlay && pad_no < count) {
+      // OS-BUG-SLICEPAD: a slice instrument's pad n plays slice n, whatever the Slice FX left on the track and whichever slice is selected.
+      ctx.preview->slice_pad_down(pad_no, track, instrument, audio::kRootNote, pad_no);
+    } else {
+      // A beat slice instrument plays slice (note - kSliceRootNote), so pad n is note 24 + n; anything else plays the pad board's note.
+      ctx.preview->pad_down(pad_no, track, instrument, beat ? audio::kSliceRootNote + pad_no : ctx.view.edit.pads.note(pad_no));
+    }
   }
   return changed;
 }

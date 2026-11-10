@@ -7,6 +7,7 @@
 #include <o3os/app/actions.h>
 #include <o3os/app/app.h>
 #include <o3os/app/buttons.h>
+#include <o3os/app/mixer_view.h>
 #include <o3os/app/model.h>
 #include <o3os/app/song_map.h>
 #include <o3os/app/song_source.h>
@@ -1380,6 +1381,66 @@ TEST_CASE("navigator chords: Master + Song and Song + Pattern work on every scre
   rig.release(Button::Master);
   rig.pass(1);
   CHECK(rig.app->state().overlay == app::OverlayId::None);
+}
+
+TEST_CASE("mixer inserts chord: Master + Insert, in either order, opens the Mixer on INSERTS from any screen and fires neither tap (OS-MIXINSKEY)") {
+  const std::size_t mixer = app::screen_index(app::ScreenId::Mixer);
+  const std::uint8_t inserts = static_cast<std::uint8_t>(app::MixerPage::Inserts);
+  for (const Button from : {Button::Pattern, Button::Song, Button::Params, Button::File, Button::Master}) {
+    for (int order = 0; order < 2; ++order) {
+      Rig rig;
+      rig.tap(from);
+      if (from == Button::Master) {
+        rig.tap(Button::Master);  // a second tap: the Mixer's next page, so the chord must move it to INSERTS, not cycle on
+      }
+      NEED(rig.app->state().page[mixer] != inserts);
+      const auto depth = rig.journal.depth();
+      rig.press(order == 0 ? Button::Master : Button::Insert);
+      rig.pass(1);
+      rig.press(order == 0 ? Button::Insert : Button::Master);
+      rig.pass(1);
+      CHECK(rig.app->state().screen == app::ScreenId::Mixer);
+      CHECK(rig.app->state().page[mixer] == inserts);
+      rig.pass(core::kGestureTimings.hold_ms + 600);  // far past the hold time: still nothing else
+      rig.release(Button::Insert);
+      rig.release(Button::Master);
+      rig.pass(1);
+      CHECK(rig.app->state().screen == app::ScreenId::Mixer);  // no Master tap at the release (no screen switch, no page cycle)
+      CHECK(rig.app->state().page[mixer] == inserts);
+      CHECK(rig.app->state().overlay == app::OverlayId::None);
+      CHECK(rig.journal.depth() == depth);  // Insert's own tap (step.insert, song.add_slot, mixer.stem_set) did not run
+    }
+  }
+  Rig rig;  // on the INSERTS page already: the chord stays there
+  rig.tap(Button::Master);
+  rig.press(Button::Master);
+  rig.pass(1);
+  rig.press(Button::Insert);
+  rig.pass(1);
+  rig.release(Button::Insert);
+  rig.release(Button::Master);
+  rig.pass(1);
+  rig.press(Button::Master);
+  rig.pass(1);
+  rig.press(Button::Insert);
+  rig.pass(1);
+  rig.release(Button::Insert);
+  rig.release(Button::Master);
+  rig.pass(1);
+  CHECK(rig.app->state().screen == app::ScreenId::Mixer);
+  CHECK(rig.app->state().page[mixer] == inserts);
+  rig.tap(Button::Pattern);  // the plain keys are unchanged: Master is the Mixer again, Insert on Pattern is a step insert (no screen change)
+  const auto depth = rig.journal.depth();
+  rig.tap(Button::Insert);
+  CHECK(rig.app->state().screen == app::ScreenId::Pattern);
+  CHECK(rig.journal.depth() == depth);  // an insert on the empty pattern changes nothing; that plain Insert resolves to step.insert is builtin_bindings_test's
+  rig.press(Button::Master);  // Master held + the encoder is still the volume
+  rig.pass(1);
+  rig.turn(-2);
+  CHECK(rig.message().rfind("MASTER VOLUME ", 0) == 0u);
+  rig.release(Button::Master);
+  rig.pass(1);
+  CHECK(rig.app->state().screen == app::ScreenId::Pattern);
 }
 
 TEST_CASE("pattern tempo: under a modal overlay the gesture does nothing, and neither does it in an app's page") {

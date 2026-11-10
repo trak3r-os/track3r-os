@@ -448,6 +448,7 @@ bool mixer_name(ActionContext& ctx, core::ActionArg arg) noexcept;      // Shift
 bool mixer_mute_none(ActionContext& ctx, core::ActionArg arg) noexcept; // Shift + F7 (OS-SHIFTROW): every strip's mute off, one undo unit
 bool mixer_solo_none(ActionContext& ctx, core::ActionArg arg) noexcept; // Shift + F8: every strip's solo off
 bool mixer_page(ActionContext& ctx, core::ActionArg arg) noexcept;    // F1..F4: arg = MixerPage
+bool mixer_inserts(ActionContext& ctx, core::ActionArg arg) noexcept; // Master + Insert (OS-MIXINSKEY): the Mixer on its INSERTS page, from any screen
 bool mixer_apply(ActionContext& ctx, core::ActionArg arg) noexcept;   // F6 APPLY on the STEMS page: the pending OUTPUTS value to the USB driver, pressed twice (OS-USBOUTS)
 bool mixer_cue(ActionContext& ctx, core::ActionArg arg) noexcept;     // F5 CUE LVL: the MASTER FX page on the CUE level
 

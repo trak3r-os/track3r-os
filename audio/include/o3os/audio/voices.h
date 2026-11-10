@@ -525,6 +525,10 @@ struct SampleDesc {
   // OS-CEPLAYTHRU P2: a beat slice note plays its slice on to the end of the sample instead of stopping at the next slice point (beat_slice_span; tracker-ce's
   // slicePlayThru, docs/specs/OS-CEPLAYTHRU.md F4). In the padding byte the layout still had before `slices` (sizeof(SampleDesc) unchanged). Read at a note's start only.
   std::uint8_t slice_thru = 0;
+  // OS-BUG-SLICEPAD: the Slice play mode (4) is a table descriptor too: `beat_slice` with `slice_sel` != kNoForcedSlice (0xFF) plays slice `slice_sel` (held to the table) at the NOTE's pitch, where
+  // a Beat Slice descriptor (0xFF) picks the slice from the note and plays at the root's. The Slice FX and a pad's slice (Engine::play_live sets the track's forced slice for the press) still win. The padding byte after `slice_thru`
+  // (static_assert below); read at a note's start only.
+  std::uint8_t slice_sel = 0xFF;
   // The slice boundaries: slice_count + 1 offsets in samples from `data`, ascending, the last the length; each as two u16 (low half, high half) so that
   // the table can sit in the 16-bit sample arena after its PCM. Read only in note_on().
   const std::uint16_t* slices = nullptr;
@@ -563,6 +567,8 @@ struct SampleDesc {
   // (one shot, forward loop, slice, beat slice); 0: mono (a note of it plays M). set_sample drops it for a granular, wavetable, backward or ping-pong descriptor. Read at a note's start only.
   std::uint32_t st_off = 0;
 };
+// slice_sel sits in the byte the 32-bit target layout had spare before `slices` (the host's 64-bit pointer pads more, so only the target is asserted).
+static_assert(sizeof(void*) != 4 || offsetof(SampleDesc, slice_sel) + 1u == offsetof(SampleDesc, slices), "slice_sel must use the padding byte before slices");
 
 // The Slice FX of a track that has none (VoicePool::forced_slice).
 inline constexpr std::uint8_t kNoForcedSlice = 0xFF;
@@ -587,6 +593,8 @@ O3OS_AUDIO_INLINE bool beat_slice_span(const SampleDesc& s, unsigned note, unsig
   unsigned k;
   if (forced != kNoForcedSlice) {
     k = forced % s.slice_count;
+  } else if (s.slice_sel != kNoForcedSlice) {  // OS-BUG-SLICEPAD: the Slice mode's selected slice, not the note's number
+    k = s.slice_sel >= s.slice_count ? s.slice_count - 1u : s.slice_sel;
   } else {
     k = note > kSliceRootNote ? note - kSliceRootNote : 0u;
     k = k >= s.slice_count ? s.slice_count - 1u : k;
