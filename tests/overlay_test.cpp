@@ -11,6 +11,7 @@
 #include <o3os/app/model.h>
 #include <o3os/app/pattern_layout.h>
 #include <o3os/app/pattern_view.h>
+#include <o3os/app/screens/config_screen.h>
 #include <o3os/app/screens/overlay.h>
 #include <o3os/app/screens/pattern_screen.h>
 #include <o3os/app/screens/scene.h>
@@ -820,7 +821,8 @@ TEST_CASE("overlay: while the Navigator is up the F-key row is its own (F1 GO, F
       app::ViewState v;
       v.screen = id;
       // Closed: the screen's own row (nothing of the Navigator in it).
-      const KeyRowRef own(e->screen->soft_keys(), t);
+      // (Config opens on its MIDI page, whose F8 reads MAP: OS-LEARNMAP)
+      const KeyRowRef own(id == ScreenId::Config ? app::config_key_row(false, app::kConfigPageMidi) : e->screen->soft_keys(), t);
       const Scene closed(v, OverlayId::None, true, t);
       CHECK_MESSAGE(key_row_is(closed, own), e->name << " theme " << t << " closed");
       CHECK_FALSE(key_row_is(closed, nav_plain));

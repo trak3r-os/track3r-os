@@ -310,6 +310,7 @@ void App::run_once() noexcept {
 
   poll_transport_select();  // (OS-MIDISLV; the position itself is read at the top of the pass: OS-LIVEREC)
   poll_mute_blink();
+  poll_learn_map();
   poll_modules();
   poll_files();
   if (file_question_sync(state_)) {  // OS-NEWKEEP2
@@ -824,6 +825,16 @@ void App::poll_mute_blink() noexcept {
   }
   state_.mute_blink = phase;
   mute_pending_seen_ = pending;
+}
+
+// OS-LEARNMAP: the activity dots of LEARN MAP are lit by midi.cc (param_actions.cpp apply_cc) and go out LearnMapView::kDotMs after the last CC: the table redraws then. Nothing runs while the map is closed.
+void App::poll_learn_map() noexcept {
+  LearnMapView& lm = state_.learn_map;
+  if (state_.overlay == OverlayId::LearnMap && (lm.hit[0] | lm.hit[1]) != 0u && core::tick_elapsed(clock_.now(), lm.hit_at) >= core::ticks_from_ms(LearnMapView::kDotMs)) {
+    lm.hit[0] = 0;
+    lm.hit[1] = 0;
+    dirty_ = true;
+  }
 }
 
 bool App::open_pattern(unsigned id) noexcept {

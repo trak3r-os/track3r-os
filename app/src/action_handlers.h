@@ -266,6 +266,14 @@ bool learn_mode(ActionContext& ctx, core::ActionArg arg) noexcept;      // the t
 bool learn_follow(ActionContext& ctx, core::ActionArg arg) noexcept;    // the target's binding follows the selected instrument, or is pinned back to it (F5; OS-LEARNFOLLOW)
 bool learn_delete(ActionContext& ctx, core::ActionArg arg) noexcept;    // delete the binding the list cursor is on (F3; OS-013a)
 bool learn_clear_all(ActionContext& ctx, core::ActionArg arg) noexcept; // clear both stores: the first press arms, the second clears (F4; OS-013a)
+// learn_map_actions.cpp: OS-LEARNMAP, the LEARN MAP overlay (docs/specs/OS-LEARNMAP.md).
+bool lmap_open(ActionContext& ctx, core::ActionArg arg) noexcept;      // F6 MAP of the Learn dialog, F8 MAP of Config > MIDI (config.f8)
+bool lmap_edit(ActionContext& ctx, core::ActionArg arg) noexcept;      // arg = detents: the encoder sets the column under the cursor; undoable if a project is open
+bool lmap_coarse(ActionContext& ctx, core::ActionArg arg) noexcept;    // Shift + encoder: eight times as far, INS skips to the next instrument that has the parameter
+bool lmap_key(ActionContext& ctx, core::ActionArg arg) noexcept;       // arg = the key's number: 1 NEW, 2 MODE, 3 DELETE, 4 CLEAR ALL, 5 FOLLOW, 7 RELEARN
+bool config_f8(ActionContext& ctx, core::ActionArg arg) noexcept;      // F8 of Config: LEARN MAP on the MIDI page, UPDATE (firmware_open) on the INFO page
+// The CC that F1 NEW / F7 RELEARN waits for (midi_cc hands it over while the map is up).
+bool learn_map_capture(ActionContext& ctx, unsigned channel, unsigned cc) noexcept;
 // A control change message: arg = (channel << 16) | (cc << 8) | value, channel 1..16 (0: unknown), cc and value 0..127. With the Learn
 // overlay up it binds the controller to the target; otherwise it moves what it is bound to. MIDI input enqueues it, it never runs in an ISR.
 bool midi_cc(ActionContext& ctx, core::ActionArg arg) noexcept;

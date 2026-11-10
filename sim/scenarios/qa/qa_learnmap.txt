@@ -1,0 +1,68 @@
+# OS-LEARNMAP (docs/specs/OS-LEARNMAP.md): the LEARN MAP overlay, docs/qa/catalogue/global.md (QA-GLB-234..240). One `snap qa_lmap_NNN` per row with a visible result;
+# the goldens are keyed qa_learnmap/qa_lmap_NNN. The sim has no knob, so a CC is the `midicc` line; the activity dot lasts 250 ms, so a snap right after a `midicc` shows it.
+
+document
+wait 100
+
+# QA-GLB-234: Config opens on the MIDI page and F8 reads MAP there: the overlay lists the ENC row first (no target yet) and nothing else.
+tap config
+wait 100
+tap f8
+wait 100
+snap qa_lmap_001
+tap f8
+wait 100
+
+# QA-GLB-235: the Learn dialog binds a CC to the row under the cursor (CUTOFF of the selected instrument), F6 MAP opens the map: ENC, then the binding with SOURCE, CH, PARAMETER, INS, MODE and the live value.
+tap params
+wait 100
+press vol
+press fx
+release fx
+release vol
+wait 100
+midicc 1 74 64
+wait 400
+tap f6
+wait 100
+snap qa_lmap_002
+
+# QA-GLB-236: a CC that moves the bound parameter lights its dot and the value follows; 250 ms later the dot is out.
+midicc 1 74 100
+wait 20
+snap qa_lmap_003
+wait 400
+snap qa_lmap_004
+
+# QA-GLB-237: down to the binding, Right to the CC column, the encoder takes the source one up; Shift is coarse (8).
+tap down
+tap right
+encoder 1
+wait 100
+snap qa_lmap_005
+
+# QA-GLB-238: F2 steps the mode, F5 makes it follow the selected instrument (INS *).
+tap f2
+tap f5
+wait 100
+snap qa_lmap_006
+
+# QA-GLB-239: F1 NEW waits for a knob (the key row says so); the next CC becomes a new row; a bound CC is refused with its text.
+tap f1
+wait 100
+snap qa_lmap_007
+midicc 1 21 10
+wait 100
+snap qa_lmap_008
+tap f1
+midicc 1 21 10
+wait 100
+snap qa_lmap_009
+
+# QA-GLB-240: F4 CLEAR ALL asks first; the second press clears the lot (the ENC row stays).
+tap f4
+wait 100
+snap qa_lmap_010
+tap f4
+wait 100
+snap qa_lmap_011

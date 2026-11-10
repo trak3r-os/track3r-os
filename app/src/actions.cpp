@@ -217,6 +217,11 @@ constexpr ActionDef kActions[] = {
     make_action("learn.mode", learn_mode, core::kActionUndoableIfOpen),
     make_action("learn.follow", learn_follow, core::kActionUndoableIfOpen),  // OS-LEARNFOLLOW S1
     make_action("learn.delete", learn_delete, core::kActionUndoableIfOpen),
+    make_action("lmap.open", lmap_open),  // OS-LEARNMAP
+    make_action("lmap.edit", lmap_edit, core::kActionUndoableIfOpen),
+    make_action("lmap.coarse", lmap_coarse, core::kActionUndoableIfOpen),
+    make_action("lmap.key", lmap_key, core::kActionUndoableIfOpen),
+    make_action("config.f8", config_f8, kFocus),
     make_action("learn.clear_all", learn_clear_all, core::kActionUndoableIfOpen),
     make_action("midi.cc", midi_cc, core::kActionUndoableIfOpen | core::kActionRecords),  // OS-FXREC 3.4: a CC never closes a take; in one its parameter write is final (apply_cc) and only the recorded FX join it
     make_action("enc.assign", enc_assign),  // OS-ENCLEARN: Instr + FX2, the Learn row becomes the encoder's target
@@ -409,7 +414,8 @@ bool name_equals(const char* name, const char* s, std::size_t length) noexcept {
 // The actions whose area is the first record's, whatever the screen (D2): a controller message resolves to a parameter wherever it is, Learn writes the bindings, an app's group says
 // what it touched.
 constexpr core::ActionId kAutoArea[] = {core::action_id("midi.cc"), core::action_id("enc.turn"), core::action_id("learn.clear"), core::action_id("learn.mode"), core::action_id("learn.follow"),
-                                        core::action_id("learn.delete"), core::action_id("learn.clear_all"), core::action_id("module.app_group")};
+                                        core::action_id("learn.delete"), core::action_id("learn.clear_all"), core::action_id("lmap.edit"), core::action_id("lmap.coarse"), core::action_id("lmap.key"),
+                                        core::action_id("module.app_group")};
 
 model::UndoArea undo_area_of(core::ActionId id, ScreenId screen) noexcept {
   for (const core::ActionId a : kAutoArea) {

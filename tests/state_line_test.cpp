@@ -149,7 +149,7 @@ TEST_CASE("state line: keys= is present only while a prompt is live, and names t
   r.app->run_once();
   std::string l = r.line();
   CHECK(value_of(l, "overlay") == "LEARN");
-  CHECK(value_of(l, "keys") == "F8:BACK");
+  CHECK(value_of(l, "keys") == "F6:MAP,F8:BACK");  // (F6 MAP is always live: OS-LEARNMAP)
   CHECK(l.compare(l.rfind(' ') + 1, 5, "keys=") == 0);  // the last pair
   (void)r.app->invoke(core::action_id("learn.toggle"));
   r.app->run_once();
@@ -179,7 +179,7 @@ TEST_CASE("state line: keys= is present only while a prompt is live, and names t
 TEST_CASE("state line: the keys of any prompt fit the room keys= has, so the console's 384-character line is never cut by it") {
   // The longest line without keys= is about 310 characters (msg up to 48, sel up to 40, and sel only on File and Sample load). A dialog or a question over such a screen has at most kScreenKeys characters of keys; the boot
   // disk's eight RESTART (the one long prompt) is on Pattern, where sel is "-": its line is 39 characters shorter.
-  constexpr std::size_t kScreenKeys = 68;  // (Learn with both its CLEAR ALL options and F5 FOLLOW live at once, which no state has: 68; OS-LEARNFOLLOW S1 binds the key)
+  constexpr std::size_t kScreenKeys = 68;  // (was Learn with both its CLEAR ALL options and F5 FOLLOW live at once: 68, OS-LEARNFOLLOW S1; one live per key, and F6 MAP of OS-LEARNMAP, it is 63)
   static_assert(310u + 6u + kScreenKeys <= 384u, "keys= over the longest line must fit the console's state buffer");
   static_assert(310u - 39u + 6u + app::kKeysLineChars <= 384u, "the boot disk's keys= must fit the console's state buffer next to its line");
   std::size_t longest = 0;
@@ -190,6 +190,15 @@ TEST_CASE("state line: the keys of any prompt fit the room keys= has, so the con
       app::PromptState all;
       all.prompt = prompt;
       all.live = static_cast<std::uint16_t>((1u << prompt->count) - 1u);  // every option live at once: more than any state has
+      if (!prompt->every_key) {
+        for (unsigned i = 0; i < prompt->count; ++i) {  // ... but a key with two options has one live at a time: the later one stands (Learn's CLEAR ALL, then CLEAR ALL?)
+          for (unsigned j = i + 1; j < prompt->count; ++j) {
+            if (prompt->options[j].key == prompt->options[i].key) {
+              all.live = static_cast<std::uint16_t>(all.live & ~(1u << i));
+            }
+          }
+        }
+      }
       longest = std::max(longest, app::describe_prompt_keys(all, buf, sizeof buf));
     }
   }

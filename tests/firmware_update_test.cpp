@@ -131,7 +131,7 @@ TEST_CASE("firmware: F8 on the INFO page opens the list, copied in one pass of t
   const app::Model& model = rig.app->model();
   CHECK(model.firmware);
   CHECK(std::string(app::config_key_row(model.firmware, app::kConfigPageInfo)[7]) == "UPDATE");
-  CHECK(std::string(app::config_key_row(model.firmware, 0)[7]) == "--");  // F8 only, and on INFO only: F1..F6 stay the pages
+  CHECK(std::string(app::config_key_row(model.firmware, 1)[7]) == "--");  // F8 only, and on INFO only (and MAP on MIDI, OS-LEARNMAP): F1..F6 stay the pages
   for (unsigned i = 0; i < 7; ++i) {
     CHECK(std::string(app::config_key_row(true, app::kConfigPageInfo)[i]) == app::kConfigSoftKeys[i]);
   }
@@ -152,7 +152,7 @@ TEST_CASE("firmware: F8 on the INFO page opens the list, copied in one pass of t
   rig.tap(Button::F8);  // BACK
   CHECK(rig.overlay() == OverlayId::None);
   rig.sink.calls.clear();
-  for (const Button page : {Button::F1, Button::F2, Button::F3, Button::F5, Button::F6}) {
+  for (const Button page : {Button::F2, Button::F3, Button::F5, Button::F6}) {  // (F1, the MIDI page, has F8 MAP: OS-LEARNMAP)
     rig.tap(page);
     rig.tap(Button::F8);
     CHECK(rig.overlay() == OverlayId::None);

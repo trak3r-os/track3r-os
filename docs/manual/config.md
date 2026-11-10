@@ -54,7 +54,7 @@ METRO stays **Off** until you change it. Press `Delete` on the METRO row to put 
 | Main area | The rows of the page. Each row has a name and a value. |
 | Info line | Notes about the page or a pending change. On PATTERN it says **live recording, metronome and pads**. |
 | Strip | The message line, for example **USB RECONNECTING**. |
-| Key row | `F1` to `F6` choose a page. `F7` is **APPLY** (blank on the SD and INFO pages, which have nothing to apply). On the INFO page, `F8` is **UPDATE**: it opens the firmware update dialog (new, not yet tried on a unit). |
+| Key row | `F1` to `F6` choose a page. `F7` is **APPLY** (blank on the SD and INFO pages, which have nothing to apply). On the MIDI page, `F8` is **MAP**: it opens LEARN MAP, the list of every MIDI Learn binding (new, see [The panel](panel.md)). On the INFO page, `F8` is **UPDATE**: it opens the firmware update dialog (new, not yet tried on a unit). |
 | Shift row | `F7` is **DEFAULTS**. The other keys do nothing. |
 
 ## More tasks
@@ -318,7 +318,8 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 |---|---|---|
 | `F1` to `F6` | goes to a page: MIDI, DISPLAY, SD, INFO, USB, PATTERN | QA-CFG-033 |
 | `F7` (**APPLY**) | on a USB row: press once to say what will happen, again to write. No label and no effect on the SD and INFO pages. | QA-CFG-003, QA-CFG-004, QA-CFG-034, QA-CFG-219 |
-| `F8` (**UPDATE**) | on the INFO page only: opens the firmware update list. On the other pages it does nothing. | QA-CFG-040, QA-CFG-041, QA-CFG-218 |
+| `F8` (**MAP**) | on the MIDI page only: opens LEARN MAP. | QA-GLB-234 |
+| `F8` (**UPDATE**) | on the INFO page only: opens the firmware update list. On the DISPLAY, SD, USB and PATTERN pages it does nothing. | QA-CFG-040, QA-CFG-041, QA-CFG-218 |
 | `Shift` + `F7` (**DEFAULTS**) | puts the page's rows back to their defaults. Press it twice within two seconds. | QA-CFG-031, QA-CFG-032 |
 | `Shift` + `F1` to `F6`, `Shift` + `F8` | do nothing, and do not reach the page keys or APPLY | QA-CFG-015 |
 | `Config` (again) | goes to the next page. It wraps after PATTERN. | QA-CFG-033 |

@@ -40,6 +40,21 @@ void send_param_change(const ActionContext& ctx, core::ParamId id, float value, 
 // and the message when nothing could be written. True when the parameter changed or a message was posted.
 bool param_edit_id(ActionContext& ctx, core::ParamId id, int detents) noexcept;
 
+// The Learn stores (param_actions.cpp), shared by the Learn dialog's actions and LEARN MAP's (learn_map_actions.cpp, OS-LEARNMAP).
+core::LearnScope scope_of(core::ParamId id) noexcept;  // the store a parameter's bindings are in
+unsigned scope_index(core::LearnScope scope) noexcept;  // 0 project, 1 device: the index of Session::learn and LearnMapView::hit
+const core::LearnBinding* store_slots(const ActionContext& ctx, core::LearnScope scope) noexcept;  // nullptr: no project
+model::Status store_set(ActionContext& ctx, core::LearnScope scope, unsigned slot, const core::LearnBinding& b) noexcept;  // one slot (a project's is an undo record)
+void reset_runtime(ActionContext& ctx, core::LearnScope scope, unsigned slot) noexcept;  // the pickup state of a slot just written
+// A follow binding acts only on an instrument that has the field with its meaning (never a module field).
+bool follow_fits(model::InstrumentKind kind, unsigned field) noexcept;
+// Writes binding `b` into the store of its parameter by core::learn_plan: the slot of the same parameter, else the first one it displaces, else a free one; the others that listen to the same message go.
+// Nothing is written when the store is full.
+enum class LearnPut : std::uint8_t { Done, Full, Refused };
+LearnPut learn_put(ActionContext& ctx, const core::LearnBinding& b) noexcept;
+// F5 of the Learn dialog on parameter `id` (a followed field counts as its field), shared with LEARN MAP's F5: the binding of `id` follows the selected instrument, or is pinned back to its instrument.
+bool learn_follow_of(ActionContext& ctx, core::ParamId id) noexcept;
+
 // An info notification saying why nothing could be written ("NO PROJECT OPEN"). Returns whether the screen changed.
 bool say_not_written(ActionContext& ctx, WriteResult result) noexcept;
 

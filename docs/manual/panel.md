@@ -122,6 +122,17 @@ The Learn dialog works on the row under the cursor of the screen below. Move a M
 
 Use your keyboard as a synth: bind the knobs on one instrument, press `F5` on each, then select any instrument — the same knobs now shape whichever instrument is selected. A binding follows instrument parameters only, and it acts only when the selected instrument has the row with its meaning (a sampler row on a MIDI instrument does nothing). A follow binding is saved with the project. <!-- QA-GLB-178, QA-GLB-179 -->
 
+### See every binding: LEARN MAP
+<!-- sync: src=app/src/learn_map_actions.cpp,app/src/screens/learn_map_overlay.cpp qa=QA-GLB-234,QA-GLB-235,QA-GLB-236,QA-GLB-237,QA-GLB-238,QA-GLB-239,QA-GLB-240 -->
+
+LEARN MAP is one full-screen list of every binding of both stores, with the encoder's target on the first row (`ENC`). Open it with `F6` (**MAP**) in the Learn dialog, or with `F8` (**MAP**) on the Config MIDI page. Each row shows the **SOURCE** (the CC), its **CH** (`*` is every channel), the **PARAMETER**, the **INS** (an instrument number, or `*` for a binding that follows the selected instrument), the **MODE**, and the live **VALUE**. A dot at the left of a row lights while its CC moves and goes out a quarter of a second later. <!-- QA-GLB-234, QA-GLB-235, QA-GLB-236 -->
+
+`Up` and `Down` move the row, `Left` and `Right` pick the column, and the encoder changes it (`Shift` and the encoder: coarse steps; `Shift` + `Up` / `Down`: a page of rows). PARAMETER walks only the parameters the instrument has (a sampler's list for a sampler, the MIDI rows for a MIDI instrument). An INS that has no such parameter is refused: `INS 05 HAS NO CUTOFF`. A CC that another binding already uses on that channel is refused: `CC 74 CH1 IS TAKEN`. A refusal changes nothing. Each edit is one undo step, as in the Learn dialog (close the map with `F8`, then undo). <!-- QA-GLB-237 -->
+
+`F1` **NEW**: move a knob and the next CC becomes a new binding on the selected instrument. `F2` **MODE** steps pickup, jump and relative. `F3` **DELETE** removes the row (on the `ENC` row it clears the encoder's target). `F4` **CLR ALL**, pressed twice, removes every binding. `F5` **FOLLOW** switches a row between its instrument and the selected one. `F7` **RELEARN**: the next CC you move becomes the row's source. `F8` goes back. The `ENC` row takes no CC, mode or follow. Nothing here changes a file: the project's bindings are saved with the project as before, and the encoder's target is not saved. <!-- QA-GLB-238, QA-GLB-239, QA-GLB-240 -->
+
+New in track3r-os. Not yet checked on the unit.
+
 ### Put one parameter on the encoder
 <!-- sync: src=app/src/bindings.cpp,app/src/param_actions.cpp,app/src/rec_actions.cpp qa=QA-GLB-228,QA-GLB-229,QA-GLB-230,QA-GLB-231,QA-GLB-232 -->
 

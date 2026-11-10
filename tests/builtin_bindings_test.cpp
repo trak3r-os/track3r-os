@@ -48,6 +48,7 @@ constexpr ContextWord kContextWords[] = {
     {"verbmenu", Context::VerbMenu},  // OS-PTOOLS2 S3
     {"patterntools", Context::PatternTools},  // OS-PTOOLS2 S2: the Pattern TOOLS dialog over the block
     {"events", Context::Events},  // OS-MIDIREC S1b
+    {"learnmap", Context::LearnMap},  // OS-LEARNMAP
     {"instrument.empty", Context::InstrumentEmpty},
     {"file.export", Context::FileExport},
     {"exportprogress", Context::ExportProgress},
@@ -469,6 +470,10 @@ TEST_CASE("builtin bindings: every Shift binding is one of these, and none of th
   expected.push_back(line("events", "tap", "f7", "events.redo", 0));
   expected.push_back("steppopup tap shift+up popup.page -1\n");
   expected.push_back("steppopup tap shift+down popup.page 1\n");
+  // OS-LEARNMAP: the LEARN MAP overlay: Shift + Up / Down a page of rows, Shift + encoder the coarse step.
+  expected.push_back("learnmap tap shift+up cursor.page -1\n");
+  expected.push_back("learnmap tap shift+down cursor.page 1\n");
+  expected.push_back("learnmap tap shift+enc0 lmap.coarse @value\n");
   // The Navigator captures, so it has its own: no jumps; Shift + F7 / F8 stay CLOSE / GO (a Shift press falls back to the plain tap), the rest nothing.
   for (int n = 0; n < 6; ++n) {
     expected.push_back(line("navigator", "tap", (std::string("f") + std::to_string(n + 1)).c_str(), "ui.none", 0));

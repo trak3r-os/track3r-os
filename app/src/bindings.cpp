@@ -58,6 +58,7 @@ constexpr core::ContextId kPresetCtx = context_id(Context::Preset);
 constexpr core::ContextId kVerbMenuCtx = context_id(Context::VerbMenu);  // OS-PTOOLS2 S3: the F7 verb menu
 constexpr core::ContextId kPToolsCtx = context_id(Context::PatternTools);  // OS-PTOOLS2 S2: the Pattern TOOLS dialog over the block
 constexpr core::ContextId kEventsCtx = context_id(Context::Events);  // OS-MIDIREC S1b
+constexpr core::ContextId kLearnMapCtx = context_id(Context::LearnMap);  // OS-LEARNMAP
 constexpr core::ContextId kTextEntryCtx = context_id(Context::TextEntry);
 constexpr core::ContextId kStepPopupCtx = context_id(Context::StepPopup);
 constexpr core::ContextId kRecordCtx = context_id(Context::Record);
@@ -355,7 +356,11 @@ constexpr core::ActionId kRecordWav = core::action_id("record.wav");
 constexpr core::ActionId kMixerMuteNone = core::action_id("mixer.mute_none");  // OS-SHIFTROW
 constexpr core::ActionId kMixerSoloNone = core::action_id("mixer.solo_none");
 constexpr core::ActionId kConfigPageDefault = core::action_id("config.page_default");
-constexpr core::ActionId kFirmwareOpen = core::action_id("firmware.open");  // OS-FWCONFIG
+constexpr core::ActionId kConfigF8 = core::action_id("config.f8");  // OS-LEARNMAP: MAP on the MIDI page, firmware.open elsewhere
+constexpr core::ActionId kLmapOpen = core::action_id("lmap.open");
+constexpr core::ActionId kLmapEdit = core::action_id("lmap.edit");
+constexpr core::ActionId kLmapCoarse = core::action_id("lmap.coarse");
+constexpr core::ActionId kLmapKey = core::action_id("lmap.key");
 constexpr core::ActionId kFirmwareGo = core::action_id("firmware.go");
 constexpr core::ActionId kFirmwareBack = core::action_id("firmware.back");
 constexpr core::ActionId kUiNone = core::action_id("ui.none");  // the registered do-nothing action: a binding to it ends the resolver's walk with nothing
@@ -863,7 +868,7 @@ constexpr core::Binding kBase[] = {
     bind(kConfigCtx, tap(button_ref(Button::F6)), kParamGroup, ArgFrom::Fixed, 5),  // OS-LIVEREC
     bind(kConfigCtx, tap(button_ref(Button::F7), kShift), kConfigPageDefault),  // OS-SHIFTROW: DEFAULTS, twice
     bind(kConfigCtx, tap(button_ref(Button::F7)), kParamApply),                      // OS-USBAUDIO: APPLY, twice (USB AUDIO and USB RETURN re-enumerate the USB port)
-    bind(kConfigCtx, tap(button_ref(Button::F8)), kFirmwareOpen),                    // OS-FWCONFIG: UPDATE on the INFO page only (the action does nothing elsewhere); the dialog is below
+    bind(kConfigCtx, tap(button_ref(Button::F8)), kConfigF8),  // OS-LEARNMAP: MAP on the MIDI page; OS-FWCONFIG: UPDATE on the INFO page only (firmware.open does nothing elsewhere); the dialog is below
 
     // ---- Mixer (OS-011b): the Master button's four pages. The encoder edits what the cursor is on (Shift: the coarse step; on ROUTING a turn up sets the route bit and a turn down
     // clears it; on STEMS the same for a source of the slot), Delete is the default, F1..F4 are the pages (MIXER, ROUTING, MASTER FX, STEMS), F5 the CUE level, F7 MUTE and F8 SOLO.
@@ -1041,6 +1046,7 @@ constexpr core::Binding kBase[] = {
     bind(kLearnCtx, tap(button_ref(Button::F1)), kLearnClear),
     bind(kLearnCtx, tap(button_ref(Button::F2)), kLearnMode),
     bind(kLearnCtx, tap(button_ref(Button::F5)), kLearnFollow),  // OS-LEARNFOLLOW S1
+    bind(kLearnCtx, tap(button_ref(Button::F6)), kLmapOpen),     // OS-LEARNMAP: MAP, the full-screen table of every binding
     bind(kLearnCtx, tap(button_ref(Button::F3)), kLearnDelete),
     bind(kLearnCtx, tap(button_ref(Button::F4)), kLearnClearAll),
     bind(kLearnCtx, tap(button_ref(Button::Up)), kNavUp),
@@ -1050,6 +1056,24 @@ constexpr core::Binding kBase[] = {
     bind(kLearnCtx, tap(button_ref(Button::Up), kShift), kPage, ArgFrom::Fixed, -1),  // OS-NAV3: a page of the list
     bind(kLearnCtx, tap(button_ref(Button::Down), kShift), kPage, ArgFrom::Fixed, 1),
     bind(kLearnCtx, tap(button_ref(Button::F8)), kBack),
+
+    // ---- LEARN MAP (OS-LEARNMAP): Up / Down choose the row, Left / Right the column, the encoder edits the column (Shift: coarse), F1 NEW, F2 MODE, F3 DELETE, F4 CLEAR ALL (twice), F5 FOLLOW,
+    // F7 RELEARN, F8 BACK ------------------------------------------------------------------------------------------------------------------------------------------------------------
+    bind(kLearnMapCtx, tap(button_ref(Button::Up)), kNavUp),
+    bind(kLearnMapCtx, tap(button_ref(Button::Down)), kNavDown),
+    bind(kLearnMapCtx, tap(button_ref(Button::Left)), kNavLeft),
+    bind(kLearnMapCtx, tap(button_ref(Button::Right)), kNavRight),
+    bind(kLearnMapCtx, tap(button_ref(Button::Up), kShift), kPage, ArgFrom::Fixed, -1),
+    bind(kLearnMapCtx, tap(button_ref(Button::Down), kShift), kPage, ArgFrom::Fixed, 1),
+    bind(kLearnMapCtx, tap(encoder_ref(0)), kLmapEdit, ArgFrom::Value),
+    bind(kLearnMapCtx, tap(encoder_ref(0), kShift), kLmapCoarse, ArgFrom::Value),  // OS-SHIFTENC
+    bind(kLearnMapCtx, tap(button_ref(Button::F1)), kLmapKey, ArgFrom::Fixed, 1),
+    bind(kLearnMapCtx, tap(button_ref(Button::F2)), kLmapKey, ArgFrom::Fixed, 2),
+    bind(kLearnMapCtx, tap(button_ref(Button::F3)), kLmapKey, ArgFrom::Fixed, 3),
+    bind(kLearnMapCtx, tap(button_ref(Button::F4)), kLmapKey, ArgFrom::Fixed, 4),
+    bind(kLearnMapCtx, tap(button_ref(Button::F5)), kLmapKey, ArgFrom::Fixed, 5),
+    bind(kLearnMapCtx, tap(button_ref(Button::F7)), kLmapKey, ArgFrom::Fixed, 7),
+    bind(kLearnMapCtx, tap(button_ref(Button::F8)), kBack),
 
     // ---- Navigator overlay (captures; OS-NAV2: it stays open after the keys that opened it are let go): choose with the arrows or the encoder; F8 GO opens the chosen screen
     // (F1 too); F7 or Pattern again CLOSE it without changing the view. F8 is Back in the other overlays, so its footer says F7 CLOSE / F8 GO. Shift + F1..F5 jump around the grid
@@ -1371,6 +1395,7 @@ constexpr ContextName kContextNames[] = {
     {"verbmenu", Context::VerbMenu},  // OS-PTOOLS2 S3: the F7 verb menu
     {"patterntools", Context::PatternTools},  // OS-PTOOLS2 S2: the Pattern TOOLS dialog over the block
     {"events", Context::Events},  // OS-MIDIREC S1b
+    {"learnmap", Context::LearnMap},  // OS-LEARNMAP
     {"textentry", Context::TextEntry},
     {"steppopup", Context::StepPopup},
     {"pads.tracks", Context::PadsTracks},

@@ -152,7 +152,7 @@ std::vector<KeyState> make_states() {
     if (r.context == app::Context::Song || r.context == app::Context::SongAsk || r.context == app::Context::SongTools || r.context == app::Context::PadsTracks) {
       s.pre = kSongSlots;
     }
-    if (r.context == app::Context::Learn) {
+    if (r.context == app::Context::Learn || r.context == app::Context::LearnMap) {  // (OS-LEARNMAP: the map lists the same two bindings)
       s.doc = Doc::DemoLearn;  // two bindings: UNBIND, DELETE and CLEAR ALL have something to act on
     }
     if (needs_engine(r.context)) {

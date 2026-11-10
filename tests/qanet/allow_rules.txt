@@ -46,8 +46,7 @@ R2 | F7 (param.apply 0) | CONFIG_page_3 | bound key changes nothing and says not
 # OS-FWCONFIG: F8 UPDATE opens the update dialog on the INFO page of a build that has a firmware update path; the net's sim has none (no `firmware on`), where the key row labels no F8 and the key does nothing (QA-CFG-040, QA-CFG-041; the dialog itself is walked by the qa_config_update scenarios).
 # OS-FWCONFIG: in the update dialog only F1 alone answers (docs/specs/OS-FWCONFIG.md): Shift + F1 is bound to ui.none and takes a question back, where the other dialogs let Shift + Fn act as Fn; the dialog's row does not follow Shift, so it still reads F1's label. A held Shift must never confirm a firmware update.
 R2 | Shift+F1 | FirmwareUpdate | the key row shows a label and the key is bound to nothing | OS-FWCONFIG
-R2 | F8 (firmware.open 0) | Config | bound key changes nothing and says nothing | OS-FWCONFIG
-R2 | F8 (firmware.open 0) | CONFIG_page_* | bound key changes nothing and says nothing | OS-FWCONFIG
+R2 | F8 (config.f8 0) | CONFIG_page_* | bound key changes nothing and says nothing | OS-FWCONFIG
 # OS-QAFIX-15: Learn F1/F2 (unbind, binding mode) act on the focused parameter's binding; the state the net opens has none focused, so they correctly do nothing (param_actions.cpp learn_clear/learn_mode).
 R2 | F1 (learn.clear 0) | Learn | bound key changes nothing and says nothing | OS-QAFIX-15
 R2 | F2 (learn.mode 0) | Learn | bound key changes nothing and says nothing | OS-QAFIX-15
@@ -66,6 +65,16 @@ R2 | Shift+F8 (events.back 0) | Events | bound key acts or says something and th
 # OS-MIDIREC S1c: the same fallback on F1 FILTER and F5 PREVIEW, which act since S1c, while the Shift row shows "-" there.
 R2 | Shift+F1 (events.filter 0) | Events | bound key acts or says something and the key row shows no label | OS-MIDIREC
 R2 | Shift+F5 (events.preview 0) | Events | bound key acts or says something and the key row shows no label | OS-MIDIREC
+# OS-LEARNMAP (spec D7): on the ENC row F2 MODE, F3 DELETE (with no target), F5 FOLLOW and F7 RELEARN have no meaning (the encoder target is not a CC binding), so their key caps are blank and a press
+# is refused with a strip line saying so (asserted in learn_map_test); the Shift row has no binding of its own and falls back to the plain key. Deliberate: the refusal explains the blank cap.
+R2 | F2 (lmap.key 2) | LearnMap | bound key acts or says something and the key row shows no label | OS-LEARNMAP
+R2 | F3 (lmap.key 3) | LearnMap | bound key acts or says something and the key row shows no label | OS-LEARNMAP
+R2 | F5 (lmap.key 5) | LearnMap | bound key acts or says something and the key row shows no label | OS-LEARNMAP
+R2 | F7 (lmap.key 7) | LearnMap | bound key acts or says something and the key row shows no label | OS-LEARNMAP
+R2 | Shift+F2 (lmap.key 2) | LearnMap | bound key acts or says something and the key row shows no label | OS-LEARNMAP
+R2 | Shift+F3 (lmap.key 3) | LearnMap | bound key acts or says something and the key row shows no label | OS-LEARNMAP
+R2 | Shift+F5 (lmap.key 5) | LearnMap | bound key acts or says something and the key row shows no label | OS-LEARNMAP
+R2 | Shift+F7 (lmap.key 7) | LearnMap | bound key acts or says something and the key row shows no label | OS-LEARNMAP
 # OS-SCALES28 S2 (A10): changing the scale is not an undo unit, as with the pads of row 2; it marks the project unsaved through App::sync_project_state, as every NOTE change does.
 R1 | popup.move 1 | StepPopup tap Up [demo] | document changed with no question and no undo unit | OS-SCALES28
 R1 | popup.move 2 | StepPopup tap Right [demo] | document changed with no question and no undo unit | OS-SCALES28

@@ -58,6 +58,8 @@ const Overlay* overlay_of(OverlayId id) noexcept {
       return &kPatternToolsOverlay;  // OS-PTOOLS2 S2: the Pattern TOOLS dialog over the block
     case OverlayId::Events:
       return &kEventsOverlay;
+    case OverlayId::LearnMap:
+      return &kLearnMapOverlay;  // OS-LEARNMAP
     case OverlayId::ExportProgress:
       return &kExportOverlay;
     case OverlayId::FirmwareUpdate:
@@ -115,6 +117,8 @@ void binding_text(core::FixedString<48>& line, const core::LearnBinding& b) noex
   }
 }
 
+}  // namespace
+
 // What owns a parameter, for the list: "INS 03", "INS *" (a follow binding), "TRK 02", "MASTER", "SETTING", and (OS-INSFX S7) "FX 03A" (the insert A of track 3), "FX MST".
 void owner_text(core::FixedString<48>& line, const core::LearnBinding& b) noexcept {
   const core::ParamKind kind = core::param_kind(b.param);
@@ -144,6 +148,8 @@ void owner_text(core::FixedString<48>& line, const core::LearnBinding& b) noexce
     line.assign("SETTING");
   }
 }
+
+namespace {
 
 // The binding of a parameter, from the store its kind belongs to (the device's block or the project's), or nullptr.
 const core::LearnBinding* find_binding(const Model& model, core::ParamId id) noexcept {

@@ -80,7 +80,10 @@ constexpr KeyPrompt every_key(const KeyOption (&options)[N]) noexcept {
 // Learn (A1): F1 UNBIND and F2 MODE with a target, F3 DELETE and F4 CLEAR ALL with bindings (F4 asks, then reads CLR ALL? inverted), F5 FOLLOW on an instrument
 // parameter with a binding (OS-LEARNFOLLOW S2), F8 BACK.
 constexpr KeyOption kLearnOptions[] = {{kF1, "UNBIND", "UNBIND"}, {kF2, "MODE", "MODE"},           {kF3, "DELETE", "DELETE"},
-                                       {kF4, "CLR ALL", "CLEAR ALL"}, {kF4, "CLR ALL?", "CLEAR ALL?"}, {kF5, "FOLLOW", "FOLLOW"}, {kF8, "BACK", "BACK"}};
+                                       {kF4, "CLR ALL", "CLEAR ALL"}, {kF4, "CLR ALL?", "CLEAR ALL?"}, {kF5, "FOLLOW", "FOLLOW"}, {kF6, "MAP", "MAP"}, {kF8, "BACK", "BACK"}};  // (OS-LEARNMAP: F6 MAP is always live)
+// LEARN MAP (OS-LEARNMAP): F1 NEW, F2 MODE, F3 DELETE, F4 CLEAR ALL (asks, then CLR ALL? inverted), F5 FOLLOW, F7 RELEARN, F8 BACK. The ENC row has no MODE, FOLLOW or RELEARN: those keys read blank there.
+constexpr KeyOption kLearnMapOptions[] = {{kF1, "NEW", "NEW"},       {kF2, "MODE", "MODE"},     {kF3, "DELETE", "DELETE"},    {kF4, "CLR ALL", "CLEAR ALL"},
+                                          {kF4, "CLR ALL?", "CLEAR ALL?"}, {kF5, "FOLLOW", "FOLLOW"}, {kF7, "RELEARN", "RELEARN"}, {kF8, "BACK", "BACK"}};
 // The Navigator (A2): F1 and F8 GO (F1 has no words: a second GO), F7 CLOSE; its Shift layer is declared: Shift+F7 CLOSE and Shift+F8 GO are bound. Shift+F1..F6 are bound to ui.none and read "-": owner_row makes
 // that of a Shift key with no option, so the table does not hold them.
 constexpr KeyOption kNavigatorOptions[] = {{kF1, "GO", ""}, {kF7, "CLOSE", "CLOSE"}, {kF8, "GO", "GO"}, {kShiftF7, "CLOSE", ""}, {kShiftF8, "GO", ""}};
@@ -135,6 +138,7 @@ constexpr KeyPrompt kDiskRestartPrompt = every_key(kDiskRestartOptions);
 constexpr KeyPrompt kDiskConfirmPrompt = every_key(kDiskConfirmOptions);
 constexpr KeyPrompt kDiskFinishingPrompt = owner(kDiskFinishingOptions);
 constexpr KeyPrompt kLearnPrompt = owner(kLearnOptions);
+constexpr KeyPrompt kLearnMapPrompt = owner(kLearnMapOptions);
 constexpr KeyPrompt kNavigatorPrompt = owner(kNavigatorOptions);
 constexpr KeyPrompt kChooserPrompt = owner(kChooserOptions);
 constexpr KeyPrompt kSelectPrompt = owner(kSelectOptions);
@@ -232,9 +236,16 @@ PromptState owner_state(const Model& model, const ViewState& view) noexcept {
       const bool has_list = learn_entry_count(model) != 0;
       // OS-LEARNFOLLOW S2: FOLLOW on F5 when the target is an instrument parameter with a binding (the A1 rule of the dialogs), blank otherwise.
       const bool can_follow = has_target && core::param_kind(target) == core::ParamKind::Instrument && bound_binding(model, target) != nullptr;
-      std::uint16_t live = 1u << 6;  // BACK
+      std::uint16_t live = (1u << 6) | (1u << 7);  // MAP, BACK
       live = static_cast<std::uint16_t>(live | (has_target ? 0x03u : 0u) | (has_list ? (view.learn.confirm ? 0x14u : 0x0Cu) : 0u) | (can_follow ? 1u << 5 : 0u));
       return owned(kLearnPrompt, live, view.learn.confirm ? 1u << 4 : 0u);
+    }
+    case OverlayId::LearnMap: {  // OS-LEARNMAP: options NEW MODE DELETE CLR ALL CLR ALL? FOLLOW RELEARN BACK
+      const bool enc = view.learn_map.cursor == 0;
+      const bool has_list = learn_entry_count(model) != 0;
+      std::uint16_t live = static_cast<std::uint16_t>((1u << 0) | (1u << 7));
+      live = static_cast<std::uint16_t>(live | ((!enc || view.enc_target != core::ParamId::None) ? 1u << 2 : 0u) | (has_list ? (view.learn.confirm ? 1u << 4 : 1u << 3) : 0u) | (!enc ? (1u << 1) | (1u << 5) | (1u << 6) : 0u));
+      return owned(kLearnMapPrompt, live, view.learn.confirm ? 1u << 4 : 0u);
     }
     case OverlayId::Navigator: {
       const ScreenEntry* chosen = screen_at(navigator_screens(), view.navigator);
@@ -329,6 +340,7 @@ void append_key_name(AskText& out, std::uint8_t key) noexcept {
 const KeyPrompt* owner_prompt(OverlayId id) noexcept {
   switch (id) {
     case OverlayId::Learn: return &kLearnPrompt;
+    case OverlayId::LearnMap: return &kLearnMapPrompt;  // OS-LEARNMAP
     case OverlayId::Navigator: return &kNavigatorPrompt;
     case OverlayId::PatternChooser:
     case OverlayId::LengthChooser:

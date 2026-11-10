@@ -10,8 +10,13 @@ inline constexpr const char* kConfigSoftKeys[8] = {"MIDI", "DISPLAY", "SD", "INF
 // OS-FWCONFIG: the INFO page's row where the platform attached a firmware update path (Model::firmware): F8 UPDATE opens the update dialog (firmware_view.h). F8 only, on that page only: F1..F6 stay the pages.
 inline constexpr const char* kConfigInfoSoftKeys[8] = {"MIDI", "DISPLAY", "SD", "INFO", "USB", "PATTERN", "APPLY", "UPDATE"};
 inline constexpr unsigned kConfigPageInfo = 3;  // the INFO page's number (F4)
-// The plain row in force on page `page` (the screen's render draws it; a test reads it): the INFO page of a build with an update path labels F8 UPDATE, every other page and build "--".
-inline const char* const* config_key_row(bool firmware, unsigned page) noexcept { return firmware && page == kConfigPageInfo ? kConfigInfoSoftKeys : kConfigSoftKeys; }
+// OS-LEARNMAP: the MIDI page's row: F8 MAP opens LEARN MAP (the table of every MIDI Learn binding; learn_map_actions.cpp config_f8). F8 only, on that page only.
+inline constexpr const char* kConfigMidiSoftKeys[8] = {"MIDI", "DISPLAY", "SD", "INFO", "USB", "PATTERN", "APPLY", "MAP"};
+inline constexpr unsigned kConfigPageMidi = 0;  // the MIDI page's number (F1)
+// The plain row in force on page `page` (the screen's render draws it; a test reads it): the INFO page of a build with an update path labels F8 UPDATE, the MIDI page F8 MAP, every other page and build "--".
+inline const char* const* config_key_row(bool firmware, unsigned page) noexcept {
+  return firmware && page == kConfigPageInfo ? kConfigInfoSoftKeys : (page == kConfigPageMidi ? kConfigMidiSoftKeys : kConfigSoftKeys);
+}
 // While Shift is held (OS-SHIFTROW): F7 DEFAULTS (config.page_default, twice within 2 s); the rest does nothing.
 inline constexpr const char* kConfigShiftKeys[8] = {"-", "-", "-", "-", "-", "-", "DEFAULTS", "-"};
 

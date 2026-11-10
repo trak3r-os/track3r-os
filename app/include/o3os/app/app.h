@@ -421,6 +421,7 @@ class App {
   void sync_take() noexcept;
   void end_take() noexcept;
   void poll_transport_select() noexcept;  // OS-MIDISLV: what an external Start plays is told to the sequencer while it is stopped (TransportSink::select)
+  void poll_learn_map() noexcept;  // OS-LEARNMAP: clears LEARN MAP's activity dots 250 ms after the last CC and redraws
   void poll_mute_blink() noexcept;  // a quantised mute waits for its boundary: the Pattern screen's MUTE tag blinks and is redrawn each half period (OS-MUTEVIS)
   void watch_document() noexcept;  // the save layer's baseline of "unsaved changes": the first document it sees
   void poll_files() noexcept;    // before the jobs: a rescan asked for, the scan to start, the result of an open

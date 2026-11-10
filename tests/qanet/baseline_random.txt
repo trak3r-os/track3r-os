@@ -27,7 +27,7 @@ audio_probe | mode | pad:fresh:shape | 13@150 | shape 0.85 | new
 audio_probe | mode | pad:settled:shape | 13@150 | shape 0.85 | new
 audio_probe | undo | pad:fresh:shape | 28@150 | shape 0.75 | new
 audio_probe | undo | pad:settled:shape | 28@150 | shape 0.75 | new
-R2 | CONFIG | firmware.open 0 | 11@81 | bound key changes nothing and says nothing (firmware.open) [27x in the run] | OS-FWCONFIG
+R2 | CONFIG | config.f8 0 | 11@81 | bound key changes nothing and says nothing (config.f8) [27x in the run] | OS-FWCONFIG
 R2 | CONFIG | param.apply 0 | 100@18 | bound key changes nothing and says nothing (param.apply) [5x in the run] | OS-BUG-APPLYSILENT: seed 100 step 18 replayed 2026-10-23: CONFIG page 2 (SD, F3 then F7), no parameter row, F7 unlabelled: by design, OS-QAFIX-7
 R2 | CONFIG | shift+param.coarse -1 | 18@272 | bound key changes nothing and says nothing (param.coarse -1) [1x in the run] | new
 R2 | FILE | file.engine 0 | 162@103 | bound key changes nothing and says nothing (file.engine) [2x in the run] | new
@@ -43,7 +43,6 @@ R2 | FILE | shift+text.accept 0 | 8@102 | bound key changes nothing and says not
 R2 | FILE | shift+text.auto 0 | 9@244 | bound key changes nothing and says nothing (text.auto) [45x in the run] | OS-QAFIX-16
 R2 | FILE | shift+text.caps 0 | 11@130 | bound key changes nothing and says nothing (text.caps) [22x in the run] | new
 R2 | FILE | shift+text.key 0 | 4@60 | bound key changes nothing and says nothing (text.key) [22x in the run] | new
-R2 | FILE | text.accept 0 | 7@186 | bound key changes nothing and says nothing (text.accept) [43x in the run] | new
 R2 | FILE | text.auto 0 | 4@57 | bound key changes nothing and says nothing (text.auto) [185x in the run] | OS-QAFIX-16
 R2 | FILE | text.caps 0 | 2@123 | bound key changes nothing and says nothing (text.caps) [85x in the run] | new
 R2 | FILE | text.key 0 | 3@41 | bound key changes nothing and says nothing (text.key) [127x in the run] | new
@@ -88,15 +87,24 @@ R2 | SAMPLE_EDIT | shift+sedit.amp 1 | 12@76 | bound key changes nothing and say
 R2 | SAMPLE_LOAD | sample.play 0 | 1@62 | bound key changes nothing and says nothing (sample.play) [111x in the run] | new
 R2 | SAMPLE_LOAD | sample.rescan 0 | 4@193 | bound key changes nothing and says nothing (sample.rescan) [61x in the run] | new
 R2 | SAMPLE_LOAD | sample.up 0 | 81@111 | bound key changes nothing and says nothing (sample.up) [3x in the run] | new
-R2 | SAMPLE_LOAD | shift+cursor.jump_end 0 | 22@217 | bound key changes nothing and says nothing (cursor.jump_end) [4x in the run] | new
 R2 | SAMPLE_LOAD | shift+cursor.page -1 | 2@38 | bound key changes nothing and says nothing (cursor.page) [28x in the run] | new
 R2 | SAMPLE_LOAD | shift+cursor.page 1 | 9@279 | bound key changes nothing and says nothing (cursor.page) [3x in the run] | new
-R2 | SONG | shift+cursor.jump_end 0 | 36@282 | bound key changes nothing and says nothing (cursor.jump_end) [2x in the run] | new
 R2 | SONG | shift+song.select -1 | 24@3 | bound key changes nothing and says nothing (song.select) [4x in the run] | new
 R2 | SONG | shift+song.select 1 | 94@145 | bound key changes nothing and says nothing (song.select) [1x in the run] | new
 R2 | SONG | shift+song.select_tracks -1 | 47@284 | bound key changes nothing and says nothing (song.select_tracks) [3x in the run] | OS-SONGMAP
-R2 | SONG | song.tempo 0 | 8@142 | bound key changes nothing and says nothing (song.tempo) [22x in the run] | new
 R2 | WAVE | preview.hold 5 | 180@201 | bound key changes nothing and says nothing (preview.hold) [1x in the run] | new
 R2 | WAVE | shift+preview.hold 261 | 10@139 | bound key changes nothing and says nothing (preview.hold) [1x in the run] | new
 R2 | WAVE | wave.zc 0 | 7@164 | bound key changes nothing and says nothing (wave.zc) [14x in the run] | new
 R2 | WAVE | wave.zoom -1 | 7@272 | bound key changes nothing and says nothing (wave.zoom) [30x in the run] | new
+# OS-LEARNMAP (2026-11-10): the new keys (Learn F6 MAP, Config MIDI F8 MAP) moved the walk's random stream. The line SONG shift+cursor.jump_end left the baseline (it no longer occurs),
+# three took new repro seeds (FILE text.accept, SAMPLE_LOAD shift+cursor.jump_end, SONG song.tempo; their old seeds no longer reach them) and six came in: the same silent-by-design or page-edge keys as the lines above
+# (pattern.preview sounds through the PreviewSink, fill.vary and verb.run are live only in some states, the page keys stop at a list edge). Not a regression.
+R2 | PATTERN | pattern.preview 0 | 4@113 | bound key changes nothing and says nothing (pattern.preview) while the transport plays | new
+R2 | PATTERN | shift+fill.vary 0 | 31@273 | bound key changes nothing and says nothing (fill.vary) | OS-PTOOLS2 S1
+R2 | PATTERN | verb.run 0 | 50@36 | bound key changes nothing and says nothing (verb.run) while the transport plays | new
+R2 | PATTERN | shift+events.page -1 | 70@53 | bound key changes nothing and says nothing (events.page -1) | new
+R2 | PATTERN | shift+events.page 1 | 52@93 | bound key changes nothing and says nothing (events.page 1) while the transport plays | new
+R2 | CONFIG | shift+cursor.page -1 | 16@298 | bound key changes nothing and says nothing (cursor.page -1) | new
+R2 | FILE | text.accept 0 | 10@71 | bound key changes nothing and says nothing (text.accept) while the transport plays | new
+R2 | SONG | song.tempo 0 | 14@163 | bound key changes nothing and says nothing (song.tempo) while the transport plays | new
+R2 | SAMPLE_LOAD | shift+cursor.jump_end 0 | 65@198 | bound key changes nothing and says nothing (cursor.jump_end) while the transport plays | new

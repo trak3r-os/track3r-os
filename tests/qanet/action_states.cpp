@@ -40,6 +40,9 @@ const State kToolValue = {"a tool value set", Doc::Demo, "action songtools.delta
 const State kUnused = {"unused instruments", Doc::Sound, ""};
 const State kName = {"a letter typed", Doc::Demo, "action text.pad 3\n"};
 const State kLearn = {"two Learn bindings", Doc::DemoLearn, ""};
+// OS-LEARNMAP: the LEARN MAP overlay open over the two bindings (F6 MAP in the Learn dialog): the ENC row and two binding rows.
+// (the context's reach opens the map: Learn, then F6; the cursor starts on the ENC row, which edits no document, so Down moves it to the first binding)
+const State kLmap = {"LEARN MAP open over two bindings, cursor on the first", Doc::DemoLearn, "tap down\n"};
 const State kSliced = {"sample loaded, one slice added", Doc::Sound, "action wave.add\n", "tap sampleload\nwait 120\ntap down 2\ntap f1\nwait 50\ntap f1\nwait 300\ntap pattern\n"};
 const State kSel = {"edit on, 3 steps selected", Doc::Demo, "tap rec\npress shift\ntap down 3\nrelease shift\n"};
 // OS-PTOOLS2 S3: edit on with a RANDOM fill made through the dialog (TYPE row to RANDOM), and the verb menu open (F7), so verb.repeat (F6 REPEAT) has a last verb whose repeat draws again and acts.
@@ -142,6 +145,7 @@ const std::vector<ActionEntry>& action_states() {
       A("chooser.pad", {kDemo, kLenChooser}),
       A("chooser.release"),
       A("chooser.toggle"),
+      A("config.f8", {kFwInfo}),  // OS-LEARNMAP: MAP on the MIDI page, UPDATE on the INFO page (firmware.open's state)
       A("config.page_default"),
       A("cursor.jump_end"),
       A("cursor.jump_fraction"),
@@ -195,7 +199,6 @@ const std::vector<ActionEntry>& action_states() {
       A("fill.vary", {kFillVary}),  // OS-PTOOLS2 S1: F2 in the dialog on a random fill
       A("firmware.back", {kFwPath}),
       A("firmware.go", {kFwPath}),
-      A("firmware.open", {kFwInfo}),
       A("help.open"),
       A("input_test.reset"),
       A("instrument.copy"),
@@ -219,6 +222,10 @@ const std::vector<ActionEntry>& action_states() {
       A("learn.follow", {kLearn, kLearnBound}),  // OS-LEARNFOLLOW S1: F5 in the Learn overlay
       A("learn.mode", {kLearn, kLearnBound}),
       A("learn.toggle"),
+      A("lmap.coarse", {kLmap}),  // OS-LEARNMAP
+      A("lmap.edit", {kLmap}),
+      A("lmap.key", {kLmap}),
+      A("lmap.open", {kLearn}),
       A("mixer.apply", {kStemsPage}),  // OS-USBOUTS: the simulator has no USB driver behind the board, so on STEMS it says NOTHING TO APPLY
       A("mixer.coarse"),
       A("mixer.cue"),
@@ -440,6 +447,7 @@ const std::vector<ContextReach>& context_reach() {
       {Context::Help, "Help", "press shift\ntap config\nrelease shift\n", nullptr},
       {Context::Navigator, "Navigator", "press song\npress pattern\nrelease pattern\nrelease song\n", nullptr},  // OS-APPSNAV: the chord (Shift + Pattern lists the apps now)
       {Context::Learn, "Learn", "action learn.toggle\n", nullptr},
+      {Context::LearnMap, "LearnMap", "action learn.toggle\ntap f6\n", nullptr},  // OS-LEARNMAP: F6 MAP in the Learn dialog
       {Context::File, "File", "tap file\nwait 300\n", nullptr},
       {Context::FileExport, "FileExport", "tap file\nwait 300\ntap f7\n", nullptr},
       {Context::SampleLoad, "SampleLoad", "tap sampleload\nwait 300\n", nullptr},

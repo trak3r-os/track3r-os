@@ -10,8 +10,8 @@ tap config
 tap f4
 snap qa_cfg_040
 
-# QA-CFG-041: F8 does nothing on the other pages (the MIDI page: no dialog, the key row has no label on F8).
-tap f1
+# QA-CFG-041: F8 does nothing on the other pages (the DISPLAY page: no dialog, the key row has no label on F8; the MIDI page's F8 is MAP, OS-LEARNMAP).
+tap f2
 tap f8
 assert state overlay=NONE
 snap qa_cfg_041

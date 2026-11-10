@@ -1424,7 +1424,7 @@ struct Walk {
 // overlay or the queue outside what they can hold (the sanitisers watch the rest: the display lists, the tables).
 void check_invariants(const app::App& a) {
   const app::ViewState& v = a.state();
-  CHECK((v.overlay == OverlayId::None || v.overlay == OverlayId::Learn || v.overlay == OverlayId::Navigator || v.overlay == OverlayId::StepPopup || v.overlay == OverlayId::Help || v.overlay == OverlayId::ModulePicker));  // (a held Instr, Fx or Note: OS-FU3; Shift + Config: OS-HELP; Shift + Pattern: the apps list, OS-APPSNAV)
+  CHECK((v.overlay == OverlayId::None || v.overlay == OverlayId::Learn || v.overlay == OverlayId::Navigator || v.overlay == OverlayId::StepPopup || v.overlay == OverlayId::Help || v.overlay == OverlayId::ModulePicker || v.overlay == OverlayId::LearnMap));  // (LEARN MAP: OS-LEARNMAP; a held Instr, Fx or Note: OS-FU3; Shift + Config: OS-HELP; Shift + Pattern: the apps list, OS-APPSNAV)
   CHECK(v.help.page < app::kHelpPages);
   for (unsigned p = 0; p < app::kHelpPages; ++p) {  // a scroll never leaves its page: the last line stays in the body
     CHECK((v.help.scroll[p] == 0 || v.help.scroll[p] + app::kHelpRows <= app::help_page(p).count));

@@ -4,6 +4,7 @@ User-visible changes of the Community OS, newest first, one entry per change, in
 
 ## Unreleased
 
+- **LEARN MAP: one screen with every MIDI Learn binding** and the encoder's target. Open it with F6 MAP in the Learn dialog or F8 on Config > MIDI. Each row shows the CC, channel, parameter, instrument (or FOLLOW), mode, the live value and a dot when the CC moves; edit a column with Left/Right and the encoder, add with F1 NEW, delete with F3, relearn the source with F7. A CC already bound on that channel, or a parameter the instrument does not have, is refused with a message. More testing needed.
 - **TB-303, Chip, FM and SID are card modules now, no longer inside the firmware image** (frees 36 KB of flash for new features). Copy `modules/instruments/` and `LICENSES/` from the starter zip to the card; without them a project that uses one of these instruments loads with the instrument muted and the ENGINE picker shows `MODULE NOT ON THE CARD`. Overwrite older copies on the card: an older `chip.tmod` (1.0.0) would now be used and lacks Chip waves 4..11. More testing needed.
 - **Master + Insert opens the Mixer's INSERTS page** from any screen (issue #5). Insert now acts when it is let go, or 40 ms after the press, so the two keys can be pressed together. Checked on the unit.
 - **Shift + pad plays the instrument on the Instrument screen** instead of selecting it (issue #9), so you can hold Shift for the encoder's coarse step and still play the pads; F6 and F7 change the instrument. Checked on the unit.

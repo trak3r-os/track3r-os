@@ -27,10 +27,7 @@
 
 namespace o3os::app {
 
-namespace {
-
-constexpr int kMaxDetents = 1 << 16;  // a turn larger than this is clamped before it is multiplied (an encoder fed from data)
-
+// The Learn store helpers (declared in param_access.h): the Learn dialog here and LEARN MAP (learn_map_actions.cpp) write the stores through the same ones.
 core::LearnScope scope_of(core::ParamId id) noexcept { return core::learn_scope(core::param_kind(id)); }
 unsigned scope_index(core::LearnScope s) noexcept { return s == core::LearnScope::Device ? 1u : 0u; }
 
@@ -54,6 +51,36 @@ void reset_runtime(ActionContext& ctx, core::LearnScope scope, unsigned slot) no
     ctx.session->learn[scope_index(scope)][slot] = core::LearnRuntime{};
   }
 }
+
+LearnPut learn_put(ActionContext& ctx, const core::LearnBinding& b) noexcept {
+  const core::LearnScope scope = scope_of(b.param);
+  const core::LearnBinding* slots = store_slots(ctx, scope);
+  if (slots == nullptr) {
+    return LearnPut::Refused;
+  }
+  core::LearnBinding plan_slots[core::kLearnSlots];
+  std::memcpy(plan_slots, slots, sizeof plan_slots);
+  core::LearnPlan plan{0, 0};
+  if (!core::learn_plan(plan_slots, core::kLearnSlots, b, plan)) {
+    return LearnPut::Full;
+  }
+  const std::uint32_t gone = plan.clear;  // the bindings this one takes the message from
+  for (unsigned s = 0; s < core::kLearnSlots; ++s) {
+    if ((gone & (std::uint32_t{1} << s)) != 0 && static_cast<int>(s) != plan.write) {
+      (void)store_set(ctx, scope, s, core::LearnBinding{});
+      reset_runtime(ctx, scope, s);
+    }
+  }
+  if (store_set(ctx, scope, static_cast<unsigned>(plan.write), b) != model::Status::Ok) {
+    return LearnPut::Refused;
+  }
+  reset_runtime(ctx, scope, static_cast<unsigned>(plan.write));
+  return LearnPut::Done;
+}
+
+namespace {
+
+constexpr int kMaxDetents = 1 << 16;  // a turn larger than this is clamped before it is multiplied (an encoder fed from data)
 
 bool say(ActionContext& ctx, core::Severity severity, const char* text) noexcept {
   return say_tag(ctx, severity, text, "params");
@@ -1045,9 +1072,7 @@ bool learn_mode(ActionContext& ctx, core::ActionArg) noexcept {
 }
 
 // OS-LEARNFOLLOW 3.1, F5 in the Learn overlay: toggle the target's binding between "this instrument" and "the selected instrument".
-bool learn_follow(ActionContext& ctx, core::ActionArg) noexcept {
-  ctx.view.learn.confirm = false;
-  const core::ParamId id = focus_param(ctx);
+bool learn_follow_of(ActionContext& ctx, core::ParamId id) noexcept {
   if (id == core::ParamId::None) {
     return false;
   }
@@ -1078,20 +1103,10 @@ bool learn_follow(ActionContext& ctx, core::ActionArg) noexcept {
     b.param = id;
     b.flags = 0;
   }
-  core::LearnPlan plan{0, 0};
-  if (!core::learn_plan(slots, core::kLearnSlots, b, plan)) {
-    return say(ctx, core::Severity::Warn, "LEARN STORE FULL");
+  const LearnPut put = learn_put(ctx, b);
+  if (put != LearnPut::Done) {
+    return say(ctx, core::Severity::Warn, put == LearnPut::Full ? "LEARN STORE FULL" : "BINDING REFUSED");
   }
-  for (unsigned s = 0; s < core::kLearnSlots; ++s) {  // the bindings this one takes the message from
-    if ((plan.clear & (std::uint32_t{1} << s)) != 0) {
-      (void)store_set(ctx, scope, s, core::LearnBinding{});
-      reset_runtime(ctx, scope, s);
-    }
-  }
-  if (store_set(ctx, scope, static_cast<unsigned>(plan.write), b) != model::Status::Ok) {
-    return say(ctx, core::Severity::Warn, "BINDING REFUSED");
-  }
-  reset_runtime(ctx, scope, static_cast<unsigned>(plan.write));
   core::FixedString<core::kNotifyTextChars> text;
   text.assign("CC ");
   append_uint(text, b.cc);
@@ -1103,6 +1118,11 @@ bool learn_follow(ActionContext& ctx, core::ActionArg) noexcept {
   }
   (void)ctx.view.notify.post(core::Severity::Info, text.c_str(), "learn", ViewState::kMessageMs);
   return true;
+}
+
+bool learn_follow(ActionContext& ctx, core::ActionArg) noexcept {
+  ctx.view.learn.confirm = false;
+  return learn_follow_of(ctx, focus_param(ctx));
 }
 
 // F3 in the overlay: deletes the binding the list cursor is on (either store; a project binding is an undo unit).
@@ -1153,8 +1173,6 @@ bool learn_clear_all(ActionContext& ctx, core::ActionArg) noexcept {
   return true;
 }
 
-namespace {
-
 // OS-LEARNFOLLOW 3.3, the fit rule: a follow binding acts only when the instrument has the field with its meaning (F7): the sampler,
 // source, envelope, MOD and VEL> rows (0x00..0x77, 0x8B) belong to a Sample instrument, a MIDI row (0x80..0x8A) to a MIDI one; a
 // module parameter (0x100..) means something else in every module, so it never follows (A-4).
@@ -1167,6 +1185,8 @@ bool follow_fits(model::InstrumentKind kind, unsigned field) noexcept {
   }
   return kind == model::InstrumentKind::Sample;
 }
+
+namespace {
 
 // Binds controller `cc` (channel `channel`, 0 = every) to the Learn target, in the store its kind belongs to.
 bool learn_bind(ActionContext& ctx, unsigned channel, unsigned cc) noexcept {
@@ -1197,20 +1217,10 @@ bool learn_bind(ActionContext& ctx, unsigned channel, unsigned cc) noexcept {
       b.flags = core::kLearnFollow;
     }
   }
-  core::LearnPlan plan{0, 0};
-  if (!core::learn_plan(slots, core::kLearnSlots, b, plan)) {
-    return say(ctx, core::Severity::Warn, "LEARN STORE FULL");
+  const LearnPut put = learn_put(ctx, b);
+  if (put != LearnPut::Done) {
+    return say(ctx, core::Severity::Warn, put == LearnPut::Full ? "LEARN STORE FULL" : "BINDING REFUSED");
   }
-  for (unsigned s = 0; s < core::kLearnSlots; ++s) {  // the bindings this one takes the message from
-    if ((plan.clear & (std::uint32_t{1} << s)) != 0) {
-      (void)store_set(ctx, scope, s, core::LearnBinding{});
-      reset_runtime(ctx, scope, s);
-    }
-  }
-  if (store_set(ctx, scope, static_cast<unsigned>(plan.write), b) != model::Status::Ok) {
-    return say(ctx, core::Severity::Warn, "BINDING REFUSED");
-  }
-  reset_runtime(ctx, scope, static_cast<unsigned>(plan.write));
   (void)say_binding(ctx, "CC ", cc, d->name, true);
   return true;
 }
@@ -1258,6 +1268,10 @@ bool apply_cc(ActionContext& ctx, core::LearnScope scope, unsigned channel, unsi
   }
   const core::LearnBinding& b = slots[slot];
   core::LearnRuntime& rt = ctx.session->learn[scope_index(scope)][slot];
+  if (ctx.view.overlay == OverlayId::LearnMap) {  // OS-LEARNMAP: the row's activity dot (the app's poll clears it)
+    ctx.view.learn_map.hit[scope_index(scope)] |= std::uint32_t{1} << slot;
+    ctx.view.learn_map.hit_at = ctx.now;
+  }
   // A follow binding acts on the instrument the UI has selected (the Instruments are 1..48, slots 0..47).
   core::ParamId id = b.param;
   if ((b.flags & core::kLearnFollow) != 0) {
@@ -1368,6 +1382,9 @@ bool midi_cc(ActionContext& ctx, core::ActionArg arg) noexcept {
   }
   if (ctx.view.overlay == OverlayId::Learn) {
     return learn_bind(ctx, channel, cc);
+  }
+  if (ctx.view.overlay == OverlayId::LearnMap && ctx.view.learn_map.wait != 0) {
+    return learn_map_capture(ctx, channel, cc);  // OS-LEARNMAP: F1 NEW / F7 RELEARN is waiting for a knob
   }
   // The project's bindings first, then the device's: one message may move a parameter of each.
   const bool a = apply_cc(ctx, core::LearnScope::Project, channel, cc, value);

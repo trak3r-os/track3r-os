@@ -57,6 +57,21 @@ struct LearnView {
   bool confirm = false;
 };
 
+// OS-LEARNMAP (docs/specs/OS-LEARNMAP.md): the LEARN MAP overlay. Row 0 is the encoder's target, row n the (n-1)-th binding of learn_entry_at; `column` is SOURCE, CH, PARAMETER, INS, MODE;
+// `wait` is what the next CC is for (F1 NEW, F7 RELEARN); CLEAR ALL pressed once is the Learn dialog's `learn.confirm` (the same flag, the same action). `hit` is the activity: bit s of hit[store] is set by midi.cc when the CC of slot s of that
+// store arrives while the map is open, `hit_at` is that tick; the main loop (App::poll_learn_map) clears both 250 ms later. Single writer: the main loop (midi.cc and the poll run on it).
+struct LearnMapView {
+  static constexpr std::uint8_t kColumns = 5;
+  static constexpr std::uint8_t kWaitNew = 1;
+  static constexpr std::uint8_t kWaitRelearn = 2;
+  static constexpr core::Tick kDotMs = 250;
+  std::uint8_t cursor = 0;
+  std::uint8_t column = 0;
+  std::uint8_t wait = 0;
+  std::uint32_t hit[2] = {0, 0};
+  core::Tick hit_at = 0;
+};
+
 // OS-012b: the module screens' cursors: the MODULES screen's chosen app, the engine picker's chosen entry and the row of the running app's parameter list.
 struct ModulesView {
   std::uint8_t apps = 0;
@@ -186,6 +201,7 @@ struct ViewState {
   SampleEditState sedit;  // the Sample edit screen's window, selection and hand-offs (OS-011a)
   ParamView params;     // the generated parameter page's row and envelope (OS-002d)
   LearnView learn;      // the Learn overlay's list cursor (OS-013a)
+  LearnMapView learn_map;  // the LEARN MAP overlay (OS-LEARNMAP)
   core::ParamId enc_target = core::ParamId::None;  // OS-ENCLEARN: the one parameter that Instr + FX1 and the encoder move (set by Instr + FX2 on a Learn row; session only, never saved; main loop only)
   MixerView mixer;      // the Mixer screen's cursor (OS-011b)
   ModulesView modules;  // the MODULES screen, the engine picker and the app page (OS-012b)

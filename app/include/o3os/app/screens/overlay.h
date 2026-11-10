@@ -74,6 +74,25 @@ class LearnOverlay final : public Overlay {
 };
 extern const LearnOverlay kLearnOverlay;
 
+// LEARN MAP (OS-LEARNMAP, docs/specs/OS-LEARNMAP.md): every Learn binding plus the encoder's target as one table, the ENC row first. Up / Down and the encoder's row keys move the row, Left / Right the
+// column (step), the encoder edits the column (lmap.edit). Full-screen like the Events list; modal, context `learnmap`.
+inline constexpr int kLearnMapRows = 15;  // data rows in view (the cover is the header band plus the 16 grid rows; the title and the captions take two)
+
+class LearnMapOverlay final : public Overlay {
+ public:
+  constexpr LearnMapOverlay() noexcept = default;
+  ui::Rect rect(const ui::Theme& theme) const noexcept override;
+  void render(const Model& model, const ViewState& view, ui::Renderer& r) const noexcept override;
+  bool modal() const noexcept override { return true; }
+  Context context() const noexcept override { return Context::LearnMap; }
+  int count(const Model& model, const ViewState& view) const noexcept override;  // the ENC row plus the bindings
+  int position(const ViewState& view) const noexcept override;
+  int page() const noexcept override { return kLearnMapRows; }
+  bool set_position(const Model& model, ViewState& view, int position) const noexcept override;
+  bool step(const Model& model, ViewState& view, int dx, int dy) const noexcept override;
+};
+extern const LearnMapOverlay kLearnMapOverlay;
+
 // The Navigator's own F-key row (OS-NAV2, OS-KEYROWDLG). While the grid is up its F8 is GO, not the screen's own F8 (UNDO, ...; Back in the other overlays), so the row is the dialog's prompt
 // (key_prompt.cpp, painted by render_scene; the screen under it draws none: ViewState::overlay_keys): F1 GO, F7 CLOSE, F8 GO, the rest blank. While Shift is held the row shows its layer, the one Shift layer a
 // dialog declares (OS-SHIFTROW: no quarter jumps; Shift + F7 and F8 are CLOSE and GO, bound, as Shift may still be down from the chord that opened it; Shift + F1..F6 are bound to nothing and read "-").

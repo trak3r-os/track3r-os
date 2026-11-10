@@ -14,6 +14,7 @@ const char* overlay_name(OverlayId id) noexcept {
   switch (id) {
     case OverlayId::None: return "NONE";
     case OverlayId::Learn: return "LEARN";
+    case OverlayId::LearnMap: return "LEARN_MAP";
     case OverlayId::Navigator: return "NAVIGATOR";
     case OverlayId::Notify: return "NOTIFY";
     case OverlayId::PatternChooser: return "PATTERN_CHOOSER";

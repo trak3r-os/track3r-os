@@ -374,6 +374,16 @@ The Learn dialog works on the row under the cursor of the screen below. Move a M
 
 Use your keyboard as a synth: bind the knobs on one instrument, press `F5` on each, then select any instrument — the same knobs now shape whichever instrument is selected. A binding follows instrument parameters only, and it acts only when the selected instrument has the row with its meaning (a sampler row on a MIDI instrument does nothing). A follow binding is saved with the project.
 
+### See every binding: LEARN MAP
+
+LEARN MAP is one full-screen list of every binding of both stores, with the encoder's target on the first row (`ENC`). Open it with `F6` (**MAP**) in the Learn dialog, or with `F8` (**MAP**) on the Config MIDI page. Each row shows the **SOURCE** (the CC), its **CH** (`*` is every channel), the **PARAMETER**, the **INS** (an instrument number, or `*` for a binding that follows the selected instrument), the **MODE**, and the live **VALUE**. A dot at the left of a row lights while its CC moves and goes out a quarter of a second later.
+
+`Up` and `Down` move the row, `Left` and `Right` pick the column, and the encoder changes it (`Shift` and the encoder: coarse steps; `Shift` + `Up` / `Down`: a page of rows). PARAMETER walks only the parameters the instrument has (a sampler's list for a sampler, the MIDI rows for a MIDI instrument). An INS that has no such parameter is refused: `INS 05 HAS NO CUTOFF`. A CC that another binding already uses on that channel is refused: `CC 74 CH1 IS TAKEN`. A refusal changes nothing. Each edit is one undo step, as in the Learn dialog (close the map with `F8`, then undo).
+
+`F1` **NEW**: move a knob and the next CC becomes a new binding on the selected instrument. `F2` **MODE** steps pickup, jump and relative. `F3` **DELETE** removes the row (on the `ENC` row it clears the encoder's target). `F4` **CLR ALL**, pressed twice, removes every binding. `F5` **FOLLOW** switches a row between its instrument and the selected one. `F7` **RELEARN**: the next CC you move becomes the row's source. `F8` goes back. The `ENC` row takes no CC, mode or follow. Nothing here changes a file: the project's bindings are saved with the project as before, and the encoder's target is not saved.
+
+New in track3r-os. Not yet checked on the unit.
+
 ### Put one parameter on the encoder
 
 The encoder can work like a MIDI knob that you bound with Learn, with no MIDI controller. You pick a parameter once. Then you hold two keys and turn the encoder to move it, on any screen. It is a relative control: it has no CC number to set and no pickup, and every click moves the value one step.
@@ -3210,7 +3220,7 @@ METRO stays **Off** until you change it. Press `Delete` on the METRO row to put 
 | Main area | The rows of the page. Each row has a name and a value. |
 | Info line | Notes about the page or a pending change. On PATTERN it says **live recording, metronome and pads**. |
 | Strip | The message line, for example **USB RECONNECTING**. |
-| Key row | `F1` to `F6` choose a page. `F7` is **APPLY** (blank on the SD and INFO pages, which have nothing to apply). On the INFO page, `F8` is **UPDATE**: it opens the firmware update dialog (new, not yet tried on a unit). |
+| Key row | `F1` to `F6` choose a page. `F7` is **APPLY** (blank on the SD and INFO pages, which have nothing to apply). On the MIDI page, `F8` is **MAP**: it opens LEARN MAP, the list of every MIDI Learn binding (new, see [The panel](panel.md)). On the INFO page, `F8` is **UPDATE**: it opens the firmware update dialog (new, not yet tried on a unit). |
 | Shift row | `F7` is **DEFAULTS**. The other keys do nothing. |
 
 ## More tasks
@@ -3457,7 +3467,8 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 |---|---|---|
 | `F1` to `F6` | goes to a page: MIDI, DISPLAY, SD, INFO, USB, PATTERN | QA-CFG-033 |
 | `F7` (**APPLY**) | on a USB row: press once to say what will happen, again to write. No label and no effect on the SD and INFO pages. | QA-CFG-003, QA-CFG-004, QA-CFG-034, QA-CFG-219 |
-| `F8` (**UPDATE**) | on the INFO page only: opens the firmware update list. On the other pages it does nothing. | QA-CFG-040, QA-CFG-041, QA-CFG-218 |
+| `F8` (**MAP**) | on the MIDI page only: opens LEARN MAP. | QA-GLB-234 |
+| `F8` (**UPDATE**) | on the INFO page only: opens the firmware update list. On the DISPLAY, SD, USB and PATTERN pages it does nothing. | QA-CFG-040, QA-CFG-041, QA-CFG-218 |
 | `Shift` + `F7` (**DEFAULTS**) | puts the page's rows back to their defaults. Press it twice within two seconds. | QA-CFG-031, QA-CFG-032 |
 | `Shift` + `F1` to `F6`, `Shift` + `F8` | do nothing, and do not reach the page keys or APPLY | QA-CFG-015 |
 | `Config` (again) | goes to the next page. It wraps after PATTERN. | QA-CFG-033 |

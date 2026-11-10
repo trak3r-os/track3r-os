@@ -305,7 +305,7 @@ test::KeyBinding resolve_in_overlay(app::OverlayId id, std::uint8_t key) {
 }
 
 constexpr app::OverlayId kModal[] = {app::OverlayId::Learn,       app::OverlayId::Navigator, app::OverlayId::PatternChooser, app::OverlayId::LengthChooser, app::OverlayId::JumpChooser, app::OverlayId::ModulePicker,
-                                     app::OverlayId::TextEntry,   app::OverlayId::StepPopup, app::OverlayId::Fill,           app::OverlayId::PlayMode,      app::OverlayId::Preset,     app::OverlayId::VerbMenu, app::OverlayId::Events,      app::OverlayId::ExportProgress, app::OverlayId::SongTools, app::OverlayId::PatternTools, app::OverlayId::FirmwareUpdate, app::OverlayId::Help};
+                                     app::OverlayId::TextEntry,   app::OverlayId::StepPopup, app::OverlayId::Fill,           app::OverlayId::PlayMode,      app::OverlayId::Preset,     app::OverlayId::VerbMenu, app::OverlayId::Events,      app::OverlayId::LearnMap,       app::OverlayId::ExportProgress, app::OverlayId::SongTools, app::OverlayId::PatternTools, app::OverlayId::FirmwareUpdate, app::OverlayId::Help};
 
 }  // namespace
 
@@ -449,14 +449,17 @@ TEST_CASE("key prompt: a dialog's row is its own keys, every other key blank, th
     const test::RowRead shifted = test::read_owner_row(model, view, true);
     CHECK(shifted.label[4] == "SAVE");  // Shift + F5
   }
-  // Learn without a target and without bindings: BACK alone; its CLEAR ALL asks and then reads CLR ALL? inverted.
+  // Learn without a target and without bindings: MAP (OS-LEARNMAP: the map opens even when empty, to add a binding) and BACK; its CLEAR ALL asks and then reads CLR ALL? inverted.
   model.device.init(core::ParamKind::Device);  // (a bare Model's settings block holds whatever the stack held until init(): its Learn store must start empty)
   view.overlay = app::OverlayId::Learn;
   {
     const test::RowRead row = test::read_owner_row(model, view);
     CHECK(row.label[7] == "BACK");
+    CHECK(row.label[5] == "MAP");
     for (unsigned i = 0; i < 7; ++i) {
-      CHECK_MESSAGE(row.label[i].empty(), "Learn F" << i + 1 << " with nothing to act on");
+      if (i != 5) {
+        CHECK_MESSAGE(row.label[i].empty(), "Learn F" << i + 1 << " with nothing to act on");
+      }
     }
   }
 }

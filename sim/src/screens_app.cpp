@@ -744,7 +744,76 @@ void draw_events(ui::Renderer& r, unsigned) {
   scene(r, d.model, v);
 }
 
-constexpr unsigned kEventsFieldVariants = 8;     // the cursor on every field (the valid ones of the row are boxed)
+// OS-LEARNMAP: the LEARN MAP overlay. The project of the typical state has the demo's two bindings; the dearest one has all 32 slots in use
+// (the longest parameter names, every mode, a follow binding, a hit dot on each) and the cursor on every page of the window.
+struct LearnMapDoc {
+  std::unique_ptr<model::ModelArena> arena;
+  Model model;
+};
+
+LearnMapDoc& learn_map_doc(bool full) {
+  static LearnMapDoc typical;
+  static LearnMapDoc worst;
+  LearnMapDoc& d = full ? worst : typical;
+  if (!d.arena) {
+    d.arena = std::make_unique<model::ModelArena>();
+    std::memset(d.arena.get(), 0, sizeof(model::ModelArena));
+    if (full) {
+      fill_demo_project(d.arena->project);
+      for (unsigned i = 0; i < core::kLearnSlots; ++i) {
+        const unsigned field = model::instrument_param::Cutoff + (i % 3u);
+        core::LearnBinding b{core::param_id(core::ParamKind::Instrument, i % 12u, field), static_cast<std::uint8_t>(100 + i), static_cast<std::uint8_t>(i % 17u),
+                             static_cast<std::uint8_t>(i % 3u), static_cast<std::uint8_t>(i % 5u == 0 ? core::kLearnFollow : 0u)};
+        (void)d.arena->project.set_learn_slot(i, b);
+      }
+    } else {
+      fill_demo_project_with_bindings(d.arena->project);
+    }
+    d.model.project = &d.arena->project;
+    d.model.undo_depth = 12;
+  }
+  return d;
+}
+
+void learn_map_view(ViewState& v, unsigned cursor, unsigned column) {
+  v.overlay = OverlayId::LearnMap;
+  v.learn_map.cursor = static_cast<std::uint8_t>(cursor);
+  v.learn_map.column = static_cast<std::uint8_t>(column);
+}
+
+void draw_learn_map(ui::Renderer& r, unsigned variant) {
+  LearnMapDoc& d = learn_map_doc(false);
+  ViewState v = pattern_view(3, 6);
+  learn_map_view(v, 2, 2);
+  if (variant == 1) {  // a CC moved the second binding: its dot is lit; waiting for a new one
+    v.learn_map.hit[0] = 2u;
+    v.learn_map.wait = app::LearnMapView::kWaitNew;
+  }
+  scene(r, d.model, v);
+}
+
+constexpr unsigned kLearnMapWorstVariants = 4 * 5 * 3;  // four cursor places, five columns, the head's three states
+
+void draw_learn_map_worst(ui::Renderer& r, unsigned variant) {
+  LearnMapDoc& d = learn_map_doc(true);
+  static constexpr unsigned kCursors[4] = {0, 1, 16, 32};
+  const unsigned head = variant % 3u;
+  variant /= 3u;
+  const unsigned column = variant % 5u;
+  variant /= 5u;
+  ViewState v = pattern_view(3, 6);
+  learn_map_view(v, kCursors[variant % 4u], column);
+  v.learn_map.hit[0] = 0xFFFFFFFFu;  // every dot lit
+  v.enc_target = core::param_id(core::ParamKind::Instrument, 11, model::instrument_param::Cutoff);
+  if (head == 1) {
+    v.learn_map.wait = app::LearnMapView::kWaitRelearn;
+  } else if (head == 2) {
+    v.learn.confirm = true;
+  }
+  scene(r, d.model, v);
+}
+
+constexpr unsigned kEventsFieldVariants = 8;    // the cursor on every field (the valid ones of the row are boxed)
 constexpr unsigned kEventsFilterVariants = 3;    // S1c: ALL, NOTES, CC (the header count and the F1 label follow)
 constexpr unsigned kEventsPlayVariants = 2;      // S1c: the play marker off / on (3.7)
 constexpr unsigned kEventsWorstVariants = kWindows * kEventsFieldVariants * kEventsFilterVariants * kEventsPlayVariants;
@@ -940,7 +1009,7 @@ const ScreenState kSongStates[16] = {
 
 // The `_worst` sweeps are measured but not rendered to the
 // gallery: the typical states are what is looked at.
-const ScreenState kOverlayStates[20] = {
+const ScreenState kOverlayStates[22] = {
     {"pattern_learn", true, 1, kBudgetWords, draw_learn},
     {"pattern_learn_worst", true, kWindows, kBudgetWords, draw_learn_worst, false},
     {"pattern_navigator", true, 1, kBudgetWords, draw_navigator},
@@ -962,6 +1031,9 @@ const ScreenState kOverlayStates[20] = {
     // OS-MIDIREC S1b: the EVENTS overlay over the Pattern screen.
     {"events", true, 1, kBudgetWords, draw_events},
     {"events_worst", true, kEventsWorstVariants, kBudgetWords, draw_events_worst, false},
+    // OS-LEARNMAP: the LEARN MAP overlay (typical: two bindings, idle and waiting for a new knob; worst: all 32 slots).
+    {"learn_map", true, 2, kBudgetWords, draw_learn_map},
+    {"learn_map_worst", true, kLearnMapWorstVariants, kBudgetWords, draw_learn_map_worst, false},
     // OS-PTOOLS2 S3: the F7 verb menu over the Pattern screen (its own budget state).
     {"pattern_verb_menu", true, 1, kBudgetWords, draw_verb_menu},
     {"pattern_verb_menu_worst", true, kVerbMenuWorstVariants, kBudgetWords, draw_verb_menu_worst, false},
