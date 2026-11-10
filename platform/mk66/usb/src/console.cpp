@@ -23,8 +23,8 @@
 //   poke       OS-HW1: one 32-bit write, I2S0's registers only (the audio clock bring-up is what it is for)
 //   audio      OS-HW1: `audio start` calls the audio device's start() again from here (the main loop) when it failed at boot
 //   rot        OS-HW1: REG_ROTATE written through the display driver, the display idle (not saved)
-//   status     OS-STATUSLED: the status LED's heartbeat on/off (blink.h g_heartbeat_on, through appimg::status_led), the Config > DISPLAY
-//              screen's STATUS LED row's choice; not saved (BLINK at every boot). A fault blink code still shows with off.
+//   status     OS-LEDBPM: the status LED: the mode in force (the saved Config > DISPLAY > STATUS LED setting, or the session override), the beat flashes since boot
+//              and the play step of the last one; `status blink|bpm|off` overrides the mode for this session only, nothing is saved. A fault blink code still shows in every mode.
 //   sd         OS-007e: the SD card (slot, mount, identity, speed, counters); `sd mount` initialises and mounts it again. Reads the card.
 //   ls         OS-007e: a directory of the card, a pager. A read.
 //   load       OS-007e: starts loading an OG project folder of the card into the document (appimg::start_project_load): reads the card, replaces the
@@ -655,17 +655,36 @@ void cmd_rot(shell::Shell& sh, const shell::Args& a) {
 // through appimg so the row and the console share one state. Not saved: BLINK at every boot. Off stops the heartbeat only: a fault blink
 // code still shows. Main loop only, no allocation, no blocking.
 void cmd_status(shell::Shell& sh, const shell::Args& a) {
-  if (a.argc == 1) {
-    sh.out().text("status: heartbeat ").text(appimg::status_led_heartbeat() ? "blink" : "off").text(" (not saved)\n");
+  static constexpr const char* const kModes[] = {"blink", "bpm", "off"};
+  if (a.argc == 2) {
+    int mode = -1;
+    for (int i = 0; i < 3; ++i) {
+      if (same(a.argv[1], kModes[i])) {
+        mode = i;
+      }
+    }
+    if (mode < 0) {
+      sh.out().text(text(txt::status_1));
+      return;
+    }
+    appimg::status_led_set(mode);
+    sh.out().text("status: led ").text(kModes[mode]).text(text(txt::status_2));
     return;
   }
-  if (a.argc != 2 || !(same(a.argv[1], "blink") || same(a.argv[1], "off"))) {
+  if (a.argc != 1) {
     sh.out().text(text(txt::status_1));
     return;
   }
-  const bool on = same(a.argv[1], "blink");
-  appimg::status_led(on);
-  sh.out().text("status: heartbeat ").text(on ? "blink" : "off").text(text(txt::status_2));
+  const appimg::StatusLedInfo info = appimg::status_led_info();
+  sh.out().text("status: led ").text(kModes[info.mode < 3u ? info.mode : 0u]).text(info.overridden ? " (session override)" : " (setting)").text(", beat flashes ").dec(info.flashes);
+  if (info.last_pos >= 256u &&info.last_pos < 512u) {  // a count-in step (blink.h BeatLed: 512 - the steps left)
+    sh.out().text(", last on count-in step ").dec(512u - info.last_pos).text(" left");
+  } else if (info.last_pos != 0xFFFFu) {
+    sh.out().text(", last on step ").dec(info.last_pos);
+  } else {
+    sh.out().text(", last free-run");
+  }
+  sh.out().text("\n");
 }
 
 // `sd`: the slot, the mount, the card, the counters (storage/sd_text.h); the loader's last summary is the last line but one. `sd mount` runs the

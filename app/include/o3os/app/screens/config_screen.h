@@ -17,9 +17,8 @@ inline constexpr const char* kConfigShiftKeys[8] = {"-", "-", "-", "-", "-", "-"
 
 // OS-USBDISK U2b: the USB page's two rows after its settings are not settings. CARD AS DISK is an action row (F7 twice hands the card to the computer; F7 twice again takes it back), READ ONLY a
 // session choice (the encoder toggles it; RAM only, Q4). config_row() says which one the cursor is on (Param on every other row and page).
-// OS-STATUSLED: the DISPLAY page's last row, STATUS LED (BLINK / OFF), is not a setting either: a session choice (the encoder toggles it; RAM only, BLINK at every boot; a fault blink code
-// still shows with OFF; the platform reads it through App::status_led_blink).
-enum class ConfigRow : std::uint8_t { Param, CardAsDisk, ReadOnly, StatusLed };
+// OS-LEDBPM: the DISPLAY page's last row, STATUS LED (Blink / BPM / Off), is an ordinary saved device setting (device_setting::StatusLed, a Param row); the platform reads the setting.
+enum class ConfigRow : std::uint8_t { Param, CardAsDisk, ReadOnly };
 ConfigRow config_row(const ViewState& view) noexcept;
 // False on SD and INFO (no parameter row): F7 has no label there and does nothing (OS-QAFIX-7).
 bool config_page_has_rows(const ViewState& view) noexcept;

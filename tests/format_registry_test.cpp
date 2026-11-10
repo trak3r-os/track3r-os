@@ -386,7 +386,7 @@ TEST_CASE("format registry: the device settings file is registered, found by nam
   CHECK(run_writer(*d->writer, any_project, file, wp) == Progress::Done);
   CHECK(d->writer->report().error == FormatError::None);
   CHECK(d->writer->report().bytes == file.size());
-  CHECK(file.size() == 222u + 7u * 8u + 8u + 4u + 8u);  // + the two entries of TRANSPORT IN and OUT (E-CFG-03), the one of PAT SWITCH (E-PAT-35), the one of CC MAP (OS-MIDICCMAP S1) the two of MTC OUT and MTC START (OS-MTC A3) and the one of MTC IN (OS-MTC B3)
+  CHECK(file.size() == 222u + 8u * 8u + 8u + 4u + 8u);  // + the one of STATUS LED (OS-LEDBPM), the two entries of TRANSPORT IN and OUT (E-CFG-03), the one of PAT SWITCH (E-PAT-35), the one of CC MAP (OS-MIDICCMAP S1) the two of MTC OUT and MTC START (OS-MTC A3) and the one of MTC IN (OS-MTC B3)
   // Found by its bytes (the head the registry offers) and by name-and-bytes; not mistaken for a project, nor a project for it.
   CHECK(r.sniff(file.data(), 16, static_cast<std::uint32_t>(file.size())) == d);
   CHECK(r.identify("settings.o3st", file.data(), 16, static_cast<std::uint32_t>(file.size())) == d);

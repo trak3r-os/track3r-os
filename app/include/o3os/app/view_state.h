@@ -247,10 +247,6 @@ struct ViewState {
     std::uint32_t time = 0;
   };
   MtcView mtc;
-  // OS-STATUSLED: the Config > DISPLAY screen's STATUS LED row (BLINK / OFF): whether the status LED's heartbeat blinks (a fault code
-  // still shows with OFF). A session choice, RAM only, not saved, like READ ONLY above: BLINK at every boot. The platform reads it
-  // (App::status_led_blink) and drives the LED with it.
-  bool status_led_blink = true;
   int navigator = 0;                    // the Navigator's chosen cell: an index into the screen registry
 
   bool playing = false;  // the transport is running (the Play button's last accepted request): the status strip's PLAY / STOP badge

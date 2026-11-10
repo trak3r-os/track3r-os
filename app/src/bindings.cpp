@@ -368,6 +368,8 @@ constexpr core::InputRef kShift = button_ref(Button::Shift);
 constexpr core::InputRef kNoteKey = button_ref(Button::Note);
 // OS-SONGSHARE S3: Copy is the second held modifier, on Song only (core/gesture.h, "Held modifiers"): Copy + Up / Down moves the slots. Its own Tap, and Shift + Copy's, then wait for the release; Copy followed by another button is consumed.
 constexpr core::InputRef kCopyKey = button_ref(Button::Copy);
+// OS-MIXINSHOLD: and Master, on every screen: Master held + Insert (any delay) opens the Mixer's INSERTS page. Master's own chords (Song, Insert within the chord window) and Master + encoder (OS-MASTERVOL) are unchanged.
+constexpr core::InputRef kMasterKey = button_ref(Button::Master);
 
 // The device's built-in bindings. A context's keys are its own: the walk of the chain stops at the first context that
 // binds a gesture (core/binding.h), so what is bound in Global is only what no screen or overlay claims.
@@ -450,6 +452,9 @@ constexpr core::Binding kBase[] = {
     // OS-MIXINSKEY (new Community OS behaviour, public issue #5): Master + Insert, either press order, opens the Mixer on its INSERTS page from any screen. A chord: neither Master's tap (the page cycle) nor
     // Insert's own tap (step.insert, song.add_slot, mixer.stem_set) follows; the plain Insert keeps its bindings, and Master held + the encoder is still the master volume.
     bind(kGlobal, chord(button_ref(Button::Master), button_ref(Button::Insert)), kMixerInserts),
+    // OS-MIXINSHOLD (new Community OS behaviour, maintainer 2026-11-10): Master held, then Insert at any later time, is the same: Master is a held modifier (core/gesture.h, "Held modifiers"; the Insert tap carries it, and the
+    // Global row wins over a screen's plain Insert row). Master's own tap is consumed, so its release is silent. Insert first, then Master after the chord window, stays Insert's own tap; Insert is not a modifier.
+    bind(kGlobal, tap(button_ref(Button::Insert), kMasterKey), kMixerInserts),
     // OS-HELP: Shift + Config opens the help page of the screen in view. Global, so every screen reaches it, Config included (a binding that names the modifier wins over the plain Config above it);
     // a modal overlay's context captures it, so under a dialog or the Navigator it does nothing. The app page (ModuleApp) captures too, so it binds the chord for itself, below.
     bind(kGlobal, tap(button_ref(Button::Config), kShift), kHelpOpen),
@@ -1426,7 +1431,7 @@ bool find_action_name(const void*, const char* name, core::ActionId& out) noexce
 // OS-SONGSHARE S3: and Copy, the same way: Song's built-in Copy + Up / Down rows say `copy+up` / `copy+down`, so the loader must name it (the built-in table is written and read back as keymap text in the tests).
 // OS-PTOOLS2 S3b: and F7, the same way: Pattern's built-in F7 + pad row says `f7+pad*`, so the loader must name it.
 constexpr std::uint64_t kKeymapModifiers = kModifierButtons | (std::uint64_t{1} << static_cast<unsigned>(Button::Note)) | (std::uint64_t{1} << static_cast<unsigned>(Button::Copy)) |
-                                            (std::uint64_t{1} << static_cast<unsigned>(Button::F7));
+                                            (std::uint64_t{1} << static_cast<unsigned>(Button::F7)) | (std::uint64_t{1} << static_cast<unsigned>(Button::Master));  // OS-MIXINSHOLD: Master
 
 constexpr core::KeymapNames kNames{nullptr, find_context, find_button, find_action_name, kKeymapModifiers};
 

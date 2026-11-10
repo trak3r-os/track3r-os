@@ -115,7 +115,7 @@ TEST_CASE("param tables: every row is a valid descriptor that its storage can ho
     const bool reenumerates = std::strcmp(d->name, "USB RETURN") == 0 || std::strcmp(d->name, "USB AUDIO") == 0;
     // OS-MIDICCMAP S1: and CC MAP, a device MIDI routing switch, not learnable.
     // OS-MTC A3: and MTC OUT and MTC START (a controller must not start a time code).
-    const bool routing = std::strcmp(d->name, "CC MAP") == 0 || std::strcmp(d->name, "MTC OUT") == 0 || std::strcmp(d->name, "MTC START") == 0 || std::strcmp(d->name, "MTC IN") == 0;  // OS-MTC B3: and MTC IN (a controller must not hand the transport to a master)
+    const bool routing = std::strcmp(d->name, "CC MAP") == 0 || std::strcmp(d->name, "MTC OUT") == 0 || std::strcmp(d->name, "MTC START") == 0 || std::strcmp(d->name, "MTC IN") == 0 || std::strcmp(d->name, "STATUS LED") == 0;  // OS-LEDBPM: STATUS LED is a display mode of the LED, not worth a CC;  // OS-MTC B3: and MTC IN (a controller must not hand the transport to a master)
     // OS-INSTUI S3: and PLAY MODE, WT SIZE and SLICES, which are made by their actions (a window size moves by counters, a mode needs the sample's say, the slices are made on Wave)
     const bool by_action = std::strcmp(d->name, "PLAY ENGINE") == 0 || std::strcmp(d->name, "PLAY MODE") == 0 || std::strcmp(d->name, "WT SIZE") == 0 || std::strcmp(d->name, "SLICES") == 0 ||
                            std::strcmp(d->name, "WT POS") == 0 || std::strcmp(d->name, "SLICE") == 0;  // (WT POS and SLICE: not until a CC scale onto the windows / slices there are exists)
@@ -141,7 +141,7 @@ TEST_CASE("param tables: every row is a valid descriptor that its storage can ho
     }
   });
   // 64 + 16 instruments' and tracks' worth, and one each of the others: 2 x 95 + 2 x 5 + 8 + 3 + 30 rows were visited (29 device rows before OS-MTC B3 appended MTC IN, 27 device rows before OS-MTC A3 appended MTC OUT and MTC START, 26 before OS-MIDICCMAP S1 appended CC MAP).
-  CHECK(rows == 2u * 95u + 2u * 5u + 8u + 3u + 30u);
+  CHECK(rows == 2u * 95u + 2u * 5u + 8u + 3u + 31u);  // 31 device rows since OS-LEDBPM appended STATUS LED
   CHECK(model::instrument_param::kCount == 95u);  // 14 + the 9 rows of the source page (OS-INSTUI S3) + 6 x 6 envelope fields + 6 x 4 MOD rows (SOURCE, LFO SHAPE, SPEED, AMOUNT; OS-INSTUI S6) + the 12 MIDI / VEL> rows (OS-INSTUI S8b + S9)
   CHECK(model::kProjectParamSlots == 64u * 95u + 16u * 5u + 8u);
 }
@@ -164,9 +164,9 @@ TEST_CASE("param tables: what is not a parameter is not found") {
   CHECK_FALSE(model::find_param(core::param_id(ParamKind::Master, 0, 8), f));
   CHECK_FALSE(model::find_param(core::param_id(ParamKind::Project, 0, 4), f));
   CHECK_FALSE(model::find_param(core::param_id(ParamKind::Project, 1, 0), f));
-  CHECK_FALSE(model::find_param(core::param_id(ParamKind::Device, 0, 30), f));  // 30 is past the last field (OS-MTC B3 took 29, A3 27 and 28, OS-MIDICCMAP S1 26)
-  CHECK(model::param_desc(core::param_id(ParamKind::Device, 0, 30)) == nullptr);
-  CHECK(model::param_slot(core::param_id(ParamKind::Device, 0, 30)) == model::kNoParamSlot);
+  CHECK_FALSE(model::find_param(core::param_id(ParamKind::Device, 0, 31), f));  // 31 is past the last field (OS-LEDBPM took 30, OS-MTC B3 29, A3 27 and 28, OS-MIDICCMAP S1 26)
+  CHECK(model::param_desc(core::param_id(ParamKind::Device, 0, 31)) == nullptr);
+  CHECK(model::param_slot(core::param_id(ParamKind::Device, 0, 31)) == model::kNoParamSlot);
   CHECK(model::param_field_of_slot(ParamKind::Track, 5) == 0xFFFFu);
   CHECK(model::param_index_count(ParamKind::None) == 0u);
   CHECK(model::param_slots_per_index(ParamKind::None) == 0u);
@@ -561,7 +561,7 @@ TEST_CASE("settings: a block starts at the defaults, takes values in range, coun
   CHECK(s.set(model::device_setting::ClockSync, 7.0f) == model::Status::BadValue);
   CHECK(s.set(model::device_setting::ClockSync, -6.0f) == model::Status::Ok);
   CHECK(s.get(model::device_setting::ClockSync) == -6.0f);  // a signed field
-  CHECK(s.set(30, 0.0f) == model::Status::BadIndex);  // 30 is past the last field (OS-MTC B3 took 29, A3 27 and 28, OS-MIDICCMAP S1 26; the block's room is 32)
+  CHECK(s.set(31, 0.0f) == model::Status::BadIndex);  // 31 is past the last field (OS-LEDBPM took 30, OS-MTC B3 29, A3 27 and 28, OS-MIDICCMAP S1 26; the block's room is 32)
   CHECK(s.get(model::device_setting::MetronomeVolume) == 80.0f);
   CHECK(s.generation(model::device_setting::MetronomeVolume) == g_volume + 1);
   CHECK(s.check_invariants());

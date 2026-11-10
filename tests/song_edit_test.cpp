@@ -1443,6 +1443,65 @@ TEST_CASE("mixer inserts chord: Master + Insert, in either order, opens the Mixe
   CHECK(rig.app->state().screen == app::ScreenId::Pattern);
 }
 
+TEST_CASE("mixer inserts hold: Master down, any delay, then Insert opens the Mixer on INSERTS from any screen; Master's release is silent (OS-MIXINSHOLD)") {
+  const std::size_t mixer = app::screen_index(app::ScreenId::Mixer);
+  const std::uint8_t inserts = static_cast<std::uint8_t>(app::MixerPage::Inserts);
+  for (const Button from : {Button::Pattern, Button::Song, Button::Params, Button::File, Button::Master}) {
+    for (const std::uint32_t delay : {core::kGestureTimings.chord_ms + 10u, 500u, core::kGestureTimings.hold_ms + 600u}) {
+      Rig rig;
+      rig.tap(from);
+      if (from == Button::Master) {
+        rig.tap(Button::Master);  // the Mixer's next page: the later Insert must move it to INSERTS
+      }
+      NEED(rig.app->state().page[mixer] != inserts);
+      const auto depth = rig.journal.depth();
+      rig.press(Button::Master);
+      rig.pass(delay);
+      rig.press(Button::Insert);
+      rig.pass(core::kGestureTimings.chord_ms + 10);  // Insert's tap resolves when its chord window is over
+      CHECK(rig.app->state().screen == app::ScreenId::Mixer);
+      CHECK(rig.app->state().page[mixer] == inserts);
+      rig.release(Button::Insert);
+      rig.pass(core::kGestureTimings.hold_ms + 100);
+      rig.release(Button::Master);
+      rig.pass(1);
+      CHECK(rig.app->state().screen == app::ScreenId::Mixer);  // Master's release is silent: no page cycle
+      CHECK(rig.app->state().page[mixer] == inserts);
+      CHECK(rig.app->state().overlay == app::OverlayId::None);
+      CHECK(rig.journal.depth() == depth);  // Insert's own tap did not run
+    }
+  }
+  {  // Insert first, Master after the chord window: Insert's own tap (a step insert on Pattern), then Master's own tap (the Mixer), as today
+    Rig rig;
+    rig.tap(Button::Pattern);
+    rig.press(Button::Insert);
+    rig.pass(core::kGestureTimings.chord_ms + 10);
+    rig.press(Button::Master);
+    rig.pass(1);
+    rig.release(Button::Insert);
+    rig.release(Button::Master);
+    rig.pass(1);
+    CHECK(rig.app->state().screen == app::ScreenId::Mixer);
+    CHECK(rig.app->state().page[mixer] != inserts);
+  }
+  {  // a lone Master tap is still the Mixer
+    Rig rig;
+    rig.tap(Button::Master);
+    CHECK(rig.app->state().screen == app::ScreenId::Mixer);
+  }
+  {  // Master held, then Song after the chord window: Song, and no Mixer tap at the Master's release
+    Rig rig;
+    rig.press(Button::Master);
+    rig.pass(core::kGestureTimings.chord_ms + 10);
+    rig.press(Button::Song);
+    rig.pass(1);
+    rig.release(Button::Song);
+    rig.release(Button::Master);
+    rig.pass(1);
+    CHECK(rig.app->state().screen != app::ScreenId::Mixer);
+  }
+}
+
 TEST_CASE("pattern tempo: under a modal overlay the gesture does nothing, and neither does it in an app's page") {
   Rig rig;
   rig.press(Button::Vol);  // the Vol + Fx chord is Learn

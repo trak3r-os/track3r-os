@@ -483,9 +483,9 @@ int main() {
     if (pads_code_done && shown_code == 0 && ms - pads_code_from < mk66::blink::period_ms(mk66::blink::kInputDegraded)) {
       led_from_sram_l(mk66::blink::led_on(mk66::blink::kInputDegraded, ms - pads_code_from));  // a fault code: shows whatever the STATUS LED row says
     } else {
-      // OS-STATUSLED: led_on_status keeps a fault code (shown_code >= 1) blinking whatever the STATUS LED row says, and with the
-      // heartbeat off (blink::g_heartbeat_on false) the heartbeat (shown_code 0) and the over-budget code 12 (no fault) keep the LED dark.
-      led_from_sram_l(mk66::blink::led_on_status(shown_code, ms, mk66::blink::g_heartbeat_on));
+      // OS-LEDBPM: the STATUS LED setting (Blink / BPM / Off): a fault code (shown_code >= 1) blinks in every mode; the heartbeat (shown_code 0) and the over-budget code 12 (no fault) are the
+      // heartbeat, the beat flash or dark.
+      led_from_sram_l(mk66::appimg::status_led_level(shown_code, ms));
     }
     if (ms / 1000u != last_second) {
       last_second = ms / 1000u;

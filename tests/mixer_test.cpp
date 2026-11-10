@@ -291,15 +291,15 @@ TEST_CASE("master volume: the ends of the range hold and the strip still says wh
   CHECK(rig.project().get_param(volume_id) == 100.0f);
 }
 
-// Accepted limits of the gesture (QA-MIX-030 / 031, the CHANGELOG): the volume gesture is the Master key held on its own. A Shift that joins after the Master press ends it: the tap is lost and a
-// turn is the screen's own, not the volume. A Shift held before the Master press is ignored by the gesture (the volume moves a plain step a detent, no coarse step). Pinned so that a change of the
-// recogniser shows here.
-TEST_CASE("master volume: a Shift joined after the Master press loses the tap and the volume; a Shift held first changes nothing") {
+// QA-MIX-030 / 031 and OS-MIXINSHOLD: Master is a bound modifier now (Master held, then Insert), and the recogniser keeps such a key across the context change a Shift makes. So a Shift that joins
+// after the Master press no longer ends the gesture: the tap acts at the release and the turn is still the volume (before OS-MIXINSHOLD both were lost, an accepted limit that other keys keep).
+// A Shift held before the Master press still changes nothing: the volume moves a plain step a detent, no coarse step. Pinned so that a change of the recogniser shows here.
+TEST_CASE("master volume: a Shift joined after the Master press keeps the tap and the volume (OS-MIXINSHOLD); a Shift held first changes nothing") {
   const ParamId volume_id = core::param_id(ParamKind::Master, 0, mp::Volume);
   Rig rig;
   rig.tap(Button::Pattern);
   const float vol = rig.project().get_param(volume_id);
-  rig.press(Button::Master);  // Master down first, then Shift joins, then both let go: no Mixer
+  rig.press(Button::Master);  // Master down first, then Shift joins, then both let go: the Mixer opens
   rig.pass(1);
   rig.press(Button::Shift);
   rig.pass(1);
@@ -307,34 +307,35 @@ TEST_CASE("master volume: a Shift joined after the Master press loses the tap an
   rig.pass(1);
   rig.release(Button::Shift);
   rig.pass(1);
-  CHECK(rig.app->state().screen == app::ScreenId::Pattern);
+  CHECK(rig.app->state().screen == app::ScreenId::Mixer);
   CHECK(rig.project().get_param(volume_id) == vol);
+  rig.tap(Button::Pattern);
 
-  rig.press(Button::Master);  // Master down first, Shift joins, then the encoder: the screen's own turn, the volume stays
+  rig.press(Button::Master);  // Master down first, Shift joins, then the encoder: the volume, a plain step a detent; the turn consumes the tap
   rig.pass(1);
   rig.press(Button::Shift);
   rig.pass(1);
   rig.turn(-4);
-  CHECK(rig.project().get_param(volume_id) == vol);
+  CHECK(rig.project().get_param(volume_id) == vol - 4.0f);
   rig.release(Button::Master);
   rig.pass(1);
   rig.release(Button::Shift);
   rig.pass(1);
   CHECK(rig.app->state().screen == app::ScreenId::Pattern);
-  CHECK(rig.project().get_param(volume_id) == vol);
+  CHECK(rig.project().get_param(volume_id) == vol - 4.0f);
 
   rig.press(Button::Shift);  // Shift held first, then Master, then the encoder: still the volume, one plain step a detent
   rig.pass(1);
   rig.press(Button::Master);
   rig.pass(1);
   rig.turn(-4);
-  CHECK(rig.project().get_param(volume_id) == vol - 4.0f);
+  CHECK(rig.project().get_param(volume_id) == vol - 8.0f);
   rig.release(Button::Master);
   rig.pass(1);
   rig.release(Button::Shift);
   rig.pass(1);
   CHECK(rig.app->state().screen == app::ScreenId::Pattern);  // (the turn consumed the Shift + Master tap too)
-  CHECK(rig.project().get_param(volume_id) == vol - 4.0f);
+  CHECK(rig.project().get_param(volume_id) == vol - 8.0f);
 }
 
 TEST_CASE("mixer: F7 mutes and F8 solos the track under the cursor, F7 on a send bus mutes the effect") {

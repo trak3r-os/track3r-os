@@ -993,6 +993,75 @@ TEST_CASE("gesture: a bound modifier with no Hold taps at the release however lo
   CHECK(s.rec.held() == 0u);
 }
 
+// OS-MIXINSHOLD: Master is a bound modifier (Insert under it is bound) that also waits for a chord (Master + Insert inside the window) and taps at its release.
+TEST_CASE("gesture: a bound modifier that also waits for a chord (Master + Insert)") {
+  const std::uint8_t kMaster = kA;
+  const std::uint8_t kInsert = kB;
+  const std::uint32_t kLate = 500;  // well past the 40 ms chord window
+  Rig s(kShiftMask);
+  s.w.of[kMaster] = kWantModifier | kWantChord | kWantHoldEncoder;  // as the bindings give it: Master + encoder (OS-MASTERVOL) is why it has no 40 ms deadline
+  s.w.of[kInsert] = kWantChord;
+  s.w.pair_ab = true;
+  SUBCASE("the partner inside the window is the chord; after the window it is a key made under Master, and Master's release is silent") {
+    s.press(0, kMaster);
+    s.press(10, kInsert);
+    NEED_SIZE(s.log, 1u);
+    CHECK(s.log[0].kind == GestureKind::Chord);  // (both orders keep working: the pair is bound)
+    s.release(20, kInsert);
+    s.release(30, kMaster);
+    CHECK(s.log.size() == 1u);
+    s.clear();
+    s.press(1000, kMaster);
+    s.advance(ms(1000 + kLate));
+    CHECK(s.log.empty());  // Master goes on waiting past the window: it has a use as a modifier
+    s.press(1000 + kLate, kInsert);
+    s.advance(ms(1000 + kLate + 50));  // Insert waits for its own chord window, then taps
+    NEED_SIZE(s.log, 1u);
+    CHECK(is(s.log[0], GestureKind::Tap, btn(kInsert), btn(kMaster), 1000 + kLate + 40));
+    s.release(1000 + kLate + 20, kInsert);
+    s.release(1000 + kLate + 400, kMaster);
+    CHECK(s.log.size() == 1u);  // the Tap of Master was consumed: no Mixer at the release
+    CHECK(s.rec.held() == 0u);
+  }
+  SUBCASE("a Shift that joins does not end the wait") {
+    s.press(0, kMaster);
+    s.press(100, kShift);
+    s.advance(ms(100 + kLate));
+    NEED_SIZE(s.log, 1u);
+    CHECK(s.log[0].kind == GestureKind::Tap);  // Shift's own tap; Master did not tap when Shift came, nor when the window ended
+    CHECK(s.log[0].input == btn(kShift));
+    CHECK(s.log.size() == 1u);
+    s.press(100 + kLate, kInsert);
+    s.advance(ms(100 + kLate + 50));
+    NEED_SIZE(s.log, 2u);
+    CHECK(s.log[1].kind == GestureKind::Tap);
+    CHECK(s.log[1].input == btn(kInsert));
+    s.release(100 + kLate + 10, kInsert);
+    s.release(100 + kLate + 20, kShift);
+    s.release(100 + kLate + 30, kMaster);
+    CHECK(s.log.size() == 2u);  // Master's release is silent
+    CHECK(s.rec.held() == 0u);
+  }
+  SUBCASE("a Shift that joins and no other key: Master's tap still comes at its release") {
+    s.press(0, kMaster);
+    s.press(100, kShift);
+    s.advance(ms(100 + kLate));
+    CHECK(s.log.size() == 1u);  // Shift's own tap only
+    s.release(100 + kLate, kMaster);
+    NEED_SIZE(s.log, 2u);
+    CHECK(is(s.log[1], GestureKind::Tap, btn(kMaster), kNoInput, 100 + kLate));
+  }
+  SUBCASE("Master alone still taps at its release, however long it was held") {
+    s.press(0, kMaster);
+    s.advance(ms(2000));
+    CHECK(s.log.empty());
+    s.release(2100, kMaster);
+    NEED_SIZE(s.log, 1u);
+    CHECK(is(s.log[0], GestureKind::Tap, btn(kMaster), kNoInput, 2100));
+    CHECK(s.rec.held() == 0u);
+  }
+}
+
 TEST_CASE("gesture: Shift + a bound modifier with no Hold still taps at the release, under the Shift that was held at the press, and a key pressed under both is made under Shift") {
   Rig s(kShiftMask);
   s.w.of[kA] = kWantModifier;

@@ -12,7 +12,7 @@ The keys on one page. Each table names the chapter it comes from.
 | `Rec` | on Pattern, turns STEP on or off; on Record, starts or stops the take |
 | `Shift` + `Rec` | on Pattern, turns LIVE on or off |
 | `Song` + `Pattern`, or `Master` + `Song` | opens the Navigator. `F8` (**GO**) opens the chosen screen; `Pattern` leaves it |
-| `Master` + `Insert` | opens the Mixer on its INSERTS page, from any screen |
+| `Master` + `Insert` | opens the Mixer on its INSERTS page, from any screen (hold `Master`, then tap `Insert` at any time) |
 | `Shift` + `Pattern` | lists the module apps that are not tools. `F1` (**LAUNCH**) starts one; `Pattern` leaves it |
 | `Shift` + `Config` | opens the help page of the screen you are on. `Left` and `Right` turn the pages, `Up`, `Down` and the encoder scroll, any other key closes it |
 | `Shift` + `Master` | steps to the next colour theme: Amiga, Black, White. <!-- QA-GLB-157 --> |

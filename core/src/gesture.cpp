@@ -157,11 +157,11 @@ void GestureRecognizer::press(std::uint8_t id, Tick t, const GestureHints& hints
     release(id, t, false, out);  // a press with no release in between: the release was lost, close the old press
     i = find(id);
   }
-  consume_modifiers(id);
   settle_waiting(t, out, id);
   i = find(id);
   const InputRef self = button_ref(id);
   if (i >= 0) {  // the entry is waiting for exactly this: the second tap
+    consume_modifiers(id);
     Entry& e = entries_[i];
     emit(out, t, GestureKind::DoubleTap, self, modifier_ref(e.mod), 0);
     e.state = State::Decided;
@@ -181,10 +181,13 @@ void GestureRecognizer::press(std::uint8_t id, Tick t, const GestureHints& hints
       const bool self_greater = input_less(first, self);
       emit(out, t, GestureKind::Chord, self_greater ? self : first, self_greater ? first : self, 0);
       p.state = State::Decided;
+      consume_modifiers(id);  // any other undecided bound modifier is consumed as before; the partner is decided already
       add(id, State::Decided, 0, kNoMod, t);
       return;
     }
   }
+  // Only now: a bound modifier that is also half of a chord (Master + Insert, OS-MIXINSHOLD) must still be able to pair inside the chord window.
+  consume_modifiers(id);
   settle_chords(t, out, id);  // another input arrived: nobody is waiting for a chord with it any more
   std::uint8_t wants = 0;
   if (hints.wants != nullptr) {
@@ -291,8 +294,9 @@ void GestureRecognizer::settle_waiting(Tick t, GestureList& out, std::uint8_t ex
 void GestureRecognizer::settle_chords(Tick t, GestureList& out, std::uint8_t except) noexcept {
   for (unsigned i = 0; i < count_; ++i) {
     Entry& e = entries_[i];
+    // A Shift that joins keeps a bound modifier waiting (Master held, Shift, then the encoder or Insert: OS-MIXINSHOLD); the context change it makes already dropped every other waiter.
     if (e.state == State::Down && e.id != except && (e.wants & kWantChord) != 0 &&
-        (e.wants & (kWantHold | kWantDoubleTap)) == 0) {
+        (e.wants & (kWantHold | kWantDoubleTap)) == 0 && !((e.wants & kWantModifier) != 0 && is_modifier(except))) {
       emit(out, t, GestureKind::Tap, button_ref(e.id), modifier_ref(e.mod), 0);
       e.state = State::Decided;
     }

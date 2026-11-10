@@ -37,7 +37,7 @@ help_power	power [press|release|pin|off [dry]]: the Power switch and the shutdow
 help_disk	disk [share [ro]|eject]: give the card to the computer, take it back
 help_guard	guard [n <1..255>]: the main-loop guard's window (OS-MAINGUARD)
 help_ins	ins [list|bind t s mod|unbind t s|bypass t s on|off] (bind loads mod)
-help_status	status [blink|off]: the status LED heartbeat (not saved)
+help_status	status [blink|bpm|off]: LED mode and beat flashes (session only)
 help_trans	trans: transport refusals and playing flags [OS-BUG-PLAYSTOP]
 help_mtc	mtc [at <order> <step>]: time code state; the map time of a step
 help_ptfx	ptfx quarantine|list|info <n>|run <n>: .ptfx plugins
@@ -79,8 +79,8 @@ audio_1	audio start: Ok, outputs open when clean
 audio_2	audio start: FAILED, result
 rot_1	rot: the display is not running\n
 rot_2	rot: the display is busy with a frame, try again\n
-status_1	usage: status [blink|off]\n
-status_2	 (not saved; a fault code still blinks)\n
+status_1	usage: status [blink|bpm|off]\n
+status_2	 (this session only, not saved: Config > DISPLAY > STATUS LED is the saved setting; a fault code still blinks)\n
 sd_1	sd: the card is in use (a load, a save, an upload, a listing), try again in a moment\n
 sd_2	sd: mounted again from the console
 sd_3	sd: mount from the console FAILED

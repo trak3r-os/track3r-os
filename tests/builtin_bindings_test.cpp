@@ -132,7 +132,7 @@ TEST_CASE("builtin bindings: contexts, the modifier set and the pool sizes") {
   CHECK(app::context_id(Context::FirmwareUpdate) == 48);  // OS-FWCONFIG: the firmware update dialog (46 and 47 went to the DJ page and Help; 41-43 are left to the branches that add contexts)
   CHECK(app::context_id(Context::Record) == 27);      // OS-011c: the Record screen (22, 23 Mixer and Perform; 24-26 the modules' contexts)
   CHECK(app::kModifierButtons == (std::uint64_t{1} << static_cast<unsigned>(Button::Shift)));
-  CHECK(app::keymap_names().modifiers == (app::kModifierButtons | (std::uint64_t{1} << static_cast<unsigned>(Button::Note)) | (std::uint64_t{1} << static_cast<unsigned>(Button::Copy)) | (std::uint64_t{1} << static_cast<unsigned>(Button::F7))));  // the loader names Shift (the recogniser's own modifier), Note, Copy and F7 (held modifiers where the bindings say so: OS-ZOOM, OS-SONGSHARE S3, OS-PTOOLS2 S3b)
+  CHECK(app::keymap_names().modifiers == (app::kModifierButtons | (std::uint64_t{1} << static_cast<unsigned>(Button::Note)) | (std::uint64_t{1} << static_cast<unsigned>(Button::Copy)) | (std::uint64_t{1} << static_cast<unsigned>(Button::F7)) | (std::uint64_t{1} << static_cast<unsigned>(Button::Master))));  // the loader names Shift (the recogniser's own modifier), Note, Copy, F7 and Master (held modifiers where the bindings say so: OS-ZOOM, OS-SONGSHARE S3, OS-PTOOLS2 S3b, OS-MIXINSHOLD)
   CHECK(sizeof(core::Binding) == 16u);
   CHECK(app::kUserBindings * sizeof(core::Binding) + app::kPresetBindings * sizeof(core::Binding) <= 2048u);
 }
@@ -798,6 +798,31 @@ TEST_CASE("builtin bindings: Master + Insert opens the Mixer INSERTS page from e
   CHECK(resolve_in(song, core::GestureKind::Tap, Button::Insert, false).action == core::action_id("song.add_slot"));
   CHECK(resolve_in(stems, core::GestureKind::Tap, Button::Insert, false).action == core::action_id("mixer.stem_set"));
   CHECK(resolve_in(pattern, core::GestureKind::Tap, Button::Master, false).action == core::action_id("nav.screen"));
+}
+
+TEST_CASE("builtin bindings: Master held, then a tap of Insert, opens the Mixer INSERTS page from every screen; Master is a held modifier there and nothing else changes (OS-MIXINSHOLD)") {
+  const core::BindingSet set{{core::BindingView{nullptr, 0}, core::BindingView{nullptr, 0}, app::builtin_bindings()}};
+  const Chain pattern{"pattern", {Context::PatternEdit, Context::Pattern, Context::Global}, false};
+  const Chain song{"song", {Context::Song, Context::Global}, false};
+  const Chain instrument{"instrument", {Context::Instrument, Context::Global}, false};
+  const Chain stems{"stems", {Context::MixerStems, Context::Mixer, Context::Global}, false};
+  const Chain inserts{"inserts", {Context::MixerInserts, Context::Mixer, Context::Global}, false};
+  const Chain navigator{"navigator", {Context::Navigator, Context::Global}, true};
+  const core::Gesture held{0, core::GestureKind::Tap, app::button_ref(Button::Insert), app::button_ref(Button::Master), 0};
+  for (const Chain* c : {&pattern, &song, &instrument, &stems, &inserts}) {
+    const core::Resolution r = core::resolve(set, chain_of(*c), held);  // a screen's plain Insert row does not shadow the Global one
+    CHECK_MESSAGE((r.status == core::Resolution::Status::Bound && r.action == core::action_id("mixer.inserts")), c->what);
+    CHECK_MESSAGE((core::gesture_wants(set, chain_of(*c), app::button_ref(Button::Master)) & core::kWantModifier) != 0, c->what);  // Master is a held modifier in every chain that binds the row
+    CHECK_MESSAGE((core::gesture_wants(set, chain_of(*c), app::button_ref(Button::Insert)) & core::kWantModifier) == 0, c->what);  // Insert is not
+  }
+  // A capturing context hides the Global row: Master + Insert there is the plain Insert of the context (or nothing).
+  CHECK_FALSE(core::resolve(set, chain_of(navigator), held).action == core::action_id("mixer.inserts"));
+  // The other Master keys are as they were: Master + Shift + Insert is Shift's row, Master's tap, Shift + Master, the chord with Song and the encoder hold.
+  CHECK(resolve_in(pattern, core::GestureKind::Tap, Button::Insert, true).action == core::action_id("cursor.jump_fraction"));
+  CHECK(resolve_in(pattern, core::GestureKind::Tap, Button::Master, false).action == core::action_id("nav.screen"));
+  CHECK(resolve_in(pattern, core::GestureKind::Tap, Button::Master, true).action == core::action_id("ui.theme.next"));
+  CHECK(core::chord_bound(set, chain_of(pattern), app::button_ref(Button::Master), app::button_ref(Button::Song)));
+  CHECK(core::hold_encoder_bound(set, chain_of(pattern), app::button_ref(Button::Master), core::InputRef{core::InputKind::Encoder, 0}));
 }
 
 TEST_CASE("builtin bindings: F8 is UNDO and Shift + F8 REDO on Pattern (every mode) and Song, and Back in the overlays (OS-002c)") {

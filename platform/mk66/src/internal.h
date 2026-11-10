@@ -134,11 +134,18 @@ bool input_degraded() noexcept;
 // key scanner has refused its first configurations since the bus opened and has never answered (the retries go on, a late answer brings the pads online).
 void input_audio_started() noexcept;
 bool pads_gave_no_answer() noexcept;
-// OS-STATUSLED: the STATUS LED option (blink.h g_heartbeat_on; the Config > DISPLAY screen's STATUS LED row and the `diag status`
-// command). Not saved: BLINK at every boot. pass() copies the app's choice to the platform's flag each pass; status_led() sets both at
-// once, so the row and the console never disagree. Main loop only.
-bool status_led_heartbeat() noexcept;
-void status_led(bool on) noexcept;
+// OS-LEDBPM: the status LED. status_led_level() is main.cpp's LED level once a pass (the saved STATUS LED setting, Blink / BPM / Off, or the console's session override; a fault code wins in
+// every mode; BPM reads the sequencer's play position, lock-free). status_led_set(mode) is the `diag status` override for this session, not saved (-1: back to the setting); status_led_info()
+// the mode in force, whether it is the override, the beat flashes since boot and the play step of the last one (0xFFFF: a free-run flash). Main loop only.
+struct StatusLedInfo {
+  std::uint8_t mode;  // blink::LedMode
+  bool overridden;
+  std::uint32_t flashes;
+  std::uint16_t last_pos;
+};
+bool status_led_level(std::uint8_t shown_code, std::uint32_t ms) noexcept;
+void status_led_set(int mode) noexcept;
+StatusLedInfo status_led_info() noexcept;
 // OS-USBDISK U1c, the boot disk (mode (b)): true when the chord Shift + F1 + F7 was held at power-up (init() decides, once). main.cpp then mounts nothing, loads nothing and never opens the
 // outputs. boot_disk_open() is its last step, after the USB port started with the DISK set: the card's owner becomes the computer and the card is started for it. Main loop only.
 bool boot_disk() noexcept;

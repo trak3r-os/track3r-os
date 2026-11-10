@@ -60,14 +60,7 @@ constexpr bool led_on(std::uint8_t pulses, std::uint32_t ms) noexcept {
   return t % (kPulseOnMs + kPulseOffMs) < kPulseOnMs;
 }
 
-// OS-STATUSLED: whether the heartbeat (pattern 0) blinks at all — the Config > DISPLAY screen's STATUS LED row (BLINK / OFF) and the
-// `diag status` console command. Not saved: BLINK (true) at every boot, so no settings file changes. Single-writer flag: the writers are
-// the app (its Config row, copied to the flag by appimg::pass(), app_main.cpp) and the `diag status` command, both from the main loop
-// thread only; the reader is main.cpp's main loop, which drives the LED. The heartbeat is polled from that loop, not from an ISR or a
-// timer, so the volatile flag needs no critical section.
-inline volatile bool g_heartbeat_on = true;
-
-// OS-STATUSLED: the LED level with the STATUS LED option in force: with the heartbeat off (`heartbeat_on` false) the heartbeat
+// OS-STATUSLED: the LED level with the heartbeat option in force: with the heartbeat off (`heartbeat_on` false) the heartbeat
 // (pattern 0) and the over-budget code (kAudioOverBudget, 12: no fault, a render over the load governor's share) keep the LED dark,
 // while a fault code (any other pulses >= 1, the sticky codes that replace the heartbeat) still shows. With the heartbeat on nothing
 // changes: code 12 keeps blinking as before.
@@ -77,5 +70,102 @@ constexpr bool led_on_status(std::uint8_t pulses, std::uint32_t ms, bool heartbe
   }
   return led_on(pulses, ms);
 }
+
+// OS-LEDBPM: the STATUS LED setting (model::device_setting::StatusLed; the values are the setting's, 0 Blink, 1 BPM, 2 Off).
+enum class LedMode : std::uint8_t { Blink = 0, Bpm = 1, Off = 2 };
+
+// The LED level in a mode. `beat_on` is BeatLed's level (the beat flash). Blink: the heartbeat as today; Off: led_on_status with the heartbeat off; BPM: the beat flash in place of the heartbeat
+// (pulses 0) and of the over-budget code 12 (no fault). Every other code (a fault: shown_code >= 1) keeps blinking in every mode.
+constexpr bool led_on_mode(LedMode mode, std::uint8_t pulses, std::uint32_t ms, bool beat_on) noexcept {
+  if (mode == LedMode::Bpm && (pulses == 0u || pulses == kAudioOverBudget)) {
+    return beat_on;
+  }
+  return led_on_status(pulses, ms, mode != LedMode::Off);
+}
+
+// OS-LEDBPM: the beat flash. A pure state machine, fed once per main-loop pass with one read of the sequencer's PlayPosition (audio/play_position.h, relaxed atomics, the render context its single
+// writer: this runs in the main loop, takes no lock, allocates nothing and is nowhere near the audio path) and the millisecond clock.
+//   Playing: the beat is the step with `step % 4 == 0` (4 steps per beat, seq::kStepsPerBeat; a pattern's step 0 is always a beat), so the flash lands on the step that starts each beat and
+//   follows the sequencer: under an external MIDI clock or MTC the play position already follows it, so the LED does too. It fires on the first sample that sees a new step with `step % 4 == 0`,
+//   or a new beat (a beat step the main loop was too slow to see: the flash is late, not lost); a play start in the middle of a bar flashes at the next beat step. During a count-in (`step` stays
+//   0) the steps are numbered from the end (cpos = 512 - count_in), so the count-in beats fall on `count_in % 4 == 0` and the first step of the song flashes as a beat.
+//   Stopped (or no position published yet): free-run, one flash per beat at the project tempo (period 6000000 / tempo_x100 ms, 120 BPM while no tempo is known); a tempo change applies from the
+//   next flash; the first flash is immediate, at a stop and at power-up. Unsigned 32-bit time differences throughout (the ms clock wraps).
+inline constexpr std::uint32_t kBeatFlashMs = 40;
+inline constexpr std::uint32_t kStepsPerBeat = 4;
+inline constexpr std::uint32_t kDefaultTempoX100 = 12000;
+inline constexpr std::uint16_t kNoBeatPos = 0xFFFFu;
+
+struct BeatSample {
+  bool playing = false;
+  std::uint16_t step = 0;        // PlayPosition::Value::step (0..127)
+  std::uint8_t ustep = 0;        // its ustep (0..47)
+  std::uint8_t count_in = 0;     // its count_in (steps left of the count-in, 0: none)
+  std::uint32_t tempo_x100 = 0;  // its tempo_x100 (0: not known)
+};
+
+constexpr std::uint32_t beat_period_ms(std::uint32_t tempo_x100) noexcept {
+  const std::uint32_t t = tempo_x100 == 0u ? kDefaultTempoX100 : (tempo_x100 < 1000u ? 1000u : (tempo_x100 > 99900u ? 99900u : tempo_x100));
+  return 6000000u / t;
+}
+
+struct BeatLed {
+  // Written and read by the main loop only (no sharing). `flashes` and `last_pos` are what `diag status` prints: the number of flashes since boot and the play step of the last one
+  // (kNoBeatPos: a free-run flash; 512 - count_in for a count-in step).
+  std::uint32_t flashes = 0;
+  std::uint16_t last_pos = kNoBeatPos;
+
+  // One pass: the level the LED has now.
+  constexpr bool update(const BeatSample& s, std::uint32_t ms) noexcept {
+    bool flash = false;
+    std::uint16_t pos = kNoBeatPos;
+    if (!s.playing) {
+      const std::uint32_t period = beat_period_ms(s.tempo_x100);
+      if (was_playing_ || !started_) {
+        flash = true;  // power-up, or a stop: the free-run starts with a flash
+        beat_ms_ = ms;
+      } else if (ms - beat_ms_ >= period) {
+        beat_ms_ += period;
+        if (ms - beat_ms_ >= period) {
+          beat_ms_ = ms;  // late by more than a beat (a long pass): resynchronise instead of flashing in a burst
+        }
+        flash = true;
+      }
+      was_playing_ = false;
+      prev_pos_ = kNoBeatPos;
+    } else {
+      pos = s.count_in != 0u ? static_cast<std::uint16_t>(512u - s.count_in) : s.step;
+      if (!was_playing_ || prev_pos_ == kNoBeatPos) {
+        flash = pos % kStepsPerBeat == 0u;  // a start: only a beat step flashes
+      } else {
+        const bool new_step = pos != prev_pos_ || s.ustep < prev_ustep_;  // (the ustep part: a pattern of one or two steps loops on the same position)
+        flash = new_step && (pos % kStepsPerBeat == 0u || pos / kStepsPerBeat != prev_pos_ / kStepsPerBeat);
+      }
+      was_playing_ = true;
+      prev_pos_ = pos;
+      prev_ustep_ = s.ustep;
+    }
+    started_ = true;
+    if (flash) {
+      flash_ms_ = ms;
+      lit_ = true;
+      ++flashes;
+      last_pos = pos;
+    }
+    if (lit_ && ms - flash_ms_ >= kBeatFlashMs) {
+      lit_ = false;
+    }
+    return lit_;
+  }
+
+ private:
+  std::uint32_t flash_ms_ = 0;  // when the lit flash began
+  std::uint32_t beat_ms_ = 0;   // free-run: when the last beat was due
+  std::uint16_t prev_pos_ = kNoBeatPos;
+  std::uint8_t prev_ustep_ = 0;
+  bool was_playing_ = false;
+  bool started_ = false;
+  bool lit_ = false;
+};
 
 }  // namespace o3os::platform::mk66::blink

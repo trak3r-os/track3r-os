@@ -277,7 +277,11 @@ inline constexpr unsigned MtcStart = 28;
 // rate). While it is not Off the MIDI clock follow is off (CLOCK IN and CLOCK MODE Slave are ignored) and MTC OUT is muted. Appended by the same rule: a file written before it has no such entry and reads Off; an older reader skips the entry it does not know. Not learnable
 // (a controller must not hand the transport to a master). The block holds 32 fields since OS-MIDICCMAP S1: no raise, no version bump.
 inline constexpr unsigned MtcIn = 29;
-inline constexpr unsigned kCount = 30;
+// OS-LEDBPM (new Community OS behaviour; the official firmware's status LED is a fixed heartbeat). STATUS LED: 0 Blink (the default: the heartbeat of today), 1 BPM (a short flash on every beat, locked to the play position, free-running
+// at the project tempo while stopped), 2 Off. A fault code wins in every mode. Appended by the same rule: a file written before it has no such entry and reads Blink; an older reader skips the entry it does not know; an out-of-range
+// value is refused (the reader skips it: Blink). The block holds 32 fields since OS-MIDICCMAP S1: no raise, no version bump. Not learnable.
+inline constexpr unsigned StatusLed = 30;
+inline constexpr unsigned kCount = 31;
 }  // namespace device_setting
 
 // EnvState (OS-INSTUI S6): the SOURCE of a modulator slot, 0 Off / 1 Envelope / 2 LFO, kept in two bytes of an Envelope: `loop` at the field's offset and `enable` in the byte after it.

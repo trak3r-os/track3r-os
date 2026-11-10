@@ -2019,15 +2019,41 @@ void input_audio_started() noexcept {
 }
 bool pads_gave_no_answer() noexcept { return g_input_up && input::device::scanner().pads_gave_no_answer(); }
 
-// OS-STATUSLED: the STATUS LED option (blink.h g_heartbeat_on): the Config > DISPLAY screen's STATUS LED row, and the `diag status`
-// command. pass() copies the app's choice to the platform's flag each pass; status_led() sets both at once, so the row and the console
-// never disagree. Not saved: BLINK at every boot.
-bool status_led_heartbeat() noexcept { return g_app != nullptr ? g_app->status_led_blink() : blink::g_heartbeat_on; }
-void status_led(bool on) noexcept {
-  blink::g_heartbeat_on = on;  // the single-writer flag of blink.h (written from the main loop only)
-  if (g_app != nullptr) {
-    g_app->set_status_led_blink(on);
+// OS-LEDBPM: the status LED. The mode is the saved device setting STATUS LED (Config > DISPLAY; Blink / BPM / Off) unless `diag status <mode>` overrode it for the session (not saved). Main loop only:
+// main.cpp's LED loop calls status_led_level() once a pass; it reads the sequencer's play position once (lock-free, PlayPosition) and feeds the beat flash (blink.h BeatLed).
+namespace {
+blink::BeatLed g_beat_led;
+int g_led_override = -1;  // -1: the setting rules; else a blink::LedMode, set by the console
+blink::LedMode led_mode() noexcept {
+  if (g_led_override >= 0) {
+    return static_cast<blink::LedMode>(g_led_override);
   }
+  const float v = g_app != nullptr ? g_app->device_settings().get(model::device_setting::StatusLed) : 0.0f;
+  return v >= 1.5f ? blink::LedMode::Off : (v >= 0.5f ? blink::LedMode::Bpm : blink::LedMode::Blink);  // (the block refuses 3 and over: Blink is the default)
+}
+}  // namespace
+bool status_led_level(std::uint8_t shown_code, std::uint32_t ms) noexcept {
+  const blink::LedMode mode = led_mode();
+  bool beat_on = false;
+  if (mode == blink::LedMode::Bpm) {  // (the flash is only fed in BPM, so its counters count what the LED showed)
+    blink::BeatSample s;
+#if !O3OS_AUDIO_TEST  // (the skeleton image has no sequencer: the beat free-runs at the default tempo)
+    if (g_seq != nullptr) {
+      const audio::PlayPosition::Value v = g_seq->play_position().read();
+      s.playing = v.playing;
+      s.step = v.step;
+      s.ustep = v.ustep;
+      s.count_in = v.count_in;
+      s.tempo_x100 = v.tempo_x100;
+    }
+#endif
+    beat_on = g_beat_led.update(s, ms);
+  }
+  return blink::led_on_mode(mode, shown_code, ms, beat_on);
+}
+void status_led_set(int mode) noexcept { g_led_override = mode; }
+StatusLedInfo status_led_info() noexcept {
+  return StatusLedInfo{static_cast<std::uint8_t>(led_mode()), g_led_override >= 0, g_beat_led.flashes, g_beat_led.last_pos};
 }
 
 #if !O3OS_AUDIO_TEST
@@ -3791,7 +3817,6 @@ std::uint8_t pass() noexcept {
   if (g_app == nullptr) {
     return 0;
   }
-  blink::g_heartbeat_on = g_app->status_led_blink();  // OS-STATUSLED: the Config > DISPLAY STATUS LED row, copied to the flag main.cpp's LED loop reads
   const std::uint32_t backlight_generation = g_app->device_settings().generation(model::device_setting::DisplayBrightness);
   if (backlight_generation != g_backlight_generation) {  // the setting DISPLAY (OS-CFGWIRE: Config, a bound controller, the settings file): the backlight goes to its level in the driver's ramp
     g_backlight_generation = backlight_generation;

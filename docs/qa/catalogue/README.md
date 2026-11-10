@@ -33,11 +33,11 @@ Open = rows with neither a sim nor a unit PASS. The table is generated: `python3
 
 | Screen | File | Functions | Sim PASS | Unit PASS | Open |
 |---|---|---|---|---|---|
-| Config | [config.md](config.md) | 117 | 81 | 1 | 36 |
+| Config | [config.md](config.md) | 118 | 81 | 1 | 37 |
 | File | [file.md](file.md) | 101 | 48 | 22 | 45 |
-| Global | [global.md](global.md) | 140 | 28 | 10 | 104 |
+| Global | [global.md](global.md) | 140 | 28 | 11 | 103 |
 | Input test | [input_test.md](input_test.md) | 9 | 0 | 0 | 9 |
-| Instrument | [instrument.md](instrument.md) | 167 | 76 | 12 | 82 |
+| Instrument | [instrument.md](instrument.md) | 167 | 76 | 13 | 82 |
 | Mixer | [mixer.md](mixer.md) | 91 | 51 | 0 | 40 |
 | Module app | [module_app.md](module_app.md) | 9 | 5 | 2 | 3 |
 | Modules | [modules.md](modules.md) | 166 | 35 | 10 | 125 |
@@ -47,8 +47,8 @@ Open = rows with neither a sim nor a unit PASS. The table is generated: `python3
 | Sample edit | [sample_edit.md](sample_edit.md) | 45 | 22 | 0 | 23 |
 | Sample load | [sample_load.md](sample_load.md) | 46 | 14 | 15 | 18 |
 | Song | [song.md](song.md) | 126 | 62 | 6 | 64 |
-| Wave | [wave.md](wave.md) | 27 | 20 | 1 | 7 |
-| **Total** | | **1518** | **678** | **97** | **778** |
+| Wave | [wave.md](wave.md) | 27 | 20 | 2 | 6 |
+| **Total** | | **1519** | **678** | **100** | **777** |
 
 <!-- /qa-cover -->
 

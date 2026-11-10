@@ -8,7 +8,7 @@ The Mixer has five pages, and three are not a fader strip. **ROUTING** decides w
 
 ## What it is for
 
-Use the Mixer to set levels and pans, route tracks, mute and solo, put effects on tracks, and watch the master limiter. Press `Master`. `F1` to `F4` pick the page, with the cursor on its first row. `F6` opens **INSERTS** from the MIXER, ROUTING and MASTER FX pages; on **STEMS** it is **APPLY**. Pressing `Master` again turns to the next page. `Master` and `Insert` together open the Mixer straight on **INSERTS** from any screen (new in track3r-os). <!-- QA-MIX-112, QA-MIX-031, QA-MIX-032, QA-MIX-033, QA-MIX-034, QA-MIX-036, QA-MIX-058 -->
+Use the Mixer to set levels and pans, route tracks, mute and solo, put effects on tracks, and watch the master limiter. Press `Master`. `F1` to `F4` pick the page, with the cursor on its first row. `F6` opens **INSERTS** from the MIXER, ROUTING and MASTER FX pages; on **STEMS** it is **APPLY**. Pressing `Master` again turns to the next page. `Master` and `Insert` together, or `Insert` pressed while `Master` is still held, open the Mixer straight on **INSERTS** from any screen (new in track3r-os). If you hold `Master` and then press any other key (`Play`, say) after a moment, that key does its own job and letting go of `Master` does nothing; the Mixer opens only when you tap `Master` on its own. Earlier builds opened the Mixer on that second key. <!-- QA-MIX-112, QA-MIX-031, QA-MIX-032, QA-MIX-033, QA-MIX-034, QA-MIX-036, QA-MIX-058 -->
 
 To set a level or a pan on the MIXER page, press `Left` or `Right` to pick the column and `Up` or `Down` to pick the field (level or pan). Turn the encoder to set the value. `Shift` makes the step coarse. `Delete` puts back the default.
 
@@ -260,7 +260,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 > **Careful**: The Mixer has no undo. `F8` here is **SOLO**, and `F8` on Pattern, Song or Params does not bring a Mixer change back. <!-- QA-MIX-013 -->
 
 - The master has no bit-depth stage. The MST FX page lists only the limiter. Bit depth is a step effect and a Perform slot. <!-- QA-MIX-002, QA-PRF-014 -->
-- `Master` acts when you let go of it, because it waits to see whether you turn the encoder. If `Shift` joins after `Master`, the tap is lost. <!-- QA-MIX-031 -->
+- `Master` acts when you let go of it, because it waits to see whether you turn the encoder. If `Shift` joins after `Master`, the tap still acts when you let go. <!-- QA-MIX-031 -->
 - The master limiter is always on. The page lists no headroom, saturation, EQ, bass, space or bit-depth stages. <!-- QA-MIX-002 -->
 - A muted track still exports as a stem, with its sound in it. <!-- QA-MIX-024 -->
 - The first hit after an unmute can be soft: it loses up to 1.45 ms to a short ramp. It never clicks. <!-- QA-MIX-025 -->

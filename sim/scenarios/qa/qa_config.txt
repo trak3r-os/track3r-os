@@ -248,13 +248,14 @@ encoder 1
 tap down
 encoder 1
 
-# OS-STATUSLED: the STATUS LED row, the DISPLAY page's sixth row (not a setting: a session choice, RAM only, BLINK again at every boot).
-# QA-CFG-272: the row reads STATUS LED BLINK, the default; the card on the right says what OFF does and that it is not saved.
+# OS-STATUSLED, OS-LEDBPM: the STATUS LED row, the DISPLAY page's sixth row (a saved device setting, field id 30: BLINK / BPM / OFF, default BLINK).
+# QA-CFG-272: the row reads STATUS LED BLINK, the default; the card on the right says what BLINK, BPM and OFF do. (The restore above clamps its two turns onto this row now that it is a setting like the others: Delete puts the default back first.)
 tap down 2
+tap delete
 snap qa_cfg_272
 
-# QA-CFG-273: STATUS LED to OFF by a turn: the row reads OFF at once, no star, nothing pending (no settings entry is written).
-encoder -1
+# QA-CFG-273: STATUS LED two turns on, BLINK to BPM to OFF: the row reads OFF at once and is saved with the other settings.
+encoder 2
 snap qa_cfg_273
 
 # QA-CFG-274: Delete puts BLINK back.

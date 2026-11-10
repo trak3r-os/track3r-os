@@ -54,6 +54,7 @@ constexpr const char* const kMetroModes[] = {"Off", "Cue", "Main"};             
 constexpr const char* const kCountIns[] = {"Off", "1 bar", "2 bars"};                            // OS-METRO
 constexpr const char* const kRecVelocity[] = {"Off", "External"};                                  // OS-RECMICRO
 constexpr const char* const kMtcRates[] = {"Off", "24 fps", "25 fps", "30 fps"};                    // OS-MTC A3 (midi::mtc::fps_of_setting)
+constexpr const char* const kStatusLeds[] = {"Blink", "BPM", "Off"};  // OS-LEDBPM (the status LED mode)
 constexpr const char* const kMtcIns[] = {"Off", "DIN", "USB"};                                     // OS-MTC B3 (the port MTC IN chases)
 constexpr const char* const kPatSwitches[] = {"Step", "Pattern end"};                              // E-PAT-35
 constexpr const char* const kMidiOuts[] = {"Config", "DIN", "USB", "DIN + USB"};                   // OS-INSTUI S8b: the instrument's MIDI port (kMidiOut*); Config = the device's MIDI OUT
@@ -265,6 +266,7 @@ constexpr Row kDevice[device_setting::kCount] = {
     at(choice("MTC OUT", kMtcRates, 4, 0, 0, kGroupMidi), 27, ParamStore::U8),                               // OS-MTC A3: Off; 24, 25 or 30 fps: MIDI Time Code out. Not learnable (a controller must not start a time code)
     at(number("MTC START", "h", ParamUnit::Int, 0, 23, 1, 23, 4, 0, kGroupMidi), 28, ParamStore::U8),        // OS-MTC A3: the hour of the time code at the song's first step, 1 (Logic's default: bar 1 at 01:00:00:00)
     at(choice("MTC IN", kMtcIns, 3, 0, 0, kGroupMidi), 29, ParamStore::U8),                                  // OS-MTC B3: Off; DIN or USB: the unit chases the time code of that port. Not learnable (a controller must not hand the transport to a master)
+    at(choice("STATUS LED", kStatusLeds, 3, 0, 0, kGroupDisplay), 30, ParamStore::U8),                       // OS-LEDBPM: Blink (today's heartbeat); BPM: a flash on every beat; Off. Not learnable
 };
 
 static_assert(Settings::kValueBytes >= device_setting::kCount && Settings::kValueBytes >= project_setting::kCount &&

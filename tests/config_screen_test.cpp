@@ -717,24 +717,28 @@ TEST_CASE("config: a page change starts at its first row; SD and INFO have no ro
   CHECK(app::kConfigScreen.count(rig.app->model(), rig.app->state()) == 0);
 }
 
-TEST_CASE("config: the DISPLAY page's STATUS LED row (OS-STATUSLED): a session choice, not a setting; the encoder toggles BLINK / OFF, Delete puts BLINK back") {
+TEST_CASE("config: the DISPLAY page's STATUS LED row (OS-LEDBPM): a saved device setting; the encoder walks BLINK / BPM / OFF at once, Delete puts BLINK back") {
   Rig rig;
   rig.tap(Button::F2);
   CHECK(app::kConfigScreen.count(rig.app->model(), rig.app->state()) == 6);  // DISPLAY, PAD LIGHTS, NUMBERING, MIDDLE C, THEME, STATUS LED
   for (int i = 0; i < 5; ++i) {
     rig.tap(Button::Down);  // STATUS LED is the sixth row of the DISPLAY page
   }
-  CHECK(app::config_row(rig.app->state()) == app::ConfigRow::StatusLed);
-  CHECK(app::kConfigScreen.focus_param(rig.app->model(), rig.app->state()) == core::ParamId::None);  // no descriptor: not a setting
-  CHECK(rig.app->state().status_led_blink);                                                       // BLINK at boot, not saved
-  rig.turn(-1);
-  CHECK(!rig.app->state().status_led_blink);  // OFF
-  CHECK(rig.params().pending_n == 0u);        // nothing pending: the row writes no setting
+  CHECK(app::config_row(rig.app->state()) == app::ConfigRow::Param);  // an ordinary row now
+  NEED(app::kConfigScreen.focus_param(rig.app->model(), rig.app->state()) == core::param_id(core::ParamKind::Device, 0, ds::StatusLed));
+  CHECK(rig.get(ds::StatusLed) == 0.0f);  // BLINK, the default
   rig.turn(1);
-  CHECK(rig.app->state().status_led_blink);  // BLINK again
-  rig.turn(-1);
+  CHECK(rig.get(ds::StatusLed) == 1.0f);  // BPM
+  CHECK(rig.params().pending_n == 0u);    // applied at once
+  rig.turn(1);
+  CHECK(rig.get(ds::StatusLed) == 2.0f);  // OFF
+  rig.turn(1);
+  CHECK(rig.get(ds::StatusLed) == 2.0f);  // the end of the choice
+  rig.turn(-2);
+  CHECK(rig.get(ds::StatusLed) == 0.0f);
+  rig.turn(1);
   rig.tap(Button::Delete);
-  CHECK(rig.app->state().status_led_blink);  // Delete puts the default (BLINK) back
+  CHECK(rig.get(ds::StatusLed) == 0.0f);  // Delete puts the default (BLINK) back
   CHECK(rig.params().pending_n == 0u);
 }
 

@@ -316,6 +316,7 @@ If a `Shift` + soft key has no label, it does nothing. It never acts as the plai
 | `Pattern` | the Pattern screen, when you let go of the key. Held, with the encoder: the tempo, on any screen; held, with a pad: tap tempo (see [Tempo from any screen](#tempo-from-any-screen)) | QA-GLB-153, QA-GLB-155 |
 | `Song` + `Pattern`, or `Master` + `Song`, pressed together | opens the Navigator on any screen; press `F8` (**GO**) to go to the screen you chose, or `F7` (**CLOSE**) to leave it. Neither key does its own job, and the Song peek and the held volume and tempo turns stay off | QA-GLB-233 |
 | `Master` + `Insert`, pressed together | opens the Mixer on its **INSERTS** page from any screen (on the Mixer it goes to INSERTS). Neither key does its own job. New in track3r-os. | QA-MIX-112 |
+| `Master` held, then `Insert` at any later time | the same: hold `Master`, take your time, tap `Insert`; letting go of `Master` afterwards does nothing. (`Insert` first and `Master` later is not this: `Insert` acts on its own.) Any other key pressed that way (`Play`, say) does its own job and `Master`'s release is silent; earlier builds opened the Mixer on that key. New in track3r-os. | QA-MIX-112 |
 | `Shift` + `Pattern` | lists the module apps that are not tools; `F1` or `F8` (**LAUNCH**) starts one, `Pattern` leaves the list. It was the Navigator before | QA-MOD-252 |
 | `Shift` + `Master` | steps to the next colour theme: Amiga, Black, White, then Amiga again. The THEME row on Config says the same. New in track3r-os. | QA-GLB-157 |
 | `Shift` + `Config` | opens the help page of the screen you are on (see [The help page](#the-help-page)) | QA-GLB-141 |
@@ -412,7 +413,7 @@ On the Song screen, `Insert` adds a slot, `Shift` + `Insert` adds a slot with a 
 
 The second label Backspace is not what `Shift` + `Delete` does on Pattern: it pulls steps up and erases nothing backwards. The backspace is the plain `Delete` key on the on-screen keyboard. The pull is new in track3r-os.
 
-Most screen buttons act when you press them. `Pattern`, `Song`, `Master` and `Insert` act when you let go (or 40 ms after the press), because a hold can mean something else: `Song` + `Pattern` and `Master` + `Song` open the Navigator, `Master` + `Insert` opens the Mixer on INSERTS (press both within 40 ms of each other; a slower press is a `Master` tap, then `Insert`) and `Shift` + `Pattern` lists the module apps, and a hold of `Song` for 0.4 seconds shows the Song screen as a peek.  Playback does not stop when you change screen. Leaving Perform ends its effects, except when you go to the Mixer or Song; see [Perform](perform.md).
+Most screen buttons act when you press them. `Pattern`, `Song`, `Master` and `Insert` act when you let go (or 40 ms after the press), because a hold can mean something else: `Song` + `Pattern` and `Master` + `Song` open the Navigator, `Master` + `Insert` opens the Mixer on INSERTS (press both within 40 ms of each other, or hold `Master` and tap `Insert` whenever you like; `Insert` first and `Master` later is `Insert`'s own key, then `Master`) and `Shift` + `Pattern` lists the module apps, and a hold of `Song` for 0.4 seconds shows the Song screen as a peek.  Playback does not stop when you change screen. Leaving Perform ends its effects, except when you go to the Mixer or Song; see [Perform](perform.md).
 
 The buttons have no lights. The screen shows the state instead, for example the mode chip and the red **REC** badge on Pattern.
 
@@ -769,7 +770,7 @@ The Mixer has five pages, and three are not a fader strip. **ROUTING** decides w
 
 ## What it is for
 
-Use the Mixer to set levels and pans, route tracks, mute and solo, put effects on tracks, and watch the master limiter. Press `Master`. `F1` to `F4` pick the page, with the cursor on its first row. `F6` opens **INSERTS** from the MIXER, ROUTING and MASTER FX pages; on **STEMS** it is **APPLY**. Pressing `Master` again turns to the next page. `Master` and `Insert` together open the Mixer straight on **INSERTS** from any screen (new in track3r-os).
+Use the Mixer to set levels and pans, route tracks, mute and solo, put effects on tracks, and watch the master limiter. Press `Master`. `F1` to `F4` pick the page, with the cursor on its first row. `F6` opens **INSERTS** from the MIXER, ROUTING and MASTER FX pages; on **STEMS** it is **APPLY**. Pressing `Master` again turns to the next page. `Master` and `Insert` together, or `Insert` pressed while `Master` is still held, open the Mixer straight on **INSERTS** from any screen (new in track3r-os). If you hold `Master` and then press any other key (`Play`, say) after a moment, that key does its own job and letting go of `Master` does nothing; the Mixer opens only when you tap `Master` on its own. Earlier builds opened the Mixer on that second key.
 
 To set a level or a pan on the MIXER page, press `Left` or `Right` to pick the column and `Up` or `Down` to pick the field (level or pan). Turn the encoder to set the value. `Shift` makes the step coarse. `Delete` puts back the default.
 
@@ -1010,7 +1011,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 > **Careful**: The Mixer has no undo. `F8` here is **SOLO**, and `F8` on Pattern, Song or Params does not bring a Mixer change back.
 
 - The master has no bit-depth stage. The MST FX page lists only the limiter. Bit depth is a step effect and a Perform slot.
-- `Master` acts when you let go of it, because it waits to see whether you turn the encoder. If `Shift` joins after `Master`, the tap is lost.
+- `Master` acts when you let go of it, because it waits to see whether you turn the encoder. If `Shift` joins after `Master`, the tap still acts when you let go.
 - The master limiter is always on. The page lists no headroom, saturation, EQ, bass, space or bit-depth stages.
 - A muted track still exports as a stem, with its sound in it.
 - The first hit after an unmute can be soft: it loses up to 1.45 ms to a short ramp. It never clicks.
@@ -3399,9 +3400,9 @@ Press `F2` (**DISPLAY**). Move to a row and turn the encoder.
 | NUMBERING | From 0, From 1, Hex | How the step rows of the Pattern screen are numbered. The default is **From 1**. |
 | MIDDLE C | C-3, C-4, C-5, C-6 | The name of MIDI note 60 on the Pattern screen. The default is **C-5**. |
 | THEME | Amiga, Black, White | The colours of the screens. `Shift` + `Master` also steps to the next theme. |
-| STATUS LED | BLINK, OFF | Whether the status LED behind the F keys blinks its heartbeat. **OFF** stops the heartbeat and also keeps blink code 12 (the over-budget code, no fault) dark: a fault blink code still shows (new Community OS behaviour). Not saved: every boot starts with **BLINK**. |
+| STATUS LED | BLINK, BPM, OFF | What the status LED behind the F keys does in normal running. **BLINK** is the heartbeat (100 ms on, 900 ms off). **BPM** flashes briefly on every beat: while a song or pattern plays the flash is locked to the play position (under an external MIDI clock too) and lands on the step that starts each beat; stopped, it flashes at the project tempo. **OFF** keeps the LED dark and also keeps blink code 12 (the over-budget code, no fault) dark. A fault blink code always shows, whatever the row says (new Community OS behaviour). The default is **BLINK**. |
 
-The five setting rows act at once, with nothing to apply.   NUMBERING and MIDDLE C show on the Pattern screen: with **From 0** the step rows count from 00, and with MIDDLE C on **C-4** a note that reads C-5 by default reads C-4.   The STATUS LED row is not a setting: it is a choice of this session (RAM only), so it is not saved to the card and every boot starts with **BLINK**; `Delete` puts **BLINK** back.
+The six setting rows act at once, with nothing to apply.   NUMBERING and MIDDLE C show on the Pattern screen: with **From 0** the step rows count from 00, and with MIDDLE C on **C-4** a note that reads C-5 by default reads C-4.   STATUS LED is saved with the other settings; a settings file from an older version reads **BLINK**, and `Delete` puts **BLINK** back.
 
 ### Reset a page to its defaults
 
@@ -3558,7 +3559,7 @@ The console has more commands than this table. The table lists the ones that are
 | `ins` | the inserts of the project: the totals of the insert stage, then one line for each bound insert with its track, slot, module, `on` or `bypassed`, and its cost | `ins bind <track> <slot> <module>` puts an effect on a track and loads the module from the card when it is not loaded yet; `ins unbind <track> <slot>` removes it; `ins bypass <track> <slot> on` or `off` bypasses it. For the master insert, which runs its effect twice (left and right) and so lists two lines, `master L` and `master R`, type `master` instead of the track and slot: `ins bind master <module>`, `ins unbind master`, `ins bypass master on`. A refusal says why and changes nothing: **DELETE THE INSERT FIRST** (the slot is taken), **NO INSERT HERE** (the slot is empty), **NOT AN EFFECT MODULE**, **MODULE MISSING**, **INSERTS FULL**. These are the INSERTS page's messages, see [Mixer](mixer.md)  |
 | `voices` | the sampler voices in use, the peak since boot, the steals and `advanced` | `advanced` counts the short stretches (one a block, about 690 a second for each) in which a voice on a muted track was moved along without being rendered. It stays at 0 while no track is muted. |
 | `rot` | the display orientation, `rot 0` to `rot 7` | not saved |
-| `status` | the status LED heartbeat: `status blink` or `status off` | not saved: every boot starts with blink; with off the over-budget code 12 stays dark too, a fault code still blinks (new Community OS behaviour) |
+| `status` | the status LED mode, with a count of beat flashes: `status blink`, `status bpm` or `status off` | for this session only, not saved: Config > DISPLAY > STATUS LED is the saved setting and every boot starts with that; with off the over-budget code 12 stays dark too, a fault code still blinks (new Community OS behaviour) |
 | `state` | the app state as one `key=value` line | for example the screen, the cursor and play |
 | `shot` | the screen, as framed data | the tool `--shot` option asks for it |
 | `leds` | the pad LED levels, on one line | |
@@ -3904,7 +3905,7 @@ The keys on one page. Each table names the chapter it comes from.
 | `Rec` | on Pattern, turns STEP on or off; on Record, starts or stops the take |
 | `Shift` + `Rec` | on Pattern, turns LIVE on or off |
 | `Song` + `Pattern`, or `Master` + `Song` | opens the Navigator. `F8` (**GO**) opens the chosen screen; `Pattern` leaves it |
-| `Master` + `Insert` | opens the Mixer on its INSERTS page, from any screen |
+| `Master` + `Insert` | opens the Mixer on its INSERTS page, from any screen (hold `Master`, then tap `Insert` at any time) |
 | `Shift` + `Pattern` | lists the module apps that are not tools. `F1` (**LAUNCH**) starts one; `Pattern` leaves it |
 | `Shift` + `Config` | opens the help page of the screen you are on. `Left` and `Right` turn the pages, `Up`, `Down` and the encoder scroll, any other key closes it |
 | `Shift` + `Master` | steps to the next colour theme: Amiga, Black, White.  |
