@@ -4,6 +4,7 @@
 #include <o3os/core/action.h>
 #include <o3os/core/learn.h>
 #include <o3os/core/param.h>
+#include <o3os/model/lane_store.h>
 #include <o3os/model/project.h>
 #include <o3os/model/undo.h>
 
@@ -165,6 +166,27 @@ class Editor {
   Status set_steps(std::uint32_t id, std::uint32_t track, std::uint32_t first, const Step* values,
                    std::uint32_t count) noexcept;
 
+  // OS-MIDIREC-P1 S1: the MIDI take lanes (lane_store.h). The store is the app's, outside the Project; without one attached (the default) the lane
+  // calls answer NotFound and delete / clear / length changes touch no lane. A lane edit is journalled in the Pattern ring as kLaneDelete and kLaneInsert
+  // records (the events moved, so one record never exceeds one lane's 32 KiB) and advances the pattern's generation (Project::touch_lanes), so undo and
+  // redo and the native Writer's Modified check see it. A17: shortening a track (set_track_length, set_pattern_length) deletes the lane events at or
+  // past the new length in the same unit; lengthening does not; delete_pattern and clear_pattern free the pattern's lanes (their records come before the
+  // pattern's own, so undo brings the pattern back first). A lane record is twice the data (the events are kept to undo and to redo), so before any
+  // erase, cut, free or replace the Editor checks that the unit's lane records (plus the pattern's own record) fit the ring: when they do not the call
+  // answers Full and changes nothing (state and history intact). That is delete_pattern, clear_pattern, set_track_length, set_pattern_length and
+  // lane_replace / lane_clear, and only when lanes are touched (a pattern without lanes keeps the old rule: an oversize unit clears the ring and the edit
+  // stays done); only a unit begun with UndoArea::None, or a final or replayed one, is not checked (nothing is recorded).
+  void attach_lanes(LaneStore* lanes) noexcept { lanes_ = lanes; }
+  const LaneStore* lanes() const noexcept { return lanes_; }
+  // Replaces the events of the lane of (pattern, track) whose tick is in [t0, t1) with `n` events (sorted, valid, ticks inside [t0, t1)). A take commit is
+  // one call: t0 and t1 are its range. NotFound: no pattern or no store; BadIndex: track; BadValue: t0 >= t1, t1 above 6144, n above 4096 or events
+  // that are invalid, unsorted or outside the range, or t1 above the track's length x 48 ticks (A17: no event past the end of its track); Full: the lane
+  // would pass 4096 events, the pool 24,576, there would be a 2049th lane, or the unit does not fit the undo ring (nothing changes). The same events as
+  // there are: applied, not recorded. lane_clear empties the whole lane whatever the track's length.
+  Status lane_replace(std::uint32_t pattern, std::uint32_t track, std::uint32_t t0, std::uint32_t t1, const LaneEvent* events,
+                      std::uint32_t n) noexcept;
+  Status lane_clear(std::uint32_t pattern, std::uint32_t track) noexcept;
+
   Status set_instrument(std::uint32_t index, const Instrument& value) noexcept;
   Status clear_instrument(std::uint32_t index) noexcept;
   // OS-INSTUI S7, NAME: the instrument's name (the stored field: up to kInstrumentNameMax characters, any but NUL) as one undo record (the whole instrument, as set_instrument: the unit
@@ -218,6 +240,18 @@ class Editor {
   friend class Scope;
 
   void check_sync() noexcept;
+  // Lane edits that record themselves (the caller checked everything): erase [index, index + count) of the lane / put `count` events in at `index`.
+  void lane_erase(std::uint32_t pattern, std::uint32_t track, std::uint32_t index, std::uint32_t count) noexcept;
+  bool lane_insert(std::uint32_t pattern, std::uint32_t track, std::uint32_t index, const LaneEvent* events, std::uint32_t count) noexcept;
+  void lane_cut(std::uint32_t pattern, std::uint32_t track, std::uint32_t from_tick) noexcept;  // A17: the events at or past the tick
+  void lanes_free(std::uint32_t pattern) noexcept;                                                // every lane of the pattern
+  Status lane_replace_in(std::uint32_t pattern, std::uint32_t track, std::uint32_t t0, std::uint32_t t1, const LaneEvent* events, std::uint32_t n,
+                         bool inside_track) noexcept;
+  // The undo-ring bytes the records of such an edit take (0: no lane event is involved), and whether `record_bytes` more fit the ring that a unit starting with `op` writes to.
+  std::size_t lane_cut_bytes(std::uint32_t pattern, std::uint32_t track, std::uint32_t from_tick) noexcept;
+  std::size_t lanes_free_bytes(std::uint32_t pattern) noexcept;
+  bool undo_fits(std::uint8_t op, std::size_t record_bytes) const noexcept;
+  static std::size_t lane_record_bytes(std::uint32_t n) noexcept;  // 8n + 16 (0 for n = 0)
   void synced() noexcept { synced_ = project_.generation(); }
   static unsigned ring_index(UndoArea area) noexcept { return UndoHistory::index(area); }
   // The ring the open unit writes to; the first record of an Auto unit chooses it by `op`. nullptr: not journalled (UndoArea::None).
@@ -240,6 +274,7 @@ class Editor {
   void note_applied(core::ParamId id, float value) noexcept;
 
   Project& project_;
+  LaneStore* lanes_ = nullptr;  // OS-MIDIREC-P1: not owned
   UndoJournal* rings_[kUndoAreas];  // by UndoHistory::index; the same ring three times in the single-ring shape
   UndoJournal* walking_ = nullptr;  // the ring undo() / redo() reads from
   UndoJournal* open_ = nullptr;     // the ring the open unit writes to (chosen at its first record when the area is Auto)

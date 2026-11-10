@@ -100,7 +100,7 @@ def main():
     if cpp_limits != py_limits:
         sys.exit("FAILED: the limits tables differ\nC++:\n%s\nPython:\n%s" % (cpp_limits.decode(), py_limits.decode()))
 
-    for kind in ("empty", "small", "maximal", "settings", "state", "midi13", "persist2", "scales", "lfosine", "stereo", "wt", "playthru", "modrate", "og", "og17", "law", "insx"):
+    for kind in ("empty", "small", "maximal", "settings", "state", "midi13", "persist2", "scales", "lfosine", "stereo", "wt", "playthru", "modrate", "og", "og17", "law", "insx", "lanes-empty", "lanes-some", "lanes-one", "lanes-2048", "lanes-full"):
         a, b, c = (os.path.join(work, "%s.%s.o3p" % (kind, tag)) for tag in ("cpp", "py", "cpp2"))
         run([tool, "gen", kind, a])
         if kind in PRE_LAW:  # OS-BUG-PASTE24: a project whose law is 0 writes no LAW chunk: the file is the one the build before it wrote (size and CRC-32 taken from that build's o3pj_tool)
@@ -1309,6 +1309,108 @@ def main():
         if b"INSX" not in [c for c, _ in older["unknown"]] or older["inserts"] != [] or prev.build(older) != data:
             sys.exit("FAILED: %s: a reader that does not know INSX does not keep it and write it back byte for byte" % what)
     print("insx: the INSX chunk is read alike on both sides (tolerance, shape errors, newer minors, order), a file without it is the one that never had an insert, a previous reader keeps it byte for byte")
+    # OS-MIDIREC-P1 S1: the MEVT chunk (lane events). The fixtures above are identical on both sides; here the bytes and the hostile cases.
+    small = read(os.path.join(work, "small.cpp.o3p"))
+    if read(os.path.join(work, "lanes-empty.cpp.o3p")) != small:
+        sys.exit("FAILED: a project with an empty lane store is not byte for byte the project without lanes")
+    sm = split_chunks(small)
+    spec_now = importlib.util.spec_from_file_location("o3project_now", ref)
+    now = importlib.util.module_from_spec(spec_now)
+    spec_now.loader.exec_module(now)
+    first_unknown = next(i for i, (c, _) in enumerate(sm) if c not in now.RANKS)
+
+    def ev(tick, ln, kind, chan, port, a, b):
+        return struct.pack(">HHBBBB", tick, ln, kind << 4 | chan, port, a, b)
+
+    def lane(pattern, track, events, size=8, reserved=0, count=None):
+        return struct.pack(">BBHBB", pattern, track, len(events) if count is None else count, size, reserved) + b"".join(events)
+
+    def mevt(lanes, version=0x0100, count=None, tail=b""):
+        return struct.pack(">HH", version, len(lanes) if count is None else count) + b"".join(lanes) + tail
+
+    def with_mevt(payload, at=None):
+        cs = list(sm)
+        cs.insert(first_unknown if at is None else at, (b"MEVT", payload))
+        return cs
+
+    one = read(os.path.join(work, "lanes-one.cpp.o3p"))
+    ln_chunks = split_chunks(one)
+    if [c for c in ln_chunks if c[0] != b"MEVT"] != sm or ln_chunks[first_unknown][0] != b"MEVT":
+        sys.exit("FAILED: the lanes-one fixture is not the small project with one MEVT chunk right before its unknown chunks")
+    lane_line = [l for l in run([tool, "dump", os.path.join(work, "lanes-one.cpp.o3p")]).stdout.decode().splitlines() if l.startswith("lane ")]
+    if len(lane_line) != 1 or not lane_line[0].startswith("lane 1 0 events=4096 "):
+        sys.exit("FAILED: lanes-one dumps %r" % lane_line)
+    pay = ln_chunks[first_unknown][1]
+    if len(pay) != 4 + 6 + 4096 * 8 or pay[:10] != bytes([1, 0, 0, 1, 1, 0, 0x10, 0, 8, 0]):
+        sys.exit("FAILED: the MEVT payload of lanes-one is not version 1.0, 1 lane, pattern 1 track 0, 4096 events of 8 bytes (%d bytes)" % len(pay))
+    full = read(os.path.join(work, "lanes-full.cpp.o3p"))
+    fp = dict(split_chunks(full))[b"MEVT"]
+    if len(fp) != 4 + 2048 * 6 + 24576 * 8:
+        sys.exit("FAILED: the MEVT payload of lanes-full is %d bytes" % len(fp))
+
+    e1 = ev(0, 48, 0, 0, 0, 60, 100)
+    e2 = ev(100, 0, 1, 0, 0, 7, 64)
+    good2 = mevt([lane(1, 0, [e1, e2]), lane(1, 3, [e1])])
+    canon = join_chunks(with_mevt(good2))
+    d = rewrite_alike("two lanes", with_mevt(good2), expect=canon)
+    if [l.split(" crc=")[0] for l in d if l.startswith("lane ")] != ["lane 1 0 events=2", "lane 1 3 events=1"] or any(l.startswith("mevt_skipped") for l in d):
+        sys.exit("FAILED: two lanes dump %r" % [l for l in d if l.startswith(("lane", "mevt"))])
+
+    def skipped(name, payload, lines, n=1):
+        d = rewrite_alike(name, with_mevt(payload))
+        got = [l.split(" crc=")[0] for l in d if l.startswith("lane ")]
+        if got != lines or ("mevt_skipped=%d" % n) not in d:
+            sys.exit("FAILED: %s: lanes %r, wanted %r with mevt_skipped=%d (%r)" % (name, got, lines, n, [l for l in d if l.startswith("mevt")]))
+
+    skipped("unsorted lanes", mevt([lane(1, 3, [e1]), lane(1, 0, [e1])]), ["lane 1 3 events=1"])
+    skipped("duplicate lane", mevt([lane(1, 0, [e1]), lane(1, 0, [e2])]), ["lane 1 0 events=1"])
+    skipped("pattern missing", mevt([lane(1, 0, [e1]), lane(200, 0, [e1])]), ["lane 1 0 events=1"])
+    skipped("pattern 0", mevt([lane(0, 0, [e1]), lane(1, 0, [e1])]), ["lane 1 0 events=1"])
+    skipped("track 16", mevt([lane(1, 16, [e1]), lane(1, 1, [e1])]), ["lane 1 1 events=1"])
+    skipped("no events", mevt([lane(1, 0, [], count=0), lane(1, 1, [e1])]), ["lane 1 1 events=1"])
+    skipped("event size 7", mevt([lane(1, 0, [e1[:7]], size=7), lane(1, 1, [e1])]), ["lane 1 1 events=1"])
+    skipped("4097 events", mevt([lane(1, 0, [e1] * 4097), lane(1, 1, [e1])]), ["lane 1 1 events=1"])
+    for name, bad in (("kind 6", ev(0, 0, 6, 0, 0, 1, 1)), ("tick 6144", ev(6144, 0, 1, 0, 0, 1, 1)), ("port 4", ev(0, 0, 1, 0, 4, 1, 1)),
+                      ("data 128", ev(0, 0, 1, 0, 0, 128, 1)), ("value 128", ev(0, 0, 1, 0, 0, 1, 128)), ("note length 0", ev(0, 0, 0, 0, 0, 60, 1)),
+                      ("note length 6145", ev(0, 6145, 0, 0, 0, 60, 1)), ("other event with a length", ev(0, 5, 1, 0, 0, 1, 1))):
+        skipped("bad event: " + name, mevt([lane(1, 0, [e1, bad]), lane(1, 1, [e1])]), ["lane 1 1 events=1"])
+    skipped("unsorted events", mevt([lane(1, 0, [e2, e1]), lane(1, 1, [e1])]), ["lane 1 1 events=1"])
+    # Seven lanes of 4096 events: the pool holds 24,576, so the seventh is skipped (nothing is lost from the first six).
+    big = [ev(i, 0, 1, 0, 0, 1, 1) for i in range(4096)]
+    skipped("pool full", mevt([lane(1, t, big) for t in range(7)]), ["lane 1 %d events=4096" % t for t in range(6)])
+    # Tolerated: a reserved byte that is not 0, bytes after the last lane, a larger event whose first eight bytes are read, a newer minor with appended bytes.
+    rewrite_alike("reserved byte", with_mevt(mevt([lane(1, 0, [e1], reserved=9)])), expect=join_chunks(with_mevt(mevt([lane(1, 0, [e1])]))))
+    rewrite_alike("trailing bytes", with_mevt(mevt([lane(1, 0, [e1])], tail=b"\xab" * 7)), expect=join_chunks(with_mevt(mevt([lane(1, 0, [e1])]))))
+    rewrite_alike("event size 10", with_mevt(mevt([lane(1, 0, [e1 + b"\xee\xee"], size=10)])), expect=join_chunks(with_mevt(mevt([lane(1, 0, [e1])]))))
+    rewrite_alike("MEVT 1.1 with appended bytes", with_mevt(mevt([lane(1, 0, [e1])], version=0x0101, tail=b"\xab" * 40)), expect=join_chunks(with_mevt(mevt([lane(1, 0, [e1])]))))
+    # An empty lane list is read and not written back (a project with no lane has no MEVT chunk).
+    rewrite_alike("MEVT with no lanes", with_mevt(mevt([])), expect=small)
+    # Refused: a shape error of the chunk.
+    refused_alike("MEVT 2.0", with_mevt(mevt([lane(1, 0, [e1])], version=0x0200)), "newer major version")
+    refused_alike("MEVT version 0", with_mevt(mevt([lane(1, 0, [e1])], version=0)))
+    refused_alike("MEVT shorter than its head", with_mevt(b"\x01\x00\x00"))
+    refused_alike("MEVT 2049 lanes", with_mevt(mevt([], count=2049)))
+    refused_alike("MEVT more lanes than it holds", with_mevt(mevt([lane(1, 0, [e1])], count=2)))
+    refused_alike("MEVT lane header cut", with_mevt(mevt([lane(1, 0, [e1])])[:4 + 3]))
+    refused_alike("MEVT lane data cut", with_mevt(mevt([lane(1, 0, [e1, e2])])[:-3]))
+    refused_alike("MEVT twice", sm[:first_unknown] + [(b"MEVT", good2), (b"MEVT", good2)] + sm[first_unknown:])
+    refused_alike("MEVT before INST", sm[:first_unknown - 1] + [(b"MEVT", good2)] + sm[first_unknown - 1:])
+    # Behind the unknown chunks it is legal, and written back in its place.
+    rewrite_alike("MEVT after the unknown chunks", sm + [(b"MEVT", good2)], expect=canon)
+    # The build before this slice (emulated: MEVT is unknown to it, the CRC chunk is rank 20): a chunk of 16 KiB or less is kept as an unknown chunk and written back byte for byte, a bigger one is dropped and counted.
+    spec_mevt = importlib.util.spec_from_file_location("o3project_before_mevt", ref)
+    old = importlib.util.module_from_spec(spec_mevt)
+    spec_mevt.loader.exec_module(old)
+    old.RANKS.pop(b"MEVT")
+    old.LENGTH_RANGE.pop(b"MEVT")
+    old.RANKS[b"CRC "] = 20
+    kept = old.parse(canon)
+    if b"MEVT" not in [c for c, _ in kept["unknown"]] or kept["lanes"] != {} or old.build(kept) != canon:
+        sys.exit("FAILED: a reader that does not know MEVT does not keep a small one and write it back byte for byte")
+    dropped = old.parse(one)
+    if b"MEVT" in [c for c, _ in dropped["unknown"]] or dropped["unknown_dropped"] != 1 or dropped["lanes"] != {}:
+        sys.exit("FAILED: a reader that does not know MEVT does not drop a chunk above 16 KiB and count it")
+    print("mevt: the MEVT chunk is read alike on both sides (shape errors, skipped lanes, tolerance, order, pool limit), a project without lanes is the file that never had a lane, a previous reader keeps a small one and drops a big one")
     print("versions: %d newer-major cases refused, %d newer-minor cases read, INST 1.0 read as rate 0, alike" % (len(refused) + 1, len(accepted) + 3))
     print("OK")
 

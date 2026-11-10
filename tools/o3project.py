@@ -97,6 +97,12 @@ LIMITS = [
     ("perf_scenes", 3),
     ("send_fx_rows", 12),
     ("send_fx_rows_max", 32),
+    # OS-MIDIREC-P1 S1: the MEVT chunk's take lanes (model/limits.h)
+    ("lane_ticks", 6144),
+    ("max_lane_events", 4096),
+    ("max_lane_pool_events", 24576),
+    ("max_lanes", 2048),
+    ("lane_event_kinds", 6),
 ]
 L = dict(LIMITS)
 
@@ -133,7 +139,7 @@ SAMPLER_BYTES = SAMPLER_HEAD.size + 6 * ENVELOPE.size + 6 * LFO.size + SLICES.si
 assert SAMPLER_BYTES == 296
 
 RANKS = {b"PHDR": 1, b"TRAK": 2, b"MODR": 3, b"SONG": 4, b"PATT": 5, b"INST": 6, b"SETS": 7, b"LRNB": 8,
-         b"MIDI": 9, b"USBS": 10, b"MIXR": 11, b"PERF": 12, b"APPM": 13, b"NOTE": 14, b"MUTE": 15, b"SCEN": 16, b"SNFX": 17, b"LAW ": 18, b"INSX": 19, b"CRC ": 20}
+         b"MIDI": 9, b"USBS": 10, b"MIXR": 11, b"PERF": 12, b"APPM": 13, b"NOTE": 14, b"MUTE": 15, b"SCEN": 16, b"SNFX": 17, b"LAW ": 18, b"INSX": 19, b"MEVT": 20, b"CRC ": 21}
 
 # The project-level state of OS-004d (docs/formats/o3-project.md section 3, model/project_state.h): the chunks MIDI, USBS, MIXR, PERF, APPM.
 USB_PROFILE_CHANNELS = [2, 8, 10, 11, 0, 4, 6]  # usb::Profile P2, P8, P10, P11, (P4S: not stored), P4, P6 (usb::profile_channels)
@@ -200,6 +206,8 @@ def new_project():
         "law": 0,           # OS-BUG-PASTE24: the instrument volume law; the LAW chunk is written only when it is 1
         "inserts": [],      # OS-INSFX S3a: (where, slot, module, flags, [value bits]) ascending (where, slot); the INSX chunk is written only when there is one
         "apps": [],         # (module name, abi major, abi minor, [value bits]) oldest first
+        "lanes": {},        # OS-MIDIREC-P1 S1: (pattern id, track) -> [(tick, len, kind << 4 | channel, port, a, b)]; the MEVT chunk is written only when there is one
+        "mevt_skipped": 0,  # lanes the reader skipped (Report::mevt_skipped)
         "unknown": [],      # (fourcc bytes, payload)
         "unknown_dropped": 0,
         "unknown_dropped_bytes": 0,
@@ -368,6 +376,7 @@ LENGTH_RANGE = {
     b"SNFX": (3, 3 + 2 * 32),
     b"LAW ": (3, 3),
     b"INSX": (3, 3 + INSERT_MAX * (5 + 4 * INSERT_PARAMS_MAX)),
+    b"MEVT": (4, L["max_file_bytes"]),
     b"CRC ": (6, 6),
 }
 
@@ -479,6 +488,9 @@ def parse(data):
             law = parse_law(payload, check_version(be16(payload, 0), cid))  # applied when the CRC has matched, like the C++ reader does at Done
         elif cid in INSX_PARTS:
             parse_insx(p, payload, check_version(be16(payload, 0), cid))
+        elif cid == b"MEVT" and cid in RANKS:  # (a table without it emulates the build before this chunk: it is then an unknown chunk)
+            check_version(be16(payload, 0), cid)
+            parse_mevt(p, payload)
         elif cid == b"CRC ":
             c = Cursor(payload)
             check_version(c.u16())
@@ -831,6 +843,48 @@ def parse_insx(p, payload, newer):
     p["inserts"] = sorted(out, key=lambda x: (x[0], x[1]))
 
 
+def lane_event_valid(e):
+    tick, length, kc, port, a, b = e
+    kind = kc >> 4
+    if tick >= L["lane_ticks"] or kind >= L["lane_event_kinds"] or port > 3 or a > 127 or b > 127:
+        return False
+    return 1 <= length <= L["lane_ticks"] if kind == 0 else length == 0
+
+
+def parse_mevt(p, payload):
+    """MEVT (OS-MIDIREC-P1 S1, docs/formats/o3-project.md "The MEVT chunk"): u16 version, u16 lane count, then per lane u8 pattern ID, u8 track, u16 event count, u8 event size (8), u8 reserved and
+    the events. A lane count above the limit, or a lane header or data that runs past the chunk, is Malformed; a lane with a bad key, shape, order, event or pattern, a duplicate or a lane past the pool
+    limit is skipped and counted. Bytes after the last lane are ignored."""
+    count = be16(payload, 2)
+    if count > L["max_lanes"]:
+        malformed("MEVT: more lanes than the limit")
+    at = 4
+    next_key = 0
+    pool = 0
+    for _ in range(count):
+        if len(payload) - at < 6:
+            malformed("MEVT ends inside its lane list")
+        pattern, track, n, esize = payload[at], payload[at + 1], be16(payload, at + 2), payload[at + 4]
+        at += 6
+        size = n * esize
+        if size > len(payload) - at:
+            malformed("MEVT lane data runs past the chunk")
+        data = payload[at:at + size]
+        at += size
+        key = (pattern - 1) * L["tracks"] + track if 1 <= pattern <= L["max_pattern_id"] and track < L["tracks"] else None
+        if (key is None or esize < 8 or n == 0 or n > L["max_lane_events"] or key < next_key or pattern not in p["patterns"]
+                or pool + n > L["max_lane_pool_events"]):
+            p["mevt_skipped"] += 1
+            continue
+        next_key = key + 1
+        events = [struct.unpack(">HHBBBB", data[i * esize:i * esize + 8]) for i in range(n)]
+        if not all(lane_event_valid(e) for e in events) or any(events[i][0] < events[i - 1][0] for i in range(1, n)):
+            p["mevt_skipped"] += 1
+            continue
+        p["lanes"][(pattern, track)] = events
+        pool += n
+
+
 def parse_session(p, cid, payload, newer):
     """NOTE, MUTE, SCEN, SNFX (OS-PERSIST2): the shape of the chunk is the only error; a value out of its range is its default (model/project_state.cpp's sanitise_*)."""
     c = Cursor(payload)
@@ -1114,7 +1168,13 @@ def build(p):
     if p["inserts"]:  # INSX: after LAW, only for a project that has an insert
         chunks.append(chunk(b"INSX", v + bytes([len(p["inserts"])]) + b"".join(
             bytes([where, slot, module, flags, len(bits)]) + b"".join(struct.pack(">I", x) for x in bits) for where, slot, module, flags, bits in p["inserts"])))
+    if p["lanes"]:  # MEVT: after INSX, only for a project that has a lane; it replaces a carried one
+        chunks.append(chunk(b"MEVT", v + struct.pack(">H", len(p["lanes"])) + b"".join(
+            struct.pack(">BBHBB", pattern, track, len(events), 8, 0) + b"".join(struct.pack(">HHBBBB", *e) for e in events)
+            for (pattern, track), events in sorted(p["lanes"].items(), key=lambda kv: (kv[0][0] - 1) * L["tracks"] + kv[0][1]))))
     for cid, payload in p["unknown"]:
+        if cid == b"MEVT" and p["lanes"]:
+            continue
         chunks.append(chunk(cid, payload))
     body = b"".join(chunks)
     form = b"FORM" + struct.pack(">I", 4 + len(body) + 14) + b"O3PJ" + body
@@ -1236,6 +1296,10 @@ def dump(p):
         out.append("law=%d" % p["law"])
     for n, (where, slot, module, flags, bits) in enumerate(p["inserts"]):
         out.append("insert %d where=%d slot=%d module=%d flags=%d values=%s" % (n, where, slot, module, flags, ",".join("%08x" % x for x in bits)))
+    for (pattern, track), events in sorted(p["lanes"].items()):
+        out.append("lane %d %d events=%d crc=%08x" % (pattern, track, len(events), zlib.crc32(b"".join(struct.pack(">HHBBBB", *e) for e in events)) & 0xFFFFFFFF))
+    if p["mevt_skipped"]:
+        out.append("mevt_skipped=%d" % p["mevt_skipped"])
     for n, (cid, payload) in enumerate(p["unknown"]):
         out.append("unknown %d id=%s len=%d crc=%08x" % (n, cid.decode("ascii"), len(payload),
                                                         zlib.crc32(payload) & 0xFFFFFFFF))

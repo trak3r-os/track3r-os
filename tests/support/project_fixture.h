@@ -5,6 +5,7 @@
 // convenience wrappers that run the resumable reader and writer to the end over memory.
 
 #include <o3os/formats/native.h>
+#include <o3os/model/lane_store.h>
 #include <o3os/model/project.h>
 
 #include <cstddef>
@@ -36,11 +37,13 @@ void fill_maximal(model::Project& p);
 
 // Runs a Writer to Done over a vector sink. `budget` is the per-step byte budget.
 formats::native::Progress save(const model::Project& p, std::vector<std::uint8_t>& out,
-                               std::size_t budget = formats::native::kDefaultStepBudget);
+                               std::size_t budget = formats::native::kDefaultStepBudget,
+                               const model::LaneStore* lanes = nullptr);
 // Runs a Reader to Done or Failed over memory.
 formats::native::Progress load(model::ModelArena& a, const std::vector<std::uint8_t>& bytes,
                                formats::native::Report* report = nullptr,
-                               std::size_t budget = formats::native::kDefaultStepBudget);
+                               std::size_t budget = formats::native::kDefaultStepBudget,
+                               model::LaneStore* lanes = nullptr);
 
 // The project is the empty default: no patterns, instruments, modules, song or unknown chunks.
 bool is_default_empty(const model::Project& p);

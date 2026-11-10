@@ -44,11 +44,12 @@ Order of chunks, as written:
 | `SCEN` | 0..1 | the Perform scenes 1..3 and LATCH (OS-PERSIST2), only when the project has them; 1.2 for a stored scene's PLAYMODE slot with a value 4..23 (OS-PERFMODES M3), 1.1 for the FX 20 or 21 (OS-PERFFX P1) |
 | `SNFX` | 0..1 | the send effects' controls of the MASTER FX page (OS-PERSIST2), only when the project has them |
 | `LAW ` | 0..1 | the instrument volume law (OS-BUG-PASTE24), only when it is the 1.1.14 table (law 1) |
-| `INSX` | 0..1 | the inserts: effect modules on the track strips and the master (OS-INSFX S3a), only when the project has one; the last known chunk |
+| `INSX` | 0..1 | the inserts: effect modules on the track strips and the master (OS-INSFX S3a), only when the project has one |
+| `MEVT` | 0..1 | the MIDI take lanes: recorded events per pattern track (OS-MIDIREC-P1 S1), only when the project has one; the last known chunk |
 | unknown | 0..16 | chunks this version does not know (the OG formats' `OGPM` and `OGPN` among them), in the order they were read |
 | `CRC ` | 1, last | CRC-32 of every byte before this chunk's header |
 
-Reading is stricter than writing only where it protects the model: `PHDR` must be the first chunk of all; known chunks must appear in the order above (only `PATT` and `INST` repeat; `SETS` comes after the last `INST`, `LRNB` after `SETS`, then `MIDI`, `USBS`, `MIXR`, `PERF`, `APPM`, `NOTE`, `MUTE`, `SCEN`, `SNFX`, `LAW `, `INSX` in that order, each once); `CRC ` must be the last chunk and end exactly at the end of `FORM`. `TRAK`, `MODR` and `SONG` may be absent (defaults: default tracks, no modules, empty song; a module count in `PHDR` must still match). Unknown chunks may appear anywhere after `PHDR`; they are written back after the known chunks (their position among the known ones is not kept).
+Reading is stricter than writing only where it protects the model: `PHDR` must be the first chunk of all; known chunks must appear in the order above (only `PATT` and `INST` repeat; `SETS` comes after the last `INST`, `LRNB` after `SETS`, then `MIDI`, `USBS`, `MIXR`, `PERF`, `APPM`, `NOTE`, `MUTE`, `SCEN`, `SNFX`, `LAW `, `INSX`, `MEVT` in that order, each once); `CRC ` must be the last chunk and end exactly at the end of `FORM`. `TRAK`, `MODR` and `SONG` may be absent (defaults: default tracks, no modules, empty song; a module count in `PHDR` must still match). Unknown chunks may appear anywhere after `PHDR`; they are written back after the known chunks (their position among the known ones is not kept).
 
 The pad byte must be zero. Everything else a reader finds wrong is an error (section 7); it never guesses.
 
@@ -317,6 +318,44 @@ The size is `3 + sum(5 + 4n)`: 3 with no record (never written), 535 at most (fo
 
 **Older builds.** An older build (any before this chunk) reads `INSX` as an unknown chunk, keeps it (one of 16, at most 535 bytes of the 16 KiB pool; a full pool, which `OGPN` can fill, drops it and counts it as any unknown chunk) and writes it back byte for byte, in the order it read them. **The project plays without the inserts** (the sound differs; the file is not refused), and the `MODR` entry does not make the older build load the effect module (only a Module instrument's module is loaded). A save in the older build keeps the chunk and the entry. `tests/o3project_roundtrip.py` emulates that reader (its chunk table without `INSX`, the `CRC ` rank 19) and checks the byte-for-byte write back, before and behind the unknown chunks.
 
+### The `MEVT` chunk (OS-MIDIREC-P1 S1): the MIDI take lanes
+
+A **lane** is the MIDI events recorded on one track of one pattern (`docs/specs/OS-MIDIREC-P1.md`, A1-A3): notes, controllers, program changes, channel and poly aftertouch and pitch bend, each at a tick of 1/48 of a step in the track's own timeline. The lanes of a project live in the app's lane store (`model/lane_store.h`), **outside `Project` and `ModelArena`** (no pinned size moves), and this chunk is their only persistent form. New Community OS behaviour; the official firmware has no such chunk.
+
+```
+MEVT payload (big-endian, like every chunk), 4 .. 208,900 bytes (the pool caps it; see Limits)
+u16 version = 0x0100
+u16 lane_count            0..2048
+lane x lane_count, ascending (pattern, track), no duplicates:
+  u8  pattern             the pattern ID 1..255 (the ID PATT and SONG carry, not the pool slot)
+  u8  track               0..15
+  u16 event_count         1..4096
+  u8  event_size          8 (a later minor may write more; a reader takes the first 8 bytes of each event)
+  u8  reserved            0 (a reader tolerates any value)
+  event x event_count, ascending by tick (ties in the order recorded):
+    u16 tick              0..6143
+    u16 len               notes 1..6144, every other kind 0
+    u8  kind_channel      kind << 4 | channel: kind 0 note, 1 CC, 2 program, 3 channel AT, 4 poly AT, 5 pitch bend; channel 0..15
+    u8  port              0..3 (the value `midi_route.h` uses: DIN, USB)
+    u8  a                 0..127: note, controller, program, pressure, note of a poly AT, pitch bend LSB
+    u8  b                 0..127: velocity, controller value, pitch bend MSB
+(a later minor appends AFTER the last lane)
+```
+
+The size is `4 + sum(6 + 8n)`. The lane key is `(pattern - 1) * 16 + track` (4080 keys); **spec deviation:** the spec says "pattern 0..127", which is the pool slot; the file carries the pattern ID, so a lane survives a reordering of the pool and a pattern copied to another ID is a new lane.
+
+- **Written only with a lane.** A project that never had a lane, or whose store is empty, is **the file it was**: no byte of any other chunk changes (`tests/o3project_roundtrip.py` pins `lanes-empty` equal to `small`, and the sizes and CRC-32 of every earlier fixture are unchanged). The chunk is written after `INSX` and before the unknown chunks and `CRC `. The Writer writes a store only when it belongs to the project being written (the store's epoch is the project's `load_epoch()`); a store of an earlier project is empty to it.
+- **Limits.** 4,096 events in one lane, 24,576 in all lanes of a project (the 192 KiB pool, decision 6a), 2,048 lanes with events, 6,144 ticks (the longest pattern, 128 steps), 6 kinds. The biggest chunk is `4 + 2048 x 6 + 24576 x 8` = 208,900 bytes; the biggest file (the `maximal` fixture with a full pool) stays under the 4 MiB the reader accepts.
+- **Reading, 1.0.** The same shape rules as every chunk: version 0 is `Malformed`, a newer major is `NewerMajor`, a payload shorter than the 4-byte head is refused, a `lane_count` above 2,048 is `Malformed`, and a lane header or lane data that runs past the chunk is `Malformed`. **Lanes are read tolerantly (the `LRNB` rule: the project still opens):** a lane is skipped and counted (`Report::mevt_skipped`) when its key is invalid (pattern 0, track 16), its `event_size` is below 8, its count is 0 or above 4,096, its key is not above the previous lane's (unsorted or a duplicate), the project has no such pattern, the store has no room (pool full), or any of its events is invalid or out of tick order (the lane is dropped whole). Trailing bytes after the last lane are skipped.
+- **Newer minor (1.x).** Read as far as 1.0 knows it (the `event_size` byte is the extension point; whatever follows the last lane is skipped), `newer_minor` is set, and the appended data is lost on the next save: the chunk is written back as 1.0.
+- **A file without the chunk** has no lanes, and loading it **clears** the store: none leak from the previous project. The Reader adopts the loaded project's epoch into the store; the Editor calls `LaneStore::sync` before a lane edit and the app should call it after a load or a new project.
+- **Model.** `model::LaneStore` (a directory of 4,080 `{offset, count}` slots plus a pool of 24,576 events, 212,928 bytes, lanes packed in key order), `Editor::lane_replace` / `lane_clear` (undoable, one unit per take commit), and the length rules of `docs/specs/OS-MIDIREC-P1.md` A16 and A17: `delete_pattern` and `clear_pattern` free the pattern's lanes in the same undo unit, and **shortening** a track (`set_track_length`, `set_pattern_length`) deletes the lane events at or past the new length (`length x 48` ticks) in the same unit, whereas lengthening does not. Nothing plays or records a lane in S1 (S2 and S3).
+- **Rank.** `CRC ` was rank 20 and is now rank 21; `MEVT` is rank 20. The rank is internal to the reader and the Python reference (`RANKS` in `tools/o3project.py`), not a field.
+
+**Older builds.** An older build (any before this chunk) reads `MEVT` as an unknown chunk. **A chunk of 16 KiB or less** (one of 16 in the 16,384-byte pool, with the other unknown chunks) is kept and written back byte for byte, in the order it was read; **a bigger one is dropped and counted** (`unknown_dropped`), and the lanes are gone from the next save of that build (decision 3a of the maintainer, 2026-11-10: a take of more than about 2,000 events is lost by an older build). The older build plays the project without the lanes. The Python reference simulates it (`tests/o3project_roundtrip.py`, "old reader"), and `tests/mevt_format_test.cpp` does the same with a null store.
+
+Caveat of the checker: `Verifier` (the Writer's self-check) shares the rank table with the Reader and always treats `MEVT` as a known chunk; a Reader without a store treats a misplaced `MEVT` as unknown instead of refusing it.
+
 ### CRC
 
 `u16 version`, `u32 crc` (section 2). Payload 6 bytes.
@@ -444,6 +483,7 @@ Chunks are parsed as they arrive, before the CRC is known (it is last), so a fil
 | PLAYMODE value (`PERF` and `SCEN`) | 0..3 (1.0 and 1.1), 0..23 (1.2: 4..23 are the custom play orders C1..C20, OS-PERFMODES M3) |
 | apps remembered / values per app | 12 (`APPM` 1.0: 6) / 32 |
 | session state (OS-PERSIST2): Perform scenes / note scales, octaves, jump / mute modes / send effect rows | 3 / 39 (the official 0..38, OS-SCALES28; the NOTE 1.0 byte holds the panel's twelve 0..11), 10, 32 / 3 / 12 (a chunk holds up to 32 rows) |
+| MIDI take lanes (`MEVT`): events per lane / events in all lanes / lanes / ticks / kinds | 4,096 / 24,576 (192 KiB) / 2,048 / 6,144 / 6 (OS-MIDIREC-P1 S1) |
 | tempo, swing, levels | 40.00..800.00 BPM, 25..75, 0..100 |
 | file | 4 MiB |
 
@@ -471,6 +511,7 @@ Samples are standard WAV files next to the project file; an instrument stores th
 - OS-BUG-PASTE24: one new chunk, `LAW ` (the instrument volume law; no bump of any chunk, no field changed, no major bump: maintainer decision 2026-10-16), written only when the law is the 1.1.14 table, so every other file is the bytes it always was. Compatibility, both ways: an older file in a new build is law 0 and is written back as it was; a new file in an older build loads, keeps the chunk as unknown and writes it back byte for byte, **but plays the levels at the 1.2+ law (a downgrade hearing risk, section 3, "The `LAW` chunk")**. Round trips: `tests/law_format_test.cpp`, ctest `project_python` (the `law` fixture: C++ against `o3project.py`, both ways, the same reading of damaged chunks). Checked against the build before this chunk (built from its sources, see the commit of the slice): its C++ reader and writer and its Python reference keep the `LAW` chunk of the `law` fixture and write the file back byte for byte.
 
 - OS-INSFX S3a: one new chunk, `INSX` 1.0 (the inserts; no bump of any chunk, no field changed: decision D2 of the maintainer, 2026-11-01), written only when the project has an insert, after `LAW `, so every file that never had one is the bytes it always was. Compatibility, both ways: an older file in a new build has no inserts (and loading it clears the document's); a new file in an older build loads, keeps the chunk as unknown and writes it back byte for byte, and plays without the inserts (section 3). `MODR` is never pruned.
+- OS-MIDIREC-P1 S1 (2026-11-10): one new chunk, `MEVT` 1.0 (the MIDI take lanes; no bump of any chunk, no field changed), written only when the lane store has a lane, after `INSX`; `CRC ` moves from rank 20 to 21 in the reader (internal); a project with no lane is the file it was; an older build keeps a chunk of 16 KiB or less as unknown and drops a bigger one (section 3, "The `MEVT` chunk"). Lane key by pattern ID, not pool slot (a spec deviation recorded there).
 - OS-APPUX S3: `APPM` 1.0 to 1.1, the same layout with a count of up to 12 apps (it was 6) and a payload of up to 1,015 bytes; written as 1.0 while six apps or fewer are stored (every file that never used more is the bytes it always was), as 1.1 beyond; a loader for 1.0 (at most 6) stays; the model arena grows by 984 B (six more 164-byte sets: 1,933,416 B). An older OS refuses a 1.1 `APPM` (`APPM: bad app count`) and with it the whole project (maintainer, 2026-10-19, option B: no appended tail); no other chunk changed.
 - OS-PRFDEFAULTS: no bytes change and no version moves. The defaults of the `PERF` values (what a project with no `PERF` chunk reads as, and what a new project holds) are the table of `docs/specs/OS-PERFFX.md` section 9 instead of 0 (maintainer decision 2026-10-23); a chunk that is present loads exactly as stored, and a project that never touched Perform is still written without the chunk.
 - OS-PERFFX P1 + OS-APPUX S3 together: the two version gates are independent. `PERF` and `SCEN` are 1.1 only with the Perform FX 20 or 21 in a slot (of a stored scene for `SCEN`); `APPM` is 1.1 only with more than six apps stored; every other chunk stays 1.0. A project that uses neither is the file it always was; one that uses one feature bumps only that feature's chunks; one that uses both writes all three as 1.1. Every combination is read (a 1.1 `PERF` with six apps, a 1.0 `PERF` with seven apps, and so on) and written back as the versions its content needs. An older OS opens the file when no `APPM` is 1.1 (it reads the two FX ids as none) and refuses it when `APPM` is 1.1. Tests: `tests/project_state_test.cpp` ("the version gates are independent"), ctest `project_python` ("PERF/SCEN 1.1 ... and APPM 1.1 in one project", C++ against `o3project.py`).

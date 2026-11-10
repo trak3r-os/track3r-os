@@ -82,8 +82,12 @@ void put_pad(Enc& e, std::size_t payload) noexcept {
 
 }  // namespace
 
-void Writer::begin(const Project& project, core::ByteSink& sink, std::uint64_t stereo_mask) noexcept {
+void Writer::begin(const Project& project, core::ByteSink& sink, std::uint64_t stereo_mask, const model::LaneStore* lanes) noexcept {
   project_ = &project;
+  lanes_ = lanes;
+  // A store of another load epoch holds the lanes of a project that is gone: nothing to write (the Editor syncs it on the next lane edit).
+  write_lanes_ = lanes != nullptr && lanes->in_sync(project.load_epoch()) && lanes->lane_count() != 0;
+  lanes_open_ = false;
   stereo_mask_ = stereo_mask;
   sink_ = &sink;
   progress_ = Progress::Running;
@@ -121,6 +125,9 @@ bool Writer::measure(std::size_t& budget) noexcept {
       case Phase::Fixed:
         measure_total_ = 4 + chunk_total(phdr_size(p)) + chunk_total(trak_size(p)) + chunk_total(modr_size(p)) +
                          chunk_total(song_size(p)) + chunk_total(kCrcPayload);
+        if (write_lanes_) {  // the store is packed: its size is a formula, no scan
+          measure_total_ += chunk_total(kMevtHead + lanes_->lane_count() * kMevtLaneHead + lanes_->total_events() * kMevtEvent);
+        }
         spent += 256;  // names and tables, a few hundred bytes
         phase_ = Phase::Patterns;
         measure_id_ = 1;
@@ -185,7 +192,9 @@ bool Writer::measure(std::size_t& budget) noexcept {
           phase_ = Phase::Done;
           break;
         }
-        measure_total_ += chunk_total(p.unknown(measure_id_)->length);
+        if (!(write_lanes_ && p.unknown(measure_id_)->id == kChunkMevt)) {  // the Writer's own MEVT replaces a carried one
+          measure_total_ += chunk_total(p.unknown(measure_id_)->length);
+        }
         spent += 8;
         ++measure_id_;
         break;
@@ -443,7 +452,7 @@ bool Writer::build_piece() noexcept {
 
       case Unit::State: {  // OS-004d: MIDI, USBS, MIXR, PERF, APPM, each only when the project has it
         if (cursor_ >= state_chunks::kParts) {
-          unit_ = Unit::Unknown;
+          unit_ = Unit::Lanes;
           cursor_ = 0;
           sub_ = 0;
           break;
@@ -461,12 +470,69 @@ bool Writer::build_piece() noexcept {
         break;
       }
 
+      case Unit::Lanes: {  // OS-MIDIREC-P1: MEVT, only when the store holds a lane of this project (docs/formats/o3-project.md)
+        if (!write_lanes_) {
+          unit_ = Unit::Unknown;
+          cursor_ = 0;
+          sub_ = 0;
+          break;
+        }
+        if (!lanes_open_) {  // the chunk header, the version and the lane count
+          const std::size_t payload = kMevtHead + lanes_->lane_count() * kMevtLaneHead + lanes_->total_events() * kMevtEvent;
+          report_.chunk = kChunkMevt;
+          put_header(e, kChunkMevt, payload);
+          e.u16(kChunkVersion);
+          e.u16(static_cast<std::uint16_t>(lanes_->lane_count()));  // <= 2048
+          lanes_open_ = true;
+          cursor_ = lanes_->next_key(0);
+          sub_ = 0;  // 0: the lane header of `cursor_` is not written; n + 1: n of its events are
+          produced = true;
+          break;
+        }
+        if (cursor_ >= model::LaneStore::kKeys) {  // the payload is even (4 + 6 n + 8 m): no pad byte
+          unit_ = Unit::Unknown;
+          cursor_ = 0;
+          sub_ = 0;
+          break;
+        }
+        const model::LaneStore::View lane = lanes_->lane_at(cursor_);
+        report_.chunk = kChunkMevt;
+        if (sub_ == 0) {
+          e.u8(static_cast<std::uint8_t>(model::LaneStore::pattern_of(cursor_)));
+          e.u8(static_cast<std::uint8_t>(model::LaneStore::track_of(cursor_)));
+          e.u16(static_cast<std::uint16_t>(lane.count));  // <= 4096
+          e.u8(static_cast<std::uint8_t>(kMevtEvent));
+          e.u8(0);
+          sub_ = 1;
+        }
+        while (sub_ - 1 < lane.count && e.size() + kMevtEvent <= kScratchBytes) {
+          const model::LaneEvent& ev = lane.events[sub_ - 1];
+          e.u16(ev.tick);
+          e.u16(ev.len);
+          e.u8(ev.kind_channel);
+          e.u8(ev.port);
+          e.u8(ev.a);
+          e.u8(ev.b);
+          ++sub_;
+        }
+        if (sub_ - 1 == lane.count) {
+          cursor_ = lanes_->next_key(cursor_ + 1);
+          sub_ = 0;
+        }
+        produced = true;
+        break;
+      }
+
       case Unit::Unknown: {
         if (cursor_ >= p.unknown_count()) {
           unit_ = Unit::Crc;
           break;
         }
         const model::UnknownChunk& u = *p.unknown(cursor_);
+        if (write_lanes_ && u.id == kChunkMevt) {  // replaced by the Writer's own MEVT
+          ++cursor_;
+          break;
+        }
         report_.chunk = u.id;
         if (sub_ == 0) {
           put_header(e, u.id, u.length);

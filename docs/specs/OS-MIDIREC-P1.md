@@ -169,6 +169,13 @@ Rules: written only when at least one lane has events; an empty lane is never wr
 
 **Level C gates for S1 (and S2 for the audio path)** (`fw-feature`): this spec accepted and decisions 2, 3 and 6 answered; a risk review of the format (downgrade, pool pressure, fuzz) and one independent `firmware-reviewer`; round-trip, fuzz and old-reader tests green with the full `tools/ci.sh host`; the format doc and the Python reference updated in the same commit; `ci.sh qemu` and `mk66` for S2; hardware verification of S2 on the unit (DIN saturation, chase burst, jitter against the step grid, CPU on the heavy song) before the feature is called done; a flash and SRAM delta in each commit body.
 
+**S2 gates from the S1 reviews (2026-11-10; not implemented in S1, S2 must close each before it merges).**
+1. `LaneStore::sync(Project::load_epoch())` is called in the app's project load and new-project paths, with a test (a loaded project never plays a stale lane).
+2. The one `LaneStore` instance (about 208 KiB) is placed explicitly in SDRAM after SDRAM init (a section attribute or a placement pointer; its zero initialisation is part of the placement, not a static constructor in SRAM), with the SDRAM_STATIC delta in the commit body.
+3. `Report::newer_minor` and `Report::mevt_skipped` are shown to the user after a load (a notice naming the skipped lanes, and that a newer file was read), not only counted.
+4. The cost of `lane_replace` (one memmove of the pool tail, up to 192 KiB, plus the undo record copy) is measured on the unit at a take commit and recorded in `docs/architecture/cpu-budget.md`.
+5. Lane undo (maintainer decision 2026-11-10): (a) a lane undo record holds one copy of the removed events (1x the lane data), not two as in S1 (8n + 16 bytes today); (b) when a destructive lane operation (`delete_pattern`, CLEAR, a shorter track or pattern, a take over a long lane) still does not fit the undo ring, the app shows `TOO BIG TO UNDO`; a second press confirms, the operation then runs without undo and the history is cleared explicitly, never silently. The model keeps S1's behaviour underneath: `Status::Full` with nothing changed, history intact, so the app's confirmation is an explicit second call that clears the history first.
+
 ## QA rows (reserved QA-PAT-490..519 and the matching screens' ranges; added per slice)
 
 | ID | Function | Gesture | Expected |

@@ -231,6 +231,10 @@ class Project {
   std::uint32_t song_generation() const noexcept { return song_generation_; }
   // 0 for an id that does not exist
   std::uint32_t pattern_generation(std::uint32_t id) const noexcept;
+  // OS-MIDIREC-P1: the lanes of a pattern live in a LaneStore outside the arena, so an Editor lane edit says so here: the generation
+  // and the pattern's generation advance (the native Writer's Modified check and the Editor's undo sync both read them). False,
+  // and nothing changes, for an id that does not exist.
+  bool touch_lanes(std::uint32_t id) noexcept;
   std::uint32_t instrument_generation(std::uint32_t index) const noexcept;
   // A counter per parameter: advances whenever the value of THAT parameter changes, by set_param or by a whole-object mutator that
   // changes it (set_instrument, clear_instrument, set_track, set_master, set_settings, reset), and by nothing else; setting a value

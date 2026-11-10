@@ -196,6 +196,15 @@ std::uint32_t Project::pattern_generation(std::uint32_t id) const noexcept {
   return p != nullptr ? pattern_generation_[p - patterns_] : 0;
 }
 
+bool Project::touch_lanes(std::uint32_t id) noexcept {
+  const Pattern* p = pattern(id);
+  if (p == nullptr) {
+    return false;
+  }
+  touch_pattern(*p);
+  return true;
+}
+
 std::uint32_t Project::instrument_generation(std::uint32_t index) const noexcept {
   return index < kMaxInstruments ? instrument_generation_[index] : 0;
 }

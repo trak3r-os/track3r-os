@@ -4,6 +4,7 @@
 #include <o3os/core/byte_io.h>
 #include <o3os/formats/crc32.h>
 #include <o3os/formats/progress.h>
+#include <o3os/model/lane_store.h>
 #include <o3os/model/project.h>
 
 #include <cstddef>
@@ -46,6 +47,7 @@ inline constexpr std::uint32_t kChunkScen = fourcc('S', 'C', 'E', 'N');  // the 
 inline constexpr std::uint32_t kChunkSnfx = fourcc('S', 'N', 'F', 'X');  // the send effects' controls (OS-PERSIST2)
 inline constexpr std::uint32_t kChunkLaw = fourcc('L', 'A', 'W', ' ');   // the instrument volume law, written only when it is the 1.1.14 table (OS-BUG-PASTE24)
 inline constexpr std::uint32_t kChunkInsx = fourcc('I', 'N', 'S', 'X');  // the inserts, written only when the project has one (OS-INSFX S3a)
+inline constexpr std::uint32_t kChunkMevt = fourcc('M', 'E', 'V', 'T');  // the MIDI take lanes: recorded events per pattern track, written only when there is one (OS-MIDIREC-P1 S1, docs/formats/o3-project.md)
 inline constexpr std::uint32_t kChunkCrc = fourcc('C', 'R', 'C', ' ');   // CRC-32 of everything before it
 
 // Chunk version, the first two payload bytes of every chunk: major in the high byte, minor in the low byte.
@@ -142,6 +144,9 @@ struct Report {
   // invalid binding) and values of the session state chunks NOTE, MUTE, SCEN and SNFX that were out of range (OS-PERSIST2): the setting
   // keeps its default, the load goes on (reader, OS-002d).
   std::uint32_t settings_skipped = 0;
+  // MEVT lanes the reader did not take (OS-MIDIREC-P1): a pattern the project does not have, a track or count out of range, a lane out of key order or a
+  // second lane of one key, an invalid event, or no room in the lane store. The load goes on; the lane is gone on the next save.
+  std::uint32_t mevt_skipped = 0;
   // A chunk had a newer minor version than this reader: fields it does not know were skipped and are lost
   // on the next save.
   bool newer_minor = false;
@@ -156,7 +161,9 @@ class Reader {
   Reader(const Reader&) = delete;
   Reader& operator=(const Reader&) = delete;
 
-  void begin(core::ByteSource& source, model::ModelArena& arena) noexcept;
+  // `lanes` (OS-MIDIREC-P1): the store the MEVT chunk is read into (cleared at begin(), adopting the loaded project's epoch, and again on a failure). With nullptr the reader is the one of
+  // a build without lanes: MEVT is an unknown chunk, kept in the project's pool when it fits and written back (docs/formats/o3-project.md, decision 3a).
+  void begin(core::ByteSource& source, model::ModelArena& arena, model::LaneStore* lanes = nullptr) noexcept;
   Progress step(std::size_t byte_budget = kDefaultStepBudget) noexcept;
   Progress progress() const noexcept { return progress_; }
   const Report& report() const noexcept { return report_; }
@@ -164,6 +171,7 @@ class Reader {
  private:
   enum class State : std::uint8_t {
     FormHeader, ChunkHeader, Version, Payload, PattHead, PattName, PattTrackLen, PattTrackData, UnknownBody, Skip,
+    MevtHead, MevtLane, MevtEvents, MevtSkip,
     Pad,
     Done, Failed,
   };
@@ -192,9 +200,16 @@ class Reader {
   bool parse_settings(std::size_t len, bool bindings) noexcept;
   bool parse_state(std::size_t len, unsigned part) noexcept;
   bool parse_crc(std::size_t len) noexcept;
+  void on_mevt_head() noexcept;
+  void next_lane() noexcept;
+  void on_mevt_lane() noexcept;
+  void on_mevt_events() noexcept;
+  void next_event_block() noexcept;
+  void skip_lane(std::uint32_t bytes) noexcept;
 
   core::ByteSource* source_ = nullptr;
   model::Project* project_ = nullptr;
+  model::LaneStore* lanes_ = nullptr;  // OS-MIDIREC-P1: where MEVT goes; nullptr = MEVT is an unknown chunk
   State state_ = State::Failed;
   Progress progress_ = Progress::Failed;
   Report report_;
@@ -215,6 +230,15 @@ class Reader {
   bool chunk_minor_newer_ = false;  // the chunk's minor version is newer than the one this reader knows for its kind
   std::uint8_t chunk_minor_ = 0;    // the minor version of the chunk being read
   std::uint8_t law_ = 0;            // the LAW chunk's value: held here, applied to the project at Done (cleared in begin())
+  std::uint32_t mevt_lanes_left_ = 0;   // lanes the MEVT header announced and the reader has not read
+  std::uint32_t mevt_next_key_ = 0;     // the lowest key the next lane may have (the last taken lane's key + 1)
+  std::uint32_t mevt_events_left_ = 0;  // events of the lane being taken that are not read yet
+  std::uint32_t mevt_count_ = 0;        // events of the lane being taken
+  std::uint32_t mevt_last_tick_ = 0;
+  model::LaneEvent* mevt_dst_ = nullptr;  // where the next event goes inside the store's pool (valid until the lane is done)
+  std::uint8_t mevt_pattern_ = 0;
+  std::uint8_t mevt_track_ = 0;
+  std::uint8_t mevt_esize_ = 0;
   std::uint8_t patt_id_ = 0;
   std::uint8_t patt_tracks_ = 0;
   std::uint8_t patt_track_ = 0;
@@ -242,7 +266,10 @@ class Writer {
 
   // `stereo_mask` (OS-STEREO (b)): bit n lets instrument slot n's stereo flag be written. The app holds a flag back where the sample has no side signal on the card (rule 4 of docs/specs/OS-STEREO.md: a 1 is
   // never saved without its file); the project itself is not touched. The default writes every flag as it is.
-  void begin(const model::Project& project, core::ByteSink& sink, std::uint64_t stereo_mask = ~std::uint64_t{0}) noexcept;
+  // `lanes` (OS-MIDIREC-P1): the MIDI take lanes to write as the MEVT chunk, when the store belongs to the project's load epoch and holds a lane; nullptr writes none. A lane edit goes through the
+  // Editor, which bumps the project's generation, so the Modified check covers the store too.
+  void begin(const model::Project& project, core::ByteSink& sink, std::uint64_t stereo_mask = ~std::uint64_t{0},
+             const model::LaneStore* lanes = nullptr) noexcept;
   Progress step(std::size_t byte_budget = kDefaultStepBudget) noexcept;
   Progress progress() const noexcept { return progress_; }
   const Report& report() const noexcept { return report_; }
@@ -251,7 +278,7 @@ class Writer {
   std::uint32_t total_bytes() const noexcept { return sized_ ? form_len_ + 8u : 0u; }
 
  private:
-  enum class Unit : std::uint8_t { Measure, Form, Phdr, Trak, Modr, Song, Patt, Inst, Sets, Lrnb, State, Unknown, Crc, End };
+  enum class Unit : std::uint8_t { Measure, Form, Phdr, Trak, Modr, Song, Patt, Inst, Sets, Lrnb, State, Lanes, Unknown, Crc, End };
   enum class Phase : std::uint8_t { Fixed, Patterns, Instruments, UnknownChunks, Done };
 
   bool measure(std::size_t& budget) noexcept;
@@ -264,6 +291,9 @@ class Writer {
   }
 
   const model::Project* project_ = nullptr;
+  const model::LaneStore* lanes_ = nullptr;  // written as MEVT when write_lanes_
+  bool write_lanes_ = false;                 // decided at begin(): the store is in the project's epoch and holds a lane
+  bool lanes_open_ = false;                  // the MEVT chunk header has been written
   std::uint64_t stereo_mask_ = ~std::uint64_t{0};
   core::ByteSink* sink_ = nullptr;
   Progress progress_ = Progress::Failed;

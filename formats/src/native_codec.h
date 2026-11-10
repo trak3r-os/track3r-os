@@ -45,6 +45,12 @@ inline constexpr std::size_t kInstModRate = 1;   // version 1.8 appends the modu
 inline constexpr std::size_t kInstMax =
     kInstFixed + model::kInstrumentNameMax + model::kSamplePathMax + model::kModuleParamBytes;  // version 1.0
 inline constexpr std::size_t kCrcPayload = 6;
+// MEVT (OS-MIDIREC-P1): version u16, lane count u16; per lane pattern u8, track u8, event count u16, event size u8 (8), reserved u8 (0), then the events (8 bytes each: tick u16, len u16, kind<<4|channel, port, a, b).
+inline constexpr std::size_t kMevtHead = 4;
+inline constexpr std::size_t kMevtLaneHead = 6;
+inline constexpr std::size_t kMevtEvent = 8;
+static_assert(kMevtEvent == sizeof(model::LaneEvent), "the event in the file is the event in memory, byte-swapped");
+inline constexpr std::size_t kMevtMax = kMevtHead + model::kMaxLanes * kMevtLaneHead + model::kMaxLanePoolEvents * kMevtEvent;
 
 static_assert(kPhdrMax <= kScratchBytes && kTrakMax <= kScratchBytes && kModrMax <= kScratchBytes &&
                   kSongMax <= kScratchBytes && kInstMax <= kScratchBytes,

@@ -22,7 +22,8 @@ constexpr std::uint8_t kRankInst = 6;
 constexpr std::uint8_t kRankSets = 7;  // OS-002d: after INST, before the unknown chunks and the CRC
 constexpr std::uint8_t kRankLrnb = 8;
 constexpr std::uint8_t kRankMidi = 9;  // OS-004d: the project-level state, after LRNB in this order (state_chunks::Part), before the unknown chunks and the CRC
-constexpr std::uint8_t kRankCrc = 20;  // after the eleven state parts (OS-004d: MIDI..APPM, OS-PERSIST2: NOTE, MUTE, SCEN, SNFX, OS-BUG-PASTE24: LAW, OS-INSFX S3a: INSX)
+constexpr std::uint8_t kRankMevt = kRankMidi + 11;  // OS-MIDIREC-P1: the take lanes, after INSX (the last state part)
+constexpr std::uint8_t kRankCrc = 21;  // after the eleven state parts (OS-004d: MIDI..APPM, OS-PERSIST2: NOTE, MUTE, SCEN, SNFX, OS-BUG-PASTE24: LAW, OS-INSFX S3a: INSX) and MEVT
 
 std::uint8_t rank_of(std::uint32_t id) noexcept {
   switch (id) {
@@ -45,6 +46,7 @@ std::uint8_t rank_of(std::uint32_t id) noexcept {
     case kChunkSnfx: return kRankMidi + 8;
     case kChunkLaw: return kRankMidi + 9;
     case kChunkInsx: return kRankMidi + 10;
+    case kChunkMevt: return kRankMevt;
     case kChunkCrc: return kRankCrc;
     default: return 0;
   }
@@ -89,6 +91,7 @@ void v1_bounds(std::uint32_t id, std::uint32_t minor, std::size_t& lo, std::size
     case kChunkSnfx: lo = state_chunks::kSendFxFixed; hi = state_chunks::kSendFxMax; break;
     case kChunkLaw: lo = hi = state_chunks::kLawBytes; break;
     case kChunkInsx: lo = state_chunks::kInsxFixed; hi = state_chunks::kInsxMax; break;
+    case kChunkMevt: lo = kMevtHead; hi = kMaxFileBytes; break;  // the lanes are streamed; the file limit is the only bound a framing check can know
     default: lo = kCrcPayload; hi = kCrcPayload; break;  // CRC
   }
 }
@@ -114,10 +117,17 @@ const char* error_name(Error e) noexcept {
   return "unknown";
 }
 
-void Reader::begin(core::ByteSource& source, model::ModelArena& arena) noexcept {
+void Reader::begin(core::ByteSource& source, model::ModelArena& arena, model::LaneStore* lanes) noexcept {
   source_ = &source;
   project_ = &arena.project;
+  lanes_ = lanes;
   project_->reset();
+  if (lanes_ != nullptr) {
+    lanes_->clear();
+    lanes_->adopt(project_->load_epoch());  // the lanes this load fills belong to the project it builds
+  }
+  mevt_lanes_left_ = 0;
+  mevt_next_key_ = 0;
   state_ = State::FormHeader;
   progress_ = Progress::Running;
   report_ = Report{};
@@ -150,6 +160,9 @@ void Reader::fail(Error e, const char* detail) noexcept {
   want_ = 0;
   have_ = 0;
   project_->reset();  // never leave a half-loaded project behind
+  if (lanes_ != nullptr) {
+    lanes_->clear();  // nor half-loaded lanes (the reset moved the project's epoch: the store is out of sync anyway)
+  }
 }
 
 bool Reader::check(model::Status s, const char* what) noexcept {
@@ -269,6 +282,9 @@ void Reader::advance() noexcept {
       if (chunk_id_ == kChunkPatt) {
         state_ = State::PattHead;
         want_ = kPattHead;  // have_ stays 2: the version bytes are already in scratch_
+      } else if (chunk_id_ == kChunkMevt) {
+        state_ = State::MevtHead;
+        want_ = kMevtHead;  // the lanes are streamed (up to 209 KB); have_ stays 2 as for PATT
       } else {
         state_ = State::Payload;
         want_ = std::min<std::size_t>(chunk_len_, hi);
@@ -330,6 +346,24 @@ void Reader::advance() noexcept {
       chunk_left_ -= static_cast<std::uint32_t>(want_);
       ++patt_track_;
       next_track();
+      return;
+    case State::MevtHead:
+      on_mevt_head();
+      return;
+    case State::MevtLane:
+      on_mevt_lane();
+      return;
+    case State::MevtEvents:
+      on_mevt_events();
+      return;
+    case State::MevtSkip:
+      skip_left_ -= static_cast<std::uint32_t>(want_);
+      if (skip_left_ == 0) {
+        next_lane();
+      } else {
+        want_ = std::min<std::size_t>(skip_left_, kScratchBytes);
+        have_ = 0;
+      }
       return;
     case State::UnknownBody:
       if (!check(project_->unknown_append(scratch_, static_cast<std::uint32_t>(want_)), "unknown chunk overflow")) {
@@ -394,7 +428,8 @@ void Reader::on_chunk_header() noexcept {
     fail(Error::Malformed, "the first chunk must be PHDR");
     return;
   }
-  const std::uint8_t rank = rank_of(id);
+  // Without a lane store MEVT is a chunk this reader does not know: unknown, kept in the pool when it fits (the old-reader behaviour, decision 3a).
+  const std::uint8_t rank = (id == kChunkMevt && lanes_ == nullptr) ? std::uint8_t{0} : rank_of(id);
   if (rank != 0) {
     if (rank < rank_ || (rank == rank_ && rank != kRankPatt && rank != kRankInst)) {
       fail(Error::Malformed, "chunk out of order or repeated");
@@ -570,6 +605,133 @@ void Reader::next_track() noexcept {
   state_ = State::PattTrackLen;
   want_ = kPattTrackFixed;
   have_ = 0;
+}
+
+// ---- MEVT (OS-MIDIREC-P1 S1) --------------------------------------------------------------------------
+//
+// u16 version, u16 lane count, then per lane: u8 pattern ID, u8 track, u16 event count, u8 event size (8 now),
+// u8 reserved, count x event size bytes. Lanes are streamed straight into the store's pool in key order (so a
+// lane is appended, never inserted). A lane this reader cannot take is skipped and counted in
+// Report::mevt_skipped; a chunk whose own framing is wrong (lane count, a header or data past the chunk's end)
+// is Malformed. chunk_left_ is the payload not yet read.
+
+void Reader::on_mevt_head() noexcept {
+  const std::uint32_t count = get16(scratch_ + 2);
+  chunk_left_ -= static_cast<std::uint32_t>(kMevtHead);
+  if (count > model::kMaxLanes) {
+    fail(Error::Malformed, "MEVT: more lanes than the limit");
+    return;
+  }
+  mevt_lanes_left_ = count;
+  mevt_next_key_ = 0;
+  next_lane();
+}
+
+void Reader::next_lane() noexcept {
+  if (mevt_lanes_left_ == 0) {
+    if (chunk_left_ == 0) {
+      end_payload();
+    } else {  // bytes after the last lane (fields of a newer minor): skipped, lost on the next save
+      const std::uint32_t rest = chunk_left_;
+      chunk_left_ = 0;
+      enter_skip(rest);
+    }
+    return;
+  }
+  if (chunk_left_ < kMevtLaneHead) {
+    fail(Error::Malformed, "MEVT ends inside its lane list");
+    return;
+  }
+  state_ = State::MevtLane;
+  want_ = kMevtLaneHead;
+  have_ = 0;
+}
+
+void Reader::skip_lane(std::uint32_t bytes) noexcept {
+  ++report_.mevt_skipped;
+  chunk_left_ -= bytes;
+  if (bytes == 0) {
+    next_lane();
+    return;
+  }
+  skip_left_ = bytes;
+  state_ = State::MevtSkip;
+  want_ = std::min<std::size_t>(bytes, kScratchBytes);
+  have_ = 0;
+}
+
+void Reader::on_mevt_lane() noexcept {
+  const std::uint32_t pattern = scratch_[0];
+  const std::uint32_t track = scratch_[1];
+  const std::uint32_t count = get16(scratch_ + 2);
+  const std::uint32_t esize = scratch_[4];  // scratch_[5] is reserved: not checked, a later version may use it
+  chunk_left_ -= static_cast<std::uint32_t>(kMevtLaneHead);
+  --mevt_lanes_left_;
+  const std::uint32_t bytes = count * esize;  // at most 65535 x 255
+  if (bytes > chunk_left_) {
+    fail(Error::Malformed, "MEVT lane data runs past the chunk");
+    return;
+  }
+  const bool key_ok = model::LaneStore::valid_key(pattern, track);
+  const std::uint32_t key = key_ok ? model::LaneStore::key_of(pattern, track) : 0u;
+  if (!key_ok || esize < kMevtEvent || count == 0 || count > model::kMaxLaneEvents || key < mevt_next_key_ ||
+      project_->pattern(pattern) == nullptr || !lanes_->can_grow(pattern, track, count)) {
+    skip_lane(bytes);  // bad key, shape, order or duplicate, no such pattern, or the store is full
+    return;
+  }
+  model::LaneEvent* dst = lanes_->open_gap(pattern, track, 0, count);  // key past every taken lane: appended
+  if (dst == nullptr) {
+    skip_lane(bytes);
+    return;
+  }
+  mevt_next_key_ = key + 1;
+  mevt_pattern_ = static_cast<std::uint8_t>(pattern);
+  mevt_track_ = static_cast<std::uint8_t>(track);
+  mevt_esize_ = static_cast<std::uint8_t>(esize);
+  mevt_count_ = count;
+  mevt_events_left_ = count;
+  mevt_last_tick_ = 0;
+  mevt_dst_ = dst;
+  next_event_block();
+}
+
+void Reader::next_event_block() noexcept {
+  if (mevt_events_left_ == 0) {
+    next_lane();
+    return;
+  }
+  const std::uint32_t per_block = static_cast<std::uint32_t>(kScratchBytes) / mevt_esize_;
+  const std::uint32_t n = std::min(mevt_events_left_, per_block);
+  state_ = State::MevtEvents;
+  want_ = static_cast<std::size_t>(n) * mevt_esize_;
+  have_ = 0;
+}
+
+void Reader::on_mevt_events() noexcept {
+  const std::uint32_t n = static_cast<std::uint32_t>(want_ / mevt_esize_);
+  for (std::uint32_t i = 0; i < n; ++i) {
+    const std::uint8_t* p = scratch_ + static_cast<std::size_t>(i) * mevt_esize_;
+    model::LaneEvent e;
+    e.tick = get16(p);
+    e.len = get16(p + 2);
+    e.kind_channel = p[4];
+    e.port = p[5];
+    e.a = p[6];
+    e.b = p[7];
+    if (!model::lane_event_valid(e) || e.tick < mevt_last_tick_) {  // a bad value or an unsorted lane: the lane is dropped whole
+      lanes_->erase(mevt_pattern_, mevt_track_, 0, mevt_count_);
+      chunk_left_ -= static_cast<std::uint32_t>(want_);
+      mevt_events_left_ -= n;
+      skip_lane((mevt_events_left_) * mevt_esize_);  // counts it and skips the events not read yet
+      return;
+    }
+    mevt_last_tick_ = e.tick;
+    mevt_dst_[i] = e;
+  }
+  mevt_dst_ += n;
+  mevt_events_left_ -= n;
+  chunk_left_ -= static_cast<std::uint32_t>(want_);
+  next_event_block();
 }
 
 // ---- whole-payload chunks ---------------------------------------------------------------------------

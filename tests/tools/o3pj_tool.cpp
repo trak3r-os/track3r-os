@@ -23,6 +23,8 @@
 //   o3pj_tool gen midisync|midisync-song|midisync-load OUT  (OS-MIDISYNC) the songs of the MIDI clock bench: one MIDI track (instrument 49, channel 1, USB) with a note on every step, the note naming
 //                                       the step (36 + step; the song: 3 patterns, 36 + 16 * (pattern - 1) + step); `-load` adds the Dense8 sampler tracks (and their WAVs in `samples/`) so the CPU is real
 //   o3pj_tool gen mtc-tempo OUT        (OS-MTC A2) the MTC test song: the `midisync-song` (3 patterns, note naming every step) with a Tempo FX in slot 2 step 1 (value 70 = 140 BPM; the value is BPM / 2, docs/formats/med.md 3.5), Tempo fine in slot 3 step 1 (132 = +1.00 BPM), Swing in slot 2 step 2 (50, straight) and Break in slot 3 step 2
+//   o3pj_tool gen lanes-empty|lanes-some|lanes-one|lanes-2048|lanes-full OUT  (OS-MIDIREC-P1 S1) the MEVT chunk: none (the small project plus an empty lane store: the bytes of `small`), 40 lanes of varying length,
+//                                       one lane of 4,096 events, 2,048 lanes of one event (the maximal project), and every lane of that project at 12 events (the pool full: 24,576)
 //   o3pj_tool resave IN OUT            load a file and save it again (exit 1 with the error on failure)
 //   o3pj_tool dump IN                   print the loaded project as text (same format as `o3project.py dump`)
 //   o3pj_tool limits                    print the limits table (same format as `o3project.py limits`)
@@ -85,7 +87,27 @@ std::uint32_t bits(float f) {
 
 std::size_t len_of(const char* field, std::size_t cap) { return field_length(field, cap); }
 
-void dump(const Project& p) {
+// The lane lines of o3project.py's dump (OS-MIDIREC-P1 S1): events as the file holds them (big-endian), CRC-32 of that image.
+void dump_lanes(const LaneStore& store, const formats::native::Report& report) {
+  std::vector<std::uint8_t> image;
+  for (std::uint32_t key = store.next_key(0); key < LaneStore::kKeys; key = store.next_key(key + 1)) {
+    const LaneStore::View v = store.lane_at(key);
+    image.clear();
+    for (std::uint32_t i = 0; i < v.count; ++i) {
+      const LaneEvent& e = v.events[i];
+      const std::uint8_t b[8] = {static_cast<std::uint8_t>(e.tick >> 8), static_cast<std::uint8_t>(e.tick), static_cast<std::uint8_t>(e.len >> 8),
+                                 static_cast<std::uint8_t>(e.len), e.kind_channel, e.port, e.a, e.b};
+      image.insert(image.end(), b, b + 8);
+    }
+    std::printf("lane %u %u events=%u crc=%08x\n", LaneStore::pattern_of(key), LaneStore::track_of(key), v.count,
+                formats::crc32(image.data(), image.size()));
+  }
+  if (report.mevt_skipped != 0) {
+    std::printf("mevt_skipped=%u\n", static_cast<unsigned>(report.mevt_skipped));
+  }
+}
+
+void dump(const Project& p, const LaneStore& lanes, const formats::native::Report& report) {
   print_hex("project name", p.name(), len_of(p.name(), kProjectNameMax));
   std::printf(" tempo=%u swing=%u deflen=%u active=%u master=%u,%u,%u,%u,%u\n", p.tempo_x100(), p.swing(),
               p.default_pattern_length(), p.active_tracks(), p.master().volume, p.master().dry_volume,
@@ -257,6 +279,7 @@ void dump(const Project& p) {
     }
     std::printf("\n");
   }
+  dump_lanes(lanes, report);
   for (std::uint32_t i = 0; i < p.unknown_count(); ++i) {
     const UnknownChunk& u = *p.unknown(i);
     const char id[5] = {static_cast<char>(u.id >> 24), static_cast<char>(u.id >> 16), static_cast<char>(u.id >> 8),
@@ -346,6 +369,11 @@ void limits() {
       {"perf_scenes", kSceneCount},
       {"send_fx_rows", kSendFxCount},
       {"send_fx_rows_max", kSendFxCountMax},
+      {"lane_ticks", kLaneTicks},
+      {"max_lane_events", kMaxLaneEvents},
+      {"max_lane_pool_events", kMaxLanePoolEvents},
+      {"max_lanes", kMaxLanes},
+      {"lane_event_kinds", kLaneEventKinds},
   };
   for (const Item& i : items) {
     std::printf("%s=%u\n", i.name, i.value);
@@ -828,6 +856,42 @@ int fail(const char* what) {
   return 1;
 }
 
+// OS-MIDIREC-P1 S1: the MEVT fixtures. The store is static (about 208 KiB). Events are deterministic and valid (A3); gen fills the store after the project, so it is in the project's epoch.
+LaneStore g_lanes;
+
+// Fills lanes for the patterns the project has, in key order, up to `max_lanes` lanes of `per` events (0: a count that varies from lane to lane, 1..200).
+void fill_lanes(const Project& p, std::uint32_t max_lanes, std::uint32_t per) {
+  g_lanes.clear();
+  g_lanes.adopt(p.load_epoch());
+  std::uint32_t lanes = 0;
+  for (std::uint32_t key = 0; key < LaneStore::kKeys && lanes < max_lanes; ++key) {
+    const std::uint32_t pattern = LaneStore::pattern_of(key);
+    const std::uint32_t track = LaneStore::track_of(key);
+    if (p.pattern(pattern) == nullptr || (per == 0 && (key % 5) != 0)) {
+      continue;
+    }
+    const std::uint32_t n = per != 0 ? per : 1 + (lanes * 37u) % 200u;
+    LaneEvent* e = g_lanes.open_gap(pattern, track, 0, n);
+    if (e == nullptr) {
+      std::abort();
+    }
+    for (std::uint32_t i = 0; i < n; ++i) {
+      const std::uint32_t kind = (lanes + i) % 6u;
+      e[i].tick = static_cast<std::uint16_t>(i * kLaneTicks / n);
+      e[i].len = kind == 0 ? static_cast<std::uint16_t>(1 + (i * 13u) % 600u) : std::uint16_t{0};
+      e[i].kind_channel = static_cast<std::uint8_t>(kind << 4 | ((lanes + i) % 16u));
+      e[i].port = static_cast<std::uint8_t>((lanes + i) & 3u);
+      e[i].a = static_cast<std::uint8_t>((lanes * 7u + i * 3u) & 127u);
+      e[i].b = static_cast<std::uint8_t>((i * 5u + lanes) & 127u);
+    }
+    if (!lane_events_valid(e, n, 0, kLaneTicks)) {
+      std::abort();
+    }
+    ++lanes;
+  }
+}
+
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -936,11 +1000,27 @@ int main(int argc, char** argv) {
       if (!gen_og(a, std::strcmp(argv[2], "og17") == 0 ? 17u : 16u)) {
         return fail("gen: the synthetic OG project did not import");
       }
+    } else if (std::strcmp(argv[2], "lanes-empty") == 0) {
+      test::fill_small(a.project);
+      g_lanes.clear();
+      g_lanes.adopt(a.project.load_epoch());
+    } else if (std::strcmp(argv[2], "lanes-some") == 0) {
+      test::fill_small(a.project);
+      fill_lanes(a.project, 40, 0);
+    } else if (std::strcmp(argv[2], "lanes-one") == 0) {
+      test::fill_small(a.project);
+      fill_lanes(a.project, 1, kMaxLaneEvents);
+    } else if (std::strcmp(argv[2], "lanes-2048") == 0) {
+      test::fill_maximal(a.project);
+      fill_lanes(a.project, kMaxLanes, 1);
+    } else if (std::strcmp(argv[2], "lanes-full") == 0) {
+      test::fill_maximal(a.project);
+      fill_lanes(a.project, kMaxLanes, kMaxLanePoolEvents / kMaxLanes);
     } else {
-      return fail("gen: empty, small, maximal, settings, state, midi13, persist2, scales, lfosine, stereo, wt, playthru, modrate, kit, heavy, dense10, dense8, moddrive1|4|8[off], lfostep23|24|33|36|off, midisync, midisync-song, midisync-load, mtc-tempo, og, og17, law or insx");
+      return fail("gen: empty, small, lanes-empty|some|one|2048|full, maximal, settings, state, midi13, persist2, scales, lfosine, stereo, wt, playthru, modrate, kit, heavy, dense10, dense8, moddrive1|4|8[off], lfostep23|24|33|36|off, midisync, midisync-song, midisync-load, mtc-tempo, og, og17, law or insx");
     }
     std::vector<std::uint8_t> out;
-    if (test::save(a.project, out) != formats::native::Progress::Done) {
+    if (test::save(a.project, out, formats::native::kDefaultStepBudget, &g_lanes) != formats::native::Progress::Done) {
       return fail("gen: save failed");
     }
     if (!write_file(argv[3], out)) {
@@ -964,17 +1044,17 @@ int main(int argc, char** argv) {
     }
     ModelArena& a = test::arena(0);
     formats::native::Report report;
-    if (test::load(a, in, &report) != formats::native::Progress::Done) {
+    if (test::load(a, in, &report, formats::native::kDefaultStepBudget, &g_lanes) != formats::native::Progress::Done) {
       std::fprintf(stderr, "o3pj_tool: load failed: %s (%s) at byte %u\n", formats::native::error_name(report.error),
                    report.detail, report.offset);
       return 1;
     }
     if (argv[1][0] == 'd') {
-      dump(a.project);
+      dump(a.project, g_lanes, report);
       return 0;
     }
     std::vector<std::uint8_t> out;
-    if (test::save(a.project, out) != formats::native::Progress::Done) {
+    if (test::save(a.project, out, formats::native::kDefaultStepBudget, &g_lanes) != formats::native::Progress::Done) {
       return fail("resave: save failed");
     }
     return write_file(argv[3], out) ? 0 : fail("resave: cannot write the output");

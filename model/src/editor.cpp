@@ -73,6 +73,8 @@ enum Op : std::uint8_t {
   kClearInstrument,
   kSetParam,  // OS-002d
   kSetLearn,
+  kLaneDelete,  // OS-MIDIREC-P1: u8 id, u8 track, u16 index, u16 count (host order), then count LaneEvents; the reverse inserts them
+  kLaneInsert,  // the same payload; the reverse erases them
 };
 
 constexpr std::size_t kStepBytes = sizeof(Step);
@@ -282,6 +284,8 @@ UndoArea auto_area(std::uint8_t op) noexcept {
     case kClearPattern:
     case kSetStep:
     case kSetSteps:
+    case kLaneDelete:
+    case kLaneInsert:
       return UndoArea::Pattern;
     case kSetInstrument:
     case kClearInstrument:
@@ -630,6 +634,11 @@ Status Editor::delete_pattern(std::uint32_t id) noexcept {
   if (pat == nullptr) {
     return project_.delete_pattern(id);  // NotFound
   }
+  const std::size_t lane_bytes = lanes_free_bytes(id);
+  if (lane_bytes != 0 && !undo_fits(kDeletePattern, lane_bytes + UndoJournal::kRecordOverheadBytes + kDeleteImage + 3u)) {
+    return Status::Full;  // the lanes' records and the pattern's would not fit the undo ring: nothing is deleted (editor.h)
+  }
+  lanes_free(id);  // OS-MIDIREC-P1 A16: before the pattern's record, so an undo brings the pattern back first
   const std::uint8_t idb = static_cast<std::uint8_t>(id);
   UndoJournal* j = writer(kDeletePattern);
   const bool rec = j != nullptr && j->reserve(kDeletePattern, kDeleteImage);
@@ -659,6 +668,13 @@ Status Editor::clear_pattern(std::uint32_t id) noexcept {
     for (std::uint32_t k = 0; k < kMaxPatternLength && !any; ++k) {
       any = !is_empty(pat->steps[t][k]);
     }
+  }
+  if (pat != nullptr) {
+    const std::size_t lanes = lanes_free_bytes(id);
+    if (lanes != 0 && !undo_fits(kClearPattern, lanes + (any ? UndoJournal::kRecordOverheadBytes + 1 + kStepsImage + 3u : 0))) {
+      return Status::Full;  // the lanes' records and the steps' would not fit the undo ring: nothing is cleared (editor.h)
+    }
+    lanes_free(id);  // OS-MIDIREC-P1 A16: CLEAR frees the pattern's lanes too (their own records, in this unit)
   }
   if (!any) {
     return project_.clear_pattern(id);  // NotFound, or nothing to clear: not recorded
@@ -707,12 +723,21 @@ Status Editor::set_track_length(std::uint32_t id, std::uint32_t track, std::uint
     return project_.set_track_length(id, track, length);  // NotFound or BadIndex
   }
   const std::uint8_t old = pat->track_length[track];
+  if (length < old && length >= kMinPatternLength) {
+    const std::size_t lanes = lane_cut_bytes(id, track, length * kLaneTicksPerStep);
+    if (lanes != 0 && !undo_fits(kSetTrackLength, lanes + UndoJournal::kRecordOverheadBytes + 4u)) {
+      return Status::Full;  // the cut lane's record and the length's would not fit the undo ring: nothing changes (editor.h)
+    }
+  }
   const Status st = project_.set_track_length(id, track, length);
   if (st == Status::Ok && old != length) {
     const std::uint8_t b[4] = {static_cast<std::uint8_t>(id), static_cast<std::uint8_t>(track),
                                static_cast<std::uint8_t>(length), old};
     const Piece p[] = {{b, 4}};
     (void)record(kSetTrackLength, p, 1);
+  }
+  if (st == Status::Ok && length < old) {
+    lane_cut(id, track, length * kLaneTicksPerStep);  // A17
   }
   return st;
 }
@@ -731,12 +756,174 @@ Status Editor::set_pattern_length(std::uint32_t id, std::uint32_t length) noexce
   for (std::uint32_t t = 0; t < kMaxTracks; ++t) {
     changes = changes || b[2 + t] != b[1];
   }
+  if (length >= kMinPatternLength && length <= kMaxPatternLength) {
+    std::size_t lanes = 0;
+    for (std::uint32_t t = 0; t < kMaxTracks; ++t) {
+      lanes += length < b[2 + t] ? lane_cut_bytes(id, t, length * kLaneTicksPerStep) : 0;
+    }
+    if (lanes != 0 && !undo_fits(kSetPatternLength, lanes + UndoJournal::kRecordOverheadBytes + ((sizeof b + 3u) & ~std::size_t{3}))) {
+      return Status::Full;  // the cut lanes' records and the lengths' would not fit the undo ring: nothing changes (editor.h)
+    }
+  }
   const Status st = project_.set_pattern_length(id, length);
   if (st == Status::Ok && changes) {
     const Piece p[] = {{b, sizeof b}};
     (void)record(kSetPatternLength, p, 1);
   }
+  if (st == Status::Ok) {
+    for (std::uint32_t t = 0; t < kMaxTracks; ++t) {
+      if (length < b[2 + t]) {
+        lane_cut(id, t, length * kLaneTicksPerStep);  // A17
+      }
+    }
+  }
   return st;
+}
+
+// ---- lanes (OS-MIDIREC-P1) --------------------------------------------------------------------------------------------
+
+// One lane record: u8 id, u8 track, u16 index, u16 count (host order), then the events. The events of a record are at most one lane's (4096 x 8 + 6 bytes).
+void Editor::lane_erase(std::uint32_t pattern, std::uint32_t track, std::uint32_t index, std::uint32_t count) noexcept {
+  const LaneStore::View v = lanes_->lane(pattern, track);
+  if (v.count < index + count) {
+    return;
+  }
+  const std::uint16_t ix = static_cast<std::uint16_t>(index);
+  const std::uint16_t n = static_cast<std::uint16_t>(count);
+  const std::uint8_t id = static_cast<std::uint8_t>(pattern);
+  const std::uint8_t tr = static_cast<std::uint8_t>(track);
+  const Piece p[] = {{&id, 1}, {&tr, 1}, {&ix, 2}, {&n, 2}, {v.events + index, count * sizeof(LaneEvent)}};
+  (void)record(kLaneDelete, p, 5);  // the pieces point into the pool: the journal copies them before the erase
+  (void)lanes_->erase(pattern, track, index, count);
+  (void)project_.touch_lanes(pattern);
+}
+
+bool Editor::lane_insert(std::uint32_t pattern, std::uint32_t track, std::uint32_t index, const LaneEvent* events,
+                         std::uint32_t count) noexcept {
+  LaneEvent* gap = lanes_->open_gap(pattern, track, index, count);
+  if (gap == nullptr) {
+    return false;
+  }
+  std::memcpy(gap, events, count * sizeof(LaneEvent));
+  const std::uint16_t ix = static_cast<std::uint16_t>(index);
+  const std::uint16_t n = static_cast<std::uint16_t>(count);
+  const std::uint8_t id = static_cast<std::uint8_t>(pattern);
+  const std::uint8_t tr = static_cast<std::uint8_t>(track);
+  const Piece p[] = {{&id, 1}, {&tr, 1}, {&ix, 2}, {&n, 2}, {events, count * sizeof(LaneEvent)}};
+  (void)record(kLaneInsert, p, 5);
+  (void)project_.touch_lanes(pattern);
+  return true;
+}
+
+// The ring bytes of one lane record of `n` events (0 for none): 8 + align4(u8 id, u8 track, u16 index, u16 count, the events) = 8n + 16.
+std::size_t Editor::lane_record_bytes(std::uint32_t n) noexcept {
+  return n == 0 ? 0 : UndoJournal::kRecordOverheadBytes + ((6u + n * sizeof(LaneEvent) + 3u) & ~std::size_t{3});
+}
+
+std::size_t Editor::lane_cut_bytes(std::uint32_t pattern, std::uint32_t track, std::uint32_t from_tick) noexcept {
+  if (lanes_ == nullptr) {
+    return 0;
+  }
+  lanes_->sync(project_.load_epoch());
+  const LaneStore::View v = lanes_->lane(pattern, track);
+  return lane_record_bytes(v.count - LaneStore::lower_bound(v, from_tick));
+}
+
+std::size_t Editor::lanes_free_bytes(std::uint32_t pattern) noexcept {
+  std::size_t bytes = 0;
+  for (std::uint32_t t = 0; lanes_ != nullptr && t < kMaxTracks; ++t) {
+    bytes += lane_cut_bytes(pattern, t, 0);
+  }
+  return bytes;
+}
+
+// Whether a unit that adds `record_bytes` of records fits the ring it is written to (the open unit's own bytes count; the oldest history is made room for by
+// eviction, but a unit bigger than the ring is not undoable and ends the history, so the callers refuse it with Full before changing anything).
+bool Editor::undo_fits(std::uint8_t op, std::size_t record_bytes) const noexcept {
+  if (muted_ || final_) {
+    return true;  // nothing is recorded
+  }
+  const UndoJournal* j = open_ != nullptr ? open_ : rings_[ring_index(area_ == UndoArea::Auto ? auto_area(op) : area_)];
+  if (j == nullptr || !j->ready()) {
+    return true;
+  }
+  const std::size_t held = j->open_bytes();  // header and trailer included once the unit has a record
+  const std::size_t frame = held == 0 ? UndoJournal::kUnitHeaderBytes + UndoJournal::kUnitTrailerBytes : 0;
+  return held + frame + record_bytes <= j->capacity_bytes();
+}
+
+void Editor::lane_cut(std::uint32_t pattern, std::uint32_t track, std::uint32_t from_tick) noexcept {
+  if (lanes_ == nullptr) {
+    return;
+  }
+  lanes_->sync(project_.load_epoch());
+  const LaneStore::View v = lanes_->lane(pattern, track);
+  const std::uint32_t at = LaneStore::lower_bound(v, from_tick);
+  if (at < v.count) {
+    lane_erase(pattern, track, at, v.count - at);
+  }
+}
+
+void Editor::lanes_free(std::uint32_t pattern) noexcept {
+  if (lanes_ == nullptr) {
+    return;
+  }
+  lanes_->sync(project_.load_epoch());
+  for (std::uint32_t t = 0; t < kMaxTracks; ++t) {
+    const std::uint32_t n = lanes_->lane(pattern, t).count;
+    if (n != 0) {
+      lane_erase(pattern, t, 0, n);
+    }
+  }
+}
+
+Status Editor::lane_replace(std::uint32_t pattern, std::uint32_t track, std::uint32_t t0, std::uint32_t t1,
+                            const LaneEvent* events, std::uint32_t n) noexcept {
+  Scope scope(*this);
+  return lane_replace_in(pattern, track, t0, t1, events, n, true);
+}
+
+Status Editor::lane_clear(std::uint32_t pattern, std::uint32_t track) noexcept {
+  Scope scope(*this);
+  return lane_replace_in(pattern, track, 0, kLaneTicks, nullptr, 0, false);  // the whole lane, whatever the track's length
+}
+
+// `inside_track`: t1 must not pass the track's length x 48 ticks (A17); lane_clear is exempt (it only removes).
+Status Editor::lane_replace_in(std::uint32_t pattern, std::uint32_t track, std::uint32_t t0, std::uint32_t t1,
+                               const LaneEvent* events, std::uint32_t n, bool inside_track) noexcept {
+  const Pattern* pat = project_.pattern(pattern);
+  if (lanes_ == nullptr || pat == nullptr) {
+    return Status::NotFound;
+  }
+  if (track >= kMaxTracks) {
+    return Status::BadIndex;
+  }
+  if (t0 >= t1 || t1 > kLaneTicks || n > kMaxLaneEvents || (n != 0 && events == nullptr) || !lane_events_valid(events, n, t0, t1) ||
+      (inside_track && t1 > pat->track_length[track] * kLaneTicksPerStep)) {
+    return Status::BadValue;
+  }
+  lanes_->sync(project_.load_epoch());
+  const LaneStore::View v = lanes_->lane(pattern, track);
+  const std::uint32_t lo = LaneStore::lower_bound(v, t0);
+  const std::uint32_t hi = LaneStore::lower_bound(v, t1);
+  const std::uint32_t old = hi - lo;
+  if (old == n && (n == 0 || std::memcmp(v.events + lo, events, n * sizeof(LaneEvent)) == 0)) {
+    return Status::Ok;  // the same events: nothing to apply, nothing to record
+  }
+  if (v.count - old + n > kMaxLaneEvents || lanes_->total_events() - old + n > kMaxLanePoolEvents ||
+      (v.count == 0 && n != 0 && lanes_->lane_count() >= kMaxLanes)) {
+    return Status::Full;
+  }
+  if (!undo_fits(kLaneDelete, lane_record_bytes(old) + lane_record_bytes(n))) {
+    return Status::Full;  // the records of this take would not fit the undo ring: nothing is erased, the history stays
+  }
+  if (old != 0) {
+    lane_erase(pattern, track, lo, old);
+  }
+  if (n != 0) {
+    (void)lane_insert(pattern, track, lo, events, n);  // room was checked above (the erase freed the old ones)
+  }
+  return Status::Ok;
 }
 
 Status Editor::set_step(std::uint32_t id, std::uint32_t track, std::uint32_t step, const Step& value) noexcept {
@@ -1152,6 +1339,30 @@ bool Editor::replay(std::uint8_t op, std::size_t payload, std::size_t len, bool 
       r.get(&now, sizeof now);
       r.get(&old, sizeof old);
       st = project_.set_learn_slot(slot, undo ? old : now);
+      break;
+    }
+    case kLaneDelete:
+    case kLaneInsert: {
+      const std::uint32_t id = r.u8();
+      const std::uint32_t track = r.u8();
+      std::uint16_t index = 0, count = 0;
+      r.get(&index, 2);
+      r.get(&count, 2);
+      if (!r.ok || lanes_ == nullptr || count == 0 || r.left != count * sizeof(LaneEvent)) {
+        r.ok = false;
+        break;
+      }
+      if ((op == kLaneInsert) != undo) {  // forward of an insert, or the reverse of a delete: put the events back in
+        LaneEvent* gap = lanes_->open_gap(id, track, index, count);
+        if (gap == nullptr) {
+          st = Status::Full;
+          break;
+        }
+        r.get(gap, count * sizeof(LaneEvent));
+        st = project_.touch_lanes(id) ? Status::Ok : Status::NotFound;
+      } else {
+        st = lanes_->erase(id, track, index, count) && project_.touch_lanes(id) ? Status::Ok : Status::BadIndex;
+      }
       break;
     }
     default:

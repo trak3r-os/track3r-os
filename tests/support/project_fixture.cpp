@@ -470,10 +470,10 @@ void fill_maximal(Project& p) {
   }
 }
 
-Progress save(const Project& p, std::vector<std::uint8_t>& out, std::size_t budget) {
+Progress save(const Project& p, std::vector<std::uint8_t>& out, std::size_t budget, const model::LaneStore* lanes) {
   VectorSink sink;
   Writer w;
-  w.begin(p, sink);
+  w.begin(p, sink, ~0u, lanes);
   Progress pr = Progress::Running;
   for (std::uint32_t guard = 0; pr == Progress::Running && guard < 100000000u; ++guard) {
     pr = w.step(budget);
@@ -482,10 +482,11 @@ Progress save(const Project& p, std::vector<std::uint8_t>& out, std::size_t budg
   return pr;
 }
 
-Progress load(ModelArena& a, const std::vector<std::uint8_t>& bytes, Report* report, std::size_t budget) {
+Progress load(ModelArena& a, const std::vector<std::uint8_t>& bytes, Report* report, std::size_t budget,
+              model::LaneStore* lanes) {
   MemorySource src(bytes);
   Reader rd;
-  rd.begin(src, a);
+  rd.begin(src, a, lanes);
   Progress pr = Progress::Running;
   for (std::uint32_t guard = 0; pr == Progress::Running && guard < 100000000u; ++guard) {
     pr = rd.step(budget);

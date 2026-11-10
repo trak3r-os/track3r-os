@@ -52,6 +52,16 @@ inline constexpr std::uint32_t kModuleNameMax = 31;
 inline constexpr std::uint32_t kMaxUnknownChunks = 16;
 inline constexpr std::uint32_t kUnknownPoolBytes = 16384;
 
+// MIDI take lanes (OS-MIDIREC-P1, the MEVT chunk): a lane is the recorded events of one track of one pattern, in
+// ticks of 1/48 of a step (6144 = the longest pattern). 24576 events of 8 bytes are the 192 KiB pool.
+inline constexpr std::uint32_t kLaneTicks = 6144;           // 128 steps x 48 ticks; an event's tick is below it
+inline constexpr std::uint32_t kLaneTicksPerStep = 48;
+static_assert(kLaneTicks == kLaneTicksPerStep * kMaxPatternLength, "the lane timeline is the longest pattern");
+inline constexpr std::uint32_t kMaxLaneEvents = 4096;      // in one lane
+inline constexpr std::uint32_t kMaxLanePoolEvents = 24576;  // in all lanes of a project (192 KiB)
+inline constexpr std::uint32_t kMaxLanes = 2048;            // lanes with events in one project
+inline constexpr std::uint32_t kLaneEventKinds = 6;         // kind 0..5 (docs/specs/OS-MIDIREC-P1.md A3)
+
 // Value ranges
 inline constexpr std::uint32_t kMinTempoX100 = 4000;  // BPM x 100: 40..800, our range (an OG import clamps to it)
 inline constexpr std::uint32_t kMaxTempoX100 = 80000;
