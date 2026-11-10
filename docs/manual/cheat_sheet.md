@@ -56,8 +56,8 @@ Held at power-on, until the strip shows the mode:
 |---|---|
 | `Up`, `Down`, `Left`, `Right` | move the cursor. `Up` on step 1 goes to the last step |
 | pad | in STEP, writes a note at the cursor; in WATCH, plays the sound |
-| MIDI CC bound by Learn | in LIVE, a knob bound to CUTOFF, PANNING, a send, OVERDRIVE or BIT DEPTH also writes its move as a step FX on the play line (QA-PAT-324) |
-| the encoder as a Learn knob | the encoder target records the same way, in LIVE and in STEP (on the cursor's step); a parameter with no FX of its own moves the sound and records nothing (QA-GLB-231, QA-GLB-232) |
+| MIDI CC bound by Learn | in LIVE, a knob bound to CUTOFF, PANNING, a send, OVERDRIVE or BIT DEPTH also writes its move as a step FX on the play line; any other parameter is recorded as a CC letter, CC A to CC F (QA-PAT-324, QA-GLB-242) |
+| the encoder as a Learn knob | the encoder target records the same way, in LIVE and in STEP (on the cursor's step) (QA-GLB-231, QA-GLB-232) |
 | `Delete` | clears the cursor's entry, or the highlighted columns of the block |
 | `Shift` + `Delete` | pulls the steps below up, to close a gap |
 | `Insert` | inserts an empty step at the cursor; the steps below move down |

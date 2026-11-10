@@ -3,10 +3,10 @@
 # as it was when the section was last acknowledged: a path (git blob hash; a manual page without its generated tables; a folder: a hash of
 # its tracked files) or a QA ID (a hash of the row's Function, How and Expected cells).
 # After a merge conflict here: take either side, then re-run --ack-path <file> (or --ack-all) on the merged tree.
-cheat_sheet.md#global-keys QA-GLB-130=4460aa4d421d QA-GLB-157=75a7529ba1e2 docs/manual/panel.md=2e86614c669e docs/manual/pattern.md=cb060f77524c
-cheat_sheet.md#pattern-editing docs/manual/panel.md=2e86614c669e docs/manual/pattern.md=cb060f77524c
-cheat_sheet.md#screens docs/manual/file.md=87dbe88b9049 docs/manual/instrument.md=0f028e9f3c56 docs/manual/mixer.md=6811f88ccb28 docs/manual/panel.md=2e86614c669e docs/manual/pattern.md=cb060f77524c docs/manual/perform_dj.md=9e47d0bd71e8 docs/manual/record.md=086fac474b0d docs/manual/sample_edit.md=270c122843e0 docs/manual/sample_load.md=94d3d2e7dd75
-cheat_sheet.md#shift-combinations docs/manual/file.md=87dbe88b9049 docs/manual/instrument.md=0f028e9f3c56 docs/manual/mixer.md=6811f88ccb28 docs/manual/panel.md=2e86614c669e docs/manual/pattern.md=cb060f77524c docs/manual/sample_load.md=94d3d2e7dd75
+cheat_sheet.md#global-keys QA-GLB-130=4460aa4d421d QA-GLB-157=75a7529ba1e2 docs/manual/panel.md=cdaaefe5b245 docs/manual/pattern.md=627e45782ef6
+cheat_sheet.md#pattern-editing docs/manual/panel.md=cdaaefe5b245 docs/manual/pattern.md=627e45782ef6
+cheat_sheet.md#screens docs/manual/file.md=87dbe88b9049 docs/manual/instrument.md=0f028e9f3c56 docs/manual/mixer.md=6811f88ccb28 docs/manual/panel.md=cdaaefe5b245 docs/manual/pattern.md=627e45782ef6 docs/manual/perform_dj.md=9e47d0bd71e8 docs/manual/record.md=086fac474b0d docs/manual/sample_edit.md=270c122843e0 docs/manual/sample_load.md=94d3d2e7dd75
+cheat_sheet.md#shift-combinations docs/manual/file.md=87dbe88b9049 docs/manual/instrument.md=0f028e9f3c56 docs/manual/mixer.md=6811f88ccb28 docs/manual/panel.md=cdaaefe5b245 docs/manual/pattern.md=627e45782ef6 docs/manual/sample_load.md=94d3d2e7dd75
 computer_tools.md#measure-the-audio-o3audiopy platform/mk66/tools/o3audio.py=05a7d8707dc0
 computer_tools.md#send-a-firmware-file-to-the-card platform/mk66/tools/o3console.py=e39d81ca6e8d platform/mk66/update/include/o3os/platform/mk66/update/path_guard.h=79167782c658
 computer_tools.md#take-a-screen-from-a-saved-text-o3shotpy platform/mk66/tools/o3shot.py=da6c8eed3e9e

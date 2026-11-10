@@ -134,7 +134,7 @@ LEARN MAP is one full-screen list of every binding of both stores, with the enco
 New in track3r-os. Not yet checked on the unit.
 
 ### Put one parameter on the encoder
-<!-- sync: src=app/src/bindings.cpp,app/src/param_actions.cpp,app/src/rec_actions.cpp qa=QA-GLB-228,QA-GLB-229,QA-GLB-230,QA-GLB-231,QA-GLB-232 -->
+<!-- sync: src=app/src/bindings.cpp,app/src/param_actions.cpp,app/src/rec_actions.cpp qa=QA-GLB-228,QA-GLB-229,QA-GLB-230,QA-GLB-231,QA-GLB-232,QA-GLB-241,QA-GLB-242 -->
 
 The encoder can work like a MIDI knob that you bound with Learn, with no MIDI controller. You pick a parameter once. Then you hold two keys and turn the encoder to move it, on any screen. It is a relative control: it has no CC number to set and no pickup, and every click moves the value one step.
 
@@ -142,7 +142,11 @@ Any row that Learn can bind can also sit on the encoder, without a MIDI controll
 
 To use it, hold `Instr` and `Vol` and turn the encoder, on any screen with no dialog open. Each click moves the row by one step; hold `Shift` for the coarse step. The strip shows `<PARAM> <value>`. Moves undo like a Learn knob. With no target the strip says `NO ENCODER TARGET (INSTR + FX2)`. While both keys are held the encoder does nothing else. Turning cancels the `Instr` popup and the `Vol` tap, so a turn never selects a column. Pressing the two keys without turning does nothing. <!-- QA-GLB-229, QA-GLB-230 -->
 
-Recording follows the Learn rule. In LIVE recording, with Record knob moves as FX on, a move writes the matching FX on the playing step (cutoff, panning, delay send, reverb send, overdrive and bit depth have one). In Edit with free recording, a move writes the FX on the cursor's step of the cursor's track, and one hold of the two keys is one undo unit. A row with no FX still moves the sound and records nothing: the strip says `REC FX: <PARAM> HAS NO FX` on the first move. Browse records nothing. <!-- QA-GLB-231, QA-GLB-232 -->
+Recording follows the Learn rule, and a row with no FX of its own now records too. In LIVE recording, with Record knob moves as FX on, a move writes the matching FX on the playing step (cutoff, panning, delay send, reverb send, overdrive and bit depth have one). In Edit with free recording, a move writes the FX on the cursor's step of the cursor's track, and one hold of the two keys is one undo unit. Browse records nothing. <!-- QA-GLB-231 -->
+
+Any other parameter of a Sample or Module instrument is recorded as a CC letter, **CC A** to **CC F**, in the step's FX column. The first recorded move takes the first free letter of the project, and the strip says `REC FX: VOLUME -> CC A`. Turning the same row again reuses its letter; the next row takes the next one (TUNE takes **CC B**). There are six letters, so a seventh parameter says `REC FX: NO FREE CC LETTER`: the move still sounds and nothing is written. On a track whose instrument is a MIDI one the strip says `REC FX: MIDI TRACK` and nothing is written, because a letter there would send a MIDI CC. Rows that cannot take a letter (VEL>, Track, Master, Insert) still say `REC FX: <PARAM> HAS NO FX` on the first move of a hold. <!-- QA-GLB-232, QA-GLB-242 -->
+
+One Undo takes the step and its letter back together, and leaves the other parameters you changed since as they are. On playback a mapped letter moves the parameter on its own instrument; it sends no MIDI. An older `CC x` step of a non-MIDI track in the same project now does the same. Playing such a step counts as a change to the project, so leaving the project after a plain play asks about unsaved changes. <!-- QA-GLB-241 -->
 
 The encoder target differs from a Learn binding in four ways. It is not listed in Learn and it is not saved with the project: it is gone when you switch the unit off. It is one parameter, not a list. It stays on the instrument you picked, so it does not follow the selected instrument as a Learn binding does with `F5` (**FOLLOW**). <!-- QA-GLB-228 -->
 
