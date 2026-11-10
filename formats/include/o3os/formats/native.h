@@ -93,6 +93,12 @@ inline constexpr std::uint16_t kInstVersionPlayThru = 0x0107;
 // without one is byte for byte the file it was. A reader that knows 1.8 reads an older chunk as 0 and a value above 2 as 0 (as the stereo byte does); an older reader meets 1.8 as a newer minor, reads the chunk as of 1.7
 // and skips the byte (it is the payload's tail), reading FULL and losing the rate on its next save.
 inline constexpr std::uint16_t kInstVersionRate = 0x0108;
+// OS-PARAMAUTO S1 (docs/specs/OS-PARAMAUTO.md; maintainer 2026-11-10, route A with a minor bump; new Community OS behaviour): INST 1.9 adds no field and no byte (the layout is 1.8's, whole: every byte of 1.3 .. 1.8 always present). The version
+// says that the six `midi_cc` bytes of a Sample or Module instrument are LETTERS: the parameter code of the field that owns CC A..F (model/param_auto.h), where they were always 0 before. The writer writes 1.9 only for a non-MIDI
+// instrument with a non-zero `midi_cc` byte (model::inst_has_auto_letter), so every project without a letter is byte for byte the file it was; 1.9 covers 1.8 .. 1.1 (it is above every gate). A reader that knows 1.9 reads the bytes
+// of a non-MIDI instrument as letters; in a chunk older than 1.9 it zeroes them (the old reader and the old engine ignored them on such an instrument: nothing changes). A MIDI instrument's bytes (its controller map) are the same in every
+// minor. An older reader meets 1.9 as a newer minor with nothing appended, reads the chunk whole, keeps the bytes and writes them back (as 1.3 .. 1.8); the letter does nothing there.
+inline constexpr std::uint16_t kInstVersionAutoCc = 0x0109;
 // OS-PERFFX P1 (decision D5, option A): PERF and SCEN 1.1 add no field and no byte: the version only says that the Perform FX ids 20 (BITDEPTH) and 21 (OVERDRV) are valid. The writer writes 1.1 only when a slot
 // (of a stored scene, for SCEN) holds one of them and 1.0, byte for byte as before, for every other bank (state_chunks::version_of); a reader that knows 1.1 reads 1.0 with 20 and 21 as none. An older reader
 // meets 1.1 as a newer minor of a chunk it knows at 1.0: it reads the chunk whole (the length is the same), reads the two ids as none and loses them on its next save.

@@ -218,6 +218,8 @@ class SimAudio::Tracks final : public app::TrackSink {
   bool mute_cancel(unsigned track) noexcept override { return ring_.push(seq::Command{seq::Command::Kind::MuteCancel, static_cast<std::uint8_t>(track), 0, 0}); }
   std::uint16_t mute_pending() const noexcept override { return seq_.mute_pending(); }
   std::uint8_t note_count(unsigned track) const noexcept override { return seq_.note_count(track); }
+  void auto_mask(std::uint8_t mask) noexcept override { seq_.set_auto_mask(mask); }
+  std::uint8_t auto_take(std::uint8_t* val) noexcept override { return seq_.take_auto(val); }
 
  private:
   seq::Sequencer& seq_;

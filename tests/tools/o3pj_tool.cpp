@@ -2,7 +2,7 @@
 // Command-line helper for the C++ <-> Python round trip of the native project format (ctest project_python,
 // driven by tests/o3project_roundtrip.py). Not part of the OS.
 //
-//   o3pj_tool gen empty|small|maximal|settings|state|midi13|persist2|scales|lfosine|stereo|wt|playthru|modrate|og|og17|law|insx OUT  write a fixture project (empty = the default project; state = the project-level
+//   o3pj_tool gen empty|small|maximal|settings|state|midi13|persist2|scales|lfosine|stereo|wt|playthru|modrate|autocc|og|og17|law|insx OUT  write a fixture project (empty = the default project; state = the project-level
 //                                       state of OS-004d: MIDI, USBS, MIXR, PERF, APPM and instruments with a playback engine; persist2 = the session
 //                                       state of OS-PERSIST2: NOTE, MUTE, SCEN, SNFX; scales = the persist2 fixture with a NOTE 1.1 chunk (OS-SCALES28: Hirajoshi, SCALE LOCK on); lfosine = the small project with a Sine LFO, so INST 1.4; stereo = the small project with the stereo flag, so INST 1.5;
 //                                       wt = the small project with WT slots, so INST 1.6 (OS-CEWTENV W1); playthru = the small project with the play-thru flag, so INST 1.7 (OS-CEPLAYTHRU P1); modrate = the small project with the module RATE 2 on instrument 50, so INST 1.8 (OS-MODRATE S3); og =what the OG
@@ -345,6 +345,7 @@ void limits() {
       {"inst_version_wt", formats::native::kInstVersionWt},
       {"inst_version_playthru", formats::native::kInstVersionPlayThru},
       {"inst_version_modrate", formats::native::kInstVersionRate},
+      {"inst_version_autocc", formats::native::kInstVersionAutoCc},
       {"state_version_fx", formats::native::kStateVersionFx},
       {"state_version_play_order", formats::native::kStateVersionPlayOrder},
       {"apps_version_v11", formats::state_chunks::kAppsVersionV11},
@@ -963,6 +964,19 @@ int main(int argc, char** argv) {
       model::Instrument in = *a.project.instrument(50);
       in.rate = 2;
       (void)a.project.set_instrument(50, in);
+    } else if (std::strcmp(argv[2], "autocc") == 0) {
+      // OS-PARAMAUTO S1: the small project with CC letters on its Sample instrument (slot 0: codes 1, 8, 120 on A, C, F) and its Module instrument (slot 50: codes 1 and 32 on A, D), so INST 1.9 (the 1.8 layout whole, no new byte); the other instruments stay as they were.
+      test::fill_small(a.project);
+      const std::uint8_t sample_cc[6] = {1, 0, 8, 0, 0, 120};
+      const std::uint8_t module_cc[6] = {1, 0, 0, 32, 0, 0};
+      model::Instrument s = *a.project.instrument(0);
+      model::Instrument m = *a.project.instrument(50);
+      for (unsigned i = 0; i < 6; ++i) {
+        s.midi_cc[i] = sample_cc[i];
+        m.midi_cc[i] = module_cc[i];
+      }
+      (void)a.project.set_instrument(0, s);
+      (void)a.project.set_instrument(50, m);
     } else if (std::strcmp(argv[2], "persist2") == 0) {
       test::fill_persist2(a.project);
     } else if (std::strcmp(argv[2], "scales") == 0) {
@@ -1017,7 +1031,7 @@ int main(int argc, char** argv) {
       test::fill_maximal(a.project);
       fill_lanes(a.project, kMaxLanes, kMaxLanePoolEvents / kMaxLanes);
     } else {
-      return fail("gen: empty, small, lanes-empty|some|one|2048|full, maximal, settings, state, midi13, persist2, scales, lfosine, stereo, wt, playthru, modrate, kit, heavy, dense10, dense8, moddrive1|4|8[off], lfostep23|24|33|36|off, midisync, midisync-song, midisync-load, mtc-tempo, og, og17, law or insx");
+      return fail("gen: empty, small, lanes-empty|some|one|2048|full, maximal, settings, state, midi13, persist2, scales, lfosine, stereo, wt, playthru, modrate, autocc, kit, heavy, dense10, dense8, moddrive1|4|8[off], lfostep23|24|33|36|off, midisync, midisync-song, midisync-load, mtc-tempo, og, og17, law or insx");
     }
     std::vector<std::uint8_t> out;
     if (test::save(a.project, out, formats::native::kDefaultStepBudget, &g_lanes) != formats::native::Progress::Done) {

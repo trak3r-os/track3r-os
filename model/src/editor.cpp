@@ -73,6 +73,7 @@ enum Op : std::uint8_t {
   kClearInstrument,
   kSetParam,  // OS-002d
   kSetLearn,
+  kSetInstrumentCc,  // OS-PARAMAUTO: one midi_cc byte of an instrument
   kLaneDelete,  // OS-MIDIREC-P1: u8 id, u8 track, u16 index, u16 count (host order), then count LaneEvents; the reverse inserts them
   kLaneInsert,  // the same payload; the reverse erases them
 };
@@ -96,6 +97,7 @@ static_assert(kUndoPatternBytes / UndoJournal::unit_bytes_for(kDeleteImage) >= 1
 static_assert(kUndoSongBytes / UndoJournal::unit_bytes_for(kDeleteImage) >= 6, "a whole-pattern copy keeps 6 levels in SONG");
 static_assert(sizeof(core::LearnBinding) == 8, "a Learn record copies the binding as bytes: no padding");
 static_assert(UndoJournal::unit_bytes_for(12) == 40, "a parameter edit is 40 bytes of journal (editor.h)");
+static_assert(UndoJournal::unit_bytes_for(4) == 32, "a letter edit is 32 bytes of journal (editor.h)");
 static_assert(UndoJournal::unit_bytes_for(1 + 2 * sizeof(core::LearnBinding)) == 48, "a Learn edit is 48 bytes of journal (editor.h)");
 
 // The text of a text record: [length of new][new][length of old][old]. Redo wants the new, undo the old.
@@ -199,7 +201,8 @@ bool Editor::adopt_instrument_load(std::uint32_t slot) noexcept {
   static const auto names = [](std::uint8_t op, std::uint32_t head, unsigned slot_arg) noexcept {
     switch (op) {
       case kSetInstrument:
-      case kClearInstrument: return (head & 0xFFu) == slot_arg;
+      case kClearInstrument:
+      case kSetInstrumentCc: return (head & 0xFFu) == slot_arg;
       case kSetParam: return core::param_kind(static_cast<core::ParamId>(head)) == core::ParamKind::Instrument && core::param_index(static_cast<core::ParamId>(head)) == slot_arg;
       default: return false;
     }
@@ -291,6 +294,7 @@ UndoArea auto_area(std::uint8_t op) noexcept {
     case kClearInstrument:
     case kSetParam:
     case kSetLearn:
+    case kSetInstrumentCc:
       return UndoArea::Sound;
     default:
       return UndoArea::Song;  // order, tempo, swing, the title and the project-level fields
@@ -1080,6 +1084,29 @@ Status Editor::set_insert(const InsertRecord& value) noexcept { O3OS_EDITOR_STAT
 Status Editor::clear_insert(std::uint32_t where, std::uint32_t slot) noexcept { O3OS_EDITOR_STATE_SETTER(project_.clear_insert(where, slot)) }
 #undef O3OS_EDITOR_STATE_SETTER
 
+// OS-PARAMAUTO: one byte of Instrument::midi_cc as a 4-byte record [slot][letter][new][old] (32 bytes of journal, not the instrument's 1,472): the take that gives a parameter its letter
+// holds the letter in its own undo unit, and an undo of the take restores that one byte, not the other parameters the instrument had changed since.
+Status Editor::set_instrument_cc(std::uint32_t index, unsigned letter, std::uint8_t code) noexcept {
+  Scope scope(*this);
+  const Instrument* cur = project_.instrument(index);
+  if (cur == nullptr) {
+    return index >= kMaxInstruments ? Status::BadIndex : Status::NotFound;
+  }
+  if (letter >= sizeof cur->midi_cc) {
+    return Status::BadIndex;
+  }
+  const std::uint8_t old = cur->midi_cc[letter];
+  Instrument next = *cur;
+  next.midi_cc[letter] = code;
+  const Status st = project_.set_instrument(index, next);
+  if (st == Status::Ok && code != old) {
+    const std::uint8_t b[4] = {static_cast<std::uint8_t>(index), static_cast<std::uint8_t>(letter), code, old};
+    const Piece p[] = {{b, 4}};
+    (void)record(kSetInstrumentCc, p, 1);
+  }
+  return st;
+}
+
 Status Editor::set_instrument_name(std::uint32_t index, const char* text, std::size_t len) noexcept {
   const Instrument* cur = project_.instrument(index);
   if (cur == nullptr) {
@@ -1306,6 +1333,19 @@ bool Editor::replay(std::uint8_t op, std::size_t payload, std::size_t len, bool 
       }
       r.get(&inst, sizeof inst);
       st = project_.set_instrument(index, inst);
+      break;
+    }
+    case kSetInstrumentCc: {
+      const std::uint32_t index = r.u8();
+      const std::uint32_t letter = r.u8();
+      const std::uint8_t now = r.u8();
+      const std::uint8_t old = r.u8();
+      const Instrument* cur = project_.instrument(index);
+      if (r.ok && cur != nullptr && letter < sizeof cur->midi_cc) {  // (a slot that is gone since has no letter to move)
+        Instrument next = *cur;
+        next.midi_cc[letter] = undo ? old : now;
+        st = project_.set_instrument(index, next);
+      }
       break;
     }
     case kClearInstrument: {

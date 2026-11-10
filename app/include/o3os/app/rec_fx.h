@@ -86,7 +86,9 @@ constexpr int rec_fx_place(model::Step& s, std::uint8_t type, std::uint8_t value
   const seq::FxGroup group = seq::fx_group(type, 0u);  // every mapped type is a table type: its group does not depend on the column
   for (unsigned c = 0; c < 2u; ++c) {
     const std::uint8_t held = s.fx[c].type;
-    if (held != model::kFxNone && seq::fx_group(held, c) == group) {  // the column of the group wins: the value is overwritten, the type follows
+    // The column of the group wins: the value is overwritten, the type follows. A type with no group (the CC letters of OS-PARAMAUTO, which
+    // share FxGroup::None with Chance, Micro-move and the rest) matches only its own type: a recorded CC A never overwrites another FX.
+    if (held != model::kFxNone && (group == seq::FxGroup::None ? held == type : seq::fx_group(held, c) == group)) {
       s.fx[c].type = type;
       s.fx[c].value = value;
       return static_cast<int>(c);

@@ -275,6 +275,12 @@ void Sequencer::emit_cc(std::uint32_t t, std::uint32_t slot_index, std::uint8_t 
   const model::Instrument* in = slot != 0xFFu ? project_.instrument(slot) : nullptr;
   const std::uint8_t track = static_cast<std::uint8_t>(t);
   if (in == nullptr || in->kind != model::InstrumentKind::Midi || slot_index >= model::kMidiCcSlotsPerInstrument) {
+    // OS-PARAMAUTO S2: a letter mapped to a parameter moves it (the main loop applies the value), and sends no MIDI CC.
+    if (slot_index < 6u && ((auto_mask_.load(std::memory_order_relaxed) >> slot_index) & 1u) != 0u) {
+      auto_val_[slot_index].store(value > 127u ? std::uint8_t{127} : value, std::memory_order_relaxed);
+      auto_dirty_.fetch_or(static_cast<std::uint8_t>(1u << slot_index), std::memory_order_release);
+      return;
+    }
     emit(at, EventKind::MidiCc, track, static_cast<std::uint8_t>(slot_index), value, audio::kChannelDefault, 0, 0);
     return;
   }

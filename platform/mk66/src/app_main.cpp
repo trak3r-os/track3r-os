@@ -230,7 +230,7 @@ static_assert(alignof(audio::FilterMod) <= 4 && alignof(audio::ModGen) <= 4 && a
 O3OS_SDRAM_NOINIT alignas(audio::FxEnvMem) unsigned char g_fxe_raw[sizeof(audio::FxEnvMem)];
 static_assert(alignof(audio::FxEnvMem) <= 4, "the W6a raw storage is word aligned");
 audio::SeqEvent g_events[audio::kMaxEventsPerBlock];
-static_assert(sizeof(seq::Sequencer) <= mem::budget_bytes(mem::kSramUBudget, mem::kSramUBudgetCount, "sequencer") + 896u,  // (the row is 8,352 B; 512 B of slack, +128 for OS-INSTUI S8b: the MIDI instrument's output state is 72 B, +128 for OS-MTC A3: the time code generator, 72 B, and its request state, +128 for OS-MTC B3: the chase's answer, phase pair, rate trim and flags are 48 B. The Perform layer's values (800 B) are in the OrderStore in SDRAM, not in the sequencer (OS-CEWTENV W6a SRAM_U recovery): sizeof is about 800 B smaller than the 9,152 B measured before that, against the 9,248 B allowed here)
+static_assert(sizeof(seq::Sequencer) <= mem::budget_bytes(mem::kSramUBudget, mem::kSramUBudgetCount, "sequencer") + 896u,  // (the row is 8,352 B; 512 B of slack, +128 for OS-INSTUI S8b: the MIDI instrument's output state is 72 B, +128 for OS-MTC A3: the time code generator, 72 B, and its request state, +128 for OS-MTC B3: the chase's answer, phase pair, rate trim and flags are 48 B. OS-PARAMAUTO adds 8 B (the letter mailbox: the mask, the dirty bits and six values) inside that slack, no new allowance. The Perform layer's values (800 B) are in the OrderStore in SDRAM, not in the sequencer (OS-CEWTENV W6a SRAM_U recovery): sizeof is about 800 B smaller than the 9,152 B measured before that, against the 9,248 B allowed here)
               "the sequencer outgrew its SRAM_U row (mem_map.h sequencer; the 2.3 KB event buffer is in the rings row)");
 
 // OS-005c2: the MIDI link over the sequencer (the emitter's rings, USB out, the router, the two midiRt rings, the clock-follow loop: about 23 KB of SRAM_U, ADR 0013 D7's
@@ -491,6 +491,10 @@ class SeqTrackSink final : public app::TrackSink {
   }
   std::uint16_t mute_pending() const noexcept override { return g_seq != nullptr ? g_seq->mute_pending() : std::uint16_t{0}; }
   std::uint8_t note_count(unsigned track) const noexcept override { return g_seq != nullptr ? g_seq->note_count(track) : std::uint8_t{0}; }
+  void auto_mask(std::uint8_t mask) noexcept override {
+    if (g_seq != nullptr) g_seq->set_auto_mask(mask);
+  }
+  std::uint8_t auto_take(std::uint8_t* val) noexcept override { return g_seq != nullptr ? g_seq->take_auto(val) : std::uint8_t{0}; }
 };
 SeqTrackSink g_track_sink;
 

@@ -422,6 +422,7 @@ class App {
   void end_take() noexcept;
   void poll_transport_select() noexcept;  // OS-MIDISLV: what an external Start plays is told to the sequencer while it is stopped (TransportSink::select)
   void poll_learn_map() noexcept;  // OS-LEARNMAP: clears LEARN MAP's activity dots 250 ms after the last CC and redraws
+  void poll_param_auto() noexcept;  // OS-PARAMAUTO S2: tells the sequencer which CC letters move a parameter (when the project changed) and applies the values it has played (param.auto)
   void poll_mute_blink() noexcept;  // a quantised mute waits for its boundary: the Pattern screen's MUTE tag blinks and is redrawn each half period (OS-MUTEVIS)
   void watch_document() noexcept;  // the save layer's baseline of "unsaved changes": the first document it sees
   void poll_files() noexcept;    // before the jobs: a rescan asked for, the scan to start, the result of an open
@@ -569,6 +570,8 @@ class App {
   std::int16_t* wav_pcm_ = nullptr;  // where that import reads the audio to (the arena's tail)
   bool wav_side_ = false;            // OS-STEREO (b): the import was asked for the side signal as well (F8 CH STEREO): finish_import sets the instrument's flag when it came
   std::uint16_t mute_pending_seen_ = 0;  // the sequencer's pending-mute bits at the last poll_mute_blink()
+  const model::Project* auto_project_ = nullptr;  // the project and its generation at the last poll_param_auto(): a change rebuilds the letter mask
+  std::uint32_t auto_generation_ = 0;
   std::uint32_t theme_generation_ = 0;  // the generation of the device setting THEME at the last poll_theme()
   std::uint32_t pad_offset_generation_ = 0;  // ... of PAD OFFSET at the last poll_pad_offset()
   bool peaks_quiet_ = false;         // the peak build in progress was started on Params (its source visual): no strip text, a failure still says so (main loop only)

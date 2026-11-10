@@ -56,7 +56,7 @@ std::uint8_t rank_of(std::uint32_t id) noexcept {
 // APPM at 1.1 (OS-APPUX S3: up to 12 apps), USBS at 1.1 (OS-USBOUTS), NOTE at 1.1 (OS-SCALES28: the appended official scale), every other chunk at 1.0.
 std::uint32_t known_minor(std::uint32_t id) noexcept {
   switch (id) {
-    case kChunkInst: return kInstVersionRate & 0xFFu;
+    case kChunkInst: return kInstVersionAutoCc & 0xFFu;
     case kChunkPerf:
     case kChunkScen: return kStateVersionPlayOrder & 0xFFu;
     case kChunkAppm: return state_chunks::kAppsVersionV11 & 0xFFu;
@@ -932,6 +932,16 @@ bool Reader::parse_inst(std::size_t len) noexcept {
   if (chunk_minor_ >= 8) {  // OS-MODRATE S3: version 1.8 appends the module RATE after the play-thru byte; a value above 2 reads 0, as the stereo byte does, a RATE on a non-Module instrument reads 0, and an older chunk reads 0
     const std::uint8_t rate = c.u8();
     inst_.rate = rate <= model::kInstRateMax && kind == static_cast<std::uint32_t>(model::InstrumentKind::Module) ? rate : std::uint8_t{0};
+  }
+  if (chunk_minor_ < 9 && kind != static_cast<std::uint32_t>(model::InstrumentKind::Midi)) {  // OS-PARAMAUTO S1: from INST 1.9 the midi_cc bytes of a Sample or Module instrument are CC letters; in an older chunk they were never read as anything, so they read 0 (no letter: the project behaves as it did)
+    bool stray = false;
+    for (std::uint8_t& n : inst_.midi_cc) {
+      stray = stray || n != 0;
+      n = 0;
+    }
+    if (stray) {
+      ++report_.settings_skipped;  // a hand-edited or foreign file: the bytes were never a letter, they are dropped and counted
+    }
   }
   if (chunk_minor_ < 6) {  // OS-CEWTENV W1 (spec A3): an older chunk has no WT bytes; a loop of 2 or more in it came from a tracker-ce file through an older build, which had already lost the contour and played the slot as an LFO: it reads as loop 1
     for (model::Envelope& e : inst_.sampler.envelope) {

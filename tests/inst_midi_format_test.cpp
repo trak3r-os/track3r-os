@@ -347,14 +347,14 @@ TEST_CASE("inst 1.3: a value out of its range reads as the field's default (a la
   CHECK(rep.error == Error::Malformed);
 }
 
-TEST_CASE("inst 1.3: a newer minor (1.9, past INST 1.4 of OS-LFOSINE, INST 1.5 of OS-STEREO, INST 1.6 of OS-CEWTENV W1, INST 1.7 of OS-CEPLAYTHRU P1 and INST 1.8 of OS-MODRATE S3) is read as far as 1.8, the rest skipped, and written back as 1.3 without it; an older reader meets the same rule at 1.3") {
+TEST_CASE("inst 1.3: a newer minor (1.10, past INST 1.9 of OS-PARAMAUTO S1 (no byte), INST 1.4 of OS-LFOSINE, INST 1.5 of OS-STEREO, INST 1.6 of OS-CEWTENV W1, INST 1.7 of OS-CEPLAYTHRU P1 and INST 1.8 of OS-MODRATE S3) is read as far as 1.8, the rest skipped, and written back as 1.3 without it; an older reader meets the same rule at 1.3") {
   test::fill_small(proj(0));
   NEED(proj(0).set_instrument(kSlot, busy_midi()) == Status::Ok);
   const Bytes file = saved(proj(0));
   std::vector<RawChunk> edit = test::split_chunks(file);
   RawChunk* c = inst_of(edit, kSlot);
   NEED(c != nullptr);
-  c->payload[1] = 0x09;
+  c->payload[1] = 0x0A;
   c->payload.push_back(0xAB);  // the stereo flag of 1.5, above 1: mono
   for (unsigned i = 0; i < 12; ++i) {
     c->payload.push_back(0);  // the twelve WT bytes of 1.6: none

@@ -903,6 +903,22 @@ assert model pat.1.0.5.fx1=27:79
 snap qa_pat_324
 playhead stop
 
+# OS-PARAMAUTO S3 (docs/specs/OS-PARAMAUTO.md): QA-PAT-485, a learnable parameter with no FX of its own is recorded as a CC letter. The demo document with its bindings (CC 71 on instrument 1's RESONANCE, jump): LIVE, the
+# first move takes letter A and writes CC A (FX type 8) on the play line of the cursor's track, the strip says REC FX: RESONANCE -> CC A; the same knob on another step reuses the letter.
+document bindings
+wait 3000
+action view.mode 0
+action cursor.track 0
+action cursor.jump_fraction 0
+playhead 4
+midicc 1 71 100
+assert model pat.1.0.4.fx1=8:100
+snap qa_pat_485
+playhead 6
+midicc 1 71 20
+assert model pat.1.0.6.fx1=8:20
+playhead stop
+
 # QA-PAT-334: Play 1 / Skip 1 (103) on the note of step 1: the 16-step pattern at 120 BPM is a 2 s pass, so the 7.9 s render holds four passes; the note sounds on the passes 1 and 3 only (the render is sound there and silent in the passes 2 and 4).
 document sound
 audio on

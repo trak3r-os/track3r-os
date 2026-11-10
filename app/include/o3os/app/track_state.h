@@ -36,6 +36,10 @@ class TrackSink {
   virtual std::uint16_t mute_pending() const noexcept = 0;
   // The notes track t has started, modulo 256 (Sequencer::note_count).
   virtual std::uint8_t note_count(unsigned track) const noexcept = 0;
+  // OS-PARAMAUTO S2 (Sequencer::set_auto_mask / take_auto): the letters CC A..F that move a parameter, and the values the sequencer has published for them. Not pure: a sink without a sequencer
+  // maps nothing and takes nothing.
+  virtual void auto_mask(std::uint8_t) noexcept {}
+  virtual std::uint8_t auto_take(std::uint8_t*) noexcept { return 0; }
 
  protected:
   TrackSink() = default;

@@ -8,6 +8,7 @@
 #include <o3os/app/actions.h>
 #include <o3os/app/app.h>
 #include <o3os/app/buttons.h>
+#include <o3os/app/mix_board.h>
 #include <o3os/app/rec_fx.h>
 #include <o3os/app/screens/pattern_screen.h>
 #include <o3os/audio/play_position.h>
@@ -17,6 +18,7 @@
 #include <o3os/core/param.h>
 #include <o3os/model/editor.h>
 #include <o3os/model/instrument.h>
+#include <o3os/model/param_auto.h>
 #include <o3os/model/params.h>
 #include <o3os/platform/host/fakes.h>
 #include <o3os/seq/fx.h>
@@ -60,6 +62,7 @@ struct Rig {
   platform::host::FakeClock clock;
   platform::host::FakeDisplay display;
   model::UndoJournal journal;
+  model::UndoHistory history;  // used only after three_rings(); declared before the editor so that it outlives it
   std::unique_ptr<model::Editor> editor;
   audio::PlayPosition pos;
   core::ParamRing ring;
@@ -89,6 +92,13 @@ struct Rig {
     if (edit) {
       live();
     }
+  }
+  // The device's shape: one ring per area (PATTERN, SONG, SOUND) in place of the single ring of the other tests (OS-UNDOGRP).
+  void three_rings() {
+    NEED(history.begin(g_ring, sizeof g_ring));
+    auto three = std::make_unique<model::Editor>(project(), history);
+    app->attach_document(three.get());
+    editor = std::move(three);
   }
   // Edit following, LIVE (OS-RECMODE2), entered as the tests always did.
   void live() { (void)app->invoke(core::action_id("view.mode"), static_cast<ActionArg>(PatternMode::Edit)); }
@@ -137,8 +147,8 @@ struct Rig {
   }
   DispatchResult invoke(const char* name, ActionArg arg = 0) { return app->invoke(core::action_id(name), arg); }
   DispatchResult midicc(unsigned channel, unsigned num, unsigned value) { return invoke("midi.cc", cc(channel, num, value)); }
-  void bind(unsigned slot, unsigned field, std::uint8_t num, core::LearnMode mode, std::uint8_t flags = 0) {
-    NEED(editor->set_learn_slot(0, binding(slot, field, num, mode, flags)) == model::Status::Ok);
+  void bind(unsigned slot, unsigned field, std::uint8_t num, core::LearnMode mode, std::uint8_t flags = 0, unsigned learn_slot = 0) {
+    NEED(editor->set_learn_slot(learn_slot, binding(slot, field, num, mode, flags)) == model::Status::Ok);
   }
   void bind_track(unsigned track, unsigned field, std::uint8_t num) {  // a Mixer parameter (A-7): the device's Learn store
     NEED(app->device_settings().set_learn(0, core::LearnBinding{core::param_id(ParamKind::Track, track, field), num, 0,
@@ -247,7 +257,9 @@ TEST_CASE("fxrec app: a binding of instrument 2 with instrument 1 selected write
   rig.play(3);
   CHECK(rig.midicc(1, 75, 127) == DispatchResult::Changed);
   CHECK(rig.value(inst(1, ip::Cutoff)) == 1.0f);  // the parameter of instrument 2 moved...
-  CHECK(no_fx_anywhere(rig));                     // ... but no FX: instrument 1 is selected
+  CHECK(rig.step(0, 3).fx[0].type == seq::fx::kCcA);  // ... recorded as a CC letter, not the cutoff FX (Q3 a is for own FX): instrument 1 is selected
+  CHECK(rig.project().instrument(1)->midi_cc[0] == model::auto_code(inst(1, ip::Cutoff)));
+  CHECK(rig.project().instrument(0)->midi_cc[0] == 0);
   (void)rig.invoke("instrument.select", 2);
   rig.play(4);
   CHECK(rig.midicc(1, 75, 64) == DispatchResult::Changed);
@@ -361,20 +373,22 @@ TEST_CASE("fxrec app: outside a take the CC is its own undo unit as before, and 
   CHECK(rig.value(inst(0, ip::Cutoff)) == 0.30f);  // and it undoes on its own
 }
 
-TEST_CASE("fxrec app: TUNE writes nothing (Q2 a), and a Mixer parameter records nothing and does not close the take (A-7)") {
+TEST_CASE("fxrec app: TUNE has no FX of its own (Q2 a) and records as a CC letter (OS-PARAMAUTO); a Mixer parameter records nothing and does not close the take (A-7)") {
   Rig rig;
   rig.bind(0, ip::Tune, 77, core::LearnMode::Jump);
   rig.bind_track(2, tp::Volume, 20);
   rig.play(3);
   CHECK(rig.state().edit.take_open);
-  const unsigned d0 = rig.depth();
   CHECK(rig.midicc(1, 77, 60) == DispatchResult::Changed);
   CHECK(rig.value(inst(0, ip::Tune)) != 0.0f);  // the parameter moved
-  CHECK(no_fx_anywhere(rig));
+  CHECK(rig.step(0, 3).fx[0].type == seq::fx::kCcA);  // no FX of its own: letter A
+  CHECK(rig.project().instrument(0)->midi_cc[0] == model::auto_code(inst(0, ip::Tune)));
+  const unsigned d1 = rig.depth();
+  const model::Step before = rig.step(0, 3);
   CHECK(rig.midicc(1, 20, 100) == DispatchResult::Changed);  // the track's volume moved
   CHECK(rig.state().edit.take_open);                         // the take stayed open (kActionRecords on midi.cc)
-  CHECK(rig.depth() == d0);                                  // and nothing was journalled for either move
-  CHECK(no_fx_anywhere(rig));
+  CHECK(rig.depth() == d1);                                  // and nothing was journalled for it
+  CHECK(std::memcmp(&rig.step(0, 3), &before, sizeof before) == 0);
 }
 
 TEST_CASE("fxrec app: a write with no free column says so once per take and leaves the step alone") {
@@ -421,4 +435,240 @@ TEST_CASE("fxrec app: the recorded FX leaves the step's note, instrument and vol
   CHECK(rig.step(0, 3).fx[0].type == seq::fx::kPanning);
   CHECK(rig.step(0, 3).fx[0].value == 100);
   CHECK(rig.step(0, 3).fx[1].type == model::kFxNone);
+}
+
+// OS-PARAMAUTO S3: a learnable parameter with no FX of its own is recorded as a CC letter of the project.
+TEST_CASE("paramauto rec: the first recorded move takes letter A and writes CC A; the same parameter reuses it, another takes B; the strip says which") {
+  Rig rig;
+  rig.bind(0, ip::Tune, 77, core::LearnMode::Jump);
+  rig.bind(0, ip::FineTune, 79, core::LearnMode::Jump, 0, 1);
+  const model::Instrument* in = rig.project().instrument(0);
+  CHECK(in->midi_cc[0] == 0);  // no letter at assign time
+  rig.play(3);
+  CHECK(rig.midicc(1, 77, 127) == DispatchResult::Changed);
+  CHECK(in->midi_cc[0] == model::auto_code(inst(0, ip::Tune)));
+  CHECK(rig.step(0, 3).fx[0].type == seq::fx::kCcA);
+  CHECK(rig.step(0, 3).fx[0].value == 127);  // Tune at its maximum
+  CHECK(rig.last_note() == "REC FX: TUNE -> CC A");
+  rig.play(4);
+  CHECK(rig.midicc(1, 77, 0) == DispatchResult::Changed);  // the same parameter: the same letter
+  CHECK(rig.step(0, 4).fx[0].type == seq::fx::kCcA);
+  CHECK(rig.step(0, 4).fx[0].value == 0);
+  CHECK(in->midi_cc[1] == 0);
+  rig.play(5);
+  CHECK(rig.midicc(1, 79, 127) == DispatchResult::Changed);  // another parameter: the next letter
+  CHECK(in->midi_cc[1] == model::auto_code(inst(0, ip::FineTune)));
+  CHECK(rig.step(0, 5).fx[0].type == static_cast<std::uint8_t>(seq::fx::kCcA + 1));
+  CHECK(rig.step(0, 5).fx[0].value == 127);
+}
+
+TEST_CASE("paramauto rec: one undo takes back the step and the letter; WATCH assigns nothing") {
+  {
+    Rig rig;
+    rig.bind(0, ip::Tune, 77, core::LearnMode::Jump);
+    rig.play(3);
+    CHECK(rig.midicc(1, 77, 127) == DispatchResult::Changed);
+    CHECK(rig.project().instrument(0)->midi_cc[0] != 0);
+    rig.stop();  // the take ends: one undo group
+    (void)rig.invoke("edit.undo");
+    CHECK(rig.project().instrument(0)->midi_cc[0] == 0);
+    CHECK(no_fx_anywhere(rig));
+  }
+  {
+    Rig rig(16, false);  // WATCH: the parameter moves, nothing records, no letter
+    rig.bind(0, ip::Tune, 77, core::LearnMode::Jump);
+    rig.play(3);
+    CHECK(rig.midicc(1, 77, 127) == DispatchResult::Changed);
+    CHECK(rig.value(inst(0, ip::Tune)) != 0.0f);
+    CHECK(rig.project().instrument(0)->midi_cc[0] == 0);
+    CHECK(no_fx_anywhere(rig));
+  }
+}
+
+TEST_CASE("paramauto rec: six letters taken say NO FREE CC LETTER once per take and record nothing; an uncodable row still has no FX") {
+  Rig rig;
+  model::Instrument other = *rig.project().instrument(1);
+  for (unsigned l = 0; l < 6; ++l) {
+    other.midi_cc[l] = static_cast<std::uint8_t>(100 + l);  // six other parameters of instrument 2 hold every letter
+  }
+  NEED(rig.project().set_instrument(1, other) == model::Status::Ok);
+  rig.bind(0, ip::Tune, 77, core::LearnMode::Jump);
+  rig.bind(0, ip::VelSens, 80, core::LearnMode::Jump, 0, 1);
+  rig.play(3);
+  CHECK(rig.midicc(1, 77, 127) == DispatchResult::Changed);
+  CHECK(rig.value(inst(0, ip::Tune)) != 0.0f);  // the move still sounds
+  CHECK(no_fx_anywhere(rig));
+  CHECK(rig.project().instrument(0)->midi_cc[0] == 0);
+  CHECK(rig.last_note().find("REC FX: NO FREE CC LETTER") != std::string::npos);
+  CHECK(rig.state().edit.rec_cc_full);
+  rig.play(4);
+  CHECK(rig.midicc(1, 77, 0) == DispatchResult::Changed);  // said once
+  CHECK(no_fx_anywhere(rig));
+  rig.stop();
+  CHECK_FALSE(rig.state().edit.rec_cc_full);
+  rig.play(5);  // VelSens is not coverable: it keeps its own message
+  CHECK(rig.midicc(1, 80, 64) == DispatchResult::Changed);
+  CHECK(no_fx_anywhere(rig));
+  CHECK(rig.project().instrument(0)->midi_cc[0] == 0);
+}
+
+TEST_CASE("paramauto rec: a write with no free FX column leaves no stray letter") {
+  Rig rig;
+  rig.bind(0, ip::Tune, 77, core::LearnMode::Jump);
+  model::Step full = model::kEmptyStep;
+  full.fx[0] = {seq::fx::kChance, 80};
+  full.fx[1] = {seq::fx::kMicroMove, 20};
+  NEED(rig.project().set_step(1, 0, 3, full) == model::Status::Ok);
+  rig.play(3);
+  CHECK(rig.midicc(1, 77, 127) == DispatchResult::Changed);
+  CHECK(std::memcmp(&rig.step(0, 3), &full, sizeof full) == 0);
+  CHECK(rig.project().instrument(0)->midi_cc[0] == 0);
+}
+
+TEST_CASE("paramauto rec: a CC letter takes the free column and never overwrites another FX of no group; the same letter overwrites itself") {
+  Rig rig;
+  rig.bind(0, ip::Tune, 77, core::LearnMode::Jump);
+  model::Step held = model::kEmptyStep;
+  held.fx[0] = {seq::fx::kChance, 80};
+  NEED(rig.project().set_step(1, 0, 3, held) == model::Status::Ok);
+  rig.play(3);
+  CHECK(rig.midicc(1, 77, 127) == DispatchResult::Changed);
+  CHECK(rig.step(0, 3).fx[0].type == seq::fx::kChance);
+  CHECK(rig.step(0, 3).fx[0].value == 80);
+  CHECK(rig.step(0, 3).fx[1].type == seq::fx::kCcA);
+  CHECK(rig.step(0, 3).fx[1].value == 127);
+  CHECK(rig.midicc(1, 77, 0) == DispatchResult::Changed);  // the same letter on the same step: its own column
+  CHECK(rig.step(0, 3).fx[0].type == seq::fx::kChance);
+  CHECK(rig.step(0, 3).fx[1].type == seq::fx::kCcA);
+  CHECK(rig.step(0, 3).fx[1].value == 0);
+}
+
+// Review fold: the letter is its own 4-byte record in the take's unit, not the whole instrument.
+TEST_CASE("paramauto rec: undoing the take takes only the letter back; another parameter and the name changed since keep their values") {
+  Rig rig;
+  rig.three_rings();
+  rig.bind(0, ip::Tune, 77, core::LearnMode::Jump);
+  rig.play(3);
+  CHECK(rig.midicc(1, 77, 127) == DispatchResult::Changed);
+  CHECK(rig.project().instrument(0)->midi_cc[0] != 0);
+  rig.stop();  // the take is one undo unit of the PATTERN ring
+  NEED(rig.editor->set_param(inst(0, ip::Cutoff), 0.80f) == model::Status::Ok);  // after the take: the SOUND ring
+  NEED(rig.editor->set_instrument_name(0, "NEWNAME", 7) == model::Status::Ok);
+  const float tune = rig.value(inst(0, ip::Tune));
+  // The take's unit lives in the PATTERN ring (edit.undo picks the ring of the screen in view; the editor is asked directly).
+  CHECK(rig.editor->undo(model::UndoArea::Pattern) == model::UndoResult::Ok);
+  const model::Instrument* in = rig.project().instrument(0);
+  CHECK(in->midi_cc[0] == 0);  // the letter is gone with the FX
+  CHECK(no_fx_anywhere(rig));
+  CHECK(rig.value(inst(0, ip::Cutoff)) == 0.80f);  // the other parameter keeps its new value
+  CHECK(std::strcmp(in->name, "NEWNAME") == 0);
+  CHECK(rig.value(inst(0, ip::Tune)) == tune);
+  CHECK(rig.editor->redo(model::UndoArea::Pattern) == model::UndoResult::Ok);  // and redo gives the letter back
+  CHECK(rig.project().instrument(0)->midi_cc[0] == model::auto_code(inst(0, ip::Tune)));
+  CHECK(rig.value(inst(0, ip::Cutoff)) == 0.80f);
+}
+
+TEST_CASE("paramauto editor: set_instrument_cc is one record; the same code, a bad letter and an empty slot record nothing") {
+  Rig rig;
+  model::Editor& e = *rig.editor;
+  const unsigned depth = rig.depth();
+  CHECK(e.set_instrument_cc(0, 6, 5) == model::Status::BadIndex);
+  CHECK(e.set_instrument_cc(9, 0, 5) == model::Status::NotFound);
+  CHECK(e.set_instrument_cc(0, 0, 0) == model::Status::Ok);  // already 0
+  CHECK(rig.depth() == depth);
+  CHECK(e.set_instrument_cc(0, 2, 5) == model::Status::Ok);
+  CHECK(rig.project().instrument(0)->midi_cc[2] == 5);
+  CHECK(rig.depth() == depth + 1);
+  (void)e.undo();
+  CHECK(rig.project().instrument(0)->midi_cc[2] == 0);
+}
+
+namespace {
+// A sequencer stand-in for App::poll_param_auto: it keeps the mask it was told and hands out the value of a letter once.
+struct AutoSink final : app::TrackSink {
+  std::uint8_t mask = 0xFF;  // 0xFF: never told
+  int masks = 0;
+  std::uint8_t pending = 0;
+  std::uint8_t val[6] = {};
+  bool playing() const noexcept override { return true; }
+  bool mute_defer(unsigned, app::MuteMode, bool) noexcept override { return false; }
+  bool mute_cancel(unsigned) noexcept override { return false; }
+  std::uint16_t mute_pending() const noexcept override { return 0; }
+  std::uint8_t note_count(unsigned) const noexcept override { return 0; }
+  void auto_mask(std::uint8_t m) noexcept override {
+    mask = m;
+    ++masks;
+  }
+  std::uint8_t auto_take(std::uint8_t* out) noexcept override {
+    std::memcpy(out, val, sizeof val);
+    const std::uint8_t p = pending;
+    pending = 0;
+    return p;
+  }
+};
+}  // namespace
+
+// Review fold: the main loop's half of the playback (App::poll_param_auto).
+TEST_CASE("paramauto poll: the mask is told on the first pass and again only when the project's generation moves; a played letter is applied to its parameter") {
+  Rig rig;
+  AutoSink sink;
+  auto board = std::make_unique<app::MixBoard>();
+  board->tracks = &sink;
+  rig.app->attach_mix(board.get());
+  rig.pass();
+  CHECK(sink.masks == 1);
+  CHECK(sink.mask == 0);  // a project with no letter assigned: every CC A..F step plays as before (the sequencer sends the CC)
+  rig.pass();
+  CHECK(sink.masks == 1);  // nothing changed: not rebuilt
+  // a letter is assigned (a take, here by hand): the generation moves and the mask follows
+  NEED(rig.editor->set_instrument_cc(0, 0, model::auto_code(inst(0, ip::Tune))) == model::Status::Ok);
+  rig.pass();
+  CHECK(sink.masks == 2);
+  CHECK(sink.mask == 0x01);
+  // the sequencer played CC A = 127: the parameter takes its maximum, and the project's generation moves with the write
+  const float before = rig.value(inst(0, ip::Tune));
+  sink.val[0] = 127;
+  sink.pending = 0x01;
+  rig.pass();
+  CHECK(rig.value(inst(0, ip::Tune)) != before);
+  CHECK(rig.value(inst(0, ip::Tune)) == doctest::Approx(24.0f));  // TUNE is -24..24 st: 127 is its maximum
+  CHECK(sink.pending == 0);
+  // a letter of another instrument's slot with the same code is not a second owner: the lowest slot wins
+  const float other = rig.value(inst(1, ip::Tune));
+  NEED(rig.editor->set_instrument_cc(1, 0, model::auto_code(inst(1, ip::Tune))) == model::Status::Ok);
+  sink.val[0] = 0;
+  sink.pending = 0x01;
+  rig.pass();
+  CHECK(rig.value(inst(1, ip::Tune)) == other);
+  rig.app->attach_mix(nullptr);
+}
+
+// Review fold: a letter on a MIDI track would send a CC, not move the parameter: refused, nothing written.
+TEST_CASE("paramauto rec: a track whose sounding instrument is MIDI refuses the letter once per take and writes nothing") {
+  Rig rig;
+  rig.bind(0, ip::Tune, 77, core::LearnMode::Jump);
+  model::Instrument mi;
+  model::init_instrument(mi, model::InstrumentKind::Midi);
+  mi.midi_channel = 1;
+  NEED(rig.project().set_instrument(2, mi) == model::Status::Ok);
+  model::Step n = model::kEmptyStep;
+  n.note = 40;
+  n.instr = 3;  // instrument slot 2, the MIDI one: the track plays it until a step names another
+  NEED(rig.project().set_step(1, 0, 1, n) == model::Status::Ok);
+  rig.play(3);
+  CHECK(rig.midicc(1, 77, 127) == DispatchResult::Changed);  // the parameter still moves
+  CHECK(rig.last_note() == "REC FX: MIDI TRACK");
+  CHECK(rig.step(0, 3).fx[0].type == model::kFxNone);
+  CHECK(rig.project().instrument(0)->midi_cc[0] == 0);
+  rig.play(4);
+  CHECK(rig.midicc(1, 77, 0) == DispatchResult::Changed);
+  CHECK(rig.step(0, 4).fx[0].type == model::kFxNone);
+  // A step that names the Sample instrument sounds it: the letter records there.
+  model::Step s = model::kEmptyStep;
+  s.note = 40;
+  s.instr = 1;
+  NEED(rig.project().set_step(1, 0, 5, s) == model::Status::Ok);
+  rig.play(6);
+  CHECK(rig.midicc(1, 77, 127) == DispatchResult::Changed);
+  CHECK(rig.step(0, 6).fx[0].type == seq::fx::kCcA);
 }

@@ -17,6 +17,7 @@
 #include <o3os/core/param.h>
 #include <o3os/model/editor.h>
 #include <o3os/model/instrument.h>
+#include <o3os/model/param_auto.h>
 #include <o3os/model/params.h>
 #include <o3os/platform/host/fakes.h>
 #include <o3os/seq/fx.h>
@@ -360,19 +361,19 @@ TEST_CASE("OS-ENCLEARN STEP writes the FX on the cursor's step of the cursor's t
   CHECK(rig.no_fx_anywhere());
 }
 
-TEST_CASE("OS-ENCLEARN a parameter with no FX moves the sound and records nothing; LIVE and STEP say HAS NO FX on the first move of a gesture, WATCH says nothing") {
+TEST_CASE("OS-ENCLEARN a parameter that cannot be recorded (VEL>, no FX and no CC letter, OS-PARAMAUTO) moves the sound and records nothing; LIVE and STEP say HAS NO FX on the first move of a gesture, WATCH says nothing") {
   {
     Rig rig;  // STEP
-    NEED(rig.focus(Button::F2, inst(0, ip::Volume)));
+    NEED(rig.focus(Button::F2, inst(0, ip::VelSens)));
     rig.assign();
     rig.screen(ScreenId::Pattern);
     rig.tap(Button::Rec);
     NEED(rig.state().edit.rec_free);
-    const float v0 = rig.value(inst(0, ip::Volume));
+    const float v0 = rig.value(inst(0, ip::VelSens));
     rig.hold();
     rig.turn(-2);
-    CHECK(rig.value(inst(0, ip::Volume)) != v0);
-    CHECK(rig.noted("REC FX: VOLUME HAS NO FX"));
+    CHECK(rig.value(inst(0, ip::VelSens)) != v0);
+    CHECK(rig.noted("REC FX: VEL> HAS NO FX"));
     CHECK(rig.state().edit.enc_said);
     CHECK(rig.no_fx_anywhere());
     rig.expire();  // the queue drops only its head per pass: two messages are queued
@@ -389,22 +390,22 @@ TEST_CASE("OS-ENCLEARN a parameter with no FX moves the sound and records nothin
   }
   {
     Rig rig;  // LIVE
-    NEED(rig.focus(Button::F2, inst(0, ip::Volume)));
+    NEED(rig.focus(Button::F2, inst(0, ip::VelSens)));
     rig.assign();
     rig.screen(ScreenId::Pattern);
     rig.live();
     rig.play(2);
-    const float v0 = rig.value(inst(0, ip::Volume));
+    const float v0 = rig.value(inst(0, ip::VelSens));
     rig.hold();
     rig.turn(-2);
-    CHECK(rig.value(inst(0, ip::Volume)) != v0);
-    CHECK(rig.noted("REC FX: VOLUME HAS NO FX"));
+    CHECK(rig.value(inst(0, ip::VelSens)) != v0);
+    CHECK(rig.noted("REC FX: VEL> HAS NO FX"));
     CHECK(rig.no_fx_anywhere());
     rig.let_go();
   }
   {
     Rig rig;  // WATCH
-    NEED(rig.focus(Button::F2, inst(0, ip::Volume)));
+    NEED(rig.focus(Button::F2, inst(0, ip::VelSens)));
     rig.assign();
     rig.screen(ScreenId::Pattern);
     rig.hold();
@@ -413,6 +414,25 @@ TEST_CASE("OS-ENCLEARN a parameter with no FX moves the sound and records nothin
     CHECK(rig.no_fx_anywhere());
     rig.let_go();
   }
+}
+
+TEST_CASE("OS-PARAMAUTO the encoder move of a parameter with no FX of its own records CC A and the strip names the letter; the letter belongs to the parameter") {
+  Rig rig;
+  NEED(rig.focus(Button::F2, inst(0, ip::Volume)));
+  rig.assign();
+  rig.screen(ScreenId::Pattern);
+  rig.live();
+  rig.play(2);
+  CHECK(rig.project().instrument(0)->midi_cc[0] == 0);  // assigning takes no letter
+  rig.hold();
+  rig.turn(-2);
+  CHECK(rig.noted("REC FX: VOLUME -> CC A"));
+  CHECK(rig.project().instrument(0)->midi_cc[0] == model::auto_code(inst(0, ip::Volume)));
+  const int t = rig.app->view().track();
+  CHECK(rig.step(t, 2).fx[0].type == seq::fx::kCcA);
+  CHECK(rig.step(t, 2).fx[0].value < 127u);
+  CHECK_FALSE(rig.noted("HAS NO FX"));
+  rig.let_go();
 }
 
 TEST_CASE("OS-ENCLEARN one key let go mid-gesture swallows the turn until both are up: the held key edits nothing") {

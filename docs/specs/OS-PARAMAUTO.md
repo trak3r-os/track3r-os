@@ -69,7 +69,7 @@ Modes as ENCLEARN: LIVE (`pattern_recording`) one value per step along the play 
 
 ## 6. UI, toasts, undo, evidence
 
-- Assign, use and toasts are ENCLEARN's (`ENCODER: <PARAM> INS <n>`, `<PARAM> <value>`); nothing new to learn. New strips: `REC FX: <PARAM> -> CC x`, `REC FX: NO FREE CC LETTER`.
+- Assign, use and toasts are ENCLEARN's (`ENCODER: <PARAM> INS <n>`, `<PARAM> <value>`); nothing new to learn. New strips: `REC FX: <PARAM> -> CC x`, `REC FX: NO FREE CC LETTER`, `REC FX: MIDI TRACK` (the instrument the step sounds is a MIDI one: a letter there would send a CC; nothing is written). The letter is journalled as its own 4-byte record (`Editor::set_instrument_cc`) in the take's unit.
 - The Fx column shows the step as `CCA`..`CCF` as today. No screen lists the letter map in this item; a later row may (open question 3).
 - Undo: the letter write and the steps are one unit per take or gesture (section 5). The parameter value is not restored by Undo (as in a LIVE take today).
 - Playback moves of a parameter write no undo record (section 4).

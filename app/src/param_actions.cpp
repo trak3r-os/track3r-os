@@ -19,6 +19,7 @@
 #include <o3os/audio/voices.h>
 #include <o3os/core/fixed_string.h>
 #include <o3os/model/instrument.h>
+#include <o3os/model/param_auto.h>
 #include <o3os/model/params.h>
 #include <o3os/seq/sequencer.h>
 
@@ -1332,6 +1333,45 @@ bool enc_assign(ActionContext& ctx, core::ActionArg) noexcept {
     append_uint(text, core::param_index(id) + 1u);
   }
   return say_tag(ctx, core::Severity::Info, text.c_str(), "enc");
+}
+
+std::uint8_t param_auto_mask(const Model& model) noexcept {
+  if (model.project == nullptr) {
+    return 0;
+  }
+  model::AutoMap map;
+  model::auto_scan(*model.project, map);
+  std::uint8_t mask = 0;
+  for (unsigned l = 0; l < model::kAutoLetters; ++l) {
+    if (map.id[l] != core::ParamId::None) {  // (learnable or not is param_auto's to say: a module's descriptor exists only while its instance does, which no project generation tells)
+      mask = static_cast<std::uint8_t>(mask | (1u << l));
+    }
+  }
+  return mask;
+}
+
+// OS-PARAMAUTO S2 (new Community OS behaviour): the value the sequencer played on CC letter `arg >> 8` (A..F = 0..5, low byte 0..127) moves the parameter that owns the letter. The map is read from the project at
+// each call (64 instruments x 6 bytes, a few values a pass at most, never per step), so a project edit needs no rebuild here. The write is final as in a take: the playback is not an edit of the document (no undo
+// record, the project keeps the last value played, so a save has it), and send_param_change tells the audio side.
+bool param_auto(ActionContext& ctx, core::ActionArg arg) noexcept {
+  const unsigned letter = (arg >> 8) & 0xFFu;
+  if (ctx.edit == nullptr || letter >= model::kAutoLetters) {
+    return false;
+  }
+  model::AutoMap map;
+  model::auto_scan(ctx.edit->project(), map);
+  const core::ParamId id = map.id[letter];
+  ParamScratch scratch;
+  const core::ParamDesc* d = id != core::ParamId::None ? describe_param(ctx.model, id, scratch) : nullptr;
+  if (d == nullptr || (d->flags & core::kParamLearnable) == 0u) {
+    return false;  // a letter that names nothing now (a changed kind, a code a newer build knew), or a parameter that cannot be learned
+  }
+  const unsigned v = arg & 0xFFu;
+  const bool was_final = ctx.edit->final_edits();
+  ctx.edit->set_final(true);
+  const WriteResult r = write_param(ctx, id, core::param_denorm(*d, static_cast<float>(v > 127u ? 127u : v) / 127.0f));
+  ctx.edit->set_final(was_final);
+  return r == WriteResult::Changed;
 }
 
 // OS-ENCLEARN: the encoder turned while Instr + FX1 are held (App::run_once takes it ahead of the bindings): the target moves by `arg` fine steps, a coarse step each with Shift, through the write

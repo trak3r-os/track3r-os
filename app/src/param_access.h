@@ -20,6 +20,9 @@ bool read_param(const Model& model, core::ParamId id, float& value) noexcept;
 // Its generation (project or device block), 0 if it does not exist.
 std::uint32_t param_generation_of(const Model& model, core::ParamId id) noexcept;
 
+// OS-PARAMAUTO S2: bit L is set when CC letter L (A..F) owns a parameter of the project (model::auto_scan): the letters the sequencer publishes instead of sending a MIDI CC (Sequencer::set_auto_mask).
+std::uint8_t param_auto_mask(const Model& model) noexcept;
+
 enum class WriteResult : std::uint8_t { Changed, Unchanged, Rejected, NoProject, NoInstrument };
 
 // Sets a parameter to `value` (it must be in range: BadValue is Rejected). A project parameter goes through ctx.edit, so it is part of the

@@ -579,6 +579,28 @@ TEST_CASE("midi inst: a sample instrument's CC FX, and a MIDI instrument's defau
   CHECK((b.a == 1 && b.b == 21 && b.c == audio::kChannelDefault && b.flags == 0 && b.value == 0));
 }
 
+TEST_CASE("param auto: a CC letter in the mask of a sample instrument is handed to the main loop (last value wins) instead of sent; a letter outside the mask, and a MIDI instrument's, still send") {
+  project16();
+  model::Project& p = seq_project();
+  CHECK(p.set_step(1, 0, 0, make_step(60, 1, fx::kCcA, 20, fx::kSlot37, 9)) == model::Status::Ok);
+  CHECK(p.set_step(1, 0, 1, make_step(0, 1, fx::kCcA, 33, fx::kCcA + 1, 21)) == model::Status::Ok);
+  CHECK(p.set_step(1, 0, 2, make_step(61, kMidi, fx::kCcA, 44)) == model::Status::Ok);
+  seq::Sequencer& s = make();
+  std::uint8_t val[6] = {};
+  CHECK(s.take_auto(val) == 0u);
+  s.set_auto_mask(0x21u);  // CC A and CC F
+  run_steps(s, 4);
+  // CC B (not mapped) and the MIDI instrument's CC A (a controller) are the events that remain.
+  NEED(count(EventKind::MidiCc) == 2u);
+  CHECK(g_col.nth(EventKind::MidiCc, 0)->ev.b == 21);
+  CHECK(g_col.nth(EventKind::MidiCc, 1)->ev.b == 44);
+  std::uint8_t taken = s.take_auto(val);
+  CHECK(taken == 0x21u);
+  CHECK(val[0] == 33);  // step 0 said 20, step 1 said 33: the main loop applies the latest
+  CHECK(val[5] == 9);
+  CHECK(s.take_auto(val) == 0u);  // taken once
+}
+
 // ---- the contract of the new kinds ----------------------------------------------------------------------------------------------------------
 
 TEST_CASE("midi inst: the default instrument makes the events it made before INST 1.3 (flags 0, value 0, no program, no bend)") {

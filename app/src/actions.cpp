@@ -226,6 +226,7 @@ constexpr ActionDef kActions[] = {
     make_action("midi.cc", midi_cc, core::kActionUndoableIfOpen | core::kActionRecords),  // OS-FXREC 3.4: a CC never closes a take; in one its parameter write is final (apply_cc) and only the recorded FX join it
     make_action("enc.assign", enc_assign),  // OS-ENCLEARN: Instr + FX2, the Learn row becomes the encoder's target
     make_action("enc.turn", enc_turn, core::kActionUndoableIfOpen | core::kActionRecords),  // OS-ENCLEARN: Instr + FX1 and the encoder; as midi.cc it never closes a take and its parameter write is final in one
+    make_action("param.auto", param_auto, core::kActionUndoableIfOpen | core::kActionRecords),  // OS-PARAMAUTO S2: a played CC letter moves its parameter; like midi.cc it never closes a take, its write is final and no macro keeps it
     // OS-009 P1a.1: the pattern's edit core. Modes, the selection and the pad preview are view state; the step actions are undo units.
     make_action("pattern.edit_toggle", pattern_edit_toggle, kFocus),
     make_action("pattern.rec_free", pattern_rec_free, kFocus),
@@ -413,7 +414,7 @@ bool name_equals(const char* name, const char* s, std::size_t length) noexcept {
 
 // The actions whose area is the first record's, whatever the screen (D2): a controller message resolves to a parameter wherever it is, Learn writes the bindings, an app's group says
 // what it touched.
-constexpr core::ActionId kAutoArea[] = {core::action_id("midi.cc"), core::action_id("enc.turn"), core::action_id("learn.clear"), core::action_id("learn.mode"), core::action_id("learn.follow"),
+constexpr core::ActionId kAutoArea[] = {core::action_id("midi.cc"), core::action_id("param.auto"), core::action_id("enc.turn"), core::action_id("learn.clear"), core::action_id("learn.mode"), core::action_id("learn.follow"),
                                         core::action_id("learn.delete"), core::action_id("learn.clear_all"), core::action_id("lmap.edit"), core::action_id("lmap.coarse"), core::action_id("lmap.key"),
                                         core::action_id("module.app_group")};
 
@@ -441,7 +442,7 @@ bool is_mixer_action(core::ActionId id) noexcept {
 
 constexpr core::ActionId kMacroControls[] = {core::action_id("macro.record"), core::action_id("macro.play"),
                                              core::action_id("edit.undo"), core::action_id("edit.redo"), core::action_id("events.undo"), core::action_id("events.redo"), core::action_id("midi.cc"),
-                                             core::action_id("module.app_group")};  // (an app's group lives in the module system's buffer, not in the macro)
+                                             core::action_id("param.auto"), core::action_id("module.app_group")};  // (an app's group lives in the module system's buffer, not in the macro)
 
 // While a macro records, every action that ran is appended, except the controls of the macro and of the history, and midi.cc: a
 // controller message is a gesture of the hardware (and its effect depends on where the knob and the parameter are, which a replay

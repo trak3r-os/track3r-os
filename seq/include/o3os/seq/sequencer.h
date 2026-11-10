@@ -397,6 +397,18 @@ class Sequencer {
   // (a second press: the main loop has put the flag back) drops the hold; nothing was told to the graph. A transport that is not running, and a stop, apply it at once. SOLO is never deferred.
   // mute_pending() is published for the main loop (one word, the render the one writer): the pad blinks while a bit is set.
   std::uint16_t mute_pending() const noexcept { return pending_pub_.load(std::memory_order_relaxed); }
+  // OS-PARAMAUTO S2 (new Community OS behaviour): CC A..F on a step whose instrument is not a MIDI one moves a parameter when the letter is mapped (docs/specs/OS-PARAMAUTO.md section 4). The main loop sets the
+  // mask (bit L: letter L is mapped; one word, it is the one writer); emit_cc then sends no MidiCc for that letter, it only publishes the 7 bit value and sets the letter's bit of the dirty word (the render is the one
+  // writer of the values), and the main loop takes both with take_auto (it clears the dirty bits: two steps of one letter inside one pass collapse to the later value). Nothing is queued, nothing allocates.
+  void set_auto_mask(std::uint8_t mask) noexcept { auto_mask_.store(mask, std::memory_order_relaxed); }
+  // Fills val[L] of every letter whose bit is set in the result and clears those bits; `val` has six entries.
+  std::uint8_t take_auto(std::uint8_t* val) noexcept {
+    const std::uint8_t d = auto_dirty_.exchange(0, std::memory_order_acquire);
+    for (unsigned l = 0; l < 6u; ++l) {
+      if ((d >> l) & 1u) val[l] = auto_val_[l].load(std::memory_order_relaxed);
+    }
+    return d;
+  }
   // The notes the track has started (the sequencer's, not the live notes of the pads), modulo 256: written only here, read by the main loop, which compares it with its last copy to
   // flash a lamp (app::ActivityWatch). Counted when the step starts, whether or not the track is muted.
   std::uint8_t note_count(std::uint32_t t) const noexcept { return t < kMaxTracks ? activity_[t].load(std::memory_order_relaxed) : std::uint8_t{0}; }
@@ -723,6 +735,9 @@ class Sequencer {
   std::uint8_t mq_kind_[kMaxTracks] = {};  // MuteQuant of each pending toggle
   std::atomic<std::uint16_t> pending_pub_{0};              // mq_pending_ for the main loop: the render is the one writer
   std::atomic<std::uint8_t> activity_[kMaxTracks] = {};    // note_count: the render is the one writer
+  std::atomic<std::uint8_t> auto_mask_{0};                 // OS-PARAMAUTO: letters mapped to a parameter; the main loop is the one writer
+  std::atomic<std::uint8_t> auto_dirty_{0};                // letters with a value to take: the render sets, the main loop clears (take_auto)
+  std::atomic<std::uint8_t> auto_val_[6] = {};             // the last value of each letter: the render is the one writer
 
   // external clock
   const midi::ClockDll* follow_ = nullptr;

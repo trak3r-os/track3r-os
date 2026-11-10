@@ -97,6 +97,7 @@ struct PatternEdit {
   // "REC FX: NO FREE FX COLUMN" once (a knob sends up to about 100 messages a second). Cleared when the take ends.
   bool rec_fx_said = false;
   bool rec_fx_full = false;
+  bool rec_cc_full = false;  // OS-PARAMAUTO S3: "REC FX: NO FREE CC LETTER" was said for this take (once, like rec_fx_full)
   // OS-ENCLEARN (main loop only): the hold of Instr + FX1 with the encoder turned in STEP (Edit free) keeps one undo group open, as a take does (rec_take_sync), until a key is let go; `enc_said` is the
   // gesture's "REC FX: <PARAMETER> HAS NO FX" strip line, once. Both clear when either key is released (App::run_once).
   bool enc_take = false;

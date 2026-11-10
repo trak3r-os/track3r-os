@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <o3os/formats/native.h>
+#include <o3os/model/param_auto.h>
 
 #include "native_codec.h"
 #include "native_state.h"
@@ -44,7 +45,11 @@ std::size_t song_size(const Project& p) noexcept { return kSongFixed + p.song_le
 // 1.7 (OS-CEPLAYTHRU P1: the 1.6 layout, whole, and the play-thru flag) for a Sample instrument with the flag set; it covers 1.6, 1.5 and 1.4 too (1.7 is above their gates).
 // `stereo`: the flag as it is to be written (Writer::begin's mask may hold it back: the flag is saved only with its side file, OS-STEREO (b)).
 // 1.8 (OS-MODRATE S3: the 1.7 layout, whole, and the module RATE byte) for a Module instrument with a rate other than FULL; it covers 1.7 .. 1.4 too.
+// 1.9 (OS-PARAMAUTO S1: the 1.8 layout, whole, no new byte) for a non-MIDI instrument with a CC letter (a non-zero midi_cc byte, model::inst_has_auto_letter); it covers every older minor.
 std::uint16_t inst_version(const Instrument& in, bool stereo) noexcept {
+  if (model::inst_has_auto_letter(in)) {
+    return kInstVersionAutoCc;
+  }
   if (in.kind == model::InstrumentKind::Module && in.rate != 0) {
     return kInstVersionRate;
   }

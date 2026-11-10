@@ -192,6 +192,9 @@ class Editor {
   // OS-INSTUI S7, NAME: the instrument's name (the stored field: up to kInstrumentNameMax characters, any but NUL) as one undo record (the whole instrument, as set_instrument: the unit
   // restores the old name). NotFound for an empty slot, BadValue for a name that is too long or holds a NUL; the same name records nothing.
   Status set_instrument_name(std::uint32_t index, const char* text, std::size_t len) noexcept;
+  // OS-PARAMAUTO: one byte of Instrument::midi_cc (the letter map of a Sample or Module instrument, param_auto.h) as a 4-byte record (32 bytes of journal): undo restores that byte only, so a
+  // take that gave a parameter its letter takes the letter back without touching the instrument's other parameters. BadIndex (slot or letter), NotFound (empty slot); the same code records nothing.
+  Status set_instrument_cc(std::uint32_t index, unsigned letter, std::uint8_t code) noexcept;
   // OS-012b: a module reference joins the project's table (the engine picker of the Instrument page names a module the project did not yet use). Load-time plumbing
   // like the rest of the table: not journalled, and it does not end the history (OS-012b decision: the table only ever grows, so every older unit still applies).
   // A history that was already stale stays so.

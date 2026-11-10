@@ -8,11 +8,13 @@
 #include "param_access.h"
 #include "pattern_edit_util.h"
 
+#include <o3os/app/module_ui.h>
 #include <o3os/app/pad_note.h>
 #include <o3os/app/rec_fx.h>
 #include <o3os/app/rec_place.h>
 #include <o3os/core/fixed_string.h>
 #include <o3os/model/instrument.h>
+#include <o3os/model/param_auto.h>
 #include <o3os/model/params.h>
 
 namespace o3os::app {
@@ -215,22 +217,51 @@ bool rec_fx_write(ActionContext& ctx, core::ParamId id, const char* name, bool e
     return no_fx();  // a Mixer, Perform or device move records nothing (A-7)
   }
   const unsigned slot = core::param_index(id);
-  if (static_cast<int>(slot) + 1 != v.instrument) {
-    return no_fx();  // Q3 a: only a binding of the selected instrument
-  }
   const model::Instrument* in = ctx.model.project != nullptr ? ctx.model.project->instrument(slot) : nullptr;
-  if (in == nullptr || in->kind != model::InstrumentKind::Sample) {
-    return no_fx();  // A-5: only a Sample instrument records (the mapped fields are sampler fields)
+  if (in == nullptr || (in->kind != model::InstrumentKind::Sample && in->kind != model::InstrumentKind::Module)) {
+    return no_fx();  // A-5: only a Sample or a Module instrument records (OS-PARAMAUTO: a MIDI instrument's CC FX are its own controller map)
   }
   float value = 0.0f;
   if (!read_param(ctx.model, id, value)) {
     return false;  // the value as it is stored, so as it is heard
   }
-  float filter_type = 0.0f;
-  (void)read_param(ctx.model, core::param_id(core::ParamKind::Instrument, slot, model::instrument_param::FilterType), filter_type);  // the stored FILTER TYPE (A-1)
   model::StepFx fx{};
-  if (!rec::rec_fx_map(core::param_field(id), static_cast<unsigned>(filter_type), value, fx)) {
-    return no_fx();  // Tune and every other parameter write nothing (Q2 a)
+  // Q3 a: the FX of its own (OS-FXREC) only for a parameter of the selected Sample instrument; the filter type is the stored FILTER TYPE (A-1), Tune and the rest have none (Q2 a).
+  bool own = false;
+  if (in->kind == model::InstrumentKind::Sample && static_cast<int>(slot) + 1 == v.instrument) {
+    float filter_type = 0.0f;
+    (void)read_param(ctx.model, core::param_id(core::ParamKind::Instrument, slot, model::instrument_param::FilterType), filter_type);
+    own = rec::rec_fx_map(core::param_field(id), static_cast<unsigned>(filter_type), value, fx);
+  }
+  // OS-PARAMAUTO S3 (docs/specs/OS-PARAMAUTO.md 5; new Community OS behaviour): every other learnable parameter of a Sample or Module instrument that a letter can name is recorded as CC A..F, the letter
+  // of the parameter (taken by the first recorded move, written with the step inside the take's undo group). A parameter that owns a letter reuses it; none free: the move sounds, nothing is recorded.
+  int new_letter = -1;
+  std::uint8_t new_code = 0;
+  int letter = -1;
+  if (!own) {
+    new_code = model::auto_code(id);
+    ParamScratch scratch;
+    const core::ParamDesc* d = new_code != 0u ? describe_param(ctx.model, id, scratch) : nullptr;
+    if (d == nullptr || (d->flags & core::kParamLearnable) == 0u) {
+      return no_fx();  // VelSens, the wavetable rows and the other kinds have no letter (route A): as before
+    }
+    model::AutoMap map;
+    model::auto_scan(*ctx.model.project, map);
+    letter = model::auto_find(map, id);
+    if (letter < 0) {
+      letter = model::auto_first_free(map);
+      if (letter < 0) {
+        if (!v.edit.rec_cc_full) {  // once per take
+          v.edit.rec_cc_full = true;
+          (void)v.notify.post(core::Severity::Info, "REC FX: NO FREE CC LETTER", "rec_fx", ViewState::kMessageMs);
+        }
+        return false;
+      }
+      new_letter = letter;
+    }
+    const float norm = core::param_norm(*d, value);
+    fx.type = letter < 5 ? static_cast<std::uint8_t>(seq::fx::kCcA + letter) : static_cast<std::uint8_t>(seq::fx::kSlot37);
+    fx.value = static_cast<std::uint8_t>((norm < 0.0f ? 0.0f : (norm > 1.0f ? 1.0f : norm)) * 127.0f + 0.5f);
   }
   const PatternSource src(ctx.model, v.edit.pattern);
   const int tracks = src.tracks() < kRecTracks ? src.tracks() : kRecTracks;
@@ -244,6 +275,21 @@ bool rec_fx_write(ActionContext& ctx, core::ParamId id, const char* name, bool e
   }
   model::Step s = src.step(track, row);
   const model::Step before = s;
+  if (!own) {
+    // A letter plays on the instrument the step names, else the one the track played last (Sequencer::emit_cc): a MIDI one would send a CC, not move the parameter. Refused, nothing written.
+    unsigned sounding = s.instr;
+    for (int r = row - 1; sounding == 0u && r >= 0; --r) {
+      sounding = src.step(track, r).instr;
+    }
+    const model::Instrument* si = sounding != 0u && ctx.model.project != nullptr ? ctx.model.project->instrument(sounding - 1u) : nullptr;
+    if (si != nullptr && si->kind == model::InstrumentKind::Midi) {
+      if (!v.edit.rec_cc_full) {  // once per take (the flag of the letter messages)
+        v.edit.rec_cc_full = true;
+        (void)v.notify.post(core::Severity::Info, "REC FX: MIDI TRACK", "rec_fx", ViewState::kMessageMs);
+      }
+      return false;
+    }
+  }
   if (rec::rec_fx_place(s, fx.type, fx.value) < 0) {
     if (!v.edit.rec_fx_full) {  // once per take
       v.edit.rec_fx_full = true;
@@ -251,7 +297,8 @@ bool rec_fx_write(ActionContext& ctx, core::ParamId id, const char* name, bool e
     }
     return false;
   }
-  if (std::memcmp(&s, &before, sizeof s) == 0) {
+  const bool changed = std::memcmp(&s, &before, sizeof s) != 0;
+  if (!changed && new_letter < 0) {
     return false;  // the cell is unchanged: nothing to write, nothing recorded
   }
   bool exists = src.exists();
@@ -259,15 +306,26 @@ bool rec_fx_write(ActionContext& ctx, core::ParamId id, const char* name, bool e
     return false;
   }
   const std::size_t journal_before = ctx.edit->journal().open_bytes();
-  if (ctx.edit->set_steps(v.edit.pattern, static_cast<std::uint32_t>(track), static_cast<std::uint32_t>(row), &s, 1) != model::Status::Ok) {
+  if (new_letter >= 0) {  // the letter goes into the take's undo group with the step: Undo takes both back
+    if (ctx.edit->set_instrument_cc(slot, static_cast<unsigned>(new_letter), new_code) != model::Status::Ok) {  // (the one byte: Undo does not touch the instrument's other fields)
+      return false;
+    }
+  }
+  if (changed && ctx.edit->set_steps(v.edit.pattern, static_cast<std::uint32_t>(track), static_cast<std::uint32_t>(row), &s, 1) != model::Status::Ok) {
+    note_take_write(v, journal_before, *ctx.edit);
     return false;
   }
   note_take_write(v, journal_before, *ctx.edit);
-  if (!v.edit.rec_fx_said) {  // the take's first recorded FX says which parameter (3.5)
+  if (!v.edit.rec_fx_said) {  // the take's first recorded FX says which parameter (3.5), and for a letter which one
     v.edit.rec_fx_said = true;
     core::FixedString<core::kNotifyTextChars> text;
     text.append("REC FX: ");
     text.append(name != nullptr ? name : "");
+    if (letter >= 0) {
+      text.append(" -> CC ");
+      const char l[2] = {static_cast<char>('A' + letter), '\0'};
+      text.append(l);
+    }
     (void)v.notify.post(core::Severity::Info, text.c_str(), "rec_fx", ViewState::kMessageMs);
   }
   return true;
@@ -290,6 +348,7 @@ void rec_take_end(model::Editor* editor, PatternEdit& edit) noexcept {
     edit.take_wrote = false;
     edit.rec_fx_said = false;  // OS-FXREC: the take's strip flags go with it
     edit.rec_fx_full = false;
+    edit.rec_cc_full = false;
     if (editor != nullptr) {
       editor->end_group();  // commits the unit if it has records; an empty take leaves no entry
     }

@@ -16,6 +16,7 @@
 #include <o3os/core/param.h>
 #include <o3os/midi/cc_in.h>
 #include <o3os/model/editor.h>
+#include <o3os/model/param_auto.h>
 #include <o3os/model/params.h>
 #include <o3os/platform/host/fakes.h>
 #include <o3os/sim/demo_project.h>
@@ -535,6 +536,33 @@ TEST_CASE("params edit: a macro replays parameter edits as one unit") {
   CHECK(rig.editor->journal().depth() == depth - 1u);
   CHECK(rig.value(inst(0, ip::Volume)) == 97.0f);
   CHECK(rig.value(inst(0, ip::Panning)) == pan);
+}
+
+TEST_CASE("param auto: the value a CC letter played moves the parameter that owns it, scaled to its range, told to the audio side, with no undo unit; a free letter and a bad one do nothing") {
+  Rig rig;
+  model::Instrument in = *rig.project().instrument(0);
+  NEED(in.kind != model::InstrumentKind::Midi);
+  in.midi_cc[2] = model::auto_code(inst(0, ip::Volume));  // CC C owns VOLUME of instrument 1
+  CHECK(rig.editor->set_instrument(0, in) == model::Status::Ok);
+  rig.pass(1600);
+  rig.heard();
+  const unsigned depth = rig.editor->journal().depth();
+  CHECK(rig.invoke("param.auto", (2u << 8) | 0u) == DispatchResult::Changed);
+  CHECK(rig.value(inst(0, ip::Volume)) == 0.0f);
+  CHECK(rig.invoke("param.auto", (2u << 8) | 127u) == DispatchResult::Changed);
+  CHECK(rig.value(inst(0, ip::Volume)) == 100.0f);  // 127 is the top of the range
+  CHECK(rig.invoke("param.auto", (2u << 8) | 64u) == DispatchResult::Changed);
+  CHECK(std::fabs(rig.value(inst(0, ip::Volume)) - 100.0f * 64.0f / 127.0f) < 1.0f);
+  const std::vector<core::ParamChange> heard = rig.heard();
+  NEED(heard.size() == 3u);
+  CHECK(heard[2].id == inst(0, ip::Volume));
+  CHECK(heard[2].value == rig.value(inst(0, ip::Volume)));
+  CHECK(rig.editor->journal().depth() == depth);  // playback is not an edit of the document
+  const float v = rig.value(inst(0, ip::Volume));
+  CHECK(rig.invoke("param.auto", (0u << 8) | 5u) != DispatchResult::Changed);  // CC A owns nothing
+  CHECK(rig.invoke("param.auto", (9u << 8) | 5u) != DispatchResult::Changed);  // no such letter
+  CHECK(rig.value(inst(0, ip::Volume)) == v);
+  CHECK(rig.project().check_invariants());
 }
 
 // ---- MIDI Learn --------------------------------------------------------------------------------------------------------------

@@ -4,6 +4,7 @@
 #include <o3os/app/mixer_view.h>
 
 #include "action_handlers.h"
+#include "param_access.h"
 #include "sample_text.h"
 
 #include <o3os/app/module_import.h>
@@ -310,6 +311,7 @@ void App::run_once() noexcept {
 
   poll_transport_select();  // (OS-MIDISLV; the position itself is read at the top of the pass: OS-LIVEREC)
   poll_mute_blink();
+  poll_param_auto();
   poll_learn_map();
   poll_modules();
   poll_files();
@@ -825,6 +827,28 @@ void App::poll_mute_blink() noexcept {
   }
   state_.mute_blink = phase;
   mute_pending_seen_ = pending;
+}
+
+// OS-PARAMAUTO S2: CC A..F on a step of a Sample or Module instrument moves the parameter that owns the letter. The sequencer cannot reach the model, so it is told which letters are mapped (a scan of the
+// project, made only when the project's generation moved) and publishes the value of a mapped letter; the values are applied here, in the main loop, as the action param.auto (final: no undo record).
+void App::poll_param_auto() noexcept {
+  TrackSink* const sink = model_.mix != nullptr ? model_.mix->tracks : nullptr;
+  if (sink == nullptr) {
+    return;
+  }
+  const std::uint32_t generation = model_.project != nullptr ? model_.project->generation() : 0u;
+  if (model_.project != auto_project_ || generation != auto_generation_) {
+    auto_project_ = model_.project;
+    auto_generation_ = generation;
+    sink->auto_mask(param_auto_mask(model_));
+  }
+  std::uint8_t value[6] = {};
+  const std::uint8_t taken = sink->auto_take(value);
+  for (unsigned letter = 0; taken != 0u && letter < 6u; ++letter) {
+    if (((taken >> letter) & 1u) != 0u && invoke(core::action_id("param.auto"), (letter << 8) | value[letter]) == DispatchResult::Changed) {
+      dirty_ = true;
+    }
+  }
 }
 
 // OS-LEARNMAP: the activity dots of LEARN MAP are lit by midi.cc (param_actions.cpp apply_cc) and go out LearnMapView::kDotMs after the last CC: the table redraws then. Nothing runs while the map is closed.

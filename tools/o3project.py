@@ -69,6 +69,8 @@ LIMITS = [
     ("inst_version_playthru", 0x0107),
     # OS-MODRATE S3: INST 1.8, the 1.7 layout whole and one byte after it, the module instrument's RATE (0 FULL, 1 = 1/2, 2 = 1/4); written only for a Module instrument with a RATE other than 0
     ("inst_version_modrate", 0x0108),
+    # OS-PARAMAUTO S1: INST 1.9, the 1.8 layout with no new byte; the version only says that the six midi_cc bytes of a Sample or Module instrument are CC letters (parameter codes); written only for a non-MIDI instrument with a non-zero one
+    ("inst_version_autocc", 0x0109),
     # OS-PERFFX P1 (decision D5): PERF and SCEN 1.1, written only when a slot holds the Perform FX 20 or 21
     ("state_version_fx", 0x0101),
     # OS-PERFMODES M3: PERF and SCEN 1.2, written only when a slot holds PLAYMODE (id 18) with a custom play order 4..23
@@ -121,6 +123,7 @@ INST_VERSION_STEREO = L["inst_version_stereo"]  # OS-STEREO step 2: 1.5 = the 1.
 INST_VERSION_WT = L["inst_version_wt"]  # OS-CEWTENV W1: 1.6 = the 1.5 layout whole plus the twelve WT bytes (wt_bend, wt_sust of the six slots, in slot order) after the stereo byte; written only for an instrument with a WT slot (a loop of 2 or 3) or a non-zero WT byte
 INST_VERSION_PLAYTHRU = L["inst_version_playthru"]  # OS-CEPLAYTHRU P1: 1.7 = the 1.6 layout whole plus the play-thru flag (0 or 1) after the WT bytes; written only for a Sample instrument with the flag set
 INST_VERSION_MODRATE = L["inst_version_modrate"]  # OS-MODRATE S3: 1.8 = the 1.7 layout whole plus the module RATE (0 FULL, 1 = 1/2, 2 = 1/4; above 2 reads 0) after the play-thru byte; written only for a Module instrument with a RATE other than 0
+INST_VERSION_AUTOCC = L["inst_version_autocc"]  # OS-PARAMAUTO S1: 1.9 = the 1.8 layout whole, no new byte; written only for a non-MIDI instrument with a non-zero CC A..F byte (a CC letter)
 INST_RATE_MAX = 2  # model::kInstRateMax (OS-MODRATE S3); a native value above it reads 0
 INST_PLAYTHRU_MAX = 1  # model::kInstSliceThruMax; a native value above it reads 0 (an OG byte above 0 reads 1)
 INST_STEREO_MAX = 1  # model::kInstStereoMax
@@ -526,7 +529,7 @@ def keep_unknown(p, cid, payload, used):
 def known_minor(cid):
     """The newest minor version of a chunk this reader knows: INST 1.8, PERF and SCEN 1.2 (OS-PERFMODES M3; 1.1 was OS-PERFFX P1), APPM 1.1, USBS 1.1, NOTE 1.1 (OS-SCALES28), the others 1.0."""
     if cid == b"INST":
-        return INST_VERSION_MODRATE & 0xFF
+        return INST_VERSION_AUTOCC & 0xFF
     if cid in (b"PERF", b"SCEN"):
         return STATE_VERSION_PLAY_ORDER & 0xFF
     return 1 if cid in (b"APPM", b"USBS", b"NOTE") else CHUNK_VERSION & 0xFF
@@ -996,6 +999,9 @@ def parse_inst(p, payload):
     if (version & 0xFF) >= 8:  # OS-MODRATE S3: version 1.8 appends the module RATE after the play-thru byte; a value above 2, or a RATE on a Sample or MIDI instrument, reads 0
         mod_rate = c.u8()
         mod_rate = mod_rate if mod_rate <= INST_RATE_MAX and kind == 3 else 0
+    if (version & 0xFF) < 9 and kind != 2:  # OS-PARAMAUTO S1: from INST 1.9 the CC A..F bytes of a Sample or Module instrument are letters; in an older chunk they read 0 (no letter)
+        for n in range(5, 11):
+            m13[n] = 0
     last_shape = 5 if (version & 0xFF) >= 4 else 4  # OS-LFOSINE: the LFO shapes are 0..4 before INST 1.4 and 0..5 from it; a larger one plays as Triangle (2)
     for i, x in enumerate(lfo):
         if (version & 0xFF) >= 6 and env[i][7] in (2, 3):
@@ -1125,7 +1131,10 @@ def build(p):
         # 1.6 (OS-CEWTENV W1: the 1.5 layout whole and the twelve WT bytes) for an instrument with a WT slot (a loop of 2 or 3) or a non-zero WT byte (it covers 1.5 and 1.4 too)
         # 1.7 (OS-CEPLAYTHRU P1: the 1.6 layout whole and the play-thru flag after the WT bytes) for a Sample instrument with the flag set (it covers 1.6, 1.5 and 1.4 too)
         # 1.8 (OS-MODRATE S3: the 1.7 layout whole and the module RATE after the play-thru byte) for a Module instrument with a RATE other than 0
-        if i.get("mod_rate", 0) and i["kind"] == 3:
+        # 1.9 (OS-PARAMAUTO S1: the 1.8 layout whole, no new byte) for a non-MIDI instrument with a CC letter (a non-zero CC A..F byte)
+        if i["kind"] != 2 and any(i["m13"][5:11]):
+            version = INST_VERSION_AUTOCC
+        elif i.get("mod_rate", 0) and i["kind"] == 3:
             version = INST_VERSION_MODRATE
         elif i.get("play_thru", 0) and i["kind"] == 1:
             version = INST_VERSION_PLAYTHRU

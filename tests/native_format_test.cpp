@@ -50,10 +50,10 @@ RawChunk& chunk_of(std::vector<RawChunk>& cs, std::uint32_t id, int nth = 0) {
 
 Bytes build(const std::vector<RawChunk>& cs, const BuildOptions& o = {}) { return test::build_file(cs, o); }
 
-// A hypothetical INST 1.9 (INST 1.8 is OS-MODRATE S3's module RATE byte; INST 1.4 is OS-LFOSINE's, with no field of its own; INST 1.5 is OS-STEREO's stereo byte; INST 1.6 is OS-CEWTENV W1's twelve WT bytes; INST 1.7 is OS-CEPLAYTHRU P1's play-thru flag) made of an INST 1.1 payload: the engine byte (automatic), the twelve bytes of INST 1.3 at their defaults (OS-INSTUI S8b),
+// A hypothetical INST 1.10 (INST 1.9 is OS-PARAMAUTO S1: no byte; INST 1.8 is OS-MODRATE S3's module RATE byte; INST 1.4 is OS-LFOSINE's, with no field of its own; INST 1.5 is OS-STEREO's stereo byte; INST 1.6 is OS-CEWTENV W1's twelve WT bytes; INST 1.7 is OS-CEPLAYTHRU P1's play-thru flag) made of an INST 1.1 payload: the engine byte (automatic), the twelve bytes of INST 1.3 at their defaults (OS-INSTUI S8b),
 // the stereo byte of 1.5 (mono), the twelve WT bytes of 1.6 (zero), the play-thru byte of 1.7 (zero), the RATE byte of 1.8 (zero), then `tail` bytes of a field of a later version.
 void make_inst_next_minor(RawChunk& c, std::size_t tail, std::uint8_t fill = 0xAB, std::uint8_t engine = 0) {
-  c.payload[1] = 9;
+  c.payload[1] = 10;
   c.payload.push_back(engine);
   const std::uint8_t twelve[12] = {127, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 100};
   c.payload.insert(c.payload.end(), twelve, twelve + 12);
@@ -803,7 +803,7 @@ TEST_CASE("native: a source that fails or breaks its contract ends in SourceFail
 TEST_CASE("native: a newer minor version is read, noted, and its extra fields are lost on the next save") {
   const Bytes base = small_file();
   std::vector<RawChunk> cs = test::split_chunks(base);
-  // a hypothetical next minor version of every chunk kind (1.1; INST is at 1.8 since OS-MODRATE S3, so its next is 1.9): version bumped,
+  // a hypothetical next minor version of every chunk kind (1.1; INST is at 1.9 since OS-PARAMAUTO S1, so its next is 1.10): version bumped,
   // two unknown bytes appended to the fields
   for (RawChunk& c : cs) {
     if (c.id == kChunkInst) {
@@ -831,7 +831,7 @@ TEST_CASE("native: a newer minor version is read, noted, and its extra fields ar
   CHECK(rep.newer_minor);
 }
 
-TEST_CASE("native: INST is version 1.1 with the sample rate appended; 1.0 reads as rate 0, a 1.9 tail is skipped (OS-002c, OS-004d, OS-INSTUI S8b, OS-CEWTENV W1, OS-CEPLAYTHRU P1)") {
+TEST_CASE("native: INST is version 1.1 with the sample rate appended; 1.0 reads as rate 0, a 1.10 tail is skipped (OS-002c, OS-004d, OS-INSTUI S8b, OS-CEWTENV W1, OS-CEPLAYTHRU P1)") {
   test::fill_small(proj(0));
   CHECK(proj(0).instrument(0)->sample_rate == 22050u);
   Bytes base;
@@ -892,7 +892,7 @@ TEST_CASE("native: INST is version 1.1 with the sample rate appended; 1.0 reads 
   CHECK(test::load(test::arena(1), build(bad), &rep) == Progress::Failed);
   CHECK(rep.error == Error::Malformed);
 
-  // A 1.9, which a later firmware may write with a field of its own after the RATE byte of 1.8: read as far as 1.8 (here the engine is 0x11, which is not one, so it reads as automatic, the twelve are the defaults and the
+  // A 1.10, which a later firmware may write with a field of its own after the RATE byte of 1.8: read as far as 1.8 (here the engine is 0x11, which is not one, so it reads as automatic, the twelve are the defaults and the
   // flag is 0), the tail skipped, the report says so, and the next save writes 1.1 (an automatic engine and the defaults, what this reader knows to leave out).
   std::vector<RawChunk> next = cs;
   for (RawChunk& c : next) {
@@ -1014,7 +1014,7 @@ TEST_CASE("native: OS-CEWTENV W1, INST 1.6: a WT instrument writes the new minor
     std::vector<RawChunk> cs = test::split_chunks(wt_file);
     for (RawChunk& c : cs) {
       if (c.id == kChunkInst && c.payload[2] == 0) {
-        c.payload[1] = 9;  // a later minor appending a field of its own after the RATE byte of 1.8
+        c.payload[1] = 10;  // a later minor appending a field of its own after the RATE byte of 1.8
         c.payload.push_back(0);  // the play-thru byte of 1.7: off
         c.payload.push_back(0);  // the RATE byte of 1.8: FULL
         c.payload.push_back(0xDE);
@@ -1174,12 +1174,12 @@ TEST_CASE("native: OS-CEPLAYTHRU P1, INST 1.7: a flagged Sample instrument write
     NEED(test::save(proj(1), resaved) == Progress::Done);
     CHECK(resaved == plain);
   }
-  // a 1.7 chunk read by a 1.6 reader skips the byte safely: the flag is the payload's tail, after every field a reader that knows 1.6 stops at, so a chunk of a newer minor (1.9 here) is read as of 1.8 — the flag kept — and its own tail skipped, lost on the next save
+  // a 1.7 chunk read by a 1.6 reader skips the byte safely: the flag is the payload's tail, after every field a reader that knows 1.6 stops at, so a chunk of a newer minor (1.10 here) is read as of 1.8 — the flag kept — and its own tail skipped, lost on the next save
   {
     std::vector<RawChunk> cs = test::split_chunks(flag_file);
     for (RawChunk& c : cs) {
       if (c.id == kChunkInst && c.payload[2] == 0) {
-        c.payload[1] = 9;  // a later minor appending a field of its own after the RATE byte of 1.8
+        c.payload[1] = 10;  // a later minor appending a field of its own after the RATE byte of 1.8
         c.payload.push_back(0);  // the RATE byte of 1.8: FULL
         c.payload.push_back(0xDE);
         c.payload.push_back(0xAD);
@@ -1306,7 +1306,7 @@ TEST_CASE("native: OS-MODRATE S3, INST 1.8: a RATE above 2 reads 0 and so does o
     for (std::size_t i = 0; i < cs.size(); ++i) {
       if (cs[i].id == kChunkInst && cs[i].payload[2] == 0) {
         cs[i] = ps[i];
-        make_inst_next_minor(cs[i], 0);  // the 1.9 layout of an instrument with every field at its default: 1.8 is the same without the extra minor
+        make_inst_next_minor(cs[i], 0);  // the 1.10 layout of an instrument with every field at its default: 1.8 is the same without the extra minor
         cs[i].payload[1] = 8;
         cs[i].payload.back() = 1;
       }
@@ -1335,12 +1335,12 @@ TEST_CASE("native: OS-MODRATE S3, INST 1.8: a RATE above 2 reads 0 and so does o
     CHECK(test::load(test::arena(1), build(cs), &rep) == Progress::Failed);
     CHECK(rep.error == Error::Malformed);
   }
-  // a later minor (1.9) appending a field of its own after the RATE byte: read as far as 1.8 (the rate kept), the tail skipped, lost on the next save; a reader that stops at 1.7 sees the same chunk with the RATE byte in its tail
+  // a later minor (1.10) appending a field of its own after the RATE byte: read as far as 1.8 (the rate kept), the tail skipped, lost on the next save; a reader that stops at 1.7 sees the same chunk with the RATE byte in its tail
   {
     std::vector<RawChunk> cs = test::split_chunks(file);
     for (RawChunk& c : cs) {
       if (is_rate_slot_chunk(c)) {
-        c.payload[1] = 9;
+        c.payload[1] = 10;
         c.payload.push_back(0xDE);
         c.payload.push_back(0xAD);
       }

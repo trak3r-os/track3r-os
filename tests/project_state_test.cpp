@@ -1003,12 +1003,12 @@ TEST_CASE("project state: INST 1.2 is exact: an engine above the table reads as 
   }
   CHECK(test::load(test::arena(1), build(edit), &rep) == Progress::Failed);
   CHECK(rep.error == Error::Malformed);
-  // 1.9 (1.8 is OS-MODRATE S3's module RATE byte; 1.3 is the MIDI fields since OS-INSTUI S8b, inst_midi_format_test.cpp; 1.4 is OS-LFOSINE's, no field; 1.5 is OS-STEREO's flag; 1.6 is OS-CEWTENV W1's twelve WT bytes; 1.7 is OS-CEPLAYTHRU P1's play-thru flag): read as far as 1.8,
+  // 1.10 (1.9 is OS-PARAMAUTO S1, no byte; 1.8 is OS-MODRATE S3's module RATE byte; 1.3 is the MIDI fields since OS-INSTUI S8b, inst_midi_format_test.cpp; 1.4 is OS-LFOSINE's, no field; 1.5 is OS-STEREO's flag; 1.6 is OS-CEWTENV W1's twelve WT bytes; 1.7 is OS-CEPLAYTHRU P1's play-thru flag): read as far as 1.8,
   // here the twelve bytes of the defaults beside the engine, the WT bytes zero, the flag off, the appended field skipped, the report says so
   edit = cs;
   for (RawChunk& c : edit) {
     if (c.id == kChunkInst && c.payload[1] == 2) {
-      c.payload[1] = 9;
+      c.payload[1] = 10;
       const std::uint8_t twelve[12] = {127, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 100};
       for (const std::uint8_t b : twelve) {
         c.payload.push_back(b);

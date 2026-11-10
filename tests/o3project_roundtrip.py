@@ -100,7 +100,7 @@ def main():
     if cpp_limits != py_limits:
         sys.exit("FAILED: the limits tables differ\nC++:\n%s\nPython:\n%s" % (cpp_limits.decode(), py_limits.decode()))
 
-    for kind in ("empty", "small", "maximal", "settings", "state", "midi13", "persist2", "scales", "lfosine", "stereo", "wt", "playthru", "modrate", "og", "og17", "law", "insx", "lanes-empty", "lanes-some", "lanes-one", "lanes-2048", "lanes-full"):
+    for kind in ("empty", "small", "maximal", "settings", "state", "midi13", "persist2", "scales", "lfosine", "stereo", "wt", "playthru", "modrate", "autocc", "og", "og17", "law", "insx", "lanes-empty", "lanes-some", "lanes-one", "lanes-2048", "lanes-full"):
         a, b, c = (os.path.join(work, "%s.%s.o3p" % (kind, tag)) for tag in ("cpp", "py", "cpp2"))
         run([tool, "gen", kind, a])
         if kind in PRE_LAW:  # OS-BUG-PASTE24: a project whose law is 0 writes no LAW chunk: the file is the one the build before it wrote (size and CRC-32 taken from that build's o3pj_tool)
@@ -346,10 +346,10 @@ def main():
     def appended(cid):
         def edit(p):
             if cid == b"INST":
-                # INST is at 1.7 (1.3 is the sample rate, the engine, the MIDI fields; 1.4 is OS-LFOSINE's, no field; 1.5 is OS-STEREO's stereo byte; 1.6 is OS-CEWTENV W1's twelve WT bytes; 1.7 is OS-CEPLAYTHRU P1's play-thru flag): 1.8 is OS-MODRATE S3's module RATE byte): its next minor is 1.9.
+                # INST is at 1.7 (1.3 is the sample rate, the engine, the MIDI fields; 1.4 is OS-LFOSINE's, no field; 1.5 is OS-STEREO's stereo byte; 1.6 is OS-CEWTENV W1's twelve WT bytes; 1.7 is OS-CEPLAYTHRU P1's play-thru flag): 1.8 is OS-MODRATE S3's module RATE byte): its next minor is 1.10 (1.9 is OS-PARAMAUTO's, no new byte).
                 # The 1.1 payload ends at the rate, so the appended bytes are read as the engine (0xAB, above the table: automatic), the twelve MIDI bytes (out of range: the defaults), the stereo byte (above 1: 0),
                 # the twelve WT bytes (zeros), the play-thru byte (above 1: 0), the module RATE byte of 1.8 (0xAB, above 2: 0) and the 0xAB tail past them is skipped.
-                return b"\x01\x09" + p[2:] + b"\xab" * 14 + b"\x00" * 12 + b"\x05" + b"\xab" * 20000
+                return b"\x01\x0a" + p[2:] + b"\xab" * 14 + b"\x00" * 12 + b"\x05" + b"\xab" * 20000
             return b"\x01\x01" + p[2:] + b"\xab" * 20000
         return [(c, edit(p) if c == cid else p) for c, p in chunks]
 
@@ -658,9 +658,9 @@ def main():
         if error_kind(cpp.stderr) != "malformed" or error_kind(pyr.stderr) != "malformed":
             sys.exit("FAILED: INST 1.3 %s: C++ says %r, Python says %r" % (name, error_kind(cpp.stderr), error_kind(pyr.stderr)))
     # a newer minor (1.9; 1.8 is OS-MODRATE S3's module RATE byte; 1.4 is OS-LFOSINE's, no field; 1.5 is OS-STEREO's byte; 1.6 is OS-CEWTENV W1's twelve WT bytes; 1.7 is OS-CEPLAYTHRU P1's play-thru flag) with a tail: read as far as 1.7 (the first tail byte, 0xCD, is a stereo flag above 1: mono, then twelve WT bytes of 0: none, then the play-thru byte 0xCD above 1: 0, then the RATE byte 0xCD above 2: 0), the tail lost, the rest kept
-    newer, dump_new = alike13("INST 1.9", lambda c, p: b"\x01\x09" + p[2:] + b"\xcd" + b"\x00" * 12 + b"\xcd" + b"\xcd" * 700 if c == b"INST" and p[:2] == b"\x01\x03" else p)
+    newer, dump_new = alike13("INST 1.10", lambda c, p: b"\x01\x0a" + p[2:] + b"\xcd" + b"\x00" * 12 + b"\xcd" + b"\xcd" * 700 if c == b"INST" and p[:2] == b"\x01\x03" else p)
     if newer != m13 or "m13=100,6,3,12,40,75,129,130,131,1,128,33" not in dump_new or "stereo=0" not in dump_new or "play_thru=0" not in dump_new:
-        sys.exit("FAILED: INST 1.9 was not read as far as 1.8 and written back as the 1.3 chunk without its tail")
+        sys.exit("FAILED: INST 1.10 was not read as far as 1.8 and written back as the 1.3 chunk without its tail")
     # OS-LFOSINE: the LFO shape bytes out of range, on both readers alike. The six LFOs sit 36 bytes before the 96 of the slices and the 19 of the tail (blob length 2, rate 4, engine 1, the twelve
     # of 1.3; a sample instrument has no blob). A 1.3 chunk with a shape of 5 or more, and a 1.4 chunk with one of 6 or more, reads as Triangle (2); a 1.4 chunk keeps 5.
     def shapes_of(p):
@@ -784,9 +784,9 @@ def main():
     # a newer minor (1.9) with a tail past the flag and the RATE byte of 1.8 (a Sample instrument: the byte reads 0): read as of 1.8 (the WT slot and the flag kept, RATE 0), the tail skipped, the next save writes 1.7 with the flag and without the tail — the same skip an older reader
     # (INST 1.6) performs on the flag byte itself, which is the payload's tail, after every field it knows
     wtpt = [(c, b"\x01\x07" + p[2:] + b"\x01" if c == b"INST" and p[2] == 0 else p) for c, p in wt_chunks]  # the wt fixture's instrument 0 as 1.7 with the flag
-    tailed, dump_tail = alike_wt("INST 1.9 with a tail", lambda p: b"\x01\x09" + p[2:] + b"\x01" + b"\x00" + b"\xde\xad")
+    tailed, dump_tail = alike_wt("INST 1.10 with a tail", lambda p: b"\x01\x0a" + p[2:] + b"\x01" + b"\x00" + b"\xde\xad")
     if tailed != join_chunks(wtpt) or not any("wt=156,40" in l for l in dump_tail) or not any("play_thru=1" in l for l in dump_tail):
-        sys.exit("FAILED: an INST 1.9 chunk was not read as of 1.8 (WT and flag kept, RATE 0) with its tail lost on the next save")
+        sys.exit("FAILED: an INST 1.10 chunk was not read as of 1.8 (WT and flag kept, RATE 0) with its tail lost on the next save")
     print("wt: INST 1.6 is written for a WT slot or a non-zero WT byte only (the rest of the file is the small fixture's), an older chunk's loop 2 reads as 1 and its contour shape as Triangle, a newer minor's tail is skipped, both sides alike")
 
     # OS-CEPLAYTHRU P1, INST 1.7 (the play-thru flag after the twelve WT bytes of 1.6, written only for a Sample instrument with the flag set): the `playthru` fixture is the small project with the flag on instrument 0,
@@ -922,6 +922,45 @@ def main():
     if view17["instruments"][50].get("mod_rate", 0) != 0 or prev17.build(view17) != small_file:
         sys.exit("FAILED: a 1.7 reader did not skip the 1.8 RATE byte safely (RATE reads 0, the next save writes no 1.8)")
     print("modrate: INST 1.8 is written for a Module instrument with a RATE only (the rest of the file is the small fixture's), a 1.7 file and a value above 2 read as 0, a wrong size is malformed, a 1.7 reader skips the byte, both sides alike")
+
+    # OS-PARAMAUTO S1, INST 1.9 (the six midi_cc bytes of a Sample or Module instrument are CC letters; no new byte, the layout is the 1.8 whole): the `autocc` fixture is the small project with letters
+    # on slot 0 (Sample) and slot 50 (Module). Only those two chunks are 1.9, the rest of the file is the small fixture's; read as a 1.8 chunk the same bytes are no letters (the file is written back as the small one).
+    ac_path = os.path.join(work, "autocc.cpp.o3p")
+    ac_chunks = split_chunks(read(ac_path))
+    ac_inst = [p for c, p in ac_chunks if c == b"INST"]
+    if [(c, p) for c, p in ac_chunks if c != b"INST"] != [(c, p) for c, p in sm_chunks if c != b"INST"] or len(ac_inst) != len(sm_inst):
+        sys.exit("FAILED: the autocc fixture differs from the small fixture in more than the INST chunks")
+    if [p for p in ac_inst if p[2] not in (0, 50)] != [p for p in sm_inst if p[2] not in (0, 50)]:
+        sys.exit("FAILED: the autocc fixture's other instruments are not the small fixture's, byte for byte")
+    if [p[:2] for p in ac_inst].count(b"\x01\x09") != 2 or any(p[:2] != b"\x01\x09" for p in ac_inst if p[2] in (0, 50)):
+        sys.exit("FAILED: the autocc fixture's Sample and Module instruments are not the two INST 1.9 chunks")
+    if len([p for p in ac_inst if p[2] == 50][0]) != len(mr_mod):
+        sys.exit("FAILED: the INST 1.9 Module chunk is not as long as a 1.8 Module chunk (1.9 adds no byte)")
+    dump_ac = run([tool, "dump", ac_path]).stdout.decode().splitlines()
+    if dump_ac != run(py + ["dump", ac_path]).stdout.decode().splitlines():
+        sys.exit("FAILED: autocc: the dumps differ")
+    cc_seen = {}
+    for l in dump_ac:
+        if l.startswith("instrument "):
+            cc_seen[int(l.split()[1])] = l.split(" m13=")[1].split()[0].split(",")[5:11]
+    if cc_seen.get(0) != ["1", "0", "8", "0", "0", "120"] or cc_seen.get(50) != ["1", "0", "0", "32", "0", "0"]:
+        sys.exit("FAILED: autocc: the dump does not show the letters on slots 0 and 50: %r %r" % (cc_seen.get(0), cc_seen.get(50)))
+    ac_file = read(ac_path)
+    a_py, a_cpp = (os.path.join(work, "autocc.%s.o3p" % t) for t in ("py", "cpp2"))
+    run(py + ["rewrite", ac_path, a_py])
+    run([tool, "resave", ac_path, a_cpp])
+    if read(a_py) != ac_file or read(a_cpp) != ac_file:
+        sys.exit("FAILED: autocc: INST 1.9 is not written back as it was (Python first difference %d, C++ %d)" % (first_difference(read(a_py), ac_file), first_difference(read(a_cpp), ac_file)))
+    # the same bytes under a 1.8 label read as no letters and are written back as the small fixture's file, alike on both sides
+    old_py, old_cpp, old_in = (os.path.join(work, "autocc.old.%s.o3p" % t) for t in ("py", "cpp", "in"))
+    write(old_in, join_chunks([(c, b"\x01\x08" + p[2:] if c == b"INST" and p[:2] == b"\x01\x09" else p) for c, p in ac_chunks]))
+    run(py + ["rewrite", old_in, old_py])
+    run([tool, "resave", old_in, old_cpp])
+    if read(old_py) != read(old_cpp) or read(old_cpp) != small_file:
+        sys.exit("FAILED: autocc: a 1.8 chunk with CC bytes did not read as no letters and write back as the small file")
+    if run([tool, "dump", old_in]).stdout.decode().splitlines() != run(py + ["dump", old_in]).stdout.decode().splitlines():
+        sys.exit("FAILED: autocc: the dumps of the 1.8 label differ")
+    print("autocc: INST 1.9 is written for a Sample or Module instrument with a CC letter only (no new byte, as long as a 1.8 chunk, the rest of the file is the small fixture's), a 1.8 chunk reads no letters, both sides alike")
 
     # OS-PERSIST2: the session state, NOTE, MUTE, SCEN and SNFX. Tolerant: a value out of its range is its default, alike on both sides (the dumps show what was taken); the shape of a chunk is
     # the only error. An older build keeps the four as unknown chunks and writes them back byte for byte (emulated below, and checked against the real previous reader by hand).
