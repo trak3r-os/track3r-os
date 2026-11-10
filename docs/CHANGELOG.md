@@ -9,8 +9,8 @@ User-visible changes of the Community OS, newest first, one entry per change, in
 - **Slice pads play their own slice** (issue #7): on the CHOP page pad n plays slice n in SLICE and BEAT SLICE modes, whatever slice the pattern's Slice FX left on the track, and the Slice FX now picks a slice in SLICE mode too. Pads checked on the unit; the Slice FX in SLICE mode needs more testing.
 - **Quieter power-off** (issue #8): the codec's reference voltage now ramps down on its own, with the outputs still powered, before the rest of the codec powers off; the power-off takes about half a second longer. More testing needed: the pop has to be judged by ear.
 - **Mixer: a bar under the name of each track that has an insert** on the MIXER page. More testing needed.
-- **Master held, then Insert at any time, opens the Mixer's INSERTS page** (follow-up of issue #5): you no longer have to press both keys within 40 ms. Holding Master and pressing another key (Play, say) now does that key's job only; Master's release opens nothing. More testing needed.
-- **STATUS LED: a BPM mode.** Config > DISPLAY > STATUS LED is BLINK, BPM or OFF. In BPM the LED flashes on every beat, locked to playback (also under an external MIDI clock), and at the project tempo when stopped; a fault code still wins. The choice is now saved with the other device settings: the settings file gains one entry, and a file from an older build reads BLINK. More testing needed.
+- **Master held, then Insert at any time, opens the Mixer's INSERTS page** (follow-up of issue #5): you no longer have to press both keys within 40 ms. Holding Master and pressing another key (Play, say) now does that key's job only; Master's release opens nothing. Checked on the unit.
+- **STATUS LED: a BPM mode.** Config > DISPLAY > STATUS LED is BLINK, BPM or OFF. In BPM the LED flashes on every beat, locked to playback (also under an external MIDI clock), and at the project tempo when stopped; a fault code still wins. The choice is now saved with the other device settings: the settings file gains one entry, and a file from an older build reads BLINK. Checked on the unit.
 
 ## v1.2.0 (date to be set at publication)
 
