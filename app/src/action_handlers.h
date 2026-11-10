@@ -105,7 +105,7 @@ bool fill_delta(ActionContext& ctx, core::ActionArg arg) noexcept;              
 bool fill_coarse(ActionContext& ctx, core::ActionArg arg) noexcept;             // arg = detents, each the row's coarse step (Shift + encoder; OS-SHIFTENC)
 bool fill_apply(ActionContext& ctx, core::ActionArg arg) noexcept;              // F1: fills with the dialog's rows and closes it
 bool fill_vary(ActionContext& ctx, core::ActionArg arg) noexcept;               // F2 VARY (a random fill; OS-PTOOLS2 S1): takes back the last fill of the dialog if nothing touched its pattern since, then fills again
-bool tools_repeat(ActionContext& ctx, core::ActionArg arg) noexcept;           // OS-PTOOLS2 S3: REPEAT on F6 (RE <VERB>), the last tool verb with its settings on the current target (the last verb is FILL until the verb menu)
+bool tools_repeat(ActionContext& ctx, core::ActionArg arg) noexcept;           // OS-PTOOLS2 S3: REPEAT (RE <VERB>), F6 of the verb menu (OS-F6EVENTS), the last tool verb with its settings on the current target (the last verb is FILL until the verb menu)
 bool pattern_fill(ActionContext& ctx, core::ActionArg arg) noexcept;            // no key since OS-QJUMP (was Shift + Fx): repeats the last fill; before one, the OS-CFGWIRE fill (the current note on every Nth step, N = the edit step) of the block or the track
 // song_actions.cpp: the Song screen's editing (OS-SONG1). The edits are undo units; the range, the tempo field and the clipboard are view state (song_view.h).
 bool song_enabled(const ActionContext& ctx) noexcept;                       // the Song screen is in view
@@ -390,7 +390,7 @@ bool tools_run(ActionContext& ctx, core::ActionArg arg) noexcept;         // not
 bool verb_open(ActionContext& ctx, core::ActionArg arg) noexcept;   // F7: the menu opens over the screen (it remembers its last verb); the TOOLS list's refusals apply
 bool verb_pick(ActionContext& ctx, core::ActionArg arg) noexcept;    // a pad 1-16 in the menu, arg = the pad's index 0..15: pick the verb and run it
 bool verb_run(ActionContext& ctx, core::ActionArg arg) noexcept;     // F1 in the menu: run the verb under the cursor
-bool verb_events(ActionContext& ctx, core::ActionArg arg) noexcept;  // F6 in the menu (grid or APPS page): close it and open the EVENTS list (OS-TOOLSDEDUP)
+bool verb_repeat(ActionContext& ctx, core::ActionArg arg) noexcept;  // F6 in the menu (grid or APPS page): close it and run tools.repeat (OS-F6EVENTS; it was EVENTS, OS-TOOLSDEDUP)
 bool verb_transpose(ActionContext& ctx, core::ActionArg arg) noexcept;   // the menu's pad 1, one undo unit: the block's note delta, multi-cell rule (no note inserted on an empty step)
 bool verb_instrument(ActionContext& ctx, core::ActionArg arg) noexcept;   // the menu's pad 2, one undo unit: the block's instrument delta, multi-cell rule
 bool verb_interpolate(ActionContext& ctx, core::ActionArg arg) noexcept;  // OS-PTOOLS2 S3b, the menu's pad 4: model::verbs::apply_block over the block, one undo unit
@@ -415,8 +415,8 @@ ScreenId app_exit_screen(ViewState& view) noexcept;                       // OS-
 
 // events_actions.cpp: the EVENTS overlay of the Pattern screen (OS-MIDIREC S1b/S2b, docs/specs/OS-MIDIREC.md section 3). S1 was
 // read-only; S2b wires the encoder, Shift + encoder and the pads to the model's planners (events::plan) as dispatched edits.
-// verb_events (F6 in the verb menu) calls events_open.
-bool events_open(ActionContext& ctx, core::ActionArg arg) noexcept;   // the TOOLS entry EVENTS: opens the list over the grid pane (A13's refusals)
+// events.open is Pattern F6 (OS-F6EVENTS).
+bool events_open(ActionContext& ctx, core::ActionArg arg) noexcept;   // Pattern F6 EVENTS: opens the list over the grid pane (A13's refusals)
 bool events_move(ActionContext& ctx, core::ActionArg arg) noexcept;    // arg = rows, + down: Up / Down
 bool events_page(ActionContext& ctx, core::ActionArg arg) noexcept;   // arg = pages, + down: Shift + Up / Down (OS-NAV3)
 bool events_field(ActionContext& ctx, core::ActionArg arg) noexcept;  // arg = +-1: Left / Right, the field of the cursor row

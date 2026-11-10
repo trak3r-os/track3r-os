@@ -162,7 +162,7 @@ assert model digest=@i0
 tap f8
 assert state msg=NOTHING_TO_UNDO_HERE
 
-# QA-PAT-312 (OS-QAFIX-12): INVERT says what it needs (no key since OS-PTOOLS2 S3: F6 is REPEAT; the scenario names the action); with a block the steps are reversed track by track. Demo track 3 (ACID) has notes 13, 13, 25, 16 on rows 0..3, instrument 4, an FX1 on row 3 (128:13);
+# QA-PAT-312 (OS-QAFIX-12): INVERT says what it needs (no key since OS-PTOOLS2 S3: F7 then F6 is REPEAT; the scenario names the action); with a block the steps are reversed track by track. Demo track 3 (ACID) has notes 13, 13, 25, 16 on rows 0..3, instrument 4, an FX1 on row 3 (128:13);
 # track 4 (BASS) has note 13 on instrument 5 at row 0 and nothing on rows 1..3.
 document
 action view.mode 3

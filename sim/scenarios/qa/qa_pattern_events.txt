@@ -1,5 +1,5 @@
-# OS-MIDIREC S1b/S1c (docs/specs/OS-MIDIREC.md): the EVENTS overlay of the Pattern screen, opened by F6 in the F7 TOOLS menu
-# (OS-TOOLSDEDUP: F6 EVENTS, on the grid and on the APPS page). One snap per catalogue row this slice covers (docs/qa/catalogue/pattern.md
+# OS-MIDIREC S1b/S1c (docs/specs/OS-MIDIREC.md): the EVENTS overlay of the Pattern screen, opened by F6 on the Pattern key row
+# (OS-F6EVENTS: Pattern F6 is EVENTS; RE FILL moved to the F7 verb menu). One snap per catalogue row this slice covers (docs/qa/catalogue/pattern.md
 # QA-PAT-400..407, 408, 409, 410; the budget sweep is the `events_worst` state of the budget harness, QA-PAT-411). The document
 # is `document events` (sim/src/demo_project.cpp): pattern 1 of 64 steps with every row kind in its first four tracks, instrument
 # 49 a MIDI instrument on channel 3, the project's CC numbers A 74 and C 71, and an empty pattern 2.
@@ -11,11 +11,10 @@ wait 2500
 
 document events
 
-# QA-PAT-400: open EVENTS on the cursor's track (track 1, step 1): F7 (the verb menu), F6 EVENTS. The pane lists the
+# QA-PAT-400: open EVENTS on the cursor's track (track 1, step 1): F6 EVENTS. The pane lists the
 # track's events in time order — the note on 001 with its LEN 04.00 (its OFF on 005 is folded, no OFF row), the micro-moved note
 # on 009.50, the dim sample row on 013 (VAL ---, CH --), the gated note with a Chord on 017 (LEN 00.50, FL G, FX1 Chord, FX2 Gate), the OFF row on
 # 025 and the note on 029 with LEN >36.00; the header reads the pattern, track, steps, the count and ALL, and 01/06 at the right.
-tap f7
 tap f6
 snap qa_pat_400
 
@@ -31,7 +30,6 @@ press shift
 tap down 15
 tap right 10
 release shift
-tap f7
 tap f6
 snap qa_pat_401
 
@@ -39,7 +37,6 @@ snap qa_pat_401
 tap f8
 action select.clear
 tap right 5
-tap f7
 tap f6
 snap qa_pat_403
 
@@ -47,7 +44,6 @@ snap qa_pat_403
 # CC C #071 on CH 01 (the Config number on the notes channel) and CC D -- (unassigned).
 tap f8
 tap right 5
-tap f7
 tap f6
 snap qa_pat_404
 
@@ -55,14 +51,12 @@ snap qa_pat_404
 # on channel 3 (IN 49, CH 03).
 tap f8
 tap right 5
-tap f7
 tap f6
 snap qa_pat_405
 
 # QA-PAT-408: BACK on a CC row: the grid cursor lands on that step, track and the FX column that holds the CC.
 tap f8
 tap left 5
-tap f7
 tap f6
 tap down
 tap f8
@@ -72,14 +66,12 @@ snap qa_pat_408
 action chooser.hold 0
 action chooser.delta 2
 action chooser.release 0
-tap f7
 tap f6
 snap qa_pat_409b
 wait 2500
 
-# QA-PAT-409 (third refusal): WATCH while playing: the verb menu and the TOOLS list open (OS-PTOOLS2 S1) and EVENTS says STOP PLAYING TO OPEN EVENTS.
+# QA-PAT-409 (third refusal): WATCH while playing: EVENTS says STOP PLAYING TO OPEN EVENTS.
 playhead 5
-tap f7
 tap f6
 snap qa_pat_409c
 wait 2500
@@ -89,7 +81,6 @@ playhead stop
 action chooser.hold 0
 action chooser.delta -1
 action chooser.release 0
-tap f7
 tap f6
 snap qa_pat_409d
 
@@ -102,7 +93,6 @@ action chooser.release 0
 action cursor.jump_fraction 0
 action nav.scroll 0
 action cursor.home
-tap f7
 tap f6
 tap down 3
 snap qa_pat_406
@@ -119,7 +109,6 @@ action cursor.jump_fraction 0
 action nav.scroll 0
 action cursor.home
 tap right 10
-tap f7
 tap f6
 snap qa_pat_407
 tap f1
@@ -136,7 +125,6 @@ action nav.scroll 0
 action cursor.home
 tap rec
 playhead 8
-tap f7
 tap f6
 snap qa_pat_410
 playhead 16
@@ -153,7 +141,6 @@ tap rec
 # nothing is written, no undo unit (the info line's undo count is unchanged).
 tap f8
 tap rec
-tap f7
 tap f6
 encoder 1
 tap f8
@@ -167,7 +154,6 @@ action nav.scroll 0
 action cursor.home
 
 # QA-PAT-412: DATA of the NOTE on 001 — the encoder a semitone, Shift + encoder an octave, a pad the pad's note; one undo unit each.
-tap f7
 tap f6
 tap right 2
 encoder 1
@@ -183,7 +169,6 @@ snap qa_pat_412c
 tap f8
 action cursor.jump_fraction 0
 action nav.scroll 12
-tap f7
 tap f6
 tap right 3
 encoder 1
@@ -197,7 +182,6 @@ tap f8
 action cursor.jump_fraction 0
 action nav.scroll 0
 action cursor.home
-tap f7
 tap f6
 encoder 24
 snap qa_pat_414
@@ -211,7 +195,6 @@ action select.clear
 action cursor.jump_fraction 0
 action nav.scroll 8
 tap right 5
-tap f7
 tap f6
 tap down 1
 press shift
@@ -221,7 +204,6 @@ snap qa_pat_415
 
 # QA-PAT-416: a CC row moves by whole steps only: the CC A of track 2, from 001 to 002, same column.
 tap f8
-tap f7
 tap f6
 tap up 3
 encoder 1
@@ -234,7 +216,6 @@ action select.clear
 action cursor.jump_fraction 0
 action nav.scroll 0
 action cursor.home
-tap f7
 tap f6
 tap right 4
 encoder 1
@@ -253,7 +234,6 @@ action cursor.jump_fraction 0
 action nav.scroll 0
 action cursor.home
 tap right 10
-tap f7
 tap f6
 tap down
 tap right
@@ -271,7 +251,6 @@ action cursor.jump_fraction 0
 action nav.scroll 0
 action cursor.home
 tap right 15
-tap f7
 tap f6
 tap down
 tap right
@@ -284,7 +263,6 @@ wait 2500
 action cursor.jump_fraction 0
 action nav.scroll 0
 action cursor.home
-tap f7
 tap f6
 tap right 5
 encoder 1
@@ -302,7 +280,6 @@ action select.clear
 action cursor.jump_fraction 0
 action nav.scroll 0
 action cursor.home
-tap f7
 tap f6
 tap insert
 snap qa_pat_421
@@ -316,7 +293,6 @@ tap f8
 action chooser.hold 0
 action chooser.delta 1
 action chooser.release 0
-tap f7
 tap f6
 tap insert
 snap qa_pat_421c
@@ -333,7 +309,6 @@ action cursor.jump_fraction 0
 action nav.scroll 0
 action cursor.home
 tap right 10
-tap f7
 tap f6
 tap down 3
 tap delete
@@ -363,7 +338,6 @@ action cursor.jump_fraction 0
 action nav.scroll 0
 action cursor.home
 tap right 5
-tap f7
 tap f6
 tap down 3
 tap f2
@@ -391,7 +365,6 @@ press shift
 tap down 15
 tap right 5
 release shift
-tap f7
 tap f6
 press shift
 tap f2

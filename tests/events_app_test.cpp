@@ -146,9 +146,8 @@ struct Rig {
     input.push(core::make_pad_event(clock.now(), static_cast<std::uint8_t>(index), 0));
     pass(1);
   }
-  // F7 (the verb menu), F6 EVENTS (OS-TOOLSDEDUP: it was the APPS page's EVENTS row).
+  // F6 EVENTS on the Pattern key row (OS-F6EVENTS; it was F7, F6 in the verb menu).
   void open_events() {
-    tap(Button::F7);
     tap(Button::F6);
   }
   // The pattern in view, through the PATTERN chooser (OS-PATSWITCH: a hold of F1 only, so chooser.hold, not toggle).
@@ -175,14 +174,9 @@ struct Rig {
 
 // ---- opening ----------------------------------------------------------------------------------------------------------------------------
 
-TEST_CASE("events: F6 in the TOOLS menu opens the overlay over the cursor's track, from the grid and from the APPS page") {
+TEST_CASE("events: Pattern F6 opens the overlay over the cursor's track (OS-F6EVENTS)") {
   Rig rig;
-  rig.tap(Button::F7);
-  CHECK(rig.state().overlay == OverlayId::VerbMenu);
-  CHECK(app::tools_count(rig.app->model()) == 0u);  // OS-TOOLSDEDUP: the APPS page holds only tool apps (this rig has none), EVENTS is not a row of it
-  rig.pad(15);                                      // APPS >: the page
-  CHECK(rig.state().verb_menu.apps);
-  rig.tap(Button::F6);                              // F6 on the APPS page opens EVENTS as well
+  rig.tap(Button::F6);
   CHECK(rig.state().overlay == OverlayId::Events);
   rig.tap(Button::F8);
   CHECK(rig.state().overlay == OverlayId::None);
@@ -239,9 +233,7 @@ TEST_CASE("events: opening over a block scopes the list to the block's tracks an
 
 TEST_CASE("events: the refusals — no project, a pattern the project lacks, the follow rule of tools_open") {
   {
-    Rig rig(false);  // no pattern, but a document is attached: F7 opens the menu, F6 EVENTS refuses with PATTERN IS EMPTY
-    rig.tap(Button::F7);
-    CHECK(rig.state().overlay == OverlayId::VerbMenu);
+    Rig rig(false);  // no pattern, but a document is attached: F6 EVENTS refuses with PATTERN IS EMPTY
     rig.tap(Button::F6);
     CHECK(rig.state().overlay == OverlayId::None);
     CHECK(rig.message() == "PATTERN IS EMPTY");
@@ -601,7 +593,7 @@ TEST_CASE("events OS-EVFX: the encoder edits a NOTE row's FX value, one undo uni
   Rig rig;
   rig.tap(Button::Rec);  // STEP
   rig.go(8, 1);           // track 2, step 9: the micro-moved note (cursor on row 1)
-  rig.open_events();  // OS-TOOLSDEDUP: F7, F6
+  rig.open_events();  // OS-F6EVENTS: F6
   NEED(rig.state().overlay == OverlayId::Events);
   NEED(rig.state().events.cursor == 1u);
   for (unsigned i = 0; i < 7u; ++i) {  // Time -> Ch, Data, Val, Len, In, Fx1, Fx2

@@ -62,10 +62,6 @@ constexpr OctaveRows kOctaveRows = make_octave_rows();
 
 ModeTable PatternScreen::modes() const noexcept { return ModeTable{kModes, kPatternModes}; }
 
-const char* const* pattern_soft_keys(const ViewState& view) noexcept {
-  return view.verb_menu.last_verb == VerbMenuView::LastVerb::Tool ? kPatternRepeatRow : kPatternSoftKeys;
-}
-
 const char* const* PatternScreen::shift_row(const ViewState& view) const noexcept {
   const unsigned o = view.edit.entry.octave;
   return kOctaveRows.row[o < kEntryOctaves ? o : kEntryOctaves - 1u];
@@ -139,7 +135,7 @@ void PatternScreen::render(const Model& model, const ViewState& view, ui::Render
   const PatternSource src(model, view.edit.pattern);
   const unsigned mode = mode_of(view);
   const bool shift = view.shift && view.overlay == OverlayId::None;  // under an overlay the keys are the overlay's, not the layer's
-  PatternView::Status status{view.instrument, view.overlay_keys() ? nullptr : (shift ? shift_row(view) : pattern_soft_keys(view))};  // no labels: the Navigator's row is the one drawn (OS-SMALL2)
+  PatternView::Status status{view.instrument, view.overlay_keys() ? nullptr : (shift ? shift_row(view) : kPatternSoftKeys)};  // no labels: the Navigator's row is the one drawn (OS-SMALL2)
   const bool edit = mode == static_cast<unsigned>(PatternMode::Edit);
   status.chip = edit && view.edit.rec_free ? kChipFree : kChips[mode];
   status.chip_tone = !edit ? PatternView::Status::kToneNone : (view.edit.rec_free ? PatternView::Status::kToneStep : PatternView::Status::kToneLive);

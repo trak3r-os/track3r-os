@@ -22,7 +22,7 @@ struct VerbMenuView {
   bool apps = false;
   // OS-PTOOLS2 S2: what F6 REPEAT runs: the last parameterised apply, the last FILL dialog (fill.apply records LastVerb::Fill) or the last TOOLS dialog APPLY
   // (ptool.apply records LastVerb::Tool with its amount: F6 repeats it with the same amount on the selection as it is now). Orchestrator decision 2026-11-07
-  // (maintainer may revisit). The key row says which: RE FILL, or REPEAT after a TOOLS apply (pattern_soft_keys).
+  // (maintainer may revisit). The key row of the verb menu says which (F6: RE FILL, or REPEAT after a TOOLS apply; key_prompt.cpp).
   enum class LastVerb : std::uint8_t { None = 0, Fill = 1, Tool = 2 };
   LastVerb last_verb = LastVerb::None;
   struct ToolLast {

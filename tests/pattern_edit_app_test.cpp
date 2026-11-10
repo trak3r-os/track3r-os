@@ -41,6 +41,7 @@
 #include <string>
 #include <vector>
 
+#include "support/key_row.h"
 #include "support/need.h"
 #include "data/pattern_edit_vectors.h"
 #include "support/step_vectors.h"
@@ -2914,8 +2915,36 @@ TEST_CASE("OS-PTOOLS Fill dialog: pattern.fill (no key since OS-QJUMP) repeats t
   CHECK(rig.message() == "FILL: EUCLID 4 EVENTS");
 }
 
-TEST_CASE("OS-PTOOLS2 S3 F6 REPEAT (Q1): the key is tools.repeat and the key row reads RE FILL") {
-  CHECK(std::strcmp(app::kPatternSoftKeys[5], "RE FILL") == 0);  // the label is RE <VERB> (the 8-char key cap over "AGAIN FILL"), FILL until the verb menu tracks the last verb
+// OS-F6EVENTS: Pattern F6 is EVENTS; the repeat of the last verb is F6 of the verb menu (F7), RE FILL or REPEAT by the last verb.
+static void verb_menu_repeat(Rig& rig) {
+  rig.tap(Button::F7);
+  rig.tap(Button::F6);
+}
+
+// The label the verb menu draws on F6, read with the menu open; the menu is closed again (F8 BACK).
+static std::string verb_menu_f6_label(Rig& rig) {
+  rig.tap(Button::F7);
+  const std::string label = test::read_owner_row(rig.app->model(), rig.state()).label[5];
+  rig.tap(Button::F8);
+  rig.flush();
+  return label;
+}
+
+TEST_CASE("OS-F6EVENTS Pattern F6 opens EVENTS: the key row reads EVENTS, the verb menu has RE FILL in its place") {
+  CHECK(std::strcmp(app::kPatternSoftKeys[5], "EVENTS") == 0);
+  Rig rig(true, 16);
+  rig.tap(Button::F6);
+  CHECK(rig.state().overlay == app::OverlayId::Events);
+  rig.tap(Button::F8);  // BACK
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  CHECK(verb_menu_f6_label(rig) == "RE FILL");
+}
+
+TEST_CASE("OS-PTOOLS2 S3 / OS-F6EVENTS F7 then F6 REPEAT (Q1): the verb menu key is tools.repeat and reads RE FILL") {
+  {
+    Rig fresh(true, 16);
+    CHECK(verb_menu_f6_label(fresh) == "RE FILL");  // the label is RE <VERB> (the 8-char key cap over "AGAIN FILL"); FILL until a TOOLS apply
+  }
   Rig rig(true, 16);
   rig.edit_mode();
   (void)rig.invoke("select.column_all");  // OS-PTOOLS2 S3c: the track selected, so the fill is the track's
@@ -2925,7 +2954,7 @@ TEST_CASE("OS-PTOOLS2 S3 F6 REPEAT (Q1): the key is tools.repeat and the key row
   CHECK(column_of(rig, 0, 16) == "x...x...x...x...");
   CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
   rig.flush();
-  rig.tap(Button::F6);  // REPEAT: the last verb (FILL) again, the same rows and notice as the action
+  verb_menu_repeat(rig);  // REPEAT: the last verb (FILL) again, the same rows and notice as the action
   CHECK(column_of(rig, 0, 16) == "x...x...x...x...");
   CHECK(rig.message() == "FILL: EUCLID 4 EVENTS");
   CHECK(rig.depth() == 1);
@@ -2946,7 +2975,7 @@ TEST_CASE("OS-PTOOLS2 S3 tools.repeat with no verb run yet: NOTHING TO REPEAT, n
   Rig rig(true, 16);
   rig.edit_mode();
   const unsigned depth = rig.depth();
-  rig.tap(Button::F6);
+  verb_menu_repeat(rig);
   CHECK(rig.message() == "NOTHING TO REPEAT");
   CHECK(rig.depth() == depth);
   CHECK(column_of(rig, 0, 16) == std::string(16, '.'));
@@ -2970,7 +2999,7 @@ TEST_CASE("OS-PTOOLS2 S3 F6 with a random fill as the last verb: the repeat draw
   CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
   CHECK(column_of(rig, 0, 16) == std::string(16, '.'));
   rig.flush();
-  rig.tap(Button::F6);
+  verb_menu_repeat(rig);
   CHECK(rig.state().fill.rng.s != rng_before);  // a new draw
   CHECK(column_of(rig, 0, 16) != first);      // and a different one
   CHECK(rig.message() == "FILL: RANDOM 50 %");
@@ -2989,7 +3018,7 @@ TEST_CASE("OS-PTOOLS2 S3c: F6 REPEAT with a block active: the last fill's target
   CHECK(column_of(rig, 0, 16) == "xxxx" + std::string(12, '.'));
   CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
   rig.flush();
-  rig.tap(Button::F6);
+  verb_menu_repeat(rig);
   CHECK(column_of(rig, 0, 16) == "xxxx" + std::string(12, '.'));  // the block again, the rest of the track untouched
   CHECK(rig.message() == "FILL: WHOLE STEPS, EUCLID 4 EVENTS");  // a column block fills as whole steps (OS-AUDIT-56)
 }
@@ -3538,11 +3567,11 @@ TEST_CASE("OS-PTOOLS2 S2 F6 REPEAT repeats the last APPLY with the same amount, 
   rig.tap(Button::F1);
   CHECK(rig.step(0, 0).note == 73);
   CHECK(rig.message() == "TRANSPOSED: 4 STEPS +12 ST");
-  CHECK(std::strcmp(app::pattern_soft_keys(rig.state())[5], "REPEAT") == 0);  // the label is true: what F6 runs is a TOOLS apply, not a fill
+  CHECK(verb_menu_f6_label(rig) == "REPEAT");  // the label is true: what F6 runs is a TOOLS apply, not a fill
   const unsigned depth = rig.depth();
   rig.flush();
-  // F6 REPEAT: the same amount again, one more undo unit
-  rig.tap(Button::F6);
+  // F7 then F6 REPEAT: the same amount again, one more undo unit
+  verb_menu_repeat(rig);
   CHECK(rig.step(0, 0).note == 85);  // 73 + 12
   CHECK(rig.step(0, 3).note == 88);
   CHECK(rig.message() == "TRANSPOSED: 4 STEPS +12 ST");
@@ -3553,7 +3582,7 @@ TEST_CASE("OS-PTOOLS2 S2 F6 REPEAT repeats the last APPLY with the same amount, 
   rig.flush();
   rig.mode(PatternMode::Browse);
   const unsigned d2 = rig.depth();
-  rig.tap(Button::F6);
+  verb_menu_repeat(rig);
   CHECK(rig.message() == "TURN EDIT ON");
   CHECK(rig.depth() == d2);
   // a fill after the APPLY becomes what F6 repeats again (the last verb wins)
@@ -3566,9 +3595,9 @@ TEST_CASE("OS-PTOOLS2 S2 F6 REPEAT repeats the last APPLY with the same amount, 
   CHECK(rig.state().fill.valid);
   CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);  // the track is empty again, so the repeat has something to fill
   rig.flush();
-  rig.tap(Button::F6);
+  verb_menu_repeat(rig);
   CHECK(rig.message() == "FILL: EUCLID 4 EVENTS");  // the fill, not the transpose
-  CHECK(std::strcmp(app::pattern_soft_keys(rig.state())[5], "RE FILL") == 0);  // and the label says so again
+  CHECK(verb_menu_f6_label(rig) == "RE FILL");  // and the label says so again
 }
 
 TEST_CASE("OS-PTOOLS2 S2 the dialog's refusals: outside Edit the menu's row says TURN EDIT ON and no dialog opens; with no document NO PROJECT") {
@@ -3720,10 +3749,10 @@ TEST_CASE("OS-PTOOLS2 S3b F6 REPEAT stays the last FILL's, as its RE FILL label 
   CHECK(rig.depth() == depth + 1);
   CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
   rig.flush();
-  rig.tap(Button::F6);  // REPEAT: the fill again, not the rotate
+  verb_menu_repeat(rig);  // REPEAT: the fill again, not the rotate
   CHECK(rig.message().find("FILL:") == 0);
   CHECK(rig.depth() == depth + 1);
-  CHECK(std::string(app::kPatternSoftKeys[5]) == "RE FILL");  // the label is true: what F6 ran is a fill
+  CHECK(verb_menu_f6_label(rig) == "RE FILL");  // the label is true: what F6 ran is a fill
   // after a menu export, F6 says NOTHING TO REPEAT and writes nothing (the export is not re-run, no file rewritten)
   Rig rig2(true, 16);
   rig2.edit_mode();

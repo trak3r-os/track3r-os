@@ -67,8 +67,9 @@ Held at power-on, until the strip shows the mode:
 | `Shift` + `Left` or `Right` | grows the block one column; past the last column it takes the next track whole, then a track at a time |
 | `F4` (**FILL**) | opens the Fill dialog |
 | `F5` (**PREVIEW**) | sounds the note under the cursor while held |
-| `F6` (**RE FILL**) | repeats the last fill of the `F4` dialog or the last APPLY of the TOOLS dialog (the key then reads **REPEAT**) |
-| `F7` (**TOOLS**) | opens the verb menu: pads 1-16 pick a verb (INVERT is pad 9), `F6` opens EVENTS, **APPS >** (pad 16) lists the tool apps; DUPLICATE, EXPAND, SHRINK and the exports are pads 10 to 12, 14 and 15 |
+| `F7` then `F6` (**RE FILL**) | repeats the last fill of the `F4` dialog or the last APPLY of the TOOLS dialog (the key then reads **REPEAT**) |
+| `F6` (**EVENTS**) | opens the event list |
+| `F7` (**TOOLS**) | opens the verb menu: pads 1-16 pick a verb (INVERT is pad 9), its `F6` repeats the last fill or apply, **APPS >** (pad 16) lists the tool apps; DUPLICATE, EXPAND, SHRINK and the exports are pads 10 to 12, 14 and 15 |
 | `F8` (**UNDO**), `Shift` + `F8` (**REDO**) | take back and redo a pattern change |
 | `Note`, `Instr`, `Vol`, `Fx` | select the column; hold to open its popup |
 | `Note` + `Instr` | cycles the zoom: 5, 8 or 12 tracks |
@@ -128,7 +129,7 @@ The soft keys `F1` to `F8`, left to right, as the key row shows them.
 <!-- manual-tables: cheat screens screens=pattern,instrument,sample_load,sample_edit,record,mixer,file -->
 | Screen | Button | F1 to F8 |
 |---|---|---|
-| [Pattern](pattern.md) | `Pattern` | **PATTERN**, **LENGTH**, **JUMP**, **FILL**, **PREVIEW**, **RE FILL**, **TOOLS**, **UNDO** |
+| [Pattern](pattern.md) | `Pattern` | **PATTERN**, **LENGTH**, **JUMP**, **FILL**, **PREVIEW**, **EVENTS**, **TOOLS**, **UNDO** |
 | [Instrument](instrument.md) | `Params` | **SAMPLE**, **VOICE**, **FILTER**, **MOD**, **SENDS**, **<INS**, **INS>**, **UNDO** |
 | [Sample load](sample_load.md) | `Sample Loader` | **LOAD**, **UP**, **ENTER**, **ADD**, **PLAY**, **RESCAN**, **WT AUTO**, **CH MIX** |
 | [Sample edit](sample_edit.md) | `Sample Editor` | **CROP**, **NORM**, **REVERSE**, **FADE IN**, **FADE OUT**, **AMP**, **PREVIEW**, **UNDO** |

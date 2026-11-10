@@ -5,7 +5,7 @@
 // (screens/verb_menu_overlay.cpp), the action that runs an item (tools_actions.cpp) and the tests ask.
 //
 // OS-TOOLSDEDUP: the page lists only the tool apps, the installed apps whose file asks for edit_project (ModuleUi::scan_tools), sorted by name. They launch with the Pattern's block as their context
-// (o3m_launch_ctx). The OS's own operations (DUPLICATE, EXPAND, SHRINK, the exports) are verbs of the menu's grid and EVENTS is its F6 (verb_events), so the page does not repeat them.
+// (o3m_launch_ctx). The OS's own operations (DUPLICATE, EXPAND, SHRINK, the exports) are verbs of the menu's grid and its F6 is RE FILL / REPEAT (verb_repeat; EVENTS is Pattern F6, OS-F6EVENTS), so the page does not repeat them.
 //
 // Main loop only. No allocation.
 

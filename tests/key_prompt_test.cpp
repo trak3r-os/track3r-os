@@ -675,7 +675,7 @@ TEST_CASE("key prompt: the Song TOOLS dialog owns the row: F1 APPLY, F8 BACK, ev
   CHECK(std::string(keys) == "F1:APPLY,F8:BACK");
 }
 
-TEST_CASE("key prompt: the TOOLS menu row says F1 RUN, F6 EVENTS and F8 BACK, also on an empty APPS page (OS-TOOLSDEDUP)") {
+TEST_CASE("key prompt: the TOOLS menu row says F1 RUN, F6 RE FILL (REPEAT after a TOOLS apply) and F8 BACK, also on an empty APPS page (OS-F6EVENTS)") {
   app::Model model;
   app::ViewState view;
   view.screen = ScreenId::Pattern;
@@ -683,10 +683,16 @@ TEST_CASE("key prompt: the TOOLS menu row says F1 RUN, F6 EVENTS and F8 BACK, al
   test::RowRead row = test::read_owner_row(model, view);
   CHECK(row.marked);
   CHECK(row.label[0] == "RUN");
-  CHECK(row.label[5] == "EVENTS");
+  CHECK(row.label[5] == "RE FILL");
+  CHECK(row.label[7] == "BACK");
+  view.verb_menu.last_verb = app::VerbMenuView::LastVerb::Fill;
+  CHECK(test::read_owner_row(model, view).label[5] == "RE FILL");
+  view.verb_menu.last_verb = app::VerbMenuView::LastVerb::Tool;
+  row = test::read_owner_row(model, view);
+  CHECK(row.label[5] == "REPEAT");
   CHECK(row.label[7] == "BACK");
   view.verb_menu.apps = true;  // no module system, so no tool app
   row = test::read_owner_row(model, view);
-  CHECK(row.label[5] == "EVENTS");
+  CHECK(row.label[5] == "REPEAT");
   CHECK(row.label[7] == "BACK");
 }

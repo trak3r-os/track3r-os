@@ -101,7 +101,7 @@ constexpr ActionDef kActions[] = {
     make_action("verb.open", verb_open, kFocus, pattern_screen_in_view),  // OS-PTOOLS2 S3: Pattern F7, the verb menu (verb_menu.h)
     make_action("verb.pick", verb_pick, 0),  // pads 1-16 in the menu, arg = the pad's index 0..15 (the menu is a modal overlay: no focus)
     make_action("verb.run", verb_run, 0),    // F1 in the menu: the verb under the cursor (no focus)
-    make_action("verb.events", verb_events, 0),  // F6 in the menu: the EVENTS list (OS-TOOLSDEDUP)
+    make_action("verb.repeat", verb_repeat, 0),  // F6 in the menu: close it and repeat the last verb (OS-F6EVENTS; it was EVENTS, OS-TOOLSDEDUP)
     make_action("verb.hold", verb_hold, kFocus, pattern_screen_in_view),        // OS-PTOOLS2 S3b: F7 held; the pads under it run verbs (verb.hold_pad)
     make_action("verb.hold_pad", verb_hold_pad, kFocus, pattern_screen_in_view), // OS-PTOOLS2 S3b: F7 held + pad 1-16, arg = the pad's index 0..15
     make_action("verb.hold_end", verb_hold_end, kFocus, pattern_screen_in_view), // OS-PTOOLS2 S3b: the release of a held F7 after its Hold
@@ -122,7 +122,7 @@ constexpr ActionDef kActions[] = {
     // OS-MIDIREC S1b/S2b: the EVENTS overlay's actions. The overlay is modal, so no focus flag; move / page / field repeat on a
     // held arrow. The edit actions are undoable (one unit a detent in the PATTERN ring, A12) and say TURN EDIT ON themselves
     // outside STEP (A13), like pattern.op run from the TOOLS list.
-    make_action("events.open", events_open, 0),        // verb.events (F6 in the TOOLS menu) calls it; no key
+    make_action("events.open", events_open, 0),        // Pattern F6 (OS-F6EVENTS)
     make_action("events.move", events_move, kNav),      // Up / Down
     make_action("events.page", events_page, kNav),      // Shift + Up / Down (OS-NAV3)
     make_action("events.field", events_field, kNav),    // Left / Right
@@ -227,7 +227,7 @@ constexpr ActionDef kActions[] = {
     make_action("pattern.preview", pattern_preview),
     make_action("pattern.export", pattern_export, kFocus),  // no binding: EXPORT is Pattern F7 TOOLS now (OS-WAVEXP); a keymap or a scenario can name it, and the stub says where it is
     make_action("pattern.fill", pattern_fill, kStep, pattern_screen_in_view),
-    make_action("tools.repeat", tools_repeat, kStep, pattern_screen_in_view),  // OS-PTOOLS2 S3: REPEAT on F6 (the key row reads RE <VERB>, today RE FILL), the last verb again (today the last FILL)
+    make_action("tools.repeat", tools_repeat, kStep, pattern_screen_in_view),  // OS-PTOOLS2 S3: REPEAT, the last verb again (key row RE FILL, or REPEAT after a TOOLS apply); F6 of the verb menu since OS-F6EVENTS (verb.repeat calls it; no Pattern key)
     make_action("fill.open", fill_open, kFocus, pattern_screen_in_view),  // OS-PTOOLS: the dialog; its rows are view state, the fill is the undo unit
     make_action("fill.move", fill_move, kNav),
     make_action("fill.delta", fill_delta, kNav),

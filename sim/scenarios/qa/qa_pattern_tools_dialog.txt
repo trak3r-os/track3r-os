@@ -48,7 +48,8 @@ assert model pat.1.0.2.note=77
 action edit.undo
 assert model digest=@d0
 wait 10000
-# F6 REPEAT repeats the last APPLY with the same amount (+12 ST again), one undo unit
+# F7 then F6 REPEAT repeats the last APPLY with the same amount (+12 ST again), one undo unit
+tap f7
 tap f6
 assert state overlay=NOTIFY msg=~^TRANSPOSED:.3.STEPS.\+12.ST$
 assert model pat.1.0.0.note=73

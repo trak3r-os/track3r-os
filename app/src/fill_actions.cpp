@@ -262,8 +262,8 @@ bool pattern_fill(ActionContext& ctx, core::ActionArg) noexcept {
   return run_fill(ctx, plain);
 }
 
-// OS-PTOOLS2 S3 (Q1): tools.repeat, the last verb again, on F6. F6 repeats the last PARAMETERISED apply, one of two: the last FILL dialog (fill.apply sets v.fill.valid and
-// LastVerb::Fill; the key row reads RE FILL) or the last TOOLS dialog APPLY (ptool.apply records LastVerb::Tool with its amount; the key row reads REPEAT, pattern_soft_keys):
+// OS-PTOOLS2 S3 (Q1): tools.repeat, the last verb again, on F6 of the verb menu (OS-F6EVENTS: verb.repeat; Pattern F6 is EVENTS). F6 repeats the last PARAMETERISED apply, one of two: the last FILL dialog (fill.apply sets v.fill.valid and
+// LastVerb::Fill; the verb menu's key row reads RE FILL) or the last TOOLS dialog APPLY (ptool.apply records LastVerb::Tool with its amount; its key row reads REPEAT):
 // the later of the two wins, on the selection as it is now, one undo unit. A parameterless menu verb — ROTATE, an export, any other pad — never becomes the repeat.
 // Both are the session's: a NEW or an opened project clears them (app.cpp). With neither run yet it says NOTHING TO REPEAT and writes nothing (the OS-CFGWIRE
 // every-Nth-step fill stays pattern.fill's own, keyless behaviour). Orchestrator decision 2026-11-07 (maintainer may revisit): the TOOLS APPLY is a sanctioned F6 target.

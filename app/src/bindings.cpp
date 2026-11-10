@@ -137,7 +137,7 @@ constexpr core::ActionId kFillDelta = core::action_id("fill.delta");
 constexpr core::ActionId kFillCoarse = core::action_id("fill.coarse");  // OS-SHIFTENC
 constexpr core::ActionId kFillApply = core::action_id("fill.apply");
 constexpr core::ActionId kFillVary = core::action_id("fill.vary");  // OS-PTOOLS2 S1
-constexpr core::ActionId kToolsRepeat = core::action_id("tools.repeat");  // OS-PTOOLS2 S3: F6 REPEAT (the key row reads AGAIN <VERB>)
+constexpr core::ActionId kEventsOpen = core::action_id("events.open");  // OS-F6EVENTS: Pattern F6 opens the EVENTS list (RE FILL / REPEAT moved to the verb menu's F6)
 constexpr core::ActionId kPadsMode = core::action_id("pads.mode");
 constexpr core::ActionId kPadsOctave = core::action_id("pads.octave");  // OS-PADOCT
 constexpr core::ActionId kPadsTrack = core::action_id("pads.track");
@@ -312,7 +312,7 @@ constexpr core::ActionId kPresetSave = core::action_id("preset.save");  // OS-MO
 constexpr core::ActionId kVerbOpen = core::action_id("verb.open");
 constexpr core::ActionId kVerbPick = core::action_id("verb.pick");
 constexpr core::ActionId kVerbRun = core::action_id("verb.run");
-constexpr core::ActionId kVerbEvents = core::action_id("verb.events");
+constexpr core::ActionId kVerbRepeat = core::action_id("verb.repeat");  // OS-F6EVENTS: F6 in the menu closes it and runs tools.repeat
 constexpr core::ActionId kVerbHold = core::action_id("verb.hold");          // OS-PTOOLS2 S3b: F7 held (the hold makes the tap wait, so a tap still opens the menu)
 constexpr core::ActionId kVerbHoldPad = core::action_id("verb.hold_pad");   // OS-PTOOLS2 S3b: F7 held + pad 1-16, arg = the pad's index 0..15: run the verb without the menu
 constexpr core::ActionId kVerbHoldEnd = core::action_id("verb.hold_end");   // OS-PTOOLS2 S3b: the release of a held F7 after its Hold
@@ -522,7 +522,7 @@ constexpr core::Binding kBase[] = {
     bind(kPattern, hold(button_ref(Button::F3)), kChooserHold, ArgFrom::Fixed, 2),
     bind(kPattern, tap(button_ref(Button::F4)), kFillOpen),  // OS-PTOOLS: the Fill dialog
     bind(kPattern, tap(button_ref(Button::F5)), kPreview),
-    bind(kPattern, tap(button_ref(Button::F6)), kToolsRepeat),  // OS-PTOOLS2 S3 (Q1): F6 is REPEAT (RE <VERB>, the last verb again; the key row reads RE FILL). INVERT moves to the verb menu (pad 9) when it lands; until then pattern.invert has no key
+    bind(kPattern, tap(button_ref(Button::F6)), kEventsOpen),  // OS-F6EVENTS (new Community OS behaviour): F6 is EVENTS, the list opens directly. RE FILL / REPEAT (tools.repeat) moved to F6 of the verb menu (F7, then F6); pattern.invert has no key (pad 9 of the menu)
     // F8 is the UNDO soft key of Pattern and Song (OS-002c), Shift + F8 its redo. The overlays' own F8 (Back) comes first in
     // their capturing contexts; with no document attached the key says "nothing to undo".
     bind(kPattern, tap(button_ref(Button::F7)), kVerbOpen),  // OS-PTOOLS2 S3: F7 is the verb menu (verb_menu.h, pads 1-16 pick a verb; INVERT is pad 9). The TOOLS list (OS-H3A) is the menu's APPS > row, which runs tools.open
@@ -1147,7 +1147,7 @@ constexpr core::Binding kBase[] = {
     bind(kVerbMenuCtx, tap(button_ref(Button::Up), kShift), kPage, ArgFrom::Fixed, -1),
     bind(kVerbMenuCtx, tap(button_ref(Button::Down), kShift), kPage, ArgFrom::Fixed, 1),
     bind(kVerbMenuCtx, tap(button_ref(Button::F1)), kVerbRun),
-    bind(kVerbMenuCtx, tap(button_ref(Button::F6)), kVerbEvents),  // OS-TOOLSDEDUP: EVENTS, on the grid and the APPS page
+    bind(kVerbMenuCtx, tap(button_ref(Button::F6)), kVerbRepeat),  // OS-F6EVENTS: RE FILL / REPEAT (it replaced EVENTS here, OS-TOOLSDEDUP), on the grid and the APPS page
     bind(kVerbMenuCtx, tap(button_ref(Button::F8)), kBack),
 
     // ---- The Pattern TOOLS dialog (OS-PTOOLS2 S2, captures): Up / Down choose a row, Left / Right or the encoder change its value (Shift + the encoder the coarse

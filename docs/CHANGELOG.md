@@ -11,6 +11,8 @@ User-visible changes of the Community OS, newest first, one entry per change, in
 - **Mixer: a bar under the name of each track that has an insert** on the MIXER page. More testing needed.
 - **Master held, then Insert at any time, opens the Mixer's INSERTS page** (follow-up of issue #5): you no longer have to press both keys within 40 ms. Holding Master and pressing another key (Play, say) now does that key's job only; Master's release opens nothing. Checked on the unit.
 - **STATUS LED: a BPM mode.** Config > DISPLAY > STATUS LED is BLINK, BPM or OFF. In BPM the LED flashes on every beat, locked to playback (also under an external MIDI clock), and at the project tempo when stopped; a fault code still wins. The choice is now saved with the other device settings: the settings file gains one entry, and a file from an older build reads BLINK. Checked on the unit.
+- **Pattern: F6 opens EVENTS** directly. RE FILL / REPEAT moves to the verb menu: F7, then F6 (the menu closes and the repeat runs). More testing needed.
+- **MIDI Time Code checked on a unit over USB.** MTC OUT at 24, 25 and 30 fps: the notes land on the time code within 1 ms, and the song's loop sends a full frame back to the start. MTC IN follows within 1 ms once locked; it takes about 1.75 s to lock at a start, after a jump or after a stop, and stays silent past the song's end. DIN and Logic Pro need more testing.
 
 ## v1.2.0 (date to be set at publication)
 

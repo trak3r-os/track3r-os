@@ -1070,7 +1070,7 @@ TEST_CASE("qanet keys self-test: the walk excuses a key by its sibling, flags ev
   CHECK(names(one).count("Shift+F2 (pads.mode 0)") == 0u);
   CHECK(names(one).count("Shift+F3 (pads.mode 1)") == 0u);
   CHECK(names(one).count("Shift+F5 (pads.mode 2)") == 0u);
-  CHECK(names(one).count("F6 (tools.repeat 0)") == 1u);  // a key with no sibling is still silent (OS-PTOOLS2 S3: F6 REPEAT)
+  CHECK(names(one).count("F6 (events.open 0)") == 1u);  // a key with no sibling is still silent (OS-F6EVENTS: Pattern F6 EVENTS; it was tools.repeat)
   CHECK(one.excused_sibling >= 3u);
   // An action whose argument names a function is no peer of the others: LATCH acts and RESET, which has nothing to turn off, is still silent.
   KeyState perform;

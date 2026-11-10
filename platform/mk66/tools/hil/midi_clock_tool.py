@@ -10,7 +10,9 @@
     midi_clock_tool.py sync DEV --profile "120:30" [--json out.json] [options]
                                                               OS-MIDISYNC: the host is the clock master AND listens to the notes the unit plays back; says how well the unit followed
                                                               (docs: platform/mk66/tools/hil/MIDISYNC.md; `sync --help`)
-    midi_clock_tool.py mtc DEV [--seconds N] [--fps F] [--expect HH:MM:SS:FF] [--song midisync-song|mtc-tempo] [--json out.json]
+    midi_clock_tool.py mtc DEV [--seconds N] [--fps F] [--expect HH:MM:SS:FF] [--song midisync-song|mtc-tempo] [--json out.json] [--raw]
+    midi_clock_tool.py mtc --reanalyse FILE.json [--fps F] [--expect ...] [--song ...] [--json out.json]
+                                                              (--raw puts every event with its host stamp in the JSON; --reanalyse redoes the analysis from such a file, no device)
                                                               OS-MTC A2: listen and analyse the MTC the unit sends (docs: platform/mk66/tools/hil/MTC.md): the rate code; piece continuity
                                                               (dropped / repeated / mixed, the time of a cycle +2 frames); the quarter-frame interval mean against the host clock, in ppm, and the
                                                               straight-line fit of the decoded time against the arrival (drift in ppm, residual); the full frames against --expect; the notes against
@@ -1070,12 +1072,14 @@ MTC_RATE_NAMES = {0: "24 fps", 1: "25 fps", 2: "29.97 drop-frame", 3: "30 fps"}
 
 # The checks of an `mtc` run (starting proposals of slice A2, to confirm in the A3 HIL runs).
 MTC_LIMITS = {
-    "interval_ppm": 100.0,     # the quarter-frame interval mean against the host clock, in ppm
+    "interval_ppm": 100.0,     # the quarter-frame rate against the host clock, in ppm (the fit slope, pooled over the segments)
     "residual_p2p_ms": 2.0,    # the residual of the straight-line fit, peak to peak
     "full_frame_frames": 0.5,  # a full frame against --expect, in frames (equal to the frame)
     "note_mean_ms": 1.0,       # the notes against the time code, mean
     "note_spread_ms": 1.5,     # ... spread (std)
     "note_worst_ms": 4.0,      # ... worst
+    "loop_mean_ms": 1.0,       # the song's loop period (full frame to full frame) against the plan's one loop, mean error
+    "loop_worst_ms": 4.0,      # ... worst single period
 }
 
 
@@ -1127,11 +1131,49 @@ class MTCStream:
     any other SysEx is skipped to its F7), note-ons. A message cut by the end of a read chunk is carried into the
     next feed()."""
 
-    def __init__(self):
+    def __init__(self, raw=False):
         self._carry = b""
+        self.raw = raw   # keep every event in `events` (for --raw: the JSON carries them, --reanalyse replays them)
+        self.events = []  # [ts, "q", data byte] | [ts, "f", hh, mm, ss, ff, rate code] | [ts, "n", note, channel, velocity] | [ts, "o", note, channel]
         self.qf = []     # (ts, piece, data byte)
         self.full = []   # (ts, (hours, minutes, seconds, frames, rate code))
+        self.full_pos = []  # per full frame: (quarter frames, notes) parsed before it: its place in the byte order, whatever the timestamps say
         self.notes = []  # (ts, note, channel 1..16)
+
+    def add_qf(self, ts, byte):
+        self.qf.append((ts, (byte >> 4) & 0x07, byte))
+        if self.raw:
+            self.events.append([ts, "q", byte])
+
+    def add_full(self, ts, h, m, s, f, rate_code):
+        self.full.append((ts, (h, m, s, f, rate_code)))
+        self.full_pos.append((len(self.qf), len(self.notes)))
+        if self.raw:
+            self.events.append([ts, "f", h, m, s, f, rate_code])
+
+    def add_note(self, ts, note, channel, velocity):
+        """A note on (velocity above 0) is a note; a note off (or a note on with velocity 0) only goes in the raw events."""
+        if velocity > 0:
+            self.notes.append((ts, note, channel))
+        if self.raw:
+            self.events.append([ts, "n", note, channel, velocity] if velocity > 0 else [ts, "o", note, channel])
+
+    @classmethod
+    def from_events(cls, events):
+        """The stream of a --raw capture: its events replayed in order (the byte order is what the segmenting reads)."""
+        stream = cls(raw=True)
+        for ev in events:
+            if ev[1] == "q":
+                stream.add_qf(ev[0], ev[2])
+            elif ev[1] == "f":
+                stream.add_full(ev[0], *ev[2:7])
+            elif ev[1] == "n":
+                stream.add_note(ev[0], ev[2], ev[3], ev[4])
+            elif ev[1] == "o":
+                stream.add_note(ev[0], ev[2], ev[3], 0)
+            else:
+                raise ValueError("unknown raw event %r" % (ev,))
+        return stream
 
     def feed(self, chunk, ts):
         data = self._carry + bytes(chunk)
@@ -1143,7 +1185,7 @@ class MTCStream:
                 if i + 1 >= n:
                     self._carry = data[i:]
                     return
-                self.qf.append((ts, (data[i + 1] >> 4) & 0x07, data[i + 1]))
+                self.add_qf(ts, data[i + 1])
                 i += 2
             elif b == 0xF0:  # SysEx
                 if i + 5 > n:
@@ -1155,7 +1197,7 @@ class MTCStream:
                         return
                     if data[i + 9] == 0xF7:
                         hh = data[i + 5]
-                        self.full.append((ts, (hh & 0x1F, data[i + 6], data[i + 7], data[i + 8], (hh >> 5) & 0x03)))
+                        self.add_full(ts, hh & 0x1F, data[i + 6], data[i + 7], data[i + 8], (hh >> 5) & 0x03)
                         i += 10
                         continue
                 j = data.find(b"\xf7", i + 1)  # some other SysEx: skip to its end
@@ -1168,8 +1210,10 @@ class MTCStream:
                 if i + 1 + need > n:
                     self._carry = data[i:]
                     return
-                if (b & 0xF0) == 0x90 and data[i + 2] > 0:
-                    self.notes.append((ts, data[i + 1], (b & 0x0F) + 1))
+                if (b & 0xF0) == 0x90:
+                    self.add_note(ts, data[i + 1], (b & 0x0F) + 1, data[i + 2])
+                elif (b & 0xF0) == 0x80:
+                    self.add_note(ts, data[i + 1], (b & 0x0F) + 1, 0)
                 i += 1 + need
             elif b == 0xF2:  # Song Position Pointer
                 if i + 3 > n:
@@ -1189,9 +1233,11 @@ class MTCDecoder:
     """Quarter-frame pieces to times. A full time needs pieces 0..7 in order within one cycle (eight pieces span two
     frames); the time they spell is the time at piece 0, so the reported time is it +2 frames. A piece out of order is
     counted (dropped when the next-but-one arrives, repeated when the same one arrives again, anything else as a mixed
-    cycle) and breaks the cycle: no time comes out of it."""
+    cycle) and breaks the cycle: no time comes out of it. `free_start`: the stream begins at a full frame (a run start or a relocation),
+    where the first quarter frame is whatever piece the grid gives (spec A-2): the part cycle it opens is skipped, not counted."""
 
-    def __init__(self):
+    def __init__(self, free_start=False):
+        self.free = free_start
         self.expected = 0   # the piece a clean cycle wants next
         self.cycle = {}     # piece -> data nibble
         self.piece0_ts = 0.0
@@ -1205,6 +1251,10 @@ class MTCDecoder:
 
     def feed(self, ts, piece, data):
         nib = data & 0x0F
+        if self.free:
+            self.free = False
+            if piece != 0:
+                self.expected, self.clean, self.cycle = piece, False, {}  # a part cycle: its pieces fill in, no time comes of it
         if piece == self.expected:
             if piece == 0:
                 self.cycle, self.piece0_ts, self.clean = {}, ts, True
@@ -1242,7 +1292,7 @@ class MTCDecoder:
         self.cycles.append((self.piece0_ts, ts7, spelled, rate))
 
 
-def mtc_song_plan(song, cap=4096):
+def mtc_song_plan(song, cap=4096, start_note=None):
     """The expected time of every step of a test song from its first step, as (wire note, seconds), mirroring the A1
     walk (seq/src/song_time.cpp): a run starts at the project tempo and swing; each row's timing FX apply from the row
     they stand in (Tempo 15: value x 2 BPM, below 40 is 40; Swing 17: 25..75, straight at 50; Tempo fine 44: (v - 128) / 4
@@ -1264,6 +1314,9 @@ def mtc_song_plan(song, cap=4096):
     odd = False
     t = 0.0
     op, pat, step = 0, order[0], 0
+    if start_note is not None:  # a Play from the middle (A-12): from the step that note names, at the project tempo, no timing FX of the rows before it
+        pat, step = (start_note - 36) // 16 + 1, (start_note - 36) % 16
+        op = order.index(pat)
     out = []
     for _ in range(cap):
         fine = 0
@@ -1296,18 +1349,121 @@ def mtc_song_plan(song, cap=4096):
     return out
 
 
+def mtc_song_loop(song, start_note=None):
+    """One loop of a test song from its start: (the plan's steps of the first pass, the loop's length in seconds). The pass ends where the first
+    step comes round again (the song loops from its last slot back to slot 1: the first note again); the length is None when it never does.
+    `start_note`: a Play from the middle (A-12): the pass from the step that note names, at the project tempo, to the same loop end (times from that step)."""
+    steps = mtc_song_plan(song, start_note=start_note)
+    head = mtc_song_plan(song, cap=1)[0][0]
+    for i in range(1, len(steps)):
+        if steps[i][0] == head:
+            return steps[:i], steps[i][1]
+    return steps, None
+
+
+MTC_NOTE_MATCH_S = 1.0  # a note is matched to the plan step of its note number whose predicted arrival is nearest, within this
+MTC_BACKLOG_SPAN = 0.5  # a run of quarter frames that arrived in under this share of the time they span is a backlog read in one burst, not a live stream
+
+
+def _mtc_segments(stream):
+    """The run cut at every relocation: a full frame that comes after quarter frames (the unit sends one at a run start, at the song's loop and at a jump,
+    and the quarter frames restart from it). Returns (segments, roles): each segment is (first quarter frame, first note, index of its full frame or None,
+    end of its quarter frames, end of its notes); roles maps the index of every full frame to "start" (it opens or heads a segment), "superseded" (another
+    full frame follows with no quarter frame between: the stop of the run before a Play, a repeat) or "stop" (after the last quarter frame: the stop's).
+    The later of two full frames in a row is the start: the first is the run before's, still in the device's buffer."""
+    nq, nn = len(stream.qf), len(stream.notes)
+    starts = [[0, 0, None]]
+    roles = {}
+    for fi, (qi, ni) in enumerate(stream.full_pos):
+        if qi >= nq and nq > 0:
+            roles[fi] = "stop"
+            continue
+        if qi == starts[-1][0]:
+            if starts[-1][2] is not None:
+                roles[starts[-1][2]] = "superseded"
+            starts[-1][2] = fi
+            roles[fi] = "start"
+            continue
+        starts.append([qi, ni, fi])
+        roles[fi] = "start"
+    segs = []
+    for k, (qi, ni, fi) in enumerate(starts):
+        qe, ne = (starts[k + 1][0], starts[k + 1][1]) if k + 1 < len(starts) else (nq, nn)
+        segs.append((qi, ni, fi, qe, ne))
+    return segs, roles
+
+
+def _mtc_fit(cycles, fps):
+    """The straight-line fit of the decoded time (the time at piece 0) against its arrival: (intercept s, slope, fit dict) or None under two cycles."""
+    if len(cycles) < 2:
+        return None
+    xs = [c[0] for c in cycles]
+    ys = [c[2] / fps for c in cycles]
+    n = len(xs)
+    mx = sum(xs) / n
+    my = sum(ys) / n
+    sxx = sum((x - mx) ** 2 for x in xs)
+    sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    slope = sxy / sxx if sxx > 0 else 1.0
+    intercept = my - slope * mx
+    resid = [y - (intercept + slope * x) for x, y in zip(xs, ys)]
+    return intercept, slope, {
+        "cycles": n,
+        "slope": slope,
+        "drift_ppm": (slope - 1.0) * 1e6,
+        "residual_p2p_s": max(resid) - min(resid),
+        "residual_rms_s": math.sqrt(sum(r * r for r in resid) / n),
+    }
+
+
+def _mtc_step_of(frames, expect_frames, fps, song):
+    """Which step of the song a full frame names: (step index in the loop's first pass, note, song time s, frames off) or None. A full frame at --expect is
+    step 0 (to MTC_LIMITS' full-frame tolerance); another one is a Play from a later slot, and passes when it is the song time of a step start to the
+    frame (less than one frame off the plan's time + --expect). The nearest step is returned when none is that close (frames off tells how far)."""
+    if expect_frames is None:
+        return None
+    steps = mtc_song_loop(song)[0] if song is not None else [(None, 0.0)]
+    best = None
+    for i, (note, t) in enumerate(steps):
+        off = frames - (expect_frames + t * fps)
+        if best is None or abs(off) < abs(best[3]):
+            best = (i, note, t, off)
+        if i == 0 and abs(off) <= MTC_LIMITS["full_frame_frames"]:
+            break  # at --expect: step 0, whatever is nearer
+    return best
+
+
 def mtc_analyze(stream, fps_arg=None, expect=None, song=None):
     """The A2 analysis of a captured stream: the rate code; piece continuity (dropped / repeated / mixed, the time of a
     cycle +2 frames); the quarter-frame interval mean against the host clock, in ppm; the straight-line fit of the
     decoded time against the arrival (drift in ppm, residual peak to peak and RMS); the full frames against --expect;
     and the notes against the time code (each step's note should arrive at its song time + the expected start time),
-    with the song's plan when --song says so."""
-    dec = MTCDecoder()
-    for ts, piece, data in stream.qf:
-        dec.feed(ts, piece, data)
-    rate = dec.rate_code if dec.rate_code is not None else (stream.full[0][1][4] if stream.full else None)
+    with the song's plan when --song says so.
+
+    The run is cut into segments at every relocation (_mtc_segments): the unit sends a full frame at each loop of the song and its quarter frames
+    restart from it. Each segment is decoded, fitted and measured on its own (a cycle cut by the relocation is not a lost piece) and the checks judge
+    the worst segment (the fit's residual, the interval mean); the pieces lost inside the segments are summed. A burst of old quarter frames (the device's
+    backlog from the run before, read in one go) is no live stream: it is shown and not judged. A segment that opens with a full frame
+    also has its first cycle checked against the frame maths (the time it spells is that full frame's time plus the time elapsed from the full frame to
+    its piece 0, to a frame). A full frame is --expect (a run start, a loop) or, with --song, the song time of a step start (a Play from a later slot:
+    the check names the step); the notes of that segment are then matched against the plan from that step (at the project tempo, A-12), by the nearest
+    prediction over all the segments, so a note that arrives just before its loop's full frame still belongs to that loop. The loop period (full
+    frame to full frame) is measured against the length of the pass the segment plays. A run without a mid-run full frame is one segment and is
+    analysed as it always was (the plan continues past a loop)."""
+    segs, roles = _mtc_segments(stream)
+    multi = len(segs) > 1
+    decs = []
+    for qi, _ni, _fi, qe, _ne in segs:
+        dec = MTCDecoder(free_start=True)  # a run, a loop or a capture begins at whatever piece the grid gives: the part cycle it opens is skipped
+        for ts, piece, data in stream.qf[qi:qe]:
+            dec.feed(ts, piece, data)
+        decs.append(dec)
+    rate = next((d.rate_code for d in reversed(decs) if d.rate_code is not None), None)
+    if rate is None and stream.full:
+        rate = stream.full[0][1][4]
     fps = MTC_RATE_CODES[rate] if rate is not None else (fps_arg if fps_arg else 25.0)
     checks = []
+    tag = " (worst segment)" if multi else ""
 
     def check(name, value, limit, ok):
         checks.append({"name": name, "value": value, "limit": limit, "ok": bool(ok)})
@@ -1315,74 +1471,155 @@ def mtc_analyze(stream, fps_arg=None, expect=None, song=None):
     if fps_arg is not None and rate is not None:
         check("rate code vs --fps", "%d (%s)" % (rate, MTC_RATE_NAMES[rate]), fps_arg, abs(MTC_RATE_CODES[rate] - fps_arg) < 0.01)
 
-    # the straight-line fit of the decoded time (the time at piece 0) against its arrival
-    intercept, slope = 0.0, 1.0
+    expect_frames = mtc_time_to_frame(expect, fps) if expect is not None else None
+    fulls = [(e[0], mtc_time_to_frame(e[1][:4], fps)) for e in stream.full]  # (host ts, frames)
+    want_iv = 1.0 / (fps * 4.0)
+    seg_out = []
+    for k, ((qi, ni, fi, qe, ne), dec) in enumerate(zip(segs, decs)):
+        qts = [q[0] for q in stream.qf[qi:qe]]
+        interval = None
+        backlog = False
+        if len(qts) >= 2:
+            mean = (qts[-1] - qts[0]) / (len(qts) - 1)
+            backlog = multi and (qts[-1] - qts[0]) < MTC_BACKLOG_SPAN * (len(qts) - 1) * want_iv
+            interval = {"count": len(qts) - 1, "mean_s": mean, "expected_s": want_iv, "mean_ppm": (mean - want_iv) / want_iv * 1e6}
+        fitted = _mtc_fit(dec.cycles, fps) if not backlog else None
+        first = None  # the first cycle after the segment's full frame, against the frame maths
+        if fi is not None and dec.cycles and not backlog:
+            c0 = dec.cycles[0]
+            first = {"plus_2_vs_full_frames": c0[2] + 2 - fulls[fi][1], "off_frames": (c0[2] - fulls[fi][1]) - (c0[0] - fulls[fi][0]) * fps}
+        seg_out.append({
+            "segment": k, "full_at_s": stream.full[fi][0] if fi is not None else None,
+            "full_time": "%02d:%02d:%02d:%02d" % stream.full[fi][1][:4] if fi is not None else None,
+            "quarter_frames": qe - qi, "cycles": len(dec.cycles), "dropped": dec.dropped, "repeated": dec.repeated, "mixed": dec.mixed,
+            "backlog": backlog, "interval": None if backlog else interval, "fit": fitted[2] if fitted else None, "first_cycle": first,
+            "step": None, "_fit": fitted, "_notes": (ni, ne),
+        })
+    live = [o for o in seg_out if not o["backlog"]]  # the segments the checks judge
+
+    fits = [(o["fit"]["residual_p2p_s"], o) for o in live if o["fit"]]
     fit = None
-    if len(dec.cycles) >= 2:
-        xs = [c[0] for c in dec.cycles]
-        ys = [c[2] / fps for c in dec.cycles]
-        n = len(xs)
-        mx = sum(xs) / n
-        my = sum(ys) / n
-        sxx = sum((x - mx) ** 2 for x in xs)
-        sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
-        slope = sxy / sxx if sxx > 0 else 1.0
-        intercept = my - slope * mx
-        resid = [y - (intercept + slope * x) for x, y in zip(xs, ys)]
-        fit = {
-            "cycles": n,
-            "slope": slope,
-            "drift_ppm": (slope - 1.0) * 1e6,
-            "residual_p2p_s": max(resid) - min(resid),
-            "residual_rms_s": math.sqrt(sum(r * r for r in resid) / n),
-        }
-        check("fit residual peak to peak (ms)", fit["residual_p2p_s"] * 1000.0, MTC_LIMITS["residual_p2p_ms"],
+    if fits:
+        worst = max(fits, key=lambda x: x[0])[1]
+        fit = dict(worst["fit"], segment=worst["segment"])
+        check("fit residual peak to peak (ms)" + tag, fit["residual_p2p_s"] * 1000.0, MTC_LIMITS["residual_p2p_ms"],
               fit["residual_p2p_s"] * 1000.0 <= MTC_LIMITS["residual_p2p_ms"])
 
-    # the quarter-frame interval mean against the host clock
+    # the interval mean over all segments (the sum of their spans over the sum of their intervals), shown for information: it stands on the first and the
+    # last stamp of a segment, each quantised to the USB's 1 ms, which alone is 250 ppm over a 4 s segment, and the stamp of a loop's first quarter frame
+    # is late (it is read with the note and the full frame)
+    ivs = [o for o in live if o["interval"]]
     interval = None
-    if len(stream.qf) >= 2:
-        ts = [q[0] for q in stream.qf]
-        iv = [ts[i + 1] - ts[i] for i in range(len(ts) - 1)]
-        mean = sum(iv) / len(iv)
-        want = 1.0 / (fps * 4.0)
-        interval = {"count": len(iv), "mean_s": mean, "expected_s": want, "mean_ppm": (mean - want) / want * 1e6}
-        check("quarter-frame interval mean (ppm)", interval["mean_ppm"], MTC_LIMITS["interval_ppm"], abs(interval["mean_ppm"]) <= MTC_LIMITS["interval_ppm"])
+    if ivs:
+        count = sum(o["interval"]["count"] for o in ivs)
+        span = sum(o["interval"]["mean_s"] * o["interval"]["count"] for o in ivs)
+        interval = {"count": count, "mean_s": span / count, "expected_s": want_iv, "mean_ppm": (span / count - want_iv) / want_iv * 1e6, "segments": len(ivs)}
+    # what is judged is the rate of the time code against the host clock: the fit slope of every cycle of a segment (all of them count, so the stamp
+    # quantisation averages out), pooled over the segments by their cycles, as ppm of quarter-frame interval (positive: the master is slower than nominal).
+    # With no segment of two cycles the pooled interval stands in for it.
+    rate_iv = None
+    if fits:
+        cyc = sum(o["fit"]["cycles"] for _r, o in fits)
+        slope = sum(o["fit"]["slope"] * o["fit"]["cycles"] for _r, o in fits) / cyc
+        rate_iv = {"ppm": (1.0 / slope - 1.0) * 1e6, "slope": slope, "cycles": cyc, "segments": len(fits), "source": "fit slope"}
+    elif interval:
+        rate_iv = {"ppm": interval["mean_ppm"], "cycles": 0, "segments": interval["segments"], "source": "interval mean"}
+    if rate_iv:
+        check("quarter-frame rate vs the host clock (ppm, %s)" % rate_iv["source"] + (" (pooled)" if multi else ""), rate_iv["ppm"], MTC_LIMITS["interval_ppm"],
+              abs(rate_iv["ppm"]) <= MTC_LIMITS["interval_ppm"])
 
-    check("dropped pieces", dec.dropped, 0, dec.dropped == 0)
-    check("repeated pieces", dec.repeated, 0, dec.repeated == 0)
-    check("mixed cycles", dec.mixed, 0, dec.mixed == 0)
+    dropped, repeated, mixed = (sum(o[k] for o in live) for k in ("dropped", "repeated", "mixed"))
+    check("dropped pieces", dropped, 0, dropped == 0)
+    check("repeated pieces", repeated, 0, repeated == 0)
+    check("mixed cycles", mixed, 0, mixed == 0)
 
-    # the full frames: value, when, and against --expect
-    expect_frames = mtc_time_to_frame(expect, fps) if expect is not None else None
+    if multi:
+        offs = [o["first_cycle"]["off_frames"] for o in live if o["first_cycle"]]
+        if offs:
+            check("first cycle after a full frame vs the frame maths (frames)", [round(x, 2) for x in offs], 1.0, all(abs(x) <= 1.0 for x in offs))
+
+    # the full frames: value, when, role, and against --expect or the song time of a step start (a Play from a later slot)
     full = []
-    for ts, (h, m, s, f, rc) in stream.full:
-        entry = {"at_s": ts, "time": "%02d:%02d:%02d:%02d" % (h, m, s, f), "rate_code": rc, "frames": mtc_time_to_frame((h, m, s, f), fps)}
+    judged = []   # what the check shows for each full frame that opens a segment
+    all_ok = True
+    for fi, (ts, (h, m, s, f, rc)) in enumerate(stream.full):
+        entry = {"at_s": ts, "time": "%02d:%02d:%02d:%02d" % (h, m, s, f), "rate_code": rc, "frames": mtc_time_to_frame((h, m, s, f), fps),
+                 "role": roles.get(fi, "start")}
         if expect_frames is not None:
             entry["delta_frames_vs_expect"] = entry["frames"] - expect_frames
+        if entry["role"] == "start":
+            st = _mtc_step_of(entry["frames"], expect_frames, fps, song) if expect_frames is not None else None
+            if st is not None:
+                at_expect = abs(entry["delta_frames_vs_expect"]) <= MTC_LIMITS["full_frame_frames"]
+                step = {"index": st[0], "note": st[1], "song_s": st[2], "delta_frames": st[3]}
+                if st[0] and abs(st[3]) < 1.0 and not at_expect:
+                    entry["step"] = step  # a step start of the song (not --expect: that is step 0 of the song)
+                    judged.append("step %d (note %d) %+.2f" % (st[0], st[1], st[3]))
+                elif at_expect:
+                    entry["step"] = dict(step, index=0, song_s=0.0, delta_frames=entry["delta_frames_vs_expect"])
+                    judged.append(entry["delta_frames_vs_expect"])
+                else:
+                    all_ok = False
+                    judged.append("%+.1f (nearest step %s %+.2f)" % (entry["delta_frames_vs_expect"], st[0], st[3]) if song is not None else entry["delta_frames_vs_expect"])
         full.append(entry)
-    if expect is not None and full:
-        deltas = [e["delta_frames_vs_expect"] for e in full]
-        check("full frames vs --expect (frames)", deltas, 0, all(abs(d) <= MTC_LIMITS["full_frame_frames"] for d in deltas))
+    if expect is not None and judged:
+        check("full frames vs --expect or a step start (frames)", judged, 0, all_ok)
+    for o, (qi, ni, fi, qe, ne) in zip(seg_out, segs):
+        if fi is not None:
+            o["step"] = full[fi].get("step")
 
-    # the notes against the time code and --expect: each step's note at its song time + the expected start time
+    # the notes against the time code: each step's note at its song time + the segment's start time, matched to the nearest predicted step
     notes = None
-    if song is not None and expect is not None and fit is not None and stream.notes:
-        plan = {}
-        for note, t in mtc_song_plan(song):
-            plan.setdefault(note, []).append(t)
-        seen = {}
-        offsets = []
-        for ts, note, _channel in stream.notes:
-            k = seen.get(note, 0)
-            seen[note] = k + 1
-            if note in plan and k < len(plan[note]):
-                tc_s = intercept + slope * ts  # the time code at the note's arrival, from the fit
-                offsets.append((tc_s - (expect_frames / fps + plan[note][k])) * 1000.0)
+    if song is not None and expect is not None and stream.notes:
+        cands = {}   # note -> sorted [(predicted host ts, segment, expected code time)]
+        for o in live:
+            if o["_fit"] is None:
+                continue
+            intercept, slope = o["_fit"][0], o["_fit"][1]
+            if multi:
+                if o["full_at_s"] is None or o["step"] is None:
+                    continue  # a part loop of a run that was already going, or a start that is no step: no plan to hold it to
+                steps = mtc_song_loop(song, start_note=None if o["step"]["index"] == 0 else o["step"]["note"])[0]
+                ref = fulls[next(i for i, e in enumerate(full) if e["at_s"] == o["full_at_s"] and e["role"] == "start")][1] / fps
+            else:
+                steps, ref = mtc_song_plan(song), expect_frames / fps
+            for note, t in steps:
+                cands.setdefault(note, []).append(((ref + t - intercept) / slope, o, ref + t))
+        for lst in cands.values():
+            lst.sort(key=lambda c: c[0])
+        pairs = []
+        for i, (ts, note, _channel) in enumerate(stream.notes):
+            lst = cands.get(note)
+            if not lst:
+                continue
+            pos = bisect.bisect_left([c[0] for c in lst], ts)
+            for j in (pos - 1, pos):
+                if 0 <= j < len(lst) and abs(lst[j][0] - ts) <= MTC_NOTE_MATCH_S:
+                    pairs.append((abs(lst[j][0] - ts), i, note, j))
+        pairs.sort()
+        taken_notes, taken_cands, offsets = set(), set(), []
+        for _d, i, note, j in pairs:
+            if i in taken_notes or (note, j) in taken_cands:
+                continue
+            taken_notes.add(i)
+            taken_cands.add((note, j))
+            ts = stream.notes[i][0]
+            pred, o, code_t = cands[note][j]
+            fitted = o["_fit"]
+            off = ((fitted[0] + fitted[1] * ts) - code_t) * 1000.0
+            offsets.append(off)
+            n = o.setdefault("notes", {"heard": o["_notes"][1] - o["_notes"][0], "matched": 0, "_offs": []})
+            n["matched"] += 1
+            n["_offs"].append(off)
+        for o in seg_out:
+            n = o.get("notes")
+            if n:
+                n["mean_ms"] = statistics.fmean(n.pop("_offs"))
         if offsets:
             notes = {
                 "heard": len(stream.notes),
                 "matched": len(offsets),
+                "unmatched": len(stream.notes) - len(offsets),
                 "mean_ms": statistics.fmean(offsets),
                 "spread_ms": statistics.pstdev(offsets) if len(offsets) > 1 else 0.0,
                 "worst_ms": max(abs(o) for o in offsets),
@@ -1391,19 +1628,46 @@ def mtc_analyze(stream, fps_arg=None, expect=None, song=None):
             check("notes vs time code: spread (ms)", notes["spread_ms"], MTC_LIMITS["note_spread_ms"], notes["spread_ms"] <= MTC_LIMITS["note_spread_ms"])
             check("notes vs time code: worst (ms)", notes["worst_ms"], MTC_LIMITS["note_worst_ms"], notes["worst_ms"] <= MTC_LIMITS["note_worst_ms"])
 
+    # the loop period: full frame to full frame of consecutive segments, against the length of the pass the first of them plays
+    loop = None
+    gaps = []
+    for a, b in zip(seg_out, seg_out[1:]):
+        if a["full_at_s"] is not None and b["full_at_s"] is not None and not a["backlog"] and not b["backlog"]:
+            want = None
+            if song is not None and a["step"] is not None:
+                want = mtc_song_loop(song, start_note=None if a["step"]["index"] == 0 else a["step"]["note"])[1]
+            gaps.append((b["full_at_s"] - a["full_at_s"], want))
+    if gaps:
+        loop = {"periods_s": [g for g, _w in gaps], "mean_s": statistics.fmean(g for g, _w in gaps), "plan_s": None}
+        errs = [(g - w) * 1000.0 for g, w in gaps if w is not None]
+        if errs:
+            loop["plan_s"] = mtc_song_loop(song)[1]
+            loop["mean_err_ms"] = statistics.fmean(errs)
+            loop["worst_err_ms"] = max(abs(e) for e in errs)
+            check("loop period vs the song's loop: mean (ms)", loop["mean_err_ms"], MTC_LIMITS["loop_mean_ms"], abs(loop["mean_err_ms"]) <= MTC_LIMITS["loop_mean_ms"])
+            check("loop period vs the song's loop: worst (ms)", loop["worst_err_ms"], MTC_LIMITS["loop_worst_ms"], loop["worst_err_ms"] <= MTC_LIMITS["loop_worst_ms"])
+
+    cycles = [{"at_s": c[0], "time_plus_2_frames": c[2] + 2, "rate_code": c[3], "segment": k} for k, d in enumerate(decs) for c in d.cycles]
+    for o in seg_out:
+        o.pop("_fit")
+        o.pop("_notes")
     result = {
         "tool": "midi_clock_tool mtc",
-        "format": 2,
+        "format": 4,
+        "fps_arg": fps_arg,
         "rate_code": rate,
         "rate_name": MTC_RATE_NAMES.get(rate),
         "fps": fps,
         "quarter_frames": len(stream.qf),
-        "cycles": [{"at_s": c[0], "time_plus_2_frames": c[2] + 2, "rate_code": c[3]} for c in dec.cycles],
-        "dropped_pieces": dec.dropped,
-        "repeated_pieces": dec.repeated,
-        "mixed_cycles": dec.mixed,
+        "cycles": cycles,
+        "dropped_pieces": dropped,
+        "repeated_pieces": repeated,
+        "mixed_cycles": mixed,
         "interval": interval,
+        "rate_vs_host": rate_iv,
         "fit": fit,
+        "segments": seg_out,
+        "loop": loop,
         "full_frames": full,
         "notes": notes,
         "checks": checks,
@@ -1426,22 +1690,49 @@ def _print_mtc(result):
     if result["interval"]:
         lines.append("  interval mean %.6f s (expected %.6f, %+.1f ppm)" % (
             result["interval"]["mean_s"], result["interval"]["expected_s"], result["interval"]["mean_ppm"]))
+    if result.get("rate_vs_host"):
+        lines.append("  rate vs the host clock (judged): %+.1f ppm by the %s, %d segment(s)" % (result["rate_vs_host"]["ppm"], result["rate_vs_host"]["source"], result["rate_vs_host"]["segments"]))
     if result["fit"]:
         lines.append("  fit: drift %+.1f ppm, residual %.3f ms p2p, %.3f ms rms" % (
             result["fit"]["drift_ppm"], result["fit"]["residual_p2p_s"] * 1000.0, result["fit"]["residual_rms_s"] * 1000.0))
+    for o in result["segments"] if len(result["segments"]) > 1 else []:
+        line = "  segment %d%s%s: %d qf, %d cycles" % (
+            o["segment"], " (full frame %s at %.3f s)" % (o["full_time"], o["full_at_s"]) if o["full_at_s"] is not None else "",
+            " a backlog burst of old data, not judged" if o["backlog"] else "", o["quarter_frames"], o["cycles"])
+        if o["step"] and o["step"]["index"]:
+            line += ", Play from step %d (note %d, song time %.3f s)" % (o["step"]["index"], o["step"]["note"], o["step"]["song_s"])
+        if o["fit"]:
+            line += ", drift %+.1f ppm, residual %.3f ms p2p" % (o["fit"]["drift_ppm"], o["fit"]["residual_p2p_s"] * 1000.0)
+        if o["interval"]:
+            line += ", interval %+.1f ppm" % o["interval"]["mean_ppm"]
+        if o["first_cycle"]:
+            line += ", first cycle full+%d frames" % o["first_cycle"]["plus_2_vs_full_frames"]
+        if o["dropped"] or o["repeated"] or o["mixed"]:
+            line += ", dropped %d repeated %d mixed %d" % (o["dropped"], o["repeated"], o["mixed"])
+        lines.append(line)
+    if result["loop"]:
+        lp = result["loop"]
+        line = "  loop period: %d periods, mean %.4f s" % (len(lp["periods_s"]), lp["mean_s"])
+        if lp["plan_s"] is not None:
+            line += " (plan %.4f s, mean %+.2f ms, worst %.2f ms)" % (lp["plan_s"], lp["mean_err_ms"], lp["worst_err_ms"])
+        lines.append(line)
     if result["cycles"]:
         last = result["cycles"][-1]
         t = frame_to_mtc_time(last["time_plus_2_frames"] % (result["fps"] * 86400), result["fps"])
         lines.append("  last decoded time: %02d:%02d:%02d:%02d (piece 0 at %.3f s, +2 frames)" % (t[0], t[1], t[2], t[3], last["at_s"]))
     for e in result["full_frames"]:
         line = "  full frame at %.3f s: %s (code %d)" % (e["at_s"], e["time"], e["rate_code"])
-        if "delta_frames_vs_expect" in e:
+        if e["role"] != "start":
+            line += ", %s (not a run or loop start)" % ("superseded by the full frame after it: the stop of the run before" if e["role"] == "superseded" else "after the last quarter frame: a stop")
+        elif e.get("step") and e["step"]["index"]:
+            line += ", the start of step %d (note %d, song time %.3f s), %+.2f frames off" % (e["step"]["index"], e["step"]["note"], e["step"]["song_s"], e["step"]["delta_frames"])
+        elif "delta_frames_vs_expect" in e:
             line += ", %+.1f frames vs --expect" % e["delta_frames_vs_expect"]
         lines.append(line)
     if result["notes"]:
         n = result["notes"]
-        lines.append("  notes: %d heard, %d matched, vs time code mean %.3f ms, spread %.3f ms, worst %.3f ms" % (
-            n["heard"], n["matched"], n["mean_ms"], n["spread_ms"], n["worst_ms"]))
+        lines.append("  notes: %d heard, %d matched (%d not in the plan), vs time code mean %.3f ms, spread %.3f ms, worst %.3f ms" % (
+            n["heard"], n["matched"], n["unmatched"], n["mean_ms"], n["spread_ms"], n["worst_ms"]))
     failed = [c for c in result["checks"] if not c["ok"]]
     lines.append("  %s (%d checks, %d failed)" % ("PASS" if not failed else "FAIL", len(result["checks"]), len(failed)))
     for c in failed:
@@ -1449,10 +1740,37 @@ def _print_mtc(result):
     print("\n".join(lines))
 
 
-def mtc(dev, seconds=20.0, fps=None, expect=None, song=None, json_path=None):
-    """OS-MTC A2: listen on the unit's raw MIDI node for `seconds` and analyse the MTC it sends (MTC.md)."""
+def _mtc_finish(stream, fps, expect, song, json_path, seconds, raw):
+    result = mtc_analyze(stream, fps, expect, song)
+    result["duration_seconds"] = seconds
+    if raw:
+        result["raw"] = {"format": 1, "events": [[round(e[0], 6)] + e[1:] for e in stream.events]}
+    if json_path:
+        with open(json_path, "w") as f:
+            json.dump(result, f, indent=1)
+    _print_mtc(result)
+    return result
+
+
+def mtc_reanalyse(path, fps=None, expect=None, song=None, json_path=None, raw=True):
+    """--reanalyse: the analysis again from the events of a --raw capture. What the options leave out (--fps, --expect, --song) is taken from the file."""
+    with open(path) as f:
+        old = json.load(f)
+    if "raw" not in old or old["raw"].get("format") != 1:
+        raise ValueError("%s has no raw events (capture with --raw)" % path)
+    if fps is None and old.get("fps_arg") is not None:
+        fps = old["fps_arg"]
+    if expect is None and old.get("expect"):
+        expect = parse_mtc_time(old["expect"])
+    if song is None:
+        song = old.get("song")
+    return _mtc_finish(MTCStream.from_events(old["raw"]["events"]), fps, expect, song, json_path, old.get("duration_seconds"), raw)
+
+
+def mtc(dev, seconds=20.0, fps=None, expect=None, song=None, json_path=None, raw=False):
+    """OS-MTC A2: listen on the unit's raw MIDI node for `seconds` and analyse the MTC it sends (MTC.md). `raw`: keep every event in the JSON."""
     fd = os.open(dev, os.O_RDONLY | os.O_NONBLOCK)
-    stream = MTCStream()
+    stream = MTCStream(raw=raw)
     start = time.monotonic()
     try:
         while time.monotonic() - start < seconds:
@@ -1468,13 +1786,7 @@ def mtc(dev, seconds=20.0, fps=None, expect=None, song=None, json_path=None):
             stream.feed(data, time.monotonic())
     finally:
         os.close(fd)
-    result = mtc_analyze(stream, fps, expect, song)
-    result["duration_seconds"] = seconds
-    if json_path:
-        with open(json_path, "w") as f:
-            json.dump(result, f, indent=1)
-    _print_mtc(result)
-    return result
+    return _mtc_finish(stream, fps, expect, song, json_path, seconds, raw)
 
 
 def _synth_mtc(start_time, rate_code, fps, n_qf, t0=100.0, drift=0.0, drop=(), repeat=(), reverse=()):
@@ -1494,6 +1806,47 @@ def _synth_mtc(start_time, rate_code, fps, n_qf, t0=100.0, drift=0.0, drop=(), r
         events.append((ts, pieces[q]))
         if g in repeat:
             events.append((ts + interval * 0.5, pieces[q]))
+    events.sort(key=lambda e: e[0])
+    return events
+
+
+def _synth_mtc_loops(start_time, rate_code, fps, loops, song="mtc-tempo", t0=100.0, drift=0.0, drop=(), restart=True, period=None, lat=0.0005,
+                     note_first=False, play_from=None, play_off=0):
+    """A synthetic looping run as (t, bytes) events, as the unit sends it: every loop begins with the full frame of the start time, the quarter frames
+    restart from it (the first one is piece 1, the grid's first boundary after the full frame: piece 0 of the cycles that follow stands two frames on) and
+    the song's notes of one loop follow the plan, `lat` after their time. `period` is the real loop length (the plan's, by default); `drift` stretches the
+    arrival grid inside every loop; `drop` is a set of (loop, quarter frame number) not sent; `restart=False` makes the quarter frames go on from the
+    time the loop before had reached instead of from the full frame (a unit that forgets to relocate). `note_first`: the loop's first note goes out
+    before the loop's full frame, in the same read (what the unit does, b10). `play_from`: the run is a Play from the step of that note (A-12: the
+    plan from there at the project tempo), its full frame the song time of that step (+ `play_off` frames), and the loops after it are whole."""
+    plan, plan_s = mtc_song_loop(song)
+    period = plan_s if period is None else period
+    interval = 1.0 / (fps * 4.0)
+    base = mtc_time_to_frame(start_time, fps)
+    events = []
+    carried = 0
+    tl = t0
+    for lp in range(loops):
+        lstart, lplan, lperiod = start_time, plan, period
+        if lp == 0 and play_from is not None:
+            t_s = next(t for n, t in plan if n == play_from)
+            lstart = frame_to_mtc_time(base + int(round(t_s * fps)) + play_off, fps)
+            lplan, lperiod = mtc_song_loop(song, start_note=play_from)
+        q0 = mtc_time_to_frame(lstart, fps)
+        first_note = lplan[0]
+        if note_first:
+            events.append((tl + first_note[1], bytes((0x90, first_note[0], 100))))
+        events.append((tl, mtc_full_frame_bytes(lstart, rate_code)))
+        for q in range(1, int(lperiod / interval) + 1):
+            if (lp, q) in drop:
+                continue
+            qq = q if restart else q + carried
+            pieces = mtc_time_pieces(frame_to_mtc_time(q0 + 2 * (qq // 8), fps), rate_code)
+            events.append((tl + q * interval * (1.0 + drift), pieces[qq % 8]))
+        carried += int(lperiod / interval)
+        for note, t in lplan[1 if note_first else 0:]:
+            events.append((tl + t + lat, bytes((0x90, note, 100))))
+        tl += lperiod
     events.sort(key=lambda e: e[0])
     return events
 
@@ -1590,7 +1943,138 @@ def _self_test_mtc():
         if res["notes"]["worst_ms"] > 0.1:
             problems.append("mtc-tempo notes vs time code: worst %.3f ms" % res["notes"]["worst_ms"])
 
-    note = "decode 24/25/30 fps (+2 frames), drift %+.1f ppm measured, dropped/repeated/mixed counted, split reads parse, mtc-tempo tempo step seen" % (
+    # a looping run (the unit: a full frame at every loop, the quarter frames restart from it, the first one is piece 1): split at the full frames, every
+    # segment on its own, the notes against the plan restarted at each full frame, the loop period against the plan's one loop
+    expect = (1, 0, 0, 0)
+    for fps, rc in ((25, 1), (30, 3)):
+        res = mtc_analyze(run(_synth_mtc_loops(expect, rc, fps, 5)), fps_arg=fps, expect=expect, song="mtc-tempo")
+        if not res["pass"]:
+            problems.append("%d fps loops: the clean looping stream does not pass: %r" % (fps, [c for c in res["checks"] if not c["ok"]]))
+        base = mtc_time_to_frame(expect, fps)
+        if len(res["segments"]) != 5 or any(g["dropped"] or g["repeated"] or g["mixed"] for g in res["segments"]):
+            problems.append("%d fps loops: segments %r" % (fps, [(g["cycles"], g["dropped"], g["mixed"]) for g in res["segments"]]))
+        elif any(g["first_cycle"]["plus_2_vs_full_frames"] != 4 for g in res["segments"]):
+            problems.append("%d fps loops: first cycle after the full frame %r (wanted expect + 4 frames)" % (fps, [g["first_cycle"] for g in res["segments"]]))
+        if res["notes"] is None or res["notes"]["matched"] != 5 * 35:
+            problems.append("%d fps loops: notes %r" % (fps, res["notes"]))
+        else:
+            measured("%d fps loops: notes mean (ms)" % fps, res["notes"]["mean_ms"], 0.5, 0.05)
+        if res["loop"] is None or len(res["loop"]["periods_s"]) != 4:
+            problems.append("%d fps loops: loop %r" % (fps, res["loop"]))
+        else:
+            measured("%d fps loops: loop period (s)" % fps, res["loop"]["mean_s"], res["loop"]["plan_s"], 1e-9)
+        if res["dropped_pieces"] or res["mixed_cycles"] or any(e["frames"] != base for e in res["full_frames"]) or len(res["full_frames"]) != 5:
+            problems.append("%d fps loops: dropped %d mixed %d full frames %r" % (fps, res["dropped_pieces"], res["mixed_cycles"], res["full_frames"]))
+    # one loop only is one segment: the part cycle at the start (piece 1 first) is not a lost piece, and a full frame at the stop (no quarter frame after
+    # it) opens no segment
+    events = _synth_mtc_loops(expect, 1, 25, 1) + [(110.0, mtc_full_frame_bytes((1, 0, 0, 5), 1))]
+    res = mtc_analyze(run(events), fps_arg=25, expect=expect, song="mtc-tempo")
+    if len(res["segments"]) != 1 or res["dropped_pieces"] or res["mixed_cycles"] or res["loop"] is not None:
+        problems.append("one loop: segments %d, dropped %d, mixed %d, loop %r" % (len(res["segments"]), res["dropped_pieces"], res["mixed_cycles"], res["loop"]))
+    # the faulty ones fail, each on its own check: a drift inside every loop (the interval mean), a piece lost inside a segment, quarter frames that go on from
+    # the loop before instead of from the full frame, a loop of the wrong length
+    plan_s = mtc_song_loop("mtc-tempo")[1]
+    for name, kw, fails in (
+            ("drift inside the loops", dict(drift=400e-6), "quarter-frame rate vs the host clock (ppm, fit slope) (pooled)"),
+            ("a piece lost inside a segment", dict(drop={(2, 100)}), "dropped pieces"),
+            ("no restart at the full frame", dict(restart=False), "first cycle after a full frame vs the frame maths (frames)"),
+            ("a loop 20 ms short", dict(period=plan_s - 0.020), "loop period vs the song's loop: mean (ms)")):
+        res = mtc_analyze(run(_synth_mtc_loops(expect, 1, 25, 4, **kw)), fps_arg=25, expect=expect, song="mtc-tempo")
+        failed = [c["name"] for c in res["checks"] if not c["ok"]]
+        if res["pass"] or fails not in failed:
+            problems.append("%s: pass=%s, failed %r (wanted %r among them)" % (name, res["pass"], failed, fails))
+
+    # a segment of about 4 s read with the USB's 1 ms stamps (floor to the millisecond, the first quarter frame of every loop 1 ms late: it is read with the
+    # note and the full frame) passes: the rate is the fit slope, not the first and last stamp (those alone are 250 ppm over 4 s); a real master 300 ppm
+    # slow or fast fails, at one loop and at several
+    def ms_stamps(events):
+        first_after_full = False
+        out = []
+        for t, data in events:
+            if data[:1] == b"\xf0":
+                first_after_full = True
+            elif data[:1] == b"\xf1" and first_after_full:
+                first_after_full = False
+                t += 0.001
+            out.append((math.floor(t * 1000.0) / 1000.0, data))
+        return out
+
+    rate_check = "quarter-frame rate vs the host clock (ppm, fit slope)"
+    for loops in (1, 4):
+        suffix = " (pooled)" if loops > 1 else ""
+        res = mtc_analyze(run(ms_stamps(_synth_mtc_loops(expect, 1, 25, loops))), fps_arg=25, expect=expect, song="mtc-tempo")
+        bad = [c["name"] for c in res["checks"] if not c["ok"]]
+        if bad or res["rate_vs_host"] is None or abs(res["rate_vs_host"]["ppm"]) > 60.0:
+            problems.append("%d segment(s) of 4 s with 1 ms stamps: failed %r, rate %r" % (loops, bad, res["rate_vs_host"]))
+        for ppm in (-300.0, 300.0):
+            res = mtc_analyze(run(ms_stamps(_synth_mtc_loops(expect, 1, 25, loops, drift=ppm * 1e-6))), fps_arg=25, expect=expect, song="mtc-tempo")
+            failed = [c["name"] for c in res["checks"] if not c["ok"]]
+            if res["pass"] or rate_check + suffix not in failed or abs(res["rate_vs_host"]["ppm"] - ppm) > 100.0:
+                problems.append("a %+.0f ppm master, %d segment(s): pass %s, failed %r, rate %r" % (ppm, loops, res["pass"], failed, res["rate_vs_host"]))
+
+    # the unit's order (b10 captures): the loop's first note goes out before the loop's full frame, in the same read; it belongs to that loop (it was binned
+    # in the loop before, 4.05 s out, when the notes were matched by counting)
+    res = mtc_analyze(run(_synth_mtc_loops(expect, 1, 25, 3, note_first=True)), fps_arg=25, expect=expect, song="mtc-tempo")
+    if not res["pass"] or res["notes"]["matched"] != 3 * 35 or res["notes"]["unmatched"] or res["notes"]["worst_ms"] > 1.0:
+        problems.append("a first note before the loop's full frame: pass %s, notes %r" % (res["pass"], res["notes"]))
+    # the device's backlog at the start of a capture: old quarter frames and the stop full frame of the run before (one stamp for all, no quarter frame
+    # between it and the Play's full frame): the backlog is not judged, the stale full frame is superseded, nothing is "mixed", the Play passes
+    stale = [(95.0, bytes((0xF1, 0x10))), (95.0, bytes((0xF1, 0x21))), (95.0, bytes((0xF1, 0x32))), (95.0, mtc_full_frame_bytes((1, 0, 2, 24), 1))]
+    res = mtc_analyze(run(stale + _synth_mtc_loops(expect, 1, 25, 3, note_first=True)), fps_arg=25, expect=expect, song="mtc-tempo")
+    roles = [f.get("role") for f in res["full_frames"]]
+    if not res["pass"] or roles != ["superseded", "start", "start", "start"] or not res["segments"][0].get("backlog") or res["mixed_cycles"] \
+            or res["notes"]["matched"] != 3 * 35 or res["loop"] is None or abs(res["loop"]["mean_err_ms"]) > 0.01:
+        problems.append("a stale backlog before the Play: pass %s, roles %r, failed %r" % (res["pass"], roles, [c["name"] for c in res["checks"] if not c["ok"]]))
+    # a Play from slot 3 (A-12: the project tempo from that step on): the full frame is the song time of the step of note 68, the check names the step, the
+    # notes from it on match the plan from that step, the first segment is a short pass and its loop period is that pass
+    steps, _ = mtc_song_loop("mtc-tempo")
+    i68 = [i for i, (n, _t) in enumerate(steps) if n == 68][0]
+    for nf in (False, True):
+        res = mtc_analyze(run(_synth_mtc_loops(expect, 1, 25, 3, play_from=68, note_first=nf)), fps_arg=25, expect=expect, song="mtc-tempo")
+        step = res["full_frames"][0].get("step") or {}
+        if not res["pass"] or step.get("index") != i68 or step.get("note") != 68 or res["full_frames"][0].get("role") != "start":
+            problems.append("a Play from slot 3 (note first %s): pass %s, failed %r, step %r" % (nf, res["pass"], [c["name"] for c in res["checks"] if not c["ok"]], step))
+        elif res["notes"]["matched"] != (len(steps) - i68) + 2 * len(steps) or res["segments"][0]["mixed"] or res["notes"]["worst_ms"] > 1.0:
+            problems.append("a Play from slot 3 (note first %s): notes %r" % (nf, res["notes"]))
+        elif res["loop"] is None or abs(res["loop"]["mean_err_ms"]) > 0.01 or abs(res["loop"]["periods_s"][0] - 0.3729) > 0.001:
+            problems.append("a Play from slot 3 (note first %s): loop %r" % (nf, res["loop"]))
+    # a full frame that names another step than the notes follow fails (two frames off the step start: the notes are a step late)
+    res = mtc_analyze(run(_synth_mtc_loops(expect, 1, 25, 3, play_from=68, play_off=2)), fps_arg=25, expect=expect, song="mtc-tempo")
+    if res["pass"]:
+        problems.append("a Play whose full frame is off its step: passes")
+    # --raw / --reanalyse: the events go into the JSON and come back to the same verdict (the stamps are rounded to 6 digits, so the values are compared
+    # loosely) on the stale-backlog stream, with the options taken from the file
+    import contextlib
+    import io
+    import tempfile
+    events = stale + _synth_mtc_loops(expect, 1, 25, 3, note_first=True)
+    raw_stream = MTCStream(raw=True)
+    for t, data in events:
+        raw_stream.feed(data, t)
+    first = mtc_analyze(raw_stream, 25, expect, "mtc-tempo")
+    doc = dict(first, fps_arg=25, duration_seconds=20.0, raw={"format": 1, "events": [[round(e[0], 6)] + e[1:] for e in raw_stream.events]})
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "raw.json")
+        with open(path, "w") as f:
+            json.dump(doc, f)
+        out_path = os.path.join(tmp, "again.json")
+        with contextlib.redirect_stdout(io.StringIO()):
+            again = mtc_reanalyse(path, json_path=out_path)
+        with open(out_path) as f:
+            saved = json.load(f)
+    if again["pass"] != first["pass"] or [c["name"] for c in again["checks"]] != [c["name"] for c in first["checks"]] \
+            or [c["ok"] for c in again["checks"]] != [c["ok"] for c in first["checks"]] or again["notes"]["matched"] != first["notes"]["matched"]:
+        problems.append("reanalyse: %r against %r" % ([(c["name"], c["ok"]) for c in again["checks"]], [(c["name"], c["ok"]) for c in first["checks"]]))
+    if len(saved.get("raw", {}).get("events", ())) != len(raw_stream.events) or saved["raw"]["events"][0][1] != "q":
+        problems.append("reanalyse: the saved JSON keeps %d of %d events" % (len(saved.get("raw", {}).get("events", ())), len(raw_stream.events)))
+    try:
+        mtc_reanalyse(os.path.join(tmp, "missing.json"))
+    except (OSError, ValueError):
+        pass
+    else:
+        problems.append("reanalyse: a missing file is not an error")
+
+    note = "decode 24/25/30 fps (+2 frames), drift %+.1f ppm measured, dropped/repeated/mixed counted, split reads parse, mtc-tempo tempo step seen, loops split at full frames (stale backlog, note before the full frame, Play from slot 3), --raw/--reanalyse round trip" % (
         (1.0 / (1.0 + drift) - 1.0) * 1e6)
     return problems, note
 
@@ -1608,8 +2092,8 @@ MTC_SEND_MIN_PLAIN = 16  # --drop never takes one of the first 16 quarter frames
 
 # The checks of an `mtc-send` run: starting values from the B3 acceptance (docs/specs/OS-MTC.md), to confirm in the B3 HIL runs. Override one with --limit key=value.
 MTC_SEND_LIMITS = {
-    "lock_ms": 250.0,        # B3: from the first quarter frame (the pre-roll before the song start excluded) to the first note, at a start and after a stop
-    "reloc_ms": 300.0,       # B3: a jump, from its full frame to the first note of the new position
+    "lock_ms": 2000.0,       # from the first quarter frame (the pre-roll before the song start excluded) to the first note, at a start and after a stop (maintainer 2026-11-10: the re-lock stays about 1.75 s; B3's 250 ms is not kept)
+    "reloc_ms": 2000.0,      # a jump, from its full frame to the first note of the new position (the same decision; B3's 300 ms is not kept)
     "phase_mean_ms": 1.0,    # B3: the notes against the master's time, mean
     "phase_spread_ms": 3.0,  # ... spread (standard deviation)
     "phase_worst_ms": 10.0,  # ... worst |error| (not in the spec; three spreads and a bit)
@@ -1858,11 +2342,17 @@ def _mtc_send_t(plan, idx):
     return plan.sent_t[idx] if idx < len(plan.sent_t) else plan.events[idx][0]
 
 
-def _mtc_song_steps(plan, song):
-    """The song's steps as (wire note, master seconds): start_s + the song time of the step (mtc_song_plan), as many as the plan's master time reaches."""
+def _mtc_song_steps(plan, song, loop=False):
+    """The song's steps as (wire note, master seconds): start_s + the song time of the step (mtc_song_plan), as many as the plan's master time reaches and
+    the song is long. Song mode does not loop under MTC IN (spec Q9a): a time at or past the song's one-loop length is silence, so those steps are not
+    expected (and a note there is an extra one). `loop=True` keeps them: the steps of a chaser that wrongly loops (a faulty model for the self-test)."""
     start_s = plan.start_frames / plan.fps_real
     span = max([s["n0"] / plan.fps_real + plan.rate * (s["t1"] - s["t0"]) for s in plan.segments if s["dir"] > 0] + [start_s])
     steps = mtc_song_plan(song, int(max(0.0, span - start_s) / 0.05) + 64)
+    if not loop:
+        end = mtc_song_loop(song)[1]
+        if end is not None:
+            steps = [(note, t) for note, t in steps if t < end - 1e-9]
     return [(note, start_s + t) for note, t in steps]
 
 
@@ -2212,14 +2702,14 @@ class _MtcChaser:
         return due
 
 
-def _chaser_steps(plan, song):
+def _chaser_steps(plan, song, loop=False):
     """The steps as the chaser wants them: (wire note, position in real frames)."""
-    return [(note, s * plan.fps_real) for note, s in _mtc_song_steps(plan, song)]
+    return [(note, s * plan.fps_real) for note, s in _mtc_song_steps(plan, song, loop)]
 
 
-def _fake_chaser_ons(plan, song, **kw):
-    """The note-ons of a synthetic chaser that heard the whole plan: [(arrival s, wire note)]."""
-    ch = _MtcChaser(_chaser_steps(plan, song), plan.fps_real, **kw)
+def _fake_chaser_ons(plan, song, loop=False, **kw):
+    """The note-ons of a synthetic chaser that heard the whole plan: [(arrival s, wire note)]. `loop`: a chaser that loops the song past its end (wrong, Q9a)."""
+    ch = _MtcChaser(_chaser_steps(plan, song, loop), plan.fps_real, **kw)
     for i, ev in enumerate(plan.events):
         ch.feed(_mtc_send_t(plan, i), ev[1])
     return sorted((due, note) for due, note in ch.out)
@@ -2297,8 +2787,16 @@ def _self_test_mtc_send():
     measured("pre-roll: lock (ms)", r.get("lock_ms"), 0.5, 0.1)  # the first step sounds at the song start, the pre-roll is not the lock time
     measured("pre-roll: phase mean (ms)", rep["phase"]["mean_ms"], 0.5, 0.05)
     measured("pre-roll: phase spread (ms)", rep["phase"]["spread_ms"], 0.0, 0.05)
-    if r["missing"] or rep["extra_notes"] or r["steps_heard"] != r["steps_expected"] or r["steps_expected"] < 60:
+    if r["missing"] or rep["extra_notes"] or r["steps_heard"] != r["steps_expected"] or r["steps_expected"] != 48:  # midisync-song: 6 s, 48 steps
         problems.append("pre-roll: %r extra %d" % (r, rep["extra_notes"]))
+    # Q9a: a time code past the song's end is silence (no loop). A run of 30 s over the 6 s song passes when the chaser goes silent after one loop
+    # (the unit's real run: 48 notes, then nothing), and fails when it loops (the notes after the end are extra)
+    plan, rep = offline("at:00:59:58:00,run:30")
+    verdict("past the song's end: silence", rep, True)
+    if rep["regions"][0]["steps_expected"] != 48 or rep["regions"][0]["missing"] or rep["extra_notes"]:
+        problems.append("past the song's end: %r extra %d" % (rep["regions"][0], rep["extra_notes"]))
+    rep = analyze_mtc_send(plan, _fake_chaser_ons(plan, "midisync-song", loop=True), "midisync-song")
+    verdict("past the song's end: a chaser that loops", rep, False, ("extra notes",))
     # the same song started with the master's clock already running: the lock is the time to the first note
     _, rep = offline("at:01:00:00:00,run:6")
     verdict("start on the downbeat", rep, True)
@@ -2333,7 +2831,7 @@ def _self_test_mtc_send():
     verdict("a jump", rep, True)
     if len(rep["regions"]) != 2 or rep["regions"][1]["kind"] != "jump" or not 50.0 < rep["regions"][1]["reloc_ms"] < 300.0:
         problems.append("a jump: %r" % (rep["regions"],))
-    _, rep = offline("at:00:59:59:00,run:3,jump:01:00:02:00,run:3", chaser={"relock_s": 0.6})
+    _, rep = offline("at:00:59:59:00,run:3,jump:01:00:02:00,run:3", chaser={"relock_s": 2.4})
     verdict("a chaser slow to relocate", rep, False, ("relocation (ms)",))
     # a drop-out of 0.1 s is a freewheel (the steps in it are due); a stop of a second is the stop (the latency is measured, the steps in it are not due)
     _, rep = offline("at:01:00:00:00,run:2.03,quiet:0.1,run:2")
@@ -2701,7 +3199,9 @@ def main(argv=None):
     y.add_argument("--raw", action="store_true", help="put the per-step error series and the unit's events in the JSON")
     # OS-MTC A2: the MTC listen and analyse subcommand
     m = sub.add_parser("mtc", help="OS-MTC A2: listen and analyse the MTC the unit sends (MTC.md)")
-    m.add_argument("dev", help="the raw MIDI node to read from")
+    m.add_argument("dev", nargs="?", help="the raw MIDI node to read from (not with --reanalyse)")
+    m.add_argument("--raw", action="store_true", help="put every event (quarter frame bytes, full frames, note on / off) with its host stamp in the JSON")
+    m.add_argument("--reanalyse", metavar="FILE.json", help="no device: the analysis again from the events of a --raw capture (--fps, --expect, --song default to the file's)")
     m.add_argument("--seconds", type=float, default=20.0, help="duration to listen (default 20 seconds)")
     m.add_argument("--fps", type=float, default=None, metavar="F", help="expected fps rate, checked against the rate code (24, 25, 29.97, 30)")
     m.add_argument("--expect", metavar="HH:MM:SS:FF", help="expected MTC time at the run's start: the full frames are checked against it and the notes against it (default with --song: 01:00:00:00, MTC START)")
@@ -2760,7 +3260,12 @@ def main(argv=None):
     if args.command == "mtc":
         try:
             expect = parse_mtc_time(args.expect) if args.expect else ((1, 0, 0, 0) if args.song else None)  # MTC START's default 01:00:00:00
-            result = mtc(args.dev, args.seconds, args.fps, expect, args.song, args.json)
+            if args.reanalyse:
+                result = mtc_reanalyse(args.reanalyse, args.fps, expect, args.song, args.json, args.raw or bool(args.json))
+            elif args.dev:
+                result = mtc(args.dev, args.seconds, args.fps, expect, args.song, args.json, args.raw)
+            else:
+                raise ValueError("a device, or --reanalyse FILE.json")
         except ValueError as error:
             print("mtc: %s" % error, file=sys.stderr)
             return 2

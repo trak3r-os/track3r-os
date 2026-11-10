@@ -3,7 +3,7 @@
 // (pads 1 and 2, F1 RUN, or F7 held + the pad) open it (ptool.open) over the selection's block — the block, a column block or the cursor step. Its keys: Up / Down choose a row,
 // Left / Right or the encoder change the row's value (Shift + the encoder the coarse step: an octave on AMOUNT), F1 APPLY (ptool.apply) runs the tool as ONE undo unit through
 // pe::edit_selection and F8 BACK (ui.back) leaves the project untouched. The rules are the Song TOOLS dialog's (song_edit.cpp's apply_tool): the multi-cell rule, so a note is never
-// made from nothing and cut / fade / off steps are untouched by TRANSPOSE and INSTRUMENT. F6 REPEAT (tools.repeat) re-runs the last APPLY with the same amount.
+// made from nothing and cut / fade / off steps are untouched by TRANSPOSE and INSTRUMENT. F6 REPEAT in the verb menu (tools.repeat) re-runs the last APPLY with the same amount.
 #include "action_handlers.h"
 #include "pattern_edit_util.h"
 
@@ -134,7 +134,7 @@ bool ptool_coarse(ActionContext& ctx, core::ActionArg arg) noexcept {
 
 // Runs the tool over the selection's block as ONE undo unit through pe::edit_selection (the caller's unit: ptool.apply's, or tools.repeat's), with the Song TOOLS dialog's
 // rules (song_edit.cpp's apply_tool: the multi-cell rule — no note is made from nothing, cut / fade / off are untouched) and the block verbs' column rules (TRANSPOSE on the
-// Note column, INSTRUMENT on the Instr column, a whole-step block either). `record` keeps it as what F6 REPEAT runs with the same amount. The result names the target's steps.
+// Note column, INSTRUMENT on the Instr column, a whole-step block either). `record` keeps it as what the verb menu's F6 REPEAT runs with the same amount. The result names the target's steps.
 bool pattern_tools_run(ActionContext& ctx, PTool tool, int amount, unsigned instrument, SongWhat what, bool record) noexcept {
   ViewState& v = ctx.view;
   if (!pe::edit_enabled(ctx)) {

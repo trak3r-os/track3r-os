@@ -39,7 +39,7 @@ The dialog keeps its rows until you switch the unit off, FROM included: reopen i
 
 ### What are the tools?
 
-The TOOLS menu is the verb menu that `F7` opens. Its pads hold the length tools, **DUPLICATE x2** (pad 10), **EXPAND x2** (pad 11) and **SHRINK /2** (pad 12), which change a pattern's length in one press, and the two exports, on [Export](export.md). `F6` (**EVENTS**) lists the pattern's MIDI events, the track under the cursor or the selected block, as rows in time order (see [See a track as MIDI events](#see-a-track-as-midi-events)). The last pad, **APPS >** (pad 16), opens the APPS page, which lists the tool apps on the card and nothing else. The tool apps, such as RHYTHM GEN, are small programs that write into the pattern. The page opens on the first app. EVENTS opens while the transport plays in WATCH and STEP; in LIVE the playhead holds the cursor and the strip says **THE PLAYHEAD HOLDS THE CURSOR IN LIVE**. <!-- QA-PAT-160, QA-PAT-180, QA-PAT-400, QA-PAT-401, QA-PAT-448, QA-PAT-449 -->
+The TOOLS menu is the verb menu that `F7` opens. Its pads hold the length tools, **DUPLICATE x2** (pad 10), **EXPAND x2** (pad 11) and **SHRINK /2** (pad 12), which change a pattern's length in one press, and the two exports, on [Export](export.md). On the Pattern key row `F6` (**EVENTS**) lists the pattern's MIDI events, the track under the cursor or the selected block, as rows in time order (see [See a track as MIDI events](#see-a-track-as-midi-events)). The last pad, **APPS >** (pad 16), opens the APPS page, which lists the tool apps on the card and nothing else. The tool apps, such as RHYTHM GEN, are small programs that write into the pattern. The page opens on the first app. EVENTS opens while the transport plays in WATCH and STEP; in LIVE the playhead holds the cursor and the strip says **THE PLAYHEAD HOLDS THE CURSOR IN LIVE**. <!-- QA-PAT-160, QA-PAT-180, QA-PAT-400, QA-PAT-401, QA-PAT-448, QA-PAT-449 -->
 
 A tool is stored when you run it: it edits the pattern at once, and one `F8` (**UNDO**) takes back the whole change. An app that only edits the pattern starts at once, with no question. Leave an app with `F7` and `F8` together. <!-- QA-PAT-162, QA-PAT-165, QA-PAT-166 --> For example, EXPAND x2 on a short pattern makes one twice as long, at half speed, with a gap between every note, ready to fill the gaps by hand.
 
@@ -166,7 +166,7 @@ You should see the app's notes on the Pattern screen. One `F8` (**UNDO**) takes 
 
 Start on the Pattern screen, with the transport stopped. Select a block first to list its tracks and rows instead of the cursor's track.
 
-1. Press `F7` (**TOOLS**), then `F6` (**EVENTS**). The grid pane becomes the event list. <!-- QA-PAT-436, QA-PAT-400, QA-PAT-401 -->
+1. Press `F6` (**EVENTS**). The grid pane becomes the event list. <!-- QA-PAT-436, QA-PAT-400, QA-PAT-401 -->
 2. One row per note, with its length in **LEN**; one per MIDI CC (`CC A` to `CC F`); one per note-off that ends no note above it. `Up` and `Down` move the row; `Left` and `Right` move across its fields. <!-- QA-PAT-402 -->
 3. In Edit (`Rec`), the encoder changes the boxed field of the row — TIME by a microstep (a whole step with `Shift`), DATA by a semitone, VAL by 1, LEN by a step, TYPE to the next CC letter, CH to the next channel, IN to the next instrument — and a pad enters the pad's note on **DATA**, the 0..127 ramp on **VAL**, or sounds the row's step anywhere else. Each press writes the step and is one undo step. <!-- QA-PAT-412..420 -->
 4. The columns read TIME (the step and the percent of it, so a micro-moved note reads `009.50`), CH, DATA (the note, or what the CC sends, such as `#074`, `PROG` or `--`), VAL, IN and FL. A note with nothing below it reads `>` in LEN and plays on past the track's end. <!-- QA-PAT-402, QA-PAT-403, QA-PAT-404, QA-PAT-405 -->
@@ -234,14 +234,14 @@ At the first or last pattern, `Left` or `Right` says **NO PREVIOUS PATTERN** or 
 | `F1` (**FILL**) | Fills the selection: the block, the track or the pattern selected with `Shift` + `Up` on step 1, or the cursor step alone. | QA-PAT-088, QA-PAT-092 |
 | `F2` (**VARY**) | Live while the fill draws at random (TYPE RANDOM, or MODE RANDOM): takes back the fill just made and draws again; the dialog stays up. | QA-PAT-451 |
 | `F8` (**BACK**) | Leaves the Fill dialog without a fill. | QA-PAT-086 |
-| `F7` (**TOOLS**) | Opens the verb menu in the right-hand panel beside the grid (pads 1-16 pick a verb, `F1` RUN, `F8` BACK); `F6` (**EVENTS**) opens the event list; **APPS >** (pad 16) turns the panel into the APPS page, the tool apps only. Held + a pad 1-16 runs that verb without opening the menu. It opens in STEP and WATCH while playing; refused only in LIVE (the strip says THE PLAYHEAD HOLDS THE CURSOR IN LIVE). | QA-PAT-436, QA-PAT-456, QA-PAT-160, QA-PAT-161, QA-PAT-448, QA-PAT-449 |
+| `F7` (**TOOLS**) | Opens the verb menu in the right-hand panel beside the grid (pads 1-16 pick a verb, `F1` RUN, `F8` BACK); `F6` (**RE FILL**, **REPEAT** after an APPLY) repeats the last apply; **APPS >** (pad 16) turns the panel into the APPS page, the tool apps only. Held + a pad 1-16 runs that verb without opening the menu. It opens in STEP and WATCH while playing; refused only in LIVE (the strip says THE PLAYHEAD HOLDS THE CURSOR IN LIVE). | QA-PAT-436, QA-PAT-456, QA-PAT-160, QA-PAT-161, QA-PAT-448, QA-PAT-449 |
 | `F7`, pad 1 / pad 2 | Opens the TOOLS dialog in the right-hand panel beside the block on TRANSPOSE / INSTRUMENT: the OP row, the AMOUNT / TO row, the footer with the target and the count. | QA-PAT-457, QA-PAT-459 |
 | `Up`, `Down` | Choose a row in the TOOLS dialog. | QA-PAT-457 |
 | `Left`, `Right`, encoder | The row's value in the TOOLS dialog: the OP flips, AMOUNT moves a semitone, TO an instrument. In the HUMANIZE panel only the encoder changes the value. | QA-PAT-457, QA-PAT-461 |
 | `Shift` + encoder | The row's coarse step in the TOOLS dialog: an octave on AMOUNT, 8 on TO. | QA-PAT-458 |
 | `F1` (**APPLY**) | Runs the dialog's tool over the block as one undo step (`TRANSPOSED: 3 STEPS +12 ST`). | QA-PAT-458 |
 | `F8` (**BACK**) | Leaves the TOOLS dialog with nothing written. | QA-PAT-457 |
-| `F6` (**RE FILL**, **REPEAT** after an APPLY) | Repeats the last APPLY of the TOOLS dialog with the same amount, on the selection as it is now; after a fill, the fill (the later of the two wins). | QA-PAT-459 |
+| `F7` (**TOOLS**), `F6` (**RE FILL**, **REPEAT** after an APPLY) | Repeats the last APPLY of the TOOLS dialog with the same amount, on the selection as it is now; after a fill, the fill (the later of the two wins). | QA-PAT-459 |
 | `Up`, `Down`, encoder | Choose a row on the APPS page. `Shift` + `Up` or `Down` moves a page of eight. | QA-PAT-160 |
 | `F1` (**RUN**) | Runs the chosen item. | QA-PAT-160 |
 | `F7` + `F8` | Leaves an app's page, back to the Pattern screen. | QA-PAT-165 |
@@ -250,7 +250,7 @@ At the first or last pattern, `Left` or `Right` says **NO PREVIOUS PATTERN** or 
 | `Copy`, with `F1` held | Copies the pattern the chooser shows, whole. | QA-PAT-285 |
 | `Shift` + `Copy`, with `F1` held | Writes the copy over the pattern the chooser shows. | QA-PAT-286 |
 | `F8` (**UNDO**) | Takes back a fill, a tool, a whole-pattern paste, or everything an app wrote in one run. | QA-PAT-089, QA-PAT-166, QA-PAT-280, QA-PAT-287 |
-| `F7` (**TOOLS**), `F6` (**EVENTS**) | Opens the event list over the grid pane, on the cursor's track or the block. | QA-PAT-436, QA-PAT-400, QA-PAT-401, QA-PAT-409 |
+| `F6` (**EVENTS**) | Opens the event list over the grid pane, on the cursor's track or the block. | QA-PAT-436, QA-PAT-400, QA-PAT-401, QA-PAT-409 |
 | `Up`, `Down`, encoder | The row of the list; `Shift` + `Up` / `Down` a page. | QA-PAT-400 |
 | `Left`, `Right` | The field of the row (TIME, TYPE, CH, DATA, VAL, LEN, IN). | QA-PAT-400 |
 | `F1` (**FILTER**) | Shows every row, only the notes, or only the CC rows. | QA-PAT-407 |

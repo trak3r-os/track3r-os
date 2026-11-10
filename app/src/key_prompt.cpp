@@ -94,7 +94,7 @@ constexpr KeyOption kAppsOptions[] = {{kF1, "LAUNCH", "LAUNCH"}, {kF8, "LAUNCH",
 constexpr KeyOption kPresetOptions[] = {{kF1, "LOAD", "LOAD"}, {kShiftF5, "SAVE", "SAVE"}, {kF8, "BACK", "BACK"}};
 // The verb menu (OS-PTOOLS2 S3): F1 runs the verb under the cursor (the pads 1-16 pick one directly, so no key cap says them), F8 closes. On its APPS page (S6b, the list of A5) F1 runs the entry
 // under the cursor; after a launch that wants a second press it reads RUN? inverted.
-constexpr KeyOption kVerbMenuOptions[] = {{kF1, "RUN", "RUN"}, {kF1, "RUN?", "RUN?"}, {kF6, "EVENTS", "EVENTS"}, {kF8, "BACK", "BACK"}};  // (OS-TOOLSDEDUP: F6 opens the EVENTS list, grid and APPS page alike)
+constexpr KeyOption kVerbMenuOptions[] = {{kF1, "RUN", "RUN"}, {kF1, "RUN?", "RUN?"}, {kF6, "RE FILL", "RE FILL"}, {kF6, "REPEAT", "REPEAT"}, {kF8, "BACK", "BACK"}};  // (OS-F6EVENTS: F6 repeats the last verb, grid and APPS page alike; one of the two labels is live, owner_state picks by VerbMenuView::last_verb)
 // The EVENTS list (OS-MIDIREC S1b/S1c, spec 3.4): F1 says the filter in force — one table per filter, prompt_in_force picks it
 // from view.events.filter ("NOTES 2/3" is nine characters, over a key cap's eight, so the label is NOTE 2/3); F2 QUANT (S3),
 // F5 PREVIEW, F7 UNDO, F8 BACK; the Shift layer declares Shift + F2 and Shift + F7 ("QUANT ALL" is nine characters, over a key
@@ -255,8 +255,8 @@ PromptState owner_state(const Model& model, const ViewState& view) noexcept {
     case OverlayId::PlayMode: return owned(kSelectPrompt, all_of(kSelectPrompt));
     // OS-MODPRESET P4: the list's F1 LOAD is live only while it has an entry; Shift + F5 SAVE always is (the list is only ever open over a bound module's page).
     case OverlayId::Preset: return owned(kPresetPrompt, (preset_list_count(model, view) != 0u ? 1u << 0 : 0u) | (1u << 1) | (1u << 2));
-    case OverlayId::VerbMenu: {  // OS-PTOOLS2 S3: F1 RUN, F8 BACK; OS-TOOLSDEDUP: F6 EVENTS; the APPS page (S6b) says RUN? when the last F1 asked for a second press
-      constexpr std::uint16_t kKeep = (1u << 2) | (1u << 3);  // EVENTS, BACK
+    case OverlayId::VerbMenu: {  // OS-PTOOLS2 S3: F1 RUN, F8 BACK; OS-TOOLSDEDUP: F6 RE FILL or REPEAT (OS-F6EVENTS); the APPS page (S6b) says RUN? when the last F1 asked for a second press
+      const std::uint16_t kKeep = static_cast<std::uint16_t>((view.verb_menu.last_verb == VerbMenuView::LastVerb::Tool ? 1u << 3 : 1u << 2) | (1u << 4));  // RE FILL (or REPEAT after a TOOLS apply), BACK
       if (!view.verb_menu.apps) {
         return owned(kVerbMenuPrompt, kKeep | (1u << 0));
       }

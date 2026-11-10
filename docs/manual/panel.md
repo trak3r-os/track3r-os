@@ -34,7 +34,7 @@ Each soft key does what its label says on the screen in view. These are examples
 | `F3` | opens the JUMP chooser | shows the MST FX page | - |
 | `F4` | **FILL**: opens the Fill dialog | shows the STEMS page | QA-PAT-086 |
 | `F5` | **PREVIEW** | **CUE LVL**: goes to the cue level | - |
-| `F6` | **RE FILL** (**REPEAT**: the last fill or TOOLS apply again; the key reads **REPEAT** after a TOOLS apply) | - | QA-PAT-435 |
+| `F6` | **EVENTS** (the event list; **RE FILL** / **REPEAT**, the last fill or TOOLS apply again, is `F6` of the `F7` verb menu) | - | QA-PAT-435, QA-PAT-470 |
 | `F7` | **TOOLS**: opens the verb menu (pads 1-16 pick a verb); held + a pad runs the verb directly | **MUTE**: mutes the track under the cursor | QA-PAT-436, QA-PAT-456 |
 | `F8` | **UNDO** (`Shift` + `F8` is **REDO**) | **SOLO**: solos the track under the cursor | QA-PAT-089 |
 

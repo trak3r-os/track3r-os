@@ -5,7 +5,7 @@
 //
 // OS-PTOOLS2 S3b: the five S4 verbs are wired too — INTERPOLATE, ROTATE UP / DOWN parameterless and RANDOMISE / HUMANISE with the Plan's fixed default amounts (no dialog in
 // this slice): each runs model::verbs::apply_block over the selection's block as ONE undo unit, refused the same way the other block verbs are, and each pick records the
-// last verb so F6 REPEAT (tools.repeat) runs it again.
+// last verb so F6 REPEAT (tools.repeat, F6 of this menu since OS-F6EVENTS) runs it again.
 #include "action_handlers.h"
 #include "pattern_edit_util.h"
 
@@ -282,15 +282,17 @@ bool verb_run(ActionContext& ctx, core::ActionArg) noexcept {
   return run_verb(ctx, ctx.view.verb_menu.cursor);
 }
 
-// F6 in the menu, on the grid and on the APPS page (OS-TOOLSDEDUP; it was the APPS page's EVENTS row): the menu closes first (the strip waits behind a modal overlay) so that events_open's own
-// refusals (STOP PLAYING TO OPEN EVENTS, PATTERN IS EMPTY) say why on the strip, then the EVENTS list opens over the grid pane.
-bool verb_events(ActionContext& ctx, core::ActionArg) noexcept {
+// F6 in the menu, on the grid and on the APPS page (OS-F6EVENTS, new Community OS behaviour; it was EVENTS, OS-TOOLSDEDUP): the menu closes first (a modal overlay owns the input, and the strip waits behind it) so
+// that tools.repeat's own notices (NOTHING TO REPEAT, TURN EDIT ON) say why on the strip, then tools.repeat runs through the dispatcher (its undo unit, its focus and project checks), as the pad verbs do.
+bool verb_repeat(ActionContext& ctx, core::ActionArg) noexcept {
   if (ctx.view.overlay != OverlayId::VerbMenu) {
     return false;
   }
   ctx.view.overlay = OverlayId::None;
+  ctx.focus = true;  // the menu is closed: the base screen owns the input again (tools.repeat is a kStep action, which needs the focus), as run_verb does
   ctx.view.modules.tools_msg = "";
-  return events_open(ctx, 0);
+  (void)dispatch(action_registry(), core::action_id("tools.repeat"), 0, ctx);
+  return true;  // the menu closed, whatever the repeat did
 }
 
 }  // namespace o3os::app

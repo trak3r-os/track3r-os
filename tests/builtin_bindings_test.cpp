@@ -532,7 +532,7 @@ TEST_CASE("builtin bindings: every Shift binding is one of these, and none of th
                            : on_pattern && n < 3 ? "chooser.toggle"
                            : on_pattern && n == 3 ? "fill.open"  // OS-PTOOLS: F4 FILL
                            : on_pattern && n == 4 ? "pattern.preview"
-                           : on_pattern && n == 5 ? "tools.repeat"   // OS-PTOOLS2 S3: F6 REPEAT (AGAIN <VERB>)
+                           : on_pattern && n == 5 ? "events.open"    // OS-F6EVENTS: F6 EVENTS (RE FILL / REPEAT moved to the verb menu)
                            : c == &song ? (n == 0 ? "song.play_pattern" : n == 1 ? "transport.play" : n == 2 ? "song.add_slot" : n == 3 ? "song.delete_slot" : n == 4 ? "song.unique" : "song.tools")  // OS-SONG1; OS-SONGMAP: F5 UNIQUE, F6 TOOLS (they were the slot's pattern - / +)
                                                   : "ui.softkey";
         const core::ActionId want = core::action_id(name);

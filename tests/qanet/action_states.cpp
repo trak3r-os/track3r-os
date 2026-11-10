@@ -42,17 +42,17 @@ const State kName = {"a letter typed", Doc::Demo, "action text.pad 3\n"};
 const State kLearn = {"two Learn bindings", Doc::DemoLearn, ""};
 const State kSliced = {"sample loaded, one slice added", Doc::Sound, "action wave.add\n", "tap sampleload\nwait 120\ntap down 2\ntap f1\nwait 50\ntap f1\nwait 300\ntap pattern\n"};
 const State kSel = {"edit on, 3 steps selected", Doc::Demo, "tap rec\npress shift\ntap down 3\nrelease shift\n"};
-// OS-PTOOLS2 S3: edit on with a RANDOM fill made through the dialog (TYPE row to RANDOM), so tools.repeat (F6 REPEAT) has a last verb whose repeat draws again and acts.
-const State kFillDone = {"edit on, a random fill made on the selected track (the last verb is FILL)", Doc::Demo, "tap rec\naction step.clear\naction select.column_all\ntap f4\ntap down\naction fill.delta 1\ntap f1\n"};
+// OS-PTOOLS2 S3: edit on with a RANDOM fill made through the dialog (TYPE row to RANDOM), and the verb menu open (F7), so verb.repeat (F6 REPEAT) has a last verb whose repeat draws again and acts.
+const State kFillDone = {"edit on, a random fill made on the selected track (the last verb is FILL), the verb menu open", Doc::Demo, "tap f8\ntap rec\naction step.clear\naction select.column_all\ntap f4\ntap down\naction fill.delta 1\ntap f1\ntap f7\n"};  // the leading F8 closes the menu that the VerbMenu reach opened
 // OS-PTOOLS2 S1: the same, then the dialog reopened on the kept RANDOM rows, so F2 VARY takes the fill back and draws again (it acts).
 const State kFillVary = {"the Fill dialog reopened on the random fill the reach set (F1 applies it, F4 opens it again)", Doc::Demo, "tap f1\ntap f4\n"};
 const State kClip = {"edit on, a step copied, cursor 2 down", Doc::Demo, "tap rec\ntap copy\ntap down 2\n"};
 // OS-MIDIREC S2b: the EVENTS overlay open with Edit on (STEP), so the field edits write; and the same with the cursor's
 // field on the DATA of a NOTE row (the demo's first row), where a pad enters the note. The reach leaves the list open, so
 // these close it (F8), turn STEP on (Rec) and open it again.
-const State kEventsStep = {"events open in STEP", Doc::Demo, "tap f8\ntap rec\ntap f7\ntap f6\n"};
-const State kEventsStepMicro = {"events open in STEP, the first row moved one microstep off its step", Doc::Demo, "tap f8\ntap rec\ntap f7\ntap f6\nencoder 1\n"};
-const State kEventsStepData = {"events open in STEP, the DATA field of a NOTE row", Doc::Demo, "tap f8\ntap rec\ntap f7\ntap f6\ntap right 2\n"};
+const State kEventsStep = {"events open in STEP", Doc::Demo, "tap f8\ntap rec\ntap f6\n"};
+const State kEventsStepMicro = {"events open in STEP, the first row moved one microstep off its step", Doc::Demo, "tap f8\ntap rec\ntap f6\nencoder 1\n"};
+const State kEventsStepData = {"events open in STEP, the DATA field of a NOTE row", Doc::Demo, "tap f8\ntap rec\ntap f6\ntap right 2\n"};
 
 // The Sample load screen: the card has two folders (Projects, Samples) and then KICK.WAV and SNARE.WAV, so two steps down is KICK.WAV. The target is the instrument in view (instrument 1; 30 is free).
 // A WAV onto a used sample slot (sound document), onto the module slot (tb303 document: instrument 1 is a module), onto a free slot.
@@ -157,7 +157,7 @@ const std::vector<ActionEntry>& action_states() {
       A("edit.redo"),
       A("edit.undo"),
       A("enc.assign", {kEncRow}),  // OS-ENCLEARN: Instr + Fx on a learnable row (the turn half, enc.turn, has no key of its own)
-      A("events.back"),     // OS-MIDIREC S1b: the EVENTS overlay's actions (the walk opens it with F6 in the verb menu, verb.events)
+      A("events.back"),     // OS-MIDIREC S1b: the EVENTS overlay's actions (the walk opens it with Pattern F6, events.open)
       A("events.coarse", {kEventsStep}),  // S2b: the field edits write in STEP (the demo state says TURN EDIT ON in WATCH)
       A("events.delete", {kEventsStep}),  // S2c: Delete, A10
       A("events.edit", {kEventsStep}),
@@ -165,6 +165,7 @@ const std::vector<ActionEntry>& action_states() {
       A("events.filter"),
       A("events.insert", {kEventsStep}),  // S2c: Insert / Shift + Insert, A9
       A("events.move"),
+      A("events.open"),  // OS-F6EVENTS: Pattern F6 opens the list (it opens in WATCH too)
       A("events.page"),
       A("events.pad", {kEventsStepData}),  // S2b: a pad on the DATA field of a NOTE row enters the note (TURN EDIT ON in WATCH)
       A("events.preview"),
@@ -386,11 +387,10 @@ const std::vector<ActionEntry>& action_states() {
       A("verb.open"),  // OS-PTOOLS2 S3: F7, the verb menu (tools.open has no key any more: the menu's APPS > row runs it by name)
       A("verb.pick", {kVerbMenuOpen}),  // a pad 1-16 in the menu, arg = the pad's index (8 = INVERT); in this state pad 0 (TRANSPOSE) acts on the block
       A("verb.run", {kVerbMenuOpen}),   // F1 in the menu: the verb under the cursor
-      A("verb.events", {kVerbMenuOpen}),  // OS-TOOLSDEDUP: F6 in the menu closes it and opens the EVENTS list
+      A("verb.repeat", {kVerbMenuOpen, kFillDone}),  // OS-F6EVENTS: F6 in the menu closes it and runs tools.repeat (RE FILL / REPEAT)
       A("verb.hold", {kEdit, kSel}),    // OS-PTOOLS2 S3b: F7 held; opens nothing, it only marks the hold (refused like verb.open in LIVE / with no project)
       A("verb.hold_pad", {kEdit, kSel}),  // OS-PTOOLS2 S3b: F7 held + a pad, arg = the pad's index 0..15 (0 = pad 1, TRANSPOSE): the verb runs without the menu
       A("verb.hold_end", {kEdit, kSel}),  // OS-PTOOLS2 S3b: the release of a held F7 after its Hold: ends the hold, clears the pad mark
-      A("tools.repeat", {kEdit, kSel, kFillDone}),  // OS-PTOOLS2 S3: F6 REPEAT on Pattern; before any fill it only says NOTHING TO REPEAT, with a fill done it repeats it
       A("track.mute"),
       A("track.mute_mode", {kDemo, kAudio}),
       A("track.solo"),
@@ -470,7 +470,7 @@ const std::vector<ContextReach>& context_reach() {
       {Context::WaveGran, "WaveGran", nullptr, "the Wave screen of a GRANULAR instrument: no instrument of the two documents is one"},
       {Context::ExportProgress, "ExportProgress", "tap file\nwait 300\ntap f7\ntap f1\nwait 5\n", nullptr, "audio on\n"},
       {Context::InputTest, "InputTest", nullptr, "a hidden screen, reached only by the boot chord (Shift + F1 + F8 at power-on)", "", "action nav.screen 11\n"},  // the rules walk gets there through the screen registry
-      {Context::Events, "Events", "tap f7\ntap f6\n", nullptr},  // OS-MIDIREC S1b, OS-TOOLSDEDUP: F7, the verb menu, and F6 (EVENTS, A18) opens the list
+      {Context::Events, "Events", "tap f6\n", nullptr},  // OS-MIDIREC S1b, OS-F6EVENTS: Pattern F6 (EVENTS, A18) opens the list (it was F7, the verb menu, then F6)
   };
   return table;
 }

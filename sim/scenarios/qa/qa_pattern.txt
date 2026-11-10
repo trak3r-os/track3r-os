@@ -1003,12 +1003,11 @@ wait 10
 # QA-PAT-447: with a block the info line says what it is and what the keys do: `BLOCK 3 STEPS  ENC: TRANSPOSE  F7: TOOLS ...` (the parts that do not fit are left off, from the end).
 snap qa_pat_447
 
-# QA-PAT-448 (OS-TOOLSDEDUP): F6 EVENTS works on the APPS page too: the menu, APPS >, F6 opens the EVENTS overlay over the cursor's track (the page lists tool apps only, so with none the soft-key row is EVENTS and BACK).
+# QA-PAT-448 (OS-TOOLSDEDUP, OS-F6EVENTS): F6 RE FILL works on the APPS page too: the menu, APPS >, F6 closes the menu and repeats the last verb (here the earlier random fill: the strip says FILL: WHOLE STEPS, RANDOM 30 % again; the page lists tool apps only, so with none the soft-key row is RE FILL and BACK).
 tap f7
 pad 15
 tap f6
 snap qa_pat_448
-tap f8
 
 # QA-PAT-449: F7 while playing in WATCH with a block opens the verb menu (it was refused before, OS-BUG-TOOLSPLAY); APPS > opens the APPS page. In WATCH the info line is bare: the block hint is an Edit thing (ENC, PAD and DEL all need Edit), so qa_pat_449_watch shows no hint.
 action view.mode 3
