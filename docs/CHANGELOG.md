@@ -2,30 +2,30 @@
 
 User-visible changes of the Community OS, newest first, one entry per change, in English. The next release notes link here. A change that touches a saved file or the level of what you hear says so in plain words.
 
-## v1.3.0 (date to be set at publication)
+## v1.3.0 (2026-11-11)
 
 **Copy the new modules zip to the card.** TB-303, Chip, FM and SID now load from the card (`/modules/instruments/`); without them those instruments are muted and say `MODULE ... NOT LOADED`.
 
-Everything below is merged and tested on the host and in the emulator. Where a line says "checked on the unit" a Tracker ran it. Where a line says "Unit check: see release notes", no unit result is in yet (see "Not yet verified" in the [release notes](release/v1.3.0.md)).
+Everything below is merged and tested on the host and in the emulator. Where a line says "checked on the unit" a Tracker ran it. More testing is needed on units (see "More testing needed" in the [release notes](release/v1.3.0.md)).
 
 ### New
 
-- **MIDI recording into lanes.** A MIDI track records into lanes: notes and chords, sub-step timing and length, external CC, a Learn knob and the encoder recorded as a CC letter (CC A..F), the REC STORE setting, and the EVENTS list over the lanes. One undo per take. Unit check: see release notes.
-- **Automate any parameter from the pattern.** With REC on, move a MIDI Learn knob or the encoder's learned parameter and the pattern moves that parameter on playback (CC A..F steps). Up to six letters per project. Unit check: see release notes.
-- **LEARN MAP: one screen with every MIDI Learn binding** and the encoder's target. Open it with `F6` MAP in the Learn dialog or `F8` on Config > MIDI. Unit check: see release notes.
+- **MIDI recording into lanes.** A MIDI track records into lanes: notes and chords, sub-step timing and length, external CC, a Learn knob and the encoder recorded as a CC letter (CC A..F), the REC STORE setting, and the EVENTS list over the lanes. One undo per take. Checked on unit b13: notes, chords, sub-step timing and length, external and Learn CC, REC STORE, EVENTS, one undo per take, a save and a power cycle, five minutes at CPU max 58.6 %.
+- **Automate any parameter from the pattern.** With REC on, move a MIDI Learn knob or the encoder's learned parameter and the pattern moves that parameter on playback (CC A..F steps). Up to six letters per project. Checked on unit b13 with CC FX on 8 tracks: CPU max 82.5 %, no underrun.
+- **LEARN MAP: one screen with every MIDI Learn binding** and the encoder's target. Open it with `F6` MAP in the Learn dialog or `F8` on Config > MIDI.
 - **STATUS LED BPM mode** on Config (BLINK, BPM or OFF), saved with the device settings. Checked on the unit.
-- **A bar under the name of each track that has an insert** on the MIXER page. Unit check: see release notes.
+- **A bar under the name of each track that has an insert** on the MIXER page.
 - **Advanced cheat sheet**, [manual/advanced.md](manual/advanced.md): a printable page of the advanced keys.
 
 ### Changed
 
-- **The four instrument synths are card modules.** TB-303, Chip, FM and SID are no longer inside the firmware image (about 36 KB of flash freed). Copy `modules/instruments/` and `LICENSES/` from the starter zip to the card. **Overwrite older copies on the card:** an older `chip.tmod` (1.0.0) would now be used and lacks Chip waves 4..11. Unit check: see release notes.
+- **The four instrument synths are card modules.** TB-303, Chip, FM and SID are no longer inside the firmware image (about 36 KB of flash freed). Copy `modules/instruments/` and `LICENSES/` from the starter zip to the card. **Overwrite older copies on the card:** an older `chip.tmod` (1.0.0) would now be used and lacks Chip waves 4..11.
 - **Saved files.** The project format gains an `MEVT` chunk for the MIDI lanes. It is additive: an older firmware keeps it as an unknown chunk. The instrument file is INST 1.9 (CC letters); an older firmware says "newer fields skipped", but nothing is lost.
 - **Module ABI unchanged** (1.13).
 - **Pattern: `F6` opens EVENTS** directly. RE FILL / REPEAT moves to the verb menu: `F7`, then `F6`. Checked on unit b11: `F6` opens EVENTS; `F7` then `F6` runs the repeat.
-- **Pattern tools.** The TOOLS panel holds Humanize, and `F6` repeats the last FILL or TOOLS apply. Unit check: see release notes.
-- **Chip.** The Wave view draws waves 4..11 and the Envelope view names the filter direction. Unit check: see release notes.
-- **MIDI Time Code checked on a unit over USB.** MTC OUT at 24, 25 and 30 fps, and MTC IN, follow within about 1 ms once locked; a re-lock takes about 1.75 s. DIN and Logic Pro: see release notes.
+- **Pattern tools.** The TOOLS panel holds Humanize, and `F6` repeats the last FILL or TOOLS apply.
+- **Chip.** The Wave view draws waves 4..11 and the Envelope view names the filter direction.
+- **MIDI Time Code checked on a unit over USB.** MTC OUT at 24, 25 and 30 fps, and MTC IN, follow within about 1 ms once locked; a re-lock takes about 1.75 s.
 
 ### Fixed
 
