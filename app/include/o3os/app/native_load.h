@@ -34,6 +34,7 @@ struct NativeLoadReport {
   std::uint32_t instruments = 0;
   std::uint32_t unknown_dropped = 0;   // chunks of a newer writer that did not fit the pool
   bool newer_minor = false;            // a chunk with fields this reader does not know: they are lost on the next save
+  std::uint32_t mevt_skipped = 0;      // MIDI take lanes the reader did not take (OS-MIDIREC-P1: a pattern the project lacks, an out-of-range lane...): lost on the next save
   std::uint32_t sanitised = 0;         // settings and session-state values that were out of range and read as their defaults (OS-PERSIST2)
   hal::storage::Status storage_error = hal::storage::Status::Ok;  // a card error that ended the load
 };
@@ -49,6 +50,8 @@ class NativeFolderLoader {
   // that plays it, 12 tracks: ADR 0003) and ends Done, with folder() "" (no folder holds it). The platform then runs the phases after a load. Anything
   // running is abandoned, as begin(). `keep_instruments` (OS-NEWKEEP, File > NEW > KEEP INSTRUMENTS): the instrument table and the module table the instruments name are left as they are.
   void begin_fresh(model::ModelArena& arena, bool keep_instruments = false) noexcept;
+  // OS-MIDIREC-P1 S2: the document's MIDI take lanes. A file's MEVT chunk is read into them; a new project empties them. Without (nullptr, the default) MEVT is an unknown chunk.
+  void attach_lanes(model::LaneStore* lanes) noexcept { lanes_ = lanes; }
   bool fresh() const noexcept { return fresh_; }
   bool keeps_instruments() const noexcept { return fresh_ && keep_instruments_; }  // the fresh project kept the instrument table (and so its audio)
   State step(std::size_t byte_budget) noexcept;
@@ -67,6 +70,7 @@ class NativeFolderLoader {
 
   hal::storage::Storage* storage_ = nullptr;
   model::ModelArena* arena_ = nullptr;
+  model::LaneStore* lanes_ = nullptr;
   State state_ = State::Idle;
   bool active_ = false;
   bool fresh_ = false;    // begin_fresh(): no file

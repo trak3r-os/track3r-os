@@ -5,6 +5,7 @@
 // as the reader promises (untouched when there is no file, reset and valid when the file read badly).
 #include <doctest/doctest.h>
 
+#include "support/iff.h"
 #include "support/mem_card.h"
 #include "support/memory_io.h"
 #include "support/need.h"
@@ -434,4 +435,185 @@ TEST_CASE("verify: ProjectVerify checks the files of a folder before anything is
   CHECK(run_verify("Projects/OgShort", true, false) == app::ProjectVerify::State::Refused);
   CHECK(run_verify("Projects/OgWrongLen", true, false) == app::ProjectVerify::State::Refused);
   CHECK(run_verify("Projects/Empty", true, false) == app::ProjectVerify::State::Refused);
+}
+
+// ---- OS-MIDIREC-P1 S2: the MIDI take lanes of the document ---------------------------------------------------------------------------------------------------------------------------------------
+
+namespace {
+
+unsigned first_pattern_id(const o3os::model::Project& p) {
+  for (unsigned id = 1; id <= o3os::model::kMaxPatternId; ++id) {
+    if (p.pattern(id) != nullptr) return id;
+  }
+  return 0;
+}
+
+o3os::model::LaneEvent lane_note(unsigned tick, unsigned note) {
+  o3os::model::LaneEvent e{};
+  e.tick = static_cast<std::uint16_t>(tick);
+  e.len = 12;
+  e.a = static_cast<std::uint8_t>(note);
+  e.b = 100;
+  return e;
+}
+
+}  // namespace
+
+TEST_CASE("native load: the lanes of a file load into the attached store, a file with none empties it, a stale store is cleared") {
+  o3os::model::ModelArena& src = o3os::test::arena(0);
+  o3os::test::fill_small(src.project);
+  const unsigned id = first_pattern_id(src.project);
+  NEED(id != 0);
+  static o3os::model::LaneStore from;
+  static o3os::model::LaneStore doc;
+  from.clear();
+  from.adopt(src.project.load_epoch());
+  o3os::model::LaneEvent* g = from.open_gap(id, 2, 0, 3);
+  NEED(g != nullptr);
+  g[0] = lane_note(0, 60);
+  g[1] = lane_note(100, 62);
+  g[2] = lane_note(400, 64);
+  Bytes with_lanes;
+  NEED(o3os::test::save(src.project, with_lanes, o3os::formats::native::kDefaultStepBudget, &from) == nat::Progress::Done);
+  const Bytes without = native_file(0);
+  CHECK(with_lanes.size() > without.size());
+
+  MemCard card;
+  card.put("Projects/Lanes/project.o3pj", with_lanes);
+  card.put("Projects/Plain/project.o3pj", without);
+  o3os::model::ModelArena& target = o3os::test::arena(1);
+  target.project.reset();
+  app::NativeFolderLoader loader;
+  loader.attach_lanes(&doc);
+  doc.clear();
+
+  // the file's lanes arrive, in the store's epoch of the loaded project, and a save of the document gives the file back
+  NEED(loader.begin(card, "Projects/Lanes", target));
+  run(loader);
+  CHECK(loader.state() == State::Done);
+  CHECK(loader.report().mevt_skipped == 0u);
+  CHECK(doc.in_sync(target.project.load_epoch()));
+  CHECK(doc.lane_count() == 1u);
+  const o3os::model::LaneStore::View v = doc.lane(id, 2);
+  NEED(v.count == 3u);
+  CHECK(std::memcmp(v.events, g, 3 * sizeof(o3os::model::LaneEvent)) == 0);
+  Bytes again;
+  CHECK(o3os::test::save(target.project, again, o3os::formats::native::kDefaultStepBudget, &doc) == nat::Progress::Done);
+  CHECK(again == with_lanes);
+
+  // a file with no MEVT chunk leaves the document with no lane (the lanes of the first one do not stay)
+  NEED(loader.begin(card, "Projects/Plain", target));
+  run(loader);
+  CHECK(loader.state() == State::Done);
+  CHECK(doc.total_events() == 0u);
+  CHECK(doc.in_sync(target.project.load_epoch()));
+
+  // the fresh form (NEW) drops lanes at once, and the store follows the project's new epoch
+  doc.adopt(target.project.load_epoch());
+  o3os::model::LaneEvent* h = doc.open_gap(id, 0, 0, 1);
+  NEED(h != nullptr);
+  h[0] = lane_note(1, 1);
+  loader.begin_fresh(target);
+  CHECK(loader.step(4096) == State::Done);
+  CHECK(doc.total_events() == 0u);
+  CHECK(doc.in_sync(target.project.load_epoch()));
+}
+
+TEST_CASE("native load: a lane the reader skips is counted in the report and named by describe_native_load") {
+  o3os::model::ModelArena& src = o3os::test::arena(0);
+  o3os::test::fill_small(src.project);
+  static o3os::model::LaneStore from;
+  static o3os::model::LaneStore doc;
+  from.clear();
+  from.adopt(src.project.load_epoch());
+  const unsigned id = first_pattern_id(src.project);
+  NEED(id != 0);
+  o3os::model::LaneEvent* g = from.open_gap(id, 0, 0, 1);
+  NEED(g != nullptr);
+  g[0] = lane_note(0, 60);
+  Bytes file;
+  NEED(o3os::test::save(src.project, file, o3os::formats::native::kDefaultStepBudget, &from) == nat::Progress::Done);
+  // the MEVT chunk with its one lane moved to pattern 0, which no project has
+  std::vector<o3os::test::RawChunk> chunks = o3os::test::split_chunks(file);
+  bool found = false;
+  for (o3os::test::RawChunk& c : chunks) {
+    if (c.id == nat::kChunkMevt) {
+      c.payload[4] = 0;  // the first lane's pattern byte (after the version and the lane count)
+      found = true;
+    }
+  }
+  NEED(found);
+  MemCard card;
+  card.put("Projects/Skip/project.o3pj", o3os::test::build_file(chunks));
+  o3os::model::ModelArena& target = o3os::test::arena(1);
+  target.project.reset();
+  app::NativeFolderLoader loader;
+  loader.attach_lanes(&doc);
+  NEED(loader.begin(card, "Projects/Skip", target));
+  run(loader);
+  CHECK(loader.state() == State::Done);
+  CHECK(loader.report().mevt_skipped == 1u);
+  CHECK(doc.lane_count() == 0u);
+  char line[128];
+  CHECK(app::describe_native_load(loader, line, sizeof line) > 0u);
+  CHECK(std::string(line).find("1 MIDI lane skipped") != std::string::npos);
+}
+
+// OS-MIDIREC-P1 S2 fold: the reader keeps a write window open over the lane it fills; a load that is dropped part way (a new begin, begin_fresh, abort) must shut it, or the render skips every lane for good.
+TEST_CASE("native load: a load dropped part way through a lane leaves the store's write window shut; clear and sync shut a leaked one") {
+  o3os::model::ModelArena& src = o3os::test::arena(0);
+  o3os::test::fill_small(src.project);
+  const unsigned id = first_pattern_id(src.project);
+  NEED(id != 0);
+  static o3os::model::LaneStore from;
+  static o3os::model::LaneStore doc;
+  from.clear();
+  from.adopt(src.project.load_epoch());
+  o3os::model::LaneEvent* g = from.open_gap(id, 2, 0, 1000);  // a lane of 8 KB: many 512-byte slices
+  NEED(g != nullptr);
+  for (unsigned i = 0; i < 1000; ++i) {
+    g[i] = lane_note(i * 3u / 4u, 40u + i % 60u);
+  }
+  Bytes file;
+  NEED(o3os::test::save(src.project, file, o3os::formats::native::kDefaultStepBudget, &from) == nat::Progress::Done);
+  MemCard card;
+  card.put("Projects/Long/project.o3pj", file);
+  o3os::model::ModelArena& target = o3os::test::arena(1);
+  target.project.reset();
+  app::NativeFolderLoader loader;
+  loader.attach_lanes(&doc);
+  doc.clear();
+
+  for (int how = 0; how < 3; ++how) {  // abort, a new begin, begin_fresh
+    NEED(loader.begin(card, "Projects/Long", target));
+    bool open = false;
+    for (int i = 0; i < 200 && loader.state() == State::Running && !open; ++i) {
+      (void)loader.step(512);
+      open = (doc.seq() & 1u) != 0u;
+    }
+    NEED(open);  // part way through the lane the window is open
+    if (how == 0) {
+      loader.abort();
+    } else if (how == 1) {
+      NEED(loader.begin(card, "Projects/Long", target));
+    } else {
+      loader.begin_fresh(target);
+    }
+    CHECK((doc.seq() & 1u) == 0u);
+    loader.abort();
+  }
+
+  // a window leaked by any other writer ends with the next clear, and with a sync that moves the epoch
+  doc.begin_write();
+  doc.begin_write();
+  CHECK((doc.seq() & 1u) == 1u);
+  doc.clear();
+  CHECK((doc.seq() & 1u) == 0u);
+  doc.adopt(target.project.load_epoch());
+  doc.begin_write();
+  doc.sync(target.project.load_epoch() + 1u);
+  CHECK((doc.seq() & 1u) == 0u);
+  doc.begin_write();  // the normal nesting still works after it
+  doc.end_write();
+  CHECK((doc.seq() & 1u) == 0u);
 }

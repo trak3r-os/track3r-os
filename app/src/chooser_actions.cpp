@@ -49,8 +49,28 @@ bool set_length(ActionContext& ctx, int length) noexcept {
     return false;
   }
   const unsigned id = ctx.view.edit.pattern;
-  const model::Status st = src.exists() ? ctx.edit->set_pattern_length(id, static_cast<unsigned>(length))
-                                        : ctx.edit->create_pattern(id, static_cast<unsigned>(length));
+  PatternEdit& e = ctx.view.edit;
+  model::Status st = src.exists() ? ctx.edit->set_pattern_length(id, static_cast<unsigned>(length))
+                                  : ctx.edit->create_pattern(id, static_cast<unsigned>(length));
+  const std::uint32_t generation = ctx.edit->project().generation();
+  const std::uint16_t asked = static_cast<std::uint16_t>((id << 8) | static_cast<unsigned>(length));
+  if (st == model::Status::Full && src.exists() && ctx.edit->lanes() != nullptr && ctx.edit->lanes()->total_events() != 0u) {
+    // OS-MIDIREC-P1 S2 (maintainer, 2026-11-10): the cut MIDI lane events do not fit the undo ring (the Editor refused, nothing changed). The first press asks; the same length again, with no edit
+    // in between, goes on without undo and forgets the whole undo history (what the ring holds names a project that is not the one that results).
+    if (e.undo_ask != asked || e.undo_ask_generation != generation) {
+      e.undo_ask = asked;
+      e.undo_ask_generation = generation;
+      return pe::say(ctx, core::Severity::Warn, "TOO BIG TO UNDO: AGAIN TO CUT THE LANES");
+    }
+    const bool was_final = ctx.edit->final_edits();  // as the dispatcher does (actions.cpp): put back what it was, not false
+    ctx.edit->set_final(true);                       // the unit records nothing
+    st = ctx.edit->set_pattern_length(id, static_cast<unsigned>(length));
+    ctx.edit->set_final(was_final);
+    if (st == model::Status::Ok) {
+      ctx.edit->history_reset();
+    }
+  }
+  e.undo_ask = 0;
   if (st != model::Status::Ok) {
     return pe::say(ctx, core::Severity::Warn, "NO ROOM FOR A NEW PATTERN");
   }

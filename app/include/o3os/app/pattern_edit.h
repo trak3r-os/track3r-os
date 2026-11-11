@@ -112,6 +112,10 @@ struct PatternEdit {
   NoteEntry entry;                // OS-PADS-B: root, scale, octave and SCALE LOCK of the note entry (held Note, note_entry.h); the jump is edit_step
   std::uint8_t pad_held[48] = {};    // the note + 1 that the PIANO / ISO pad under the finger started (0: none), so its release ends that note even if the octave changed meanwhile
   StepHold step_hold;
+  // OS-MIDIREC-P1 S2: the length chooser's "TOO BIG TO UNDO" question (chooser_actions.cpp set_length): (pattern << 8 | length) the first press asked about, 0 none, and the project generation it
+  // was asked at (any edit in between takes the question back). Main loop only.
+  std::uint16_t undo_ask = 0;
+  std::uint32_t undo_ask_generation = 0;
   std::uint8_t queued_pattern = 0;   // the pattern a PATS pad queued and the sequencer has not started yet (0: none): the pad blinks
   // OS-PATSWITCH (runtime only, main loop only): the pattern a pick in the held PATTERN chooser asked the sequencer to switch to at the next step boundary and the published position has not shown yet (0: none).
   // While it is set the view is not pulled back to the playing pattern (App::poll_play_position clears it when the pattern shows, when the transport stops, and after kSwitchGuardSteps step changes without the landing).

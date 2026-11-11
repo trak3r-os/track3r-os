@@ -210,7 +210,7 @@ void PatternScreen::render(const Model& model, const ViewState& view, ui::Render
   core::FixedString<48> events_also;
   if (view.overlay == OverlayId::Events && model.project != nullptr) {
     model::events::Row row;
-    if (events_cursor_row(*model.project, view.edit.pattern, view.events, row)) {
+    if (events_cursor_row(*model.project, view.edit.pattern, view.events, row, model.lanes) && row.key.lane == 0u) {  // a lane row has no step FX to name
       const model::Pattern* pat = model.project->pattern(view.edit.pattern);
       if (pat != nullptr) {
         const model::Step& st = pat->steps[row.key.track][row.key.step];

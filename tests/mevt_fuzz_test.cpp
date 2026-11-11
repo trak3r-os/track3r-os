@@ -72,6 +72,7 @@ void fill(const Project& p) {
 
 // What a Done load promises about the store it filled.
 void check_store(const LaneStore& s) {
+  CHECK((s.seq() & 1u) == 0u);  // OS-MIDIREC-P1 S2: the reader's fill window is closed at Done, on a dropped lane and on Failed (the render never plays through an open one)
   CHECK(s.lane_count() <= kMaxLanes);
   CHECK(s.total_events() <= kMaxLanePoolEvents);
   std::uint32_t lanes = 0;

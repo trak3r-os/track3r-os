@@ -310,6 +310,9 @@ void SimProject::begin_samples() noexcept {
 void SimProject::finish() noexcept {
   const bool ok = loaded();
   const bool imported = module_->active();
+  if (lanes_ != nullptr) {
+    lanes_->sync(arena_.project.load_epoch());  // as the platform's finish_load: no lane of the replaced project plays
+  }
   editor_.history_reset();
   app_.attach_document(&editor_);
   app_.document_replaced(imported && ok);  // an imported song is on no card: dirty

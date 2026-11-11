@@ -877,6 +877,42 @@
   },
   {
    "say": "Then `diag cpu` and `diag mod`: min / mean / max per instance for the two runs. Expected equal within noise (the parameters add no per-sample work; the state block is 32 B larger, 400 to 432 B, so eight TB-303s take 3,456 B of the 4,096 B SRAM_U arena and still fit, with 640 B left for other module states instead of 896 B: `diag mod` should show every instance in SRAM_U). Write the numbers into docs/architecture/cpu-budget.md."
+  },
+  {
+   "say": "OS-CECHIP C7 rows QA-MOD-256..262 of docs/qa/catalogue/modules.md (new Community OS behaviour, tracker-ce CHIP waves 4..11; needs the SD content zip's chip.tmod 1.1.0 on the card). QA-MOD-256: Chip on a free slot, F1..F4: TONE, ENV, PITCH (ends with Shape and Sub Osc) and OSC/FX (Cutoff, Resonance, Bitcrush, PWM Depth, PWM Rate, Env Amt, Decimate, Chord); Wave reads twelve names, Chord reads OFF, MAJOR, MINOR and the others."
+  },
+  {
+   "say": "QA-MOD-257 / 258: the Wave view while Wave moves from 2A03 PULSE to CHIP DRUM: a name above a 96-sample trace of that wave's kernel, moved by Shape and Sub Osc; the Envelope view with Env Amt +50 says FILTER OPENS, -50 FILTER CLOSES, 0 says nothing. Photograph both views for the manual."
+  },
+  {
+   "say": "QA-MOD-259: Chip Wave 2A03 PULSE, a held note at C-2, C-4, C-6; Duty 12.5 / 25 / 50 %: a narrow hollow pulse, Duty changes the colour; no click, no whistle on the top notes."
+  },
+  {
+   "say": "QA-MOD-245 (SID SAW/TRI): Wave SID SAW/TRI, held C-2 / C-4 / C-6, Shape 0 / 50 / 100 %, Sub Osc 50 %: a triangle to a saw with a ring-modulated edge, Sub Osc changes the ring's colour."
+  },
+  {
+   "say": "QA-MOD-245 (NOISE/LFSR): Wave NOISE/LFSR: pitched noise that follows the key; Shape under 50 % the long sequence, 50 % up the short metallic one; PWM Depth 100 % a coarser clock."
+  },
+  {
+   "say": "QA-MOD-245 (SUPER SQR): Wave SUPER SQR: three detuned pulses that beat, wider as Shape rises; no click, no aliasing whistle on the top notes."
+  },
+  {
+   "say": "QA-MOD-246 (FM BELL): Wave FM BELL, short and held notes at C-3 and C-5; Shape 0 / 50 / 100 % changes the partials, PWM Depth brightens, the sound mellows as the note decays."
+  },
+  {
+   "say": "QA-MOD-260: Wave ZAP/LASER, a short note and a held one at C-3 and C-5; Shape 0 / 50 / 100 %: a falling zap, longer with Shape, every trigger starts the same way."
+  },
+  {
+   "say": "QA-MOD-261: Wave ARP CHORD with Chord OFF (plays Major), then MINOR and OCTAVE at Arp Speed 8 and 16 Hz; then Wave PULSE with Chord MAJOR over Arp 1 / Arp 2 set: the chord replaces the arpeggio."
+  },
+  {
+   "say": "QA-MOD-246 (CHIP DRUM): Wave CHIP DRUM, Shape 0 a kick (a pitch drop of about a quarter of a second), 50 % a snare, 100 % a metallic hat; every trigger starts the same way."
+  },
+  {
+   "say": "QA-MOD-262: Chip on PULSE: Cutoff 40 % with Resonance 60 %, Env Amt +50 / -50, Bitcrush 50 %, Decimate 50 %, Sub Osc 50 %; then load a project saved before the new rows (twenty values): it sounds as before and the ten new rows read their defaults."
+  },
+  {
+   "say": "OS-CECHIP C6 CPU arm: a Chip held on four tracks, one wave at a time over 0..11, post chain at its defaults and then with Cutoff 40 %, Bitcrush 50 %, Decimate 50 %, Sub Osc 50 %: `diag cpu` and `diag mod` min / mean / max per wave. Write the twelve numbers into the Chip row of docs/architecture/cpu-budget.md (QEMU figures per 64 frames: waves 4..11 at defaults 5,859 / 6,113 / 3,250 / 9,691 / 10,121 / 5,910 / 5,886 / 6,300 instructions; the unit's figure is in cycles)."
   }
  ],
  "finally": [

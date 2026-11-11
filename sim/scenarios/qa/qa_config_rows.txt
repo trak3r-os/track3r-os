@@ -68,7 +68,7 @@ assert state screen=CONFIG instrument=1
 # QA-CFG-240: Left / Right change the value under the cursor, one detent, and the pad board follows at once: PAD OFFSET 12 -> 11; the asserts read the note the pad writes (48 after the detent).
 tap f6
 assert state screen=CONFIG page=5
-tap down 7
+tap down 8
 tap pattern
 action view.mode 0
 action cursor.track 0
@@ -80,7 +80,7 @@ tap config
 tap f5
 tap f6
 assert state screen=CONFIG page=5
-tap down 7
+tap down 8
 tap left
 assert state screen=CONFIG page=5
 tap pattern
@@ -95,7 +95,7 @@ tap config
 tap f5
 tap f6
 assert state screen=CONFIG page=5
-tap down 7
+tap down 8
 tap right
 press shift
 tap left

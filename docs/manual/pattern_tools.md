@@ -169,7 +169,7 @@ Start on the Pattern screen, with the transport stopped. Select a block first to
 1. Press `F6` (**EVENTS**). The grid pane becomes the event list. <!-- QA-PAT-436, QA-PAT-400, QA-PAT-401 -->
 2. One row per note, with its length in **LEN**; one per MIDI CC (`CC A` to `CC F`); one per note-off that ends no note above it. `Up` and `Down` move the row; `Left` and `Right` move across its fields. <!-- QA-PAT-402 -->
 3. In Edit (`Rec`), the encoder changes the boxed field of the row — TIME by a microstep (a whole step with `Shift`), DATA by a semitone, VAL by 1, LEN by a step, TYPE to the next CC letter, CH to the next channel, IN to the next instrument — and a pad enters the pad's note on **DATA**, the 0..127 ramp on **VAL**, or sounds the row's step anywhere else. Each press writes the step and is one undo step. <!-- QA-PAT-412..420 -->
-4. The columns read TIME (the step and the percent of it, so a micro-moved note reads `009.50`), CH, DATA (the note, or what the CC sends, such as `#074`, `PROG` or `--`), VAL, IN and FL. A note with nothing below it reads `>` in LEN and plays on past the track's end. <!-- QA-PAT-402, QA-PAT-403, QA-PAT-404, QA-PAT-405 -->
+4. The columns read TIME (the step and the percent of it, so a micro-moved note reads `009.50`), CH, DATA (the note, or what the CC sends, such as `#074`, `PROG` or `--`), VAL, IN and FL. A note with nothing below it reads `>` in LEN and plays on past the track's end. A row of a take lane has an `L` in the SRC column (see "Edit the events of a take lane" below). <!-- QA-PAT-402, QA-PAT-403, QA-PAT-404, QA-PAT-405 -->
 5. Press `F1` (**FILTER**) to show every row, only the notes, or only the CC rows: the key reads `ALL 1/3`, `NOTE 2/3`, `CC 3/3`, and the count in the header follows. <!-- QA-PAT-407 -->
 6. Hold `F5` (**PREVIEW**) to hear the row's step. While the pattern plays, a bar in the left margin marks the row of the step that is playing. <!-- QA-PAT-410 -->
 7. Press `F8` (**BACK**): the grid cursor lands on the row's step, track and column. <!-- QA-PAT-408 -->
@@ -191,6 +191,22 @@ Start in the event list with Edit on (`Rec`). The list shows the steps of the pa
 7. Press `F7` (**UNDO**) to take back the last edit without leaving the list, and `Shift` + `F7` (**REDO**) to do it again. The list shows the pattern again and the cursor stays on its event. `F8` (**UNDO**) on the grid takes back the same steps after you press `F8` (**BACK**). <!-- QA-PAT-423 -->
 
 In WATCH every one of these keys says **TURN EDIT ON** and writes nothing. <!-- QA-PAT-424 --> Each key is one undo step, and **QUANT ALL** is one for the whole operation. A CC step with a micro-moved note still sends its CC at the start of the step, and only the note is late: that is why a CC row has no time inside a step. <!-- QA-PAT-425 --> New in track3r-os. <!-- QA-PAT-421..423, QA-PAT-426..428 -->
+
+### Edit the events of a take lane
+<!-- sync: src=app/src/events_actions.cpp,app/src/screens/events_overlay.cpp,model/src/event_list.cpp spec=docs/specs/OS-MIDIREC-P1.md qa=QA-PAT-505,QA-PAT-506,QA-PAT-507,QA-PAT-508,QA-PAT-509,QA-PAT-510,QA-PAT-511,QA-PAT-512 -->
+
+A track can hold a lane of MIDI events beside its steps: a take that was recorded with REC STORE set to Lane keeps every note, CC and bend at its own time, on the channel it came in on. The event list shows them after the steps' rows at the same time, in time order, and a lane row has an **L** in the **SRC** column. A step row has nothing there. <!-- QA-PAT-505 -->
+
+Start in the event list with Edit on (`Rec`), on a track that has a lane.
+
+1. Look at the list. Notes that sound together, such as a chord, are several NOTE rows with the same TIME. **CH** is the channel the event is stored with, and **LEN** of a note is its true length, not a number of steps. <!-- QA-PAT-505 -->
+2. Press `Right`. A lane row has no TYPE, IN or FX field, so `Right` goes from TIME to CH, then DATA, VAL and LEN. The encoder changes the boxed field: CH by one channel, LEN by its own unit, TIME by one tick (a whole step with `Shift`). Each detent is one undo step. <!-- QA-PAT-506, QA-PAT-507 -->
+3. After a TIME change the row takes its new place in the list and the cursor follows it. TIME beyond the track's last step is refused: the strip says **OUTSIDE THE SCOPE**. <!-- QA-PAT-508, QA-PAT-512 -->
+4. Press `Delete` to drop the event. A chord keeps its other notes. `F7` (**UNDO**) brings the event back. <!-- QA-PAT-509 -->
+5. Press `Insert` on a lane note to add a copy where the note ends (`Shift` + `Insert`: at the same time). The strip says **NO ROOM AFTER THIS NOTE** when it cannot, and **TOO MANY EVENTS HERE** when more than 32 events would be touched at once. **LANE FULL: NOTHING CHANGED** means the lane has no room for the event. <!-- QA-PAT-510 -->
+6. `F2` (**QUANT**) says **NO QUANT ON A LANE ROW** and writes nothing; `Shift` + `F2` leaves the lane rows as they are. <!-- QA-PAT-511 -->
+
+`F5` (**PREVIEW**) has no step to sound on a lane row and says so. New in track3r-os. Not yet checked on the unit.
 
 ### Double, spread or halve a pattern
 

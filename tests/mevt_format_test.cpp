@@ -227,9 +227,9 @@ TEST_CASE("mevt: round trips, empty, one lane, 2048 lanes and a full pool") {
   NEED(fill_lanes(proj(0), g_a, 2048, 1) == 2048u);
   roundtrip(proj(0), g_a, 2048, 2048);
 
-  NEED(fill_lanes(proj(0), g_a, 2048, 12) == 2048u);
-  CHECK(g_a.total_events() == 24576u);
-  roundtrip(proj(0), g_a, 2048, 24576);
+  NEED(fill_lanes(proj(0), g_a, 1920, 4) == 1920u);  // the pool exactly full (OS-MIDIREC-P1 decision 2026-11-10: 7,680 events)
+  CHECK(g_a.total_events() == 7680u);
+  roundtrip(proj(0), g_a, 1920, 7680);
 }
 
 TEST_CASE("mevt: the chunk is written as described, after INSX and before the unknown chunks and the CRC") {
@@ -313,14 +313,13 @@ TEST_CASE("mevt: a lane the reader cannot use is skipped and counted, the projec
   // a pool that has no room for the next lane
   std::vector<LaneEvent> full;
   make_events(5, 4096, full);
-  std::vector<Lane> seven;
-  std::uint32_t made = 0;
-  for (unsigned t = 0; t < 16 && made < 7; ++t, ++made) seven.push_back(Lane{id, t, full});
+  std::vector<Lane> three;  // the pool holds 7,680: one lane of 4,096 fits, the second and third do not
+  for (unsigned t = 0; t < 3; ++t) three.push_back(Lane{id, t, full});
   rep = Report{};
-  NEED(load_payload(mevt(seven), rep) == Progress::Done);
-  CHECK(rep.mevt_skipped == 1u);
-  CHECK(g_b.lane_count() == 6u);
-  CHECK(g_b.total_events() == 24576u);
+  NEED(load_payload(mevt(three), rep) == Progress::Done);  // never a failed load
+  CHECK(rep.mevt_skipped == 2u);
+  CHECK(g_b.lane_count() == 1u);
+  CHECK(g_b.total_events() == 4096u);
 }
 
 TEST_CASE("mevt: the reader's tolerances") {
@@ -472,18 +471,18 @@ TEST_CASE("mevt: an older build keeps a chunk of 16 KiB or less as unknown and w
 
 TEST_CASE("mevt: the model's limits are the file's") {
   // 2 + 2 + 2048 lanes x (6 + 4096 x 8) would not fit the pool: the pool caps the chunk
-  CHECK(4u + kMaxLanes * 6u + kMaxLanePoolEvents * 8u == 4u + 12288u + 196608u);
-  CHECK(kMaxLanePoolEvents * sizeof(LaneEvent) == 192u * 1024u);
+  CHECK(4u + kMaxLanes * 6u + kMaxLanePoolEvents * 8u == 4u + 12288u + 61440u);
+  CHECK(kMaxLanePoolEvents * sizeof(LaneEvent) == 60u * 1024u);
   CHECK(LaneStore::kKeys == 4080u);
   // the biggest file (every arena slot full, every lane, the whole pool) is saved and fits the reader's size limit
   test::fill_maximal(proj(0));
-  NEED(fill_lanes(proj(0), g_a, 2048, 12) == 2048u);
-  CHECK(g_a.total_events() == 24576u);
+  NEED(fill_lanes(proj(0), g_a, 1920, 4) == 1920u);
+  CHECK(g_a.total_events() == 7680u);
   Bytes biggest;
   NEED(test::save(proj(0), biggest, kDefaultStepBudget, &g_a) == Progress::Done);
   CHECK(biggest.size() < kMaxFileBytes);
   g_b.clear();
   Report rep;
   NEED(test::load(test::arena(1), biggest, &rep, kDefaultStepBudget, &g_b) == Progress::Done);
-  CHECK(g_b.total_events() == 24576u);
+  CHECK(g_b.total_events() == 7680u);
 }

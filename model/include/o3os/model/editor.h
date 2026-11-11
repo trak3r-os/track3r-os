@@ -5,6 +5,7 @@
 #include <o3os/core/learn.h>
 #include <o3os/core/param.h>
 #include <o3os/model/lane_store.h>
+#include <o3os/model/lane_take.h>
 #include <o3os/model/project.h>
 #include <o3os/model/undo.h>
 
@@ -161,6 +162,10 @@ class Editor {
   Status set_pattern_name(std::uint32_t id, const char* text, std::size_t len) noexcept;
   Status set_track_length(std::uint32_t id, std::uint32_t track, std::uint32_t length) noexcept;
   Status set_pattern_length(std::uint32_t id, std::uint32_t length) noexcept;
+  // OS-MIDIREC-P1 S2 fold: a dry run for a caller that changes the steps AND several track lengths in one unit (pattern ops, the whole-pattern paste): false when
+  // the lane events its shortenings cut (`lengths[t]`, 16 entries) plus the step writes of the whole pattern would not fit the undo ring, so the caller writes
+  // nothing. Conservative (it counts a full steps image); true when no lane is cut (a pattern without lanes keeps the old rule). Changes nothing.
+  bool lengths_fit_undo(std::uint32_t id, const std::uint8_t* lengths) noexcept;
   Status clear_pattern(std::uint32_t id) noexcept;
   Status set_step(std::uint32_t id, std::uint32_t track, std::uint32_t step, const Step& value) noexcept;
   Status set_steps(std::uint32_t id, std::uint32_t track, std::uint32_t first, const Step* values,
@@ -171,7 +176,8 @@ class Editor {
   // records (the events moved, so one record never exceeds one lane's 32 KiB) and advances the pattern's generation (Project::touch_lanes), so undo and
   // redo and the native Writer's Modified check see it. A17: shortening a track (set_track_length, set_pattern_length) deletes the lane events at or
   // past the new length in the same unit; lengthening does not; delete_pattern and clear_pattern free the pattern's lanes (their records come before the
-  // pattern's own, so undo brings the pattern back first). A lane record is twice the data (the events are kept to undo and to redo), so before any
+  // pattern's own, so undo brings the pattern back first). A lane record holds the moved events once (1x the lane data, maintainer 2026-11-10: a replace
+  // keeps only the events that changed, the equal head and tail stay in place), so before any
   // erase, cut, free or replace the Editor checks that the unit's lane records (plus the pattern's own record) fit the ring: when they do not the call
   // answers Full and changes nothing (state and history intact). That is delete_pattern, clear_pattern, set_track_length, set_pattern_length and
   // lane_replace / lane_clear, and only when lanes are touched (a pattern without lanes keeps the old rule: an oversize unit clears the ring and the edit
@@ -181,11 +187,18 @@ class Editor {
   // Replaces the events of the lane of (pattern, track) whose tick is in [t0, t1) with `n` events (sorted, valid, ticks inside [t0, t1)). A take commit is
   // one call: t0 and t1 are its range. NotFound: no pattern or no store; BadIndex: track; BadValue: t0 >= t1, t1 above 6144, n above 4096 or events
   // that are invalid, unsorted or outside the range, or t1 above the track's length x 48 ticks (A17: no event past the end of its track); Full: the lane
-  // would pass 4096 events, the pool 24,576, there would be a 2049th lane, or the unit does not fit the undo ring (nothing changes). The same events as
+  // would pass 4096 events, the pool 7,680, there would be a 2049th lane, or the unit does not fit the undo ring (nothing changes). The same events as
   // there are: applied, not recorded. lane_clear empties the whole lane whatever the track's length.
   Status lane_replace(std::uint32_t pattern, std::uint32_t track, std::uint32_t t0, std::uint32_t t1, const LaneEvent* events,
                       std::uint32_t n) noexcept;
   Status lane_clear(std::uint32_t pattern, std::uint32_t track) noexcept;
+  // OS-MIDIREC-P1 S3, A10 / A11 / A15: merges a finished take (lane_take.h) into the lane of its (pattern, track) in one pass and one pair of undo records
+  // (the changed span before, after). Overdub: the lane's events stay and the take's are merged by tick (a take event goes after the lane's events at its
+  // tick); a CC controller the take moved REPLACES the lane's old points of that controller (the take's channel and port) inside the take's intervals.
+  // The merge is done in place in the pool (no scratch). Ok; NotFound: no store or pattern; BadIndex: track; BadValue: the take has an event that is
+  // invalid, unsorted or past the end of the track; Full: the lane would pass 4096 events, the pool 7,680, there would be a 2049th lane, or the unit does
+  // not fit the undo ring (nothing changes: the take stays valid for one more try).
+  Status lane_merge_take(const LaneTake& take) noexcept;
 
   Status set_instrument(std::uint32_t index, const Instrument& value) noexcept;
   Status clear_instrument(std::uint32_t index) noexcept;

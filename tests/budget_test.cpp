@@ -120,7 +120,7 @@ TEST_CASE("budget: no state has an exception: every worst case is held to the st
       for (const sim::BudgetRow& row : rows) {
         if (std::string(row.screen) == "pattern" && std::string(row.theme) == theme && row.translate == translate) {
           CHECK(row.complete);
-          if (std::string(row.state).rfind("zoom", 0) != 0) {
+          if (std::string(row.state).rfind("zoom", 0) != 0 && std::string(row.state) != "lane_marks") {
             CHECK(row.words <= pattern->words);  // the pattern's own states (typical, cursor_end) are below its worst
           }
         }
@@ -137,6 +137,14 @@ TEST_CASE("budget: no state has an exception: every worst case is held to the st
         CHECK_MESSAGE(zoom8->words <= (translate ? 1545u : 1765u), theme << (translate ? " translate: " : " vtx2f: ") << zoom8->words);
         CHECK_MESSAGE(zoom12->words <= (translate ? 1300u : 1580u), theme << (translate ? " translate: " : " vtx2f: ") << zoom12->words);
       }
+      // OS-MIDIREC-P1 S4: the lane marks (a lane on every track: a bar on every step, `MID nn cc` or `MID` on every empty step) are a budgeted state of their own at the three zooms; the grid
+      // degrades (the held steps' "MID" first, then the bars) so it stays inside the standard budget.
+      const sim::BudgetRow* lanes = find_row(rows, "pattern", "lane_marks", theme, translate);
+      CHECK(lanes != nullptr);
+      if (lanes != nullptr) {
+        CHECK((lanes->budgeted && lanes->complete && lanes->variants == 108u));
+        CHECK_MESSAGE(lanes->words <= eve::kMaxDisplayListWords, theme << (translate ? " translate: " : " vtx2f: ") << lanes->words);
+      }
       const sim::BudgetRow* typical = find_row(rows, "pattern", "typical", theme, translate);
       CHECK(typical != nullptr);
       if (typical != nullptr) {
@@ -147,7 +155,14 @@ TEST_CASE("budget: no state has an exception: every worst case is held to the st
       }
     }
     // The fallback costs words (CELL and BITMAP_HANDLE where the origin would have moved): never fewer than translating.
-    CHECK(sim::worst_words(rows, theme, false) > sim::worst_words(rows, theme, true));
+    // (OS-MIDIREC-P1 S4: the lane-marked grid draws up to the cap whatever the mode, so it is left out of this comparison: it would make the two worst cases equal.)
+    std::vector<sim::BudgetRow> uncapped;
+    for (const sim::BudgetRow& row : rows) {
+      if (std::string(row.state) != "lane_marks") {
+        uncapped.push_back(row);
+      }
+    }
+    CHECK(sim::worst_words(uncapped, theme, false) > sim::worst_words(uncapped, theme, true));
   }
   CHECK(sim::format_table(rows).find("interim") == std::string::npos);
   CHECK(sim::format_table(rows).find("worst case per theme, translate: amiga ") != std::string::npos);

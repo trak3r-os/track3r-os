@@ -163,6 +163,56 @@ TEST_CASE("send delay: a time beyond the ring is held to the ring, a time below 
   CHECK(fast.d.delay_left() == SendDelay::kMinDelay);
 }
 
+// OS-MIDIREC-P1 (maintainer decision 2026-11-10): the 78.7 KiB of the 768 KiB delay region that the 4.0 s ring leaves over (mem_map.h kDelayBase + kDelayRingBytes) holds the lane store. This
+// is the proof that the delay never touches it: the ring is attached with exactly kRingFrames words, and with guard words around it no mode, time or wrap writes (or clears) a word outside.
+TEST_CASE("send delay: no mode, time or wrap writes a word outside the ring (the delay region's spare belongs to the lane store)") {
+  constexpr std::uint32_t kGuard = 4096u;
+  constexpr std::uint32_t kPat = 0xA5C3A5C3u;
+  static_assert(SendDelay::kRingBytes == SendDelay::kRingFrames * 4u, "the ring is kRingFrames words, nothing more");
+  struct Cfg {
+    float ping, mode, sync, time_ms, rate, tempo;
+  };
+  // Every mode (ping-pong, STEREO, MONO) at the longest free time, past the top (sync at 20 BPM, held to the ring) and at the shortest; 44.1 kHz and 44,117 Hz differ only in the frames of a ms.
+  const Cfg cfgs[] = {{1, 0, 0, 3500.0f, 0, 0}, {0, 1, 0, 3500.0f, 0, 0}, {0, 0, 0, 3500.0f, 0, 0}, {1, 0, 1, 0, 0, 2000},
+                      {0, 1, 1, 0, 0, 2000},    {0, 0, 1, 0, 0, 2000},    {1, 1, 0, 1.0f, 0, 0},    {0, 1, 0, 1.0f, 0, 0}};
+  for (const Cfg& c : cfgs) {
+    std::vector<std::uint32_t> mem(SendDelay::kRingFrames + 2u * kGuard, kPat);
+    SendDelay d;
+    d.attach(mem.data() + kGuard, SendDelay::kRingFrames);
+    CHECK(d.set_param(dl::PingPong, c.ping));
+    CHECK(d.set_param(dl::Mode, c.mode));
+    CHECK(d.set_param(dl::Sync, c.sync));
+    if (c.sync != 0.0f) {
+      CHECK(d.set_param(dl::Rate, c.rate));
+      CHECK(d.set_param(sx::kTempoField, c.tempo));
+    } else {
+      CHECK(d.set_param(dl::Time, c.time_ms));
+    }
+    CHECK(d.set_param(dl::Feedback, 100.0f));
+    Lcg rng;
+    std::int16_t in[kBlk];
+    std::int16_t ol[kBlk];
+    std::int16_t orr[kBlk];
+    // Two and a half rings of loud noise (the write position wraps twice), then a clear (a project load).
+    for (std::uint32_t done = 0; done < 5u * SendDelay::kRingFrames / 2u; done += kBlk) {
+      for (std::uint32_t i = 0; i < kBlk; ++i) in[i] = rng.sample();
+      d.process(in, ol, orr, kBlk);
+    }
+    d.begin_clear();
+    for (std::uint32_t done = 0; done < 2u * SendDelay::kRingFrames; done += kBlk) {
+      for (std::uint32_t i = 0; i < kBlk; ++i) in[i] = rng.sample();
+      d.process(in, ol, orr, kBlk);
+    }
+    CHECK(d.delay_left() <= SendDelay::kRingFrames - SendDelay::kMinDelay);
+    CHECK(d.delay_right() <= SendDelay::kRingFrames - SendDelay::kMinDelay);
+    bool guards_intact = true;
+    for (std::uint32_t i = 0; i < kGuard; ++i) {
+      guards_intact = guards_intact && mem[i] == kPat && mem[kGuard + SendDelay::kRingFrames + i] == kPat;
+    }
+    CHECK(guards_intact);
+  }
+}
+
 TEST_CASE("send delay: ping-pong alternates the channels, each repeat a feedback gain down") {
   DelayRig rig;
   CHECK(rig.set(dl::Time, 400.0f));

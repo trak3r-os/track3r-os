@@ -115,7 +115,7 @@ The key row and the page heading show the module's page names. The TB-303 has **
 
 2. Turn the encoder to change a value. <!-- QA-MOD-106 -->
 
-Some values show a name instead of a number. The Chip's wave shows **PULSE**, **TRIANGLE**, **NOISE LONG** or **NOISE SHORT**. Its duty shows 12.5%, 25%, 50% or 75%. The FM's algorithm shows a routing such as `4>3>2>1`. The side pane gives the range in names too. <!-- QA-MOD-106 -->
+Some values show a name instead of a number. The Chip's wave shows **PULSE**, **TRIANGLE**, **NOISE LONG**, **NOISE SHORT** or, for the eight waves added in v1.2.0, **2A03 PULSE**, **SID SAW/TRI**, **NOISE/LFSR**, **FM BELL**, **SUPER SQR**, **ZAP/LASER**, **ARP CHORD** and **CHIP DRUM**. Its duty shows 12.5%, 25%, 50% or 75%. The FM's algorithm shows a routing such as `4>3>2>1`. The side pane gives the range in names too. <!-- QA-MOD-106 -->
 
 ### Presets: load and save
 

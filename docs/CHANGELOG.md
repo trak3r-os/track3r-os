@@ -2,20 +2,38 @@
 
 User-visible changes of the Community OS, newest first, one entry per change, in English. The next release notes link here. A change that touches a saved file or the level of what you hear says so in plain words.
 
-## Unreleased
+## v1.3.0 (date to be set at publication)
 
-- **Automate any parameter from the pattern** (CC A..F step FX on sample and module tracks). With REC on, move a MIDI Learn knob or the encoder's learned parameter: the first parameter recorded takes the first free letter of the project (`REC FX: RESONANCE -> CC A`), and those steps move that parameter when the pattern plays. Up to six letters per project; parameters with an FX of their own keep using it. Playing a mapped letter changes the saved value, so leaving the project asks to save. An older firmware opening such a project says "newer fields skipped" but keeps the letters. More testing needed.
-- **LEARN MAP: one screen with every MIDI Learn binding** and the encoder's target. Open it with F6 MAP in the Learn dialog or F8 on Config > MIDI. Each row shows the CC, channel, parameter, instrument (or FOLLOW), mode, the live value and a dot when the CC moves; edit a column with Left/Right and the encoder, add with F1 NEW, delete with F3, relearn the source with F7. A CC already bound on that channel, or a parameter the instrument does not have, is refused with a message. More testing needed.
-- **TB-303, Chip, FM and SID are card modules now, no longer inside the firmware image** (frees 36 KB of flash for new features). Copy `modules/instruments/` and `LICENSES/` from the starter zip to the card; without them a project that uses one of these instruments loads with the instrument muted and the ENGINE picker shows `MODULE NOT ON THE CARD`. Overwrite older copies on the card: an older `chip.tmod` (1.0.0) would now be used and lacks Chip waves 4..11. More testing needed.
-- **Master + Insert opens the Mixer's INSERTS page** from any screen (issue #5). Insert now acts when it is let go, or 40 ms after the press, so the two keys can be pressed together. Checked on the unit.
-- **Shift + pad plays the instrument on the Instrument screen** instead of selecting it (issue #9), so you can hold Shift for the encoder's coarse step and still play the pads; F6 and F7 change the instrument. Checked on the unit.
-- **Slice pads play their own slice** (issue #7): on the CHOP page pad n plays slice n in SLICE and BEAT SLICE modes, whatever slice the pattern's Slice FX left on the track, and the Slice FX now picks a slice in SLICE mode too. Pads checked on the unit; the Slice FX in SLICE mode needs more testing.
-- **Quieter power-off** (issue #8): the codec's reference voltage now ramps down on its own, with the outputs still powered, before the rest of the codec powers off; the power-off takes about half a second longer. Checked on the unit: no pop, by ear.
-- **Mixer: a bar under the name of each track that has an insert** on the MIXER page. More testing needed.
-- **Master held, then Insert at any time, opens the Mixer's INSERTS page** (follow-up of issue #5): you no longer have to press both keys within 40 ms. Holding Master and pressing another key (Play, say) now does that key's job only; Master's release opens nothing. Checked on the unit.
-- **STATUS LED: a BPM mode.** Config > DISPLAY > STATUS LED is BLINK, BPM or OFF. In BPM the LED flashes on every beat, locked to playback (also under an external MIDI clock), and at the project tempo when stopped; a fault code still wins. The choice is now saved with the other device settings: the settings file gains one entry, and a file from an older build reads BLINK. Checked on the unit.
-- **Pattern: F6 opens EVENTS** directly. RE FILL / REPEAT moves to the verb menu: F7, then F6 (the menu closes and the repeat runs). More testing needed.
-- **MIDI Time Code checked on a unit over USB.** MTC OUT at 24, 25 and 30 fps: the notes land on the time code within 1 ms, and the song's loop sends a full frame back to the start. MTC IN follows within 1 ms once locked; it takes about 1.75 s to lock at a start, after a jump or after a stop, and stays silent past the song's end. DIN and Logic Pro need more testing.
+**Copy the new modules zip to the card.** TB-303, Chip, FM and SID now load from the card (`/modules/instruments/`); without them those instruments are muted and say `MODULE ... NOT LOADED`.
+
+Everything below is merged and tested on the host and in the emulator. Where a line says "checked on the unit" a Tracker ran it. Where a line says "Unit check: see release notes", no unit result is in yet (see "Not yet verified" in the [release notes](release/v1.3.0.md)).
+
+### New
+
+- **MIDI recording into lanes.** A MIDI track records into lanes: notes and chords, sub-step timing and length, external CC, a Learn knob and the encoder recorded as a CC letter (CC A..F), the REC STORE setting, and the EVENTS list over the lanes. One undo per take. Unit check: see release notes.
+- **Automate any parameter from the pattern.** With REC on, move a MIDI Learn knob or the encoder's learned parameter and the pattern moves that parameter on playback (CC A..F steps). Up to six letters per project. Unit check: see release notes.
+- **LEARN MAP: one screen with every MIDI Learn binding** and the encoder's target. Open it with `F6` MAP in the Learn dialog or `F8` on Config > MIDI. Unit check: see release notes.
+- **STATUS LED BPM mode** on Config (BLINK, BPM or OFF), saved with the device settings. Checked on the unit.
+- **A bar under the name of each track that has an insert** on the MIXER page. Unit check: see release notes.
+- **Advanced cheat sheet**, [manual/advanced.md](manual/advanced.md): a printable page of the advanced keys.
+
+### Changed
+
+- **The four instrument synths are card modules.** TB-303, Chip, FM and SID are no longer inside the firmware image (about 36 KB of flash freed). Copy `modules/instruments/` and `LICENSES/` from the starter zip to the card. **Overwrite older copies on the card:** an older `chip.tmod` (1.0.0) would now be used and lacks Chip waves 4..11. Unit check: see release notes.
+- **Saved files.** The project format gains an `MEVT` chunk for the MIDI lanes. It is additive: an older firmware keeps it as an unknown chunk. The instrument file is INST 1.9 (CC letters); an older firmware says "newer fields skipped", but nothing is lost.
+- **Module ABI unchanged** (1.13).
+- **Pattern: `F6` opens EVENTS** directly. RE FILL / REPEAT moves to the verb menu: `F7`, then `F6`. Checked on unit b11: `F6` opens EVENTS; `F7` then `F6` runs the repeat.
+- **Pattern tools.** The TOOLS panel holds Humanize, and `F6` repeats the last FILL or TOOLS apply. Unit check: see release notes.
+- **Chip.** The Wave view draws waves 4..11 and the Envelope view names the filter direction. Unit check: see release notes.
+- **MIDI Time Code checked on a unit over USB.** MTC OUT at 24, 25 and 30 fps, and MTC IN, follow within about 1 ms once locked; a re-lock takes about 1.75 s. DIN and Logic Pro: see release notes.
+
+### Fixed
+
+- **Master + Insert opens the Mixer's INSERTS page** from any screen (issue #5). Checked on the unit.
+- **Shift + pad plays the instrument** on the Instrument screen instead of selecting it (issue #9). Checked on the unit.
+- **Slice pads play their own slice** (issue #7). Pads checked on the unit; the Slice FX in SLICE mode needs more testing.
+- **Quieter power-off** (issue #8): the codec's reference voltage ramps down on its own first. Checked by ear on the unit.
+
 
 ## v1.2.0 (date to be set at publication)
 

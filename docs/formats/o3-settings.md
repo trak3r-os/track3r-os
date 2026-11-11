@@ -103,6 +103,8 @@ Field 29 (MTC IN, OS-MTC B3: 0 Off, 1 DIN, 2 USB; default 0) was **appended** by
 
 Field 30 (STATUS LED, OS-LEDBPM: 0 Blink, 1 BPM, 2 Off; default 0) was **appended** by the same rule (no chunk, no version bump, default-fill; the chunk's `version` stays `0x0100`; the block holds 32 fields and 31 are used, so `sizeof(Settings)` and the arena do not move): every file of a build before it (the literals of 13, 14, 16, 17, 18, 20, 22, 23, 25, 26, 27, 29 and 30 settings, `settings_format_test.cpp`; the 30 settings of OS-MTC B3, 278 bytes, were the previous default file, `kFile30`) reads with no entry skipped and STATUS LED Blink, which is what every unit did before the setting existed. A file written with it and read by a build that lacks it has one entry that build does not know (skipped and counted), so saving over it there drops it and the LED is Blink again. Every value round trips byte for byte (0..2); 3 is refused by the block and skipped by the reader, the setting keeping its default.
 
+Field 31 (REC STORE, OS-MIDIREC-P1 S3: 0 Grid, 1 Lane; default 0) was **appended** by the same rule (no chunk, no version bump, default-fill; the chunk's `version` stays `0x0100`; the block holds 32 fields and all 32 are used now, so the next setting needs a raise of `Settings::kMaxFields`): every file of a build before it (the literals of 13 to 30 settings, and the 31 settings of OS-LEDBPM, 286 bytes, the previous default file `kFile31`) reads with no entry skipped and REC STORE Grid, which is what every unit did before the setting existed. A file written with it and read by a build that lacks it has one entry that build does not know (skipped and counted); saving there drops it and recording is Grid again. Both values round trip byte for byte; 2 is refused by the block and skipped by the reader, the setting keeping its default.
+
 **The merge of OS-LIVEREC and OS-006e.** The two branches were written side by side, each leaving the other's ids alone: a file of the OS-LIVEREC branch (16 entries, 166 bytes; the test's `kFile16`) has no RETURN LEVEL and reads it as 100; a file of the OS-006e branch (17 entries) has 0.0 under ids 14 and 15 (its reserved rows) and reads REC POLY Off and REC QUANTIZE Nearest step; both load on the merged firmware, a test holds each, and the default file is the same bytes on either branch (0.0 under 14 and 15).
 
 Everything else in the official manual's Config (MIDI channels and CC numbers, the pad scale, radio region, the performance presets, theme) is for the Config screen slice (P3) and adds rows to this table; none needs a new chunk or a version bump (below).
@@ -111,7 +113,7 @@ Everything else in the official manual's Config (MIDI channels and CC numbers, t
 
 Both begin with the chunk version (`0x0100`) and are the same in the project file and the settings file; one codec (`formats/src/settings_chunks.cpp`) reads and writes both.
 
-**`SETS`**: `u16 version`, `u16 count` (0..64), then `count` entries of `u32 ParamId` and `f32 value` (8 bytes). The writer writes **every** setting of the scope, in field order; the length is exactly `4 + 8 count` (a newer minor may append). Payload 28 bytes for a project, 252 for a device (244 before OS-LEDBPM appended STATUS LED, 236 before OS-MTC B3 appended MTC IN, 212 before OS-MTC A3 appended MTC OUT and MTC START, 204 before OS-MIDICCMAP S1 appended CC MAP, 188 before E-CFG-03 appended TRANSPORT IN and OUT, 180 before OS-PADOFFSET appended PAD OFFSET, 164 before OS-RECMICRO appended REC MICRO and REC VELOCITY; 148 before OS-METRO appended METRO and COUNT-IN, 140 before OS-USBAUDIO appended USB AUDIO, 132 before OS-006e appended RETURN LEVEL, 116 before OS-LIVEREC appended REC POLY and REC QUANTIZE, 108 before OS-USBRET appended USB RETURN, 60 before OS-011a appended six settings; 148 once OS-USBAUDIO appended USB AUDIO).
+**`SETS`**: `u16 version`, `u16 count` (0..64), then `count` entries of `u32 ParamId` and `f32 value` (8 bytes). The writer writes **every** setting of the scope, in field order; the length is exactly `4 + 8 count` (a newer minor may append). Payload 28 bytes for a project, 260 for a device (252 before OS-MIDIREC-P1 S3 appended REC STORE, 244 before OS-LEDBPM appended STATUS LED, 236 before OS-MTC B3 appended MTC IN, 212 before OS-MTC A3 appended MTC OUT and MTC START, 204 before OS-MIDICCMAP S1 appended CC MAP, 188 before E-CFG-03 appended TRANSPORT IN and OUT, 180 before OS-PADOFFSET appended PAD OFFSET, 164 before OS-RECMICRO appended REC MICRO and REC VELOCITY; 148 before OS-METRO appended METRO and COUNT-IN, 140 before OS-USBAUDIO appended USB AUDIO, 132 before OS-006e appended RETURN LEVEL, 116 before OS-LIVEREC appended REC POLY and REC QUANTIZE, 108 before OS-USBRET appended USB RETURN, 60 before OS-011a appended six settings; 148 once OS-USBAUDIO appended USB AUDIO).
 
 **`LRNB`**: `u16 version`, `u16 count` (0..64; this version keeps 32 bindings, the rest of a longer one is skipped and counted), then `count` entries of `u32 ParamId`, `u8 cc`, `u8 channel`, `u8 mode`, `u8 flags` (8 bytes): the bindings in use, packed in slot order. `cc` 0..127; `channel` 0 (every channel) or 1..16; `mode` 0 pickup, 1 jump, 2 relative; `flags` bit 0 follow (the id's index is 0 and only its kind and field count: the binding acts on whichever instrument is selected). The length is exactly `4 + 8 count`. **Insert parameters (OS-INSFX S7, new Community OS behaviour):** a binding may name `ParamKind::Insert` (kind 6) in a project file: the id's index is `track * 2 + slot` of the insert (0..31; the master insert is 32, the project record `where` 16 slot 0) and its field the module's parameter (0..31); the store is the project's, and a binding never follows. The version of the chunk does not change (an older reader's rule below skips what it has no kind for).
 
@@ -124,7 +126,7 @@ A setting the file does not mention is the default. The counts are `Report::sett
 
 ## 4. The device settings file (`O3ST`)
 
-One small file, at most **1,024 bytes** (today 286, and 554 with every setting and all 32 bindings), read and written whole from and to a buffer: the platform reads it into 1 KiB and calls `formats::settings::read()`, calls `write()` into 1 KiB to save it. No file I/O, no heap, no state. Where it lives on the SD card and when it is saved (when a generation moved) are the platform's. It is a registered format like the others: `register_builtin_formats()` adds `settings` (`.o3st`, `FormatKind::Settings`, read and written, sniffed by `settings::sniff()`), whose strategies read into `ReadParams::settings` and write from `WriteParams::settings` (a `model::Settings` of kind Device) and touch no project (1 KiB buffer each, inside `BuiltinFormats`); `FormatReport::sanitised` is the number of entries skipped and `unverified_version` says a newer minor was read.
+One small file, at most **1,024 bytes** (today 294, and 562 with every setting and all 32 bindings), read and written whole from and to a buffer: the platform reads it into 1 KiB and calls `formats::settings::read()`, calls `write()` into 1 KiB to save it. No file I/O, no heap, no state. Where it lives on the SD card and when it is saved (when a generation moved) are the platform's. It is a registered format like the others: `register_builtin_formats()` adds `settings` (`.o3st`, `FormatKind::Settings`, read and written, sniffed by `settings::sniff()`), whose strategies read into `ReadParams::settings` and write from `WriteParams::settings` (a `model::Settings` of kind Device) and touch no project (1 KiB buffer each, inside `BuiltinFormats`); `FormatReport::sanitised` is the number of entries skipped and `unverified_version` says a newer minor was read.
 
 ```
 "FORM"  u32 length   "O3ST"   [SETS] [LRNB] ... "CRC "
@@ -160,11 +162,11 @@ The main loop tells the audio side with `core::ParamChange {ParamId, f32 value, 
 
 **Undo**: `Editor::set_param` journals the id with the new and the old value (40 bytes of journal), `set_learn_slot` the slot with the new and old binding (48 bytes). A knob sweep is one unit per message (a coalescing rule would need a journal feature and is an open item).
 
-## 8. Example: the default device settings file (286 bytes; 278 before OS-LEDBPM, 270 before OS-MTC B3, 254 before OS-MTC A3, 246 before OS-MIDICCMAP S1, 238 before E-PAT-35, 222 before E-CFG-03, 214 before OS-PADOFFSET, 198 before OS-RECMICRO, 182 before OS-METRO, 174 before OS-USBAUDIO, 150 before OS-LIVEREC and OS-006e, 142 before OS-USBRET, 94 with the first seven settings alone)
+## 8. Example: the default device settings file (294 bytes; 286 before OS-MIDIREC-P1 S3 appended REC STORE, 278 before OS-LEDBPM, 270 before OS-MTC B3, 254 before OS-MTC A3, 246 before OS-MIDICCMAP S1, 238 before E-PAT-35, 222 before E-CFG-03, 214 before OS-PADOFFSET, 198 before OS-RECMICRO, 182 before OS-METRO, 174 before OS-USBAUDIO, 150 before OS-LIVEREC and OS-006e, 142 before OS-USBRET, 94 with the first seven settings alone)
 
 ```
-46 4f 52 4d  00 00 01 16  4f 33 53 54            FORM, length 278, O3ST
-53 45 54 53  00 00 00 fc  01 00 00 1f            SETS, 252 bytes: version 1.0, 31 entries
+46 4f 52 4d  00 00 01 1e  4f 33 53 54            FORM, length 286, O3ST
+53 45 54 53  00 00 01 04  01 00 00 20            SETS, 260 bytes: version 1.0, 32 entries
   05 00 00 00 40 00 00 00  DISPLAY      2.0
   05 00 00 01 40 00 00 00  PAD LIGHTS   2.0
   05 00 00 02 42 48 00 00  METRO VOL    50.0
@@ -196,7 +198,8 @@ The main loop tells the audio side with `core::ParamChange {ParamId, f32 value, 
   05 00 00 1c 3f 80 00 00  MTC START    1.0
   05 00 00 1d 00 00 00 00  MTC IN       0.0
   05 00 00 1e 00 00 00 00  STATUS LED   0.0
-43 52 43 20 00 00 00 06 01 00 4a dc e6 c9     CRC: version 1.0, zlib.crc32 of the first 272 bytes
+  05 00 00 1f 00 00 00 00  REC STORE    0.0
+43 52 43 20 00 00 00 06 01 00 f9 e1 42 d9     CRC: version 1.0, zlib.crc32 of the first 280 bytes
 ```
 
 (`settings_format_test.cpp` holds the file as a literal that was computed from this description with Python, not by the writer, and compares both ways.)

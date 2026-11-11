@@ -196,3 +196,65 @@ TEST_CASE("notes in: note on, note off, velocity 0, all-notes-off, running statu
   CHECK_FALSE(p.feed(60, ch, cc, v));
   CHECK_FALSE(p.feed(100, ch, cc, v));
 }
+
+// OS-MIDIREC-P1 S3 (A8): the stamped ring. The render stamps a block's MIDI only while the main loop has a take open; with none the ring is not touched and feed() is what it was.
+TEST_CASE("stamped ring: nothing is stamped without a stamp, the stamp is carried while on, a full ring counts what it drops, and the other rings are unchanged") {
+  static midi::CcInput in;
+  const auto feed = [&](std::initializer_list<std::uint8_t> bytes, std::uint8_t port) {
+    for (const std::uint8_t b : bytes) {
+      in.feed(midi::RtItem{0, b, port, 0});
+    }
+  };
+  midi::StampMsg s{};
+  midi::NoteMsg n{};
+  CHECK(in.take_track() == midi::CcInput::kNoTrack);
+  feed({0x90, 60, 100, 0xB0, 74, 9}, 0);  // no stamp set: nothing is copied
+  CHECK_FALSE(in.pop_stamped(s));
+  NEED(in.pop_note(n));
+  CHECK(n.note == 60);
+
+  in.open_take(16);  // not a track: no take
+  CHECK(in.take_track() == midi::CcInput::kNoTrack);
+  in.open_take(3);
+  CHECK(in.take_track() == 3);
+  in.set_stamp(7, 1234);
+  feed({0x91, 61, 90, 0xB1, 74, 55, 0x81, 61, 0, 0xB1, 123, 0}, 1);
+  in.clear_stamp();
+  feed({0x91, 62, 90}, 1);  // after clear_stamp: not stamped
+  NEED(in.pop_stamped(s));
+  CHECK((s.kind == midi::StampKind::On && s.tick == 1234 && s.pattern == 7 && s.port == 1 && s.channel == 2 && s.a == 61 && s.b == 90));
+  NEED(in.pop_stamped(s));
+  CHECK((s.kind == midi::StampKind::Cc && s.a == 74 && s.b == 55 && s.tick == 1234));
+  NEED(in.pop_stamped(s));
+  CHECK((s.kind == midi::StampKind::Off && s.a == 61));
+  NEED(in.pop_stamped(s));
+  CHECK((s.kind == midi::StampKind::AllOff && s.a == 123));
+  CHECK_FALSE(in.pop_stamped(s));
+  CHECK(in.stamp_dropped() == 0u);
+  // the two older rings got everything too (the grid's note entry and MIDI Learn read them as before)
+  unsigned notes = 0;
+  while (in.pop_note(n)) {
+    ++notes;
+  }
+  CHECK(notes == 4u);  // on, off, all-off, and the unstamped on
+  midi::CcMsg c{};
+  unsigned ccs = 0;
+  while (in.pop(c)) {
+    ++ccs;
+  }
+  CHECK(ccs == 2u);  // the first one (before any take) and the stamped one; the 123 is a note message
+
+  // a full stamped ring drops what does not fit and counts it
+  in.set_stamp(1, 5);
+  for (std::uint32_t i = 0; i < midi::CcInput::kStampRingSize + 4u; ++i) {
+    feed({0xB0, 1, static_cast<std::uint8_t>(i & 0x7Fu)}, 0);
+  }
+  CHECK(in.stamp_dropped() == 4u);
+  unsigned got = 0;
+  while (in.pop_stamped(s)) {
+    ++got;
+  }
+  CHECK(got == midi::CcInput::kStampRingSize);
+  in.close_take();
+  CHECK(in.take_track() == midi::CcInput::kNoTrack);
+}

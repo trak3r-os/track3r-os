@@ -183,6 +183,8 @@ constexpr ScreenState kPatternStates[] = {
     {"shift_layer", true, 1, kBudgetWords, draw_pattern_shift_layer},
     {"zoom8", true, kPatternZoomVariants, kBudgetWords, draw_pattern_zoom8},    // OS-ZOOM: Note + Instr, 8 tracks of Note, Instr and Vol in the Label face
     {"zoom12", true, kPatternZoomVariants, kBudgetWords, draw_pattern_zoom12},  // ... and 12 tracks of the Note column in the Micro face
+    {"lane_marks", true, kPatternLaneVariants, kBudgetWords, draw_pattern_lane_worst},  // OS-MIDIREC-P1 S4: lane marks on every step of every track
+    {"lane_typical", false, 1, 0, draw_pattern_lane_typical},  // OS-MIDIREC-P1 S4: sparse lanes over the demo's content
     {"rec", true, 4, kBudgetWords, draw_pattern_rec},  // OS-REVIEW: Rec mode (Edit while it plays); variants 1, 2: Edit stopped, Play in Browse; 3: free Edit (OS-LIVEREC, OS-RECSWAP)
 };
 

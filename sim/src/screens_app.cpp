@@ -704,6 +704,7 @@ void draw_song_tools_worst(ui::Renderer& r, unsigned variant) {
 
 struct EventsDoc {
   std::unique_ptr<model::ModelArena> arena;
+  std::unique_ptr<model::LaneStore> lanes;  // S6: the take lane of track 5 (fill_events_lanes); the lane rows of every picture
   Model model;
 };
 
@@ -713,7 +714,11 @@ EventsDoc& events_doc() {
     d.arena = std::make_unique<model::ModelArena>();
     std::memset(d.arena.get(), 0, sizeof(model::ModelArena));
     fill_events_project(d.arena->project);
+    d.lanes = std::make_unique<model::LaneStore>();
+    d.lanes->sync(d.arena->project.load_epoch());
+    fill_events_lanes(*d.lanes);
     d.model.project = &d.arena->project;
+    d.model.lanes = d.lanes.get();
     d.model.undo_depth = 12;
   }
   return d;
@@ -733,7 +738,9 @@ void events_view_state(ViewState& v, unsigned pattern, unsigned field, model::ev
   v.events.scope = app::events_scope_of(*pat, v.edit, v.pattern.row(), v.pattern.track());
   v.events.filter = filter;
   v.events.field = static_cast<std::uint8_t>(field % 8u);
-  v.events.cursor = app::events_start_cursor(*pat, ev::env_of(d.arena->project), v.events.scope, v.events.filter, v.pattern.row());
+  ev::Env env = ev::env_of(d.arena->project);
+  env.lanes = d.lanes.get();  // S6: the lane rows count in the list the cursor starts in
+  v.events.cursor = app::events_start_cursor(*pat, env, v.events.scope, v.events.filter, v.pattern.row());
   v.events.top = v.events.cursor >= app::kEventsRows ? v.events.cursor - app::kEventsRows + 1u : 0u;
 }
 
@@ -816,12 +823,15 @@ void draw_learn_map_worst(ui::Renderer& r, unsigned variant) {
 constexpr unsigned kEventsFieldVariants = 8;    // the cursor on every field (the valid ones of the row are boxed)
 constexpr unsigned kEventsFilterVariants = 3;    // S1c: ALL, NOTES, CC (the header count and the F1 label follow)
 constexpr unsigned kEventsPlayVariants = 2;      // S1c: the play marker off / on (3.7)
-constexpr unsigned kEventsWorstVariants = kWindows * kEventsFieldVariants * kEventsFilterVariants * kEventsPlayVariants;
+constexpr unsigned kEventsBaseVariants = kWindows * kEventsFieldVariants * kEventsFilterVariants * kEventsPlayVariants;
+constexpr unsigned kEventsWorstVariants = 2 * kEventsBaseVariants;  // S6: the second half is the lane-heavy window (track 5, the take lane)
 
 // The dearest sweep: every window of the dearest base (the document with the block gives the TRK column), the cursor on every
 // field, every filter, the play marker on and off, and the last window's variants on the empty pattern (the empty list).
 void draw_events_worst(ui::Renderer& r, unsigned variant) {
   EventsDoc& d = events_doc();
+  const bool lane_window = variant >= kEventsBaseVariants;  // S6: the cursor on track 5, whose lane the list merges with its step note
+  variant %= kEventsBaseVariants;
   const unsigned field = variant % kEventsFieldVariants;
   variant /= kEventsFieldVariants;
   const unsigned filter = variant % kEventsFilterVariants;
@@ -832,7 +842,10 @@ void draw_events_worst(ui::Renderer& r, unsigned variant) {
   if (empty) {
     variant = kWindows - 1u;
   }
-  const Window w = window_of(variant);
+  Window w = window_of(variant);
+  if (lane_window && !empty) {
+    w.track = 4;
+  }
   ViewState view = window_view(w);
   const unsigned pattern = empty ? 2u : 1u;
   events_view_state(view, pattern, field, static_cast<model::events::Filter>(filter));

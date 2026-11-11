@@ -90,7 +90,21 @@ bool pattern_op(ActionContext& ctx, core::ActionArg arg) noexcept {
     }
     longest = longest > len ? longest : len;
   }
+  {
+    // OS-MIDIREC-P1 S2 fold: every track's new length is checked against the undo ring BEFORE any write (a refusal half way would leave a column written, a length kept and tracks apart).
+    std::uint8_t lengths[model::kMaxTracks];
+    for (unsigned t = 0; t < model::kMaxTracks; ++t) {
+      lengths[t] = pat->track_length[t];
+      if (static_cast<int>(t) >= t0 && static_cast<int>(t) <= t1) {
+        lengths[t] = static_cast<std::uint8_t>(model::ops::result_length(op, pat->track_length[t]));
+      }
+    }
+    if (!ctx.edit->lengths_fit_undo(id, lengths)) {
+      return pe::say(ctx, core::Severity::Warn, "TOO BIG TO UNDO: USE THE LENGTH CHOOSER");
+    }
+  }
   bool changed = false;
+  bool too_big = false;
   for (int t = t0; t <= t1; ++t) {
     model::Step out[model::kMaxPatternLength];
     unsigned out_len = 0;
@@ -99,13 +113,16 @@ bool pattern_op(ActionContext& ctx, core::ActionArg arg) noexcept {
       continue;  // (checked above)
     }
     changed = write_column(ctx, id, static_cast<unsigned>(t), out) || changed;
-    if (out_len != len && ctx.edit->set_track_length(id, static_cast<unsigned>(t), out_len) == model::Status::Ok) {
-      changed = true;
+    if (out_len != len) {
+      const model::Status st = ctx.edit->set_track_length(id, static_cast<unsigned>(t), out_len);
+      changed = changed || st == model::Status::Ok;
+      too_big = too_big || st == model::Status::Full;
     }
   }
   settle_view(ctx);
   if (!changed) {
-    return pe::say(ctx, core::Severity::Info, "NOTHING TO CHANGE");
+    // OS-MIDIREC-P1 S2: the cut MIDI lane events do not fit the undo ring (the Editor changed nothing); the length chooser is where that op can be confirmed without undo.
+    return pe::say(ctx, too_big ? core::Severity::Warn : core::Severity::Info, too_big ? "TOO BIG TO UNDO: USE THE LENGTH CHOOSER" : "NOTHING TO CHANGE");
   }
   core::FixedString<core::kNotifyTextChars> text;
   text.assign(op == model::ops::Op::Duplicate ? "DUPLICATED: " : (op == model::ops::Op::Expand ? "EXPANDED: " : "SHRUNK: "));
@@ -159,10 +176,17 @@ bool pattern_clip_paste(ActionContext& ctx, core::ActionArg) noexcept {
   const model::Pattern* pat = ctx.edit->project().pattern(id);
   bool changed = !existed;  // making the pattern is a change of its own
   bool grid = false;        // a step or a length changed: what the sequencer plays differs (a name alone does not)
+  bool too_big = false;     // OS-MIDIREC-P1 S2: a length change was refused because the cut MIDI lane events do not fit the undo ring
+  if (!ctx.edit->lengths_fit_undo(id, ctx.clip->lengths())) {
+    // OS-MIDIREC-P1 S2 fold: checked before any write (a pattern just made has no lanes, so only an existing one is refused here).
+    return clip_say(ctx, "TOO BIG TO UNDO: USE THE LENGTH CHOOSER");
+  }
   for (unsigned t = 0; t < model::kMaxTracks; ++t) {
     grid = write_column(ctx, id, t, ctx.clip->column(static_cast<int>(t))) || grid;
-    if (pat->track_length[t] != ctx.clip->lengths()[t] && ctx.edit->set_track_length(id, t, ctx.clip->lengths()[t]) == model::Status::Ok) {
-      grid = true;
+    if (pat->track_length[t] != ctx.clip->lengths()[t]) {
+      const model::Status st = ctx.edit->set_track_length(id, t, ctx.clip->lengths()[t]);
+      grid = grid || st == model::Status::Ok;
+      too_big = too_big || st == model::Status::Full;
     }
   }
   changed = changed || grid;
@@ -171,7 +195,7 @@ bool pattern_clip_paste(ActionContext& ctx, core::ActionArg) noexcept {
   }
   settle_view(ctx);
   if (!changed) {
-    return clip_say(ctx, "NOTHING TO CHANGE");
+    return clip_say(ctx, too_big ? "TOO BIG TO UNDO: USE THE LENGTH CHOOSER" : "NOTHING TO CHANGE");
   }
   if (grid && ctx.transport != nullptr && v.play.playing && v.play.count_in == 0u) {
     (void)ctx.transport->release_pattern(id);  // OS-BUG-PASTEHANG: the paste took the OFF rows of what played; every track that plays this pattern ends its notes at the next step (no mask of the tracks that changed; a refusal leaves the note to the next Stop)

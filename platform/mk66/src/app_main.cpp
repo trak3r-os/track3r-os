@@ -106,6 +106,7 @@
 #include <o3os/hal/input.h>
 #include <o3os/model/demo.h>
 #include <o3os/model/editor.h>
+#include <o3os/model/lane_take.h>
 #include <o3os/platform/mk66/blink.h>
 #include <o3os/platform/mk66/audio.h>
 #include <o3os/platform/mk66/capture.h>
@@ -197,6 +198,12 @@ bool g_display_off = false;
 // the model's worst case), its undo journal in the undo region and the editor over them. Built once, at the first start; a recovery that
 // starts the app over attaches the same document again (it holds the user's work, the app does not).
 model::ModelArena* g_arena = nullptr;
+// OS-MIDIREC-P1 S2: the one LaneStore (77,780 B), placed by make_document() in the delay region's spare after the 4.0 s ring (mem_map.h kLaneStoreBase; maintainer decision 2026-11-10); its directory is zero-initialised by
+// the placement new, the pool is meaningful only below events_. Main loop writes it (the Editor, the loaders), the sequencer's render reads it behind the store's seqlock (lane_store.h).
+model::LaneStore* g_lanes = nullptr;
+// OS-MIDIREC-P1 S3: the take buffer of a Lane recording (2,048 events, 16 KiB: SDRAM_STATIC had about 31 KB free; orchestrator decision), main loop only (the render fills the stamped ring, not this). No constructor:
+// the App resets it before the first take.
+[[maybe_unused]] O3OS_SDRAM_NOINIT model::LaneTake g_lane_take;  // (the mk66-tone image, O3OS_AUDIO_TEST, has no app to attach it to)
 model::UndoHistory g_journal;  // OS-UNDOGRP: three rings carved out of the one 384 KiB region
 alignas(model::Editor) unsigned char g_editor_storage[sizeof(model::Editor)];
 model::Editor* g_editor = nullptr;
@@ -215,6 +222,9 @@ alignas(seq::Sequencer) unsigned char g_seq_storage[sizeof(seq::Sequencer)];
 seq::Sequencer* g_seq = nullptr;
 // E-SONG-07: the sequencer's copy of the song list, 656 B, in SDRAM so that SRAM_U keeps its 32 KiB free floor (render reads it once a pattern end and once an edit; attach_order_store zeroes it).
 O3OS_SDRAM_NOINIT seq::OrderStore g_seq_order;
+// OS-MIDIREC-P1 S2: the live sequencer's lane playback state (about 1.5 KB). In SDRAM so that SRAM_U keeps its
+// 32 KiB floor; attach_lanes() resets it, the render is its only user.
+O3OS_SDRAM_NOINIT seq::LaneRun g_lane_run;
 // OS-FLASHDIET P4: the custom play orders' entry table (2,176 B), unpacked from the deflate blob into SDRAM once, by make_sound() before the sequencer is built; the
 // image's seq library has no plain copy (seq/CMakeLists.txt O3OS_PLAY_ORDERS_PACKED). Fully overwritten by the unpack, then read-only (the render reads one entry a step).
 O3OS_SDRAM_NOINIT alignas(4) std::uint16_t g_play_orders[seq::kPlayOrderEntries];
@@ -790,6 +800,8 @@ O3OS_SDRAM_NOINIT alignas(8) std::uint8_t g_app_export_ring[app::AppExport::kRin
 SaveHost* make_save_host() noexcept {
   SaveHost* const host = new (save_host()) SaveHost();
   host->service.attach(storage::device::storage(), host->writer);
+  host->service.attach_lanes(g_lanes);  // OS-MIDIREC-P1 S2: the project file carries the lanes (MEVT); the native loader reads them back
+  host->native_loader.attach_lanes(g_lanes);
   host->writer.attach_owner(storage::device::swap());  // OS-USBDISK U2a: gate() says Host while the computer has the card (WriteStatus::Host: the strip, and the settings stay dirty)
   host->service.attach_app_export(g_app_export_ring, sizeof g_app_export_ring);
   static_assert(app::OgTiming::kLines == 10u, "console.cpp prints 10 lines of the timing report");
@@ -995,6 +1007,7 @@ void make_sound(model::Project& project) noexcept {
   }
   g_seq = new (g_seq_storage) seq::Sequencer(project);
   g_seq->attach_order_store(g_seq_order);
+  g_seq->attach_lanes(g_lanes, &g_lane_run);  // OS-MIDIREC-P1 S2: the live sequencer plays the lanes (make_document() has placed the store); the export sequencers attach none
   {
     seq::Sequencer::Config sc = g_seq->config();
     sc.emit_ticks = true;  // OS-005h: the Tick events (core FX 43) the Amiga voices' MED tick processor runs on; nothing else reads them
@@ -1264,8 +1277,11 @@ void poll_midi_cc(bool loading) noexcept {
 
 void make_document() noexcept {
   g_arena = new (reinterpret_cast<void*>(static_cast<std::uintptr_t>(mem::core_view(mem::kProjectBase)))) model::ModelArena;  // trivial: nothing is written yet
+  static_assert(sizeof(model::LaneStore) == mem::kLaneStoreBytes && mem::kLaneStoreBase % alignof(model::LaneStore) == 0u, "the delay region's spare holds the LaneStore (mem_map.h proves it fits)");
+  g_lanes = new (reinterpret_cast<void*>(static_cast<std::uintptr_t>(mem::core_view(mem::kLaneStoreBase)))) model::LaneStore;  // default-initialised: the directory is zeroed, the pool is not touched (the delay's attach clears its own ring only)
   model::Project& project = g_arena->project;
   project.reset();
+  g_lanes->sync(project.load_epoch());  // OS-MIDIREC-P1 S2: the store belongs to the project it was made with
   (void)project.create_pattern(1, model::kDefaultPatternLength);  // pattern 1, 32 steps on every track, one song position that plays it
   (void)project.append_order(1);
 #if !O3OS_AUDIO_TEST
@@ -1273,6 +1289,7 @@ void make_document() noexcept {
 #endif
   (void)g_journal.begin(reinterpret_cast<void*>(static_cast<std::uintptr_t>(mem::kUndoBase)), mem::kUndoSize);
   g_editor = new (g_editor_storage) model::Editor(project, g_journal);
+  g_editor->attach_lanes(g_lanes);
 }
 // OS-007e: the project load. The loader (its OG readers are about 7 KB) is a static of this file; one load at a time, stepped from pass().
 // OS-QAFIX-4: the Verify phase of an open (app::ProjectVerify, about 1 KB, main loop only): the file is checked before anything is replaced; a refusal ends the open with the document, the transport and the
@@ -1392,6 +1409,9 @@ class CardProject final : public app::ProjectSink {
     }
     return native_load() != nullptr ? native_load()->report().detail : g_loader->report().detail;
   }
+  // OS-MIDIREC-P1 S2: what the native file carried that this build did not take (the strip says so after an open)
+  bool newer_fields() const noexcept override { return native_load() != nullptr && native_load()->report().newer_minor; }
+  std::uint32_t lanes_skipped() const noexcept override { return native_load() != nullptr ? native_load()->report().mevt_skipped : 0u; }
 };
 CardProject g_card_project;
 #if !O3OS_AUDIO_TEST
@@ -1453,6 +1473,9 @@ void finish_load() noexcept {
 #if !O3OS_AUDIO_TEST
   apply_project_platform_state();  // OS-004d: the project's MIDI and USB parts (the mixer and Perform are applied by the App's document_replaced below)
 #endif
+  if (g_lanes != nullptr) {
+    g_lanes->sync(g_arena->project.load_epoch());  // OS-MIDIREC-P1 S2: an OG load, an import and a failed load moved the epoch without the reader's adopt: no lane of the replaced project plays (a no-op after a native load)
+  }
   if (g_editor != nullptr) {
     g_editor->history_reset();
     if (g_app != nullptr) {
@@ -1959,6 +1982,7 @@ bool start_app(hal::Display& display, bool first_boot) noexcept {
   std::memset(g_app_storage, 0, sizeof g_app_storage);  // the SDRAM holds whatever it held: the App's members that its constructor leaves alone read zero, as in .bss
   g_app = new (g_app_storage) app::App(console::tap_input(input::device::scanner()), system_clock(), display);
 #if !O3OS_AUDIO_TEST
+  g_app->attach_lane_take(&g_lane_take);  // OS-MIDIREC-P1 S3: REC STORE = Lane
   g_app->attach_transport(&g_transport);  // the Play button
   g_app->attach_preview(&g_live_preview);  // OS-005g: the pads, the previews and the MIDI keyboard play the voices
 #endif

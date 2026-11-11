@@ -2677,7 +2677,7 @@ The key row and the page heading show the module's page names. The TB-303 has **
 
 2. Turn the encoder to change a value.
 
-Some values show a name instead of a number. The Chip's wave shows **PULSE**, **TRIANGLE**, **NOISE LONG** or **NOISE SHORT**. Its duty shows 12.5%, 25%, 50% or 75%. The FM's algorithm shows a routing such as `4>3>2>1`. The side pane gives the range in names too.
+Some values show a name instead of a number. The Chip's wave shows **PULSE**, **TRIANGLE**, **NOISE LONG**, **NOISE SHORT** or, for the eight waves added in v1.2.0, **2A03 PULSE**, **SID SAW/TRI**, **NOISE/LFSR**, **FM BELL**, **SUPER SQR**, **ZAP/LASER**, **ARP CHORD** and **CHIP DRUM**. Its duty shows 12.5%, 25%, 50% or 75%. The FM's algorithm shows a routing such as `4>3>2>1`. The side pane gives the range in names too.
 
 ### Presets: load and save
 
@@ -2833,6 +2833,10 @@ The FM has four operators, which are four sine waves. A modulator is an operator
 **WAVE** and **DUTY** can now be bound to a MIDI controller with Learn (`Vol` and `Fx` together, see [The panel](panel.md)). Turning the controller steps through the four waves or the four duties. Before, these two rows refused Learn.
 
 **Eight more waves.** In v1.2.0 the Chip has twelve waves, not four. Waves 0 to 3 are the pulse, triangle and two noises. Waves 4 to 11 are **2A03 PULSE**, **SID SAW/TRI**, **NOISE/LFSR**, **FM BELL**, **SUPER SQR**, **ZAP/LASER**, **ARP CHORD** and **CHIP DRUM**. The wave row shows the names. Ten new rows sit on the Chip's pages: **SHAPE** (the pulse width or the drop depth of the wave), **SUB OSC** (a triangle an octave down), **CUTOFF** and **RESONANCE** (a low-pass), **BITCRUSH**, **PWM DEPTH**, **PWM RATE**, **ENV AMT** (the envelope moves the cutoff), **DECIMATE** and **CHORD** (OFF, OCTAVE, FIFTH, MAJOR, MINOR, SUS4, MAJ7, MIN7: a four-step chord that replaces the two arpeggio notes). Some rows act on every wave; **SHAPE** and the two PWM rows act on waves 4 to 11 only. A project saved earlier sounds the same, because every new row starts at a neutral value.
+
+**What the Chip's two views show.** On the Chip's page the **WAVE** view draws the wave you have picked, with its name above it. For the four older waves it is as before: the pulse with its duty, the triangle, the two noises. For waves 4 to 11 it draws 96 samples of that wave's own sound generator, with the **SHAPE**, **SUB OSC**, **PWM DEPTH** and, for ARP CHORD, **CHORD** you have set, so the trace moves when you turn them. It is a sketch of the shape of the wave, not of the note you play: the time is stretched so that two periods fit. **ZAP/LASER** shows its pitch falling over the picture. **ARP CHORD** shows four steps, one for each tone of the chord (Major when **CHORD** is off). **CHIP DRUM** shows the pitch fall of one hit. The **ENVELOPE** view draws the volume against the time as before and, when **ENV AMT** is not 0, writes **FILTER OPENS** (a positive amount: the cutoff rises with the envelope) or **FILTER CLOSES** (a negative one) at its top right. Both views are new Community OS behaviour. Not checked on the unit: how they look on the screen.
+
+**Where the rows are.** The Chip's rows are on four pages: **TONE** (wave, duty, raw edges, volume steps, volume, velocity, transpose, fine), **ENV** (the envelope, sweep, sweep time), **PITCH** (vibrato, the two arpeggio notes and their speed, **SHAPE**, **SUB OSC**) and **OSC/FX** (**CUTOFF**, **RESONANCE**, **BITCRUSH**, the two PWM rows, **ENV AMT**, **DECIMATE**, **CHORD**). An 8-row page is the most a key can show, so the new rows sit where there was room; the rows of a project saved earlier keep their place.
 
 ### SID: a chip voice with four pages
 
@@ -3180,7 +3184,7 @@ Lower Fold, Resonance or Feedback first, then raise Output or Makeup in small st
 
 Status: draft
 
-Config holds the unit's settings on six pages. Three things are new in track3r-os: the USB page can turn the audio device and the audio return off, CARD AS DISK hands the card to a computer while the unit plays on, and the metronome can click on the Main outputs with a count-in of one or two bars.  The rest of the PATTERN page differs from the official manual. The metronome has no time-signature rows. Live recording has the rows REC MICRO and REC VELOCITY. PAD OFFSET sets how the pad rows overlap, while the root and scale come from the held Note panel. PAT SWITCH chooses whether a pattern picked with `F1` held lands at the next step or at the end of the pattern.  A change to USB AUDIO or USB RETURN waits until you press `F7` (**APPLY**) twice, and `Shift` + `F7` puts a page back to its defaults. Not checked against the original firmware: the pages and keys.
+Config holds the unit's settings on six pages. Three things are new in track3r-os: the USB page can turn the audio device and the audio return off, CARD AS DISK hands the card to a computer while the unit plays on, and the metronome can click on the Main outputs with a count-in of one or two bars.  The rest of the PATTERN page differs from the official manual. The metronome has no time-signature rows. Live recording has the rows REC MICRO and REC VELOCITY, and REC STORE: with Lane, a keyboard played into a MIDI track is kept with its exact timing and note lengths in the track's lane instead of on the step grid (Grid, the default). PAD OFFSET sets how the pad rows overlap, while the root and scale come from the held Note panel. PAT SWITCH chooses whether a pattern picked with `F1` held lands at the next step or at the end of the pattern.  A change to USB AUDIO or USB RETURN waits until you press `F7` (**APPLY**) twice, and `Shift` + `F7` puts a page back to its defaults. Not checked against the original firmware: the pages and keys.
 
 ## What it is for
 
@@ -3199,10 +3203,10 @@ Example: set METRO to Cue and COUNT-IN to 1 bar, and the next live take starts w
 This walk-through changes a live row, then shows a pending one that is dropped.
 
 1. Press `Config`.
-2. Press `F6` (**PATTERN**). The nine rows of the page show.
+2. Press `F6` (**PATTERN**). The ten rows of the page show.
 
-   (Picture: Config, PATTERN page: the nine rows, the cursor on the first.)
-3. Press `Down` four times. The cursor is on METRO. Turn the encoder one click to the right: the row reads **Main**.
+   (Picture: Config, PATTERN page: the ten rows, the cursor on the first.)
+3. Press `Down` five times. The cursor is on METRO. Turn the encoder one click to the right: the row reads **Main**.
 4. Turn the encoder two clicks to the left. The row reads **Off**. The Pattern screen's info line loses its METRO chip.
 
    (Picture: Config, PATTERN page: METRO reads Off.)
@@ -3217,7 +3221,7 @@ METRO stays **Off** until you change it. Press `Delete` on the METRO row to put 
 
 ## The screen at a glance
 
-(Picture: Config, PATTERN page: the nine rows, from REC POLY to PAT SWITCH, with the metronome rows in the middle.)
+(Picture: Config, PATTERN page: the ten rows, from REC POLY to PAT SWITCH, with the metronome rows in the middle.)
 
 | Area | What it shows |
 |---|---|
@@ -3283,7 +3287,7 @@ The metronome, METRO, plays a click with the beat. It is set on the PATTERN page
 
 Start on the Config screen. Press `F6` (**PATTERN**).
 
-1. Press `Down` four times. The cursor is on METRO.
+1. Press `Down` five times. The cursor is on METRO.
 2. Turn the encoder until the row reads **Off**, **Cue** or **Main**.
 
 The default is **Cue**. While OUT MODE on the [Mixer](mixer.md) is Stereo, Cue plays on the Main side, and the row reads **Cue (-> Main)**. **Main** reads **Main** whatever OUT MODE is.  When METRO is **Off**, the Pattern screen's info line loses its METRO chip.
@@ -3488,7 +3492,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 - A **pending value** is a USB row you changed but did not apply. It shows a star (\*). Changing the page or leaving it drops the pending value. Nothing is applied.
 - `Delete` on USB AUDIO when it reads Off gives **On\***. The On waits for `F7`.
 - Pressing `Shift` + `F7` on the SD or INFO page says **NO ROWS ON THIS PAGE**.
-- REC MICRO and REC VELOCITY are new in track3r-os.
+- REC MICRO, REC VELOCITY and REC STORE are new in track3r-os.
 - PAT SWITCH is new in track3r-os.
 - PAD OFFSET is new in track3r-os. The official manual names a row offset among the pad options of Config, and this chapter does not claim the same range.
 - Not checked against the original firmware: the keys and pages in this chapter.
@@ -3905,6 +3909,169 @@ Voice: one sound that is playing. Each note that sounds uses one voice, and the 
 Insert: an effect module placed on the sound of one track, in the slot INS A or INS B of that track. See [Mixer](mixer.md).
 
 Bypass: the state of an insert in which the track plays without it, with no click. `F7` turns it on and off on the INSERTS page. See [Mixer](mixer.md).
+
+---
+
+# Advanced cheat sheet
+
+Print it: 2-3 pages, A4 or Letter.
+
+The advanced and slightly complex keys of track3r-os up to version 1.3.0, one area after another. Items marked **(new in 1.3.0)** are new since version 1.2.0. The basic keys are on the [Cheat sheet](cheat_sheet.md). Each area ends with a **More** line that links to the chapter that explains it in full. Keys are written as on the unit: `Shift` + `F1` is two keys pressed together, and hold `Instr` means press and keep it down.
+
+## Pattern and editing
+
+| Keys | What it does |
+|---|---|
+| `F7` (**TOOLS**) | Opens the verb menu. Pads 1 to 16 pick a verb: INVERT is pad 9, DUPLICATE x2 pad 10, EXPAND x2 pad 11, SHRINK /2 pad 12. Pad 16 (**APPS >**) lists the tool apps. |
+| `F4` (**FILL**) | Opens the Fill dialog. TYPE is EVERY N, EUCLID, RANDOM or SCALE. MODE is CONST, RAMP or RANDOM. `F1` fills, `F8` leaves with nothing written. |
+| `F2` (**VARY**) | In a random fill: takes the fill back and draws again. |
+| `F7`, then `F6` (**RE FILL**) | Repeats the last fill or the last TOOLS apply. **(new in 1.3.0: `F6` on the key row now opens EVENTS, so the repeat sits behind `F7`.)** |
+| `F6` (**EVENTS**) | The event list: notes, CC, pitch bends and lane rows, in time order. **(new in 1.3.0: opens straight from `F6`.)** |
+| EVENTS: `F2`, `Insert`, `Delete`, `F7` | `F2` (**QUANT**) snaps a row to its step. `Insert` copies a row. `Delete` clears it. `F7` (**UNDO**) takes back a list edit; `Shift` + `F7` redoes it. |
+| `Rec`, `Shift` + `Rec`, `Rec` then `Play` | STEP on, LIVE on, or LIVE on at once. Only a key ends a mode. `Shift` + `Rec` from stopped counts in first when COUNT-IN is on. |
+| `Shift` + arrows, `Copy`, `Shift` + `Copy` | Select a block. Copy it. Paste at the cursor in STEP. Hold `F1` and press `Copy` to copy the whole pattern. |
+| `F8` (**UNDO**), `Shift` + `F8` (**REDO**) | Take back or redo a Pattern change. A whole LIVE take is one step. Song edits undo on Song. |
+
+**More:** [Fill and tools](pattern_tools.md), [Pattern](pattern.md), [Edit the events of a take lane](pattern_tools.md#edit-the-events-of-a-take-lane).
+
+## MIDI
+
+| Keys or setting | What it does |
+|---|---|
+| Config, PATTERN, **REC STORE** `Lane` (default `Grid`) **(new in 1.3.0)** | With `Lane`, LIVE records a MIDI instrument's keys and controller moves into a lane beside the steps. Nothing reaches the step grid, and the lane plays with the steps. `Grid` keeps Spill and Micro-move as before. Export to `.mtp` drops lane events and the report counts them. |
+| Lane notes, LIVE (`Shift` + `Rec`) **(new in 1.3.0)** | Each note keeps the tick it was played at and its held length. A chord is one NOTE row per key, at its own tick. |
+| Lane notes, STEP (`Rec`) **(new in 1.3.0)** | With one cell selected, a chord held together goes in at the cursor step's first tick, each note one step long. |
+| Controllers on the track's channel **(new in 1.3.0)** | A mod wheel or knob box sends its controller number into the lane. A controller on another channel is not recorded. |
+| `Instr` and `Vol` held, then the encoder, on a CC A to CC F row **(new in 1.3.0)** | The encoder or a Learn knob on a CC letter records that controller's value. The strip reads `CC <L> <value>`. The first move of a letter in a take starts at 64. |
+| The count-in **(new in 1.3.0)** | Nothing is recorded during the count-in. The strip says `LANE REC: NOT RECORDED: COUNT-IN`. |
+| `F8` (**UNDO**), then `Shift` + `F8` (**REDO**) **(new in 1.3.0)** | A whole take is one undo step. Redo brings it back. |
+| The grid mark `MID nn cc` **(new in 1.3.0)** | A step where a lane note starts shows `MID`, then the number of notes and of controller moves. A bar at the left edge: top half for notes, bottom half for controllers. The mark is for reading. |
+| `Vol` + `Fx` (**Learn**) | Opens Learn for the row under the cursor. `F1` unbinds. `F2` sets MODE: pickup, jump or relative. `F5` (**FOLLOW**) makes the binding follow the selected instrument. |
+| `F6` (**MAP**) in Learn, or `F8` (**MAP**) on Config, MIDI **(new in 1.3.0)** | **LEARN MAP**, a list of every binding. `F1` NEW, `F2` MODE, `F3` DELETE, `F4` CLR ALL (press twice), `F5` FOLLOW, `F7` RELEARN. |
+| Step CC A to CC F on a sample or module instrument **(new in 1.3.0, PARAMAUTO)** | The step moves the parameter that owns the letter. The value is scaled from 0 to 127 over its range. A MIDI instrument's CC steps work as before. |
+| LIVE or STEP, a move of a row with no FX of its own **(new in 1.3.0)** | The strip reads `REC FX: VOLUME -> CC A`. The row keeps its letter. Six letters only: a seventh says `REC FX: NO FREE CC LETTER`. On a MIDI track it says `REC FX: MIDI TRACK` and writes nothing. |
+| Config, MIDI, **CC MAP** `On` | The official fixed CC numbers drive the volume of tracks 1 to 8 (71 to 78), the master levels (79 to 82), Perform slots (51 to 62) and performance patterns (41 to 48). Off by default. |
+| Config, MIDI, **CLOCK MODE**, **TRANSP IN** and **TRANSP OUT** | Master or Slave for the clock. TRANSP IN and OUT turn off the Start, Stop and Song Position messages, not the clock. |
+| Config, MIDI, **MTC OUT** and **MTC IN** | MTC OUT sends time code (24, 25 or 30 fps) for a program such as Logic Pro, from **MTC START** `01`. MTC IN follows a time code master: the row reads LOCKED when it runs with it. |
+
+**More:** [Panel: Learn](panel.md#learn-a-midi-control), [LEARN MAP](panel.md#see-every-binding-learn-map), [Put one parameter on the encoder](panel.md#put-one-parameter-on-the-encoder), [Pattern](pattern.md#good-to-know), [Make Logic Pro follow the unit](config.md#make-logic-pro-follow-the-unit), [Let the unit follow a time code](config.md#let-the-unit-follow-a-time-code), [Control the unit with the official CC numbers](config.md#control-the-unit-with-the-official-cc-numbers).
+
+## Perform and DJ
+
+| Keys | What it does |
+|---|---|
+| Hold a pad, turn the encoder | A live effect over the tracks that are ON. It ends at the release. The pattern is not changed. `F6` (**LATCH**) keeps a value on after the release, until you press another row or the top pad. |
+| `Shift` + `F1`, `F2`, `F3` (**STORE 1** to **3**) | Store the twelve slots as a scene. `F1` to `F3` recall it. |
+| `F4` (**HALF**), `F5` (**DOUBLE**) | Half or double speed while held. `F8` (**RESET**) ends every effect. |
+| `Shift` + `F4` / `F5` (**PICK -**, **PICK +**), then `Shift` + `F6` (**TRK PAT**) | Queues a picked pattern on the tracks that are ON, at each track's loop end. |
+| `Shift` + `F7` (**TRK NEXT**), `Shift` + `F8` (**TRK SONG**) | Queues the next song pattern on the ON tracks, or sends them back to the song. |
+| DJ page, `F3` (**CURVE**) | SMOOTH fades with equal power. CUT keeps a group at full level to the end. |
+| DJ page, `Shift` + top-row pad | Sets the track's group: THRU, A or B. The encoder moves the crossfader. |
+| DJ page, hold `F4` (**FILTER**), turn the encoder | Closes a low-pass or high-pass filter over the mix. It springs back at the release. |
+| DJ page, `F5` (**SCR**) | The encoder becomes the platter for scratching. `F5` again ends it. |
+| DJ page, pads 25 to 27, pads 29 to 32 | KILL LOW, MID and HI cut a band. TRANS HP, TRANS LP and TRANS ECHO end on the next pattern. Pad 32 is TAPE STOP. |
+
+**More:** [Perform](perform.md#hold-or-latch), [Scenes](perform.md#scenes), [DJ page](perform_dj.md#groups-who-gets-faded), [Scratch and tape stop](perform_dj.md#scratch-and-tape-stop).
+
+## Song
+
+| Keys | What it does |
+|---|---|
+| `F3` (**ADD SLOT**) | Adds a slot with the same pattern. Both slots play one pattern, so an edit in Pattern is heard in both. |
+| `F5` (**UNIQUE**) | Gives a shared slot its own copy of the pattern. |
+| Hold `Copy` + `F3` (**ADD EMPTY**) | Adds a slot on the first free, empty pattern. |
+| `Rec` while the song plays | Queues a jump to the cursor's slot. Press `Rec` again to cancel. |
+| Hold `F2` (**PLAY SNG**) with slots selected | Loops the selected slots. The info line reads LOOP. |
+| `F6` (**TOOLS**) | Block dialog: TRANSPOSE, INSTRUMENT, CLEAR, EXPORT WAV, FORM and BRIDGE. FORM builds a song shape from one to three patterns. BRIDGE puts new slots between two slots. |
+| `Shift` + `F7` (**PADS**), `F7` (**TEMPO**) | PADS switches the 48 pads between SLOTS and TRACKS. `F7` puts the encoder on the tempo. Two taps under 1.5 s apart set it. |
+
+**More:** [Sharing a pattern](song.md#sharing-a-pattern), [The track map](song.md#the-track-map), [Timeline page](song.md#read-the-song-on-the-timeline-page).
+
+## Instruments and modules
+
+| Keys or setting | What it does |
+|---|---|
+| The synths are card modules **(new in 1.3.0)** | TB-303, Chip, FM and SID are `.tmod` files. Copy `modules/instruments/` and `LICENSES/` from the starter zip to the card. A project whose instrument has no module on the card shows `MODULE NOT ON THE CARD`. Replace older copies. |
+| `F4` (**MODULE**) in an empty instrument slot | Lists the instrument modules on the card: ON CARD, or LOADED once running. |
+| TB-303, `F2` (**MODS**) | TUNE (cents), TRANSPOSE (semitones), ACC THRESH, FILTER TRACK (0 to 100 %) and ACC DECAY (30 to 2000 ms). |
+| FM, operator pages | ALGORITHM runs 1 to 16. DETUNE reaches plus or minus 1200 cents. |
+| Chip, WAVE and DUTY | Waves 4 to 11 come from the CHIP synth. WAVE and DUTY can be learned. The WAVE view draws the picked wave. **(new in 1.3.0: the view.)** |
+| SID, four pages `F1` to `F4` | OSC, ENV, FILTER and PITCH. SID plays one note at a time, so play chords on several tracks. |
+| `Shift` + `F2` (**MIX**) on a module | PANNING, DELAY SEND, REVERB SEND, and RATE: FULL, 1/2 or 1/4. A lower rate is cheaper and crunchier. |
+| `Shift` + `F5` (**SAVE**) on a module page | Saves the parameter set as a preset in `modules/presets/<module>/`. `F5` lists presets; `F1` loads one. |
+| `Shift` + pad, on Instrument **(new in 1.3.0)** | Plays the instrument in view. `F6` and `F7` change the instrument. |
+| `Shift` + `Pattern`, `F1` (**LAUNCH**) | Lists the apps that are not tools and starts one. `F7` + `F8` leaves any app. |
+| `F7` (**TOOLS**), pad 16 on Pattern | The APPS page of the tool apps, such as Rhythm Gen and Humanize. |
+
+**More:** [Modules and apps](modules.md#three-kinds-of-module), [TB-303, FM and Chip](module-sounds.md#the-tb-303s-mods-page), [SID](module-sounds.md#sid-a-chip-voice-with-four-pages), [Presets](modules.md#presets-load-and-save), [App pages](module_app.md#go-back-to-where-you-opened-the-app).
+
+## Mixer and inserts
+
+| Keys | What it does |
+|---|---|
+| Hold `Master`, tap `Insert` **(new in 1.3.0)** | Opens the Mixer on INSERTS from any screen. |
+| `Insert` on an empty INSERTS cell | Opens the picker. Two insert slots a track, one on the master: DRIVE, CRUSH, COMP, ENV FILTER, FOLD, PHASER, BIQUAD, PING-PONG, WIDE, CHORUS, AUTOPAN. |
+| `F7` on a taken cell | Bypass on or off, with no click. OVER BUDGET means the CPU guard forced the insert dry. |
+| `Delete` on a taken cell | Removes the insert. The Mixer has no undo, so this is final. |
+| `Params`, or `F6` (**PARAMS**) on INSERTS | The insert's settings. Learn works on its rows with `Vol` + `Fx`. |
+| `F2` (**ROUTING**), encoder | Turn up to route a track to a bus (MAIN, CUE, SND A, SND B), down to remove. |
+| `F4` (**STEMS**), `F6` (**APPLY**) | On STEMS, `F6` sets the number of USB outputs after a second press within two seconds. |
+
+**More:** [Insert effects](insert_effects.md#presets-and-the-cpu-guard), [Put an effect on a track](mixer.md#put-an-effect-on-a-track), [Routing](mixer.md#routing-where-a-track-goes), [Sends](mixer.md#sends-a-second-volume-knob).
+
+## Sample tools and recording
+
+| Keys | What it does |
+|---|---|
+| `Sample Editor` again | Opens the FX page (`F1` FILTER, `F2` COMPRESS), then the PLUGINS page. |
+| PLUGINS, `F1` (**APPLY**) | Runs a `.ptfx` plugin from `Effects/` on the selection or the sample, with undo. A plugin that faults is contained. |
+| Sample edit, `F1` to `F6` | CROP, NORM, REVERSE, FADE IN, FADE OUT and AMP. Each acts on the selection, or on the whole sample when none is marked. |
+| `Shift` + `Right` or `Left` (Sample load) | Marks a file and steps down, or clears the marks. `F1` (**LOAD**) and `F4` (**ADD**) load every marked file. `Shift` + `F7` / `F8` moves the target instrument. |
+| Wave and Chop, `Shift` + `F1` (**MODE**) | Opens the list of play modes. `Shift` + `F6` (**PRV SEL**) previews from the selected point. |
+| `Sample Recorder` again | Turns the pages SOURCES, RESAMPLE and RADIO. |
+| `F1` (**OVERDUB**) under a loop review | Records a layer. `F5` (**UNDO LYR**) takes the last layer back. |
+| `F8` (**LOOP ON** or **MUTED**) | Mutes or unmutes the loop. |
+| `F3` (**SAVE**) on a loop, `F4` (**DISCARD**) | Saves the loop as an instrument. DISCARD asks first: press `F4` again. |
+| `Shift` + `F3` (**CROP**) on a take | Cuts the take down to its window. It asks first. |
+
+**More:** [Record](record.md#a-loop-live-stored-and-ended), [Count a take in](record.md#count-a-take-in), [Start a take on a level](record.md#start-a-take-on-a-level), [Sample edit](sample_edit.md), [Wave and chop](wave.md), [Sample load](sample_load.md).
+
+## Config
+
+| Keys or setting | What it does |
+|---|---|
+| PATTERN page, **REC STORE** **(new in 1.3.0)** | `Grid` (default) or `Lane`. See MIDI above. |
+| PATTERN page, **PAD OFFSET** | 0 to 12. Sets where each pad row starts on the row below it. 12 is the default. |
+| PATTERN page, **PAT SWITCH** | Step (default) or Pattern end: when a pattern picked with `F1` held starts. |
+| PATTERN page, **COUNT-IN**, metronome | Count-in of 1 or 2 bars. The metronome can click on the Main outputs. |
+| DISPLAY page, **STATUS LED** | BLINK is the heartbeat, OFF turns it off. **BPM** flashes on every beat **(new in 1.3.0)**. |
+| USB page, `F7` (**APPLY**) twice | Changes USB AUDIO or USB RETURN. `Shift` + `F7` puts a page back to its defaults. |
+| `F5` (**USB**), **CARD AS DISK** | Hands the card to the computer while the unit keeps playing. `F7` twice to start. |
+| INFO page, `F8` (**UPDATE**) | Installs a `.ptf` from the `Firmware` folder after two confirmations. |
+
+**More:** [Config](config.md#set-the-count-in), [Keep the timing and velocity of live notes](config.md#keep-the-timing-and-velocity-of-live-notes), [Update from the unit](config.md#update-from-the-unit).
+
+## Files, USB disk and export
+
+| Keys | What it does |
+|---|---|
+| `F3` (**NEW**), then `F3` again (**ALL**) or `F1` (**KEEP INSTRUMENTS**) | Starts a new project. |
+| `F6` (**IMPORT**) on File | Imports a MOD, S3M or MED file. It needs `modules/importers/tracker.tmod` from the content zip. |
+| `F7` (**EXPORT**) on PROJECTS | Export page: WAV of the song, a pattern, a block, or stems. `F8` (**CANCEL**) stops it; finished files stay. Pattern TOOLS pads 14 and 15 export the block and the pattern. |
+| Power on, hold `Shift`, `F1` and `F7` | The unit shows its card as a disk and does nothing else. |
+
+**More:** [File](file.md), [USB disk](usb_disk.md), [Export](export.md).
+
+## Computer tools
+
+| Command | What it does |
+|---|---|
+| `cpu`, `guard`, `ins` | The audio load, underruns and skipped blocks; each bound insert with its cost. |
+| `mem`, `crash`, `log 30` | Memory map and free SRAM; the last crash record; the last 30 log lines. |
+| `sd`, `ls Projects`, `fw` | The card's state; a read-only folder listing; firmware files on the card. Use the tool to put or arm firmware. |
+| `key <button> tap` | Presses a button as a test. `state` prints the screen, cursor and play state. |
+
+**More:** [The diag console](computer_tools.md#the-diag-console-o3consolepy), [Take a screenshot](computer_tools.md#take-a-screenshot), [Measure the audio](computer_tools.md#measure-the-audio-o3audiopy), [Input test](input_test.md).
 
 ---
 
@@ -4925,6 +5092,8 @@ A knob that MIDI Learn bound to an instrument parameter also writes into the pat
 
 A parameter with no FX of its own, such as VOLUME or TUNE, records as a CC letter, **CC A** to **CC F**. The first recorded move takes the first free letter of the project, and the strip says **REC FX: VOLUME -> CC A**; the same parameter keeps its letter, the next one takes the next. Six letters are the limit: a seventh parameter says **REC FX: NO FREE CC LETTER**, still sounds, and is not recorded. A track whose instrument is a MIDI one says **REC FX: MIDI TRACK** and nothing is written. One Undo takes the step and its letter back together. When the pattern plays, the letter moves that parameter and sends no MIDI; playing it counts as a change to the project, so leaving afterwards asks about unsaved changes. New in track3r-os. Not yet checked on the unit.
 
+The exception is a MIDI instrument with REC STORE set to Lane: the CC A to CC F rows of that instrument do not write a step FX or change their controller number; each move goes into the lane as the controller the letter names (see "New in track3r-os" above).
+
 ### Select a block
 
 Start in STEP, WATCH (stopped or playing) or LIVE. A block is the steps and tracks you mark. Inside one track it can be just some columns: note with instrument (they go together), volume, FX1, FX2.
@@ -5085,6 +5254,8 @@ The octave is also the OCTAVE row of the note panel (hold `Note`) and the octave
 - `Up` on step 1 goes to the last step; holding `Up` or `Down` stops at the ends. `Shift` + `Note`, `Instr`, `Vol` or `Fx` jumps to row 1, 17, 33 or 49 of a 64-step pattern.  While `Rec` has step entry on, the same keys also select the steps they jump over, from where you were to the step before the one you land on: from step 17, `Shift` + `Note` selects steps 1 to 16. `Delete`, copy and the encoder then work on them like on a `Shift` + arrow block, and a new jump replaces the block.
 - Count-in: with COUNT-IN on (PATTERN page of [Config](config.md)), `Shift` + `Rec` from stopped counts in first. `Rec` or `Shift` + `Rec` during the count-in cancels it. `Play` never counts in.
 - The zoom is not saved with the project: it survives a project load and starts at 5 tracks at power on.
+- New in track3r-os: a track can hold MIDI lane events (notes and controller moves with their own timing, played with the steps). The grid shows them without using a step column: a step where a lane note starts reads `MID` and two numbers (the notes that start there, then the controller moves), a step the note still sounds in reads `MID`, and a thin bar at the left edge of the cell marks it, the top half for notes and the bottom half for controller moves. A step with its own note, instrument or volume shows only the bar. The mark is for reading: the cursor on it edits the step.
+- New in track3r-os: with REC STORE set to Lane (Config, PATTERN page), a controller that you move while you record on a MIDI instrument's track goes into the lane instead of the step columns. That is every controller an external keyboard or knob box sends on the track's channel, and a knob or the encoder that moves a CC A to CC F row of the instrument: its position is the controller's value, and the row keeps naming the same controller (it is not rewritten while the take runs). Program change and aftertouch rows, and a letter with no controller, record nothing, and the strip says so once.
 - New in track3r-os: the pad layouts, the quarter jumps, column blocks and the FX names in the cells.  The official firmware has its own record edit, live recording, an instant pattern switch and a view of 4 tracks. Here they work as this chapter says.  Not checked against the original firmware: the grid, the cursor keys, the copy keys and the `Shift` + encoder steps.
 
 ## See also
@@ -5261,7 +5432,7 @@ Start on the Pattern screen, with the transport stopped. Select a block first to
 1. Press `F6` (**EVENTS**). The grid pane becomes the event list.
 2. One row per note, with its length in **LEN**; one per MIDI CC (`CC A` to `CC F`); one per note-off that ends no note above it. `Up` and `Down` move the row; `Left` and `Right` move across its fields.
 3. In Edit (`Rec`), the encoder changes the boxed field of the row — TIME by a microstep (a whole step with `Shift`), DATA by a semitone, VAL by 1, LEN by a step, TYPE to the next CC letter, CH to the next channel, IN to the next instrument — and a pad enters the pad's note on **DATA**, the 0..127 ramp on **VAL**, or sounds the row's step anywhere else. Each press writes the step and is one undo step.
-4. The columns read TIME (the step and the percent of it, so a micro-moved note reads `009.50`), CH, DATA (the note, or what the CC sends, such as `#074`, `PROG` or `--`), VAL, IN and FL. A note with nothing below it reads `>` in LEN and plays on past the track's end.
+4. The columns read TIME (the step and the percent of it, so a micro-moved note reads `009.50`), CH, DATA (the note, or what the CC sends, such as `#074`, `PROG` or `--`), VAL, IN and FL. A note with nothing below it reads `>` in LEN and plays on past the track's end. A row of a take lane has an `L` in the SRC column (see "Edit the events of a take lane" below).
 5. Press `F1` (**FILTER**) to show every row, only the notes, or only the CC rows: the key reads `ALL 1/3`, `NOTE 2/3`, `CC 3/3`, and the count in the header follows.
 6. Hold `F5` (**PREVIEW**) to hear the row's step. While the pattern plays, a bar in the left margin marks the row of the step that is playing.
 7. Press `F8` (**BACK**): the grid cursor lands on the row's step, track and column.
@@ -5282,6 +5453,21 @@ Start in the event list with Edit on (`Rec`). The list shows the steps of the pa
 7. Press `F7` (**UNDO**) to take back the last edit without leaving the list, and `Shift` + `F7` (**REDO**) to do it again. The list shows the pattern again and the cursor stays on its event. `F8` (**UNDO**) on the grid takes back the same steps after you press `F8` (**BACK**).
 
 In WATCH every one of these keys says **TURN EDIT ON** and writes nothing.  Each key is one undo step, and **QUANT ALL** is one for the whole operation. A CC step with a micro-moved note still sends its CC at the start of the step, and only the note is late: that is why a CC row has no time inside a step.  New in track3r-os.
+
+### Edit the events of a take lane
+
+A track can hold a lane of MIDI events beside its steps: a take that was recorded with REC STORE set to Lane keeps every note, CC and bend at its own time, on the channel it came in on. The event list shows them after the steps' rows at the same time, in time order, and a lane row has an **L** in the **SRC** column. A step row has nothing there.
+
+Start in the event list with Edit on (`Rec`), on a track that has a lane.
+
+1. Look at the list. Notes that sound together, such as a chord, are several NOTE rows with the same TIME. **CH** is the channel the event is stored with, and **LEN** of a note is its true length, not a number of steps.
+2. Press `Right`. A lane row has no TYPE, IN or FX field, so `Right` goes from TIME to CH, then DATA, VAL and LEN. The encoder changes the boxed field: CH by one channel, LEN by its own unit, TIME by one tick (a whole step with `Shift`). Each detent is one undo step.
+3. After a TIME change the row takes its new place in the list and the cursor follows it. TIME beyond the track's last step is refused: the strip says **OUTSIDE THE SCOPE**.
+4. Press `Delete` to drop the event. A chord keeps its other notes. `F7` (**UNDO**) brings the event back.
+5. Press `Insert` on a lane note to add a copy where the note ends (`Shift` + `Insert`: at the same time). The strip says **NO ROOM AFTER THIS NOTE** when it cannot, and **TOO MANY EVENTS HERE** when more than 32 events would be touched at once. **LANE FULL: NOTHING CHANGED** means the lane has no room for the event.
+6. `F2` (**QUANT**) says **NO QUANT ON A LANE ROW** and writes nothing; `Shift` + `F2` leaves the lane rows as they are.
+
+`F5` (**PREVIEW**) has no step to sound on a lane row and says so. New in track3r-os. Not yet checked on the unit.
 
 ### Double, spread or halve a pattern
 

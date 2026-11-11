@@ -281,7 +281,11 @@ inline constexpr unsigned MtcIn = 29;
 // at the project tempo while stopped), 2 Off. A fault code wins in every mode. Appended by the same rule: a file written before it has no such entry and reads Blink; an older reader skips the entry it does not know; an out-of-range
 // value is refused (the reader skips it: Blink). The block holds 32 fields since OS-MIDICCMAP S1: no raise, no version bump. Not learnable.
 inline constexpr unsigned StatusLed = 30;
-inline constexpr unsigned kCount = 31;
+// OS-MIDIREC-P1 S3 (docs/specs/OS-MIDIREC-P1.md A12; new Community OS behaviour). REC STORE: 0 Grid (the default: today's recording, byte for byte), 1 Lane: a MIDI instrument's keyboard notes and CCs are recorded into the track's
+// MIDI take lane with sub-step ticks and true note lengths, not into the step grid. Appended by the same rule: a file written before it has no such entry and reads Grid; an older reader skips the entry it does not know; an out-of-range
+// value is refused (the reader skips it: Grid). The block holds 32 fields: no raise, no version bump. Not learnable.
+inline constexpr unsigned RecStore = 31;
+inline constexpr unsigned kCount = 32;
 }  // namespace device_setting
 
 // EnvState (OS-INSTUI S6): the SOURCE of a modulator slot, 0 Off / 1 Envelope / 2 LFO, kept in two bytes of an Envelope: `loop` at the field's offset and `enable` in the byte after it.

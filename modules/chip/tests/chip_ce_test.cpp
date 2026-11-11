@@ -511,3 +511,61 @@ TEST_CASE("chip ce: OS-MODRATE: the pitch in Hz does not depend on the rate (the
     }
   }
 }
+
+// OS-CECHIP C6: block-size independence on every wave with every new path on at once (the post chain, Chord, Shape, PWM, sweep, vibrato, arpeggio) and the note released after 6000 samples: the fixed
+// sizes of the spec (64 as the reference, then 1, 7, 128) and four random splits (sizes 1..200 from a fixed LCG) all give the bits of one render. The control tick counts samples, not calls.
+TEST_CASE("chip ce: every wave with the whole post chain and Chord on renders the same bits for fixed block sizes and for random splits") {
+  constexpr std::uint32_t kTotal = 6000, kTail = 3000;
+  static const std::uint32_t fixed[] = {64, 1, 7, 128};
+  for (std::uint32_t wave = 0; wave < 12u; ++wave) {
+    CAPTURE(wave);
+    std::vector<float> ref;
+    for (std::uint32_t split = 0; split < 8u; ++split) {  // 0..3 fixed sizes, 4..7 random
+      Fixture f;
+      NEED(f.ok);
+      f.inst.set(CHIP_PARAM_WAVE, static_cast<float>(wave));
+      f.inst.set(CHIP_PARAM_ATTACK, 5.0f);
+      f.inst.set(CHIP_PARAM_DECAY, 100.0f);
+      f.inst.set(CHIP_PARAM_SUSTAIN, 50.0f);
+      f.inst.set(CHIP_PARAM_SHAPE, 60.0f);
+      f.inst.set(CHIP_PARAM_SUB_OSC, 40.0f);
+      f.inst.set(CHIP_PARAM_CUTOFF, 1800.0f);
+      f.inst.set(CHIP_PARAM_RESONANCE, 45.0f);
+      f.inst.set(CHIP_PARAM_BITCRUSH, 7.0f);
+      f.inst.set(CHIP_PARAM_ENV_AMT, 30.0f);
+      f.inst.set(CHIP_PARAM_DECIMATE, 2.0f);
+      f.inst.set(CHIP_PARAM_CHORD, 3.0f);
+      f.inst.set(CHIP_PARAM_ARP_SPEED, 25.0f);
+      f.inst.set(CHIP_PARAM_SWEEP, 4.0f);
+      f.inst.set(CHIP_PARAM_SWEEP_TIME, 120.0f);
+      f.inst.set(CHIP_PARAM_VIB_DEPTH, 60.0f);
+      f.inst.on(57);
+      std::vector<float> out(kTotal + kTail, 0.0f);
+      std::uint32_t lcg = 0x9e3779b9u * (split + 1u);
+      for (std::uint32_t at = 0; at < kTotal + kTail;) {
+        if (at == kTotal) {
+          f.inst.off(57);  // at the same sample whatever the split: a split never crosses it
+        }
+        std::uint32_t n;
+        if (split < 4u) {
+          n = fixed[split];
+        } else {
+          lcg = lcg * 1664525u + 1013904223u;
+          n = 1u + (lcg >> 16) % 200u;
+        }
+        const std::uint32_t limit = at < kTotal ? kTotal : kTotal + kTail;
+        n = limit - at < n ? limit - at : n;
+        f.inst.m->render(f.inst.state, nullptr, out.data() + at, n);
+        at += n;
+      }
+      CHECK(all_finite(out));
+      CHECK(peak(out) > 0.01f);
+      if (ref.empty()) {
+        ref = out;
+      } else {
+        CAPTURE(split);
+        CHECK(same_bits(ref, out));
+      }
+    }
+  }
+}

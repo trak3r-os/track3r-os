@@ -208,6 +208,10 @@ class ProjectSink {
   // OS-QAFIX-4: the last open was refused in its verify phase, before anything was replaced (a file that cannot load: truncated, a bad checksum, a project of a newer format): the document, the history and
   // the transport are as they were, loaded() and folder() are those of the project that was open before, and detail() says why the file was refused. False after every other end.
   virtual bool refused() const noexcept { return false; }
+  // OS-MIDIREC-P1 S2: what a native project that loaded carried and this build did not take, so that the user is told before a save drops it: fields of a newer minor version (newer_fields())
+  // and MIDI take lanes the reader skipped (lanes_skipped(): a pattern the project lacks, a lane out of range). Both are lost on the next SAVE. False / 0 after every other end.
+  virtual bool newer_fields() const noexcept { return false; }
+  virtual std::uint32_t lanes_skipped() const noexcept { return 0; }
   // OS-FILES part A: replaces the document with a new project made from the module file `file` ("MOD/song.mod"; .mod .s3m .med .mmd0..3), with `engine` choosing where its commands go. The same
   // hand-over as open() and start_new(), reported the same way (busy(), then loaded() and detail()); import_summary() has what it made. A sink that cannot import answers NoDocument.
   virtual Start import_module(const char* file, ImportEngine engine) noexcept {
@@ -229,6 +233,7 @@ class ProjectSink {
   ~ProjectSink() = default;
 };
 
+struct LaneRec;
 class SampleBank;
 class Recorder;
 class SaveService;
@@ -254,6 +259,7 @@ struct ActionContext {
   PatternClip* clip = nullptr;        // the pattern clipboard (OS-PATCOPY), the App's; set by the App after construction
   SongClip* song_clip = nullptr;      // the song clip (OS-SONGMAP): the Song map's cells, the App's; set by the App after construction
   hal::firmware::FirmwareSink* firmware = nullptr;  // the firmware update port (OS-FWCONFIG), when the platform has an update path; set by the App after construction
+  LaneRec* lane = nullptr;            // the Lane recording's state (OS-MIDIREC-P1 S4: a CC letter's move goes to the take while it records), the App's; set by the App after construction
   bool repeat = false;                // the call is a key auto-repeat (a held button's later Taps, OS-DELREPEAT): dispatch() runs it only when the action is kActionRepeatable
 };
 

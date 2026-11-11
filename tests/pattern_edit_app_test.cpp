@@ -72,7 +72,8 @@ struct Rig {
   model::UndoHistory history;  // `rings`: the device's three rings (a structural unit then fences the others: OS-UNDOGRP D4)
   std::unique_ptr<model::Editor> editor;
 
-  explicit Rig(bool with_document = true, unsigned length = 64, bool rings = false) {
+  // `ring_bytes`: the undo region's size (the device's is the whole g_ring); a smaller one makes a unit too big for the Pattern ring (5/12 of it) reachable.
+  explicit Rig(bool with_document = true, unsigned length = 64, bool rings = false, std::size_t ring_bytes = sizeof g_ring) {
     model::Project& p = test::arena(0).project;
     p.reset();
     if (with_document) {
@@ -81,10 +82,10 @@ struct Rig {
       }
       (void)p.append_order(1);
       if (rings) {
-        history.begin(g_ring, sizeof g_ring);
+        history.begin(g_ring, ring_bytes);
         editor = std::make_unique<model::Editor>(p, history);
       } else {
-        journal.begin(g_ring, sizeof g_ring);
+        journal.begin(g_ring, ring_bytes);
         editor = std::make_unique<model::Editor>(p, journal);
       }
       app->attach_document(editor.get());
@@ -1424,6 +1425,69 @@ TEST_CASE("pattern edit: the length chooser sets every track, by 1, by the defin
   CHECK(fresh.depth() == 1u);
   (void)fresh.invoke("chooser.delta", 0);  // a zero turn changes nothing
   CHECK(fresh.depth() == 1u);
+}
+
+// OS-MIDIREC-P1 S2 (maintainer, 2026-11-10): a length cut that takes MIDI lane events the undo ring cannot hold asks first (TOO BIG TO UNDO); the same pick again goes on, records no undo
+// and forgets the history. The Editor refuses it with Full before that (nothing changes).
+TEST_CASE("OS-MIDIREC-P1: a length cut whose lane events do not fit the undo ring asks, and the second pick runs it without undo") {
+  static model::LaneStore store;
+  static model::LaneEvent big[4096];
+  for (std::uint32_t i = 0; i < 4096; ++i) {
+    big[i] = model::LaneEvent{};
+    big[i].tick = static_cast<std::uint16_t>(48 + i);  // all past the first step: a cut to one step takes every event of every lane
+    big[i].len = 1;
+    big[i].a = static_cast<std::uint8_t>(i & 0x7F);
+    big[i].b = 100;
+  }
+  // The pool (7,680 events, OS-MIDIREC-P1 decision 2026-11-10) is at most 61 KB of records, which the device's 160 KiB Pattern ring always holds: on the unit this
+  // question is a safety net that no length cut reaches. So the rig runs on a 96 KiB undo region (a 40 KiB Pattern ring) to reach it.
+  constexpr std::size_t kSmallRing = 96u * 1024u;
+  Rig rig(true, 128, true, kSmallRing);
+  store.clear();
+  store.adopt(rig.project().load_epoch());
+  rig.editor->attach_lanes(&store);
+  // two lanes, 4096 + 3584 events (the whole pool): 32,784 + 28,688 bytes of records, more than the 40 KiB ring
+  NEED(rig.editor->lane_replace(1, 0, 0, 6144, big, 4096) == model::Status::Ok);
+  NEED(rig.editor->lane_replace(1, 1, 0, 6144, big, 3584) == model::Status::Ok);
+  rig.tap(Button::F2);
+  rig.turn(-200);  // to 1 step: every lane loses all its events
+  CHECK(rig.project().pattern_length(1) == 128);  // refused: nothing changed
+  CHECK(rig.state().edit.undo_ask != 0u);
+  CHECK(store.lane(1, 0).count == 4096u);
+  CHECK(rig.editor->can_undo());
+  rig.turn(-200);  // the same pick again
+  CHECK(rig.project().pattern_length(1) == 1);
+  CHECK(store.lane(1, 0).count == 0u);
+  CHECK(!rig.editor->can_undo());  // no undo, and no older history either
+  CHECK(rig.state().edit.undo_ask == 0u);
+
+  // A different pick between the two takes the question back.
+  Rig again(true, 128, true, kSmallRing);
+  store.clear();
+  store.adopt(again.project().load_epoch());
+  again.editor->attach_lanes(&store);
+  NEED(again.editor->lane_replace(1, 0, 0, 6144, big, 4096) == model::Status::Ok);
+  NEED(again.editor->lane_replace(1, 1, 0, 6144, big, 3584) == model::Status::Ok);
+  again.tap(Button::F2);
+  again.turn(-200);
+  CHECK(again.state().edit.undo_ask != 0u);
+  again.turn(-1);  // 127 steps: the cut is small, it fits and goes on with undo
+  CHECK(again.project().pattern_length(1) == 127);
+  CHECK(again.state().edit.undo_ask == 0u);
+
+  // The device's own ring holds the same full pool: the cut goes on at once, undoable, and no question is asked.
+  Rig device(true, 128, true);
+  store.clear();
+  store.adopt(device.project().load_epoch());
+  device.editor->attach_lanes(&store);
+  NEED(device.editor->lane_replace(1, 0, 0, 6144, big, 4096) == model::Status::Ok);
+  NEED(device.editor->lane_replace(1, 1, 0, 6144, big, 3584) == model::Status::Ok);
+  device.tap(Button::F2);
+  device.turn(-200);
+  CHECK(device.state().edit.undo_ask == 0u);
+  CHECK(device.project().pattern_length(1) == 1);
+  CHECK(store.lane(1, 0).count == 0u);
+  CHECK(device.editor->can_undo());
 }
 
 TEST_CASE("pattern edit: the jump chooser: the edit step 0..32, the defined values, pads, and what it does to an entry") {
@@ -6031,4 +6095,55 @@ TEST_CASE("OS-PTOOLS2 S1: F7 in WATCH while playing with a block opens the tools
   CHECK(rig.state().overlay == app::OverlayId::None);
   CHECK(rig.message() == "THE PLAYHEAD HOLDS THE CURSOR IN LIVE");
   rig.app->attach_document(nullptr);  // (a LIVE take is open: the rig destroys its editor before the app)
+}
+
+// OS-MIDIREC-P1 S2 fold: SHRINK / DUPLICATE and the whole-pattern paste change the track lengths, and a length cut that takes more lane events than the undo ring holds is refused (Full). The whole operation is checked
+// before the first write: nothing is half done (no cleared tail with a kept length, no track changed while another is not) and the strip asks for the length chooser.
+TEST_CASE("OS-MIDIREC-P1: SHRINK and a whole-pattern paste whose lane cut does not fit the undo ring change nothing, and say so") {
+  static model::LaneStore store;
+  static model::LaneEvent big[4096];
+  for (std::uint32_t i = 0; i < 4096; ++i) {
+    big[i] = model::LaneEvent{};
+    big[i].tick = static_cast<std::uint16_t>(3100u + (i * 2u) / 3u);  // past the cut of both operations (64 steps, 16 steps)
+    big[i].len = 1;
+    big[i].a = static_cast<std::uint8_t>(i & 0x7F);
+    big[i].b = 100;
+  }
+  Rig rig(true, 128, true, 96u * 1024u);  // a 40 KiB Pattern ring: the two lanes (61 KB of records) do not fit
+  make_pattern(rig, 5, 16, "short", 70);
+  put_note(rig, 0, 100, 77);  // a step both operations would clear
+  put_note(rig, 1, 90, 78);
+  store.clear();
+  store.adopt(rig.project().load_epoch());
+  rig.editor->attach_lanes(&store);
+  NEED(rig.editor->lane_replace(1, 0, 0, 6144, big, 4096) == model::Status::Ok);
+  NEED(rig.editor->lane_replace(1, 1, 0, 6144, big, 3584) == model::Status::Ok);
+  rig.edit_mode();
+  rig.editor->history_reset();
+  const std::uint64_t digest = pattern_digest(rig, false, false);
+  const std::vector<unsigned> lengths = lengths_of(rig);
+
+  run_tool(rig, 3);  // SHRINK /2
+  CHECK(rig.message() == "TOO BIG TO UNDO: USE THE LENGTH CHOOSER");
+  CHECK(rig.depth() == 0u);
+  CHECK(pattern_digest(rig, false, false) == digest);
+  CHECK(lengths_of(rig) == lengths);
+  CHECK(store.lane(1, 0).count == 4096u);
+  CHECK(store.lane(1, 1).count == 3584u);
+  rig.flush();
+
+  rig.hold_key(Button::F1);  // the whole pattern 5 over pattern 1: lengths 16 and 8 cut every lane event
+  rig.pad(4);
+  rig.tap(Button::Copy);
+  rig.pad(0);
+  rig.shift_tap(Button::Copy);
+  rig.release_key(Button::F1);
+  CHECK(rig.message() == "TOO BIG TO UNDO: USE THE LENGTH CHOOSER");
+  CHECK(rig.depth() == 0u);
+  CHECK(pattern_digest(rig, false, false) == digest);
+  CHECK(lengths_of(rig) == lengths);
+  CHECK(std::string(rig.project().pattern(1)->name).empty());
+  CHECK(store.lane(1, 0).count == 4096u);
+  CHECK(store.lane(1, 1).count == 3584u);
+  rig.app->attach_document(nullptr);
 }

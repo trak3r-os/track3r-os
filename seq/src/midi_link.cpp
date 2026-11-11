@@ -311,6 +311,16 @@ void MidiLink::drain_inputs() noexcept {
   midi::RtItem pass[kPassCap];
   midi::MtcEvent mtc[kMtcCap];
   std::uint32_t nev = 0;
+  if (cc_ != nullptr) {  // OS-MIDIREC-P1 S3 (A8): the stamp of this block's MIDI, only while a take is open (the main loop's release store of the track)
+    const std::uint8_t tt = cc_->take_track();
+    std::uint8_t pat = 0;
+    std::uint32_t tick = 0;
+    if (tt != midi::CcInput::kNoTrack && seq_.capture_stamp(tt, pat, tick)) {
+      cc_->set_stamp(pat, tick);
+    } else {
+      cc_->clear_stamp();
+    }
+  }
   for (std::uint32_t p = 0; p < midi::kPortCount; ++p) {
     // Both rings are drained in every mode, so that neither fills: with the clock not followed the timing bytes are counted and dropped by MidiIn.
     const bool chasing = cfg_.mtc_in != 0u;  // OS-MTC B3: the sink only when MTC IN is on (MidiIn takes the time code of its own port only); without it the call is what it was

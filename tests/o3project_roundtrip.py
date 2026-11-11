@@ -1384,7 +1384,7 @@ def main():
         sys.exit("FAILED: the MEVT payload of lanes-one is not version 1.0, 1 lane, pattern 1 track 0, 4096 events of 8 bytes (%d bytes)" % len(pay))
     full = read(os.path.join(work, "lanes-full.cpp.o3p"))
     fp = dict(split_chunks(full))[b"MEVT"]
-    if len(fp) != 4 + 2048 * 6 + 24576 * 8:
+    if len(fp) != 4 + 1920 * 6 + 7680 * 8:
         sys.exit("FAILED: the MEVT payload of lanes-full is %d bytes" % len(fp))
 
     e1 = ev(0, 48, 0, 0, 0, 60, 100)
@@ -1414,9 +1414,9 @@ def main():
                       ("note length 6145", ev(0, 6145, 0, 0, 0, 60, 1)), ("other event with a length", ev(0, 5, 1, 0, 0, 1, 1))):
         skipped("bad event: " + name, mevt([lane(1, 0, [e1, bad]), lane(1, 1, [e1])]), ["lane 1 1 events=1"])
     skipped("unsorted events", mevt([lane(1, 0, [e2, e1]), lane(1, 1, [e1])]), ["lane 1 1 events=1"])
-    # Seven lanes of 4096 events: the pool holds 24,576, so the seventh is skipped (nothing is lost from the first six).
+    # Three lanes of 4096 events: the pool holds 7,680, so the second and third are skipped (nothing is lost from the first).
     big = [ev(i, 0, 1, 0, 0, 1, 1) for i in range(4096)]
-    skipped("pool full", mevt([lane(1, t, big) for t in range(7)]), ["lane 1 %d events=4096" % t for t in range(6)])
+    skipped("pool full", mevt([lane(1, t, big) for t in range(3)]), ["lane 1 0 events=4096"], n=2)
     # Tolerated: a reserved byte that is not 0, bytes after the last lane, a larger event whose first eight bytes are read, a newer minor with appended bytes.
     rewrite_alike("reserved byte", with_mevt(mevt([lane(1, 0, [e1], reserved=9)])), expect=join_chunks(with_mevt(mevt([lane(1, 0, [e1])]))))
     rewrite_alike("trailing bytes", with_mevt(mevt([lane(1, 0, [e1])], tail=b"\xab" * 7)), expect=join_chunks(with_mevt(mevt([lane(1, 0, [e1])]))))

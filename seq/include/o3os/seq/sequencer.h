@@ -99,9 +99,11 @@
 #include <o3os/midi/in.h>
 #include <o3os/midi/mtc.h>
 #include <o3os/midi/timed_queue.h>
+#include <o3os/model/lane_store.h>
 #include <o3os/model/project.h>
 #include <o3os/seq/control.h>
 #include <o3os/seq/fx.h>
+#include <o3os/seq/lane_play.h>
 #include <o3os/seq/midi_route.h>
 #include <o3os/seq/rng.h>
 
@@ -247,6 +249,12 @@ class Sequencer {
     std::uint32_t fx_ignored = 0;       // FX that were inert or ignored by a rule (Order jump out of range, ...)
     std::uint32_t queue_dropped = 0;    // E-SONG-07: the queued jumps that a delete of their slot or an overflow of the edit journal cancelled
     std::uint32_t chase_dropped = 0;    // OS-MTC B3: the main loop's transport and position commands the chase's run dropped
+    std::uint32_t lane_events = 0;      // OS-MIDIREC-P1 S2: lane events played
+    std::uint32_t lane_deferred = 0;    // lane events that waited for the next microstep (the cap of 16 a block)
+    std::uint32_t lane_cc_merged = 0;   // lane CCs that replaced a waiting value of the same controller (the 300 / s limit)
+    std::uint32_t lane_cc_dropped = 0;  // lane CCs lost: the waiting table was full
+    std::uint32_t lane_chase_sent = 0;  // CC values the chase put out after a jump or a pattern change
+    std::uint32_t lane_odd = 0;         // blocks that found the lane store mid-write (their lane events came late, never lost; the memmove window to measure on the unit)
   };
 
   using OrderStoreType = OrderStore;
@@ -256,6 +264,16 @@ class Sequencer {
 
   // E-SONG-07: gives the sequencer its list store (zeroed here), before the first step(). Needed on the target only; the host's is inside.
   void attach_order_store(OrderStore& store) noexcept;
+  // OS-MIDIREC-P1 S2: the MIDI take lanes the sequencer plays (model/lane_store.h; the app owns the store, the main loop writes it, this render reads it under the store's seq protocol). Null: no lanes.
+  // `run` is the playback state (1.5 KB, lane_play.h), owned by the caller: on the target in SDRAM, so that SRAM_U keeps its 32 KiB free floor (the Sequencer itself is 9.9 KB there). Both null: no lanes, and
+  // every lane_* step is a no-op. The run is reset here and at every play start; one sequencer, one run.
+  void attach_lanes(const model::LaneStore* store, LaneRun* run) noexcept {
+    lanes_ = store;
+    lane_ = run;
+    if (run != nullptr) {
+      run->reset();
+    }
+  }
 
   void configure(const Config& c) noexcept;
   const Config& config() const noexcept { return cfg_; }
@@ -438,6 +456,9 @@ class Sequencer {
 
   // ---- reading ---------------------------------------------------------------------------------------------------------
   Position position() const noexcept;
+  // OS-MIDIREC-P1 S3 (A8): where a Lane recording on `track` stands now, for the stamp of the MIDI that arrives (MidiLink, render context, once a block before the sequencer steps): the pattern the track reads and the
+  // lane tick of the next microstep to run, step * 48 + microstep (0..6143). False when nothing is stamped: stopped, in the count-in (except its last half-step, stamped as the start point's first tick), or a track that is not active. At most one block (1.45 ms) late.
+  bool capture_stamp(std::uint32_t track, std::uint8_t& pattern, std::uint32_t& tick) const noexcept;
   // The position as the UI reads it (OS-009b): published at the end of every step() call, read by the main loop (audio/play_position.h).
   const audio::PlayPosition& play_position() const noexcept { return published_; }
   std::uint32_t tempo_x100() const noexcept;       // what plays: nominal_tempo_x100() at the step rate (half / double time)
@@ -549,6 +570,21 @@ class Sequencer {
   void mtc_emit() noexcept;
   void reset_tracks() noexcept;
   void load_tracks(std::uint32_t from_step, bool loop = false) noexcept;
+  // OS-MIDIREC-P1 S2 (src/sequencer_lanes.cpp), render context only
+  void lane_begin_run() noexcept;
+  void lane_end_run(std::uint64_t at) noexcept;
+  void lane_block() noexcept;
+  void lane_microstep(std::uint32_t u, std::uint64_t at, std::uint32_t active) noexcept;
+  void lane_track(std::uint32_t t, std::uint32_t u, std::uint64_t at) noexcept;
+  void lane_event(std::uint32_t t, const model::LaneEvent& e, std::uint64_t at) noexcept;
+  void lane_note_on(std::uint32_t t, const model::LaneEvent& e, std::uint64_t at) noexcept;
+  bool lane_off(std::uint32_t t, std::uint32_t index, std::uint64_t at) noexcept;
+  void lane_end_held(std::uint32_t t, std::uint64_t at) noexcept;
+  void lane_count_down(std::uint64_t at) noexcept;
+  void lane_cc(std::uint32_t t, std::uint8_t route, std::uint8_t ctl, std::uint8_t value, std::uint64_t at) noexcept;
+  bool lane_cc_send(std::uint8_t route, std::uint8_t ctl, std::uint8_t value, std::uint8_t track, std::uint64_t at) noexcept;
+  void lane_flush(std::uint64_t at) noexcept;
+  void lane_chase() noexcept;
   void land_track_queue(std::uint32_t t, std::uint64_t at) noexcept;  // E-PERF-07: track t's queued source pattern becomes its own (the caller sets the track's pattern, length and position)
   std::uint32_t song_pattern_len(std::uint32_t pattern_id) const noexcept;
   std::uint32_t effective_len() const noexcept;
@@ -634,6 +670,8 @@ class Sequencer {
   std::uint64_t bend_routes_ = 0;     // four bits a channel, one per route label (`ports` 0..3): the routes a Micro-tune bent and nothing has centred since; the centre goes to every one of them
   std::uint32_t prog_edit_[2] = {0, 0};
   std::uint32_t load_epoch_ = 0;
+  const model::LaneStore* lanes_ = nullptr;  // OS-MIDIREC-P1 S2: see attach_lanes
+  LaneRun* lane_ = nullptr;                  // render context only (the render is its one reader and writer); null with no lanes
   TrackState tr_[kMaxTracks];
   PfxState pfx_[kMaxTracks];
 

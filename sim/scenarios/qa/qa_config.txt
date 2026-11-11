@@ -325,3 +325,10 @@ snap qa_cfg_279
 # QA-CFG-275: the MIDI page (F1) has thirteen rows now (twelve before OS-MTC B3, ten before OS-MTC A3); the cursor on CC MAP (Off), the row after IN CHANNEL and before OUT CHANNEL.
 tap down 4
 snap qa_cfg_275
+
+# OS-MIDIREC-P1 S3 (docs/specs/OS-MIDIREC-P1.md, A12): REC STORE, the PATTERN page's fifth row after REC VELOCITY (Grid, Lane; the default Grid, saved in settings.o3st). Not learnable.
+# QA-CFG-282: REC STORE to Lane: the row reads Lane and the card says what the row does (the simulator has no stamped MIDI in, so a Lane take is a unit and host-test matter).
+tap f6
+tap down 4
+encoder 1
+snap qa_cfg_282

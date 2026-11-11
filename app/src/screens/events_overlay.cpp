@@ -33,6 +33,7 @@ namespace ev = model::events;
 // Column x offsets, in Data-face cells from the row's left edge: TIME TRK TYPE CH DATA VAL LEN IN FL FX1 FX2 (spec 3.3, OS-EVFX).
 constexpr int kColTime = 0;
 constexpr int kColTrk = 7;
+constexpr int kColSrc = 9;  // OS-MIDIREC-P1 S6: the SRC column, "L" on a lane row and blank on a step row (between TRK and TYPE); no caption of its own (a letter beside TYPE read as one word)
 constexpr int kColType = 10;
 constexpr int kColCh = 15;
 constexpr int kColData = 18;
@@ -51,7 +52,12 @@ const model::Pattern* events_pattern(const Model& model, const ViewState& view) 
 }
 
 ev::Env events_env(const Model& model) noexcept {
-  return model.project != nullptr ? ev::env_of(*model.project) : ev::Env{};
+  if (model.project == nullptr) {
+    return ev::Env{};
+  }
+  ev::Env env = ev::env_of(*model.project);
+  env.lanes = model.lanes;  // S6: the lane rows
+  return env;
 }
 
 const char* end_text(ev::Kind k) noexcept {
@@ -60,7 +66,10 @@ const char* end_text(ev::Kind k) noexcept {
 
 // "NOTE", "OFF", ... or "CC A".."CC F".
 void type_text(core::FixedString<12>& out, const ev::Row& row) noexcept {
-  if (row.key.kind == ev::Kind::Cc) {
+  if (row.key.lane != 0u) {  // S6: a lane event's own kind (model::LaneEvent: note, CC, program, channel AT, poly AT, pitch bend)
+    static const char* const kNames[6] = {"NOTE", "CC", "PROG", "CHAT", "PAT", "BEND"};
+    out.assign(kNames[row.lane_kind < 6u ? row.lane_kind : 1u]);
+  } else if (row.key.kind == ev::Kind::Cc) {
     char t[5] = {'C', 'C', ' ', static_cast<char>('A' + row.cc_letter), '\0'};
     out.assign(t);
   } else if (row.key.kind == ev::Kind::Note) {
@@ -198,9 +207,10 @@ void EventsOverlay::render(const Model& model, const ViewState& view, ui::Render
     if (cursor) {
       r.panel(Rect{cover.x, ry, cover.w, pitch}, Color::Sel);
       // The cursor's field is an Accent block under its own words (3.3: the TIME field boxed), drawn before them.
-      if (events_field_ok(row.key.kind, field_of)) {
+      if (events_field_ok(row, field_of)) {
         const unsigned fi = static_cast<unsigned>(field_of);
-        r.panel(Rect{x0 + kFieldX[fi] * cell - m.pad / 2, ry + m.border, kFieldW[fi] * cell + m.pad, pitch - 2 * m.border}, Color::Accent);
+        const int fw = row.key.lane != 0u && row.lane_kind == ev::kLaneBend && field_of == EventsView::Field::Val ? 5 : kFieldW[fi];  // a bend's 14 bits take five digits
+        r.panel(Rect{x0 + kFieldX[fi] * cell - m.pad / 2, ry + m.border, fw * cell + m.pad, pitch - 2 * m.border}, Color::Accent);
       }
     }
     if (play >= 0 && pat != nullptr) {  // the Accent bar in the left margin, over the cursor's row too
@@ -231,6 +241,37 @@ void EventsOverlay::render(const Model& model, const ViewState& view, ui::Render
       (void)append_dec(ch, row.channel, 2);
     }
     r.text(cx(kColCh), y, ch.c_str(), field_ink(EventsView::Field::Ch), Face::Data);
+    if (row.key.lane != 0u) {
+      // S6: a lane row — SRC "L", DATA and VAL by kind (the bytes of the model::LaneEvent), the true LEN of a note; no IN, FL or FX
+      r.text(cx(kColSrc), y, "L", ink, Face::Data);
+      const std::uint8_t k = row.lane_kind;
+      if (k == ev::kLaneNote || k == ev::kLanePolyAt) {
+        r.note_tile(cx(kColData), ry + (pitch - t.geometry(Face::Data).cell_h) / 2, note_tile_cell(static_cast<std::uint8_t>(row.lane_a + 1u), octave_shift), field_ink(EventsView::Field::Data), Face::Data);
+      } else if (k == ev::kLaneCc || k == ev::kLaneProgram) {
+        tmp.assign("#");
+        (void)append_dec(tmp, row.lane_a, 3);
+        r.text(cx(kColData), y, tmp.c_str(), field_ink(EventsView::Field::Data), Face::Data);
+      } else {
+        r.text(cx(kColData), y, "-", ink, Face::Data);
+      }
+      if (k == ev::kLaneProgram) {
+        r.text(cx(kColVal), y, "-", ink, Face::Data);
+      } else {
+        tmp.clear();
+        if (k == ev::kLaneBend) {
+          (void)append_dec(tmp, (static_cast<unsigned>(row.lane_b) << 7) | row.lane_a, 5);
+        } else {
+          (void)append_dec(tmp, k == ev::kLaneChanAt ? row.lane_a : row.lane_b, 3);
+        }
+        r.text(cx(kColVal), y, tmp.c_str(), field_ink(EventsView::Field::Val), Face::Data);
+      }
+      if (k == ev::kLaneNote) {
+        len_text(tmp, row);
+        r.text(cx(kColLen), y, tmp.c_str(), field_ink(EventsView::Field::Len), Face::Data);
+      }
+      r.text(cx(kColIn), y, "-", ink, Face::Data);
+      continue;
+    }
     if (row.key.kind == ev::Kind::Note) {
       const std::uint8_t note = pat != nullptr ? pat->steps[row.key.track][row.key.step].note : 0u;
       r.note_tile(cx(kColData), ry + (pitch - t.geometry(Face::Data).cell_h) / 2, note_tile_cell(note, octave_shift), field_ink(EventsView::Field::Data), Face::Data);

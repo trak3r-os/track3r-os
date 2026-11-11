@@ -549,7 +549,7 @@ TEST_CASE("chip: the packed .tmod passes the loader's checks, relocates, reads b
   CHECK(t.h.view_count == CHIP_VIEW_COUNT);
   CHECK(t.h.state_bytes <= CHIP_STATE_BYTES);
   CHECK(t.h.hot_size <= 3072u);  // the SRAM_L slab (14 KiB) is shared by every loaded module: the oscillator loops are the whole of it
-  CHECK(t.h.image_size - t.h.hot_size <= 12544u);  // OS-CECHIP C5: the packer reports the cold section as 12,016 B (8,768 B at C3); this test checks image minus hot; 12,544 is 4.4 % above. The spec expected about 12,000 B for the .tmod with all eight waves
+  CHECK(t.h.image_size - t.h.hot_size <= 15360u);  // OS-CECHIP C7: the packer reports the cold section as 15,056 B (12,160 B at C6, 12,016 B at C5, 8,768 B at C3): the wave view's sampled kernels (policy Fast, built -Os) are +2,896 B, on the card and in SDRAM only; this test checks image minus hot; 15,360 is 2 % above. The spec expected about 12,000 B for the .tmod with all eight waves
   MESSAGE("chip.tmod: " << t.file_bytes << " B file, hot " << t.h.hot_size << " B, cold " << (t.h.image_size - t.h.hot_size) << " B, state " << t.h.state_bytes << " B");
 }
 
@@ -583,7 +583,7 @@ TEST_CASE("chip views: both draw inside the draw API's budgets for every wave, d
   CHECK(v.lib.entry->view_count == 2u);
   NEED(v.lib.entry->ui != nullptr);
   const float times[] = {0.0f, 1.0f, 500.0f};
-  for (float wave = 0.0f; wave <= 3.0f; wave += 1.0f) {
+  for (float wave = 0.0f; wave <= 11.0f; wave += 1.0f) {  // OS-CECHIP C7: the eight new waves too (96 samples of their kernels)
     for (float duty = 0.0f; duty <= 3.0f; duty += 1.0f) {
       for (float steps : {0.0f, 1.0f}) {
         for (float a : times) {
@@ -721,7 +721,7 @@ TEST_CASE("chip views: OS-BUG-CHIPWAVELABEL the wave's name sits above the trace
   v.host.set_metrics(m);
   const int sizes[3][2] = {{160, 64}, {380, 90}, {380, 100}};  // module.json: the Wave view's min_size, preferred_size, and the tests' usual canvas
   for (const auto& sz : sizes) {
-    for (std::uint32_t wave = 0; wave < 4; ++wave) {
+    for (std::uint32_t wave = 0; wave < 12; ++wave) {
       for (std::uint32_t duty = 0; duty < 4; ++duty) {
         v.p[CHIP_PARAM_WAVE] = static_cast<float>(wave);
         v.p[CHIP_PARAM_DUTY] = static_cast<float>(duty);
@@ -748,6 +748,127 @@ TEST_CASE("chip views: OS-BUG-CHIPWAVELABEL the wave's name sits above the trace
       }
     }
   }
+}
+
+namespace {
+
+// The wave view's trace of a wave at the page's values (380 x 100), as the polyline's y values
+std::vector<std::int16_t> trace_of(Views& v, std::uint32_t wave, bool* ok = nullptr) {
+  v.p[CHIP_PARAM_WAVE] = static_cast<float>(wave);
+  const bool drew = v.draw(CHIP_VIEW_WAVE) == ViewStatus::Ok;
+  if (ok != nullptr) {
+    *ok = drew;
+  }
+  Drawing dr;
+  v.host.replay(dr);
+  std::vector<std::int16_t> ys;
+  if (drew && dr.polys.size() == 1u) {
+    for (std::size_t k = 1; k < dr.polys[0].xy.size(); k += 2) {
+      ys.push_back(dr.polys[0].xy[k]);
+    }
+  }
+  return ys;
+}
+
+// side changes of a trace across the zero line (y = 60 at 380 x 100) between samples [from, to)
+unsigned crossings(const std::vector<std::int16_t>& ys, std::size_t from, std::size_t to) {
+  unsigned n = 0;
+  for (std::size_t k = from + 1; k < to; ++k) {
+    n += ((ys[k - 1] < 60) != (ys[k] < 60)) ? 1u : 0u;
+  }
+  return n;
+}
+
+}  // namespace
+
+TEST_CASE("chip views: OS-CECHIP C7 the wave view names waves 4..11 and draws 96 samples of each one's kernel, moved by Shape and Sub Osc") {
+  Views v;
+  NEED(v.ok);
+  const char* names[8] = {"2A03 PULSE", "SID SAW/TRI", "NOISE/LFSR", "FM BELL", "SUPER SQR", "ZAP/LASER", "ARP CHORD", "CHIP DRUM"};
+  for (std::uint32_t wave = 4; wave < 12; ++wave) {
+    CAPTURE(wave);
+    v.p[CHIP_PARAM_SUB_OSC] = 0.0f;
+    v.p[CHIP_PARAM_SHAPE] = 35.0f;
+    v.p[CHIP_PARAM_WAVE] = static_cast<float>(wave);
+    NEED(v.draw(CHIP_VIEW_WAVE) == ViewStatus::Ok);
+    Drawing dr;
+    v.host.replay(dr);
+    NEED(dr.texts.size() == 1u);
+    CHECK(dr.texts[0].s == names[wave - 4]);
+    NEED(dr.polys.size() == 1u);
+    CHECK(dr.polys[0].xy.size() == 2u * 96u);
+    CHECK(dr.polys[0].xy[0] == 6);  // from the left edge to the right one
+    CHECK(dr.polys[0].xy[2 * 95] == 380 - 6);
+    for (std::size_t k = 1; k < dr.polys[0].xy.size(); k += 2) {
+      CHECK(dr.polys[0].xy[k] >= 26);  // inside the trace area: below the name, above the bottom margin
+      CHECK(dr.polys[0].xy[k] <= 94);
+    }
+    // the same page draws the same trace (the kernel starts from its fixed state every time), a different Shape or Sub Osc another
+    bool ok1 = false, ok2 = false, ok3 = false, ok4 = false;
+    const std::vector<std::int16_t> base = trace_of(v, wave, &ok1);
+    CHECK(trace_of(v, wave, &ok2) == base);
+    v.p[CHIP_PARAM_SUB_OSC] = 60.0f;
+    const std::vector<std::int16_t> with_sub = trace_of(v, wave, &ok3);
+    v.p[CHIP_PARAM_SUB_OSC] = 0.0f;
+    v.p[CHIP_PARAM_SHAPE] = 90.0f;
+    const std::vector<std::int16_t> other_shape = trace_of(v, wave, &ok4);
+    NEED((ok1 && ok2 && ok3 && ok4));
+    CHECK(with_sub != base);
+    CHECK(other_shape != base);
+    v.p[CHIP_PARAM_SHAPE] = 35.0f;
+  }
+  // a wave's own features: the zap and the drum fall in pitch over the trace (more crossings of the zero line early than late), the arpeggio changes its pitch four times
+  // (the chord's Off shows the Major triad; the Octave one is another trace), and the pulse with the shape is the pulse's duty
+  v.p[CHIP_PARAM_SUB_OSC] = 0.0f;
+  v.p[CHIP_PARAM_SHAPE] = 35.0f;
+  for (std::uint32_t wave : {9u, 11u}) {
+    CAPTURE(wave);
+    const std::vector<std::int16_t> ys = trace_of(v, wave);
+    NEED(ys.size() == 96u);
+    CHECK(crossings(ys, 0, 48) > crossings(ys, 48, 96));
+  }
+  v.p[CHIP_PARAM_CHORD] = 0.0f;
+  const std::vector<std::int16_t> arp_off = trace_of(v, 10);
+  v.p[CHIP_PARAM_CHORD] = 3.0f;  // Major
+  CHECK(trace_of(v, 10) == arp_off);
+  v.p[CHIP_PARAM_CHORD] = 1.0f;  // Octave
+  CHECK(trace_of(v, 10) != arp_off);
+  v.p[CHIP_PARAM_CHORD] = 0.0f;
+  // the wave parameter's whole range draws, and 99 is held to the last wave
+  v.p[CHIP_PARAM_WAVE] = 99.0f;
+  NEED(v.draw(CHIP_VIEW_WAVE) == ViewStatus::Ok);
+  Drawing last;
+  v.host.replay(last);
+  CHECK(last.texts.at(0).s == "CHIP DRUM");
+}
+
+TEST_CASE("chip views: OS-CECHIP C7 the envelope view says which way Env Amt moves the filter, and says nothing at 0") {
+  Views v;
+  NEED(v.ok);
+  const float amts[] = {0.0f, 30.0f, -30.0f, 100.0f, -100.0f, 0.0f};
+  for (float amt : amts) {
+    CAPTURE(amt);
+    v.p[CHIP_PARAM_ENV_AMT] = amt;
+    NEED(v.draw(CHIP_VIEW_ENVELOPE) == ViewStatus::Ok);
+    Drawing dr;
+    v.host.replay(dr);
+    NEED(dr.curves.size() == 1u);
+    if (amt == 0.0f) {
+      CHECK(dr.texts.empty());
+    } else {
+      NEED(dr.texts.size() == 1u);
+      CHECK(dr.texts[0].s == (amt > 0.0f ? "FILTER OPENS" : "FILTER CLOSES"));
+      const int chars = static_cast<int>(dr.texts[0].s.size());
+      CHECK(dr.texts[0].x >= 0);
+      CHECK(dr.texts[0].x + 8 * chars <= 380);  // inside the view, on the right
+    }
+  }
+  // too narrow a view (the smallest canvas) leaves it out rather than clipping it
+  v.p[CHIP_PARAM_ENV_AMT] = 50.0f;
+  NEED(v.draw(CHIP_VIEW_ENVELOPE, 120, 60) == ViewStatus::Ok);
+  Drawing narrow;
+  v.host.replay(narrow);
+  CHECK(narrow.texts.empty());
 }
 
 TEST_CASE("chip views: the envelope curve is the voice's envelope in time, in 4-bit steps when they are on") {

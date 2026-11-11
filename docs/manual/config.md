@@ -8,7 +8,7 @@ Open rows, not written (no simulator check): QA-CFG-014, QA-CFG-024, QA-CFG-202,
 
 Status: draft
 
-Config holds the unit's settings on six pages. Three things are new in track3r-os: the USB page can turn the audio device and the audio return off, CARD AS DISK hands the card to a computer while the unit plays on, and the metronome can click on the Main outputs with a count-in of one or two bars. <!-- og: new --> The rest of the PATTERN page differs from the official manual. The metronome has no time-signature rows. Live recording has the rows REC MICRO and REC VELOCITY. PAD OFFSET sets how the pad rows overlap, while the root and scale come from the held Note panel. PAT SWITCH chooses whether a pattern picked with `F1` held lands at the next step or at the end of the pattern. <!-- og: different --> A change to USB AUDIO or USB RETURN waits until you press `F7` (**APPLY**) twice, and `Shift` + `F7` puts a page back to its defaults. Not checked against the original firmware: the pages and keys. <!-- og: open -->
+Config holds the unit's settings on six pages. Three things are new in track3r-os: the USB page can turn the audio device and the audio return off, CARD AS DISK hands the card to a computer while the unit plays on, and the metronome can click on the Main outputs with a count-in of one or two bars. <!-- og: new --> The rest of the PATTERN page differs from the official manual. The metronome has no time-signature rows. Live recording has the rows REC MICRO and REC VELOCITY, and REC STORE: with Lane, a keyboard played into a MIDI track is kept with its exact timing and note lengths in the track's lane instead of on the step grid (Grid, the default). PAD OFFSET sets how the pad rows overlap, while the root and scale come from the held Note panel. PAT SWITCH chooses whether a pattern picked with `F1` held lands at the next step or at the end of the pattern. <!-- og: different --> A change to USB AUDIO or USB RETURN waits until you press `F7` (**APPLY**) twice, and `Shift` + `F7` puts a page back to its defaults. Not checked against the original firmware: the pages and keys. <!-- og: open -->
 
 ## What it is for
 
@@ -29,10 +29,10 @@ Example: set METRO to Cue and COUNT-IN to 1 bar, and the next live take starts w
 This walk-through changes a live row, then shows a pending one that is dropped.
 
 1. Press `Config`.
-2. Press `F6` (**PATTERN**). The nine rows of the page show.
+2. Press `F6` (**PATTERN**). The ten rows of the page show.
 
-   ![Config, PATTERN page: the nine rows, the cursor on the first.](img/config_walk_2.png)
-3. Press `Down` four times. The cursor is on METRO. Turn the encoder one click to the right: the row reads **Main**. <!-- QA-CFG-017 -->
+   ![Config, PATTERN page: the ten rows, the cursor on the first.](img/config_walk_2.png)
+3. Press `Down` five times. The cursor is on METRO. Turn the encoder one click to the right: the row reads **Main**. <!-- QA-CFG-017 -->
 4. Turn the encoder two clicks to the left. The row reads **Off**. The Pattern screen's info line loses its METRO chip. <!-- QA-CFG-018 -->
 
    ![Config, PATTERN page: METRO reads Off.](img/config_walk_4.png)
@@ -47,7 +47,7 @@ METRO stays **Off** until you change it. Press `Delete` on the METRO row to put 
 
 ## The screen at a glance
 
-![Config, PATTERN page: the nine rows, from REC POLY to PAT SWITCH, with the metronome rows in the middle.](img/config_qa_cfg_016.png)
+![Config, PATTERN page: the ten rows, from REC POLY to PAT SWITCH, with the metronome rows in the middle.](img/config_qa_cfg_016.png)
 
 | Area | What it shows |
 |---|---|
@@ -117,7 +117,7 @@ The metronome, METRO, plays a click with the beat. It is set on the PATTERN page
 
 Start on the Config screen. Press `F6` (**PATTERN**).
 
-1. Press `Down` four times. The cursor is on METRO. <!-- QA-CFG-017 -->
+1. Press `Down` five times. The cursor is on METRO. <!-- QA-CFG-017 -->
 2. Turn the encoder until the row reads **Off**, **Cue** or **Main**. <!-- QA-CFG-016 -->
 
 The default is **Cue**. While OUT MODE on the [Mixer](mixer.md) is Stereo, Cue plays on the Main side, and the row reads **Cue (-> Main)**. **Main** reads **Main** whatever OUT MODE is. <!-- QA-CFG-017 --> When METRO is **Off**, the Pattern screen's info line loses its METRO chip. <!-- QA-CFG-018 -->
@@ -335,7 +335,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 - A **pending value** is a USB row you changed but did not apply. It shows a star (\*). Changing the page or leaving it drops the pending value. Nothing is applied. <!-- QA-CFG-010 --> <!-- QA-CFG-033 -->
 - `Delete` on USB AUDIO when it reads Off gives **On\***. The On waits for `F7`. <!-- QA-CFG-009 -->
 - Pressing `Shift` + `F7` on the SD or INFO page says **NO ROWS ON THIS PAGE**. <!-- QA-CFG-032 -->
-- REC MICRO and REC VELOCITY are new in track3r-os. <!-- QA-CFG-026 --> <!-- QA-CFG-027 -->
+- REC MICRO, REC VELOCITY and REC STORE are new in track3r-os. <!-- QA-CFG-026 --> <!-- QA-CFG-027 --> <!-- QA-CFG-282 -->
 - PAT SWITCH is new in track3r-os. <!-- QA-CFG-229 --> <!-- QA-PAT-318 -->
 - PAD OFFSET is new in track3r-os. The official manual names a row offset among the pad options of Config, and this chapter does not claim the same range. <!-- QA-CFG-035 -->
 - Not checked against the original firmware: the keys and pages in this chapter.

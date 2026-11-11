@@ -23,6 +23,7 @@ void NativeFolderLoader::close_file() noexcept {
     storage_->close(file_);
   }
   file_ = hal::storage::FileHandle{};
+  reader_.abandon();  // OS-MIDIREC-P1 S2 fold: a load dropped mid-lane (begin, begin_fresh, abort) must not leave the LaneStore's write window open (the render would skip the lanes)
 }
 
 bool NativeFolderLoader::begin(hal::storage::Storage& storage, const char* folder, model::ModelArena& arena, bool backup) noexcept {
@@ -90,6 +91,9 @@ NativeFolderLoader::State NativeFolderLoader::step(std::size_t byte_budget) noex
   if (fresh_) {  // a new project: the model's defaults, one step (the app's frames are held, the transport is stopped and the voices have settled: the platform's phases)
     model::Project& project = arena_->project;
     project.reset(keep_instruments_);
+    if (lanes_ != nullptr) {
+      lanes_->sync(project.load_epoch());  // the reset moved the epoch: no lane of the old project survives (OS-MIDIREC-P1)
+    }
     if (project.create_pattern(1, model::kDefaultPatternLength) != model::Status::Ok || project.append_order(1) != model::Status::Ok) {
       fail(native::Error::Internal, "NEW PROJECT FAILED");  // (a reset project has room for a pattern: never input, never reached)
       return state_;
@@ -114,7 +118,7 @@ NativeFolderLoader::State NativeFolderLoader::step(std::size_t byte_budget) noex
       return state_;
     }
     source_.attach(*storage_, file_);
-    reader_.begin(source_, *arena_);
+    reader_.begin(source_, *arena_, lanes_);
     reading_ = true;
   }
   const native::Progress p = reader_.step(byte_budget < kMinRoom ? kMinRoom : byte_budget);
@@ -127,6 +131,7 @@ NativeFolderLoader::State NativeFolderLoader::step(std::size_t byte_budget) noex
   report_.instruments = r.instruments;
   report_.unknown_dropped = r.unknown_dropped;
   report_.newer_minor = r.newer_minor;
+  report_.mevt_skipped = r.mevt_skipped;
   report_.sanitised = r.settings_skipped;
   if (p == native::Progress::Done) {
     close_file();
@@ -296,6 +301,9 @@ std::size_t describe_native_load(const NativeFolderLoader& loader, char* out, st
       }
       if (r.newer_minor) {
         line.str(", newer fields skipped");
+      }
+      if (r.mevt_skipped != 0u) {
+        line.str(", ").dec(r.mevt_skipped).str(r.mevt_skipped == 1u ? " MIDI lane skipped" : " MIDI lanes skipped");
       }
       if (r.sanitised != 0u) {
         line.str(", ").dec(r.sanitised).str(r.sanitised == 1u ? " value reset" : " values reset");

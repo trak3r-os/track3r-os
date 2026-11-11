@@ -16,6 +16,8 @@
 #include <o3os/core/input_event.h>
 #include <o3os/midi/cc_in.h>
 #include <o3os/model/editor.h>
+#include <o3os/model/lane_store.h>
+#include <o3os/model/lane_take.h>
 #include <o3os/model/params.h>
 #include <o3os/platform/host/fakes.h>
 
@@ -313,7 +315,7 @@ TEST_CASE("rec micro: write_note puts the value in FX 2 only when it is free; RE
 TEST_CASE("rec micro: the two device settings are appended rows 20 and 21, Off by default, two choices each") {
   CHECK(ds::RecMicro == 20u);
   CHECK(ds::RecVelocity == 21u);
-  CHECK(ds::kCount == 31u);  // 30 before OS-LEDBPM appended STATUS LED, 29 before OS-MTC B3 appended MTC IN, 27 before OS-MTC A3 appended MTC OUT and MTC START, 26 before OS-MIDICCMAP S1 appended CC MAP
+  CHECK(ds::kCount == 32u);  // 31 before OS-MIDIREC-P1 S3 appended REC STORE, 30 before OS-LEDBPM appended STATUS LED, 29 before OS-MTC B3 appended MTC IN, 27 before OS-MTC A3 appended MTC OUT and MTC START, 26 before OS-MIDICCMAP S1 appended CC MAP
   model::Settings d;
   d.init(core::ParamKind::Device);
   CHECK(d.get(ds::RecMicro) == 0.0f);
@@ -328,7 +330,7 @@ TEST_CASE("rec micro: the two device settings are appended rows 20 and 21, Off b
 TEST_CASE("rec: the two device settings are appended rows whose defaults are Off and Nearest step") {
   CHECK(ds::RecPoly == 14u);
   CHECK(ds::RecQuantize == 15u);
-  CHECK(ds::kCount == 31u);  // 30 before OS-LEDBPM appended STATUS LED, 29 before OS-MTC B3 appended MTC IN, 27 before OS-MTC A3 appended MTC OUT and MTC START, 26 before OS-MIDICCMAP S1 appended CC MAP (23 until E-CFG-03 appended TRANSPORT IN and OUT; 18 until OS-METRO appended two rows, 20 until OS-RECMICRO, 22 until OS-PADOFFSET did)
+  CHECK(ds::kCount == 32u);  // 31 before OS-MIDIREC-P1 S3 appended REC STORE, 30 before OS-LEDBPM appended STATUS LED, 29 before OS-MTC B3 appended MTC IN, 27 before OS-MTC A3 appended MTC OUT and MTC START, 26 before OS-MIDICCMAP S1 appended CC MAP (23 until E-CFG-03 appended TRANSPORT IN and OUT; 18 until OS-METRO appended two rows, 20 until OS-RECMICRO, 22 until OS-PADOFFSET did)
   model::Settings d;
   d.init(core::ParamKind::Device);
   CHECK(d.get(ds::RecPoly) == 0.0f);
@@ -1496,4 +1498,650 @@ TEST_CASE("rec micro: REC VELOCITY External writes the keyboard's velocity to th
   CHECK(rig.step(0, 9).note != 0u);
   CHECK(rig.step(0, 9).vol == model::kVolumeUnset);
   rig.pad_up(12);
+}
+
+// ---- OS-MIDIREC-P1 S3: REC STORE = Lane (the stamped take, the merge, the notices) ---------------------------------------------------------------------------------
+
+namespace {
+
+model::LaneStore g_lane_store;  // static: the store and the take are large
+model::LaneTake g_lane_take;
+
+// A recording rig for the Lane: pattern 1 of `length` steps, MIDI instrument 7 on channel 1 selected, the store and the take attached, the transport playing in LIVE.
+struct LaneRig : Rig {
+  explicit LaneRig(unsigned length = 128, bool lane = true, std::size_t ring_bytes = sizeof g_ring) : Rig(length, true, ring_bytes) {
+    g_lane_store.clear();
+    g_lane_store.adopt(project().load_epoch());
+    g_lane_take.reset();
+    editor->attach_lanes(&g_lane_store);
+    app->attach_lane_take(&g_lane_take);
+    model::Instrument in;
+    model::init_instrument(in, model::InstrumentKind::Midi);
+    in.midi_channel = 1;
+    (void)project().set_instrument(6, in);
+    (void)invoke("instrument.select", 7);
+    if (lane) {
+      set(ds::RecStore, 1);
+    }
+    play(0, 0);
+    (void)send({});  // the first poll arms the keyboard's ring
+  }
+  // The render's side of one message: the stamp of the block, then the bytes.
+  void stamped(unsigned tick, std::initializer_list<std::uint8_t> bytes) {
+    keys.set_stamp(1, tick);
+    (void)send(bytes);
+    keys.clear_stamp();
+  }
+  model::LaneStore::View lane() const { return g_lane_store.lane(1, 0); }
+};
+
+}  // namespace
+
+TEST_CASE("rec lane: REC STORE = Lane records the keyboard into the lane with its tick and length, the grid stays empty, and the take is one undo unit") {
+  LaneRig rig;
+  CHECK(rig.keys.take_track() == 0u);  // armed for the cursor's track
+  const unsigned before = rig.depth();
+  rig.stamped(100, {0x90, 60, 90});
+  rig.stamped(130, {0xB0, 74, 10});
+  rig.stamped(160, {0x80, 60, 0});
+  rig.stamped(175, {0xB0, 74, 40});
+  rig.play(4, 0);  // the playhead is at tick 192 when the recording ends
+  rig.stop();
+  (void)rig.send({});
+  CHECK(rig.keys.take_track() == midi::CcInput::kNoTrack);  // disarmed
+  CHECK(rig.step(0, 2).note == 0u);                          // nothing in the grid
+  const model::LaneStore::View v = rig.lane();
+  CHECK(v.count == 3u);  // the note and two control changes
+  CHECK(rig.depth() == before + 1u);  // one unit
+  unsigned notes = 0;
+  unsigned ccs = 0;
+  for (unsigned i = 0; i < v.count; ++i) {
+    if ((v.events[i].kind_channel >> 4) == 0u) {
+      ++notes;
+      CHECK(v.events[i].tick == 100);
+      CHECK(v.events[i].len == 60);
+      CHECK(v.events[i].a == 60);
+      CHECK(v.events[i].b == 90);
+    } else {
+      ++ccs;
+      CHECK(v.events[i].a == 74);
+    }
+  }
+  CHECK(notes == 1u);
+  CHECK(ccs == 2u);
+  CHECK(rig.editor->undo(model::UndoArea::Pattern) == model::UndoResult::Ok);
+  CHECK(rig.lane().count == 0u);
+}
+
+TEST_CASE("rec lane: with REC STORE = Grid (the default) the keyboard writes the grid as always and nothing is armed or stamped") {
+  LaneRig rig(128, false);
+  CHECK(rig.keys.take_track() == midi::CcInput::kNoTrack);
+  rig.play(3, 0);
+  (void)rig.send({0x90, 62, 100});
+  CHECK(rig.step(0, 3).note == 63u);
+  (void)rig.send({0x80, 62, 0});
+  CHECK(rig.lane().count == 0u);
+  midi::StampMsg m;
+  CHECK_FALSE(rig.keys.pop_stamped(m));
+}
+
+TEST_CASE("rec lane: a take that fills the buffer commits what it has, says TAKE FULL, and goes on in a new take") {
+  LaneRig rig;
+  // A note is one event (its length is filled in by the off), so 2048 notes fill the take; the one that does not fit and the 52 after it go into a new one.
+  constexpr unsigned kNotes = 2101;
+  bool full = false;
+  for (unsigned i = 0; i < kNotes; ++i) {
+    const std::uint8_t key = static_cast<std::uint8_t>(30 + i % 60);
+    rig.stamped(i * 2, {0x90, key, 90});
+    rig.stamped(i * 2 + 1, {0x80, key, 0});
+    if (!full && rig.lane().count != 0u) {  // the take was committed by the one note that filled it
+      full = true;
+      CHECK(rig.message().find("TAKE FULL") != std::string::npos);
+      CHECK(rig.lane().count == model::LaneTake::kCapacity);
+    }
+  }
+  CHECK(full);
+  rig.play(88, 0);  // the playhead (tick 4224) is past the last note when the recording ends
+  rig.play(88, 0, false);  // stop: the new take's 53 notes are merged after the first
+  (void)rig.send({});
+  CHECK(rig.lane().count == kNotes);
+}
+
+TEST_CASE("rec lane: a take the undo ring cannot hold is refused whole, kept for one more try, then dropped; the next take is merged normally") {
+  LaneRig rig(128, true, 3 * 1024);  // a ring smaller than the 600 events' records (8 bytes each)
+  const unsigned depth0 = rig.depth();
+  for (unsigned i = 0; i < 600; ++i) {
+    rig.stamped(i * 2, {0x90, static_cast<std::uint8_t>(30 + i % 60), 90});
+    rig.stamped(i * 2 + 1, {0x80, static_cast<std::uint8_t>(30 + i % 60), 0});
+  }
+  rig.play(25, 0);
+  rig.stop();
+  (void)rig.send({});
+  CHECK(rig.lane().count == 0u);  // nothing partial
+  CHECK(rig.message().find("NO ROOM") != std::string::npos);
+  CHECK(rig.message().find("KEPT") != std::string::npos);
+  rig.live();  // (a stop leaves the Pattern screen in BROWSE)
+  rig.play(0, 0);
+  (void)rig.send({});  // recording begins again: the held take gets its one more try, still too big for this ring, and is dropped
+  CHECK(rig.lane().count == 0u);
+  CHECK(rig.message().find("DROPPED") != std::string::npos);
+  CHECK(rig.depth() == depth0);  // no unit was written
+  rig.stamped(10, {0x90, 60, 90});  // a new take is begun and merged normally
+  rig.stamped(20, {0x80, 60, 0});
+  rig.play(2, 0);
+  rig.stop();
+  (void)rig.send({});
+  CHECK(rig.lane().count == 1u);
+}
+
+// ---- OS-MIDIREC-P1 S4 (A13): a knob's move is the CC lane's value ------------------------------------------------------------------------------------------------
+
+namespace {
+
+namespace ip = model::instrument_param;
+
+// CC A of instrument 7 sends controller 74 (the selector holds 75), a Learn binding of external CC 20 (channel 1) moves it in `mode`, and the encoder targets it.
+void lane_cc_setup(LaneRig& rig, core::LearnMode mode, std::uint8_t selector = 75) {
+  model::Instrument in = *rig.project().instrument(6);
+  in.midi_cc[0] = selector;
+  (void)rig.project().set_instrument(6, in);
+  const_cast<app::ViewState&>(rig.app->state()).enc_target =core::param_id(core::ParamKind::Instrument, 6, ip::midi_cc(0));
+  const core::LearnBinding b{core::param_id(core::ParamKind::Instrument, 6, ip::midi_cc(0)), 20, 1, static_cast<std::uint8_t>(mode), 0};
+  CHECK(rig.editor->set_learn_slot(0, b) == model::Status::Ok);
+}
+DispatchResult knob(LaneRig& rig, unsigned value) { return rig.invoke("midi.cc", static_cast<ActionArg>((1u << 16) | (20u << 8) | value)); }
+unsigned selector(LaneRig& rig) { return rig.project().instrument(6)->midi_cc[0]; }
+// The CC events of the lane (kind > 0), in tick order.
+unsigned lane_ccs(LaneRig& rig, model::LaneEvent* out, unsigned max) {
+  const model::LaneStore::View v = rig.lane();
+  unsigned n = 0;
+  for (unsigned i = 0; i < v.count && n < max; ++i) {
+    if ((v.events[i].kind_channel >> 4) != 0u) {
+      out[n++] = v.events[i];
+    }
+  }
+  return n;
+}
+bool near(unsigned got, unsigned want) { return got + 1u >= want && got <= want + 1u; }
+
+}  // namespace
+
+TEST_CASE("rec lane cc: a Learn knob (Jump) on a CC letter records its position as the controller the letter names, and the selector is not rewritten") {
+  LaneRig rig;
+  lane_cc_setup(rig, core::LearnMode::Jump);
+  const unsigned depth = rig.depth();
+  rig.play(2, 0);
+  (void)rig.send({});  // the poll takes the playhead
+  (void)knob(rig, 127);
+  rig.play(2, 24);
+  (void)rig.send({});  // the poll takes the playhead
+  (void)knob(rig, 40);
+  rig.play(4, 0);
+  CHECK(selector(rig) == 75u);  // the letter still sends controller 74
+  rig.stop();
+  (void)rig.send({});
+  model::LaneEvent ev[4];
+  const unsigned n = lane_ccs(rig, ev, 4);
+  CHECK(n == 2u);
+  if (n == 2u) {
+    CHECK(ev[0].a == 74u);
+    CHECK(ev[0].tick == 96u);
+    CHECK(ev[0].b == 127u);
+    CHECK(ev[1].a == 74u);
+    CHECK(ev[1].tick == 120u);
+    CHECK(near(ev[1].b, 40u));
+    CHECK((ev[1].kind_channel & 0x0Fu) == 0u);  // the instrument's channel (1)
+  }
+  CHECK(rig.depth() <= depth + 2u);  // the set-up edits and the take, two units at most: the knob's moves are no unit of their own
+  CHECK(selector(rig) == 75u);
+  CHECK(rig.editor->undo(model::UndoArea::Pattern) == model::UndoResult::Ok);  // ONE undo takes the whole take: no unit of the knob's own is left behind
+  CHECK(rig.lane().count == 0u);
+  CHECK(selector(rig) == 75u);
+}
+
+TEST_CASE("rec lane cc: a relative knob and the encoder step the letter's running value from the stored one; nothing is written to the selector") {
+  LaneRig rig;
+  lane_cc_setup(rig, core::LearnMode::Relative);
+  rig.play(2, 0);
+  (void)rig.send({});  // the poll takes the playhead
+  (void)knob(rig, 10);  // +10 from CC 64 (the first move of a letter starts there, not at the selector's 75)
+  rig.play(2, 24);
+  (void)rig.send({});  // the poll takes the playhead
+  (void)knob(rig, 10);  // +10 from the running value
+  rig.play(3, 0);
+  (void)rig.send({});  // the poll takes the playhead
+  (void)rig.invoke("enc.turn", -20);  // the encoder goes on from the same running value
+  rig.play(4, 0);
+  CHECK(selector(rig) == 75u);
+  rig.stop();
+  (void)rig.send({});
+  model::LaneEvent ev[8];
+  const unsigned n = lane_ccs(rig, ev, 8);
+  CHECK(n == 3u);
+  if (n == 3u) {
+    CHECK(near(ev[0].b, 74u));  // option 66 of 131 (CC 64), +10: 76 of 131
+    CHECK(near(ev[1].b, 83u));  // 86 of 131
+    CHECK(near(ev[2].b, 64u));  // 66 of 131
+    CHECK(ev[2].tick == 144u);
+  }
+  CHECK(rig.message().find("CC A") != std::string::npos);  // the encoder's strip names the letter and the value recorded
+  CHECK(rig.message().find("64") != std::string::npos);
+}
+
+TEST_CASE("rec lane cc: a Pickup binding records the knob's position too (no pickup in a take), and the selector is untouched") {
+  LaneRig rig;
+  lane_cc_setup(rig, core::LearnMode::Pickup);
+  rig.play(2, 0);
+  (void)rig.send({});  // the poll takes the playhead
+  (void)knob(rig, 127);  // far from the selector's 75 on the row's scale: a pickup would swallow it
+  rig.play(4, 0);
+  CHECK(selector(rig) == 75u);
+  rig.stop();
+  (void)rig.send({});
+  model::LaneEvent ev[4];
+  const unsigned n = lane_ccs(rig, ev, 4);
+  CHECK(n == 1u);
+  if (n == 1u) {
+    CHECK(ev[0].a == 74u);
+    CHECK(ev[0].b == 127u);
+  }
+}
+
+TEST_CASE("rec lane cc: with REC STORE = Lane but no recording (stopped) a knob on the letter edits the selector as always") {
+  LaneRig rig;
+  lane_cc_setup(rig, core::LearnMode::Jump);
+  rig.stop();
+  (void)rig.send({});
+  (void)knob(rig, 127);
+  CHECK(selector(rig) == model::kMidiCcMax);
+  CHECK(rig.lane().count == 0u);
+}
+
+TEST_CASE("rec lane cc: the running value of a letter starts again at CC 64 when the next take is armed") {
+  LaneRig rig;
+  lane_cc_setup(rig, core::LearnMode::Relative);
+  rig.play(2, 0);
+  (void)rig.send({});  // the poll takes the playhead
+  (void)knob(rig, 10);
+  rig.play(2, 24);
+  (void)rig.send({});
+  (void)knob(rig, 10);  // the second step of the first take
+  rig.play(4, 0);
+  rig.stop();
+  (void)rig.send({});
+  rig.live();  // (a stop leaves the Pattern screen in BROWSE)
+  rig.play(0, 0);
+  (void)rig.send({});  // the next take is armed
+  rig.play(2, 0);
+  (void)rig.send({});  // the poll takes the playhead
+  (void)knob(rig, 10);  // not 20 steps from 64: the first step of a new take
+  rig.play(4, 0);
+  rig.stop();
+  (void)rig.send({});
+  model::LaneEvent ev[8];
+  const unsigned n = lane_ccs(rig, ev, 8);
+  CHECK(n >= 1u);
+  bool found = false;
+  for (unsigned i = 0; i < n; ++i) {
+    if (ev[i].tick == 96u) {
+      found = true;
+      CHECK(near(ev[i].b, 74u));
+    }
+  }
+  CHECK(found);
+}
+
+TEST_CASE("rec lane cc: PROG, channel and poly aftertouch and an unassigned letter record nothing and say so once; the selector is still not touched") {
+  LaneRig rig;
+  lane_cc_setup(rig, core::LearnMode::Jump, model::kMidiCcProg);
+  rig.play(2, 0);
+  (void)rig.send({});  // the poll takes the playhead
+  (void)knob(rig, 90);
+  CHECK(rig.message().find("NOT RECORDED") != std::string::npos);
+  rig.flush_messages();
+  rig.play(2, 24);
+  (void)rig.send({});  // the poll takes the playhead
+  (void)knob(rig, 20);
+  CHECK(rig.message().find("NOT RECORDED") == std::string::npos);  // once per take
+  rig.play(4, 0);
+  rig.stop();
+  (void)rig.send({});
+  CHECK(rig.lane().count == 0u);
+  CHECK(selector(rig) == model::kMidiCcProg);
+}
+
+TEST_CASE("rec lane cc: armed in the count-in, a knob and the encoder do not write the selector, the move is swallowed and the notice comes once, through to the take") {
+  LaneRig rig;
+  lane_cc_setup(rig, core::LearnMode::Jump);
+  rig.live();
+  rig.play(0, 0);
+  (void)rig.send({});
+  rig.pos.publish_count_in(2);
+  rig.pass();
+  (void)rig.send({});
+  rig.flush_messages();  // (the strip shows the oldest word: let the transport's own run out)
+  (void)knob(rig, 127);
+  CHECK(selector(rig) == 75u);
+  CHECK(rig.message().find("NOT RECORDED: COUNT-IN") != std::string::npos);
+  rig.flush_messages();
+  (void)knob(rig, 20);
+  (void)rig.invoke("enc.turn", 3);
+  CHECK(selector(rig) == 75u);
+  CHECK(rig.message().find("NOT RECORDED") == std::string::npos);  // once
+  // The count-in ends: the take begins, the notice is not said again, a move is the controller's value.
+  rig.pos.publish_count_in(0);
+  rig.play(2, 0);
+  (void)rig.send({});
+  (void)knob(rig, 127);
+  CHECK(rig.message().find("NOT RECORDED") == std::string::npos);
+  CHECK(selector(rig) == 75u);
+  rig.play(4, 0);
+  rig.stop();
+  (void)rig.send({});
+  model::LaneEvent ev[4];
+  CHECK(lane_ccs(rig, ev, 4) == 1u);
+  CHECK(selector(rig) == 75u);
+}
+
+TEST_CASE("rec lane cc: a count-in on a non-lane instrument leaves the knob editing the selector as it always did") {
+  LaneRig rig(128, false);  // REC STORE = Grid
+  lane_cc_setup(rig, core::LearnMode::Jump);
+  rig.live();
+  rig.play(0, 0);
+  (void)rig.send({});
+  rig.pos.publish_count_in(2);
+  rig.pass();
+  (void)knob(rig, 127);
+  CHECK(selector(rig) == model::kMidiCcMax);
+  CHECK(rig.message().find("COUNT-IN") == std::string::npos);
+}
+
+TEST_CASE("rec lane cc: a letter with the Config page's number left unassigned says so and records nothing") {
+  LaneRig rig;
+  lane_cc_setup(rig, core::LearnMode::Jump, model::kMidiCcConfig);
+  model::MidiState midi = rig.project().midi();
+  midi.cc_number[0] = model::kMidiCcUnassigned;
+  (void)rig.project().set_midi(midi);
+  rig.play(2, 0);
+  (void)rig.send({});  // the poll takes the playhead
+  (void)knob(rig, 90);
+  CHECK(rig.message().find("UNASSIGNED") != std::string::npos);
+  rig.play(4, 0);
+  rig.stop();
+  (void)rig.send({});
+  CHECK(rig.lane().count == 0u);
+}
+
+TEST_CASE("rec lane cc: with REC STORE = Grid a knob on the letter edits the selector as it always did, and nothing is recorded to the lane") {
+  LaneRig rig(128, false);
+  lane_cc_setup(rig, core::LearnMode::Jump);
+  rig.play(2, 0);
+  (void)rig.send({});  // the poll takes the playhead
+  (void)knob(rig, 127);
+  CHECK(selector(rig) == model::kMidiCcMax);  // the knob at its top: the last option
+  CHECK(rig.lane().count == 0u);
+}
+
+TEST_CASE("rec lane cc: an external controller on the track's channel goes through the take, IN CHANNEL filters it as for the notes") {
+  LaneRig rig;
+  rig.set(ds::MidiInChannel, 1);  // the keyboard's own filter (IN CHANNEL), as for the notes
+  rig.play(2, 0);
+  rig.stamped(96, {0xB0, 1, 30});
+  rig.stamped(120, {0xB0, 1, 90});
+  rig.stamped(130, {0xB1, 1, 99});  // channel 2: IN CHANNEL is 1
+  rig.play(4, 0);
+  rig.stop();
+  (void)rig.send({});
+  model::LaneEvent ev[8];
+  const unsigned n = lane_ccs(rig, ev, 8);
+  CHECK(n == 2u);
+  for (unsigned i = 0; i < n; ++i) {
+    CHECK(ev[i].a == 1u);
+    CHECK(ev[i].b != 99u);
+  }
+}
+
+// ---- OS-MIDIREC-P1 S5: chords, STEP mode, sub-step timing ------------------------------------------------------------------------------------------------------
+
+namespace {
+
+// STEP mode on a LaneRig: Shift + REC takes LIVE to STEP (Edit with the cursor free; the transport goes on).
+void to_step(LaneRig& rig) {
+  rig.shift_tap(Button::Rec);
+  CHECK(rig.state().edit.rec_free);
+}
+
+}  // namespace
+
+TEST_CASE("rec lane: a chord in LIVE is N note events at the tick it was played, each with its own length; the grid stays empty") {
+  LaneRig rig;
+  rig.stamped(100, {0x90, 60, 90});
+  rig.stamped(100, {0x90, 64, 80});
+  rig.stamped(101, {0x90, 67, 70});
+  rig.stamped(148, {0x80, 64, 0});
+  rig.stamped(160, {0x80, 60, 0});
+  rig.play(4, 0);  // the playhead is at tick 192: the third key is still down and ends there
+  (void)rig.send({});
+  rig.stop();
+  (void)rig.send({});
+  const model::LaneStore::View v = rig.lane();
+  CHECK(v.count == 3u);
+  if (v.count != 3u) {
+    return;
+  }
+  CHECK(v.events[0].tick == 100);
+  CHECK(v.events[0].a == 60);
+  CHECK(v.events[0].len == 60);
+  CHECK(v.events[1].tick == 100);
+  CHECK(v.events[1].a == 64);
+  CHECK(v.events[1].len == 48);
+  CHECK(v.events[2].tick == 101);
+  CHECK(v.events[2].a == 67);
+  CHECK(v.events[2].len == 91);  // up to the end of the take, 192
+  for (unsigned s = 0; s < 6; ++s) {
+    CHECK(rig.step(0, s).note == 0u);
+  }
+}
+
+TEST_CASE("rec lane: sub-step timing: a note is stored at the tick of its stamp (1/48 step), not rounded to a step, and carries no Micro-move") {
+  LaneRig rig;
+  rig.set(ds::RecMicro, 1);
+  rig.stamped(5, {0x90, 60, 90});
+  rig.stamped(47, {0x80, 60, 0});
+  rig.stamped(48, {0x90, 62, 90});
+  rig.stamped(95, {0x80, 62, 0});
+  rig.stamped(133, {0x90, 64, 90});
+  rig.stamped(140, {0x80, 64, 0});
+  rig.play(3, 0);
+  rig.stop();
+  (void)rig.send({});
+  const model::LaneStore::View v = rig.lane();
+  CHECK(v.count == 3u);
+  if (v.count != 3u) {
+    return;
+  }
+  CHECK(v.events[0].tick == 5);
+  CHECK(v.events[0].len == 42);
+  CHECK(v.events[1].tick == 48);
+  CHECK(v.events[1].len == 47);
+  CHECK(v.events[2].tick == 133);
+  CHECK(v.events[2].len == 7);
+  for (unsigned s = 0; s < 4; ++s) {
+    CHECK(rig.step(0, s).note == 0u);
+    CHECK(rig.step(0, s).fx[1].type == 0);
+  }
+}
+
+TEST_CASE("rec lane: STEP mode: a held chord enters the cursor step's first tick with LEN one step, the cursor moves on when the last key is up, one undo unit") {
+  LaneRig rig;
+  to_step(rig);
+  rig.tap(Button::Down);
+  rig.tap(Button::Down);
+  rig.tap(Button::Down);
+  CHECK(rig.row() == 3);
+  const unsigned d0 = rig.depth();
+  (void)rig.send({0x90, 60, 90});
+  (void)rig.send({0x90, 64, 80});
+  CHECK(rig.row() == 3);  // held: the cursor waits
+  CHECK(rig.lane().count == 0u);
+  (void)rig.send({0x90, 67, 70});
+  (void)rig.send({0x80, 60, 0});
+  (void)rig.send({0x80, 64, 0});
+  CHECK(rig.lane().count == 0u);  // one key is still down
+  (void)rig.send({0x80, 67, 0});
+  CHECK(rig.row() == 4);
+  const model::LaneStore::View v = rig.lane();
+  CHECK(v.count == 3u);
+  if (v.count != 3u) {
+    return;
+  }
+  for (unsigned i = 0; i < 3; ++i) {
+    CHECK(v.events[i].tick == 3 * 48);
+    CHECK(v.events[i].len == 48);
+    CHECK((v.events[i].kind_channel >> 4) == 0u);
+  }
+  CHECK(v.events[0].a == 60);
+  CHECK(v.events[1].a == 64);
+  CHECK(v.events[2].a == 67);
+  CHECK(v.events[2].b == 70);
+  CHECK(rig.step(0, 3).note == 0u);  // the grid has nothing
+  CHECK(rig.depth() == d0 + 1u);
+  // the next chord goes to the next step
+  (void)rig.send({0x90, 62, 90});
+  (void)rig.send({0x80, 62, 0});
+  CHECK(rig.row() == 5);
+  CHECK(rig.lane().count == 4u);
+  CHECK(rig.depth() == d0 + 2u);
+  CHECK(rig.editor->undo(model::UndoArea::Pattern) == model::UndoResult::Ok);
+  CHECK(rig.lane().count == 3u);
+}
+
+TEST_CASE("rec lane: STEP mode with REC STORE = Grid writes the grid as it always did, and the lane is untouched") {
+  LaneRig rig(128, false);
+  to_step(rig);
+  (void)rig.send({0x90, 62, 100});
+  (void)rig.send({0x80, 62, 0});
+  CHECK(rig.step(0, 0).note == 63u);
+  CHECK(rig.lane().count == 0u);
+}
+
+TEST_CASE("rec lane: REC STORE = Grid stays byte-identical whether the setting was ever Lane: Spill and Micro, the pattern and the lane") {
+  const auto run = [](bool was_lane, std::vector<unsigned char>& bytes) {
+    LaneRig rig(128, was_lane);
+    if (was_lane) {
+      rig.set(ds::RecStore, 0);
+      (void)rig.send({});
+    }
+    rig.spill();
+    rig.set(ds::RecMicro, 1);
+    rig.play(2, 20);
+    (void)rig.send({0x90, 60, 90});
+    (void)rig.send({0x90, 64, 80});
+    (void)rig.send({0x90, 67, 70});
+    rig.play(3, 10);
+    (void)rig.send({0x80, 60, 0});
+    (void)rig.send({0x80, 64, 0});
+    (void)rig.send({0x80, 67, 0});
+    rig.play(6, 0);
+    const model::Pattern* p = rig.project().pattern(1);
+    const unsigned char* b = reinterpret_cast<const unsigned char*>(&p->steps);
+    bytes.assign(b, b + sizeof p->steps);
+    CHECK(rig.lane().count == 0u);
+    midi::StampMsg m;
+    CHECK_FALSE(rig.keys.pop_stamped(m));
+  };
+  std::vector<unsigned char> a;
+  std::vector<unsigned char> b;
+  run(false, a);
+  run(true, b);
+  CHECK(a == b);
+  bool any = false;
+  for (const unsigned char c : a) {
+    any = any || c != 0u;
+  }
+  CHECK(any);  // the chord did land in the grid (Spill)
+}
+
+TEST_CASE("rec lane: a song that goes on to another pattern ends the take at the end of ITS track: a held note runs to there, and only the moved controller's own range is replaced") {
+  LaneRig rig;
+  (void)rig.project().create_pattern(2, 128);
+  // a first take leaves a control change far from where the second one moves
+  rig.stamped(3000, {0xB0, 74, 20});
+  rig.play(63, 0);  // tick 3024
+  (void)rig.send({});
+  rig.stop();
+  (void)rig.send({});
+  CHECK(rig.lane().count == 1u);
+  rig.live();  // (a stop leaves the Pattern screen in BROWSE)
+  rig.play(0, 0);
+  (void)rig.send({});
+  rig.stamped(100, {0x90, 60, 90});
+  rig.stamped(100, {0xB0, 74, 10});
+  rig.pos.publish(true, 2, 0, 12000, audio::PlayPosition::kNoOrder, 0);  // the song moved on to pattern 2
+  rig.pass();
+  (void)rig.send({});
+  rig.stop();
+  (void)rig.send({});
+  const model::LaneStore::View v = rig.lane();
+  CHECK(v.count == 3u);  // the old point at 3000 stays, the new one at 100 and the note
+  if (v.count != 3u) {
+    return;
+  }
+  bool old_kept = false;
+  bool note_ok = false;
+  for (unsigned i = 0; i < v.count; ++i) {
+    const model::LaneEvent& e = v.events[i];
+    if ((e.kind_channel >> 4) == 1u && e.tick == 3000) old_kept = e.b == 20;
+    if ((e.kind_channel >> 4) == 0u) note_ok = e.tick == 100 && e.len == 6143 - 100;  // up to the last tick of pattern 1's track
+  }
+  CHECK(old_kept);
+  CHECK(note_ok);
+}
+
+TEST_CASE("rec lane: a track with a Perform override keeps its take open across polls (the take's pattern is the track's own, not the song's)") {
+  LaneRig rig;
+  (void)rig.project().create_pattern(2, 128);
+  rig.pos.publish_track_pattern(0, 2);  // track 0 plays pattern 2 while the song is in pattern 1
+  rig.play(0, 0);
+  rig.keys.set_stamp(2, 100);
+  (void)rig.send({0x90, 60, 90});
+  rig.keys.clear_stamp();
+  CHECK(g_lane_take.open());
+  rig.play(10, 0);
+  CHECK(g_lane_take.open());  // not ended because the song's pattern differs
+  rig.play(20, 0);
+  CHECK(g_lane_take.open());
+  rig.keys.set_stamp(2, 1000);
+  (void)rig.send({0x80, 60, 0});
+  rig.keys.clear_stamp();
+  rig.stop();
+  (void)rig.send({});
+  const model::LaneStore::View v = g_lane_store.lane(2, 0);
+  CHECK(v.count == 1u);
+  if (v.count != 1u) {
+    return;
+  }
+  CHECK(v.events[0].tick == 100);
+  CHECK(v.events[0].len == 900);
+}
+
+TEST_CASE("rec lane: a stop during the count-in ends the take at its first stamp, not at tick 0 (no false wrap that replaces the lane)") {
+  LaneRig rig;
+  rig.stamped(4000, {0x90, 62, 80});
+  rig.stamped(4010, {0x80, 62, 0});
+  rig.play(84, 0);
+  (void)rig.send({});
+  rig.stop();
+  (void)rig.send({});
+  CHECK(rig.lane().count == 1u);
+  rig.live();
+  rig.play(0, 0);
+  (void)rig.send({});
+  rig.pos.publish_count_in(2);
+  rig.pass();
+  rig.stamped(3000, {0x90, 60, 90});
+  rig.stop();  // the count-in is still published: the playhead is never read
+  (void)rig.send({});
+  const model::LaneStore::View v = rig.lane();
+  CHECK(v.count == 2u);  // the old note at 4000 stays
 }

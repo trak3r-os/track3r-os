@@ -320,7 +320,7 @@ endif()
 set(o3os_unit_groups fuzz usb model formats plot audio seq ui apps)
 set(o3os_unit_fuzz */native_fuzz_test.cpp */mevt_fuzz_test.cpp)
 set(o3os_unit_usb */usb_*_test.cpp)
-set(o3os_unit_model */undo_test.cpp */undo_area_test.cpp */model_test.cpp */param*_test.cpp */learn_follow_test.cpp */settings_format_test.cpp */event_list_test.cpp */pattern_verbs_test.cpp */lane_store_test.cpp)
+set(o3os_unit_model */undo_test.cpp */undo_area_test.cpp */model_test.cpp */param*_test.cpp */learn_follow_test.cpp */settings_format_test.cpp */event_list_test.cpp */pattern_verbs_test.cpp */lane_store_test.cpp */lane_take_test.cpp)
 set(o3os_unit_formats */native_format_test.cpp */og_*_test.cpp */med_*_test.cpp */modimp_*_test.cpp */wav*_test.cpp */iff_sample_test.cpp */format_registry_test.cpp */preset_format_test.cpp
                       */import_job_test.cpp */project_state_test.cpp */persist2_format_test.cpp */note11_format_test.cpp */law_format_test.cpp */insx_format_test.cpp */appm_format_test.cpp */lfosine_format_test.cpp */perf_playorder_format_test.cpp */mevt_format_test.cpp)
 set(o3os_unit_plot */plot_*_test.cpp */raster*_test.cpp)
@@ -328,7 +328,7 @@ set(o3os_unit_audio */audio_*_test.cpp */tb303_*_test.cpp */paula_oracle_test.cp
 set(o3os_unit_seq */seq_*_test.cpp */midi_*_test.cpp */metro_*_test.cpp */play_*_test.cpp)
 # OS-APPUX S2/S3: the shipped apps through the whole stack in the simulator (about a minute under the sanitizers: eleven apps, each driven key by key)
 set(o3os_unit_apps */app_grammar_test.cpp */sim_apps_test.cpp */app_tools_panel_test.cpp)
-set(o3os_unit_ui */overlay_test.cpp */budget_test.cpp */pattern_view_test.cpp */pattern_zoom_test.cpp */legibility_test.cpp */events_app_test.cpp)  # OS-MIDIREC S1b
+set(o3os_unit_ui */overlay_test.cpp */budget_test.cpp */pattern_view_test.cpp */pattern_zoom_test.cpp */legibility_test.cpp */events_app_test.cpp */lane_marks_test.cpp)  # OS-MIDIREC S1b, S4
 # Every pattern of every group names a file: a pattern that matches none (a file renamed or removed) is a configure error, not a hole
 # that unit_cover finds only if the whole group goes empty. (unit_rest is the exclusion of all of them: a new file lands there.)
 foreach(group IN LISTS o3os_unit_groups)

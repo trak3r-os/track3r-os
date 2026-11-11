@@ -66,7 +66,7 @@ path's pure parts (`audio_config.h`, `sgtl5000.h`, `resources.h`, `diag_report.h
 | Region | Base | KiB | Use |
 |---|---|---:|---|
 | `sample_arena` | `0x70000000` | 10,816 | samples, recordings, edit copies (one arena; a recording is limited to the free space: 125 s when empty) |
-| `delay` | `0x70A90000` | 768 | delay lines |
+| `delay` | `0x70A90000` | 768 | delay lines (the 4.0 s ring, 705,872 B, at the start; since OS-MIDIREC-P1 S2 the one `LaneStore`, 77,780 B, sits in the spare after it, 32-byte aligned at `kLaneStoreBase`; mem_map.h static-asserts the fit) |
 | `reverb` | `0x70B50000` | 192 | reverb lines (the plate's 53,264 B at the start; the rest spare) |
 | `wt_contour` | `0x70B80000` | 64 | OS-CEWTENV W2: the wavetable contour bank (256 x 128 int16), carved out of the reverb region's spare tail |
 | `module_region` | `0x70B90000` | 768 | cold code/data of loaded modules |

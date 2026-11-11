@@ -64,6 +64,13 @@ class SimProject final : public app::ProjectSink {
   bool loaded() const noexcept override;
   const char* detail() const noexcept override;
   bool refused() const noexcept override { return refused_; }
+  bool newer_fields() const noexcept override { return native_ && native_loader_->report().newer_minor; }
+  std::uint32_t lanes_skipped() const noexcept override { return native_ ? native_loader_->report().mevt_skipped : 0u; }
+  // OS-MIDIREC-P1 S2: the document's MIDI take lanes: a native file's MEVT chunk is read into them, every load and NEW leaves them in step with the project's epoch. Outlives this object.
+  void attach_lanes(model::LaneStore* lanes) noexcept {
+    lanes_ = lanes;
+    native_loader_->attach_lanes(lanes);
+  }
 
   // OS-E2E-2: with the real engine (`audio on`), a load starts as the platform's does: a Stop on the transport, the live notes let go, and the voices let to die away (the Settle: at least 4 ms and until
   // none is in use, at most 250 ms) before the first slice. Without it nothing sounds and the load starts at once, as before. The sinks must outlive this object.
@@ -97,6 +104,7 @@ class SimProject final : public app::ProjectSink {
 
   model::ModelArena& arena_;
   model::Editor& editor_;
+  model::LaneStore* lanes_ = nullptr;
   app::App& app_;
   hal::storage::Storage& card_;
   app::WtUserMem* envelopes_ = nullptr;  // OS-CEWTENV W8 (attach_envelopes)

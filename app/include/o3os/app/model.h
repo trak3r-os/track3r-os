@@ -8,6 +8,7 @@
 #include <o3os/app/song_data.h>
 #include <o3os/app/system_load.h>
 #include <o3os/hal/storage.h>
+#include <o3os/model/lane_store.h>
 #include <o3os/model/project.h>
 #include <o3os/model/settings.h>
 
@@ -75,6 +76,7 @@ struct Model {
   SystemLoad load;  // the status strip's CPU and MEM (OS-FU3): the App refreshes it every pass (system_load.h)
   model::Settings device;
   unsigned undo_depth = 0;
+  const model::LaneStore* lanes = nullptr;  // OS-MIDIREC-P1 S6: the document's MIDI take lanes (the Editor's store), refreshed with undo_depth; the EVENTS list shows them as lane rows; nullptr: none
 };
 
 }  // namespace o3os::app

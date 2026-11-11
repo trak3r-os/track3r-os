@@ -3,6 +3,7 @@
 
 #include <o3os/app/chrome.h>
 #include <o3os/app/frame.h>
+#include <o3os/app/lane_marks.h>
 #include <o3os/app/pattern_layout.h>
 #include <o3os/app/text_format.h>
 #include <o3os/core/fixed_string.h>
@@ -270,6 +271,32 @@ void draw_field(Renderer& r, const Step& step, Column column, int x, int y, Colo
   }
 }
 
+// OS-MIDIREC-P1 S4: the text of a lane mark in the field of column `col` (0 note: "MID", 1 instrument: the notes that start, 2 volume: the CCs; two decimal digits, capped at 99).
+enum LaneText : std::uint8_t { kLaneNone = 0, kLaneHeld = 1, kLaneCounts = 2 };  // held: "MID" alone; counts: "MID nn cc"
+
+void draw_lane_text(Renderer& r, const LaneMark& m, int col, int x, int y, Color c, Face face) noexcept {
+  if (col == 0) {
+    r.text(x, y, "MID", c, face);
+  } else {
+    r.hex_tile(x, y, bcd(std::min<int>(col == 1 ? m.starts : m.ccs, 99)), c, face);
+  }
+}
+
+// What a field costs in display-list words, at most (the estimate that decides whether the held steps' "MID" fits, see PatternView::draw).
+unsigned field_word_bound(Column column, bool empty) noexcept {
+  switch (column) {
+    case Column::Note:
+      return 1;
+    case Column::Instr:
+    case Column::Vol:
+      return empty ? 2 : 1;
+    case Column::Fx1:
+    case Column::Fx2:
+      return empty ? 1 : 2;
+  }
+  return 2;
+}
+
 // "C-3" for a note number (0 = C-0): the tile's own name, which is the model's note (the number plus one) and "???" past G10 (note_name, pattern_data.h: the Fill dialog says its notes the same way).
 void append_note_name(core::FixedString<64>& text, unsigned note, int octave_shift) noexcept {
   char name[4];
@@ -446,15 +473,24 @@ void PatternView::draw(Renderer& r, const PatternSource& src, const Status& stat
   // One slot per shown field: tracks x fields is 25, 24 and 12 at the three zoom levels, so 25 (not 12 x 5) keep the stack of the main loop small.
   Color field_colors[kFieldSlots][kRows];
   Step steps[kTracksMax][kRows];
+  // OS-MIDIREC-P1 S4: the lane of each shown track as marks per row, and the text a step's empty columns get (LaneText). `est_words` is an upper bound of what the fields cost, for the held steps' "MID".
+  LaneMark lane_mark[kTracksMax][kRows];
+  std::uint8_t lane_text[kTracksMax][kRows] = {};
+  unsigned est_words = 0;
+  unsigned held_steps = 0;
+  bool any_mark = false;
   for (int s = 0; s < shown; ++s) {
     const int track = left + s;
+    compute_lane_marks(src.lane(track), top, kRows, src.track_length(track), lane_mark[s]);
     for (int i = 0; i < kRows; ++i) {
       const int row = top + i;
       if (!live[i]) {  // a blank slot: nothing of it is drawn, and `steps` and `field_colors` stay unset there (every pass loop tests live[i] before it reads either)
+        lane_mark[s][i] = LaneMark{};
         continue;
       }
       const Step step = src.step(track, row);
       steps[s][i] = step;
+      any_mark = any_mark || lane_mark[s][i].any();
       const bool in_block = sel.active && row >= block.row0 && row <= block.row1 && track >= block.track0 && track <= block.track1;
       const bool past_end = row >= src.track_length(track);
       const bool muted = src.muted(track);
@@ -464,6 +500,43 @@ void PatternView::draw(Renderer& r, const PatternSource& src, const Status& stat
         const bool empty = format_field(step, column, unused);
         const bool cursor = i == cursor_slot && track == track_ && col == field;
         field_colors[s * l.fields + col][i] = field_color(column, empty, i == cursor_slot, cursor, in_block && col >= block.col0 && col <= block.col1, past_end, play_visible && i == play_slot, muted, play_ink);
+        est_words += field_word_bound(column, empty);
+      }
+      // A lane mark's text goes where the step's own note, instrument and volume are all empty (what the step holds wins; the bar is drawn all the same).
+      char t0[4], t1[4], t2[4];
+      if (lane_mark[s][i].any() && !past_end && format_field(step, Column::Note, t0) && format_field(step, Column::Instr, t1) && format_field(step, Column::Vol, t2)) {
+        lane_text[s][i] = lane_mark[s][i].counts() ? kLaneCounts : kLaneHeld;
+        held_steps += lane_text[s][i] == kLaneHeld ? 1u : 0u;
+      }
+    }
+  }
+  // The text replaces the dashes of the empty columns at no extra word ("MID" three glyphs for the note tile's one, the two counts one tile each for the dashes' two glyphs each) except on a held step, whose "MID" alone costs two words.
+  // Those are the first to go when the grid is near its budget (the spec's order: the held steps' text, then the bars); the estimate is the words so far, an upper bound of the fields, the passes' colour and origin words (`kPassOverhead`) and a reserve for the bars.
+  if (held_steps != 0) {
+    constexpr unsigned kPassOverhead = 150;
+    constexpr unsigned kBarReserve = 64;
+    if (r.words() + est_words + kPassOverhead + 2u * held_steps + kBarReserve > kPatternBudgetWords) {
+      for (int s = 0; s < shown; ++s) {
+        for (int i = 0; i < kRows; ++i) {
+          if (lane_text[s][i] == kLaneHeld) {
+            lane_text[s][i] = kLaneNone;
+          }
+        }
+      }
+    }
+  }
+  // The text's colour: the lane colours on an otherwise empty (quiet) field; the selection, cursor and play colours stay.
+  for (int s = 0; s < shown; ++s) {
+    for (int i = 0; i < kRows; ++i) {
+      if (lane_text[s][i] == kLaneNone) {
+        continue;
+      }
+      const bool muted = src.muted(left + s);
+      for (int col = 0; col < l.fields && col <= 2; ++col) {
+        Color& c = field_colors[s * l.fields + col][i];
+        if (c == Color::Empty && (col == 0 || lane_text[s][i] == kLaneCounts)) {
+          c = muted ? Color::TextDim : (col == 0 ? Color::TextDim : col == 1 ? Color::Instr : Color::Vol);
+        }
       }
     }
   }
@@ -487,7 +560,11 @@ void PatternView::draw(Renderer& r, const PatternSource& src, const Status& stat
           for (int i = 0; i < kRows; ++i) {
             if (live[i] && field_colors[s * l.fields + col][i] == pass && tag_at[s] != i &&  // (the tag of the track is over this row's fields)
                 !hidden({l.track_x(s) + l.field_x[col], l.row_y(i) + l.cell_dy, l.field_w[col], cell_h})) {
-              draw_field(r, steps[s][i], static_cast<Column>(col), l.track_x(s) + l.field_x[col], l.row_y(i) + l.cell_dy, pass, status.octave_shift, l.face, part);
+              if (col <= 2 && lane_text[s][i] != kLaneNone && (col == 0 || lane_text[s][i] == kLaneCounts)) {
+                draw_lane_text(r, lane_mark[s][i], col, l.track_x(s) + l.field_x[col], l.row_y(i) + l.cell_dy, pass, l.face);
+              } else {
+                draw_field(r, steps[s][i], static_cast<Column>(col), l.track_x(s) + l.field_x[col], l.row_y(i) + l.cell_dy, pass, status.octave_shift, l.face, part);
+              }
             }
           }
         }
@@ -507,6 +584,60 @@ void PatternView::draw(Renderer& r, const PatternSource& src, const Status& stat
     if (tag_at[s] >= 0 && !hidden(chip_of(s))) {
       const Rect chip = chip_of(s);
       r.text(chip.x + (chip.w - r.text_width(tag_text[s], Face::Data)) / 2, chip.y + l.index_dy, tag_text[s], Color::Pane, Face::Data);
+    }
+  }
+  // OS-MIDIREC-P1 S4: the lane bars, last (so the words so far are exact). 2 px at the left edge of the track's column: the top half for the notes (the lane-note colour: full width where a note starts, a thin 1 px
+  // line where one is held), the bottom half for the CCs (the lane-CC colour); a CC-only step is the whole bar in the lane-CC colour. Runs of rows in one shape are one rectangle. A pass (one colour) stops
+  // at the budget: what does not fit is not drawn (the text is already out; this is the last of the spec's degrade order). A tag's row has no bar (its chip covers the column).
+  if (any_mark) {
+    const int w = 2 * metrics.border;
+    const int half = l.row_pitch / 2;
+    for (const Color pass : {Color::Instr, Color::Vol}) {
+      for (int s = 0; s < shown; ++s) {
+        Rect run = {0, 0, 0, 0};
+        const auto flush = [&]() {
+          if (run.w != 0 && !hidden(run) && r.words() + 8u <= kPatternBudgetWords) {  // (a panel is 2 vertex words, a colour word, a BEGIN when the primitive changes and a VERTEX_TRANSLATE_X when the origin moves: 8 is a safe bound)
+            r.panel(run, pass);
+          }
+          run = Rect{0, 0, 0, 0};
+        };
+        for (int i = 0; i < kRows; ++i) {
+          const LaneMark& m = lane_mark[s][i];
+          if (!live[i] || !m.any() || tag_at[s] == i) {
+            flush();
+            continue;
+          }
+          const int x = l.track_x(s) + metrics.border;
+          const int y = l.row_y(i);
+          for (int h = 0; h < 2; ++h) {
+            Color c = Color::Vol;  // the bottom half and a CC-only step
+            int seg_w = w;
+            if (h == 0) {
+              if (m.starts != 0) {
+                c = Color::Instr;
+              } else if (m.held) {
+                c = Color::Instr;
+                seg_w = metrics.border;
+              } else if (m.ccs == 0) {
+                seg_w = 0;
+              }
+            } else if (m.ccs == 0) {
+              seg_w = 0;
+            }
+            const int seg_y = h == 0 ? y : y + half;
+            const int seg_h = h == 0 ? half : l.row_pitch - half;
+            if (seg_w == 0 || c != pass) {
+              flush();
+            } else if (run.w == seg_w && run.x == x && run.y + run.h == seg_y) {
+              run.h += seg_h;
+            } else {
+              flush();
+              run = Rect{x, seg_y, seg_w, seg_h};
+            }
+          }
+        }
+        flush();
+      }
     }
   }
 }

@@ -53,12 +53,14 @@ inline constexpr std::uint32_t kMaxUnknownChunks = 16;
 inline constexpr std::uint32_t kUnknownPoolBytes = 16384;
 
 // MIDI take lanes (OS-MIDIREC-P1, the MEVT chunk): a lane is the recorded events of one track of one pattern, in
-// ticks of 1/48 of a step (6144 = the longest pattern). 24576 events of 8 bytes are the 192 KiB pool.
+// ticks of 1/48 of a step (6144 = the longest pattern). 7680 events of 8 bytes are the 60 KiB pool.
 inline constexpr std::uint32_t kLaneTicks = 6144;           // 128 steps x 48 ticks; an event's tick is below it
 inline constexpr std::uint32_t kLaneTicksPerStep = 48;
 static_assert(kLaneTicks == kLaneTicksPerStep * kMaxPatternLength, "the lane timeline is the longest pattern");
 inline constexpr std::uint32_t kMaxLaneEvents = 4096;      // in one lane
-inline constexpr std::uint32_t kMaxLanePoolEvents = 24576;  // in all lanes of a project (192 KiB)
+// In all lanes of a project (60 KiB). ONE constant: the store, the reader, the writer's bound, the Python reference and the tests follow it. Maintainer decision 2026-11-10: the store lives in the
+// delay region's spare (mem_map.h: 80,544 B after the 4.0 s ring), so the pool is what fits there with its directory and a margin; MEVT 1.0 was not released, so no version bump.
+inline constexpr std::uint32_t kMaxLanePoolEvents = 7680;
 inline constexpr std::uint32_t kMaxLanes = 2048;            // lanes with events in one project
 inline constexpr std::uint32_t kLaneEventKinds = 6;         // kind 0..5 (docs/specs/OS-MIDIREC-P1.md A3)
 

@@ -14,15 +14,25 @@
 //
 // Layout: the lanes with events lie in the pool packed in key order with no gaps, so a lane is found in O(1)
 // and the whole store is always compact (no compaction pass). An insert or an erase moves the tail of the pool
-// (at most 192 KiB, one memmove, once per take commit or edit, in the main loop). Spec deviation: the spec
+// (at most 60 KiB, one memmove, once per take commit or edit, in the main loop). Spec deviation: the spec
 // describes a lane moved to the pool's end plus a compaction pass; packing is simpler and needs no pass.
 //
-// Capacity (limits.h): 4096 events a lane, 24,576 in all (the 192 KiB pool), 2048 lanes with events.
-// Size in memory: 24,576 x 8 + 16,320 = 212,928 bytes. S1 instantiates none on the target; S2 places the one
-// instance in SDRAM (decision 6a: 192 KiB pool; the directory is the 16 KiB the spec budgets in the pool).
+// Capacity (limits.h): 4096 events a lane, 7,680 in all (the 60 KiB pool), 2048 lanes with events.
+// Size in memory: 77,780 bytes (7,680 x 8 + 16,320 of directory, plus the bookkeeping words; kLaneStoreBytes mirrors it). S2 places the one
+// instance in the delay region's spare (decision 6a, amended 2026-11-10: the 4.0 s ring leaves 80,544 B; mem_map.h proves it fits).
 //
-// Threading: main loop only. S2's sequencer reads a lane through a `View` at a track's step start; a writer
-// (Editor) runs in the main loop between blocks, the same single-writer protocol as the Project.
+// Threading (S2): the writer is the main loop (Editor, native Reader, the app's load); the reader is the sequencer's
+// render, which preempts the main loop on the single core, so it can see a mutation half done. Protocol (a seqlock
+// with one writer): `seq()` is odd while a mutation is in progress (every mutator and `clear` bump it around the
+// work, and `begin_write` / `end_write` extend the window over the caller's own fill of an open gap); the render
+// reads it once at the start of a block, and a block that finds it odd reads no lane this block: its events stay
+// due and the cursor catches up when the window has closed (a late event, never a lost one), and the notes the
+// render already holds end on time, because their lengths are the sequencer's own. The window is one memmove of
+// the pool's tail (at most 60 KiB, twice for a replace) in SDRAM: its time is NOT measured yet (a few ms is
+// plausible; spec gate 4, docs/architecture/cpu-budget.md), the sequencer counts the blocks it met it in
+// (Stats::lane_odd). A render never runs inside a window of its own block, because the writer cannot run during
+// it. A cursor the render keeps into a lane is valid only while `seq()` is the value it was taken at: it
+// re-seeks when it changed.
 //
 // Epoch: a project load or reset (`Project::load_epoch()`) invalidates every lane. `sync(epoch)` clears a store
 // that belongs to another epoch and adopts the new one; the Editor calls it before every lane edit, the Reader
@@ -81,6 +91,19 @@ class LaneStore {
 
   void clear() noexcept;
 
+  // The write window (see Threading). Mutators open and close it themselves; a caller that fills the gap
+  // `open_gap` returns brackets the call and the fill with begin_write / end_write (nesting is counted).
+  void begin_write() noexcept;
+  void end_write() noexcept;
+  std::uint32_t seq() const noexcept { return seq_; }  // odd: a mutation is in progress
+  struct WriteWindow {
+    explicit WriteWindow(LaneStore& s) noexcept : store(s) { store.begin_write(); }
+    ~WriteWindow() { store.end_write(); }
+    WriteWindow(const WriteWindow&) = delete;
+    WriteWindow& operator=(const WriteWindow&) = delete;
+    LaneStore& store;
+  };
+
   // Epoch protocol (see the header comment).
   void sync(std::uint32_t epoch) noexcept;
   bool in_sync(std::uint32_t epoch) const noexcept { return epoch_ == epoch; }
@@ -89,6 +112,8 @@ class LaneStore {
   // Queries. An absent lane is {nullptr, 0}; the pointer stays valid until the next mutation.
   View lane(std::uint32_t pattern, std::uint32_t track) const noexcept;
   View lane_at(std::uint32_t key) const noexcept;
+  // The lane's events for the Editor's in-place merge (OS-MIDIREC-P1 S3): writable, valid only inside a write window and until the next mutator; nullptr for an absent lane.
+  LaneEvent* lane_writable(std::uint32_t pattern, std::uint32_t track) noexcept;
   std::uint32_t lane_count() const noexcept { return lanes_; }     // lanes with events
   std::uint32_t total_events() const noexcept { return events_; }  // in all lanes
   // The first key at or after `from` that holds events, or kKeys when there is none (ordered iteration).
@@ -96,7 +121,7 @@ class LaneStore {
   // How many events the pattern's lanes hold in all (delete_pattern, CLEAR).
   std::uint32_t pattern_events(std::uint32_t pattern) const noexcept;
 
-  // Capacity check of a growth by `count` events: false when the lane would pass 4096, the pool 24,576, or a new
+  // Capacity check of a growth by `count` events: false when the lane would pass 4096, the pool 7,680, or a new
   // lane would be the 2049th.
   bool can_grow(std::uint32_t pattern, std::uint32_t track, std::uint32_t count) const noexcept;
 
@@ -116,6 +141,8 @@ class LaneStore {
   std::uint32_t pool_pos(std::uint32_t key) const noexcept;  // where the lane of `key` starts (or would start)
 
   Slot dir_[kKeys] = {};
+  volatile std::uint32_t seq_ = 0;  // single writer (main loop), read by the render: odd while a mutation is in progress; the stores to dir_ and pool_ stay between the two bumps (compiler fences)
+  std::uint32_t depth_ = 0;         // nesting of begin_write (main loop only)
   std::uint32_t lanes_ = 0;
   std::uint32_t events_ = 0;
   std::uint32_t epoch_ = 0;

@@ -106,7 +106,7 @@ TEST_CASE("config: it is a screen of the registry, reached by its button; the bu
 TEST_CASE("config: the PATTERN page has REC POLY and REC QUANTIZE; the encoder edits the row, Delete puts the default back, both are learnable") {
   Rig rig;
   rig.tap(Button::F6);
-  CHECK(app::kConfigScreen.count(rig.app->model(), rig.app->state()) == 9);  // REC POLY, REC QUANTIZE, and since OS-RECMICRO REC MICRO, REC VELOCITY, and since OS-METRO METRO, METRO VOL, COUNT-IN, and since OS-PADOFFSET PAD OFFSET (the tests below)
+  CHECK(app::kConfigScreen.count(rig.app->model(), rig.app->state()) == 10);  // REC POLY, REC QUANTIZE, and since OS-RECMICRO REC MICRO, REC VELOCITY, and since OS-METRO METRO, METRO VOL, COUNT-IN, and since OS-PADOFFSET PAD OFFSET (the tests below)
   CHECK(app::kConfigScreen.focus_param(rig.app->model(), rig.app->state()) == core::param_id(core::ParamKind::Device, 0, ds::RecPoly));
   CHECK(rig.get(ds::RecPoly) == 0.0f);  // Off
   rig.turn(1);
@@ -138,7 +138,7 @@ TEST_CASE("config: the PATTERN page has REC MICRO and REC VELOCITY after REC QUA
   rig.tap(Button::F6);
   const auto focus = [&] { return app::kConfigScreen.focus_param(rig.app->model(), rig.app->state()); };
   const auto id = [](unsigned field) { return core::param_id(core::ParamKind::Device, 0, field); };
-  CHECK(app::kConfigScreen.count(rig.app->model(), rig.app->state()) <= 9);
+  CHECK(app::kConfigScreen.count(rig.app->model(), rig.app->state()) <= 10);
   rig.tap(Button::Down);
   rig.tap(Button::Down);
   CHECK(rig.row() == 2);
@@ -158,6 +158,15 @@ TEST_CASE("config: the PATTERN page has REC MICRO and REC VELOCITY after REC QUA
   rig.tap(Button::Delete);
   CHECK(rig.get(ds::RecVelocity) == 0.0f);
   rig.tap(Button::Down);
+  CHECK(focus() == id(ds::RecStore));  // OS-MIDIREC-P1 S3: REC STORE follows REC VELOCITY
+  CHECK(rig.get(ds::RecStore) == 0.0f);  // Grid, the default
+  rig.turn(1);
+  CHECK(rig.get(ds::RecStore) == 1.0f);  // Lane
+  rig.turn(5);
+  CHECK(rig.get(ds::RecStore) == 1.0f);  // two choices: the last
+  rig.tap(Button::Delete);
+  CHECK(rig.get(ds::RecStore) == 0.0f);
+  rig.tap(Button::Down);
   CHECK(focus() == id(ds::MetroMode));  // the metronome's rows follow
 }
 
@@ -168,10 +177,10 @@ TEST_CASE("config: the PATTERN page has METRO, METRO VOL and COUNT-IN after the 
   rig.tap(Button::F6);
   const auto focus = [&] { return app::kConfigScreen.focus_param(rig.app->model(), rig.app->state()); };
   const auto id = [](unsigned field) { return core::param_id(core::ParamKind::Device, 0, field); };
-  for (int i = 0; i < 4; ++i) {  // past REC POLY, REC QUANTIZE, REC MICRO and REC VELOCITY
+  for (int i = 0; i < 5; ++i) {  // past REC POLY, REC QUANTIZE, REC MICRO, REC VELOCITY and REC STORE
     rig.tap(Button::Down);
   }
-  CHECK(rig.row() == 4);
+  CHECK(rig.row() == 5);
   CHECK(focus() == id(ds::MetroMode));
   CHECK(rig.get(ds::MetroMode) == 1.0f);  // Cue, the default
   rig.turn(1);
@@ -201,7 +210,7 @@ TEST_CASE("config: the PATTERN page has METRO, METRO VOL and COUNT-IN after the 
   rig.tap(Button::Delete);
   CHECK(rig.get(ds::CountIn) == 0.0f);
   rig.tap(Button::Down);
-  CHECK(rig.row() == 7);  // PAD OFFSET follows (the next test)
+  CHECK(rig.row() == 8);  // PAD OFFSET follows (the next test)
   for (const unsigned field : {ds::MetroMode, ds::MetronomeVolume, ds::CountIn}) {
     const core::ParamDesc* d = model::param_desc(id(field));
     NEED(d != nullptr);
@@ -226,10 +235,10 @@ TEST_CASE("config: the PATTERN page ends with PAD OFFSET; the encoder moves it 0
   const app::PadBoard& pads = rig.app->state().edit.pads;
   CHECK(pads.offset() == 12u);  // the board before the row, and the setting's default
   CHECK(pads.note(24) == 48u);  // row 2 of the pads continues right after row 1 (36..47)
-  for (int i = 0; i < 7; ++i) {
+  for (int i = 0; i < 8; ++i) {
     rig.tap(Button::Down);
   }
-  CHECK(rig.row() == 7);
+  CHECK(rig.row() == 8);
   CHECK(focus() == core::param_id(core::ParamKind::Device, 0, ds::PadOffset));
   CHECK(rig.get(ds::PadOffset) == 12.0f);
   rig.turn(1);
@@ -923,7 +932,7 @@ TEST_CASE("config: Left / Right change the value under the cursor (Shift: the co
   // A number: one step a press, ten with Shift (METRO VOL on PATTERN).
   rig.tap(Button::F6);
   CHECK(rig.page() == 5);
-  for (int i = 0; i < 5; ++i) {
+  for (int i = 0; i < 6; ++i) {
     rig.tap(Button::Down);
   }
   CHECK(rig.get(ds::MetronomeVolume) == 50.0f);
@@ -936,7 +945,7 @@ TEST_CASE("config: Left / Right change the value under the cursor (Shift: the co
   rig.tap(Button::Left);
   CHECK(rig.get(ds::MetronomeVolume) == 50.0f);
   CHECK(rig.page() == 5);
-  CHECK(rig.row() == 5);
+  CHECK(rig.row() == 6);
   // The pages: F-keys, and the screen button again for the next one.
   rig.tap(Button::F5);
   CHECK(rig.page() == 4);

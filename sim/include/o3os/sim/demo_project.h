@@ -5,6 +5,7 @@
 // pattern's (KICK, SNARE, HAT, ...) with sampler values that make the pages worth looking at (filters of the three types at different
 // cutoffs, envelopes, sends). Deterministic. Nothing here is a format or a default: it is data for pictures.
 
+#include <o3os/model/lane_store.h>
 #include <o3os/model/project.h>
 
 #include <cstdint>
@@ -45,6 +46,11 @@ void fill_insert_project(model::Project& project) noexcept;
 // every row kind in its first four tracks (see demo_project.cpp), instrument 1 a sample and 49 a MIDI instrument on channel 3, the
 // project's CC numbers A 74 and C 71, and an empty pattern 2.
 void fill_events_project(model::Project& project) noexcept;
+
+// OS-MIDIREC-P1 S6: the MIDI take lane of pattern 1, track 5 of `document events` (the first four tracks and their pictures stay as
+// they were): a step note on 001, a three-note chord and a CC at 001.50, then a bend, a program change, a channel pressure and a
+// note on the stored channel 2. The store must already be synced to the project's epoch.
+void fill_events_lanes(model::LaneStore& lanes) noexcept;
 
 // The same, then the project's Learn store: CC 74 bound to the cutoff of instrument 1 (pickup) and CC 71 to its resonance (jump).
 void fill_demo_project_with_bindings(model::Project& project) noexcept;

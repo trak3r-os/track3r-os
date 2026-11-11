@@ -993,6 +993,7 @@ DispatchResult App::invoke(core::ActionId id, core::ActionArg arg, bool repeat) 
   ctx.clip = &clip_;
   ctx.song_clip = &song_clip_;
   ctx.firmware = firmware_;
+  ctx.lane = &lane_rec_;
   ctx.repeat = repeat;
   sync_project_state();  // OS-004d: what the last action changed in the runtime is the project's before this one runs (a Save started now writes it)
   const DispatchResult result = dispatch(action_registry(), id, arg, ctx);
@@ -1031,9 +1032,12 @@ unsigned App::poll_midi_cc(midi::CcInput& in) noexcept {
 unsigned App::poll_midi_notes(midi::CcInput& in) noexcept {
   namespace ds = model::device_setting;
   poll_play_position();  // OS-LIVEREC: the platform polls the keyboard before the frame's pass: a note is placed by the playhead of now, not of the last pass (which can be a frame old)
-  sync_take();
   const unsigned in_port = static_cast<unsigned>(model_.device.get(ds::MidiInPort));
   const unsigned in_channel = static_cast<unsigned>(model_.device.get(ds::MidiInChannel));
+  // OS-MIDIREC-P1 S3: REC STORE = Lane on a MIDI instrument: the keyboard's notes and control changes go to the take (stamped by the render), not to the grid. Before sync_take, so that the commit of a
+  // finished take still joins the take's undo group when it is open.
+  const bool lane = lane_poll(lane_rec_, in, session_.state_editor(), model_, state_, in_port, in_channel);
+  sync_take();
   const std::uint32_t drops = in.note_dropped();
   if (drops != midi_note_drops_) {
     midi_note_drops_ = drops;
@@ -1052,9 +1056,18 @@ unsigned App::poll_midi_notes(midi::CcInput& in) noexcept {
     if (m.kind == midi::NoteKind::On) {
       state_.edit.last_note = key;
       state_.edit.last_velocity = m.velocity;  // OS-RECMICRO: REC VELOCITY records it (0 is none)
-      (void)invoke(core::action_id("step.midi_note"), key);  // Edit on the Pattern screen only (OS-FU1): the note goes into the cursor step (even while playing); in LIVE, at the playhead (OS-FU2, OS-RECMODE2)
+      if (!lane && lane_step_on(lane_rec_, session_.state_editor(), model_, state_, key, m.velocity)) {  // OS-MIDIREC-P1 S5: STEP mode with REC STORE = Lane: the key joins the chord that enters the lane
+        dirty_ = true;
+      } else if (!lane) {  // Lane: the take has it (stamped by the render); the grid does not
+        (void)invoke(core::action_id("step.midi_note"), key);  // Edit on the Pattern screen only (OS-FU1): the note goes into the cursor step (even while playing); in LIVE, at the playhead (OS-FU2, OS-RECMODE2)
+      }
       state_.edit.last_velocity = 0;  // only this keyboard note carries it: a scripted or learned step.midi_note records no stale velocity (OS-RECMICRO review)
-    } else if (m.kind == midi::NoteKind::Off && state_.edit.rec_open != 0u) {
+    } else if (m.kind == midi::NoteKind::Off && !lane && lane_step_off(lane_rec_, session_.state_editor(), model_, state_, key)) {
+      dirty_ = true;  // the last key of a STEP-mode chord: merged into the lane, the cursor moved on
+    } else if (m.kind == midi::NoteKind::AllOff && !lane) {
+      dirty_ = dirty_ || lane_rec_.step_open;
+      lane_step_all_off(lane_rec_, session_.state_editor(), model_, state_);
+    } else if (m.kind == midi::NoteKind::Off && state_.edit.rec_open != 0u && !lane) {
       (void)invoke(core::action_id("rec.note_off"), key);
     }
     if (preview_ == nullptr) {
@@ -2224,8 +2237,21 @@ void App::poll_files() noexcept {
       state_.notify.clear();  // OS-BUG-LATENT-1106: as NEW above: a toast left from the replaced project would show over this one (QA-INS-281 showed a NO SLICES from instrument 2 of the one before)
       state_.fill.valid = false;  // OS-PTOOLS2 S3: as NEW: a loaded project does not inherit the last fill
       state_.verb_menu.forget_last();  // (nor the last TOOLS apply)
-      compose(text, label.c_str(), recovered ? " RECOVERED" : " OPENED");  // (a recovery is whole in memory, still named .bak on the card: the next SAVE puts it back)
-      (void)state_.notify.upsert(core::Severity::Info, text.c_str(), "file", kMessageMs);
+      // OS-MIDIREC-P1 S2: a file with fields of a newer minor version or MIDI lanes this build skipped says so (the next SAVE drops them); a warning, shown longer
+      const bool newer = project_->newer_fields();
+      const std::uint32_t lanes = project_->lanes_skipped();
+      core::FixedString<core::kNotifyTextChars> suffix;
+      suffix.assign(recovered ? " RECOVERED" : " OPENED");  // (a recovery is whole in memory, still named .bak on the card: the next SAVE puts it back)
+      if (newer && lanes != 0u) {
+        suffix.append(", NEWER DATA LOST");
+      } else if (newer) {
+        suffix.append(", NEWER FIELDS LOST");
+      } else if (lanes != 0u) {
+        suffix.append(lanes == 1u ? ", 1 MIDI LANE LOST" : ", MIDI LANES LOST");
+      }
+      compose(text, label.c_str(), suffix.c_str());
+      const bool warn = newer || lanes != 0u;
+      (void)state_.notify.upsert(warn ? core::Severity::Warn : core::Severity::Info, text.c_str(), "file", warn ? 4000 : kMessageMs);
       show_pattern();
     } else {
       core::FixedString<core::kNotifyTextChars> suffix;
@@ -3345,6 +3371,7 @@ void App::sync_recent() noexcept {
 void App::render() noexcept {
   const model::Editor* doc = session_.document();
   model_.undo_depth = doc != nullptr ? doc->journal(model::UndoArea::Pattern).depth() : 0u;  // the info line's "undo n": the PATTERN area's depth
+  model_.lanes = doc != nullptr ? doc->lanes() : nullptr;  // OS-MIDIREC-P1 S6: the EVENTS list's lane rows
   ui::Renderer r(builder_, ui::theme(state_.theme));
   if (!r.begin(ui::Color::Pane)) {
     return;  // the sink is busy: stay dirty and try again on the next pass

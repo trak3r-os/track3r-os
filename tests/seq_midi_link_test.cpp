@@ -1268,6 +1268,91 @@ TEST_CASE("midi link: control changes of both ports reach MIDI Learn's ring, in 
   CHECK(g_rig.link->stats().passed_dropped == 3u);
 }
 
+// OS-MIDIREC-P1 S3 (A8): the render stamps a block's MIDI with the recording track's position, only while the main loop has a take open on a track that plays.
+TEST_CASE("midi link: with a take open the keyboard's messages are stamped with the track's pattern and tick; stopped, on a track that is not playing, or with no take nothing is") {
+  midi_project();  // 120 BPM: a step is 125 ms, 48 ticks
+  static midi::CcInput cc;
+  midi::MidiConfig cfg;  // Off
+  g_rig.init(cfg);
+  g_rig.link->attach_cc(&cc);
+  midi::StampMsg s{};
+  // stopped, take open: the track has no position
+  cc.open_take(0);
+  g_rig.send(1.0e6, 0x92);
+  g_rig.send(1.0e6 + 1.0e5, 60);
+  g_rig.send(1.0e6 + 2.0e5, 100);
+  g_rig.run_to(2000);
+  CHECK_FALSE(cc.pop_stamped(s));
+  // playing, no take open: nothing, and the other rings are as before
+  cc.close_take();
+  g_rig.s->play_pattern(1);
+  const double t0 = static_cast<double>(g_rig.sample) * kCycD;
+  g_rig.send(t0 + 1.0e6, 0x92);
+  g_rig.send(t0 + 1.1e6, 61);
+  g_rig.send(t0 + 1.2e6, 100);
+  g_rig.run_to(g_rig.sample + 2000);
+  CHECK_FALSE(cc.pop_stamped(s));
+  // playing, a take open on track 0: a note at the start and a control change a second later; one on an inactive track is not stamped
+  cc.open_take(0);
+  const std::uint64_t base = g_rig.sample;
+  const double t1 = static_cast<double>(base) * kCycD;
+  g_rig.send(t1 + 1.0e6, 0x92);
+  g_rig.send(t1 + 1.1e6, 62);
+  g_rig.send(t1 + 1.2e6, 90);
+  g_rig.send(t1 + 1.8e8, 0xB2);
+  g_rig.send(t1 + 1.8e8 + 1.0e5, 74);
+  g_rig.send(t1 + 1.8e8 + 2.0e5, 33);
+  g_rig.run_to(base + 60000);  // 1.36 s
+  NEED(cc.pop_stamped(s));
+  CHECK((s.kind == midi::StampKind::On && s.pattern == 1 && s.port == 0 && s.channel == 3 && s.a == 62 && s.b == 90));
+  CHECK((s.tick >= 5 && s.tick <= 60));  // the play began 2000 samples (45 ms) before the take: a few ticks in
+  NEED(cc.pop_stamped(s));
+  CHECK((s.kind == midi::StampKind::Cc && s.pattern == 1 && s.a == 74 && s.b == 33));
+  CHECK((s.tick >= 370 && s.tick <= 440));  // a second later: 8 steps of 48 ticks and the start's offset
+  CHECK_FALSE(cc.pop_stamped(s));
+  CHECK(cc.stamp_dropped() == 0u);
+  cc.open_take(9);
+  const std::uint64_t base2 = g_rig.sample;
+  const double t2 = static_cast<double>(base2) * kCycD;
+  g_rig.send(t2 + 1.0e6, 0x92);
+  g_rig.send(t2 + 1.1e6, 63);
+  g_rig.send(t2 + 1.2e6, 90);
+  g_rig.run_to(base2 + 2000);
+  CHECK_FALSE(cc.pop_stamped(s));
+  cc.close_take();
+}
+
+TEST_CASE("midi link: in a count-in nothing is stamped but the last half-step, which goes in as the start point's first tick (OS-MIDIREC-P1 S3)") {
+  midi_project();  // 120 BPM: a step is 125 ms, a bar of 16 steps 2 s
+  static midi::CcInput cc;
+  midi::MidiConfig cfg;
+  g_rig.init(cfg);
+  g_rig.link->attach_cc(&cc);
+  midi::StampMsg s{};
+  g_rig.s->play_pattern(1, 0, 1);  // one bar of count-in, then the pattern from step 0
+  cc.open_take(0);
+  const std::uint64_t base = g_rig.sample;
+  const double t1 = static_cast<double>(base) * kCycD;
+  g_rig.send(t1 + 0.5 * 1.8e8, 0x92);  // early in the count-in: not stamped (it is not in the pattern)
+  g_rig.send(t1 + 0.5 * 1.8e8 + 1.0e5, 60);
+  g_rig.send(t1 + 0.5 * 1.8e8 + 2.0e5, 100);
+  g_rig.send(t1 + 1.96 * 1.8e8, 0x92);  // in the last half-step before the start: the start's first tick
+  g_rig.send(t1 + 1.96 * 1.8e8 + 1.0e5, 63);
+  g_rig.send(t1 + 1.96 * 1.8e8 + 2.0e5, 90);
+  g_rig.send(t1 + 2.5 * 1.8e8, 0xB2);  // half a second into the pattern: about 4 steps in
+  g_rig.send(t1 + 2.5 * 1.8e8 + 1.0e5, 74);
+  g_rig.send(t1 + 2.5 * 1.8e8 + 2.0e5, 33);
+  g_rig.run_to(base + 120000);  // 2.72 s
+  NEED(cc.pop_stamped(s));
+  CHECK((s.kind == midi::StampKind::On && s.pattern == 1 && s.a == 63 && s.b == 90));
+  CHECK(s.tick == 0u);
+  NEED(cc.pop_stamped(s));
+  CHECK((s.kind == midi::StampKind::Cc && s.a == 74 && s.b == 33));
+  CHECK((s.tick >= 150 && s.tick <= 240));
+  CHECK_FALSE(cc.pop_stamped(s));
+  cc.close_take();
+}
+
 TEST_CASE("midi link: a configuration is clamped, taken at the next block, and the latest of several wins") {
   midi_project();
   g_rig.init(master_cfg(midi::kPortDin));

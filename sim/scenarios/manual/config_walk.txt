@@ -7,13 +7,13 @@ tap config
 wait 20
 assert state screen=CONFIG
 
-# Step 2. Press `F6` (PATTERN). The eight rows of the PATTERN page show, the cursor on the first.
+# Step 2. Press `F6` (PATTERN). The ten rows of the PATTERN page show, the cursor on the first.
 tap f6
 wait 20
 snap walk_2
 
-# Step 3. Press `Down` four times (the cursor is on METRO) and turn the encoder one click right: the row reads Main.
-tap down 4
+# Step 3. Press `Down` five times (the cursor is on METRO) and turn the encoder one click right: the row reads Main.
+tap down 5
 encoder 1
 wait 20
 

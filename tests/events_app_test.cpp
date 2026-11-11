@@ -1367,3 +1367,75 @@ TEST_CASE("events S3: Shift + F2 quantises every NOTE and end row the filter sho
   CHECK(rig.depth() == d0);
   rig.tap(Button::F8);
 }
+
+// ---- OS-MIDIREC-P1 S6: the lane rows (QA-PAT-505..512) --------------------------------------------------------------------------------
+
+namespace {
+model::LaneStore g_lanes;  // static: the store is large
+
+ev::Key lane_cursor_key(Rig& rig) {
+  ev::Row row{};
+  CHECK(app::events_cursor_row(rig.project(), 1, rig.state().events, row, &g_lanes));
+  return row.key;
+}
+}
+
+TEST_CASE("events S6: a lane row edits through lane_replace as one undo unit; TYPE is skipped, QUANT is refused, the cursor follows the moved row (QA-PAT-505..512)") {
+  Rig rig;
+  g_lanes.clear();
+  g_lanes.sync(rig.project().load_epoch());
+  rig.editor->attach_lanes(&g_lanes);
+  {
+    model::LaneStore::WriteWindow window(g_lanes);  // S2 contract: the gap is filled inside the window
+    model::LaneEvent* d = g_lanes.open_gap(1, 2, 0, 2);  // track 3: no step rows, a note on stored channel 2 and a CC
+    NEED(d != nullptr);
+    d[0] = model::LaneEvent{0, 96, static_cast<std::uint8_t>(0x01), 0, 60, 100};
+    d[1] = model::LaneEvent{100, 0, static_cast<std::uint8_t>(0x11), 0, 74, 64};
+  }
+  rig.app->run_once();
+  rig.tap(Button::Rec);  // STEP
+  rig.go(0, 2);
+  rig.open_events();
+  NEED(rig.state().overlay == OverlayId::Events);
+  CHECK(lane_cursor_key(rig).lane == 1u);
+  const unsigned depth = rig.depth();
+
+  rig.turn(3);  // TIME +3 ticks: one unit, the event is re-sorted, the cursor stays on the row
+  CHECK(rig.depth() == depth + 1u);
+  CHECK(g_lanes.lane(1, 2).events[0].tick == 3);
+  CHECK(lane_cursor_key(rig).lane == 1u);
+  rig.tap(Button::Right);  // Time -> Ch: a lane row has no TYPE
+  CHECK(static_cast<app::EventsView::Field>(rig.state().events.field) == app::EventsView::Field::Ch);
+  rig.turn(1);
+  CHECK((g_lanes.lane(1, 2).events[0].kind_channel & 15) == 2);
+  CHECK(rig.depth() == depth + 2u);
+  rig.tap(Button::Right);  // -> Data
+  rig.turn(1);
+  CHECK(g_lanes.lane(1, 2).events[0].a == 61);
+  CHECK(rig.depth() == depth + 3u);
+
+  // QUANT of a lane row is refused and writes nothing
+  rig.tap(Button::F2);
+  CHECK(head_text(rig) == "NO QUANT ON A LANE ROW");
+  CHECK(rig.depth() == depth + 3u);
+
+  // UNDO restores the event (and its tick), one unit at a time
+  rig.tap(Button::F7);
+  CHECK(g_lanes.lane(1, 2).events[0].a == 60);
+  rig.tap(Button::F7);
+  rig.tap(Button::F7);
+  CHECK(g_lanes.lane(1, 2).events[0].tick == 0);
+  CHECK((g_lanes.lane(1, 2).events[0].kind_channel & 15) == 1);
+  CHECK(rig.depth() == depth);
+
+  // WATCH: the same key writes nothing
+  rig.tap(Button::F8);
+  rig.tap(Button::Rec);
+  rig.open_events();
+  const std::uint16_t tick0 = g_lanes.lane(1, 2).events[0].tick;
+  rig.turn(1);
+  CHECK(g_lanes.lane(1, 2).events[0].tick == tick0);
+  CHECK(head_text(rig) == "TURN EDIT ON");
+  rig.tap(Button::F8);
+  rig.editor->attach_lanes(nullptr);
+}

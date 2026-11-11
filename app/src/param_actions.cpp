@@ -6,6 +6,7 @@
 
 #include <o3os/app/cc_map.h>
 #include <o3os/app/key_prompt.h>
+#include <o3os/app/lane_record.h>
 #include <o3os/app/learn_list.h>
 #include <o3os/app/module_ui.h>
 #include <o3os/app/og_samples.h>
@@ -1257,6 +1258,48 @@ WriteResult write_moved(ActionContext& ctx, core::ParamId id, float next) noexce
   return r;
 }
 
+// OS-MIDIREC-P1 S4 (A13, "S4 as built, part b"): while a Lane take is recording, the move of a CC A..F parameter of the cursor's MIDI instrument is the controller's value, not an edit of the letter's selector.
+// `abs_norm` >= 0 is the knob's absolute position 0..1 (a Learn binding in Jump or Pickup mode: the pickup is bypassed, the knob IS the value); else `detents` steps the letter's running value (the encoder, a
+// relative binding), which starts at the last value of that letter in this take, else at CC 64 (never at the stored selector value, which is a controller NUMBER). The value recorded is the one rec_fx_write
+// writes (round(norm * 127)), the controller the letter names now (read before this move; nothing writes the selector). `now` is not used. A move that cannot be recorded (no take, the count-in) is swallowed
+// all the same, with one notice per take: the selector write must not leak in half way through a take.
+struct LaneCcTake {
+  bool taken = false;    // the move was handled (the caller writes nothing); false: not a lane CC move
+  unsigned letter = 0;   // 0..5
+  unsigned value = 0;    // 0..127, what the take got
+};
+LaneCcTake lane_cc_take(ActionContext& ctx, core::ParamId id, const core::ParamDesc& d, float abs_norm, int detents) noexcept {
+  LaneCcTake t;
+  if (ctx.lane == nullptr) {
+    return t;
+  }
+  const int letter = lane_cc_letter(*ctx.lane, ctx.model, ctx.view, id);
+  if (letter < 0) {
+    return t;
+  }
+  LaneRec& rec = *ctx.lane;
+  const unsigned bit = 1u << static_cast<unsigned>(letter);
+  float next;
+  if (abs_norm >= 0.0f) {
+    next = core::param_denorm(d, abs_norm);
+  } else {
+    const float from = (rec.cc_have & bit) != 0u ? rec.cc_now[letter] : core::param_denorm(d, 64.0f / 127.0f);
+    next = core::param_step(d, from, detents);
+  }
+  rec.cc_now[letter] = next;
+  rec.cc_have = static_cast<std::uint8_t>(rec.cc_have | bit);
+  const float n = core::param_norm(d, next);
+  const float c = n < 0.0f ? 0.0f : (n > 1.0f ? 1.0f : n);
+  t.taken = true;
+  t.letter = static_cast<unsigned>(letter);
+  t.value = static_cast<unsigned>(c * 127.0f + 0.5f);
+  if (!lane_cc_move(rec, ctx.edit, ctx.model, ctx.view, t.letter, t.value) && !rec.said_ci) {
+    rec.said_ci = true;
+    (void)say(ctx, core::Severity::Info, "LANE REC: NOT RECORDED: COUNT-IN");
+  }
+  return t;
+}
+
 // A message for the bindings of one store.
 bool apply_cc(ActionContext& ctx, core::LearnScope scope, unsigned channel, unsigned cc, unsigned value) noexcept {
   const core::LearnBinding* slots = store_slots(ctx, scope);
@@ -1297,8 +1340,14 @@ bool apply_cc(ActionContext& ctx, core::LearnScope scope, unsigned channel, unsi
     if (delta == 0) {
       return false;
     }
+    if (lane_cc_take(ctx, id, *d, -1.0f, delta).taken) {
+      return true;
+    }
     next = core::param_step(*d, now, delta);
   } else {
+    if (lane_cc_take(ctx, id, *d, static_cast<float>(value > 127u ? 127u : value) / 127.0f, 0).taken) {
+      return true;
+    }
     float norm = 0.0f;
     if (!core::learn_absolute(rt, id, static_cast<core::LearnMode>(b.mode), value, core::param_norm(*d, now),
                               param_generation_of(ctx.model, id), norm)) {
@@ -1390,6 +1439,27 @@ bool enc_turn(ActionContext& ctx, core::ActionArg arg) noexcept {
   int detents = arg > kMaxDetents ? kMaxDetents : (arg < -kMaxDetents ? -kMaxDetents : static_cast<int>(arg));
   if (ctx.view.shift) {
     detents *= static_cast<int>(d->coarse);
+  }
+  const LaneCcTake lane = lane_cc_take(ctx, id, *d, -1.0f, detents);  // a Lane take records the letter's value, the selector stays
+  if (lane.taken) {
+    core::FixedString<core::kNotifyTextChars> text;  // the strip shows the value the take got
+    text.append("CC ");
+    const char l[2] = {static_cast<char>('A' + lane.letter), '\0'};
+    text.append(l);
+    text.append(" ");
+    const unsigned v = lane.value > 127u ? 127u : lane.value;  // 0..127: up to three digits
+    char digits[4] = {};
+    unsigned n = 0;
+    if (v >= 100u) {
+      digits[n++] = static_cast<char>('0' + v / 100u);
+    }
+    if (v >= 10u) {
+      digits[n++] = static_cast<char>('0' + (v / 10u) % 10u);
+    }
+    digits[n] = static_cast<char>('0' + v % 10u);
+    text.append(digits);
+    (void)ctx.view.notify.upsert(core::Severity::Info, text.c_str(), "enc", ViewState::kMessageMs);
+    return true;
   }
   const float next = core::param_step(*d, now, detents);
   const WriteResult r = write_moved(ctx, id, next);

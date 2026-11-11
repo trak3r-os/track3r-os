@@ -154,8 +154,26 @@ CcOut cc_resolve(const Env& env, const Instrument* in, std::uint8_t letter) noex
   return out;
 }
 
+namespace {
+
+// S6: a lane event's row kind (a note is a NOTE row, every other kind a CC row) and its percent of a step, exact to a tick.
+constexpr Kind lane_row_kind(const LaneEvent& e) noexcept { return (e.kind_channel >> 4) == kLaneNote ? Kind::Note : Kind::Cc; }
+constexpr std::uint8_t tick_percent(std::uint32_t ticks) noexcept {
+  return static_cast<std::uint8_t>((ticks * 100u + 24u) / 48u);  // ticks 0..47 -> 0..98
+}
+// The ticks of a track a list of this scope shows: up to the scope's last row, never past the track's length.
+std::uint32_t lane_hi(const Pattern& pat, const Scope& sc, std::uint32_t t) noexcept {
+  const std::uint32_t last = static_cast<std::uint32_t>(sc.row1) + 1u;
+  const std::uint32_t len = track_len(pat, t);
+  return (last < len ? last : len) * kLaneTicksPerStep;
+}
+
+}  // namespace
+
 Projector::Projector(const Pattern& pat, Env env, Scope scope, Filter filter) noexcept
-    : pat_(&pat), env_(env), scope_(scope), filter_(filter), step_(scope.row0) {}
+    : pat_(&pat), env_(env), scope_(scope), filter_(filter), step_(scope.row0) {
+  lane_init();
+}
 
 void Projector::reset() noexcept {
   step_ = scope_.row0;
@@ -165,6 +183,87 @@ void Projector::reset() noexcept {
   index_ = 0;
   started_ = false;
   done_ = false;
+  lane_init();
+}
+
+// Every scope track's lane cursor goes to the first event of the scope's first row (the lane is sorted by tick).
+void Projector::lane_init() noexcept {
+  for (std::uint32_t t = 0; t < kMaxTracks; ++t) {
+    lane_pos_[t] = 0;
+  }
+  if (env_.lanes == nullptr) {
+    return;
+  }
+  for (std::uint32_t t = scope_.track0; t <= scope_.track1; ++t) {
+    lane_pos_[t] = static_cast<std::uint16_t>(
+        LaneStore::lower_bound(env_.lanes->lane(pat_->id, t), static_cast<std::uint32_t>(scope_.row0) * kLaneTicksPerStep));
+  }
+}
+
+bool Projector::lane_head(std::uint8_t& track, std::uint32_t& tick) noexcept {
+  if (env_.lanes == nullptr) {
+    return false;
+  }
+  bool found = false;
+  for (std::uint32_t t = scope_.track0; t <= scope_.track1; ++t) {
+    const LaneStore::View v = env_.lanes->lane(pat_->id, t);
+    const std::uint32_t hi = lane_hi(*pat_, scope_, t);
+    std::uint32_t pos = lane_pos_[t];
+    while (pos < v.count && v.events[pos].tick < hi && !filter_keeps(filter_, lane_row_kind(v.events[pos]))) {
+      ++pos;
+    }
+    lane_pos_[t] = static_cast<std::uint16_t>(pos);
+    if (pos >= v.count || v.events[pos].tick >= hi) {
+      continue;
+    }
+    if (!found || v.events[pos].tick < tick) {  // strictly earlier: a tie keeps the lower track
+      found = true;
+      tick = v.events[pos].tick;
+      track = static_cast<std::uint8_t>(t);
+    }
+  }
+  return found;
+}
+
+void Projector::lane_build(std::uint8_t track, Row& out) noexcept {
+  const std::uint32_t pos = lane_pos_[track];
+  const LaneEvent& e = env_.lanes->lane(pat_->id, track).events[pos];
+  const std::uint8_t kind = static_cast<std::uint8_t>(e.kind_channel >> 4);
+  const std::uint32_t off = e.tick % kLaneTicksPerStep;
+  out = Row{};
+  out.key = Key{track, static_cast<std::uint8_t>(e.tick / kLaneTicksPerStep), lane_row_kind(e), 0, static_cast<std::uint16_t>(pos + 1u)};
+  out.microstep = static_cast<std::uint8_t>(off);
+  out.percent = tick_percent(off);
+  out.midi = true;
+  out.channel = static_cast<std::uint8_t>((e.kind_channel & 15u) + 1u);
+  out.lane_kind = kind;
+  out.lane_port = e.port;
+  out.lane_a = e.a;
+  out.lane_b = e.b;
+  out.lane_len = e.len;
+  if (kind == kLaneNote) {
+    out.vol = e.b;
+    out.len_steps = static_cast<std::uint16_t>(e.len / kLaneTicksPerStep);
+    out.len_percent = tick_percent(e.len % kLaneTicksPerStep);
+  }
+  lane_pos_[track] = static_cast<std::uint16_t>(pos + 1u);
+}
+
+// The time (tick) of the next step row the filter keeps, gathering the next step when this one is spent.
+bool Projector::step_head(std::uint32_t& time) noexcept {
+  for (;;) {
+    while (emit_ < nkeys_) {
+      const std::uint16_t v = keys_[emit_];
+      if (filter_keeps(filter_, p_kind(v))) {
+        time = static_cast<std::uint32_t>(step_) * kLaneTicksPerStep + (v >> 8);
+        return true;
+      }
+      ++emit_;
+    }
+    if (done_ || !gather()) {
+      return false;
+    }
+  }
 }
 
 bool Projector::gather() noexcept {
@@ -266,22 +365,24 @@ void Projector::build(std::uint16_t packed, Row& out) const noexcept {
   }
 }
 
+// The merge of the step rows (gathered a step at a time, sorted) and the lane rows (one cursor a track): by time, a step row
+// first at one tick, then a lane row (the lowest track, then lane order).
 bool Projector::next(Row& out) noexcept {
-  for (;;) {
-    while (emit_ < nkeys_) {
-      const std::uint16_t v = keys_[emit_++];
-      const Key k{p_track(v), step_, p_kind(v), p_column(v)};
-      if (!filter_keeps(filter_, k.kind)) {
-        continue;
-      }
-      build(v, out);
-      ++index_;
-      return true;
-    }
-    if (!gather()) {
-      return false;
-    }
+  std::uint32_t step_time = 0;
+  const bool has_step = step_head(step_time);
+  std::uint8_t lane_track = 0;
+  std::uint32_t lane_tick = 0;
+  if (lane_head(lane_track, lane_tick) && (!has_step || lane_tick < step_time)) {
+    lane_build(lane_track, out);
+    ++index_;
+    return true;
   }
+  if (!has_step) {
+    return false;
+  }
+  build(keys_[emit_++], out);
+  ++index_;
+  return true;
 }
 
 std::uint32_t count_rows(const Pattern& pat, Env env, Scope scope, Filter filter) noexcept {
@@ -1198,6 +1299,198 @@ Plan plan_field(Builder& b, const Request& req) noexcept {
   return b.out();
 }
 
+// ---- S6: the lane rows (OS-MIDIREC-P1). Every plan is one LaneWrite over the ticks it touches. ----
+
+// Copies the lane events of the ticks [t0, t1) into the plan's lane write, leaving `room` free slots; false (the refusal set) when
+// they do not fit. `first` gets the lane index of the first one: the write's event i is the lane's event first + i.
+bool lane_range(Builder& b, const LaneStore::View& v, std::uint8_t track, std::uint32_t t0, std::uint32_t t1, unsigned room,
+                std::uint32_t& first) noexcept {
+  first = LaneStore::lower_bound(v, t0);
+  const std::uint32_t end = LaneStore::lower_bound(v, t1);
+  if (end - first + room > kMaxLaneWriteEvents) {
+    b.refuse("TOO MANY EVENTS HERE");
+    return false;
+  }
+  LaneWrite& w = b.out().lane;
+  w.on = true;
+  w.track = track;
+  w.t0 = static_cast<std::uint16_t>(t0);
+  w.t1 = static_cast<std::uint16_t>(t1);
+  w.n = static_cast<std::uint8_t>(end - first);
+  std::memcpy(w.events, v.events + first, (end - first) * sizeof(LaneEvent));
+  return true;
+}
+
+// Puts `e` after the last event at or before its tick (ties keep the insertion order); returns its place in the write.
+unsigned lane_put(LaneWrite& w, const LaneEvent& e) noexcept {
+  unsigned q = w.n;
+  while (q > 0u && w.events[q - 1u].tick > e.tick) {
+    --q;
+  }
+  std::memmove(w.events + q + 1u, w.events + q, (w.n - q) * sizeof(LaneEvent));
+  w.events[q] = e;
+  ++w.n;
+  return q;
+}
+
+void lane_drop(LaneWrite& w, unsigned p) noexcept {
+  std::memmove(w.events + p, w.events + p + 1u, (w.n - p - 1u) * sizeof(LaneEvent));
+  --w.n;
+}
+
+// The key of the lane row at lane index `i` (0-based) of the event `e`.
+Key lane_key(std::uint8_t track, const LaneEvent& e, std::uint32_t i) noexcept {
+  return Key{track, static_cast<std::uint8_t>(e.tick / kLaneTicksPerStep), lane_row_kind(e), 0, static_cast<std::uint16_t>(i + 1u)};
+}
+
+// The value an edit gives a lane event's data byte or bytes, per kind: DATA is `a` on a note, a CC, a program and a poly
+// pressure's note; VAL is `b` on a note, a CC and a poly pressure, `a` on a channel pressure, 14 bits b << 7 | a on a bend.
+bool lane_data_edit(LaneEvent& e, const Request& req) noexcept {
+  const std::uint8_t kind = static_cast<std::uint8_t>(e.kind_channel >> 4);
+  if (kind == kLaneChanAt || kind == kLaneBend) {
+    return false;
+  }
+  int a = e.a;
+  if (kind == kLaneNote && req.absolute) {
+    a = static_cast<int>(req.value) - 1;  // the model note byte 1..128 -> 0..127
+  } else {
+    a += req.delta * (req.coarse ? (kind == kLaneNote ? 12 : 10) : 1);
+  }
+  e.a = static_cast<std::uint8_t>(a < 0 ? 0 : (a > 127 ? 127 : a));
+  return true;
+}
+
+bool lane_val_edit(LaneEvent& e, const Request& req) noexcept {
+  const std::uint8_t kind = static_cast<std::uint8_t>(e.kind_channel >> 4);
+  if (kind == kLaneProgram) {
+    return false;
+  }
+  if (kind == kLaneBend) {
+    const int v = static_cast<int>((static_cast<unsigned>(e.b) << 7) | e.a);
+    int n = v + req.delta * (req.coarse ? 128 : 1);
+    n = n < 0 ? 0 : (n > static_cast<int>(kLaneBendMax) ? static_cast<int>(kLaneBendMax) : n);
+    e.a = static_cast<std::uint8_t>(n & 127);
+    e.b = static_cast<std::uint8_t>(n >> 7);
+    return true;
+  }
+  std::uint8_t& byte = kind == kLaneChanAt ? e.a : e.b;
+  int n = byte;
+  if (req.pad) {
+    n = edit::map_int(static_cast<int>(req.value), 0, 47, 0, 127);
+  } else if (req.absolute) {
+    n = static_cast<int>(req.value);
+  } else {
+    n += req.delta * (req.coarse ? 10 : 1);
+  }
+  const int lo = kind == kLaneNote ? 1 : 0;  // a velocity of 0 would be a note-off
+  byte = static_cast<std::uint8_t>(n < lo ? lo : (n > 127 ? 127 : n));
+  return true;
+}
+
+void plan_lane_row(Builder& b, const Request& req) noexcept {
+  const Key& k = req.key;
+  const std::uint8_t track = k.track;
+  const LaneStore::View v = b.env().lanes != nullptr ? b.env().lanes->lane(b.pat().id, track) : LaneStore::View{nullptr, 0};
+  const std::uint32_t idx = static_cast<std::uint32_t>(k.lane) - 1u;
+  if (idx >= v.count || v.events[idx].tick / kLaneTicksPerStep != k.step) {
+    return;  // a stale key plans nothing
+  }
+  LaneEvent e = v.events[idx];
+  const std::uint32_t tick = e.tick;
+  const std::uint8_t kind = static_cast<std::uint8_t>(e.kind_channel >> 4);
+  const std::uint32_t hi = lane_hi(b.pat(), b.scope(), track);  // one past the last tick the list shows on this track
+  std::uint32_t first = 0;
+  if (req.op == Op::Quant) {
+    b.refuse("NO QUANT ON A LANE ROW");
+    return;
+  }
+  if (req.op == Op::Delete) {
+    if (lane_range(b, v, track, tick, tick + 1u, 0, first)) {
+      lane_drop(b.out().lane, idx - first);
+    }
+    return;
+  }
+  if (req.op == Op::Insert) {
+    // a copy of the event: the row's end for a note, the next step for the other kinds, the same tick with Shift (A9's rule)
+    const std::uint32_t at = req.shift ? tick : (kind == kLaneNote ? tick + e.len : tick + kLaneTicksPerStep);
+    if (at >= hi) {
+      b.refuse(kind == kLaneNote ? "NO ROOM AFTER THIS NOTE" : "OUTSIDE THE SCOPE");
+      return;
+    }
+    if (lane_range(b, v, track, at, at + 1u, 1, first)) {
+      LaneEvent c = e;
+      c.tick = static_cast<std::uint16_t>(at);
+      b.out().new_key = lane_key(track, c, first + lane_put(b.out().lane, c));
+      b.out().has_new_key = true;
+    }
+    return;
+  }
+  // an edit of one field
+  if (req.field == Field::Time) {
+    const long d = static_cast<long>(req.delta) * (req.coarse ? kLaneTicksPerStep : 1);
+    const long nt = static_cast<long>(tick) + d;
+    if (d == 0) {
+      return;
+    }
+    const std::uint32_t lo = static_cast<std::uint32_t>(b.scope().row0) * kLaneTicksPerStep;
+    if (nt < static_cast<long>(lo) || nt >= static_cast<long>(hi)) {
+      b.refuse_outside_scope();
+      return;
+    }
+    const std::uint32_t t0 = nt < static_cast<long>(tick) ? static_cast<std::uint32_t>(nt) : tick;
+    const std::uint32_t t1 = (nt < static_cast<long>(tick) ? tick : static_cast<std::uint32_t>(nt)) + 1u;
+    if (lane_range(b, v, track, t0, t1, 0, first)) {
+      lane_drop(b.out().lane, idx - first);
+      e.tick = static_cast<std::uint16_t>(nt);
+      b.out().new_key = lane_key(track, e, first + lane_put(b.out().lane, e));
+      b.out().has_new_key = true;
+    }
+    return;
+  }
+  const LaneEvent old = e;
+  switch (req.field) {
+    case Field::Ch:
+      e.kind_channel = static_cast<std::uint8_t>((e.kind_channel & 0xF0u) | static_cast<unsigned>(((e.kind_channel & 15) + req.delta) % 16 + 16) % 16u);
+      break;
+    case Field::Data:
+      if (!lane_data_edit(e, req)) {
+        return;
+      }
+      break;
+    case Field::Val:
+      if (!lane_val_edit(e, req)) {
+        return;
+      }
+      break;
+    case Field::Len: {
+      if (kind != kLaneNote) {
+        return;
+      }
+      long n = static_cast<long>(e.len) + static_cast<long>(req.delta) * (req.coarse ? kLaneTicksPerStep : 1);
+      n = n < 1 ? 1 : (n > static_cast<long>(kLaneTicks) ? static_cast<long>(kLaneTicks) : n);
+      e.len = static_cast<std::uint16_t>(n);
+      break;
+    }
+    default:
+      return;  // TYPE, IN and the FX slots: '-' on a lane row
+  }
+  if (std::memcmp(&e, &old, sizeof e) == 0) {
+    return;  // nothing changed
+  }
+  if (lane_range(b, v, track, tick, tick + 1u, 0, first)) {
+    b.out().lane.events[idx - first] = e;
+  }
+}
+
+Plan plan_lane(Builder& b, const Request& req) noexcept {
+  plan_lane_row(b, req);
+  Plan& p = b.out();
+  if (p.text[0] != '\0') {
+    p.lane.on = false;  // a refusal writes nothing
+  }
+  return p;
+}
+
 }  // namespace
 
 Plan plan(const Pattern& pat, Env env, Scope scope, const edit::Last& last, const Request& req) noexcept {
@@ -1208,6 +1501,9 @@ Plan plan(const Pattern& pat, Env env, Scope scope, const edit::Last& last, cons
     r.delta = 4096;
   } else if (r.delta < -4096) {
     r.delta = -4096;
+  }
+  if (r.has_key && r.key.lane != 0u) {
+    return plan_lane(b, r);
   }
   switch (r.op) {
     case Op::Insert:
@@ -1266,8 +1562,8 @@ QuantResult quant_all(const Pattern& pat, Env env, Scope scope, Filter filter, c
       Projector p(pat, env, one, filter);
       Row row;
       while (p.next(row)) {
-        if (row.key.kind == Kind::Cc || row.microstep == 0u) {
-          continue;  // a CC is on its step, and a row on the step has nothing to quantise: neither is counted
+        if (row.key.kind == Kind::Cc || row.key.lane != 0u || row.microstep == 0u) {
+          continue;  // a CC is on its step, a lane row is recorded time (S6), and a row on the step has nothing to quantise: none is counted
         }
         Request req;
         req.op = Op::Quant;

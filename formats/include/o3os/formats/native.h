@@ -170,6 +170,8 @@ class Reader {
   // `lanes` (OS-MIDIREC-P1): the store the MEVT chunk is read into (cleared at begin(), adopting the loaded project's epoch, and again on a failure). With nullptr the reader is the one of
   // a build without lanes: MEVT is an unknown chunk, kept in the project's pool when it fits and written back (docs/formats/o3-project.md, decision 3a).
   void begin(core::ByteSource& source, model::ModelArena& arena, model::LaneStore* lanes = nullptr) noexcept;
+  // A load dropped before it finished: closes the LaneStore write window over the lane being filled, so the render does not skip the lanes until the next begin().
+  void abandon() noexcept { mevt_close(); }
   Progress step(std::size_t byte_budget = kDefaultStepBudget) noexcept;
   Progress progress() const noexcept { return progress_; }
   const Report& report() const noexcept { return report_; }
@@ -211,6 +213,7 @@ class Reader {
   void on_mevt_lane() noexcept;
   void on_mevt_events() noexcept;
   void next_event_block() noexcept;
+  void mevt_close() noexcept;  // ends the write window over the lane being filled (a no-op when none is open)
   void skip_lane(std::uint32_t bytes) noexcept;
 
   core::ByteSource* source_ = nullptr;
@@ -242,6 +245,7 @@ class Reader {
   std::uint32_t mevt_count_ = 0;        // events of the lane being taken
   std::uint32_t mevt_last_tick_ = 0;
   model::LaneEvent* mevt_dst_ = nullptr;  // where the next event goes inside the store's pool (valid until the lane is done)
+  bool mevt_open_ = false;  // a LaneStore write window (begin_write) is open over the lane being filled; closed when it is done, dropped or the load fails
   std::uint8_t mevt_pattern_ = 0;
   std::uint8_t mevt_track_ = 0;
   std::uint8_t mevt_esize_ = 0;

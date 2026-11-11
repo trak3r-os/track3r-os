@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <o3os/model/lane_store.h>
 
+#include <atomic>
 #include <cstring>
 
 namespace o3os::model {
@@ -39,7 +40,27 @@ std::uint32_t LaneStore::lower_bound(const View& lane, std::uint32_t tick) noexc
   return lo;
 }
 
+void LaneStore::begin_write() noexcept {
+  if (depth_++ == 0) {
+    seq_ = seq_ + 1;  // odd: the render skips the lanes this block
+    std::atomic_signal_fence(std::memory_order_seq_cst);
+  }
+}
+
+void LaneStore::end_write() noexcept {
+  if (depth_ != 0 && --depth_ == 0) {
+    std::atomic_signal_fence(std::memory_order_seq_cst);
+    seq_ = seq_ + 1;  // even again: a render that kept a cursor sees the number changed and re-seeks
+  }
+}
+
 void LaneStore::clear() noexcept {
+  // A window a dropped load left open (depth_ above 0, seq_ odd) must not survive a clear or a sync: close it for good first (OS-MIDIREC-P1 S2 fold).
+  if (depth_ != 0) {
+    depth_ = 1;
+    end_write();
+  }
+  WriteWindow w(*this);
   std::memset(dir_, 0, sizeof dir_);
   lanes_ = 0;
   events_ = 0;
@@ -57,6 +78,14 @@ LaneStore::View LaneStore::lane_at(std::uint32_t key) const noexcept {
     return {nullptr, 0};
   }
   return {pool_ + dir_[key].offset, dir_[key].count};
+}
+
+LaneEvent* LaneStore::lane_writable(std::uint32_t pattern, std::uint32_t track) noexcept {
+  if (!valid_key(pattern, track)) {
+    return nullptr;
+  }
+  const Slot& s = dir_[key_of(pattern, track)];
+  return s.count != 0 ? pool_ + s.offset : nullptr;
 }
 
 LaneStore::View LaneStore::lane(std::uint32_t pattern, std::uint32_t track) const noexcept {
@@ -109,6 +138,7 @@ LaneEvent* LaneStore::open_gap(std::uint32_t pattern, std::uint32_t track, std::
   if (index > s.count) {
     return nullptr;
   }
+  WriteWindow w(*this);  // closes at the return: the gap is the caller's to fill (a caller that must fill it inside the window holds its own)
   const std::uint32_t start = pool_pos(key);
   const std::uint32_t at = start + index;
   std::memmove(pool_ + at + count, pool_ + at, (events_ - at) * sizeof(LaneEvent));
@@ -135,6 +165,7 @@ bool LaneStore::erase(std::uint32_t pattern, std::uint32_t track, std::uint32_t 
   if (index + count > s.count) {
     return false;
   }
+  WriteWindow w(*this);
   const std::uint32_t at = s.offset + index;
   std::memmove(pool_ + at, pool_ + at + count, (events_ - at - count) * sizeof(LaneEvent));
   s.count = static_cast<std::uint16_t>(s.count - count);

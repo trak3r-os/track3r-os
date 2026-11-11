@@ -181,6 +181,99 @@ void draw_pattern_zoom(ui::Renderer& r, int level, unsigned variant) {
 void draw_pattern_zoom8(ui::Renderer& r, unsigned variant) { draw_pattern_zoom(r, 1, variant); }
 void draw_pattern_zoom12(ui::Renderer& r, unsigned variant) { draw_pattern_zoom(r, 2, variant); }
 
+namespace {
+
+// OS-MIDIREC-P1 S4: pattern 1 of every track holds a lane that marks every step: a note of two steps with a CC on its first step and one on its second,
+// so the even steps are "starts" with a CC and the odd ones "held" with a CC (the dearest marks: both bars on every step, `MID nn cc` and `MID`).
+const model::LaneStore& lane_worst_store() {
+  static std::unique_ptr<model::LaneStore> store;
+  if (!store) {
+    store = std::make_unique<model::LaneStore>();
+    model::LaneStore::WriteWindow window(*store);
+    for (unsigned t = 0; t < static_cast<unsigned>(app::kTracks); ++t) {
+      model::LaneEvent ev[3 * (app::kSteps / 2)];
+      unsigned n = 0;
+      for (unsigned s = 0; s < static_cast<unsigned>(app::kSteps); s += 2) {
+        ev[n++] = {static_cast<std::uint16_t>(s * 48), 96, 0x00, 0, 60, 100};  // note, 2 steps
+        ev[n++] = {static_cast<std::uint16_t>(s * 48 + 8), 0, 0x10, 0, 1, 64};  // CC on the even step
+        ev[n++] = {static_cast<std::uint16_t>((s + 1) * 48 + 8), 0, 0x10, 0, 1, 90};  // CC on the odd step
+      }
+      model::LaneEvent* gap = store->open_gap(1, t, 0, n);
+      if (gap != nullptr) {
+        std::memcpy(gap, ev, n * sizeof(model::LaneEvent));
+      }
+    }
+  }
+  return *store;
+}
+
+// What a take leaves: on every third track a CC sweep (one event every other step), on the next a note of three steps every four with a CC between, the third left empty.
+const model::LaneStore& lane_typical_store() {
+  static std::unique_ptr<model::LaneStore> store;
+  if (!store) {
+    store = std::make_unique<model::LaneStore>();
+    model::LaneStore::WriteWindow window(*store);
+    for (unsigned t = 0; t < static_cast<unsigned>(app::kTracks); ++t) {
+      model::LaneEvent ev[app::kSteps];
+      unsigned n = 0;
+      for (unsigned s = 0; s < static_cast<unsigned>(app::kSteps) && t % 3 != 2; s += (t % 3 == 0 ? 2u : 4u)) {
+        if (t % 3 == 1) {
+          ev[n++] = {static_cast<std::uint16_t>(s * 48), 3 * 48, 0x00, 0, 60, 100};
+          ev[n++] = {static_cast<std::uint16_t>((s + 3) * 48 + 12), 0, 0x10, 0, 74, 80};
+        } else {
+          ev[n++] = {static_cast<std::uint16_t>(s * 48 + 4), 0, 0x10, 0, 1, 64};
+        }
+      }
+      model::LaneEvent* gap = n != 0 ? store->open_gap(1, t, 0, n) : nullptr;
+      if (gap != nullptr) {
+        std::memcpy(gap, ev, n * sizeof(model::LaneEvent));
+      }
+    }
+  }
+  return *store;
+}
+
+}  // namespace
+
+// A document over the demo's content with typical lanes (see lane_typical_store).
+void draw_pattern_lane_typical(ui::Renderer& r, unsigned) {
+  static Model model;
+  model = pattern_doc_model(0, false);
+  model.lanes = &lane_typical_store();
+  ViewState v;
+  v.mode[app::screen_index(app::ScreenId::Pattern)] = static_cast<std::uint8_t>(PatternMode::Edit);
+  scene(r, model, v);
+}
+
+// The worst lane-marked frame: the dearest content with a lane on every track, at the three zooms, the header marks and a block over the window or not, at three cursor windows.
+void draw_pattern_lane_worst(ui::Renderer& r, unsigned variant) {
+  const unsigned window = variant % 3;
+  variant /= 3;
+  const bool block = variant % 2 != 0;
+  variant /= 2;
+  const bool marks = variant % 2 != 0;
+  variant /= 2;
+  const unsigned set = variant % kDocSets;
+  variant /= kDocSets;
+  const int level = static_cast<int>(variant % 3);
+  static Model model;
+  model = pattern_doc_model(1 + set, marks);
+  model.lanes = &lane_worst_store();
+  const app::PatternView::Dims d{app::kSteps, app::kTracks};
+  ViewState v;
+  (void)v.pattern.set_zoom(level, d);
+  (void)v.pattern.jump_row(window == 1 ? 40 : 5, d);
+  (void)v.pattern.move_track(window == 0 ? 0 : (window == 1 ? 6 : 11), d);
+  v.shift = marks;
+  v.mode[app::screen_index(app::ScreenId::Pattern)] = static_cast<std::uint8_t>(PatternMode::Edit);
+  if (block) {
+    const int left = v.pattern.left_track();
+    const int top = v.pattern.top_row();
+    set_block(v, top, left, top + 15, left + v.pattern.visible_tracks() - 1);
+  }
+  scene(r, model, v);
+}
+
 // A document equal to the demo, Edit on, a block of 5 steps over 2 tracks, the second track muted and the third soloed, three edits undoable:
 // what a person sees a minute into editing.
 void draw_pattern_edit_on(ui::Renderer& r, unsigned) {

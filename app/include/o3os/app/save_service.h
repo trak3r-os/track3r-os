@@ -85,6 +85,8 @@ class NativeSaveSource final : public SaveSource {
     project_ = &project;
     stereo_mask_ = stereo_mask;
   }
+  // OS-MIDIREC-P1 S2: the MIDI take lanes the file carries as its MEVT chunk (the Writer writes them when the store belongs to the project's epoch and holds a lane); nullptr: none.
+  void set_lanes(const model::LaneStore* lanes) noexcept { lanes_ = lanes; }
   void begin(core::ByteSink& sink) noexcept override;
   formats::Progress step(std::size_t byte_budget) noexcept override;
   const char* failure() const noexcept override;
@@ -93,6 +95,7 @@ class NativeSaveSource final : public SaveSource {
  private:
   const model::Project* project_ = nullptr;
   std::uint64_t stereo_mask_ = ~std::uint64_t{0};
+  const model::LaneStore* lanes_ = nullptr;
   formats::native::Writer writer_;
 };
 
@@ -280,6 +283,8 @@ class SaveService {
     writer_ = &writer;
   }
   void attach_claim(Claim claim) noexcept { claim_ = claim; }
+  // OS-MIDIREC-P1 S2: the document's MIDI take lanes, written into every native project this layer saves (the store outlives the layer).
+  void attach_lanes(const model::LaneStore* lanes) noexcept { native_.set_lanes(lanes); }
   // OS-FILES-C T16: a cycle counter (ticks per microsecond) for the per-stage timing of the OG export (og_timing.h). Not attached: no timing, no cost.
   void attach_cycles(OgTiming::Counter counter, std::uint32_t per_us) noexcept { og_timing_.attach(counter, per_us); }
   const OgTiming& og_timing() const noexcept { return og_timing_; }  // `diag ogexp status` prints it; reset when an export starts

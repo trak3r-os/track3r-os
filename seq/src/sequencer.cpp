@@ -937,6 +937,25 @@ Position Sequencer::position() const noexcept {
   return p;
 }
 
+bool Sequencer::capture_stamp(std::uint32_t track, std::uint8_t& pattern, std::uint32_t& tick) const noexcept {
+  if (!playing_ || track >= kMaxTracks || track >= project_.active_tracks()) {
+    return false;
+  }
+  const TrackState& k = tr_[track];
+  if (count_in_left_ != 0u) {
+    // OS-MIDIREC-P1 S3 fold: the count-in stamps nothing, except the last half-step before the start: a note played there is the first step's, rounded up as the grid's Nearest step does (new Community OS behaviour).
+    if (count_in_left_ != 1u || ustep_ < kMicrostepsPerStep / 2u) {
+      return false;
+    }
+    pattern = k.pattern_id;
+    tick = static_cast<std::uint32_t>(k.pos) * kMicrostepsPerStep;  // the start point's first tick
+    return true;
+  }
+  pattern = k.pattern_id;
+  tick = static_cast<std::uint32_t>(k.pos) * kMicrostepsPerStep + ustep_;
+  return true;
+}
+
 // ---- OS-INSFX-ABI2 A3: the module clock ------------------------------------------------------------------------------------------
 
 audio::ClockPos Sequencer::clock_at(std::uint64_t sample) noexcept {
@@ -1102,6 +1121,9 @@ void Sequencer::release_pattern(std::uint32_t pattern_id) noexcept {
 // pattern at the same length then goes on with its bounce (OS-BUG-PERFPING): its cycle is 2 L - 2 steps, longer than the pattern it plays when it is as long as the pattern, so the
 // restart would cut every bounce at the turn (the order of FWD). Anything else (a different pattern, a cut, a switch, a resume, a new run) starts it again.
 void Sequencer::load_tracks(std::uint32_t from_step, bool loop) noexcept {
+  if (!loop && lane_ != nullptr) {
+    lane_->dirty_mask = 0xFFFFu;  // OS-MIDIREC-P1 A5/A6: a start, jump, locate or switch: the lanes' notes end, their controllers are chased
+  }
   for (std::uint32_t t = 0; t < kMaxTracks; ++t) {
     TrackState& k = tr_[t];
     const std::uint8_t was_pattern = k.pattern_id;
@@ -1157,6 +1179,7 @@ void Sequencer::reset_tracks() noexcept {
 
 void Sequencer::begin_run(PlayMode mode, std::uint32_t order_pos, std::uint32_t pattern_id, std::uint32_t from_step, bool resuming) noexcept {
   playing_ = true;
+  lane_begin_run();
   mode_ = mode;
   mode_request_ = false;
   clk_idx_ = kClkNone;  // OS-INSFX-ABI2 A3: a run starts: STARTED for the next clock_at, the beat from the start point
@@ -1299,6 +1322,7 @@ void Sequencer::end_run(bool emit_stop, std::uint64_t at) noexcept {
     }
   }
   queue_.cancel_if(at, [](const audio::SeqEvent& e) { return e.kind == EventKind::Tick; });
+  lane_end_run(at);  // OS-MIDIREC-P1 A5: the lanes' notes end with the run, before the bends are centred
   centre_bends(at);  // OS-INSTUI S8b: after the notes' offs
   queued_jump_ = kNoJump;  // a stopped transport has nothing queued (a resume starts a run of its own)
   loop_first_ = 0xFF;      // OS-SONG3 S7: nor a loop (every end of a run: a stop, the song's end, an export's range)
@@ -1418,6 +1442,7 @@ std::uint32_t Sequencer::step(std::uint64_t block_start, std::uint32_t n, audio:
   (void)tempo_sm_.next_block();
 
   if (playing_) {
+    lane_block();  // OS-MIDIREC-P1: the lanes' budget, the CCs that waited, the chase
     // Bounded by the block: the fastest microstep (800 BPM at double time, the widest swing) is 6.5 samples, so n / 6 + 1 of them fit; the guard is slack for a fault.
     std::uint32_t guard = n / 4u + 64u;
     bool waiting = false;
@@ -1505,6 +1530,7 @@ void Sequencer::run_microstep(std::uint64_t at) noexcept {
     for (std::uint32_t t = 0; t < active; ++t) {
       play_microstep(t, u, at);
     }
+    lane_microstep(u, at, active);  // OS-MIDIREC-P1 A4: the lane events of the tick, after the steps' events (a lane CC wins over a step CC of the same tick)
   }
   if (first) {
     finish_step();

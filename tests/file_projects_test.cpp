@@ -67,6 +67,10 @@ class FakeProject final : public app::ProjectSink {
   bool loaded() const noexcept override { return ok; }
   const char* detail() const noexcept override { return words.c_str(); }
   bool refused() const noexcept override { return was_refused; }
+  bool newer = false;           // OS-MIDIREC-P1 S2: the loaded file had fields of a newer minor version
+  std::uint32_t lanes_lost = 0;  // ... and MIDI lanes this build skipped
+  bool newer_fields() const noexcept override { return newer; }
+  std::uint32_t lanes_skipped() const noexcept override { return lanes_lost; }
 };
 
 audio::VoicePool& make_pool() {
@@ -1243,6 +1247,35 @@ TEST_CASE("open: news posted about the project that is replaced does not outlive
   rig.pass();
   CHECK(rig.message() == "PROJECT alpha OPENED");
   CHECK(notify.size() == 1u);  // nothing of the old project is queued behind it either
+}
+
+// OS-MIDIREC-P1 S2: a load that dropped newer fields or MIDI lanes tells the user (the next SAVE will not write them back), as a warning.
+TEST_CASE("open: newer fields or skipped MIDI lanes are said after OPENED, as a warning") {
+  struct Case {
+    bool newer;
+    std::uint32_t lanes;
+    const char* want;
+  };
+  const Case cases[] = {{false, 0, "PROJECT alpha OPENED"},
+                        {true, 0, "PROJECT alpha OPENED, NEWER FIELDS LOST"},
+                        {false, 1, "PROJECT alpha OPENED, 1 MIDI LANE LOST"},
+                        {false, 3, "PROJECT alpha OPENED, MIDI LANES LOST"},
+                        {true, 2, "PROJECT alpha OPENED, NEWER DATA LOST"}};
+  for (const Case& c : cases) {
+    Rig rig;
+    rig.add_project("alpha");
+    rig.open_file_screen();
+    rig.cursor_to("alpha");
+    rig.project.newer = c.newer;
+    rig.project.lanes_lost = c.lanes;
+    rig.tap(Button::F1);
+    rig.project.is_busy = false;
+    rig.pass();
+    CHECK(rig.message() == c.want);
+    const auto& notify = rig.app->state().notify;
+    NEED(notify.size() >= 1u);
+    CHECK((notify.head().severity == core::Severity::Warn) == (c.newer || c.lanes != 0u));
+  }
 }
 
 // OS-PTOOLS2 S2 review fold: as NEW (save_app_test.cpp): F6 REPEAT does not carry project A's last fill or TOOLS apply over to project B.

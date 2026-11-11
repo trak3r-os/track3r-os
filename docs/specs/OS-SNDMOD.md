@@ -41,7 +41,7 @@ Rules for every slice: parameters are only appended (format-safe today, section 
 | Budget rows | The heavy-song budget gives TB-303 12 %, FM 8 %, Chip 2 %; all three are **over** their rows today (16 / 11.7 / 2.8). Any added hot-loop work must be near zero or come after Perf M2 (TB-303 decimator) and M3 (FM per-block envelopes). | `cpu-budget.md:58`, `tmod-perf` §1 verified |
 | 14 KiB shared slab | Slab is 13,056 B; hot parts TB-303 3,424 B, Chip 2,096 B, FM 1,952 B = 7,472 B, about 5.5 KB free. | `cpu-budget.md:99` verified |
 | Flash about 70 % | 787,280 B after OS-POWER P2 = **75.1 %** of 1 MiB. | `docs/STATUS.md:8` verified |
-| Parameter counts and pages | TB-303 9 on SOUND(0-5)/SLIDE(6-8); Chip 20 on TONE(0-7)/ENV(8-11)/PITCH(12-16)/ARP(17-19); FM 32 on OP1..OP4. | `*_gen.h` verified |
+| Parameter counts and pages | TB-303 9 on SOUND(0-5)/SLIDE(6-8); Chip 20 on TONE(0-7)/ENV(8-11)/PITCH(12-16)/ARP(17-19) (audit time; now 30 on TONE(0-7)/ENV(8-13)/PITCH(14-21)/OSC-FX(22-29), OS-CECHIP C7); FM 32 on OP1..OP4. | `*_gen.h` verified |
 | Preset = float32 list in parameter order, saved in the project | Yes: `Instrument::params`, `param_len` (INST chunk, "opaque, kept verbatim", at most 256 B = 64 floats). | `docs/formats/o3-project.md:141-142`, `model/include/o3os/model/limits.h:36` verified |
 | What the loader does with fewer or more values | **Fewer:** `bind()` applies `min(param_count, param_len/4)` values; the rest keep the module's `init()` defaults; the page reads the default for a parameter the blob does not reach; the first edit of such a parameter extends the blob with the module's defaults up to that index. **More:** the extra values are ignored, kept verbatim, and written back. So **appending parameters at the end is format-safe today without a version bump**; reordering, removing or changing the meaning of an existing index is a silent break (the blob is opaque and the project records the module name and ABI version only, `MODR`, not the module version, so there is no migration hook). | `audio/src/module_voices.cpp:191-199`, `app/src/module_ui.cpp:1542`, `app/src/param_actions.cpp:268-283`, `model/src/project.cpp:805-874`, `docs/formats/o3-project.md:94` verified |
 | TB-303 README stale | Yes, several statements (section 4). | verified |
@@ -85,7 +85,7 @@ Pages: SOUND = Waveform, Cutoff, Resonance, Env Mod, Decay, Accent; SLIDE = Slid
 
 ### 2.3 Chip (`modules/chip`)
 
-Pages: TONE = Wave, Duty, Raw Edges, Vol Steps, Volume, Vel Sens, Transpose, Fine; ENV = A D S R; PITCH = Sweep, Sweep Time, Vib Depth, Vib Rate, Vib Delay; ARP = Arp 1, Arp 2, Arp Speed.
+Pages: TONE = Wave, Duty, Raw Edges, Vol Steps, Volume, Vel Sens, Transpose, Fine; ENV = A D S R; PITCH = Sweep, Sweep Time, Vib Depth, Vib Rate, Vib Delay; ARP = Arp 1, Arp 2, Arp Speed. (As audited. Since OS-CECHIP C7 the Chip has 30 parameters on four pages: TONE 0-7, ENV 8-13 (A D S R, Sweep, Sweep Time), PITCH 14-21 (Vib x3, Arp 1, Arp 2, Arp Speed, Shape, Sub Osc), OSC/FX 22-29; no ARP page.)
 
 | # | Finding | Severity | Where | Evidence |
 |---|---|---|---|---|

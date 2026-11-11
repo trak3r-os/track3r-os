@@ -24,7 +24,7 @@
 //                                       the step (36 + step; the song: 3 patterns, 36 + 16 * (pattern - 1) + step); `-load` adds the Dense8 sampler tracks (and their WAVs in `samples/`) so the CPU is real
 //   o3pj_tool gen mtc-tempo OUT        (OS-MTC A2) the MTC test song: the `midisync-song` (3 patterns, note naming every step) with a Tempo FX in slot 2 step 1 (value 70 = 140 BPM; the value is BPM / 2, docs/formats/med.md 3.5), Tempo fine in slot 3 step 1 (132 = +1.00 BPM), Swing in slot 2 step 2 (50, straight) and Break in slot 3 step 2
 //   o3pj_tool gen lanes-empty|lanes-some|lanes-one|lanes-2048|lanes-full OUT  (OS-MIDIREC-P1 S1) the MEVT chunk: none (the small project plus an empty lane store: the bytes of `small`), 40 lanes of varying length,
-//                                       one lane of 4,096 events, 2,048 lanes of one event (the maximal project), and every lane of that project at 12 events (the pool full: 24,576)
+//                                       one lane of 4,096 events, 2,048 lanes of one event (the maximal project), and 1,920 lanes of that project at 4 events (the pool full: 7,680)
 //   o3pj_tool resave IN OUT            load a file and save it again (exit 1 with the error on failure)
 //   o3pj_tool dump IN                   print the loaded project as text (same format as `o3project.py dump`)
 //   o3pj_tool limits                    print the limits table (same format as `o3project.py limits`)
@@ -857,7 +857,7 @@ int fail(const char* what) {
   return 1;
 }
 
-// OS-MIDIREC-P1 S1: the MEVT fixtures. The store is static (about 208 KiB). Events are deterministic and valid (A3); gen fills the store after the project, so it is in the project's epoch.
+// OS-MIDIREC-P1 S1: the MEVT fixtures. The store is static (about 76 KiB). Events are deterministic and valid (A3); gen fills the store after the project, so it is in the project's epoch.
 LaneStore g_lanes;
 
 // Fills lanes for the patterns the project has, in key order, up to `max_lanes` lanes of `per` events (0: a count that varies from lane to lane, 1..200).
@@ -1029,7 +1029,7 @@ int main(int argc, char** argv) {
       fill_lanes(a.project, kMaxLanes, 1);
     } else if (std::strcmp(argv[2], "lanes-full") == 0) {
       test::fill_maximal(a.project);
-      fill_lanes(a.project, kMaxLanes, kMaxLanePoolEvents / kMaxLanes);
+      fill_lanes(a.project, kMaxLanePoolEvents / 4u, 4u);  // 1,920 lanes of 4 events: exactly the pool
     } else {
       return fail("gen: empty, small, lanes-empty|some|one|2048|full, maximal, settings, state, midi13, persist2, scales, lfosine, stereo, wt, playthru, modrate, autocc, kit, heavy, dense10, dense8, moddrive1|4|8[off], lfostep23|24|33|36|off, midisync, midisync-song, midisync-load, mtc-tempo, og, og17, law or insx");
     }

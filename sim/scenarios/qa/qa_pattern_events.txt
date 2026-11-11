@@ -372,3 +372,56 @@ release shift
 snap qa_pat_427
 tap f8
 snap qa_pat_427b
+
+# OS-MIDIREC-P1 S6 (docs/specs/OS-MIDIREC-P1.md, "What EVENTS shows", QA-PAT-505..): the lane rows. Track 5 of `document events` holds one step
+# note and a MIDI take lane (sim/src/demo_project.cpp, fill_events_lanes): a three-note chord on 001.00 (stored channel 2), a CC 74 on 001.50, a pitch
+# bend, a program change, a channel pressure and a note on channel 9 that plays on past the track's end.
+
+# QA-PAT-505: open EVENTS on track 5: the step note first, then the chord (three NOTE rows at 001.00, SRC L, the stored CH 02 and the true LEN 02.00),
+# the CC, the bend, the program change and the pressure; the SRC column is empty on the step row.
+document events
+action select.clear
+action cursor.jump_fraction 0
+action nav.scroll 0
+action cursor.home
+tap right 20
+tap f6
+snap qa_pat_505
+
+# QA-PAT-506: CH of a lane row: Right goes from TIME to CH (a lane row has no TYPE field), the encoder turns the stored channel (02 to 03), one undo unit; the
+# row keeps its place.
+tap down
+tap right
+encoder 1
+snap qa_pat_506
+
+# QA-PAT-507: LEN of a lane note: the true length, not a step multiple: Right walks DATA, VAL, LEN; the encoder adds to the 02.00 and the row reads it
+# exactly.
+tap right 3
+encoder 1
+snap qa_pat_507
+
+# QA-PAT-508: TIME of a lane row: the encoder moves it by ticks and the row takes its new place in the list, the cursor on it.
+tap left 4
+encoder 10
+snap qa_pat_508
+
+# QA-PAT-509: Delete drops the lane event (the chord keeps its other two notes, the cursor goes to the row nearest in time); F7 UNDO brings it back.
+tap delete
+snap qa_pat_509
+tap f7
+snap qa_pat_509b
+
+# QA-PAT-510: Insert on a lane NOTE puts a copy where the note ends; the cursor is on the new row.
+tap insert
+snap qa_pat_510
+
+# QA-PAT-511: QUANT has no meaning on a lane event: F2 says so and writes nothing.
+tap f2
+snap qa_pat_511
+
+# QA-PAT-512: TIME beyond the track's last step is refused (OUTSIDE THE SCOPE) and nothing changes.
+tap down 20
+encoder 100
+snap qa_pat_512
+tap f8

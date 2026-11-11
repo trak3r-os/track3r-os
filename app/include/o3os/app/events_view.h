@@ -45,6 +45,28 @@ constexpr bool events_field_ok(model::events::Kind kind, EventsView::Field f) no
   return fi <= static_cast<unsigned>(EventsView::Field::In);  // an end row: Time, Type, Ch, In (Data, Val, Len are '-')
 }
 
+// The same for a projected row (S6): a lane row has TIME and CH, DATA (not on a channel pressure or a bend), VAL (not on a program change) and LEN
+// (a note only); its TYPE, IN and FX slots are '-' (a lane event has no step to carry them).
+constexpr bool events_field_ok(const model::events::Row& row, EventsView::Field f) noexcept {
+  if (row.key.lane == 0u) {
+    return events_field_ok(row.key.kind, f);
+  }
+  const std::uint8_t k = row.lane_kind;
+  switch (f) {
+    case EventsView::Field::Time:
+    case EventsView::Field::Ch:
+      return true;
+    case EventsView::Field::Data:
+      return k != model::events::kLaneChanAt && k != model::events::kLaneBend;
+    case EventsView::Field::Val:
+      return k != model::events::kLaneProgram;
+    case EventsView::Field::Len:
+      return k == model::events::kLaneNote;
+    default:
+      return false;
+  }
+}
+
 // The scope the list opens with (A2): the block's tracks and rows as whole steps when a range is active (a column block is
 // widened — the scope has no columns), else the cursor's track, every step of its length. Shared by events_open and the
 // simulator's budget sweep, so the two cannot disagree.
@@ -74,6 +96,7 @@ inline std::uint32_t events_start_cursor(const model::Pattern& pat, model::event
 // The row under the cursor, read from the window the view draws (one projection from `top`, the same the render walks): false
 // when the list is empty or the pattern is gone. Shared by the actions (events_actions.cpp), the info line of the base screen
 // and the tests, so the three cannot disagree about what the cursor is on.
-bool events_cursor_row(const model::Project& project, unsigned pattern, const EventsView& ev, model::events::Row& out) noexcept;
+// `lanes` (S6): the document's lane store, so the window holds the lane rows too (nullptr: step rows only).
+bool events_cursor_row(const model::Project& project, unsigned pattern, const EventsView& ev, model::events::Row& out, const model::LaneStore* lanes = nullptr) noexcept;
 
 }  // namespace o3os::app

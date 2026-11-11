@@ -143,7 +143,7 @@ bool stereo_side_path(const model::Project& project, unsigned slot, const char* 
 
 void NativeSaveSource::begin(core::ByteSink& sink) noexcept {
   if (project_ != nullptr) {
-    writer_.begin(*project_, sink, stereo_mask_);
+    writer_.begin(*project_, sink, stereo_mask_, lanes_);
   }
 }
 

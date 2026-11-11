@@ -20,8 +20,8 @@ One mono voice an instance (the ABI runs one instance per instrument slot: play 
 
 ## Views
 
-Two views on the Instrument page, drawn from the parameter values the page hands over: **Wave** (two periods of the pulse with its duty, the triangle, or 48 steps of the noise LFSR, named) and **Envelope** (the level against
-time for the key held and released, as the parameters say, in 4-bit steps when Vol Steps is on). About 35 to 120 (the pulse to the noise) and 340 estimated display-list words (the pair fits the page's 700 with room for the page: the test holds 500).
+Two views on the Instrument page, drawn from the parameter values the page hands over: **Wave** (waves 0..3: two periods of the pulse with its duty, the triangle, or 48 steps of the noise LFSR, named; waves 4..11, OS-CECHIP C7: 96 samples of the wave's own kernel at a fixed pitch (two periods of the pulse, SID, noise, bell and super square), at the page's Shape, Sub Osc and PWM Depth, with the wave's name above it: ZAP/LASER shows its pitch drop, ARP CHORD its four chord steps, CHIP DRUM a hit with its time stretched 30 times; the kernels run at policy Fast with a local `semis_ratio` polynomial, because the view's canvas has no host maths) and **Envelope** (the level against
+time for the key held and released, as the parameters say, in 4-bit steps when Vol Steps is on; with Env Amt not 0 and a canvas of 160 pixels or more, FILTER OPENS or FILTER CLOSES says which way the envelope moves the cutoff). About 35 to 120 (the pulse to the noise) and 340 estimated display-list words (the pair fits the page's 700 with room for the page: the test holds 500).
 
 ## Parameters (a preset is thirty little-endian float32 values in this order, ids 20..29 appended by OS-CECHIP (a preset of the first twenty loads with them at their defaults); four pages under ABI 1.8, which keeps ids in order and 8 rows a page, so they are interim: TONE 0-7, ENV 8-13 (Attack .. Release, Sweep, Sweep Time), PITCH 14-21 (Vib Depth, Vib Rate, Vib Delay, Arp 1, Arp 2, Arp Speed, Shape, Sub Osc), OSC/FX 22-29; the spec's pages need the display order of A1, slice C7)
 
@@ -60,27 +60,46 @@ time for the key held and released, as the parameters say, in 4-bit steps when V
 
 ## Sizes and cost (mk66, `arm-none-eabi-g++ -O2` through `tools/o3m_pack.py`)
 
-At OS-CECHIP C5 (1.1.0): file 14,684 B, hot part 2,112 B (`render` with the three oscillator loops inlined, as before: 2,096 B at 1.0.0; the SRAM_L slab is 14 KiB shared by all modules), cold section 12,096 B
-(descriptor, parameter table, labels, set-up, the two views, and the engine's cold path; 8,768 B at C3), instance 332 B (the manifest reserves 336, so that twelve instances still fit the 4 KiB arena of 16-byte blocks; it was 312 B at C3 and 192 B at 1.0.0: the models' phases, register and drum decay, less two floats that nothing read). Image minus hot is 12,096 B, the figure `chip_test.cpp` bounds.
+At OS-CECHIP C7 (1.1.0): file 17,720 B, hot part 2,112 B (`render` with the three oscillator loops inlined, as before: 2,096 B at 1.0.0; the SRAM_L slab is 14 KiB shared by all modules), cold section 15,056 B
+(descriptor, parameter table, labels, set-up, the two views, and the engine's cold path; 8,768 B at C3, 12,160 B at C6 before the new waves' views, which cost 2,896 B with `kernel_trace` built -Os: 3.9 KB at -O2), instance 332 B (the manifest reserves 336, so that twelve instances still fit the 4 KiB arena of 16-byte blocks; it was 312 B at C3 and 192 B at 1.0.0: the models' phases, register and drum decay, less two floats that nothing read). Image minus hot is 15,056 B; `chip_test.cpp` bounds it at 15,360 B.
+
+**Static check of the hot part (`tmod-perf`, `objdump -d -j .o3m_hot`, G1 against now):** 605 against 604 instructions, 90 against 90 FP loads and stores, 4 against 4 `vdiv`, and `blx` 1 against 2 (the extra one is the call from `render` into the cold `ce::` path, once per render call, not per sample); the hot part grew by 16 B (limit 64 B), 2,096 to 2,112 B. No division was added to the per-sample loops.
 
 **Cost.** Waves 0..3 at the defaults run today's loops, unchanged: **measured on the unit, 2.8 % of a 64-frame block (about 7.3k cycles) per sounding voice on 0.4.9** (`docs/architecture/cpu-budget.md`; the earlier
 estimate of 1.8 % from the instruction count was low), and on QEMU (`tests/module_builtin_run_test.cpp`) held within 1 % of G1's 3,273 / 1,765 / 1,402 / 1,464 instructions per 64-frame block for waves 0..3. A silent voice costs nothing. Waves 4..11, and waves 0..3 once a post-chain parameter is off its default (Sub Osc above 0, Bitcrush below 15.5, Decimate above 1, Resonance above 2 %, a Cutoff below 17,500 Hz
 or an Env Amt other than 0), leave those loops for the cold path (it runs from SDRAM, whose speed for code is not validated): for waves 0..3 `raw<W>` writes the oscillator into the output buffer, then a second pass applies per
 sample the sub phase and mix, the hold and crush, the lowpass, and the envelope and gain, with one `exp2_f` and one `sin_f` every 32 samples for the lowpass coefficient. **Measured on QEMU (instructions, not cycles; the
-same 64-frame block, 8000 blocks, `[chip post icount]` in `tests/module_builtin_run_test.cpp`, with Sub Osc 40 %, Cutoff 1800 Hz, Resonance 45 %, Bitcrush 6, Env Amt 30 %, Decimate 3):** wave 0 (pulse) 8,503, wave 1 (triangle)
-6,984, wave 2 6,800, wave 3 6,789; wave 0 with Sub Osc alone 6,265; that is about 2.6 times the default pulse (3,273) and 4.0 to 4.9 times the other three. They are instruction counts of the whole `render` call on the
-Cortex-M4F emulator, not the unit's cycles, which C6 measures (`diag cpu` with a held note on each wave and on waves 0..3 with the post chain on).
+same 64-frame block, 8000 blocks, `[chip post icount]` in `tests/module_builtin_run_test.cpp`, with Sub Osc 40 %, Cutoff 1800 Hz, Resonance 45 %, Bitcrush 6, Env Amt 30 %, Decimate 3):** wave 0 (pulse) 8,460, wave 1 (triangle)
+6,941, wave 2 6,753, wave 3 6,742; wave 0 with Sub Osc alone 6,218; that is about 2.6 times the default pulse (3,285 now) and 3.9 to 4.9 times the other three. **Waves 4..11 at their defaults (no post-chain pass; one note, the same block):** 2A03 PULSE 5,859, SID SAW/TRI 6,113, NOISE/LFSR 3,250, FM BELL 9,691, SUPER SQR 10,121, ZAP/LASER 5,910, ARP CHORD 5,886, CHIP DRUM 6,300. Waves 0..3 at the defaults, as of this build: 3,285 / 1,769 / 1,410 / 1,468 against G1's 3,273 / 1,765 / 1,402 / 1,464 (+0.4 %, +0.2 %, +0.6 %, +0.3 %: inside the 1 % that `qemu_module_builtin` checks). They are instruction counts of the whole `render` call on the
+Cortex-M4F emulator, not the unit's cycles (`diag cpu` with a held note on each wave, and on waves 0..3 with the post chain on, stays owed: **unit: pending**).
 
 **Size, C3 to C5.** The file grew from 11,328 B (C3) to 14,684 B (C5), +3,356 B (about +3.4 KB), all of it cold: the cold section from 8,768 to 12,096 B (+3,328 B) for SID, NOISE/LFSR, SUPER SQR, FM BELL and CHIP DRUM, the hot part unchanged at 2,112 B. C4 and C5 are both in `chip_ce.h`.
 
-**Fast against Std (OS-CECHIP C6, host, `tests/cechip_oracle_test.cpp`).** Policy `Fast` (polynomial sine, the drum's recurrence, the host's maths at control points) is held against `Std` per wave by SNR. Bound of the spec: at least 60 dB. SID and SUPER SQR (every shape) and FM BELL (every shape) are checked at 60 dB and pass; the pulse family through the whole voice passes at 55 dB (measured 64 to 122 dB). **CHIP DRUM misses the bound: 44.5 dB at Shape 0 and 50 % (55.1 dB at the next shape, bit-exact at the third), checked at 40 dB.** What is left is the rounding edges of the stepped body (a 1-ulp phase step moves a dozen samples a second), not a drift of the decay, which follows exp(-age / (0.08 sr)). Per the spec the drum could keep `Std`'s call for that term; that is not done here, the deviation is recorded instead (the 40 dB check keeps it from getting worse). The dB figures of the other waves are the test's bounds, not new measures: the run printed no per-case figures. Unit measures (`diag mod`, `diag cpu`) stay owed.
+**Fast against Std (OS-CECHIP C6, host, `tests/cechip_oracle_test.cpp`).** Policy `Fast` (polynomial sine, the drum's recurrence, the host's maths at control points) is held against `Std` and against the original engine per wave by SNR. Bound of the spec: at least 60 dB. Measured (dB, higher is closer):
+
+| Case | Measured | Check at |
+|---|---|---|
+| Pulse voice against the original (waves 0..3 family, every note and shape) | 64 to 122 (worst: note 108, Shape 0.5, 63.9; the others 88 to 122) | 55 |
+| Post chain voice, one term at a time: Sub Osc / Decimate / Bitcrush / Cutoff / Env Amt / all | 88.1 / 89.3 / 71.3 / 96.9 / 88.3 / 133 | 55 |
+| SID `Fast` against `Std` (Shape 0 / 0.35 / 1) | 173.2 / 169.4 / 163.6 | 60 |
+| SUPER SQR `Fast` against `Std` (three shapes) | 168.6 / 165.8 / 166.8 | 60 |
+| SID and SUPER SQR voice against the original | wave 5: 93.9 and 102.1; wave 8: 91.2 and 85.7 | 60 |
+| NOISE/LFSR voice against the original | 32.6 (note 60, Shape 0.35) and 200 (bit-exact) | 30 |
+| FM BELL `Fast` against `Std` (Shape 0 / 0.5 / 1) | 149.9 / 150.2 / 150.2 | 60 |
+| FM BELL voice against the original (Shape 0 / 0.5 / 1) | 62.0 / 51.3 / 47.2 | 40 |
+| CHIP DRUM `Fast` against `Std` (Shape 0 / 0.5 / 1) | **44.5** / 55.1 / bit-exact (200) | 40 |
+| CHIP DRUM voice against the original (Shape 0 / 0.5 / 1; from sample 1500) | 48.3 / 56.9 / 200 | 20 |
+| CHIP DRUM recurrence, worst relative error over 30,000 samples | 1.69e-6 | |
+| Sine polynomial, worst error | 7.6e-8 | |
+
+The noise bound is the loosest (30 dB) because a one-sample shift of the register's clock changes the sequence, not its sound. **CHIP DRUM misses the 60 dB bound at Shape 0 (44.5 dB) and at 50 % (55.1 dB).** The spec allowed the drum to keep `Std`'s call for that term; it was tried and does not help: with the per-sample host `exp2` of `Std` in the decay the `Fast` drum still reaches only 50.1 dB and 64.6 dB, so the gap is not the recurrence (whose own error is 1.7e-6) but the rounding edges of the stepped body, where a one-ulp phase difference moves a dozen samples a second. `Fast` stays (the per-sample `exp2` is the cost the recurrence exists to avoid, and it buys no 60 dB), the check is held at 40 dB so that it cannot get worse, and the deviation is recorded here (the voice against the original: 48.3 dB from sample 1500). Unit measures (`diag mod`, `diag cpu`) stay owed.
 
 ## Tests (`ctest -R o3m_chip`)
 
 Duty cycles and the removed mean; pitch (six notes, two waves, transpose and fine); PolyBLEP against raw edges (inharmonic share of the spectrum, at least 6 dB lower); triangle shape; noise levels and flip rate; the LFSR's
 periods (32767 and 93); envelope timing (attack, decay, sustain, release, the 1 ms floor, retrigger continuity, sustain 0 ending the note); 4-bit steps (every sample a multiple of 1/15, sixteen levels); arpeggio (three, two and one
 step, downwards); sweep (linear in semitones, repeats at every note); vibrato (depth, rate, delay); velocity and Volume; **block-size independence** (bit for bit over five block sizes); hostile parameters (NaN, 1e30, out-of-range
-ids, note and velocity): no NaN, bounded; the packed `.tmod` through the loader's checks (header, CRC, relocation, descriptor); both views against formulae and the draw API's budgets for every wave, duty and corner of the envelope.
+ids, note and velocity): no NaN, bounded; the packed `.tmod` through the loader's checks (header, CRC, relocation, descriptor); both views against formulae and the draw API's budgets for every wave, duty and corner of the envelope; the new waves' view (names, 96 points, Shape and Sub Osc move the trace, the zap and drum cross zero more often early than late, Chord changes ARP CHORD, a wave out of range clamps) and the envelope view's filter text.
 
 ## Hardware check (by ear still open)
 

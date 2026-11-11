@@ -102,7 +102,7 @@ LIMITS = [
     # OS-MIDIREC-P1 S1: the MEVT chunk's take lanes (model/limits.h)
     ("lane_ticks", 6144),
     ("max_lane_events", 4096),
-    ("max_lane_pool_events", 24576),
+    ("max_lane_pool_events", 7680),
     ("max_lanes", 2048),
     ("lane_event_kinds", 6),
 ]

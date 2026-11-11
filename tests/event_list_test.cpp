@@ -1907,3 +1907,301 @@ TEST_CASE("event list S3: the property test of QUANT ALL — I1 (only the planne
   }
   CHECK(moved_episodes > kEpisodes / 2);  // the generator quantises something most of the time
 }
+
+// ---- OS-MIDIREC-P1 S6: the lane rows --------------------------------------------------------------------------------------------
+
+namespace {
+
+LaneStore g_lanes;  // static: the store is large
+
+LaneEvent lane_ev(std::uint8_t kind, std::uint8_t ch, std::uint16_t tick, std::uint8_t a, std::uint8_t b, std::uint16_t len = 0) noexcept {
+  LaneEvent e{};
+  e.tick = tick;
+  e.len = len;
+  e.kind_channel = static_cast<std::uint8_t>(kind << 4 | ch);
+  e.a = a;
+  e.b = b;
+  return e;
+}
+
+// Pattern 1 (the fixture's) with the given events in the lane of `track`; the store is emptied first.
+void lane_fill(std::uint8_t track, const LaneEvent* ev, std::uint32_t n) {
+  g_lanes.clear();
+  g_lanes.sync(1);
+  LaneStore::WriteWindow window(g_lanes);  // S2 contract: the gap is filled inside the window (closes at the return)
+  LaneEvent* d = g_lanes.open_gap(1, track, 0, n);
+  NEED(d != nullptr);
+  std::memcpy(d, ev, n * sizeof(LaneEvent));
+}
+
+Env lane_env() noexcept {
+  Env e = g_fx.env();
+  e.lanes = &g_lanes;
+  return e;
+}
+
+// The lane of `track` after a plan's lane write.
+std::vector<LaneEvent> lane_after(const Plan& pl, std::uint8_t track) {
+  const LaneStore::View v = g_lanes.lane(1, track);
+  std::vector<LaneEvent> out;
+  if (!pl.lane.on) {
+    out.assign(v.events, v.events + v.count);
+    return out;
+  }
+  const std::uint32_t a = LaneStore::lower_bound(v, pl.lane.t0);
+  const std::uint32_t b = LaneStore::lower_bound(v, pl.lane.t1);
+  out.assign(v.events, v.events + a);
+  out.insert(out.end(), pl.lane.events, pl.lane.events + pl.lane.n);
+  out.insert(out.end(), v.events + b, v.events + v.count);
+  return out;
+}
+
+Plan lane_plan(const Request& r, const Scope& sc) { return plan(g_fx.pat, lane_env(), sc, edit::Last{}, r); }
+
+Key lkey(std::uint8_t track, std::uint16_t lane, Kind kind, std::uint8_t step) noexcept { return Key{track, step, kind, 0, lane}; }
+
+}  // namespace
+
+TEST_CASE("event list S6: lane rows — projected with the stored fields, merged by time, step rows first at a tick, then by track") {
+  g_fx.reset();
+  g_fx.pat.steps[0][1] = note_step(61, 1);  // a step note at tick 48
+  const LaneEvent ev[] = {lane_ev(kLaneNote, 1, 0, 60, 100, 96), lane_ev(kLaneCc, 1, 48, 74, 64), lane_ev(kLaneBend, 2, 70, 0, 96)};
+  lane_fill(1, ev, 3);
+  {
+    LaneStore::WriteWindow window(g_lanes);  // S2 contract: the gap is filled inside the window
+    LaneEvent* d = g_lanes.open_gap(1, 0, 0, 1);
+    NEED(d != nullptr);
+    d[0] = lane_ev(kLaneProgram, 0, 48, 5, 0);
+  }
+
+  const Scope sc = scope_block(0, 15, 0, 1);
+  const std::vector<Row> rows = all(g_fx.pat, lane_env(), sc);
+  NEED(rows.size() == 5);
+  CHECK(rows[0].key == lkey(1, 1, Kind::Note, 0));  // tick 0
+  CHECK(rows[0].lane_kind == kLaneNote);
+  CHECK(rows[0].channel == 2);  // the stored channel 1 is shown 02
+  CHECK(rows[0].lane_len == 96);
+  CHECK(rows[0].len_steps == 2);
+  CHECK(rows[0].vol == 100);
+  CHECK(rows[1].key == Key{0, 1, Kind::Note, 0, 0});  // tick 48: the step row first
+  CHECK(rows[2].key == lkey(0, 1, Kind::Cc, 1));      // then the lane rows of the tick, the lower track first
+  CHECK(rows[2].lane_kind == kLaneProgram);
+  CHECK(rows[3].key == lkey(1, 2, Kind::Cc, 1));
+  CHECK(rows[3].lane_a == 74);
+  CHECK(rows[4].key == lkey(1, 3, Kind::Cc, 1));
+  CHECK(rows[4].microstep == 22);
+  CHECK(rows[4].lane_kind == kLaneBend);
+
+  // the key <-> index round trip over the merged list
+  for (std::uint32_t i = 0; i < rows.size(); ++i) {
+    Key k;
+    NEED(key_of_index(g_fx.pat, lane_env(), sc, Filter::All, i, k));
+    CHECK(k == rows[i].key);
+  }
+}
+
+TEST_CASE("event list S6: lane rows — the filter, the scope and a track's length bound the list; without a store there are none") {
+  g_fx.reset();
+  const LaneEvent ev[] = {lane_ev(kLaneNote, 0, 0, 60, 100, 48), lane_ev(kLaneCc, 0, 96, 1, 2), lane_ev(kLaneNote, 0, 20 * 48, 60, 100, 48)};
+  lane_fill(0, ev, 3);
+  CHECK(all(g_fx.pat, lane_env(), scope_track(g_fx.pat, 0)).size() == 2);  // the third is past the track's 16 steps
+  CHECK(all(g_fx.pat, lane_env(), scope_track(g_fx.pat, 0), Filter::Notes).size() == 1);
+  CHECK(all(g_fx.pat, lane_env(), scope_track(g_fx.pat, 0), Filter::Cc).size() == 1);
+  CHECK(all(g_fx.pat, lane_env(), scope_block(1, 15, 0, 0)).size() == 1);  // a block from step 2 on: only the CC
+  CHECK(all(g_fx.pat, lane_env(), scope_block(0, 1, 1, 1)).empty());       // another track
+  CHECK(all(g_fx.pat, g_fx.env(), scope_track(g_fx.pat, 0)).empty());      // no store: no lane rows
+  CHECK(sizeof(Projector) <= kStackBound);
+}
+
+TEST_CASE("event list S6: planners — CH, LEN, DATA and VAL write one lane range; TYPE, IN and FX do nothing") {
+  g_fx.reset();
+  const LaneEvent ev[] = {lane_ev(kLaneNote, 1, 0, 60, 100, 96), lane_ev(kLaneNote, 1, 0, 64, 90, 96), lane_ev(kLaneCc, 1, 100, 74, 64)};
+  lane_fill(0, ev, 3);
+  const Scope sc = scope_track(g_fx.pat, 0);
+  const Key k1 = lkey(0, 2, Kind::Note, 0);
+
+  Plan p = lane_plan(field_req(Field::Ch, k1, 1), sc);
+  CHECK(p.text[0] == '\0');
+  CHECK(p.n == 0);
+  NEED(p.lane.on);
+  CHECK(p.lane.n == 2);  // the two events of the tick only
+  std::vector<LaneEvent> a = lane_after(p, 0);
+  NEED(a.size() == 3);
+  CHECK((a[1].kind_channel & 15) == 2);
+  CHECK((a[0].kind_channel & 15) == 1);
+  p = lane_plan(field_req(Field::Ch, k1, -2), sc);  // wraps
+  a = lane_after(p, 0);
+  CHECK((a[1].kind_channel & 15) == 15);
+
+  p = lane_plan(field_req(Field::Len, k1, 5), sc);
+  a = lane_after(p, 0);
+  CHECK(a[1].len == 101);
+  p = lane_plan(field_req(Field::Len, k1, -500), sc);  // clamps at 1 tick
+  a = lane_after(p, 0);
+  CHECK(a[1].len == 1);
+  p = lane_plan(field_req(Field::Len, k1, 1, true), sc);  // coarse: a step
+  a = lane_after(p, 0);
+  CHECK(a[1].len == 144);
+
+  p = lane_plan(field_req(Field::Data, k1, 3), sc);
+  a = lane_after(p, 0);
+  CHECK(a[1].a == 67);
+  p = lane_plan(field_req(Field::Val, k1, -200), sc);  // a velocity never reaches 0
+  a = lane_after(p, 0);
+  CHECK(a[1].b == 1);
+
+  const Key kc = lkey(0, 3, Kind::Cc, 2);
+  p = lane_plan(field_req(Field::Val, kc, 100), sc);
+  a = lane_after(p, 0);
+  CHECK(a[2].b == 127);
+  p = lane_plan(field_req(Field::Len, kc, 1), sc);  // a CC has no LEN
+  CHECK(!p.lane.on);
+  CHECK(p.text[0] == '\0');
+  for (const Field f : {Field::Type, Field::In, Field::Fx1, Field::Fx2}) {
+    p = lane_plan(field_req(f, k1, 1), sc);
+    CHECK(!p.lane.on);
+    CHECK(p.n == 0);
+  }
+  p = lane_plan(field_req(Field::Ch, lkey(0, 9, Kind::Note, 0), 1), sc);  // a stale key plans nothing
+  CHECK(!p.lane.on);
+  CHECK(p.n == 0);
+}
+
+TEST_CASE("event list S6: planners — a bend's VAL is 14 bits, a channel pressure's VAL is its byte, a program has no VAL") {
+  g_fx.reset();
+  const LaneEvent ev[] = {lane_ev(kLaneProgram, 0, 0, 5, 0), lane_ev(kLaneChanAt, 0, 48, 90, 0), lane_ev(kLaneBend, 0, 96, 127, 127)};
+  lane_fill(0, ev, 3);
+  const Scope sc = scope_track(g_fx.pat, 0);
+  Plan p = lane_plan(field_req(Field::Val, lkey(0, 1, Kind::Cc, 0), 1), sc);
+  CHECK(!p.lane.on);
+  p = lane_plan(field_req(Field::Val, lkey(0, 2, Kind::Cc, 1), 4), sc);
+  std::vector<LaneEvent> a = lane_after(p, 0);
+  CHECK(a[1].a == 94);
+  p = lane_plan(field_req(Field::Data, lkey(0, 2, Kind::Cc, 1), 4), sc);  // a pressure has no DATA
+  CHECK(!p.lane.on);
+  p = lane_plan(field_req(Field::Val, lkey(0, 3, Kind::Cc, 2), 1), sc);  // at the top of the 14 bits: no change
+  CHECK(!p.lane.on);
+  p = lane_plan(field_req(Field::Val, lkey(0, 3, Kind::Cc, 2), -1), sc);
+  a = lane_after(p, 0);
+  CHECK(a[2].a == 126);
+  CHECK(a[2].b == 127);
+  p = lane_plan(field_req(Field::Val, lkey(0, 3, Kind::Cc, 2), -1, true), sc);  // coarse: 128
+  a = lane_after(p, 0);
+  CHECK(a[2].a == 127);
+  CHECK(a[2].b == 126);
+}
+
+TEST_CASE("event list S6: planners — TIME moves a tick, re-sorts and names the new key; outside the scope is refused") {
+  g_fx.reset();
+  const LaneEvent ev[] = {lane_ev(kLaneNote, 0, 10, 60, 100, 48), lane_ev(kLaneCc, 0, 12, 1, 2), lane_ev(kLaneCc, 0, 30, 1, 3)};
+  lane_fill(0, ev, 3);
+  const Scope sc = scope_track(g_fx.pat, 0);
+  Plan p = lane_plan(field_req(Field::Time, lkey(0, 1, Kind::Note, 0), 3), sc);
+  CHECK(p.text[0] == '\0');
+  NEED(p.lane.on);
+  CHECK(p.has_new_key);
+  std::vector<LaneEvent> a = lane_after(p, 0);
+  NEED(a.size() == 3);
+  CHECK(a[1].tick == 13);  // behind the CC at 12
+  CHECK(a[1].a == 60);
+  CHECK(p.new_key == lkey(0, 2, Kind::Note, 0));
+  CHECK(lane_events_valid(a.data(), static_cast<std::uint32_t>(a.size()), 0, 16u * 48u));
+
+  p = lane_plan(field_req(Field::Time, lkey(0, 1, Kind::Note, 0), 1, true), sc);  // coarse: a step
+  a = lane_after(p, 0);
+  CHECK(a[2].tick == 58);
+  CHECK(p.new_key == lkey(0, 3, Kind::Note, 1));
+
+  p = lane_plan(field_req(Field::Time, lkey(0, 1, Kind::Note, 0), -11), sc);  // before the start
+  CHECK(!p.lane.on);
+  CHECK(p.text[0] != '\0');
+  p = lane_plan(field_req(Field::Time, lkey(0, 3, Kind::Cc, 0), 16 * 48), sc);  // past the track's end
+  CHECK(!p.lane.on);
+  CHECK(p.text[0] != '\0');
+}
+
+TEST_CASE("event list S6: planners — Delete, Insert (the end of a note, the next step, Shift: the same tick), the room refusals") {
+  g_fx.reset();
+  const LaneEvent ev[] = {lane_ev(kLaneNote, 0, 0, 60, 100, 96), lane_ev(kLaneCc, 0, 100, 74, 64), lane_ev(kLaneCc, 0, 15 * 48 + 10, 74, 65)};
+  lane_fill(0, ev, 3);
+  const Scope sc = scope_track(g_fx.pat, 0);
+  Request r;
+  r.key = lkey(0, 2, Kind::Cc, 2);
+  r.op = Op::Delete;
+  Plan p = lane_plan(r, sc);
+  NEED(p.lane.on);
+  std::vector<LaneEvent> a = lane_after(p, 0);
+  CHECK(a.size() == 2);
+  CHECK(a[1].tick == 15 * 48 + 10);
+
+  r.op = Op::Insert;
+  r.key = lkey(0, 1, Kind::Note, 0);
+  p = lane_plan(r, sc);  // a note: a copy at its end
+  a = lane_after(p, 0);
+  NEED(a.size() == 4);
+  CHECK(a[1].tick == 96);
+  CHECK(a[1].a == 60);
+  CHECK(p.has_new_key);
+  CHECK(p.new_key == lkey(0, 2, Kind::Note, 2));
+  r.shift = true;  // the same tick, after the row
+  p = lane_plan(r, sc);
+  a = lane_after(p, 0);
+  CHECK(a[1].tick == 0);
+  CHECK(p.new_key == lkey(0, 2, Kind::Note, 0));
+  r.shift = false;
+  r.key = lkey(0, 2, Kind::Cc, 2);  // a CC: the next step
+  p = lane_plan(r, sc);
+  a = lane_after(p, 0);
+  CHECK(a[2].tick == 148);
+  r.key = lkey(0, 3, Kind::Cc, 15);  // the last step: no next one
+  p = lane_plan(r, sc);
+  CHECK(!p.lane.on);
+  CHECK(std::strcmp(p.text, "OUTSIDE THE SCOPE") == 0);
+
+  const LaneEvent last[] = {lane_ev(kLaneNote, 0, 15 * 48, 60, 100, 96)};  // a note whose end is past the track
+  lane_fill(0, last, 1);
+  r.key = lkey(0, 1, Kind::Note, 15);
+  p = lane_plan(r, sc);
+  CHECK(!p.lane.on);
+  CHECK(std::strcmp(p.text, "NO ROOM AFTER THIS NOTE") == 0);
+}
+
+TEST_CASE("event list S6: planners — a range of more than 32 events is refused, nothing is written") {
+  g_fx.reset();
+  LaneEvent ev[kMaxLaneWriteEvents + 1];
+  for (auto& e : ev) {
+    e = lane_ev(kLaneCc, 0, 5, 1, 2);
+  }
+  lane_fill(0, ev, kMaxLaneWriteEvents + 1);
+  const Scope sc = scope_track(g_fx.pat, 0);
+  Plan p = lane_plan(field_req(Field::Val, lkey(0, 1, Kind::Cc, 0), 1), sc);
+  CHECK(!p.lane.on);
+  CHECK(std::strcmp(p.text, "TOO MANY EVENTS HERE") == 0);
+  lane_fill(0, ev, kMaxLaneWriteEvents);  // 32 at one tick edit fine, but an insert (one more) does not
+  p = lane_plan(field_req(Field::Val, lkey(0, 1, Kind::Cc, 0), 1), sc);
+  CHECK(p.lane.on);
+  CHECK(p.lane.n == 32);
+  Request r;
+  r.op = Op::Insert;
+  r.shift = true;
+  r.key = lkey(0, 1, Kind::Cc, 0);
+  p = lane_plan(r, sc);
+  CHECK(!p.lane.on);
+  CHECK(std::strcmp(p.text, "TOO MANY EVENTS HERE") == 0);
+}
+
+TEST_CASE("event list S6: QUANT of a lane row is refused, QUANT ALL leaves the lane rows alone") {
+  g_fx.reset();
+  const LaneEvent ev[] = {lane_ev(kLaneNote, 0, 13, 60, 100, 48)};
+  lane_fill(0, ev, 1);
+  const Scope sc = scope_track(g_fx.pat, 0);
+  Request r;
+  r.op = Op::Quant;
+  r.key = lkey(0, 1, Kind::Note, 0);
+  const Plan p = lane_plan(r, sc);
+  CHECK(!p.lane.on);
+  CHECK(std::strcmp(p.text, "NO QUANT ON A LANE ROW") == 0);
+  const QuantResult q = quant_all(g_fx.pat, lane_env(), sc, Filter::All, edit::Last{}, [](void*, const Plan&) noexcept { return true; }, nullptr);
+  CHECK(q.done == 0);
+  CHECK(q.left == 0);
+}

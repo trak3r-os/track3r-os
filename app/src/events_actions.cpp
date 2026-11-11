@@ -33,7 +33,12 @@ const model::Pattern* events_pattern(const ActionContext& ctx) noexcept {
 }
 
 ev::Env events_env(const ActionContext& ctx) noexcept {
-  return ctx.model.project != nullptr ? ev::env_of(*ctx.model.project) : ev::Env{};
+  if (ctx.model.project == nullptr) {
+    return ev::Env{};
+  }
+  ev::Env env = ev::env_of(*ctx.model.project);
+  env.lanes = ctx.model.lanes;  // S6: the lane rows
+  return env;
 }
 
 // Keeps the window on the cursor: the cursor is always inside the kEventsRows rows from `top`.
@@ -51,11 +56,11 @@ void events_follow(ViewState& v) noexcept {
 // The field snaps to one the row's kind has, when the cursor moved to a row of another kind.
 void events_field_snap(ActionContext& ctx) noexcept {
   ev::Row row;
-  if (!events_cursor_row(*ctx.model.project, ctx.view.edit.pattern, ctx.view.events, row)) {
+  if (!events_cursor_row(*ctx.model.project, ctx.view.edit.pattern, ctx.view.events, row, ctx.model.lanes)) {
     return;
   }
   const auto f = static_cast<EventsView::Field>(ctx.view.events.field);
-  if (!events_field_ok(row.key.kind, f)) {
+  if (!events_field_ok(row, f)) {
     ctx.view.events.field = static_cast<std::uint8_t>(EventsView::Field::Time);
   }
 }
@@ -118,13 +123,30 @@ bool events_apply(ActionContext& ctx, const ev::Request& req, const ev::Key& old
   }
   model::edit::Last last{static_cast<std::uint8_t>(pe::clampi(v.instrument, 1, static_cast<int>(model::kMaxInstruments))), v.edit.last_fx};
   const ev::Plan p = ev::plan(*pat, events_env(ctx), v.events.scope, last, req);
-  if (p.n == 0u) {
+  if (p.n == 0u && !p.lane.on) {
     if (p.text[0] != '\0') {
       return pe::say(ctx, core::Severity::Info, p.text);  // the refusal: nothing written, no unit
     }
     return false;  // a no-op (a stale key, a delta of 0): silent
   }
   bool changed = false;
+  if (p.lane.on) {
+    // S6: a lane row's edit is one Editor::lane_replace over the ticks it touches (atomic, one undo unit with the dispatch's)
+    const model::Status st = ctx.edit->lane_replace(v.edit.pattern, p.lane.track, p.lane.t0, p.lane.t1, p.lane.events, p.lane.n);
+    if (st == model::Status::Full) {
+      // Full is the lane, the pool or the lane count (the same tests as Editor::lane_replace_in) or the undo ring: say which
+      const model::LaneStore* ls = ctx.edit->lanes();
+      bool lane_full = false;
+      if (ls != nullptr) {
+        const model::LaneStore::View lv = ls->lane(v.edit.pattern, p.lane.track);
+        const std::uint32_t old = model::LaneStore::lower_bound(lv, p.lane.t1) - model::LaneStore::lower_bound(lv, p.lane.t0);
+        lane_full = lv.count - old + p.lane.n > model::kMaxLaneEvents || ls->total_events() - old + p.lane.n > model::kMaxLanePoolEvents ||
+                    (lv.count == 0 && p.lane.n != 0 && ls->lane_count() >= model::kMaxLanes);
+      }
+      return pe::say(ctx, core::Severity::Info, lane_full ? "LANE FULL: NOTHING CHANGED" : "TOO BIG TO UNDO: NOTHING CHANGED");
+    }
+    changed = st == model::Status::Ok;
+  }
   for (unsigned i = 0; i < p.n; ++i) {
     const ev::StepWrite& w = p.writes[i];
     changed = ctx.edit->set_step(v.edit.pattern, static_cast<std::uint32_t>(w.track), static_cast<std::uint32_t>(w.step), w.value) == model::Status::Ok || changed;
@@ -156,7 +178,7 @@ bool events_field_edit(ActionContext& ctx, core::ActionArg arg, bool coarse) noe
     return false;
   }
   ev::Row row;
-  const bool have = events_cursor_row(*ctx.model.project, v.edit.pattern, v.events, row);
+  const bool have = events_cursor_row(*ctx.model.project, v.edit.pattern, v.events, row, ctx.model.lanes);
   if (!have) {
     // an empty list: the edit keys say what adds one (A9); a cursor off the window's rows edits nothing
     return events_total(ctx) == 0u ? pe::say(ctx, core::Severity::Info, "NO EVENTS: INSERT ADDS ONE") : false;
@@ -176,13 +198,15 @@ bool events_field_edit(ActionContext& ctx, core::ActionArg arg, bool coarse) noe
 
 // The row under the cursor, from the window the view draws (one projection from `top`): the actions and the base screen's info
 // line read the same row the overlay draws under the cursor.
-bool events_cursor_row(const model::Project& project, unsigned pattern, const EventsView& ev, model::events::Row& out) noexcept {
+bool events_cursor_row(const model::Project& project, unsigned pattern, const EventsView& ev, model::events::Row& out, const model::LaneStore* lanes) noexcept {
   const model::Pattern* pat = project.pattern(pattern);
   if (pat == nullptr) {
     return false;
   }
   ev::Row rows[kEventsRows];
-  const std::uint32_t n = ev::window(*pat, ev::env_of(project), ev.scope, ev.filter, ev.top, rows, kEventsRows, nullptr);
+  ev::Env env = ev::env_of(project);
+  env.lanes = lanes;
+  const std::uint32_t n = ev::window(*pat, env, ev.scope, ev.filter, ev.top, rows, kEventsRows, nullptr);
   const std::int32_t i = static_cast<std::int32_t>(ev.cursor) - static_cast<std::int32_t>(ev.top);
   if (i < 0 || static_cast<std::uint32_t>(i) >= n) {
     return false;
@@ -269,14 +293,14 @@ bool events_field(ActionContext& ctx, core::ActionArg arg) noexcept {
     return false;
   }
   ev::Row row;
-  if (!events_cursor_row(*ctx.model.project, v.edit.pattern, v.events, row)) {
+  if (!events_cursor_row(*ctx.model.project, v.edit.pattern, v.events, row, ctx.model.lanes)) {
     return false;
   }
   const int step = arg < 0 ? -1 : 1;
   unsigned f = v.events.field;
   for (unsigned k = 0; k < static_cast<unsigned>(EventsView::Field::kCount); ++k) {
     f = (f + static_cast<unsigned>(step) + static_cast<unsigned>(EventsView::Field::kCount)) % static_cast<unsigned>(EventsView::Field::kCount);
-    if (events_field_ok(row.key.kind, static_cast<EventsView::Field>(f))) {
+    if (events_field_ok(row, static_cast<EventsView::Field>(f))) {
       break;
     }
   }
@@ -293,13 +317,13 @@ bool events_back(ActionContext& ctx, core::ActionArg) noexcept {
     return false;
   }
   ev::Row row;
-  const bool have = events_cursor_row(*ctx.model.project, v.edit.pattern, v.events, row);
+  const bool have = events_cursor_row(*ctx.model.project, v.edit.pattern, v.events, row, ctx.model.lanes);
   v.overlay = OverlayId::None;
   if (have) {
     const PatternView::Dims d = pattern_dims(ctx.model, v);
     (void)v.pattern.jump_row(row.key.step, d);
     (void)v.pattern.move_track(static_cast<int>(row.key.track) - v.pattern.track(), d);
-    (void)v.pattern.select_column(row.key.kind == ev::Kind::Cc ? (row.key.column == 0u ? Column::Fx1 : Column::Fx2) : Column::Note);
+    (void)v.pattern.select_column(row.key.kind == ev::Kind::Cc && row.key.lane == 0u ? (row.key.column == 0u ? Column::Fx1 : Column::Fx2) : Column::Note);  // a lane row has no column: the step's note column
   }
   return true;
 }
@@ -337,8 +361,11 @@ bool events_preview(ActionContext& ctx, core::ActionArg) noexcept {
   }
   const model::Pattern* pat = events_pattern(ctx);
   ev::Row row;
-  if (pat == nullptr || !events_cursor_row(*ctx.model.project, v.edit.pattern, v.events, row)) {
+  if (pat == nullptr || !events_cursor_row(*ctx.model.project, v.edit.pattern, v.events, row, ctx.model.lanes)) {
     return false;  // an empty list: nothing to sound
+  }
+  if (row.key.lane != 0u) {  // a lane event has no step to sound (S6)
+    return v.notify.post(core::Severity::Info, "PREVIEW: NO STEP ON A LANE ROW", "preview", ViewState::kMessageMs);
   }
   const model::Step& st = pat->steps[row.key.track][row.key.step];
   if (!ev::note_is_note(st.note)) {
@@ -379,7 +406,7 @@ bool events_pad(ActionContext& ctx, core::ActionArg arg) noexcept {
     return false;
   }
   ev::Row row;
-  if (!events_cursor_row(*ctx.model.project, v.edit.pattern, v.events, row)) {
+  if (!events_cursor_row(*ctx.model.project, v.edit.pattern, v.events, row, ctx.model.lanes)) {
     // an empty list: the pads are edit keys there (A9 names what adds one); in WATCH any edit key says TURN EDIT ON (A13)
     if (!pe::edit_enabled(ctx)) {
       return pe::say(ctx, core::Severity::Info, pe::kEditOff);
@@ -392,7 +419,7 @@ bool events_pad(ActionContext& ctx, core::ActionArg arg) noexcept {
   const unsigned instrument = row.instr >= 1u && row.instr <= model::kMaxInstruments ? row.instr : static_cast<unsigned>(v.instrument);
   if (!note_field && !val_field) {
     // A14: the row's step sounds. A pad preview, not an edit: it works in WATCH too.
-    if (ctx.preview == nullptr) {
+    if (ctx.preview == nullptr || row.key.lane != 0u) {  // a lane row has no step to sound (S6)
       return false;
     }
     const model::Step& st = pat->steps[row.key.track][row.key.step];
@@ -419,7 +446,7 @@ bool events_pad(ActionContext& ctx, core::ActionArg arg) noexcept {
   if (note_field) {
     sound = pad_note_byte;
     sound_ok = true;
-  } else {
+  } else if (row.key.lane == 0u) {
     const model::Step& st = pat->steps[row.key.track][row.key.step];
     if (ev::note_is_note(st.note)) {
       sound = st.note - 1u;
@@ -476,7 +503,7 @@ bool events_insert(ActionContext& ctx, core::ActionArg arg) noexcept {
     return false;
   }
   ev::Row row;
-  const bool have = events_cursor_row(*ctx.model.project, v.edit.pattern, v.events, row);
+  const bool have = events_cursor_row(*ctx.model.project, v.edit.pattern, v.events, row, ctx.model.lanes);
   ev::Request req = events_row_request(ctx, ev::Op::Insert, have, row);
   req.shift = arg != 0;
   return events_apply(ctx, req, row.key);
@@ -496,7 +523,7 @@ bool events_delete(ActionContext& ctx, core::ActionArg) noexcept {
     return false;
   }
   ev::Row row;
-  if (!events_cursor_row(*ctx.model.project, v.edit.pattern, v.events, row)) {
+  if (!events_cursor_row(*ctx.model.project, v.edit.pattern, v.events, row, ctx.model.lanes)) {
     return events_total(ctx) == 0u ? pe::say(ctx, core::Severity::Info, "NO EVENTS: INSERT ADDS ONE") : false;
   }
   return events_apply(ctx, events_row_request(ctx, ev::Op::Delete, true, row), row.key);
@@ -513,7 +540,7 @@ bool events_history(ActionContext& ctx, bool undo) noexcept {
     return false;
   }
   ev::Row row;
-  const bool have = events_cursor_row(*ctx.model.project, v.edit.pattern, v.events, row);
+  const bool have = events_cursor_row(*ctx.model.project, v.edit.pattern, v.events, row, ctx.model.lanes);
   const bool done = undo ? edit_undo(ctx, 0) : edit_redo(ctx, 0);
   if (events_pattern(ctx) == nullptr) {
     return done;
@@ -568,7 +595,7 @@ bool events_quant(ActionContext& ctx, core::ActionArg arg) noexcept {
     return false;
   }
   ev::Row row;
-  const bool have = events_cursor_row(*ctx.model.project, v.edit.pattern, v.events, row);
+  const bool have = events_cursor_row(*ctx.model.project, v.edit.pattern, v.events, row, ctx.model.lanes);
   if (arg == 0) {
     if (!have) {
       return events_total(ctx) == 0u ? pe::say(ctx, core::Severity::Info, "NO EVENTS: INSERT ADDS ONE") : false;

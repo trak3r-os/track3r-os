@@ -882,9 +882,9 @@ TEST_CASE("midi input: a control change binds in the Learn overlay and then move
 TEST_CASE("midi input: a controller bound in the device's store moves a setting with no project at all") {
   Rig bare(false);
   midi::CcInput in;
-  bare.tap(Button::Config);  // CONFIG, then F6: the PATTERN page, METRO VOL (its sixth row) under the cursor
+  bare.tap(Button::Config);  // CONFIG, then F6: the PATTERN page, METRO VOL (its seventh row) under the cursor
   bare.tap(Button::F6);
-  for (int i = 0; i < 5; ++i) {
+  for (int i = 0; i < 6; ++i) {
     bare.tap(Button::Down);
   }
   CHECK(bare.app->state().screen == app::ScreenId::Config);

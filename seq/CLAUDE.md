@@ -4,6 +4,7 @@
 - Entry points:
   - `include/o3os/seq/sequencer.h`: `step()`, tempo/swing, transport, follow
   - OS-MTC (docs/specs/OS-MTC.md): `song_time.h` is the song time map (main loop), `app/mtc_sync.h` answers the time code generator's (`MtcSync`) and the chase's (`ChaseSync`) questions; the chase of MTC IN is `MidiLink` (`chase_*`: the chaser's notices, the request word, the rate trim once a step) over `Sequencer::chase_go` / `chase_stop` / `set_rate_trim` (the run's phase pair `chase_end` / `chase_map`); while `chase_run()` the main loop's Play, Stop, Resume, Locate and slot jumps are dropped (Q8 a) and the song does not loop (Q9 a). Tests `tests/seq_mtc_test.cpp`, `tests/seq_mtc_chase_test.cpp`, `tests/seq_song_time_test.cpp`
+  - OS-MIDIREC-P1 S2 (docs/specs/OS-MIDIREC-P1.md, "S2 as built"): `lane_play.h` + `src/sequencer_lanes.cpp` play the MIDI take lanes of `model::LaneStore` (`Sequencer::attach_lanes`; the main loop writes the store inside a seqlock window, the render reads it and defers on an odd `seq()`); hooks in `sequencer.cpp` (`load_tracks`, `begin_run`, `end_run`, `step` -> `lane_block`, `run_microstep` -> `lane_microstep`); tests `tests/seq_lane_test.cpp`
   - `include/o3os/seq/fx.h`: `kFxInfo`, the one table of which step FX is executable, with ranges and groups
   - `include/o3os/seq/control.h`: who controls a voice parameter (FX col 1 over col 2 over Perform)
   - `include/o3os/seq/rows.h`: reading a step from the model arena in the render context

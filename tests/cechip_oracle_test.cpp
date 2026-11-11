@@ -945,7 +945,7 @@ TEST_CASE("cechip oracle: CHIP DRUM at policy Fast (the decay anchored every 32 
     CAPTURE(shape);
     const double snr = snr_db(our_drum<chip::ce::Std>(shape, 60, 44100), our_drum<chip::ce::Fast>(shape, 60, 44100), 0);
     MESSAGE("drum shape " << shape << ": Fast against Std " << snr << " dB");
-    CHECK(snr >= 40.0);  // measured 44.5 / 55.1 / bit-exact: what is left is the stepped body's rounding edges (a 1-ulp phase step moves a dozen samples a second); below C6's 60 dB bound at Shape 0 and 50 %: the figure goes to C6
+    CHECK(snr >= 40.0);  // measured 44.5 / 55.1 / bit-exact: what is left is the stepped body's rounding edges (a 1-ulp phase step moves a dozen samples a second). Below the spec's 60 dB at Shape 0 and 50 %, and keeping Std's call (the host's exp2_f at every sample) does not reach it either (50.1 / 64.6 dB: the host's exp2 is not the original's expf), so Fast stays and this wave's bound is 40 dB (README, C6)
   }
 }
 

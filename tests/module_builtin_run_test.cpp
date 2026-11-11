@@ -652,7 +652,7 @@ TEST_CASE("built-in chip: a note on each of the waves 4..11 renders finite, audi
 // OS-CECHIP C3: what waves 0..3 cost once a post-chain parameter is off its default (they leave today's loops for the cold path: raw<W> into out[], then a pass with the sub phase, the hold and
 // the lowpass a sample, exp2_f and sin_f every 32 samples). Measured like the default case above and only printed (modules/chip/README.md quotes it): the bound is a sanity bound.
 // Parameter ids as the manifest's: 0 Wave, 21 Sub Osc, 22 Cutoff, 23 Resonance, 24 Bitcrush, 27 Env Amt, 28 Decimate.
-TEST_CASE("built-in chip: instructions per 64-frame block of waves 0..3 with the post chain on (QEMU icount, measured, not a golden)") {
+TEST_CASE("built-in chip: instructions per 64-frame block of waves 0..3 with the post chain on and of waves 4..11 at their defaults (QEMU icount, measured, not a golden)") {
   NEED(module::kBuiltinModuleCount == 4u);
   Rig r;
   static audio::ModuleVoices mv;
@@ -671,15 +671,18 @@ TEST_CASE("built-in chip: instructions per 64-frame block of waves 0..3 with the
     const char* name;
     bool whole;  // false: Sub Osc only
     std::uint32_t wave;
+    float sub;  // Sub Osc in percent (0 for the new waves at their defaults: OS-CECHIP C6 records their cost here, on the cold path without the post chain's passes)
   };
-  const Config configs[] = {{"sub only", false, 0}, {"whole chain", true, 0}, {"whole chain", true, 1}, {"whole chain", true, 2}, {"whole chain", true, 3}};
+  const Config configs[] = {{"sub only", false, 0, 40.0f}, {"whole chain", true, 0, 40.0f}, {"whole chain", true, 1, 40.0f}, {"whole chain", true, 2, 40.0f}, {"whole chain", true, 3, 40.0f},
+                            {"defaults", false, 4, 0.0f},  {"defaults", false, 5, 0.0f},      {"defaults", false, 6, 0.0f},      {"defaults", false, 7, 0.0f},      {"defaults", false, 8, 0.0f},
+                            {"defaults", false, 9, 0.0f},  {"defaults", false, 10, 0.0f},     {"defaults", false, 11, 0.0f}};
   for (const Config& c : configs) {
     CAPTURE(c.name);
     CAPTURE(c.wave);
     std::memset(state, 0, state_bytes);
     NEED(m.entry->init(state, &mv.host()) == 0);
     m.entry->set_param(state, 0, static_cast<float>(c.wave));
-    m.entry->set_param(state, 21, 40.0f);  // Sub Osc 40 %
+    m.entry->set_param(state, 21, c.sub);  // Sub Osc
     if (c.whole) {
       m.entry->set_param(state, 22, 1800.0f);  // Cutoff
       m.entry->set_param(state, 23, 45.0f);    // Resonance

@@ -2045,6 +2045,12 @@
    ],
    "gap": 0.5,
    "note": "(Note released, the panel closed)"
+  },
+  {
+   "say": "qa_pat_500 (the lane mark, after OS-MIDIREC-P1 S3 can make a lane; the unit cannot make one before): record a CC take or a note take with REC STORE = Lane on a MIDI instrument's track, then read the Pattern grid. Each step with a lane note reads `MID nn cc` with a bar at its left edge (top half notes, bottom half CCs), a step the note is held in reads `MID`, a step with its own note shows only the bar. Count the marks against F6 EVENTS and check that the grid still scrolls and the cursor moves with no flicker or tearing on 16 tracks at zoom 16 (the draw is the worst case measured: 1788 of 1792 words). qa_pat_501"
+  },
+  {
+   "say": "qa_pat_491 and qa_pat_502 (the CC lane's source, OS-MIDIREC-P1 S4; needs REC STORE = Lane and a MIDI instrument whose CC A sends a controller, number 1..128, on the INSTRUMENT page): go LIVE on that instrument's track (Shift + Rec), play, and turn the encoder after Instr + FX2 on the CC A row (hold Instr + FX1), or move a Learn knob bound to CC A; stop, open F6 EVENTS. The lane holds that controller's points at the ticks where the encoder or knob moved, the CC A row still names the same controller, and no CC lands in the step columns. Then repeat with an external controller on the track's channel (qa_pat_502): its controller number is recorded as itself and one on another channel is not. A letter set to PROG or AT records nothing and the strip says `LANE REC: CC A (PROG/AT) NOT RECORDED` once."
   }
  ],
  "finally": [

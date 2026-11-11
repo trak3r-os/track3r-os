@@ -59,7 +59,7 @@ Rows rows_of(const ViewState& view) noexcept {
   if (page == kPagePattern || page == kPageMidi) {  // OS-METRO, OS-RECMICRO, OS-PADOFFSET: the order of the spec (REC POLY, REC QUANTIZE, REC MICRO, REC VELOCITY, METRO, METRO VOL, COUNT-IN, PAD OFFSET), not the table's: METRO VOL is row 2, from before the page existed
     // E-CFG-03: the MIDI page puts TRANSPORT IN and OUT (ids 23, 24, appended) right after CLOCK MODE
     namespace ds = model::device_setting;
-    static constexpr std::uint16_t kPatternOrder[] = {ds::RecPoly, ds::RecQuantize, ds::RecMicro, ds::RecVelocity, ds::MetroMode, ds::MetronomeVolume, ds::CountIn, ds::PadOffset, ds::PatSwitch};
+    static constexpr std::uint16_t kPatternOrder[] = {ds::RecPoly, ds::RecQuantize, ds::RecMicro, ds::RecVelocity, ds::RecStore, ds::MetroMode, ds::MetronomeVolume, ds::CountIn, ds::PadOffset, ds::PatSwitch};
     static constexpr std::uint16_t kMidiOrder[] = {ds::ClockIn, ds::ClockSync, ds::ClockMode, ds::TransportIn, ds::TransportOut, ds::MtcOut, ds::MtcStart, ds::MtcIn, ds::MidiInPort, ds::MidiOutPort, ds::MidiInChannel, ds::CcMap, ds::MidiOutChannel};  // OS-MIDICCMAP S1: CC MAP after IN CHANNEL
     const std::uint16_t* const kOrder = page == kPagePattern ? kPatternOrder : kMidiOrder;
     const unsigned order_n = page == kPagePattern ? sizeof kPatternOrder / sizeof kPatternOrder[0] : sizeof kMidiOrder / sizeof kMidiOrder[0];
@@ -318,6 +318,10 @@ void ConfigScreen::render(const Model& model, const ViewState& view, Renderer& r
           r.text(card_x, cell_y(3), "Blink: the heartbeat blinks", Color::TextDim, Face::Label);
           r.text(card_x, cell_y(4), "BPM: a flash on every beat", Color::TextDim, Face::Label);
           r.text(card_x, cell_y(5), "Off: dark; a fault still blinks", Color::TextDim, Face::Label);
+        } else if (field == model::device_setting::RecStore) {  // OS-MIDIREC-P1 S3: not learnable, so no controller line
+          r.text(card_x, cell_y(3), "Grid: notes go in the step grid", Color::TextDim, Face::Label);
+          r.text(card_x, cell_y(4), "Lane: a MIDI track keeps ticks", Color::TextDim, Face::Label);
+          r.text(card_x, cell_y(5), "and note lengths in its lane", Color::TextDim, Face::Label);
         } else if (field == model::device_setting::MtcStart) {
           r.text(card_x, cell_y(3), "Hour of the song's first step", Color::TextDim, Face::Label);
           r.text(card_x, cell_y(4), "01: Logic's bar 1 at 01:00:00:00", Color::TextDim, Face::Label);

@@ -6,6 +6,7 @@
 #include <o3os/app/buttons.h>
 #include <o3os/app/dir_scan.h>
 #include <o3os/app/import_job.h>
+#include <o3os/app/lane_record.h>
 #include <o3os/app/midi_input.h>
 #include <o3os/app/model.h>
 #include <o3os/app/pad_lights.h>
@@ -149,8 +150,10 @@ class App {
   // undo".
   void attach_document(model::Editor* editor) noexcept {
     end_take();  // a take that was open on the old document ends with it (OS-LIVEREC)
+    lane_discard(lane_rec_);  // OS-MIDIREC-P1 S3: so does a Lane take (nothing is committed to a document that goes away)
     session_.attach(editor);
     model_.project = editor != nullptr ? &editor->project() : nullptr;  // the parameter screens and the Pattern screen read it (Model::project)
+    model_.lanes = editor != nullptr ? editor->lanes() : nullptr;       // OS-MIDIREC-P1 S6 (render() keeps it current)
     state_.song.ask = SongAsk{};  // a question about the old document is over (OS-SONGMAP)
     {
       bool restore = false;
@@ -349,6 +352,8 @@ class App {
   // moving a Learn binding, an undo) is pushed to it as {ParamId, value, ramp}. The caller owns the ring: the engine's (audio::Engine::params()),
   // a test's fake consumer. nullptr detaches it. The main loop is its one producer; a full ring drops the push and counts it.
   void attach_param_ring(core::ParamRing* ring) noexcept { params_out_ = ring; }
+  // OS-MIDIREC-P1 S3: the Lane recording's take buffer (model::LaneTake, 16 KiB: the platform places it in SDRAM); null (the default) leaves REC STORE = Lane recording into the grid as it does with Grid.
+  void attach_lane_take(model::LaneTake* take) noexcept { lane_rec_.take = take; }
   void attach_scratch(audio::MasterScratch* stage) noexcept { state_.dj.scratch = stage; }  // OS-DJ C1: the engine's scratch stage (null: the page says so)
 
   // MIDI Learn's input (OS-013a): takes at most kMidiCcPerPass control changes from `in` (the render's ring, midi/cc_in.h; this is its one consumer), drops those the device
@@ -516,6 +521,7 @@ class App {
   core::ParamRing* params_out_ = nullptr;
   PreviewSink* preview_ = nullptr;
   std::uint32_t midi_note_drops_ = 0;  // midi::CcInput::note_dropped() at the last poll_midi_notes()
+  LaneRec lane_rec_;                   // OS-MIDIREC-P1 S3: the Lane recording's state (lane_record.h); main loop only
   TransportSink* transport_ = nullptr;
   ProjectSink* project_ = nullptr;
   SaveService* saves_ = nullptr;

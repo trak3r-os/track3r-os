@@ -98,6 +98,12 @@ inline constexpr std::uint32_t kReverbSize = 192u * kKiB;
 //   delay: the stereo ring, 176,468 frames of one 32-bit word = 4.0 s at 44,117 Hz = 705,872 B, at the start of the region; the rest of the 768 KiB (80,560 B) is spare.
 //   reverb: the plate's 13 int16 lines (the FULL layout, HALF uses less), 26,632 samples = 53,264 B, at the start of the region; the rest of the region (143,344 B) is spare.
 inline constexpr std::uint32_t kDelayRingBytes = 705872u;
+// OS-MIDIREC-P1 S2 (maintainer decision 2026-11-10): the one o3os::model::LaneStore (MIDI take lanes) lives in the delay region's spare, 32-byte aligned after the ring: 705,888 B in, 80,544 B left.
+// The delay never reaches it: every ring index is reduced modulo the frames it was attached with (kRingFrames, app_main.cpp static_asserts it equals kDelayRingBytes / 4) and tests/audio_send_fx_test.cpp
+// runs every mode at the longest time with guard words around the ring. The platform layer may not include the model, so the size is mirrored here and tests/mem_map_model_test.cpp checks it
+// against sizeof(LaneStore) (7,680 events x 8 B + the 4080-slot directory of 16,320 B + the bookkeeping words = 77,780 B).
+inline constexpr std::uint32_t kLaneStoreBase = kDelayBase + (kDelayRingBytes + 31u) / 32u * 32u;  // 32-byte aligned; no '~' (gen_ld.py's expression grammar)
+inline constexpr std::uint32_t kLaneStoreBytes = 77780u;  // mirrors sizeof(o3os::model::LaneStore)
 inline constexpr std::uint32_t kReverbMemBytes = 53264u;
 // OS-CEWTENV W2: the wavetable contour bank (audio/wt_contour.h), 256 contours x 128 int16 = 64 KiB, carved out of the reverb region's
 // spare tail (the region was 256 KiB with 208,880 B spare; the plate's lines stay at its start). Every base after it is unchanged, so the
@@ -241,7 +247,7 @@ inline constexpr Budget kSramUBudget[] = {
     // OS-STEREO (c): +832 B (28 KiB + 64 B -> 28 KiB + 896 B, from the same slack: the rows still leave 9 KiB over the 32 KiB floor) for the stereo voice: 4 side blocks (512 B), their state, 65 descriptors' st_off (260 B), the tracks' side map.
     {"voice_state", 28u * kKiB + 896u},  // OS-PERF-LFO: PerfSlots 90 -> 180 B (+90 B, five LFO slots); g_voices 23,192 B + g_amiga 5,376 B = 28,568 B of the 28,736 B, 168 B of slack left (nm on the mk66 image, 2026-10-25). OS-PERFFX P5: +64 B from the ADR slack (9.3 KiB are still over the 32 KiB floor) for the third PerfSlots slot (TUNE, +18 B; P0 left 4 B). OS-VOX: 16 sampler voices (11,536 B) + the Amiga voices (5,632 B) = 17,168 B; was 16 KiB for 8 voices (the 2 KiB come from the budget's slack, the real floor is the linker's 32 KiB). OS-MOD: 12 voices and 65 descriptors with the pan, finetune and amp modulators (3 x FilterMod a slot, 3 more generators a voice) + the Amiga voices = 23.3 KB, 6 KiB more from the same slack. OS-GRAN: the granular voice's state (12 x 48 B), the wavetable window and the granular fields a descriptor (65 x 20 B), the position modulator (a FilterMod a descriptor, one more generator a voice) = ~27 KB, 4 KiB more from the same slack
     {"module_hot_state", 16u * kKiB},
-    {"sequencer", 8u * kKiB + 160u},     // +64 B for OS-PERF-SMP: the control table's per-group Perform values grow by one group (FxGroup::SampleEnd, +32 B; the image holds 8,856 B). app_main.cpp allows 640 B above it (OS-INSTUI S8b: the MIDI instrument's output state, 72 B); the image held 8,704 B (E-SONG-07: +24 B and the song list's copy, 656 B, is in SDRAM: g_seq_order). OS-CECHANCE C1: +96 B for the Chance conditions' per-track state (6 B x 16 tracks in TrackState; the image holds 8,952 B)
+    {"sequencer", 8u * kKiB + 160u},     // OS-MIDIREC-P1 S2: the lane playback state (LaneRun, about 1.5 KB) is NOT in the sequencer: it is in SDRAM (g_lane_run, app_main.cpp), so SRAM_U keeps its 32 KiB floor. +64 B for OS-PERF-SMP: the control table's per-group Perform values grow by one group (FxGroup::SampleEnd, +32 B; the image holds 8,856 B). app_main.cpp allows 640 B above it (OS-INSTUI S8b: the MIDI instrument's output state, 72 B); the image held 8,704 B (E-SONG-07: +24 B and the song list's copy, 656 B, is in SDRAM: g_seq_order). OS-CECHANCE C1: +96 B for the Chance conditions' per-track state (6 B x 16 tracks in TrackState; the image holds 8,952 B)
     {"rings", 16u * kKiB},                // MIDI, ParamChange, events, StemRing 10 x 5 blocks, USB return and packets; OS-USBDISK U1c: and the Mass Storage link (MscLink, 1,104 B, two rings of eight 64-byte packets) inside the same 16 KiB; its engine with the two block buffers is in the SDRAM slack window
     {"sd_ft812_staging", 24u * kKiB},     // SD sector buffers, FT812 display-list staging
     {"ui_app_bss", 18u * kKiB},           // ADR: about 40 KiB; OS-MEM1: the App (28 KB) and the project and sample loaders (10.5 KB) moved to the SDRAM slack window (SdramBox, sdram_box.h); OS-SRAMU: and the plots' CurveScratch (4,480 B)
@@ -309,6 +315,9 @@ static_assert(kUiCacheBase == kPtfxBase + kPtfxSize && kUiCacheSize == 448u * kK
               "OS-CEPTFX A3: ui_cache keeps its last 448 KiB after the ptfx region took its first 64 KiB; diag_log is unchanged");
 static_assert(kSampleArenaSize == 10816u * kKiB, "sample arena: 10,816 KiB (ADR 0013 D7's 11,456 minus the 640 KiB the model arena needed)");
 static_assert(kDelayRingBytes <= kDelaySize && kDelayBase % 4u == 0u && kDelayRingBytes % 4u == 0u, "the delay's ring (OS-SENDFX) fits the delay region, word aligned");
+static_assert(kLaneStoreBase % 32u == 0u && kLaneStoreBase >= kDelayBase + kDelayRingBytes && kLaneStoreBase + kLaneStoreBytes <= kDelayBase + kDelaySize,
+              "OS-MIDIREC-P1 S2: the LaneStore sits after the delay's ring and inside the delay region");
+static_assert(kDelayBase + kDelaySize - (kLaneStoreBase + kLaneStoreBytes) >= 1024u, "OS-MIDIREC-P1 S2: at least 1 KiB of the delay region's spare is left over the LaneStore");
 static_assert(kReverbMemBytes <= kReverbSize && kReverbBase % 4u == 0u, "the reverb's lines (OS-SENDFX) fit the reverb region");
 static_assert(kWtContourSize == 64u * kKiB && kWtContourBase % 32u == 0u && kWtContourBase == kReverbBase + kReverbSize,
               "OS-CEWTENV W2: the contour bank is 64 KiB at the end of the reverb region's former spare");

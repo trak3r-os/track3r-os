@@ -118,6 +118,7 @@ const char* error_name(Error e) noexcept {
 }
 
 void Reader::begin(core::ByteSource& source, model::ModelArena& arena, model::LaneStore* lanes) noexcept {
+  mevt_close();  // a reader that was abandoned mid-lane leaves its window open on the store it had
   source_ = &source;
   project_ = &arena.project;
   lanes_ = lanes;
@@ -160,6 +161,7 @@ void Reader::fail(Error e, const char* detail) noexcept {
   want_ = 0;
   have_ = 0;
   project_->reset();  // never leave a half-loaded project behind
+  mevt_close();
   if (lanes_ != nullptr) {
     lanes_->clear();  // nor half-loaded lanes (the reset moved the project's epoch: the store is out of sync anyway)
   }
@@ -679,8 +681,12 @@ void Reader::on_mevt_lane() noexcept {
     skip_lane(bytes);  // bad key, shape, order or duplicate, no such pattern, or the store is full
     return;
   }
+  // The gap is filled over several steps: the window stays open from here to the last event (or the drop of the lane), so the render never reads a lane that is half filled.
+  lanes_->begin_write();
+  mevt_open_ = true;
   model::LaneEvent* dst = lanes_->open_gap(pattern, track, 0, count);  // key past every taken lane: appended
   if (dst == nullptr) {
+    mevt_close();
     skip_lane(bytes);
     return;
   }
@@ -695,8 +701,18 @@ void Reader::on_mevt_lane() noexcept {
   next_event_block();
 }
 
+void Reader::mevt_close() noexcept {
+  if (mevt_open_) {
+    mevt_open_ = false;
+    if (lanes_ != nullptr) {
+      lanes_->end_write();
+    }
+  }
+}
+
 void Reader::next_event_block() noexcept {
   if (mevt_events_left_ == 0) {
+    mevt_close();
     next_lane();
     return;
   }
@@ -720,6 +736,7 @@ void Reader::on_mevt_events() noexcept {
     e.b = p[7];
     if (!model::lane_event_valid(e) || e.tick < mevt_last_tick_) {  // a bad value or an unsorted lane: the lane is dropped whole
       lanes_->erase(mevt_pattern_, mevt_track_, 0, mevt_count_);
+      mevt_close();
       chunk_left_ -= static_cast<std::uint32_t>(want_);
       mevt_events_left_ -= n;
       skip_lane((mevt_events_left_) * mevt_esize_);  // counts it and skips the events not read yet

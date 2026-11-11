@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+// OS-MIDIREC-P1 S6 (docs/specs/OS-MIDIREC-P1.md, "What EVENTS shows"): the lane rows. When Env::lanes is set the list also
+// carries the take lanes of the pattern's tracks: one row per lane event (a NOTE row for a lane note, a CC row for every
+// other kind), keyed by its place in the lane (Key::lane), merged by time with the step rows, step rows first at one tick,
+// then lane rows in tick order (track, then lane order). A lane row edits through Plan::lane, a write the action applies
+// with Editor::lane_replace; the step planners never see a lane row.
+//
 // OS-MIDIREC S1 + S2a (docs/specs/OS-MIDIREC.md): the EVENTS list's pure model — the scope, the projection, the
 // order, the ownership, LEN and the inputs of CC resolution (S1), and the edit planners (S2a, section 3.5, A6,
 // A9, A10, A19-A21): each planner is a pure function that answers one edit with a refusal (its text) or at most
@@ -18,6 +24,7 @@
 // sequencer's values (F2, F6), and tests/event_list_test.cpp checks them against the facts.
 
 #include <o3os/model/instrument.h>
+#include <o3os/model/lane_store.h>
 #include <o3os/model/limits.h>
 #include <o3os/model/pattern.h>
 #include <o3os/model/project.h>
@@ -93,9 +100,12 @@ struct Key {
   std::uint8_t step = 0;    // 0-based, 0..127
   Kind kind = Kind::Note;
   std::uint8_t column = 0;  // the FX column of a CC row: 0 = fx[0] ("FX 1"), 1 = fx[1] ("FX 2"); 0 for the other kinds
+  // S6: 0 for a step row; a lane row: its place in the track's lane + 1 (the lane's order is stable between edits; a plan that
+  // moves or inserts an event names the row's new key). A lane row's step is its tick / 48, its kind NOTE or CC.
+  std::uint16_t lane = 0;
 };
 constexpr bool operator==(const Key& a, const Key& b) noexcept {
-  return a.track == b.track && a.step == b.step && a.kind == b.kind && a.column == b.column;
+  return a.track == b.track && a.step == b.step && a.kind == b.kind && a.column == b.column && a.lane == b.lane;
 }
 constexpr bool operator!=(const Key& a, const Key& b) noexcept { return !(a == b); }
 
@@ -119,6 +129,7 @@ struct Env {
   // hides its array.
   const Instrument* (*instrument)(void* ctx, std::uint32_t slot) noexcept = nullptr;
   void* instrument_ctx = nullptr;
+  const LaneStore* lanes = nullptr;  // S6: the take lanes of the project (the app's store); nullptr: no lane rows
 
   const Instrument* instrument_of(std::uint32_t slot) const noexcept {
     return instrument != nullptr ? instrument(instrument_ctx, slot) : nullptr;
@@ -145,6 +156,11 @@ struct CcOut {
 };
 CcOut cc_resolve(const Env& env, const Instrument* in, std::uint8_t letter) noexcept;
 
+// ---- the lane event kinds (LaneEvent::kind_channel >> 4) ----
+inline constexpr std::uint8_t kLaneNote = 0, kLaneCc = 1, kLaneProgram = 2, kLaneChanAt = 3, kLanePolyAt = 4, kLaneBend = 5;
+inline constexpr std::uint16_t kLaneTicksPerStep = 48;
+inline constexpr std::uint16_t kLaneBendMax = 16383;  // 14 bit: b << 7 | a
+
 // ---- the row ----
 struct Row {
   Key key;
@@ -161,6 +177,13 @@ struct Row {
   std::uint8_t len_percent = 0;
   bool len_runs_on = false;         // '>': the note plays on past the track's end
   bool gated = false;               // 'G': a Gate FX on the note's step sets the length
+  // S6, a lane row (key.lane != 0): the stored event. microstep is the tick's offset into its step, 0..47; percent is exact to a
+  // tick (offset x 100 / 48); channel the stored one 1..16; len_* the true length (NOTE rows); vol the velocity.
+  std::uint8_t lane_kind = 0;       // kLaneNote .. kLaneBend
+  std::uint8_t lane_port = 0;
+  std::uint8_t lane_a = 0;
+  std::uint8_t lane_b = 0;
+  std::uint16_t lane_len = 0;       // ticks (notes)
 };
 
 // ---- the filter (3.2) ----
@@ -191,6 +214,13 @@ class Projector {
  private:
   bool gather() noexcept;  // the next step that has rows: fill keys_ and sort them
   void build(std::uint16_t packed, Row& out) const noexcept;
+  // S6: the lane merge. lane_head: the track whose next listed lane event is the earliest (ties: the lower track), false when
+  // none is left; events the filter drops and events past a track's length or the scope are passed for good. lane_build builds
+  // the row of that head and passes it. step_head: the time of the next step row the filter keeps (false at the end).
+  void lane_init() noexcept;
+  bool lane_head(std::uint8_t& track, std::uint32_t& tick) noexcept;
+  void lane_build(std::uint8_t track, Row& out) noexcept;
+  bool step_head(std::uint32_t& time) noexcept;
 
   const Pattern* pat_;
   Env env_;
@@ -200,6 +230,7 @@ class Projector {
   std::uint8_t nkeys_ = 0;
   std::uint8_t emit_ = 0;
   std::uint16_t keys_[kMaxStepKeys];
+  std::uint16_t lane_pos_[kMaxTracks];  // S6: the next event of each scope track's lane (main loop only, one reader)
   std::uint32_t cells_ = 0;
   std::uint32_t index_ = 0;
   bool started_ = false;
@@ -252,6 +283,18 @@ struct Request {
   unsigned value = 0;
 };
 
+// One lane write of a plan (S6): the events of the ticks [t0, t1) of one track's lane become events[0..n), sorted and inside
+// the range — Editor::lane_replace's arguments, which the action applies with the pattern's ID. A range holds at most
+// kMaxLaneWriteEvents events; a longer one is refused (TOO MANY EVENTS HERE).
+inline constexpr unsigned kMaxLaneWriteEvents = 32;
+struct LaneWrite {
+  bool on = false;
+  std::uint8_t track = 0;
+  std::uint8_t n = 0;
+  std::uint16_t t0 = 0, t1 = 0;
+  LaneEvent events[kMaxLaneWriteEvents]{};
+};
+
 // One step write of a plan: the action applies it through Editor::set_step (3.5).
 struct StepWrite {
   std::uint8_t track = 0;
@@ -273,6 +316,7 @@ struct Plan {
   bool has_new_key = false;
   edit::Last last{};
   StepWrite writes[kMaxPlanWrites]{};
+  LaneWrite lane{};  // S6: a lane row's edit (then n == 0: no step is written); new_key names the row when it moved or was inserted
 };
 
 // Plan one edit against the pattern as it is. Pure: no globals, no heap, no step written. The scope is the

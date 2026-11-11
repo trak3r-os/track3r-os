@@ -77,6 +77,8 @@ A knob that MIDI Learn bound to an instrument parameter also writes into the pat
 
 A parameter with no FX of its own, such as VOLUME or TUNE, records as a CC letter, **CC A** to **CC F**. The first recorded move takes the first free letter of the project, and the strip says **REC FX: VOLUME -> CC A**; the same parameter keeps its letter, the next one takes the next. Six letters are the limit: a seventh parameter says **REC FX: NO FREE CC LETTER**, still sounds, and is not recorded. A track whose instrument is a MIDI one says **REC FX: MIDI TRACK** and nothing is written. One Undo takes the step and its letter back together. When the pattern plays, the letter moves that parameter and sends no MIDI; playing it counts as a change to the project, so leaving afterwards asks about unsaved changes. New in track3r-os. Not yet checked on the unit. <!-- QA-GLB-241, QA-GLB-242 -->
 
+The exception is a MIDI instrument with REC STORE set to Lane: the CC A to CC F rows of that instrument do not write a step FX or change their controller number; each move goes into the lane as the controller the letter names (see "New in track3r-os" above).
+
 ### Select a block
 <!-- sync: src=app/src/step_actions.cpp,app/src/bindings.cpp qa=QA-PAT-007,QA-PAT-226,QA-PAT-465 -->
 
@@ -235,7 +237,7 @@ The Shift row sets the pads' octave and chooses what the pads do. The octave is 
 The octave is also the OCTAVE row of the note panel (hold `Note`) and the octave pads of PIANO: all three agree. <!-- QA-PAT-313, QA-PAT-314, QA-PAT-467 --> A lone `Shift` held down shows the TRACKS layout until you let go.
 
 ## Good to know
-<!-- sync: src=app/src/pattern_actions.cpp qa=QA-PAT-250,QA-PAT-251,QA-PAT-252,QA-PAT-253,QA-PAT-243,QA-PAT-246,QA-PAT-247,QA-PAT-052,QA-PAT-235,QA-PAT-057,QA-PAT-219,QA-PAT-221,QA-PAT-244,QA-PAT-254 -->
+<!-- sync: src=app/src/pattern_actions.cpp,app/src/pattern_view.cpp qa=QA-PAT-500,QA-PAT-501,QA-PAT-491,QA-PAT-502,QA-PAT-250,QA-PAT-251,QA-PAT-252,QA-PAT-253,QA-PAT-243,QA-PAT-246,QA-PAT-247,QA-PAT-052,QA-PAT-235,QA-PAT-057,QA-PAT-219,QA-PAT-221,QA-PAT-244,QA-PAT-254 -->
 
 - `F1` **PATTERN** works only while you hold it, so a tap opens nothing. **JUMP** is the step value. The tempo is set with `Pattern` held and the encoder, on any screen. <!-- QA-PAT-086, QA-PAT-089 -->
 - After `Play` stops in WATCH, the cursor stays on the last row it followed; it does not jump back or to the top. New in track3r-os. <!-- QA-PAT-322 -->
@@ -245,6 +247,8 @@ The octave is also the OCTAVE row of the note panel (hold `Note`) and the octave
 - `Up` on step 1 goes to the last step; holding `Up` or `Down` stops at the ends. `Shift` + `Note`, `Instr`, `Vol` or `Fx` jumps to row 1, 17, 33 or 49 of a 64-step pattern. <!-- QA-PAT-219, QA-PAT-221, QA-PAT-244 --> While `Rec` has step entry on, the same keys also select the steps they jump over, from where you were to the step before the one you land on: from step 17, `Shift` + `Note` selects steps 1 to 16. `Delete`, copy and the encoder then work on them like on a `Shift` + arrow block, and a new jump replaces the block. <!-- QA-PAT-483 -->
 - Count-in: with COUNT-IN on (PATTERN page of [Config](config.md)), `Shift` + `Rec` from stopped counts in first. `Rec` or `Shift` + `Rec` during the count-in cancels it. `Play` never counts in. <!-- QA-PAT-052, QA-PAT-235, QA-PAT-057 -->
 - The zoom is not saved with the project: it survives a project load and starts at 5 tracks at power on. <!-- QA-PAT-243 -->
+- New in track3r-os: a track can hold MIDI lane events (notes and controller moves with their own timing, played with the steps). The grid shows them without using a step column: a step where a lane note starts reads `MID` and two numbers (the notes that start there, then the controller moves), a step the note still sounds in reads `MID`, and a thin bar at the left edge of the cell marks it, the top half for notes and the bottom half for controller moves. A step with its own note, instrument or volume shows only the bar. The mark is for reading: the cursor on it edits the step. <!-- QA-PAT-500, QA-PAT-501 -->
+- New in track3r-os: with REC STORE set to Lane (Config, PATTERN page), a controller that you move while you record on a MIDI instrument's track goes into the lane instead of the step columns. That is every controller an external keyboard or knob box sends on the track's channel, and a knob or the encoder that moves a CC A to CC F row of the instrument: its position is the controller's value, and the row keeps naming the same controller (it is not rewritten while the take runs). Program change and aftertouch rows, and a letter with no controller, record nothing, and the strip says so once. <!-- QA-PAT-491, QA-PAT-502 -->
 - New in track3r-os: the pad layouts, the quarter jumps, column blocks and the FX names in the cells. <!-- og: new --> The official firmware has its own record edit, live recording, an instant pattern switch and a view of 4 tracks. Here they work as this chapter says. <!-- og: different --> Not checked against the original firmware: the grid, the cursor keys, the copy keys and the `Shift` + encoder steps. <!-- og: open --> <!-- QA-PAT-001..010, QA-PAT-226..229, QA-PAT-251..253, QA-PAT-254..264, QA-PAT-276, QA-PAT-288, QA-PAT-316, QA-PAT-317, QA-PAT-318, QA-PAT-311, QA-PAT-319..323 -->
 
 ## See also

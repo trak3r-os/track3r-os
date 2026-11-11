@@ -30,6 +30,7 @@ Key notation: keys are written in code style, for example `Shift` + `F3` or hold
 - [Config](config.md): Use the Config screen to change the unit's settings.
 - [Computer tools](computer_tools.md): the USB console on a computer: connect, screenshots, firmware path, diagnostics, key injection
 - [Glossary](glossary.md): every term of the manual, one entry each
+- [Advanced cheat sheet](advanced.md): Print it: 2-3 pages, A4 or Letter.
 - [Cheat sheet](cheat_sheet.md): The keys on one page.
 - [Export](export.md): Export writes what the unit plays to files on the card, in the folder Export/<PROJECT>.
 - [Effects in the pattern](fx.md): Use a step effect when one note needs its own treatment and a new instrument would be too much.

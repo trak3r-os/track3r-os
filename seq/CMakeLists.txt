@@ -25,6 +25,7 @@ o3os_library(seq
     src/perform.cpp
     src/play_orders.cpp "${_play_orders_blob_gen}"
     src/sequencer.cpp
+    src/sequencer_lanes.cpp
     src/song_time.cpp
   DEPENDS core model audio midi)
 if(O3OS_CROSS)

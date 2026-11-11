@@ -22,6 +22,7 @@ Written by one cheap-model session per chapter, from the rules in `.claude/skill
 | [Getting started](getting_started.md) | install, first boot, the keys and the screen layout | `global.md` |
 | [The panel](panel.md) | the panel drawing and the key map: where each key is and what it does | `global.md`, `bindings.cpp`, `docs/qa/catalogue/*.md` |
 | [Cheat sheet](cheat_sheet.md) | the keys on one page: global keys, Pattern editing, the Shift combinations, one line per screen | `panel.md`, `pattern.md`, `instrument.md`, `sample_load.md`, `mixer.md`, `file.md` |
+| [Advanced cheat sheet](advanced.md) | the advanced keys of every area up to 1.3.0, for printing on 2-3 pages (new in 1.3.0: lane recording, LEARN MAP, PARAMAUTO, the synths on the card) | the chapters of this manual, `docs/qa/catalogue/*.md` |
 | [Pattern](pattern.md) | step editing, WATCH / STEP / LIVE recording, pads, TOOLS | `pattern.md` |
 | [Effects in the pattern](fx.md) | the Fx column: effects, their values, the FX list | `pattern.md` |
 | [Fill and tools](pattern_tools.md) | the Fill dialog, and the TOOLS menu | `pattern.md` |

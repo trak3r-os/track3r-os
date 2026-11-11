@@ -71,10 +71,10 @@ action select.clear
 playhead stop
 snap qa_pat_050
 
-# QA-PAT-051: METRO Off in Config > PATTERN (F6, the fifth row since OS-RECMICRO put REC MICRO and REC VELOCITY before it): no chip.
+# QA-PAT-051: METRO Off in Config > PATTERN (F6, the sixth row since OS-RECMICRO put REC MICRO and REC VELOCITY, and OS-MIDIREC-P1 REC STORE, before it): no chip.
 tap config
 tap f6
-tap down 4
+tap down 5
 encoder -1
 tap pattern
 snap qa_pat_051
@@ -83,7 +83,7 @@ snap qa_pat_051
 tap config
 tap f6
 tap up 5
-tap down 4
+tap down 5
 encoder 1
 tap pattern
 

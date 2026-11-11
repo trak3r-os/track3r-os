@@ -16,6 +16,7 @@
 #include <o3os/app/model.h>
 #include <o3os/app/pattern_data.h>
 #include <o3os/app/track_state.h>
+#include <o3os/model/lane_store.h>
 #include <o3os/model/project.h>
 
 #include <cstdint>
@@ -34,6 +35,7 @@ class PatternSource {
         pattern_(model.project != nullptr ? model.project->pattern(pattern_id) : nullptr),
         demo_(&model.pattern),
         mix_(model.mix),
+        lanes_(model.lanes),
         id_(pattern_id) {}
   // The demo alone (the tests and the sweeps of the simulator).
   explicit PatternSource(const PatternData& demo) noexcept : demo_(&demo) {}
@@ -42,6 +44,13 @@ class PatternSource {
   // The document's pattern exists (always false for the demo).
   bool exists() const noexcept { return pattern_ != nullptr; }
   unsigned id() const noexcept { return id_; }
+  // OS-MIDIREC-P1 S4: the MIDI lane of one track of this pattern ({nullptr, 0} for the demo, a missing pattern or an empty lane).
+  model::LaneStore::View lane(int track) const noexcept {
+    if (lanes_ == nullptr || pattern_ == nullptr || track < 0 || track >= static_cast<int>(model::kMaxTracks)) {
+      return {nullptr, 0};
+    }
+    return lanes_->lane(id_, static_cast<std::uint32_t>(track));
+  }
   const model::Project* project() const noexcept { return project_; }
 
   // Tracks the user can reach: the project's active tracks, 12 for the demo.
@@ -129,6 +138,7 @@ class PatternSource {
   const model::Pattern* pattern_ = nullptr;
   const PatternData* demo_ = nullptr;
   const MixBoard* mix_ = nullptr;
+  const model::LaneStore* lanes_ = nullptr;  // OS-MIDIREC-P1 S4: the grid's lane marks; nullptr for the demo
   unsigned id_ = 0;
 };
 

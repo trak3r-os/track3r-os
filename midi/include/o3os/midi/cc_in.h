@@ -77,6 +77,21 @@ constexpr NoteMsg note_unpack(std::uint32_t w) noexcept {
                  static_cast<std::uint8_t>((w >> 16) & 0xFFu), static_cast<std::uint8_t>((w >> 24) & 0xFFu)};
 }
 
+// OS-MIDIREC-P1 S3 (A8): the stamped copy of a message, for a Lane recording. While a take is open the render pushes each note and control change a second time, here, with the
+// position of the recording track at the block that drained it (the pattern and the lane tick, step * 48 + microstep). 8 bytes. `channel` is 1..16 like the other rings; `a` / `b` are
+// the note and velocity (On, Off), the controller and value (Cc) or the controller 120 / 123 and 0 (AllOff).
+enum class StampKind : std::uint8_t { On = 1, Off = 2, AllOff = 3, Cc = 4 };
+struct StampMsg {
+  std::uint16_t tick;
+  StampKind kind;
+  std::uint8_t port;
+  std::uint8_t channel;
+  std::uint8_t a;
+  std::uint8_t b;
+  std::uint8_t pattern;
+};
+static_assert(sizeof(StampMsg) == 8, "a stamped message is two words");
+
 // One channel message that the parser picked out: a control change (`cc` is the controller, `value` its value) or a note message (see NoteMsg; `note` is in `cc`, `velocity` in `value`).
 struct ChannelMsg {
   enum class Kind : std::uint8_t { Cc, Note };
@@ -167,6 +182,22 @@ class CcInput {
  public:
   static constexpr std::uint32_t kRingSize = 32;  // power of two; a pass of the main loop takes 16 (App::kMidiCcPerPass), the render adds at most a few messages a block
   static constexpr std::uint32_t kNoteRingSize = 32;  // the notes' own ring (OS-005g); a pass takes 16 (App::kMidiNotesPerPass)
+  static constexpr std::uint32_t kStampRingSize = 256;  // OS-MIDIREC-P1 S3: the stamped ring (2 KiB); a pass of the main loop takes up to 64 (App kLaneStampPerPass)
+  static constexpr std::uint8_t kNoTrack = 0xFF;        // take_track(): no take is open
+
+  // ---- the stamp (OS-MIDIREC-P1 S3) -----------------------------------------------------------------------------------------------
+  // Single-writer protocol. `take_track_` is written by the main loop only (release) and read by the render once a block (acquire): the track whose take is open, kNoTrack when none. The stamp
+  // (`stamp_on_`, pattern, tick) is written and read by the render only (MidiLink sets it once a block before it feeds the bytes, from the sequencer's own position), so it needs no atomic.
+  // The stamped ring has the render as its one producer and the main loop as its one consumer. With no take open nothing here is touched: feed() is what it was.
+  void open_take(std::uint8_t track) noexcept { take_track_.store(track < 16u ? track : kNoTrack, std::memory_order_release); }  // main loop
+  void close_take() noexcept { take_track_.store(kNoTrack, std::memory_order_release); }                                      // main loop
+  std::uint8_t take_track() const noexcept { return take_track_.load(std::memory_order_acquire); }                              // render (and the main loop)
+  void set_stamp(std::uint8_t pattern, std::uint32_t tick) noexcept {                                                           // render
+    stamp_on_ = true;
+    stamp_pattern_ = pattern;
+    stamp_tick_ = static_cast<std::uint16_t>(tick);
+  }
+  void clear_stamp() noexcept { stamp_on_ = false; }  // render
 
   // ---- the render (the one producer) ------------------------------------------------------------------------------------------
   // One byte that MidiIn did not take for timing, with the port it came from.
@@ -176,6 +207,9 @@ class CcInput {
     ChannelMsg m{};
     if (!parser_[port].next(item.byte, m)) {
       return;
+    }
+    if (stamp_on_) {
+      push_stamped(static_cast<std::uint8_t>(port), m);
     }
     if (m.kind == ChannelMsg::Kind::Cc) {
       const CcMsg c{static_cast<std::uint8_t>(port), static_cast<std::uint8_t>(m.ch + 1u), m.cc, m.value};
@@ -209,14 +243,42 @@ class CcInput {
     out = note_unpack(w);
     return true;
   }
+  // OS-MIDIREC-P1 S3: the next stamped message of the open take (main loop).
+  bool pop_stamped(StampMsg& out) noexcept { return stamped_.pop(out); }
+  // Stamped messages lost to a full ring since start (the consumer compares it with the last value it saw; a lost note off is closed by the take's end).
+  std::uint32_t stamp_dropped() const noexcept { return stamp_dropped_.load(std::memory_order_relaxed); }
   // Note messages lost to a full ring since start (the consumer compares it with the last value it saw and silences the keyboard's notes when it moved).
   std::uint32_t note_dropped() const noexcept { return note_dropped_.load(std::memory_order_relaxed); }
   // Messages lost to a full ring since start (a word the render writes and the main loop reads: a block old at worst).
   std::uint32_t dropped() const noexcept { return dropped_.load(std::memory_order_relaxed); }
 
  private:
+  void push_stamped(std::uint8_t port, const ChannelMsg& m) noexcept {
+    StampMsg s{};
+    s.tick = stamp_tick_;
+    s.port = port;
+    s.channel = static_cast<std::uint8_t>(m.ch + 1u);
+    s.pattern = stamp_pattern_;
+    s.a = m.cc;
+    s.b = m.value;
+    if (m.kind == ChannelMsg::Kind::Cc) {
+      s.kind = StampKind::Cc;
+    } else {
+      s.kind = m.note_kind == NoteKind::On ? StampKind::On : (m.note_kind == NoteKind::Off ? StampKind::Off : StampKind::AllOff);
+    }
+    if (!stamped_.push(s)) {
+      stamp_dropped_.store(stamp_dropped_.load(std::memory_order_relaxed) + 1u, std::memory_order_relaxed);  // one writer
+    }
+  }
+
   core::SpscRing<std::uint32_t, kRingSize> ring_;
   core::SpscRing<std::uint32_t, kNoteRingSize> notes_;
+  core::SpscRing<StampMsg, kStampRingSize> stamped_;
+  std::atomic<std::uint8_t> take_track_{kNoTrack};  // main loop writes (release), render reads (acquire)
+  bool stamp_on_ = false;                           // render only
+  std::uint8_t stamp_pattern_ = 0;                  // render only
+  std::uint16_t stamp_tick_ = 0;                    // render only
+  std::atomic<std::uint32_t> stamp_dropped_{0};
   CcParser parser_[kPortCount];  // render only
   MidiMonitor monitor_;
   std::atomic<std::uint32_t> dropped_{0};

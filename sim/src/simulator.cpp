@@ -41,6 +41,8 @@ struct SimDocument {
   alignas(8) std::uint8_t journal_bytes[model::kUndoRegionBytes];
   model::UndoHistory journal;
   std::unique_ptr<model::Editor> editor;
+  std::unique_ptr<model::LaneStore> lanes = std::make_unique<model::LaneStore>();  // OS-MIDIREC-P1 S2: the MIDI take lanes (77,780 B, on the heap here)
+  std::unique_ptr<seq::LaneRun> lane_run = std::make_unique<seq::LaneRun>();  // the sequencer's lane playback state (SDRAM on the unit)
   core::ParamRing ring;
   std::vector<core::ParamChange> heard;
 };
@@ -61,6 +63,7 @@ class SimProjectSink final : public app::ProjectSink {
  private:
   Start fresh(bool keep) noexcept {
     auto native = std::make_unique<app::NativeFolderLoader>();  // (the reader inside is not a stack object)
+    native->attach_lanes(doc_.lanes.get());
     native->begin_fresh(doc_.arena, keep);
     while (native->step(4096) == app::NativeFolderLoader::State::Running) {
     }
@@ -237,6 +240,11 @@ void Simulator::open_document(bool with_bindings, bool with_new, unsigned tracks
   }
   (void)document_->journal.begin(document_->journal_bytes, sizeof document_->journal_bytes);
   document_->editor = std::make_unique<model::Editor>(document_->arena.project, document_->journal);
+  document_->lanes->sync(document_->arena.project.load_epoch());
+  document_->editor->attach_lanes(document_->lanes.get());
+  if (events) {
+    fill_events_lanes(*document_->lanes);  // OS-MIDIREC-P1 S6: the lane rows of the EVENTS list's pictures
+  }
   app_.attach_document(document_->editor.get());
   app_.attach_param_ring(&document_->ring);
   if (with_new) {
@@ -319,6 +327,7 @@ bool Simulator::open_card(const std::string& fixture, std::string& error) {
   }
   rig->slow = std::make_unique<platform::host::SlowCard>(*rig->card, card_timing_, static_cast<platform::host::CardClock&>(*this));
   rig->project = std::make_unique<SimProject>(document_->arena, *document_->editor, app_, *rig->slow, *rig->voices, rig->bank, rig->samples.get(), SimCard::kSampleCount);
+  rig->project->attach_lanes(document_->lanes.get());
   rig->project->attach_envelopes(rig->wt_user.get());  // OS-CEWTENV W8: the card's /Envelopes contours, loaded at the mount and on every project load
   rig->project->reload_envelopes();
   rig->project->attach_importer();  // OS-FLASHDIET I2: the importer module the File > IMPORT goes through (the starter zip's tracker.tmod, as a native entry)
@@ -329,6 +338,7 @@ bool Simulator::open_card(const std::string& fixture, std::string& error) {
     saves_ = std::make_unique<app::SaveService>();
   }
   saves_->attach(*card_->slow, *card_->slow);
+  saves_->attach_lanes(document_->lanes.get());
   app_.attach_storage(card_->slow.get());
   app_.attach_samples(&card_->bank);
   card_->ptfx_run.app = &app_;
@@ -493,6 +503,7 @@ bool Simulator::audio_on(std::string& error) {
     return false;
   }
   audio_ = std::make_unique<SimAudio>(document_->arena.project, card_ != nullptr ? card_->voices.get() : nullptr);
+  audio_->sequencer().attach_lanes(document_->lanes.get(), document_->lane_run.get());  // OS-MIDIREC-P1 S2: the live sequencer plays the lanes of the document
   app_.attach_param_ring(&audio_->params());  // the app's ParamChanges go to the engine, which drains them in every block after its voices (a note in the block of an edit starts on the old value, for one block at most; the document's fake consumer has nothing more to hear)
   app_.attach_play_position(&audio_->play_position());
   app_.attach_scratch(&audio_->engine().graph().scratch());  // OS-DJ C1: F5 and TAPE STOP take the ring from the card's bank; the sim has no encoder counter (still)
@@ -616,6 +627,7 @@ void Simulator::mark_unsaved() {
   }
   if (!saves_) {
     saves_ = std::make_unique<app::SaveService>();
+    saves_->attach_lanes(document_->lanes.get());
     app_.attach_saves(saves_.get());
   }
   (void)document_->arena.project.set_tempo_x100(document_->arena.project.tempo_x100() + 100u);  // any accepted mutation: the project is no longer the one the save layer took as its baseline

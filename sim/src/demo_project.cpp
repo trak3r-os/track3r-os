@@ -222,8 +222,41 @@ void fill_events_project(model::Project& p) noexcept {
   (void)p.set_step(1, 3, 0, s);
   s = model::kEmptyStep; s.note = 63; s.instr = 49;
   (void)p.set_step(1, 3, 4, s);
+  // Track 5: one step note; the lane of the track (fill_events_lanes) adds the MIDI take events around it.
+  s = model::kEmptyStep; s.note = 58; s.instr = 49; s.vol = 70;
+  (void)p.set_step(1, 4, 0, s);
   // A pattern that exists and holds nothing, for the empty list.
   (void)p.create_pattern(2, 16);
+}
+
+// OS-MIDIREC-P1 S6: the lane of pattern 1, track 5 (index 4), written through the store's own gap call (as a take commit does), in
+// tick order: tick = step x 48 + microstep. Ticks 0..: a three-note chord of 2 steps on stored channel 2, a CC 74 at 001.50, a bend,
+// a program change, a channel pressure, and a note that ends past the track's last step. The step note is the one step row: it
+// lists first at its tick, then the chord.
+void fill_events_lanes(model::LaneStore& lanes) noexcept {
+  struct Spec {
+    std::uint16_t tick, len;
+    std::uint8_t kind, ch, a, b;
+  };
+  static constexpr Spec kLane[] = {
+      {0, 96, model::events::kLaneNote, 1, 60, 100},     // C-4 on channel 2, two steps
+      {0, 96, model::events::kLaneNote, 1, 64, 90},      // the chord's E
+      {0, 96, model::events::kLaneNote, 1, 67, 80},      // and G, all on 001.00
+      {24, 0, model::events::kLaneCc, 1, 74, 64},        // CC 74 = 64 on 001.50
+      {96, 0, model::events::kLaneBend, 1, 0, 96},       // a bend, b << 7 | a = 12288
+      {144, 0, model::events::kLaneProgram, 1, 5, 0},    // program 5 on 004.00
+      {192, 0, model::events::kLaneChanAt, 1, 90, 0},    // channel pressure 90 on 005.00
+      {3000, 400, model::events::kLaneNote, 8, 72, 110}, // channel 9: 063.24, ends past the track's 64 steps (tick 3072)
+  };
+  constexpr std::uint32_t kN = sizeof kLane / sizeof kLane[0];
+  model::LaneStore::WriteWindow window(lanes);  // S2 contract: the gap is filled inside the window
+  model::LaneEvent* e = lanes.open_gap(1, 4, 0, kN);
+  if (e == nullptr) {
+    return;
+  }
+  for (std::uint32_t i = 0; i < kN; ++i) {
+    e[i] = model::LaneEvent{kLane[i].tick, kLane[i].len, static_cast<std::uint8_t>((kLane[i].kind << 4) | kLane[i].ch), 0, kLane[i].a, kLane[i].b};
+  }
 }
 
 void fill_demo_project_with_bindings(model::Project& p) noexcept {

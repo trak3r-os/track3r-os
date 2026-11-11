@@ -52,6 +52,7 @@ import sys
 # catalogue file and is kept in step by its `sync:` markers only; a string exempts the chapter from the sync-sha check, with the reason.
 CATALOGUE = {
     "cheat_sheet.md": "*",  # the keys of every screen on one page
+    "advanced.md": "*",
     "computer_tools.md": [],  # the diag console and the host tools (platform/mk66/tools): `sync: src=` markers
     "config.md": ["config"],
     "export.md": ["pattern", "file"],

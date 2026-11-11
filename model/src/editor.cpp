@@ -746,6 +746,25 @@ Status Editor::set_track_length(std::uint32_t id, std::uint32_t track, std::uint
   return st;
 }
 
+bool Editor::lengths_fit_undo(std::uint32_t id, const std::uint8_t* lengths) noexcept {
+  const Pattern* pat = project_.pattern(id);
+  if (pat == nullptr || lengths == nullptr) {
+    return true;
+  }
+  std::size_t lanes = 0;
+  for (std::uint32_t t = 0; t < kMaxTracks; ++t) {
+    if (lengths[t] < pat->track_length[t] && lengths[t] >= kMinPatternLength) {
+      const std::size_t cut = lane_cut_bytes(id, t, lengths[t] * kLaneTicksPerStep);
+      lanes += cut != 0 ? cut + UndoJournal::kRecordOverheadBytes + 4u : 0;
+    }
+  }
+  if (lanes == 0) {
+    return true;
+  }
+  // the step writes of the same unit: at most the whole image, in up to one record a track
+  return undo_fits(kSetTrackLength, lanes + kStepsImage + kMaxTracks * (UndoJournal::kRecordOverheadBytes + 8u));
+}
+
 Status Editor::set_pattern_length(std::uint32_t id, std::uint32_t length) noexcept {
   Scope scope(*this);
   const Pattern* pat = project_.pattern(id);
@@ -804,6 +823,7 @@ void Editor::lane_erase(std::uint32_t pattern, std::uint32_t track, std::uint32_
 
 bool Editor::lane_insert(std::uint32_t pattern, std::uint32_t track, std::uint32_t index, const LaneEvent* events,
                          std::uint32_t count) noexcept {
+  LaneStore::WriteWindow window(*lanes_);  // the gap is filled inside the window: the render never sees it unfilled
   LaneEvent* gap = lanes_->open_gap(pattern, track, index, count);
   if (gap == nullptr) {
     return false;
@@ -892,6 +912,162 @@ Status Editor::lane_clear(std::uint32_t pattern, std::uint32_t track) noexcept {
   return lane_replace_in(pattern, track, 0, kLaneTicks, nullptr, 0, false);  // the whole lane, whatever the track's length
 }
 
+// A10 / A11 / A15: one run of the merge is the changed span [a, b) of the old lane (from the first removed or first-merged index to the last), the
+// `m` take events from take index `first`, and the kept count after the replaced CC points went. Two runs when the take wrapped (disjoint, planned
+// together so the fit check covers both; the higher run is applied first so the lower one's indices stay valid).
+namespace {
+struct MergeRun {
+  std::uint32_t a = 0;
+  std::uint32_t b = 0;
+  std::uint32_t removed = 0;
+  std::uint32_t first = 0;  // first take event of the run
+  std::uint32_t m = 0;      // take events of the run
+  std::uint16_t t0 = 0;
+  std::uint16_t t1 = 0;
+  bool active = false;
+};
+
+bool merge_removes(const LaneTake& take, const LaneEvent& e, std::uint32_t t0, std::uint32_t t1) noexcept {
+  return (e.kind_channel >> 4) == 1 && (e.kind_channel & 15u) == take.channel() && e.port == take.port() && take.replaces(e.a, e.tick) && e.tick >= t0 &&
+         e.tick < t1;
+}
+}  // namespace
+
+Status Editor::lane_merge_take(const LaneTake& take) noexcept {
+  Scope scope(*this);
+  const std::uint32_t pattern = take.pattern();
+  const std::uint32_t track = take.track();
+  const Pattern* pat = project_.pattern(pattern);
+  if (lanes_ == nullptr || pat == nullptr) {
+    return Status::NotFound;
+  }
+  if (track >= kMaxTracks) {
+    return Status::BadIndex;
+  }
+  const std::uint32_t n = take.count();
+  if (n == 0) {
+    return Status::Ok;
+  }
+  const LaneEvent* ev = take.events();
+  if (take.interval_count() == 0 || !lane_events_valid(ev, n, 0, pat->track_length[track] * kLaneTicksPerStep)) {
+    return Status::BadValue;
+  }
+  lanes_->sync(project_.load_epoch());
+  const LaneStore::View v = lanes_->lane(pattern, track);
+  MergeRun runs[2];
+  std::uint32_t covered = 0;
+  std::uint32_t span_total = 0;
+  std::uint32_t merged_total = 0;
+  std::size_t undo_bytes = 0;
+  for (std::uint32_t r = 0; r < take.interval_count() && r < 2; ++r) {
+    MergeRun& run = runs[r];
+    run.t0 = take.interval(r).t0;
+    run.t1 = take.interval(r).t1;
+    std::uint32_t lo = 0;
+    while (lo < n && ev[lo].tick < run.t0) {
+      ++lo;
+    }
+    std::uint32_t hi = lo;
+    while (hi < n && ev[hi].tick < run.t1) {
+      ++hi;
+    }
+    run.first = lo;
+    run.m = hi - lo;
+    covered += run.m;
+    const std::uint32_t from = LaneStore::lower_bound(v, run.t0);
+    const std::uint32_t to = LaneStore::lower_bound(v, run.t1);
+    std::uint32_t first_removed = v.count;
+    std::uint32_t last_removed = 0;
+    for (std::uint32_t i = from; i < to; ++i) {
+      if (merge_removes(take, v.events[i], run.t0, run.t1)) {
+        if (run.removed == 0) {
+          first_removed = i;
+        }
+        last_removed = i + 1;
+        ++run.removed;
+      }
+    }
+    if (run.m == 0 && run.removed == 0) {
+      continue;
+    }
+    run.a = first_removed;
+    run.b = last_removed;
+    if (run.m != 0) {
+      const std::uint32_t ia = LaneStore::lower_bound(v, ev[lo].tick + 1u);  // after the lane's events at the first take tick
+      const std::uint32_t ib = LaneStore::lower_bound(v, ev[hi - 1u].tick + 1u);
+      run.a = run.a < ia ? run.a : ia;
+      run.b = run.b > ib ? run.b : ib;
+    }
+    run.active = true;
+    const std::uint32_t kept = (run.b - run.a) - run.removed;
+    span_total += run.b - run.a;
+    merged_total += kept + run.m;
+    undo_bytes += lane_record_bytes(run.b - run.a) + lane_record_bytes(kept + run.m);
+  }
+  if (covered != n) {
+    return Status::BadValue;  // an event outside every interval: not a take this Editor was handed by finish()
+  }
+  if (v.count - span_total + merged_total > kMaxLaneEvents || lanes_->total_events() - span_total + merged_total > kMaxLanePoolEvents ||
+      (v.count == 0 && merged_total != 0 && lanes_->lane_count() >= kMaxLanes)) {
+    return Status::Full;
+  }
+  if (!undo_fits(kLaneDelete, undo_bytes)) {
+    return Status::Full;
+  }
+  LaneStore::WriteWindow window(*lanes_);
+  const std::uint8_t id = static_cast<std::uint8_t>(pattern);
+  const std::uint8_t tr = static_cast<std::uint8_t>(track);
+  for (std::uint32_t r = 0; r < 2; ++r) {
+    const MergeRun& run = runs[r];
+    if (!run.active) {
+      continue;
+    }
+    const std::uint32_t size = run.b - run.a;
+    LaneEvent* p = lanes_->lane_writable(pattern, track);
+    if (size != 0) {
+      const std::uint16_t ix = static_cast<std::uint16_t>(run.a);
+      const std::uint16_t cnt = static_cast<std::uint16_t>(size);
+      const Piece pc[] = {{&id, 1}, {&tr, 1}, {&ix, 2}, {&cnt, 2}, {p + run.a, size * sizeof(LaneEvent)}};
+      (void)record(kLaneDelete, pc, 5);  // the old span, before it is touched (the journal copies it)
+      std::uint32_t w = run.a;
+      for (std::uint32_t i = run.a; i < run.b; ++i) {
+        if (!merge_removes(take, p[i], run.t0, run.t1)) {
+          p[w++] = p[i];
+        }
+      }
+    }
+    const std::uint32_t kept = size - run.removed;
+    const std::uint32_t merged = kept + run.m;
+    if (merged > size) {
+      (void)lanes_->open_gap(pattern, track, run.b, merged - size);  // room was checked above
+    } else if (merged < size) {
+      (void)lanes_->erase(pattern, track, run.a + merged, size - merged);
+    }
+    if (merged == 0) {
+      (void)project_.touch_lanes(pattern);
+      continue;
+    }
+    p = lanes_->lane_writable(pattern, track);
+    std::int32_t i = static_cast<std::int32_t>(run.a + kept) - 1;  // the last kept old event
+    std::int32_t j = static_cast<std::int32_t>(run.first + run.m) - 1;
+    std::int32_t wr = static_cast<std::int32_t>(run.a + merged) - 1;
+    const std::int32_t j_end = static_cast<std::int32_t>(run.first);
+    while (j >= j_end) {
+      if (i >= static_cast<std::int32_t>(run.a) && p[i].tick > ev[j].tick) {
+        p[wr--] = p[i--];
+      } else {
+        p[wr--] = ev[j--];
+      }
+    }
+    const std::uint16_t ix = static_cast<std::uint16_t>(run.a);
+    const std::uint16_t cnt = static_cast<std::uint16_t>(merged);
+    const Piece pc[] = {{&id, 1}, {&tr, 1}, {&ix, 2}, {&cnt, 2}, {p + run.a, merged * sizeof(LaneEvent)}};
+    (void)record(kLaneInsert, pc, 5);
+    (void)project_.touch_lanes(pattern);
+  }
+  return Status::Ok;
+}
+
 // `inside_track`: t1 must not pass the track's length x 48 ticks (A17); lane_clear is exempt (it only removes).
 Status Editor::lane_replace_in(std::uint32_t pattern, std::uint32_t track, std::uint32_t t0, std::uint32_t t1,
                                const LaneEvent* events, std::uint32_t n, bool inside_track) noexcept {
@@ -918,14 +1094,29 @@ Status Editor::lane_replace_in(std::uint32_t pattern, std::uint32_t track, std::
       (v.count == 0 && n != 0 && lanes_->lane_count() >= kMaxLanes)) {
     return Status::Full;
   }
-  if (!undo_fits(kLaneDelete, lane_record_bytes(old) + lane_record_bytes(n))) {
+  // Undo records only what changes (maintainer 2026-11-10: lane undo costs 1x the lane data): the equal head and tail of the old and the new run stay in place, so a take that only adds at the end records the added events alone.
+  std::uint32_t at = lo;
+  std::uint32_t head = 0;
+  while (head < old && head < n && std::memcmp(v.events + lo + head, events + head, sizeof(LaneEvent)) == 0) {
+    ++head;
+  }
+  std::uint32_t tail = 0;
+  while (tail < old - head && tail < n - head &&
+         std::memcmp(v.events + hi - 1 - tail, events + n - 1 - tail, sizeof(LaneEvent)) == 0) {
+    ++tail;
+  }
+  at += head;
+  const std::uint32_t gone = old - head - tail;
+  const std::uint32_t added = n - head - tail;
+  if (!undo_fits(kLaneDelete, (gone != 0 ? lane_record_bytes(gone) : 0) + (added != 0 ? lane_record_bytes(added) : 0))) {
     return Status::Full;  // the records of this take would not fit the undo ring: nothing is erased, the history stays
   }
-  if (old != 0) {
-    lane_erase(pattern, track, lo, old);
+  LaneStore::WriteWindow window(*lanes_);  // one window over the erase and the insert (nesting is counted): the render never sees the lane between the two
+  if (gone != 0) {
+    lane_erase(pattern, track, at, gone);
   }
-  if (n != 0) {
-    (void)lane_insert(pattern, track, lo, events, n);  // room was checked above (the erase freed the old ones)
+  if (added != 0) {
+    (void)lane_insert(pattern, track, at, events + head, added);  // room was checked above (the erase freed the old ones)
   }
   return Status::Ok;
 }
@@ -1393,6 +1584,7 @@ bool Editor::replay(std::uint8_t op, std::size_t payload, std::size_t len, bool 
         break;
       }
       if ((op == kLaneInsert) != undo) {  // forward of an insert, or the reverse of a delete: put the events back in
+        LaneStore::WriteWindow window(*lanes_);
         LaneEvent* gap = lanes_->open_gap(id, track, index, count);
         if (gap == nullptr) {
           st = Status::Full;

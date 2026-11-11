@@ -112,6 +112,11 @@ void draw_pattern_rec(ui::Renderer& r, unsigned variant);
 inline constexpr unsigned kPatternZoomVariants = kPatternWorstDataSets * 2 * 2 * 3;
 void draw_pattern_zoom8(ui::Renderer& r, unsigned variant);
 void draw_pattern_zoom12(ui::Renderer& r, unsigned variant);
+// OS-MIDIREC-P1 S4: a lane on every track (a two-step note and a CC on each step) over the dearest content, at the three zooms
+// (108 variants: three zooms, three contents, the marks, a block, three cursor tracks).
+inline constexpr unsigned kPatternLaneVariants = 3 * kPatternWorstDataSets * 2 * 2 * 3;
+void draw_pattern_lane_worst(ui::Renderer& r, unsigned variant);
+void draw_pattern_lane_typical(ui::Renderer& r, unsigned variant);  // sparse lanes over the demo's content: the picture of the manual and the QA row
 // The document model of a content (0 the demo's pattern, 1..kPatternWorstDataSets the worst-case data sets) with every header mark set or none.
 const app::Model& pattern_doc_model(unsigned which, bool marks);
 // A Pattern ViewState in Edit with the Shift layer on, at a row and a number of column moves right, with the window's block when `block`.
