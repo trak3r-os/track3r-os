@@ -30,7 +30,7 @@ track3r-os replaces the software that runs on the Tracker. You keep the hardware
 - **It can follow a DAW.** MIDI Time Code out and in, next to the MIDI clock.
 - **It is open.** Anyone can read the code, build it and improve it.
 
-**v1.3.0** is the current release (v1.2.0, v1.1.0, v1.0.1 and v1.0.0 came before). It is tested on a computer, in the emulator and on a unit. The changes are in the [release notes](docs/release/v1.3.0.md); what is open and what comes next is in [docs/roadmap/BACKLOG.md](docs/roadmap/BACKLOG.md).
+**v1.3.0** is the current release (v1.2.0, v1.1.0, v1.0.1 and v1.0.0 came before). The changes are in the [release notes](docs/release/v1.3.0.md); what is open and what comes next is in [docs/roadmap/BACKLOG.md](docs/roadmap/BACKLOG.md).
 
 ## Screens
 
@@ -68,46 +68,66 @@ track3r-os replaces the software that runs on the Tracker. You keep the hardware
 ### Make patterns
 - **12 tracks.** Each step holds a note, an instrument, a volume and **two effects**. Patterns run up to 128 steps, and the song can chain up to 255 positions.
 - **More than 60 effects:** the ones the official manual documents, plus classic tracker effects (arpeggio, slides, retrigger, tremor, channel and global volume, panning), chords, arpeggios, swing, gate length, glide, overdrive and bit depth.
+- **Chance conditions** 101 to 103+ (group with last, not last, play N or skip M) and **Play Thru** for slices, as in the official file format.
 - **Three ways to record:**
   - **WATCH** just follows the song.
   - **STEP** writes where the cursor is, with the song still playing.
   - **LIVE** writes where the music is, with a count-in, a metronome, quantize and microtiming.
-- **Pads that play the way you want:** notes in a scale, piano layout, isomorphic layout, or one pad per track.
-- **Pattern tools:** fill dialogs (including Euclidean rhythms), block select, copy and paste, and a **TOOLS** menu with export and the editing apps.
+- **MIDI recording into lanes:** notes and chords with their sub-step timing and length, external CCs, a Learn knob or the encoder. The **EVENTS** list shows and edits every lane event, and one undo takes a whole take back.
+- **Parameter automation:** any learnable parameter records from the pattern as a CC letter, **CC A** to **CC F**, six per project.
+- **Pads that play the way you want:** notes in a scale (39 scales, with the official numbering), piano layout, isomorphic layout, or one pad per track.
+- **Pattern tools:** select, press `F7` and pick a verb; fill dialogs (including Euclidean rhythms), TRANSPOSE and INSTRUMENT dialogs, copy and paste, a selection that grows in stages, and `F6` to repeat the last fill or tool.
 - **Undo and redo** for every edit, and names for tracks, patterns and the project.
+
+### Arrange the song
+- **LIST** for the order of patterns, and an editable **TIMELINE** with a note map, an ENERGY row, a rectangle selection, PREVIEW, empty slots and a loop over a range.
+- **TOOLS:** FORM and BRIDGE build a song structure for you.
 
 ### Shape sounds
 - **64 instruments**, each one of three kinds:
-  - **sample instruments**, with one shot, loop, slices, beat slices, wavetable and granular playback, on a modern engine or an Amiga-style one;
+  - **sample instruments**, with one shot, loop, slices, beat slices, wavetable and granular playback;
   - **MIDI instruments**, which play your other gear;
   - **module instruments**, loaded from the card.
-- **Synth modules (on the SD content zip):** a TB-303-style bass line, an FM synth, a chip-tune voice and a SID voice.
-- **Per instrument:** filter, envelopes, LFO, glide, overdrive and bit depth.
-- **Samples in any common format and rate:** WAV, AIFF and IFF 8SVX, at any sample rate, always in tune. On a stereo file you choose left, right or both.
+- **Synth modules (in the modules zip):** a TB-303-style bass line, an FM synth, a chip-tune voice, a SID voice (6581 or 8580 filter, sync, ring, PWM) and a sine.
+- **Module presets:** factory presets for every synth and effect, and your own saved to the card.
+- **RATE** for module instruments (full, 1/2 or 1/4): a crunchier sound that costs less CPU.
+- **Per instrument:** filter, envelopes, LFO, glide, overdrive and bit depth, panning and the delay and reverb sends.
+- **Wavetable envelopes and LFOs:** WT ENV and WT LFO on the MOD page, drawn contours or your own from `/Envelopes/`, and step effects to drive them.
+- **Four play engines:** Modern, Amiga (like Paula), 12-bit and 8-bit.
+- **Samples in any common format and rate:** WAV, AIFF and IFF 8SVX, at any sample rate, always in tune. **Stereo samples** play in stereo when you turn STEREO on, or you pick left or right.
+- **Sample editor:** cut, shape and convert (also to the Amiga rates), plus a **PLUGINS** page that runs `.ptfx` effects on the sample with undo; thirteen plugins come in the modules zip.
 
 ### Mix and perform
 - **Mixer:** levels, mute and solo, a delay send and a reverb send per track, and a master limiter.
-- **Perform screen:** scenes you can store and recall, plus live effects.
+- **Insert effects:** two per track and one on the master, with their parameters on MIDI Learn and saved with the project. Eleven effect modules: DRIVE, CRUSH, COMP (with a transient mode and a sidechain key), ENV FILTER, FOLD, PHASER, BIQUAD, PING-PONG (tempo-synced), WIDE, CHORUS and AUTOPAN.
+- **Perform screen:** scenes you can store and recall, live effects, and custom play orders C1 to C20.
 - **DJ page:** put some tracks in group A and some in group B, then mix them live with a crossfader, a filter, band kills, stutters, a scratch and tape stop, and move to the next pattern from the pads. Nothing is written into the song. Open Perform, then press `Perform` again ([manual](docs/manual/perform_dj.md)).
-- **Record screen:** sample from line in, the microphone, the FM radio or the Tracker's own output (resampling).
+- **Record screen:** sample from line in, the microphone, the FM radio or the Tracker's own output (resampling), with a count-in, status chips and a **loop recorder** of 1 to 16 bars that plays in time and takes layers.
 
 ### Files and compatibility
 - **Projects:** open, save, save as and new, with a list of recent projects. Deleting is safe: a deleted project is only hidden, so you can get it back from a computer.
-- **Projects of the original firmware open**, so your old work comes with you.
-- **Import MOD, S3M and MED songs**, with a report of what was kept and what changed.
+- **Projects of the original firmware open**, so your old work comes with you, and so do project folders of Polyend's published tracker-ce (with their 16-track pattern files).
+- **Import MOD (also 15-sample Soundtracker), S3M and MED songs**, with a report of what was kept and what changed.
 - **Export to WAV:** the song, one pattern or a selection, or **stems** (one file per track, plus delay, reverb and the full mix), ready for your DAW.
+- **Update from the unit:** Config, INFO, `F8` installs a `.ptf` from the card, with checks and two questions first.
+- **The card as a USB disk**, also while the unit keeps playing.
 
 ### Modules and apps
 - **Extend the Tracker from the SD card** with `.tmod` modules: instruments, effects, file importers and **apps**.
-- **Apps:** tap tempo and BPM calculator, MIDI monitor, loudness meter, tuner, scope and spectrum, rhythm generator (Euclidean, polyrhythms, probability), chord progressions, humanize, mutate, morph and MIDI file export. They are a separate download: the `apps-v1.0.0` release.
+- **Apps:** tap tempo and BPM calculator, MIDI monitor, loudness meter, tuner, scope and spectrum, rhythm generator (Euclidean, polyrhythms, probability), chord progressions, humanize, mutate, morph and MIDI file export. One Apps list opens with `Shift` + `Pattern`.
 - **Every app edit is undoable**, and apps can never touch your files.
 - **Write your own:** the module SDK is MIT-licensed and documented in [docs/guides/app-modules.md](docs/guides/app-modules.md).
 
 ### Connections
-- **USB MIDI and USB audio**, including multitrack audio to your computer.
+- **USB MIDI and USB audio**, with 2, 4, 6, 8 or 10 output channels for multitrack recording on your computer.
 - **MIDI DIN** in and out.
-- **MIDI clock** in and out.
-- **MIDI learn** for parameters.
+- **MIDI clock** in and out, and **MIDI Time Code** out and in, so a DAW can follow the unit.
+- **MIDI Learn** for parameters and the encoder, a Learn that follows the selected instrument, the official **CC map**, and **LEARN MAP**, the list of every binding.
+
+### On every screen
+- **Help pages** on `Shift` + `Config`, the **Navigator** to jump to any screen, three **themes** (Amiga, Black and White) and screenshots to the card.
+- **Status LED:** a heartbeat, the BPM, or off.
+- **Cheat sheets:** a [basic](docs/manual/cheat_sheet.md) and an [advanced](docs/manual/advanced.md) one.
 
 ### Under the hood
 - **A headless simulator** draws every screen. The screenshots on this page come from it, and so do the tests of the user interface.
@@ -138,7 +158,7 @@ New to track3r-os? Start here: these are the keys worth learning first. The [qui
 | **change the look** | `Shift` + `Master` steps through the themes: Amiga, Black and White. |
 | **take a screenshot** | `Shift` + `Power` saves the screen to the card as a picture. |
 
-**Save before you switch off.** track3r-os never saves by itself, not even when you turn it off. Press `F4` (**SAVE**) on the File screen first. To turn the unit off, hold `Power` for 2 seconds; if something is not saved, the strip warns **UNSAVED WORK** while you hold. Projects saved by track3r-os may not open on the official firmware yet (not verified), so keep a copy of your old projects.
+**Save before you switch off.** track3r-os never saves by itself, not even when you turn it off. Press `F4` (**SAVE**) on the File screen first. To turn the unit off, hold `Power` for 2 seconds; if something is not saved, the strip warns **UNSAVED WORK** while you hold. Keep a copy of your old projects before you save over them.
 
 **Go Amiga.** track3r-os is a tribute to the Amiga as much as to the Tracker:
 - **Load Amiga samples.** Sample load reads IFF 8SVX files, next to WAV and AIFF.

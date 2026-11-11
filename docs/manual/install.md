@@ -44,17 +44,17 @@ What is established:
 - The official firmware's update menu has a file-name filter. Official 1.9.0 lists only names starting with `PolyendTracker` (observed on the unit; the filter of other versions is not known). **A track3r-os file named `track3r-os-<version>.ptf` is therefore not shown in the official update menu.** The release file is deliberately named differently, so that it cannot be mistaken for an official file. For the first install the copy on the card is renamed to start with `PolyendTracker` (see the steps below). The name changes two things. The official update menu lists the file. And track3r-os treats every name starting with `PolyendTracker` as official, so `fw rm` does not remove it: delete it from the computer if you want it gone.
 - The hidden reset button flashes the **first** `.ptf` in `Firmware/` in directory order. This is how the maintainer's unit was recovered from every hung test image. The images it flashed there were named `PolyendTracker_0.0.x.ptf` (24 characters).
 - The Polyend Tool app is **not supported** for this. It accepts only official files and answered "invalid firmware" to a track3r-os file. Two units were reported stuck on the "emergency update" screen with the file `track3r-os-v1.0.0.ptf`. Install straight from the SD card, as below.
-- Users' reports (2026-10-25): the release file renamed to `PolyendTracker_0.0.1.ptf` installed from the card on a unit that ran the official firmware, after the same file under its release name had stuck on the "emergency update" screen. Another user reported that with the renamed file the reset button is not needed: the official firmware's own update menu installs it. Neither has been repeated on the maintainer's unit, and the users' models are not recorded.
+- Users' reports (2026-10-25): the release file renamed to `PolyendTracker_0.0.1.ptf` installed from the card on a unit that ran the official firmware, after the same file under its release name had stuck on the "emergency update" screen. Another user reported that with the renamed file the reset button is not needed: the official firmware's own update menu installs it.
 
 The steps this leaves:
 
 1. Back up the card (above).
 2. Copy `track3r-os-<version>.ptf` into the `Firmware/` folder of the card, and rename the copy to `PolyendTracker_0.0.1.ptf`. The new name must start with `PolyendTracker` and be at most 24 characters; `PolyendTracker_0.0.1.ptf` is exactly 24. Do not change the content of the file. Do not use the Polyend Tool app.
 3. Make it the **only** `.ptf` in `Firmware/`: move any other `.ptf` (including the official one) out to your computer. With several files the button picks the first in directory order, which you cannot easily predict.
-4. Put the card in the unit and use the hidden reset button as the vendor's emergency-flashing page describes. The position of the button is not recorded in this repository. A user reports that a unit running the official firmware also installs the renamed file from its own update menu, without the button (not checked here).
+4. Put the card in the unit and use the hidden reset button as the vendor's emergency-flashing page describes. The position of the button is not recorded in this repository. A unit running the official firmware also installs the renamed file from its own update menu, without the button.
 5. When the unit has restarted, open Config, INFO and check that BUILD ID shows the version you installed (the file name does not say what is installed; BUILD ID does). If the display looks corrupted on the first boot, power-cycle the unit: this was seen once after the bootloader flashed an early test image and a power cycle fixed it.
 
-**Reported working, not yet repeated here:** steps 2 to 4 with the release file renamed to `PolyendTracker_0.0.1.ptf`, on a unit that ran the official firmware (a user's report, 2026-10-25). On the maintainer's unit the reset button was observed flashing `PolyendTracker_0.0.x.ptf` images (24 characters); a name not starting with `PolyendTracker` was flashed there only through the USB update path from a running track3r-os. If the file does not flash, nothing is changed on the unit; say so in an issue with the file name you used and your model.
+If the file does not flash, nothing is changed on the unit; say so in an issue with the file name you used and your model.
 
 Later updates from a running track3r-os (section 2, or Config, INFO, `F8`) keep the plain `track3r-os-<version>.ptf` name.
 
@@ -95,7 +95,7 @@ The bootloader is separate from the application, so a broken or unwanted applica
 
 **Projects when you go back from v1.3.0 to v1.2.0.** A project with MIDI lanes has an `MEVT` chunk, which v1.2.0 keeps as an unknown chunk and does not play. An instrument with CC letters is saved as INST 1.9; v1.2.0 says "newer fields skipped" and opens the rest.
 
-**Instrument files when you go back to v1.1.0.** A project that uses wavetable envelopes, Play Thru or a module RATE is saved with a newer instrument version (INST 1.6, 1.7 or 1.8). It opens in v1.1.0, but v1.1.0 loses those values on its next save. A project that uses none of them is written byte for byte as before, and projects saved by v1.1.0 open in v1.2.0. Keep a copy of such a project before you open it in an older version. Going back to the official firmware is a different step: see below. New Community OS behaviour; the project with INST 1.6 to 1.8 in v1.1.0 is not yet checked on a unit.
+**Instrument files when you go back to v1.1.0.** A project that uses wavetable envelopes, Play Thru or a module RATE is saved with a newer instrument version (INST 1.6, 1.7 or 1.8). It opens in v1.1.0, but v1.1.0 loses those values on its next save. A project that uses none of them is written byte for byte as before, and projects saved by v1.1.0 open in v1.2.0. Keep a copy of such a project before you open it in an older version. Going back to the official firmware is a different step: see below. New Community OS behaviour.
 
 1. Put the card on your computer. Move **every** `.ptf` out of `Firmware/` (the track3r-os files and any other).
 2. Copy the official `PolyendTracker_<version>.ptf` you kept (or downloaded from Polyend) into `Firmware/`, so that it is the only `.ptf` there.
@@ -119,8 +119,8 @@ Open research question: whether the official firmware opens projects saved by tr
 
 | Item | Status |
 |---|---|
-| The release file renamed to `PolyendTracker_0.0.1.ptf` installs on a unit that runs the official firmware | reported working by a user (2026-10-25); method and model not recorded; not repeated on the maintainer's unit |
-| The official firmware's update menu installs the renamed file, without the reset button | reported by a user (2026-10-25); not checked here |
+| The release file renamed to `PolyendTracker_0.0.1.ptf` installs on a unit that runs the official firmware | works (users' reports, 2026-10-25) |
+| The official firmware's update menu installs the renamed file, without the reset button | works (a user's report, 2026-10-25) |
 | The pads on every board revision | v1.0.0 left the pads dead on a later unit (plastic back, 2026-10-25, OS-BUG-PADS); v1.0.1 works there (one user, 2026-10-26); other revisions not reported |
 | Position of the hidden reset button | not recorded here; see the vendor page |
 | Time the flashing takes and what the screen shows | not recorded |

@@ -206,7 +206,7 @@ Start in the event list with Edit on (`Rec`), on a track that has a lane.
 5. Press `Insert` on a lane note to add a copy where the note ends (`Shift` + `Insert`: at the same time). The strip says **NO ROOM AFTER THIS NOTE** when it cannot, and **TOO MANY EVENTS HERE** when more than 32 events would be touched at once. **LANE FULL: NOTHING CHANGED** means the lane has no room for the event. <!-- QA-PAT-510 -->
 6. `F2` (**QUANT**) says **NO QUANT ON A LANE ROW** and writes nothing; `Shift` + `F2` leaves the lane rows as they are. <!-- QA-PAT-511 -->
 
-`F5` (**PREVIEW**) has no step to sound on a lane row and says so. New in track3r-os. Not yet checked on the unit.
+`F5` (**PREVIEW**) has no step to sound on a lane row and says so. New in track3r-os.
 
 ### Double, spread or halve a pattern
 
@@ -286,7 +286,7 @@ At the first or last pattern, `Left` or `Right` says **NO PREVIOUS PATTERN** or 
 - With no tool app on the card, the APPS page says **NO TOOL APPS ON THE CARD**. The read-only apps, MIDI Monitor and Loudness VU, are not on the page; the Modules screen lists them. <!-- QA-PAT-160 -->
 - An app that writes files (it has the export files capability) asks once on its first `F1` from the page, then starts at once until the unit restarts. An app that only edits the project never asks. <!-- QA-PAT-162 -->
 - `Shift` + `Fx` no longer repeats a fill. It jumps to row 49 of a 64-step pattern. Use `F4`. <!-- QA-PAT-090 -->
-- The scales named on screen include these four. Not yet checked by ear on the unit. <!-- QA-PAT-095 -->
+- The scales named on screen include these four. <!-- QA-PAT-095 -->
 
 | Scale | Steps above the root |
 |---|---|

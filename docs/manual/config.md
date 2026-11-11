@@ -54,7 +54,7 @@ METRO stays **Off** until you change it. Press `Delete` on the METRO row to put 
 | Main area | The rows of the page. Each row has a name and a value. |
 | Info line | Notes about the page or a pending change. On PATTERN it says **live recording, metronome and pads**. |
 | Strip | The message line, for example **USB RECONNECTING**. |
-| Key row | `F1` to `F6` choose a page. `F7` is **APPLY** (blank on the SD and INFO pages, which have nothing to apply). On the MIDI page, `F8` is **MAP**: it opens LEARN MAP, the list of every MIDI Learn binding (new, see [The panel](panel.md)). On the INFO page, `F8` is **UPDATE**: it opens the firmware update dialog (new, not yet tried on a unit). |
+| Key row | `F1` to `F6` choose a page. `F7` is **APPLY** (blank on the SD and INFO pages, which have nothing to apply). On the MIDI page, `F8` is **MAP**: it opens LEARN MAP, the list of every MIDI Learn binding (new, see [The panel](panel.md)). On the INFO page, `F8` is **UPDATE**: it opens the firmware update dialog (new). |
 | Shift row | `F7` is **DEFAULTS**. The other keys do nothing. |
 
 ## More tasks

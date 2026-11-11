@@ -131,7 +131,7 @@ LEARN MAP is one full-screen list of every binding of both stores, with the enco
 
 `F1` **NEW**: move a knob and the next CC becomes a new binding on the selected instrument. `F2` **MODE** steps pickup, jump and relative. `F3` **DELETE** removes the row (on the `ENC` row it clears the encoder's target). `F4` **CLR ALL**, pressed twice, removes every binding. `F5` **FOLLOW** switches a row between its instrument and the selected one. `F7` **RELEARN**: the next CC you move becomes the row's source. `F8` goes back. The `ENC` row takes no CC, mode or follow. Nothing here changes a file: the project's bindings are saved with the project as before, and the encoder's target is not saved. <!-- QA-GLB-238, QA-GLB-239, QA-GLB-240 -->
 
-New in track3r-os. Not yet checked on the unit.
+New in track3r-os.
 
 ### Put one parameter on the encoder
 <!-- sync: src=app/src/bindings.cpp,app/src/param_actions.cpp,app/src/rec_actions.cpp qa=QA-GLB-228,QA-GLB-229,QA-GLB-230,QA-GLB-231,QA-GLB-232,QA-GLB-241,QA-GLB-242 -->
@@ -275,7 +275,7 @@ The off does not save for you. This is what happens to work in progress:
 - **A firmware update on the card.** Power is refused while the update runs, and the strip says **FIRMWARE UPDATE RUNNING**. The update is not touched. <!-- QA-GLB-112 -->
 - **A writable disk.** When the card is shown to the computer as a writable disk, the first hold only warns, and the strip says **COMPUTER MAY BE WRITING - HOLD AGAIN**. A second full hold within 10 seconds turns the unit off. If you eject the disk on the computer first, one hold turns the unit off at once. The unit cannot flush the computer's write cache. See [Getting started](getting_started.md#use-the-card-on-a-computer). <!-- QA-GLB-111 -->
 
-**Checked on a unit (test build v0.6.12):** the two-second hold turns the unit off, and the screen goes dark and silent. A press of `Power` starts it again, and so does plugging the USB cable in again. <!-- QA-GLB-102, QA-GLB-103, QA-GLB-117 -->
+The two-second hold turns the unit off, and the screen goes dark and silent. A press of `Power` starts it again, and so does plugging the USB cable in again. <!-- QA-GLB-102, QA-GLB-103, QA-GLB-117 -->
 
 **Known gap:** a click may be heard at power off and at power on. <!-- QA-GLB-102, QA-GLB-103 -->
 

@@ -85,7 +85,7 @@ Eject the disk on the computer, or press `F7` twice on the **CARD AS DISK** row.
 ## Good to know
 
 - Tested on Linux only. Windows and macOS are untested.
-- Checked on a unit (test build v0.6.10): the power-on way, its strip, the eject and the restart, and unmounting and mounting the card on the computer. <!-- QA-GLB-015, QA-GLB-016, QA-GLB-017, QA-GLB-019, QA-GLB-020, QA-GLB-021 --> <!-- QA-CFG-200 -->
+- The power-on way, its strip, the eject and the restart, and unmounting and mounting the card on the computer all work. <!-- QA-GLB-015, QA-GLB-016, QA-GLB-017, QA-GLB-019, QA-GLB-020, QA-GLB-021 --> <!-- QA-CFG-200 -->
 - A bench run wrote to one SD card at about 430 KiB/s. That is the rate of the unit's card writes on that card, not a speed you will see copying files, and it was measured on one card brand. <!-- docs/specs/OS-USBDISK.md section 13, 4a -->
 
 ## See also

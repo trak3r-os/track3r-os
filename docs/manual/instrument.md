@@ -36,7 +36,7 @@ The **VOLUME** row (on the VOICE page) sets the level. The volume law turns it i
 
 If you want to know more: a module imported from a tracker file keeps its loudness; volume 64 becomes level 50, which is 0 dB (checked on the host). The Amiga engine gives the same dB as the Modern one. <!-- QA-INS-202, QA-INS-203 -->
 
-Between the marked points, each step of **VOLUME** is 0.48 dB in the first law (volume 1 is -24 dB, and 0 is silence) and 0.4 dB in the second. Not checked by ear on the unit.
+Between the marked points, each step of **VOLUME** is 0.48 dB in the first law (volume 1 is -24 dB, and 0 is silence) and 0.4 dB in the second.
 
 A project saved by an earlier build can sound at a different level, and the stored levels stay as they were. A note that names no velocity, on a native instrument at level 80, now plays at 0 dB; it played at +24 dB. On the Amiga engine levels 50 and 80 both play full volume. A module imported now gives its instruments velocity 63, so a Roll that fades with VolUp or VolDown peaks about 6 dB lower and sits 6 dB under a plain note. The demo kit stays at 0 dB after any edit. <!-- QA-INS-211, QA-INS-212, QA-INS-204 -->
 

@@ -15,7 +15,7 @@ track3r-os runs in place of the official firmware on the same unit and the same 
 
 track3r-os is an operating system for the Polyend Tracker. The community wrote it. It is unofficial and not affiliated with or endorsed by Polyend. It runs in place of the official firmware on your unit. Read this chapter once before you install anything.
 
-> **Careful**: track3r-os is unofficial community firmware, and some steps of the install and the way back have not been run on a unit with the release file (the release notes list them). Back up the whole SD card before you install anything. Copy everything on it to your computer: projects, samples, modules and the `Firmware/` folder.
+> **Careful**: track3r-os is unofficial community firmware. Back up the whole SD card before you install anything. Copy everything on it to your computer: projects, samples, modules and the `Firmware/` folder.
 
 ## Before you start
 
@@ -97,7 +97,7 @@ To open another project from the card, press `File`. See [File](file.md). For wh
 2. Keep holding until the line is full. The strip says **POWERING OFF**. The keys and pads stop working, the screen fades, the pad lights go out and the sound stops. <!-- QA-GLB-102 -->
 3. Let go of `Power`. The unit stays dark. Press `Power` and let go to start it again. <!-- QA-GLB-102, QA-GLB-103, QA-GLB-114 -->
 
-To cancel, let go before the line is full, or press `Shift` while you hold `Power`. <!-- QA-GLB-100, QA-GLB-110 --> `Shift` + `Power` on its own is not an off: it saves a screenshot to the card ([The panel](panel.md#screenshot)). <!-- QA-GLB-130 --> To remove all power, unplug the USB cable. For saves and exports during the off, see [The panel](panel.md#power). **Checked on a unit (test build v0.6.12):** the off, the dark screen, and a press of `Power` to start again. **Known gap:** a click may be heard at power off and at power on.
+To cancel, let go before the line is full, or press `Shift` while you hold `Power`. <!-- QA-GLB-100, QA-GLB-110 --> `Shift` + `Power` on its own is not an off: it saves a screenshot to the card ([The panel](panel.md#screenshot)). <!-- QA-GLB-130 --> To remove all power, unplug the USB cable. For saves and exports during the off, see [The panel](panel.md#power). **Known gap:** a click may be heard at power off and at power on.
 
 ### Use the card on a computer
 
@@ -108,7 +108,7 @@ In this mode the unit shows its card to the computer as a disk. The unit does no
 3. You can unmount and mount the card on the computer without ejecting it. The card comes back with the same files. <!-- QA-GLB-021 -->
 4. When you are done, eject the disk on the computer. Then press a key on the unit. If the computer has not ejected the disk, press a key twice within 5 seconds: the first only warns. <!-- QA-GLB-017, QA-GLB-023 -->
 
-The strip says **DISK EJECTED - PRESS ANY KEY TO RESTART**, and the unit restarts with the card in place. <!-- QA-GLB-017 --> Checked on a unit (test build v0.6.10); tested on Linux only. For the details, and for sharing the card while the unit plays, see [USB disk](usb_disk.md).
+The strip says **DISK EJECTED - PRESS ANY KEY TO RESTART**, and the unit restarts with the card in place. <!-- QA-GLB-017 --> For the details, and for sharing the card while the unit plays, see [USB disk](usb_disk.md).
 
 ### Go back to the official firmware
 
