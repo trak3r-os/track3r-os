@@ -912,6 +912,67 @@ Status Editor::lane_clear(std::uint32_t pattern, std::uint32_t track) noexcept {
   return lane_replace_in(pattern, track, 0, kLaneTicks, nullptr, 0, false);  // the whole lane, whatever the track's length
 }
 
+// OS-MIDIREC-P1 S7a, A16: the events of the source lane below the track's end (a lane holds none past it, A17) go into the empty lane of the copy as one insert record.
+std::uint32_t Editor::lane_copy_count(std::uint32_t from, std::uint32_t track) noexcept {
+  const Pattern* src = project_.pattern(from);
+  if (lanes_ == nullptr || src == nullptr || track >= kMaxTracks) {
+    return 0;
+  }
+  lanes_->sync(project_.load_epoch());
+  const LaneStore::View v = lanes_->lane(from, track);
+  return LaneStore::lower_bound(v, src->track_length[track] * kLaneTicksPerStep);
+}
+
+bool Editor::lanes_copy_fit(std::uint32_t from, std::uint16_t tracks, std::size_t other_bytes) noexcept {
+  std::uint32_t events = 0;
+  std::uint32_t lanes = 0;
+  std::size_t bytes = 0;
+  for (std::uint32_t t = 0; t < kMaxTracks; ++t) {
+    const std::uint32_t n = ((tracks >> t) & 1u) != 0u ? lane_copy_count(from, t) : 0u;
+    events += n;
+    lanes += n != 0u ? 1u : 0u;
+    bytes += lane_record_bytes(n);
+  }
+  if (events == 0) {
+    return true;  // no lane is touched: the old rule (nothing to check here)
+  }
+  return lanes_->total_events() + events <= kMaxLanePoolEvents && lanes_->lane_count() + lanes <= kMaxLanes && undo_fits(kLaneInsert, other_bytes + bytes);
+}
+
+Status Editor::lane_copy(std::uint32_t from, std::uint32_t to, std::uint32_t track) noexcept {
+  Scope scope(*this);
+  if (lanes_ == nullptr || project_.pattern(from) == nullptr || project_.pattern(to) == nullptr) {
+    return Status::NotFound;
+  }
+  if (track >= kMaxTracks) {
+    return Status::BadIndex;
+  }
+  const std::uint32_t n = lane_copy_count(from, track);
+  if (n == 0) {
+    return Status::Ok;
+  }
+  if (from == to || lanes_->lane(to, track).count != 0) {
+    return Status::BadValue;  // the target lane must be empty (a fresh pattern's)
+  }
+  if (!lanes_->can_grow(to, track, n) || lanes_->total_events() + n > kMaxLanePoolEvents || !undo_fits(kLaneInsert, lane_record_bytes(n))) {
+    return Status::Full;
+  }
+  LaneStore::WriteWindow window(*lanes_);
+  LaneEvent* gap = lanes_->open_gap(to, track, 0, n);
+  if (gap == nullptr) {
+    return Status::Full;
+  }
+  std::memcpy(gap, lanes_->lane(from, track).events, n * sizeof(LaneEvent));  // the source is looked up again: the gap moved the pool's tail
+  const std::uint16_t ix = 0;
+  const std::uint16_t cnt = static_cast<std::uint16_t>(n);
+  const std::uint8_t id = static_cast<std::uint8_t>(to);
+  const std::uint8_t tr = static_cast<std::uint8_t>(track);
+  const Piece p[] = {{&id, 1}, {&tr, 1}, {&ix, 2}, {&cnt, 2}, {gap, n * sizeof(LaneEvent)}};
+  (void)record(kLaneInsert, p, 5);
+  (void)project_.touch_lanes(to);
+  return Status::Ok;
+}
+
 // A10 / A11 / A15: one run of the merge is the changed span [a, b) of the old lane (from the first removed or first-merged index to the last), the
 // `m` take events from take index `first`, and the kept count after the replaced CC points went. Two runs when the take wrapped (disjoint, planned
 // together so the fit check covers both; the higher run is applied first so the lower one's indices stay valid).

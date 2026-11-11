@@ -268,10 +268,12 @@ class App {
   void attach_transport(TransportSink* sink) noexcept { transport_ = sink; }
   // OS-CEPTFX S3b: runs one plugin over the sample in view, from the Sample edit selection or the whole, with the bank's PtfxJob (SampleBankMem: SDRAM, no SRAM here). nullptr when it
   // started (the job ends through report_jobs and commits as one undo unit), else the strip text of the refusal (nothing changed).
-  const char* run_ptfx(const PtfxJob::Plugin& plugin) noexcept;
+  // OS-GENNEW: `slot` is the instrument the run's result goes to: kPtfxViewSlot (the default) is the one in view (F1 APPLY), else its 0-based number (F4 NEW INS: the first free one).
+  static constexpr int kPtfxViewSlot = -1;
+  const char* run_ptfx(const PtfxJob::Plugin& plugin, int slot = kPtfxViewSlot) noexcept;
   // The refusal run_ptfx would give for the screen, the sample and another job (nullptr: none), so the platform asks before it loads the plugin's code from the card.
   // OS-CEPTFX S4c: a `generator` (the plugin's flag) needs no sample: on an empty slot it makes one.
-  const char* ptfx_refusal(bool generator = false) const noexcept;
+  const char* ptfx_refusal(bool generator = false, int slot = kPtfxViewSlot) const noexcept;
   // Which check made the last run_ptfx say PLUGIN NOT READY ("host", "plugin", "stereo", "scratch"), else nullptr: the console appends it to its reply (the strip keeps one text).
   const char* ptfx_not_ready_why() noexcept;
   // Gives up a plugin run in progress (nothing is committed). The platform calls it before it rescans or unloads the catalogue or loads a project: the job reads the plugin's image.
@@ -279,7 +281,8 @@ class App {
   bool ptfx_busy() const noexcept { return edit_ptfx_; }  // a plugin run is in progress: the image, the scratch and the catalogue are in use
   // OS-CEPTFX S4b: what F1 APPLY on the PLUGINS page calls (the platform's or the simulator's: the App cannot load code from the card). `index` is the listing entry, `values` the page's 12 A15 values;
   // it loads the plugin and calls run_ptfx: nullptr when the job started, else the strip text of the refusal. No runner: the strip says the plugins run on the tracker.
-  using PtfxRunner = const char* (*)(void* ctx, unsigned index, const float* values) noexcept;
+  // `slot` (OS-GENNEW): the instrument the result goes to, as run_ptfx takes it (kPtfxViewSlot: the one in view).
+  using PtfxRunner = const char* (*)(void* ctx, unsigned index, const float* values, int slot) noexcept;
   void attach_ptfx_runner(PtfxRunner runner, void* ctx) noexcept {
     ptfx_runner_ = runner;
     ptfx_runner_ctx_ = ctx;
@@ -590,6 +593,7 @@ class App {
   int edit_slot_ = -1;               // its job slot, -1 when it is not running
   bool edit_ptfx_ = false;           // OS-CEPTFX S3b: the edit in progress is a plugin run (the bank's ptfx_job): finish_edit stages its result (main loop only)
   unsigned edit_target_ = 0;         // the instrument slot it reads
+  int edit_new_from_ = 0;            // OS-GENNEW: the run is F4 NEW INS: the instrument (1..64) in view when it started, 0 for any other run (main loop only)
   std::uint32_t edit_version_ = 0;   // the version of that sample it started on: a result for another one is thrown away
   std::int16_t* edit_dst_ = nullptr; // the buffer it writes
   EditOp edit_op_ = EditOp::Amplify;

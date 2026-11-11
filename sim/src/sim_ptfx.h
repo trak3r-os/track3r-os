@@ -28,7 +28,7 @@ struct SimPtfxRun {
   alignas(4) std::uint8_t scratch[1024] = {};
   module::PtfxQuarantine quarantine;
 
-  static const char* run(void* self, unsigned index, const float* values) noexcept;
+  static const char* run(void* self, unsigned index, const float* values, int slot) noexcept;
 };
 
 }  // namespace o3os::sim

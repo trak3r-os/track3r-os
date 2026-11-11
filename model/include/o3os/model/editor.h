@@ -192,6 +192,13 @@ class Editor {
   Status lane_replace(std::uint32_t pattern, std::uint32_t track, std::uint32_t t0, std::uint32_t t1, const LaneEvent* events,
                       std::uint32_t n) noexcept;
   Status lane_clear(std::uint32_t pattern, std::uint32_t track) noexcept;
+  // OS-MIDIREC-P1 S7a, A16: a pattern copy carries its lanes. lane_copy puts the events of the lane of (from, track) below the track's end into the EMPTY lane of
+  // (to, track) as one insert record (Ok with nothing to copy; NotFound: no store or pattern; BadIndex: track; BadValue: from == to or the target lane has events;
+  // Full: the pool, the lane count or the undo ring would not take it, nothing changes). lanes_copy_fit is its dry run for a caller that copies the lanes of the
+  // tracks in the mask `tracks` after other edits of the same unit that take `other_bytes` of ring: true when no lane is involved (the old rule), else whether
+  // the pool, the lane count and the ring (the open unit's bytes included) take them all. Changes nothing.
+  Status lane_copy(std::uint32_t from, std::uint32_t to, std::uint32_t track) noexcept;
+  bool lanes_copy_fit(std::uint32_t from, std::uint16_t tracks, std::size_t other_bytes) noexcept;
   // OS-MIDIREC-P1 S3, A10 / A11 / A15: merges a finished take (lane_take.h) into the lane of its (pattern, track) in one pass and one pair of undo records
   // (the changed span before, after). Overdub: the lane's events stay and the take's are merged by tick (a take event goes after the lane's events at its
   // tick); a CC controller the take moved REPLACES the lane's old points of that controller (the take's channel and port) inside the take's intervals.
@@ -260,7 +267,8 @@ class Editor {
   void lane_erase(std::uint32_t pattern, std::uint32_t track, std::uint32_t index, std::uint32_t count) noexcept;
   bool lane_insert(std::uint32_t pattern, std::uint32_t track, std::uint32_t index, const LaneEvent* events, std::uint32_t count) noexcept;
   void lane_cut(std::uint32_t pattern, std::uint32_t track, std::uint32_t from_tick) noexcept;  // A17: the events at or past the tick
-  void lanes_free(std::uint32_t pattern) noexcept;                                                // every lane of the pattern
+  std::uint32_t lane_copy_count(std::uint32_t from, std::uint32_t track) noexcept;                // the events lane_copy takes from the source lane
+  void lanes_free(std::uint32_t pattern) noexcept;                                               // every lane of the pattern
   Status lane_replace_in(std::uint32_t pattern, std::uint32_t track, std::uint32_t t0, std::uint32_t t1, const LaneEvent* events, std::uint32_t n,
                          bool inside_track) noexcept;
   // The undo-ring bytes the records of such an edit take (0: no lane event is involved), and whether `record_bytes` more fit the ring that a unit starting with `op` writes to.

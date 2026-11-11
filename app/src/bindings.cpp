@@ -834,14 +834,14 @@ constexpr core::Binding kBase[] = {
     bind(kSeditFxCtx, tap(button_ref(Button::Up), kShift), kUiNone),  // the AMP row of the edit page is not on this page
     bind(kSeditFxCtx, tap(button_ref(Button::Down), kShift), kUiNone),
     // OS-CEPTFX S4a (new Community OS behaviour): the PLUGINS page, the screen's field level: the encoder picks the plugin (the list in focus) or changes the value (x10 with Shift) or the list item; Delete puts the value
-    // back to its default; F1 APPLY (S4b), F2 RESCAN, F3 DEFAULTS (every value of the plugin); F4..F6 do nothing; F7 PREVIEW, F8 UNDO and the Shift keys are the screen's.
+    // back to its default; F1 APPLY (S4b), F2 RESCAN, F3 DEFAULTS (every value of the plugin), F4 NEW INS (OS-GENNEW: a generator into the first free instrument); F5 and F6 do nothing; F7 PREVIEW, F8 UNDO and the Shift keys are the screen's.
     bind(kSeditPlugCtx, tap(encoder_ref(0)), kSeditPlug, ArgFrom::Value),
     bind(kSeditPlugCtx, tap(encoder_ref(0), kShift), kSeditPlugCoarse, ArgFrom::Value),
     bind(kSeditPlugCtx, tap(button_ref(Button::Delete)), kSeditPlugDo, ArgFrom::Fixed, 0),
     bind(kSeditPlugCtx, tap(button_ref(Button::F1)), kSeditPlugDo, ArgFrom::Fixed, 1),
     bind(kSeditPlugCtx, tap(button_ref(Button::F2)), kSeditPlugDo, ArgFrom::Fixed, 2),
     bind(kSeditPlugCtx, tap(button_ref(Button::F3)), kSeditPlugDo, ArgFrom::Fixed, 3),
-    bind(kSeditPlugCtx, tap(button_ref(Button::F4)), kUiNone),
+    bind(kSeditPlugCtx, tap(button_ref(Button::F4)), kSeditPlugDo, ArgFrom::Fixed, 4),  // OS-GENNEW: NEW INS
     bind(kSeditPlugCtx, tap(button_ref(Button::F5)), kUiNone),
     bind(kSeditPlugCtx, tap(button_ref(Button::F6)), kUiNone),
     bind(kSeditPlugCtx, tap(button_ref(Button::Up), kShift), kUiNone),  // the AMP row of the edit page is not on this page

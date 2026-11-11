@@ -5,7 +5,8 @@
 #   qanet_shrink_selftest        B2: a planted fault is shrunk to under 15 commands, written as a scenario that fails under o3sim with the same message
 #   qanet_assert_selftest        B2 fold: the assertions a written scenario ends with (listing, undo) pass on the state they want and fail on the one the bug leaves, under the real o3sim
 #   qanet_random_rules_selftest         B4: a rule-1 breach planted after a sample slot is filled is found at that step (and not before), shrunk and written
-#   qanet_random_rules23_selftest  B4b: a silent key that appears only after the document changed mid-walk (rule 2) and an out-of-span edit after a mid-walk selection (rule 3) are found at that step (and not before), shrunk and written
+#   qanet_random_rules2_selftest   B4b: a silent key that appears only after the document changed mid-walk (rule 2) is found at that step (and not before), shrunk and written
+#   qanet_random_rules3_selftest   B4b: an out-of-span edit after a mid-walk selection (rule 3), the same (OS-OPS-CIPOLE: one ctest a rule, `--rules23-selftest --rules-case R2|R3`, so that they run side by side; they were one, qanet_random_rules23_selftest)
 #   qanet_random_meta_selftest   B5: each metamorphic relation of --meta is reached, a save that loses a field is found, and its written scenario fails under o3sim
 #   qanet_random_exhaust_selftest  B8: the limit fixtures (--exhaust) each reach their limit, find nothing in a clean run, and find a defect planted at it (rule 1, also with the sample-edit history full)
 #   qanet_random_exhaust         B8: seeds 1..2 as qanet_random_user_short, with --exhaust --exhaust-all instead of --meta: the undo cap, the sample-edit history cap and the first edit after a slot switch (3 fixtures, 6 reached) on those two seeds only (the eight shards do not run --exhaust)
@@ -38,11 +39,15 @@ set_tests_properties(qanet_audio_probe_selftest PROPERTIES TIMEOUT 600 FAIL_REGU
 add_test(NAME qanet_assert_selftest COMMAND o3_qanet_random_user --assert-selftest --card ${_card} --found-dir ${CMAKE_BINARY_DIR}/qanet_found --o3sim $<TARGET_FILE:o3sim>)
 set_tests_properties(qanet_assert_selftest PROPERTIES TIMEOUT 600 FAIL_REGULAR_EXPRESSION "FAILED")
 # B4: a rule-1 breach planted after a slot is filled is found at that step, shrunk and written
+# OS-OPS-CIPOLE: the walk ends at the planted step (--stop-at-plant), which cut this test from 163 s to 138 s on the build machine (a ctest of
+# its own; the shrink replays are one run after another, a ctest cannot split them). COST: ctest starts the tests of the highest COST first when it has no timing history, which is a fresh build directory.
 add_test(NAME qanet_random_rules_selftest COMMAND o3_qanet_random_user --rules-selftest --card ${_card} --found-dir ${CMAKE_BINARY_DIR}/qanet_found)
-set_tests_properties(qanet_random_rules_selftest PROPERTIES TIMEOUT 900 FAIL_REGULAR_EXPRESSION "FAILED")
-# B4b: a silent key that appears only after the document changed mid-walk (rule 2), and an out-of-span edit after a selection the walk made mid-walk (rule 3), are found, shrunk and written
-add_test(NAME qanet_random_rules23_selftest COMMAND o3_qanet_random_user --rules23-selftest --card ${_card} --found-dir ${CMAKE_BINARY_DIR}/qanet_found)
-set_tests_properties(qanet_random_rules23_selftest PROPERTIES TIMEOUT 1200 FAIL_REGULAR_EXPRESSION "FAILED")
+set_tests_properties(qanet_random_rules_selftest PROPERTIES TIMEOUT 900 COST 138 FAIL_REGULAR_EXPRESSION "FAILED")
+# B4b: a silent key that appears only after the document changed mid-walk (rule 2), and an out-of-span edit after a selection the walk made mid-walk (rule 3), are found, shrunk and written (one ctest each, 64 s as one before)
+add_test(NAME qanet_random_rules2_selftest COMMAND o3_qanet_random_user --rules23-selftest --rules-case R2 --card ${_card} --found-dir ${CMAKE_BINARY_DIR}/qanet_found)
+set_tests_properties(qanet_random_rules2_selftest PROPERTIES TIMEOUT 600 COST 36 FAIL_REGULAR_EXPRESSION "FAILED")
+add_test(NAME qanet_random_rules3_selftest COMMAND o3_qanet_random_user --rules23-selftest --rules-case R3 --card ${_card} --found-dir ${CMAKE_BINARY_DIR}/qanet_found)
+set_tests_properties(qanet_random_rules3_selftest PROPERTIES TIMEOUT 600 COST 13 FAIL_REGULAR_EXPRESSION "FAILED")
 add_dependencies(o3_qanet_random_user o3sim)
 # B5: every metamorphic relation (save then OPEN, transpose and back, octave and back, copy + paste + undo, slice edit + undo) is reached, a save that loses a field is found, and the scenario written for it fails under o3sim
 add_test(NAME qanet_random_meta_selftest COMMAND o3_qanet_random_user --meta-selftest --card ${_card} --found-dir ${CMAKE_BINARY_DIR}/qanet_found --o3sim $<TARGET_FILE:o3sim>)

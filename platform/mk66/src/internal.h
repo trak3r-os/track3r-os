@@ -292,7 +292,7 @@ std::size_t ptfx_line(unsigned i, char* out, std::size_t cap) noexcept;
 const char* ptfx_scan() noexcept;
 std::size_t ptfx_list_line(unsigned i, char* out, std::size_t cap) noexcept;
 std::size_t ptfx_info_line(unsigned n, unsigned i, char* out, std::size_t cap) noexcept;
-const char* ptfx_run(unsigned n, const float* values = nullptr) noexcept;  // values: the 12 A15 values of the PLUGINS page (S4b), nullptr: the defaults
+const char* ptfx_run(unsigned n, const float* values = nullptr, int slot = -1) noexcept;  // values: the 12 A15 values of the PLUGINS page (S4b), nullptr: the defaults; slot: the target slot (OS-GENNEW NEW INS), -1 the one in view
 const char* ptfx_run_why() noexcept;  // after a refused ptfx_run: which check said PLUGIN NOT READY ("host", "plugin", "stereo", "scratch"), else nullptr (the console appends it)
 const char* module_bind(unsigned slot, const char* stem) noexcept;
 // OS-INSFX S1 (`diag ins`): an effect module (kind 2, loaded by `mod load`) as an insert of `track` (0..15), `slot` 0 (A) or 1 (B). Each returns null or the reason it could not. Nothing is saved: a project

@@ -188,6 +188,8 @@ class PerformBank {
   bool held(unsigned slot) const noexcept { return slot < kPerfSlots && ((held_ >> slot) & 1u) != 0u; }
   bool affected(unsigned track) const noexcept { return track < kPerfTracks && ((affected_ >> track) & 1u) != 0u; }
   std::uint16_t affected_mask() const noexcept { return affected_; }
+  // OS-MIDIREC-P1 S7b: the play mode the bank wants on `track` now (TrackPlayMode, 0..23; 0 = Forward: no PLAYMODE slot is on for it, or the track is not affected). What the sequencer was or will be told by apply().
+  int play_mode(unsigned track) const noexcept;
   bool edit() const noexcept { return edit_; }
   unsigned edit_slot() const noexcept { return edit_slot_; }
   // The slot's FX is on: a row but 0 is selected and its value is not 0 (what the pads' LEDs and the screen's highlight show); a slot in CC mode

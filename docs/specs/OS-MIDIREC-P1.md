@@ -240,6 +240,26 @@ NEW COMMUNITY OS BEHAVIOUR; host-tested; the feel on the unit is a hardware chec
 - **REC STORE = Grid**: none of this runs; the grid, Spill and Micro-move are byte-identical (test).
 - **Not done (S5 deviation)**: pads still write the grid (pads as lane notes would need a pad-down tick; not asked for by a test and left to the maintainer). Hooks for S4: `lane_poll`'s drain; the STEP path never arms the ring.
 
+## S7a as built (2026-11-11; `Editor::lane_copy` / `lanes_copy_fit` in `model/src/editor.cpp`, `app/src/song_edit.cpp`, `app/src/pattern_tools_actions.cpp`, `tests/lane_row_test.cpp`)
+
+NEW COMMUNITY OS BEHAVIOUR; host-tested; no on-disk change (a lane-free project is unchanged: no lane, no record, no byte).
+
+- **Copy (A16)**: `song_copy_pattern` and `song_copy_pattern_masked` call `Editor::lane_copy(from, to, track)` for each copied track after its steps (the masked copy skips the cleared tracks). One `kLaneInsert` record per lane, inside the caller's unit; only the events below the source track's end are copied (A17). The source view is re-read after the gap opens (the pool is packed).
+- **Full with nothing changed**: before `create_pattern` the copy asks `Editor::lanes_copy_fit` (pool events, lane count, and the open unit's ring bytes plus the copy's own), so Full leaves the project, the lanes and the history as they were. DUP PAT says `NO FREE PATTERN` for that too.
+- **Planners**: `copy_pattern_body*` add the lane records to the journal bytes when given the lane store (`song_unique_plan`, `song_form_plan`; the optional parameter defaults to none). Known limit: the UNIQUE and FORM plans do not model the pool across several copies of one unit; a later copy can answer Full at apply time, leaving the earlier ones (the unit stays consistent and undoable).
+- **Delete**: `Editor::delete_pattern` already freed the pattern's lanes (records before the pattern's); S7a adds only the test.
+- **CLEAR LANE**: in the Pattern TOOLS dialog, CLEAR with WHAT = ALL over every step of the cursor's track also calls `Editor::lane_clear` for that track (same undo unit, done first so a refusal changes nothing; strip `CLEARED: n STEPS + LANE`). A partial block leaves the lane alone. Clearing a time range of a lane is left to S7b or the EVENTS list.
+
+## S7b as built (2026-11-11; `app/src/lane_record.cpp`, `seq::PerformBank::play_mode`, `ViewState::track_mode`, `tests/rec_test.cpp`)
+
+NEW COMMUNITY OS BEHAVIOUR (maintainer-delegated decision, simplest and reversible); host-tested; no on-disk change. A Lane take is refused while the recording track plays in any order but Forward (Backward, PingPong, Random, C1..C20), the alternative of deriving the take's intervals from min/max being left out.
+
+- **Source of the order**: the only writer of a track's play mode is the Perform layer (`Command::Kind::PerfTrack` from the PLAYMODE slot), so the App mirrors `PerformBank::play_mode(track)` (the value the bank wants: the PLAYMODE slot's live value when the track is affected, else 0) into `ViewState::track_mode[12]` once per pass, before `lane_poll`. Tracks above 11 are Forward. Cost: 12 short loops per main-loop pass, 12 bytes.
+- **Refusal**: `lane_poll` treats the take as not wanted when `order_ok` fails: no `open_take`, `lane_counting_in` is false (a knob or the encoder in the count-in edits its parameter as for a non-lane instrument), the keyboard goes to the step grid as with REC STORE = Grid. The strip says `LANE REC: FORWARD ONLY` once per arming (`LaneRec::said_order`, reset when the order is Forward again or the recording is not wanted).
+- **Order change under a take**: the take is dropped (`close_take`, `LaneTake::reset`; nothing more is committed: the parts a TAKE FULL split already committed stay, the rest of the lane is unchanged), the same notice is said, and the grid takes the keys from then on. The next recording in Forward arms normally.
+- **Unchanged**: STEP into a lane (its place is the cursor's row, not the playhead, so the order does not matter); playback of lanes in every order (S2).
+- Tests: `rec_test.cpp` "rec lane order" (five orders under a take, arming refused then recording after Forward, a mode on another track leaves the take alone).
+
 ## QA rows (reserved QA-PAT-490..519 and the matching screens' ranges; added per slice)
 
 | ID | Function | Gesture | Expected |

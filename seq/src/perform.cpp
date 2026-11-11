@@ -225,6 +225,10 @@ int PerformBank::desired(unsigned track, unsigned fx) const noexcept {
   return 0;
 }
 
+int PerformBank::play_mode(unsigned track) const noexcept {
+  return desired(track, idx(PerfFx::PatternPlayMode));
+}
+
 bool PerformBank::set_dj_layer(unsigned track, int stutter, int delay, int gain) noexcept {
   if (track >= kPerfTracks) {
     return false;

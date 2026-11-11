@@ -320,7 +320,7 @@ endif()
 set(o3os_unit_groups fuzz usb model formats plot audio seq ui apps)
 set(o3os_unit_fuzz */native_fuzz_test.cpp */mevt_fuzz_test.cpp)
 set(o3os_unit_usb */usb_*_test.cpp)
-set(o3os_unit_model */undo_test.cpp */undo_area_test.cpp */model_test.cpp */param*_test.cpp */learn_follow_test.cpp */settings_format_test.cpp */event_list_test.cpp */pattern_verbs_test.cpp */lane_store_test.cpp */lane_take_test.cpp)
+set(o3os_unit_model */undo_test.cpp */undo_area_test.cpp */model_test.cpp */param*_test.cpp */learn_follow_test.cpp */settings_format_test.cpp */event_list_test.cpp */pattern_verbs_test.cpp */lane_store_test.cpp */lane_take_test.cpp */lane_row_test.cpp)
 set(o3os_unit_formats */native_format_test.cpp */og_*_test.cpp */med_*_test.cpp */modimp_*_test.cpp */wav*_test.cpp */iff_sample_test.cpp */format_registry_test.cpp */preset_format_test.cpp
                       */import_job_test.cpp */project_state_test.cpp */persist2_format_test.cpp */note11_format_test.cpp */law_format_test.cpp */insx_format_test.cpp */appm_format_test.cpp */lfosine_format_test.cpp */perf_playorder_format_test.cpp */mevt_format_test.cpp)
 set(o3os_unit_plot */plot_*_test.cpp */raster*_test.cpp)
@@ -349,6 +349,8 @@ foreach(group IN LISTS o3os_unit_groups)
   set_tests_properties(unit_${group} PROPERTIES TIMEOUT 240 FAIL_REGULAR_EXPRESSION "test cases: +0 ")
   list(APPEND o3os_unit_cover_groups "--source-file=${filter}")
 endforeach()
+# COST (OS-OPS-CIPOLE): ctest starts the tests with the highest COST first when it has no timing history (a fresh build directory, which is every CI run), so the long ones do not start last: unit_audio 52 s under the sanitizers.
+set_tests_properties(unit_audio PROPERTIES COST 52)
 # OS-MODPRESET P1: preset_format_test reads the corpus that preset_python writes (below): ctest runs that test first, also for `ctest -R unit_formats`.
 set_tests_properties(unit_formats PROPERTIES FIXTURES_REQUIRED preset_corpus)
 # unit_rest is cut in six ctests that run side by side (2026-11-10): in one piece it took about 115 s on the build machine, 340 s under
@@ -509,6 +511,16 @@ set_tests_properties(unit_cover PROPERTIES TIMEOUT 60)
 # OS-FINALQA FQA-7: the heavy song of the unit's CPU run (`o3pj_tool gen heavy`) against the mix of docs/architecture/cpu-budget.md section 4.
 add_test(NAME heavy_song_python COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/heavy_song_test.py $<TARGET_FILE:o3pj_tool>)
 set_tests_properties(heavy_song_python PROPERTIES TIMEOUT 60)
+# OS-OPS-TOKCAP: the PreToolUse hook that caps a subagent's context (.claude/hooks/ctx_cap.py). Pure Python, reads synthetic transcripts.
+add_test(NAME ctx_cap_python COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/ctx_cap_test.py)
+set_tests_properties(ctx_cap_python PROPERTIES TIMEOUT 60)
+# OS-OPS-GITGUARD: the PreToolUse hook that keeps subagents off the main checkout's git state and off dev/main pushes
+# (.claude/hooks/git_guard.py), and the orphaned-session scan of session_brief.py. Pure Python, temp git repos and a fake /proc.
+add_test(NAME git_guard_python COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/git_guard_test.py)
+set_tests_properties(git_guard_python PROPERTIES TIMEOUT 60)
+# OS-OPS-LAND: tools/land.py, the only path from a reviewed branch to dev (temp bare origin and clone, stub CI). Pure Python.
+add_test(NAME land_python COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/land_test.py)
+set_tests_properties(land_python PROPERTIES TIMEOUT 120)
 # OS-CLEANUP: the songs of the step-FX CPU runs (`o3pj_tool gen lfostepNN|lfostepoff|moddriveN[off]`) against the recipe the HIL scenarios qa_lfostep and qa_cpu_moddrive expect.
 add_test(NAME hil_songs_python COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/hil_songs_test.py $<TARGET_FILE:o3pj_tool>)
 set_tests_properties(hil_songs_python PROPERTIES TIMEOUT 120)

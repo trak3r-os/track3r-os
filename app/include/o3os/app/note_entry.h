@@ -24,11 +24,12 @@ inline constexpr char kRootNames[12][3] = {"C", "C#", "D", "D#", "E", "F", "F#",
 inline constexpr unsigned kEntryOctaves = 10;   // OCTAVE 0..9
 inline constexpr unsigned kEntryMaxNote = 120;  // the pad board's kMaxNote (pad_board.h): no pad plays above it
 inline constexpr std::uint8_t kNoNote = 0xFF;
+inline constexpr std::uint8_t kEntryDefaultOctave = 3;  // the octave of a new NoteEntry (the PIANO octave pads light by the shift from it, OS-NOTESLED2)
 
 struct NoteEntry {
   std::uint8_t root = 0;     // the pitch class 0..11 (C..B)
   std::uint8_t scale = 0;    // 0..model::kNoteScaleMax (38): the official scale numbering (OS-SCALES28); the panel's pad row 2 goes through model::kNotePanelScales
-  std::uint8_t octave = 3;   // 0..9; with the C root, the 36 (C-3) that the pad board always started at
+  std::uint8_t octave = kEntryDefaultOctave;   // 0..9; with the C root, the 36 (C-3) that the pad board always started at
   std::uint8_t lock = 0;     // SCALE LOCK: 0 off, 1 on. The pads of the NOTES mode lay out the scale and the pads and the MIDI keyboard snap to it
 
   // OS-SCALES28: the core table's index of the scale (the official index + 1; core index 0 is "No scale", not offered here), and the one name table's name for it (Q4c).
@@ -36,7 +37,6 @@ struct NoteEntry {
   const char* scale_name() const noexcept { return core::kScaleNames[core_scale()]; }
   const char* root_name() const noexcept { return kRootNames[root < 12u ? root : 0u]; }
   bool in_scale(unsigned note) const noexcept { return core::is_in_scale(static_cast<std::uint8_t>(note), root, core_scale()); }
-  bool is_root(unsigned note) const noexcept { return note % 12u == root; }
   // The lowest pad of the NOTES board: the root in the octave (a note number, 0..kEntryMaxNote).
   unsigned board_root() const noexcept {
     const unsigned n = (octave < kEntryOctaves ? octave : kEntryOctaves - 1u) * 12u + (root < 12u ? root : 0u);

@@ -186,7 +186,7 @@ GateResult mono_tool_call(const app::PtfxJob::Plugin&, std::uintptr_t entry, std
 
 }  // namespace
 
-const char* SimPtfxRun::run(void* self, unsigned, const float* values) noexcept {
+const char* SimPtfxRun::run(void* self, unsigned, const float* values, int slot) noexcept {
   auto* r = static_cast<SimPtfxRun*>(self);
   if (r == nullptr || r->app == nullptr || r->page == nullptr || std::strcmp(r->page->info().name, "Mono Tool") != 0) {
     return "PLUGINS RUN ON THE TRACKER";
@@ -203,7 +203,7 @@ const char* SimPtfxRun::run(void* self, unsigned, const float* values) noexcept 
   p.values = values;
   p.quarantine = &r->quarantine;
   p.call = &mono_tool_call;
-  return r->app->run_ptfx(p);
+  return r->app->run_ptfx(p, slot);
 }
 
 }  // namespace o3os::sim

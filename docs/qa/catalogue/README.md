@@ -41,14 +41,14 @@ Open = rows with neither a sim nor a unit PASS. The table is generated: `python3
 | Mixer | [mixer.md](mixer.md) | 91 | 51 | 1 | 40 |
 | Module app | [module_app.md](module_app.md) | 9 | 5 | 2 | 3 |
 | Modules | [modules.md](modules.md) | 174 | 35 | 10 | 133 |
-| Pattern | [pattern.md](pattern.md) | 328 | 193 | 10 | 127 |
+| Pattern | [pattern.md](pattern.md) | 335 | 193 | 10 | 134 |
 | Perform | [perform.md](perform.md) | 123 | 46 | 7 | 70 |
 | Record | [record.md](record.md) | 47 | 9 | 1 | 37 |
-| Sample edit | [sample_edit.md](sample_edit.md) | 45 | 22 | 0 | 23 |
+| Sample edit | [sample_edit.md](sample_edit.md) | 48 | 22 | 0 | 26 |
 | Sample load | [sample_load.md](sample_load.md) | 46 | 14 | 15 | 18 |
 | Song | [song.md](song.md) | 126 | 62 | 6 | 64 |
 | Wave | [wave.md](wave.md) | 27 | 20 | 2 | 6 |
-| **Total** | | **1561** | **698** | **105** | **798** |
+| **Total** | | **1571** | **698** | **105** | **808** |
 
 <!-- /qa-cover -->
 

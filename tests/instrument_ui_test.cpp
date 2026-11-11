@@ -624,7 +624,7 @@ TEST_CASE("instrument ui: a beat slice instrument plays slice n on pad n; PIANO 
   CHECK(app::kParamsScreen.pad_roles(rig.app->model(), rig.app->state(), roles));
   CHECK(roles[0] == app::PadRole::Off);
   CHECK(roles[11] == app::PadRole::Off);
-  // NOTES again: the board's scale lights (OS-NOTESLED), as on Pattern: the root's pad Front
+  // NOTES again: the board's lights by scale (OS-NOTESLED2), as on Pattern: a note in the scale Front (the default chromatic scale: every pad)
   rig.tap(Button::Pattern);
   (void)rig.invoke("pads.mode", 0);
   rig.tap(Button::Params);
@@ -633,7 +633,7 @@ TEST_CASE("instrument ui: a beat slice instrument plays slice n on pad n; PIANO 
   for (const app::PadRole role : roles) {
     fronts += role == app::PadRole::Front ? 1u : 0u;
   }
-  CHECK(fronts > 0u);  // the roots of the board's octaves
+  CHECK(fronts > 0u);  // the board's notes in the scale
 }
 
 TEST_CASE("instrument ui: changing the instrument releases the held notes first, on the instrument that started them (O2), MIDI included") {

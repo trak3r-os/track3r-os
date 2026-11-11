@@ -26,7 +26,7 @@ namespace o3os::app {
 enum class SongBuildKind : std::uint8_t { Form, Bridge };
 
 // Why a build writes nothing (the text of each is song_build_text).
-enum class SongBuildRefusal : std::uint8_t { None, Select, NoPattern, SongFull, NoRoom, NoNext, Same };
+enum class SongBuildRefusal : std::uint8_t { None, Select, NoPattern, SongFull, NoRoom, NoNext, Same, NoLanes };  // NoLanes: the copies' MIDI lanes do not fit the lane pool (OS-MIDIREC-P1 S7a)
 
 // The most new slots (and so new patterns) a build makes: BRIDGE's SLOTS row is 1..16, FORM's longest form has 10 slots.
 inline constexpr unsigned kSongBuildMax = 16;
@@ -92,7 +92,8 @@ const char* song_form_name(SongForm form) noexcept;
 std::uint16_t song_form_tracks(std::uint8_t groups, unsigned drums) noexcept;
 
 // Plans FORM over the slots `rect.s0..s1` (the tracks of the rectangle are ignored). Writes nothing. A refusal is in plan.info.refusal; `plan.bytes` is set when none.
-void song_form_plan(const model::Project& project, const SongRect& rect, SongForm form, unsigned drums, SongBuildPlan& plan) noexcept;
+// `lanes` (the app's lane store; null: none) adds the copies' lane records to `plan.bytes` (OS-MIDIREC-P1 S7a).
+void song_form_plan(const model::Project& project, const SongRect& rect, SongForm form, unsigned drums, SongBuildPlan& plan, const model::LaneStore* lanes = nullptr) noexcept;
 
 // Writes the plan: each copy (song_copy_pattern_masked), then the slots. The caller's undo unit holds it. False when the model refused a step (the caller checked the pool and the list first: a bug).
 bool song_form_apply(model::Editor& editor, const SongBuildPlan& plan) noexcept;

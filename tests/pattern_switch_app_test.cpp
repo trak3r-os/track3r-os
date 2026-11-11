@@ -364,7 +364,7 @@ TEST_CASE("patswitch app: in Song mode every pick, the playing pattern's own pad
 TEST_CASE("patswitch app: the pads light with the patterns while F1 is held, as PATS lights them: Front plays (stopped: the view), Back has content, Off empty; a tap-opened LENGTH chooser has none") {
   Rig rig;
   PadRole roles[48];
-  NEED(rig.lights(roles));            // NOTES lights its scale (OS-NOTESLED): the root pad 36 Front
+  NEED(rig.lights(roles));            // NOTES lights its notes by scale (OS-NOTESLED2): pad 36 (C, in the default chromatic scale) Front
   CHECK(roles[36] == PadRole::Front);
   rig.hold_f1();
   NEED(rig.lights(roles));
@@ -373,8 +373,8 @@ TEST_CASE("patswitch app: the pads light with the patterns while F1 is held, as 
   CHECK(roles[2] == PadRole::Off);    // 3 exists and holds nothing
   CHECK(roles[8] == PadRole::Off);    // 9 does not exist
   rig.release_f1();
-  NEED(rig.lights(roles));  // back to the NOTES board's lights
-  CHECK(roles[37] == PadRole::Back);
+  NEED(rig.lights(roles));  // back to the NOTES board's lights (chromatic: every note in the scale, Front)
+  CHECK(roles[37] == PadRole::Front);
   rig.play(2, 3);
   rig.hold_f1();
   NEED(rig.lights(roles));

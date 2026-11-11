@@ -14,6 +14,7 @@
 #include <o3os/app/screens/pattern_screen.h>
 #include <o3os/audio/play_position.h>
 #include <o3os/core/action.h>
+#include <o3os/core/gesture.h>
 #include <o3os/core/input_event.h>
 #include <o3os/model/editor.h>
 #include <o3os/model/params.h>
@@ -98,6 +99,7 @@ struct Rig {
     if (edit) {
       (void)app->invoke(core::action_id("view.mode"), static_cast<ActionArg>(PatternMode::Edit));
     }
+    use_c_major();
   }
   model::Project& project() { return test::arena(0).project; }
   const app::ViewState& state() const { return app->state(); }
@@ -139,7 +141,18 @@ struct Rig {
   const model::Step& step(int track, int row) { return project().pattern(1)->steps[track][row]; }
   void set(unsigned field, unsigned value) { CHECK(app->device_settings().set(field, static_cast<float>(value)) == model::Status::Ok); }
   std::string message() const { return app->message(); }
-  // OS-NOTESLED: with no count-in the pads are the NOTES board's lights (the default C, chromatic: the root Front, the next note Back), neither a count-in's flash (all Front or all Back) nor nothing.
+  // OS-NOTESLED2: C major through the note-entry panel (held Note, then its pads), so the NOTES board is lit in two levels: C Front (in the scale), C# Back (outside it).
+  void use_c_major() {
+    press(Button::Note);
+    pass(core::kGestureTimings.hold_ms + 1);
+    pad_down(0);
+    pad_up(0);
+    pad_down(12 + 1);
+    pad_up(12 + 1);
+    release(Button::Note);
+    pass();
+  }
+  // With no count-in the pads are the NOTES board's lights (C major: C Front, C# Back), neither a count-in's flash (all Front or all Back) nor nothing.
   bool notes_lit() const {
     PadRole roles[48];
     return app->pad_lights(roles) && roles[36] == PadRole::Front && roles[37] == PadRole::Back;

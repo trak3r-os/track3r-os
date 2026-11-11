@@ -321,7 +321,8 @@ The Sample Edit button cycles edit page → FX page → **PLUGINS** → edit pag
 | F1 APPLY | Run on the selection, or on all of the sample when there is none. A generator replaces the sample or fills an empty slot. |
 | F2 RESCAN | Scan `/Effects` again |
 | F3 DEFAULTS | Every parameter of this plugin back to its default |
-| F4-F6 | `-` |
+| F4 NEW INS | OS-GENNEW (3.9): run the generator into the first free instrument |
+| F5-F6 | `-` |
 | F7 PREVIEW | As on the other pages |
 | F8 | UNDO (CANCEL while running) |
 | Shift row | The edit page's |
@@ -329,6 +330,19 @@ The Sample Edit button cycles edit page → FX page → **PLUGINS** → edit pag
 - **Value display:** `'f'` values show two decimals and `'d'` integers, then the unit. A list shows its item. Values are kept per A15.
 - **No sample:** on an empty slot an effect plugin shows greyed with `NO SAMPLE`, and only a generator can be applied.
 - **Messages:** `PLUGIN <NAME> nn%`, then `DONE`. Errors use the texts of 3.1, 3.3, 3.5 and 3.6. `PLUGINS RUN ON THE TRACKER` appears in the sim without a stand-in.
+
+### 3.9 OS-GENNEW: F4 NEW INS (new Community OS behaviour)
+
+**Intent.** A generator made a sound only in the open slot: empty (`Gen NN`) or replacing a sample. To keep the open sample and still get a generated one, the user had to find an empty slot by hand. F4 on the PLUGINS page runs the picked generator into the first empty instrument slot.
+
+**Acceptance.**
+- F4 runs the selected generator into the first slot with no instrument (`first_free_slot`), through the same take path as an empty-slot F1 run (3.5, QA-SED-035). The open instrument is untouched.
+- Refusals change nothing and leave the view: not a generator (`NEW INS NEEDS A GENERATOR`), no free slot (`NO FREE INSTRUMENT`), a job running, an unsaved Recorder take, and the plugin refusals of F1.
+- When the run succeeds, the screen is still Sample edit and the instrument in view is the one at the start, the view shows the new instrument (the internal action `sedit.show`: live pads released, waveform view reset, also for instruments 49..64). Otherwise the view stays.
+- A cancelled or failed run makes no instrument. The creation is no undo step; F1 afterwards regenerates over it as one history step (F8).
+- A slot is empty for a plugin when it has no instrument (or kind None) or no audio. Deleting an instrument leaves its audio in the bank until the next project load, so the path follows the instrument: on such a slot an effect plugin says `NO SAMPLE` (F1) and a generator (F1 or F4) goes in by the take path, replacing the leftover audio like a load (the sample edit's history of that slot is dropped with it).
+
+**As built.** The target slot is a parameter of the run (`ptfx_refusal(generator, slot)`, `run_ptfx(plugin, slot)`, the runner's `slot` argument in the simulator and the mk66 glue; F1 passes `App::kPtfxViewSlot`). `SampleEditState::plug_new` carries the F4 key to `apply_ptfx`; `App::edit_new_from_` remembers the instrument in view at the start. `slot_has_sample` (app.cpp) is the single test of "empty"; `SampleBank::take_commit` drops the sample history of the slot it replaces, as `commit_load` does. No format changes. Tests: QA-SED-046..048.
 
 ### 3.8 Can the `.tmod` loader be reused?
 

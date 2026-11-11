@@ -202,6 +202,11 @@ bool sedit_plug_do(ActionContext& ctx, core::ActionArg arg) noexcept {
     st.plug_apply = true;
     return true;
   }
+  if (arg == 4) {  // F4 NEW INS (OS-GENNEW): the App's pass runs the picked generator into the first free instrument (a refusal changes nothing)
+    st.plug_apply = true;
+    st.plug_new = true;
+    return true;
+  }
   if (arg == 2) {  // F2 RESCAN: the App starts the catalogue job (the listing and the plugin in view are read again)
     st.plug_scan = true;
     return true;
@@ -285,6 +290,21 @@ bool sedit_instrument(ActionContext& ctx, core::ActionArg arg) noexcept {
   }
   release_live_pads(ctx);  // as instrument_select (which refuses what a pad cannot give): the same step for 49..64
   ctx.view.instrument = to;
+  wave_view_reset(ctx.view);
+  return true;
+}
+
+// OS-GENNEW: arg = the instrument number 1..64 to show (the App invokes it when F4 NEW INS has made an instrument and the view was still on the one it started from): the same step as a pad
+// (1..48, which also resets the window and the selection) or Shift + F5 (49..64).
+bool sedit_show(ActionContext& ctx, core::ActionArg arg) noexcept {
+  if (arg < 1 || arg > static_cast<core::ActionArg>(model::kMaxInstruments)) {
+    return false;
+  }
+  if (arg <= static_cast<core::ActionArg>(kInstruments)) {
+    return instrument_select(ctx, arg);
+  }
+  release_live_pads(ctx);
+  ctx.view.instrument = arg;
   wave_view_reset(ctx.view);
   return true;
 }

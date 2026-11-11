@@ -1910,8 +1910,8 @@ void shot_cancel() noexcept {
 // OS-CEPTFX S4b: F1 APPLY on the PLUGINS page (App::attach_ptfx_runner): the same load and run as the console's `ptfx run`, with the page's values. The console's refusals are lower case and name
 // console commands; the strip gets the page's own upper-case text for each (what ptfx_refusal_text says for the same reason), and a text that is already the App's passes as it is.
 #if !O3OS_AUDIO_TEST
-const char* ptfx_page_run(void*, unsigned index, const float* values) noexcept {
-  const char* why = ptfx_run(index, values);
+const char* ptfx_page_run(void*, unsigned index, const float* values, int slot) noexcept {
+  const char* why = ptfx_run(index, values, slot);
   if (why == nullptr || (why[0] >= 'A' && why[0] <= 'Z')) {
     return why;
   }
@@ -2776,7 +2776,7 @@ std::size_t ptfx_info_line(unsigned n, unsigned i, char* out, std::size_t cap) n
 #endif
 }
 
-const char* ptfx_run(unsigned n, const float* values) noexcept {
+const char* ptfx_run(unsigned n, const float* values, int slot) noexcept {
 #if !O3OS_AUDIO_TEST
   ModuleSystem& m = modsys();
   hal::storage::FileHandle file;
@@ -2796,7 +2796,7 @@ const char* ptfx_run(unsigned n, const float* values) noexcept {
   } else if (entry.quarantined || m.ptfx_q.contains(entry.id)) {
     refuse = "quarantined";
   } else {
-    refuse = g_app->ptfx_refusal((entry.flags & module::kPtfxFlagGenerator) != 0u);
+    refuse = g_app->ptfx_refusal((entry.flags & module::kPtfxFlagGenerator) != 0u, slot);
   }
   if (refuse != nullptr) {
     card.close(file);
@@ -2833,10 +2833,11 @@ const char* ptfx_run(unsigned n, const float* values) noexcept {
   p.quarantine = &m.ptfx_q;
   p.catalog = &m.ptfx_cat;
   p.values = values;  // (the page's A15 values stay in the sample bank's memory until the run ends; nullptr: every default, as the console's run)
-  return g_app->run_ptfx(p);
+  return g_app->run_ptfx(p, slot);
 #else
   (void)n;
   (void)values;
+  (void)slot;
   return "not in this image";
 #endif
 }

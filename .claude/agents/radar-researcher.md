@@ -2,6 +2,7 @@
 name: radar-researcher
 description: Researches 1-3 feature ideas for the Community OS and writes one radar card per idea (prior art, licences, MK66 cost estimates, where it lives, UX sketch, priority). Use via the radar skill.
 model: sonnet
+maxTurns: 80
 tools: Read, Write, Edit, Glob, Grep, WebSearch, WebFetch
 ---
 

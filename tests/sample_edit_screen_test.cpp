@@ -1123,7 +1123,7 @@ hal::code_gate::GateResult double_call(const app::PtfxJob::Plugin&, std::uintptr
     auto* out = reinterpret_cast<std::int16_t* const*>(r1);
     const std::uint32_t n = static_cast<std::uint32_t>(r2);
     for (std::uint32_t i = 0; i < n; ++i) {
-      out[0][i] = static_cast<std::int16_t>(in[0][i] * 2);
+      out[0][i] = in[0] != nullptr ? static_cast<std::int16_t>(in[0][i] * 2) : static_cast<std::int16_t>(7000);  // a generator's input is NULL
     }
     *ret = static_cast<std::int32_t>(n);
   }
@@ -1143,9 +1143,12 @@ struct Runner {
   alignas(4) std::uint8_t scratch[1024] = {};
   module::PtfxQuarantine quarantine;
 
-  static const char* go(void* self, unsigned i, const float* values) noexcept {
+  int slot = -2;  // the slot the last call was given (App::kPtfxViewSlot: the one in view)
+
+  static const char* go(void* self, unsigned i, const float* values, int to) noexcept {
     auto* r = static_cast<Runner*>(self);
     ++r->calls;
+    r->slot = to;
     r->index = i;
     r->first_value = values[0];
     if (!r->run) {
@@ -1162,7 +1165,7 @@ struct Runner {
     p.values = values;
     p.quarantine = &r->quarantine;
     p.call = &double_call;
-    return r->rig->app->run_ptfx(p);
+    return r->rig->app->run_ptfx(p, to);
   }
 };
 
@@ -1287,6 +1290,142 @@ TEST_CASE("sample edit PLUGINS (S4b): an effect on an empty slot says NO SAMPLE,
   CHECK(r.calls == 1u);
   CHECK(r.index == 1u);
   CHECK(rig.message() == "BUSY TEST");
+}
+
+// OS-GENNEW: F4 NEW INS runs the selected generator into the first free instrument and shows it. F1 gives the runner the slot in view (App::kPtfxViewSlot), F4 the free slot.
+TEST_CASE("sample edit PLUGINS (OS-GENNEW): F4 on a generator makes Gen NN in the first free slot, shows it, and F1 after it regenerates with one history step") {
+  PlugRig rig;
+  Runner r;
+  r.rig = &rig;
+  r.run = true;
+  rig.app->attach_ptfx_runner(&Runner::go, &r);
+  rig.open_page();
+  rig.down();  // BETA, a generator
+  rig.tap(Button::F4);
+  CHECK(r.calls == 1u);
+  CHECK(r.index == 1u);
+  CHECK(r.slot == 0);  // the first free slot (the loop is in slot 2)
+  CHECK(rig.app->state().instrument == static_cast<int>(kSlot) + 1);  // still the view while it runs
+  for (unsigned i = 0; i < 400u && rig.bank.pcm(0).frames == 0u; ++i) {
+    rig.pass();
+  }
+  NEED(rig.bank.pcm(0).frames == app::kPtfxGeneratorFrames);
+  const model::Instrument* in = rig.arena->project.instrument(0);
+  NEED(in != nullptr);
+  CHECK(std::string(in->name) == "Gen 01");
+  CHECK(rig.bank.undo_depth(0) == 0u);  // the creation is no history step
+  CHECK(rig.app->state().screen == ScreenId::SampleEdit);
+  CHECK(rig.app->state().instrument == 1);
+  CHECK(app::sedit_plug_page(rig.app->state()));
+  CHECK(std::memcmp(rig.pcm().data, rig.original.data(), kFrames * sizeof(std::int16_t)) == 0);  // the loop is untouched
+  rig.passes(4);
+  rig.expire();
+  rig.tap(Button::F1);  // APPLY now acts on the instrument in view, the new one
+  CHECK(r.calls == 2u);
+  CHECK(r.slot == app::App::kPtfxViewSlot);
+  for (unsigned i = 0; i < 400u && rig.bank.undo_depth(0) == 0u; ++i) {
+    rig.pass();
+  }
+  CHECK(rig.bank.undo_depth(0) == 1u);
+}
+
+// OS-GENNEW review fold: instrument_delete leaves the PCM in the bank; the keys decide by the instrument.
+TEST_CASE("sample edit PLUGINS (OS-GENNEW): after the open instrument is deleted, F4 on a generator makes Gen NN in its slot, and F1 on an effect says NO SAMPLE") {
+  PlugRig rig;
+  Runner r;
+  r.rig = &rig;
+  r.run = true;
+  rig.app->attach_ptfx_runner(&Runner::go, &r);
+  rig.open_page();
+  model::Instrument midi;
+  model::init_instrument(midi, model::InstrumentKind::Midi);
+  midi.midi_channel = 1;
+  for (unsigned i = 0; i < kSlot; ++i) {  // the deleted loop's slot is the first free one
+    NEED(rig.arena->project.set_instrument(i, midi) == model::Status::Ok);
+  }
+  NEED(rig.editor->clear_instrument(kSlot) == model::Status::Ok);
+  NEED(rig.bank.pcm(kSlot).frames == kFrames);  // the leftover audio
+  rig.tap(Button::F1);                          // ALPHA, an effect, on a slot with no instrument
+  CHECK(rig.message() == "NO SAMPLE");
+  CHECK(r.calls == 0u);
+  rig.down();  // BETA, a generator
+  rig.expire();
+  rig.tap(Button::F4);
+  CHECK(r.calls == 1u);
+  CHECK(r.slot == static_cast<int>(kSlot));
+  for (unsigned i = 0; i < 600u && rig.arena->project.instrument(kSlot) == nullptr; ++i) {
+    rig.pass();
+  }
+  const model::Instrument* in = rig.arena->project.instrument(kSlot);
+  NEED(in != nullptr);
+  CHECK(std::string(in->name) == "Gen 03");
+  CHECK(rig.bank.pcm(kSlot).frames == app::kPtfxGeneratorFrames);  // the leftover audio is replaced
+  CHECK(rig.bank.undo_depth(kSlot) == 0u);
+  CHECK(rig.app->state().instrument == static_cast<int>(kSlot) + 1);
+  CHECK(app::sedit_plug_page(rig.app->state()));
+}
+
+TEST_CASE("sample edit PLUGINS (OS-GENNEW): F4 on an effect, with no free instrument, or while a job runs, says why and changes nothing") {
+  PlugRig rig;
+  Runner r;
+  r.rig = &rig;
+  r.run = true;
+  rig.app->attach_ptfx_runner(&Runner::go, &r);
+  rig.open_page();
+  rig.tap(Button::F4);  // ALPHA, an effect
+  CHECK(rig.message() == "NEW INS NEEDS A GENERATOR");
+  CHECK(r.calls == 0u);
+  CHECK(rig.app->state().instrument == static_cast<int>(kSlot) + 1);
+  // every slot used
+  rig.down();  // BETA
+  model::Instrument midi;
+  model::init_instrument(midi, model::InstrumentKind::Midi);
+  midi.midi_channel = 1;
+  for (unsigned i = 0; i < model::kMaxInstruments; ++i) {
+    if (i != kSlot) {
+      NEED(rig.arena->project.set_instrument(i, midi) == model::Status::Ok);
+    }
+  }
+  rig.expire();
+  rig.tap(Button::F4);
+  CHECK(rig.message() == "NO FREE INSTRUMENT");
+  CHECK(r.calls == 0u);
+  CHECK(rig.app->state().instrument == static_cast<int>(kSlot) + 1);
+  CHECK(rig.app->state().screen == ScreenId::SampleEdit);
+}
+
+TEST_CASE("sample edit PLUGINS (OS-GENNEW): F4 while the plugin runs says so, and a free slot past the 48th is shown too") {
+  PlugRig rig;
+  Runner r;
+  r.rig = &rig;
+  r.run = true;
+  rig.app->attach_ptfx_runner(&Runner::go, &r);
+  rig.open_page();
+  model::Instrument midi;
+  model::init_instrument(midi, model::InstrumentKind::Midi);
+  midi.midi_channel = 1;
+  for (unsigned i = 0; i < 50u; ++i) {  // slots 0..49 used: the first free one is instrument 51
+    if (i != kSlot) {
+      NEED(rig.arena->project.set_instrument(i, midi) == model::Status::Ok);
+    }
+  }
+  rig.down();  // BETA
+  rig.press(Button::F4);
+  rig.release(Button::F4);
+  rig.clock.advance(core::kTicksPerMs);
+  rig.app->run_once();
+  NEED(rig.st().running);
+  CHECK(r.slot == 50);
+  const unsigned calls = r.calls;
+  rig.tap(Button::F4);  // a second NEW INS while the first one runs
+  CHECK(r.calls == calls);
+  CHECK(rig.message() != "");
+  for (unsigned i = 0; i < 600u && rig.bank.pcm(50).frames == 0u; ++i) {
+    rig.pass();
+  }
+  NEED(rig.bank.pcm(50).frames == app::kPtfxGeneratorFrames);
+  CHECK(rig.app->state().instrument == 51);
+  CHECK(rig.app->state().screen == ScreenId::SampleEdit);
 }
 
 TEST_CASE("sample edit PLUGINS (S4b): F2 and F1 pressed in one pass say SCANNING..., not that the file is damaged, and run nothing") {

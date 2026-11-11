@@ -445,6 +445,6 @@ set_tests_properties(e2e_report_selftest PROPERTIES TIMEOUT 60)
 add_test(NAME o3sim_manual_images
   COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/../tools/manual_images.py --check --strict
           --root ${PROJECT_SOURCE_DIR} --sim $<TARGET_FILE:o3sim>)
-set_tests_properties(o3sim_manual_images PROPERTIES TIMEOUT 900)
+set_tests_properties(o3sim_manual_images PROPERTIES TIMEOUT 900 COST 76)  # COST (OS-OPS-CIPOLE): 76 s under the sanitizers, started early by ctest in a fresh build directory
 
 o3os_label_tests()

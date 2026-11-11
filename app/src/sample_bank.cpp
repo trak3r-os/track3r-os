@@ -390,6 +390,11 @@ bool SampleBank::take_commit(unsigned slot, std::uint32_t offset, std::uint32_t 
   if (slot >= kSlots || !m.take_live || frames == 0u || at >= m.take_frames || frames > m.take_frames - at) {
     return false;
   }
+  if (hist_slot_ == slot) {  // OS-GENNEW: as commit_load(): the sample edit's history is of the audio this replaces (a deleted instrument's slot still holds its audio and may hold its history)
+    hist_slot_ = kSlots;
+    undo_n_ = 0;
+    redo_n_ = 0;
+  }
   adopt(slot, arena_ + m.take_start + at, frames);
   m.slots[slot].table = nullptr;  // as commit_load(): the old table belonged to the old audio
   request_rebind(slot);

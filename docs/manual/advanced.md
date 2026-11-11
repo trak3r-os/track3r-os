@@ -29,7 +29,7 @@ The advanced and slightly complex keys of track3r-os up to version 1.3.0, one ar
 
 | Keys or setting | What it does |
 |---|---|
-| Config, PATTERN, **REC STORE** `Lane` (default `Grid`) **(new in 1.3.0)** | With `Lane`, LIVE records a MIDI instrument's keys and controller moves into a lane beside the steps. Nothing reaches the step grid, and the lane plays with the steps. `Grid` keeps Spill and Micro-move as before. Export to `.mtp` drops lane events and the report counts them. |
+| Config, PATTERN, **REC STORE** `Lane` (default `Grid`) **(new in 1.3.0)** | With `Lane`, LIVE records a MIDI instrument's keys and controller moves into a lane beside the steps. Nothing reaches the step grid, and the lane plays with the steps. `Grid` keeps Spill and Micro-move as before. A lane records only while the track plays forward: if a Perform PLAYMODE (Backward, PingPong, Random or C1 to C20) is on for the track, the strip says `LANE REC: FORWARD ONLY`, no take is made and the keys go to the step grid; a take that is under way when the order changes is dropped. Export to `.mtp` drops lane events and the report counts them. |
 | Lane notes, LIVE (`Shift` + `Rec`) **(new in 1.3.0)** | Each note keeps the tick it was played at and its held length. A chord is one NOTE row per key, at its own tick. |
 | Lane notes, STEP (`Rec`) **(new in 1.3.0)** | With one cell selected, a chord held together goes in at the cursor step's first tick, each note one step long. |
 | Controllers on the track's channel **(new in 1.3.0)** | A mod wheel or knob box sends its controller number into the lane. A controller on another channel is not recorded. |

@@ -199,6 +199,7 @@ constexpr ActionDef kActions[] = {
     make_action("sedit.amiga", sedit_amiga, kFocus, sedit_enabled),
     make_action("sedit.q8", sedit_q8, kFocus, sedit_enabled),
     make_action("sedit.instrument", sedit_instrument, kFocus),
+    make_action("sedit.show", sedit_show, kFocus, sedit_enabled),  // OS-GENNEW: internal (no binding)
     make_action("sample.commit", sample_commit, kStep, sedit_enabled),
     make_action("sedit.undo", sedit_undo, kStep, sedit_enabled),
     make_action("sedit.redo", sedit_redo, kStep, sedit_enabled),

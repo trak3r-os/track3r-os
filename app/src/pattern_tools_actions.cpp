@@ -18,6 +18,7 @@
 #include <o3os/app/verb_menu_view.h>
 #include <o3os/app/view_state.h>
 #include <o3os/model/editor.h>
+#include <o3os/model/lane_store.h>
 #include <o3os/model/pattern.h>
 #include <o3os/model/project.h>
 #include <o3os/model/step_edit.h>
@@ -150,6 +151,21 @@ bool pattern_tools_run(ActionContext& ctx, PTool tool, int amount, unsigned inst
   if (tool == PTool::Transpose && amount == 0) {
     return pe::say(ctx, core::Severity::Info, "NOTHING TO DO");
   }
+  // OS-MIDIREC-P1 S7a, CLEAR LANE (new Community OS behaviour): CLEAR of ALL over every step of the cursor's track also clears that track's MIDI take lane (Editor::lane_clear, in
+  // this action's one undo unit). A block that does not cover the whole track leaves the lane alone: the lane is the track's, not a step's. Done first: a refusal (the undo ring) changes nothing.
+  bool lane_cleared = false;
+  const model::LaneStore* lane_store = ctx.edit != nullptr ? ctx.edit->lanes() : nullptr;
+  if (tool == PTool::Clear && what == SongWhat::All && b.whole_steps() && lane_store != nullptr) {
+    const int track = v.pattern.track();
+    const model::Pattern* pat = ctx.model.project->pattern(v.edit.pattern);
+    if (pat != nullptr && track >= 0 && track < static_cast<int>(model::kMaxTracks) && b.track0 <= track && track <= b.track1 && b.row0 == 0 &&
+        b.row1 >= static_cast<int>(pat->track_length[track]) - 1 && lane_store->lane(v.edit.pattern, static_cast<std::uint32_t>(track)).count != 0u) {
+      if (ctx.edit->lane_clear(v.edit.pattern, static_cast<std::uint32_t>(track)) != model::Status::Ok) {
+        return pe::say(ctx, core::Severity::Info, "TOO BIG TO UNDO: NOTHING CHANGED");
+      }
+      lane_cleared = true;
+    }
+  }
   pe::Edited e;
   switch (tool) {
     case PTool::Transpose:
@@ -167,7 +183,7 @@ bool pattern_tools_run(ActionContext& ctx, PTool tool, int amount, unsigned inst
       break;
     }
   }
-  if (!e.changed) {
+  if (!e.changed && !lane_cleared) {
     if (e.failed) {
       return true;  // (said: NO ROOM FOR A NEW PATTERN)
     }
@@ -203,6 +219,9 @@ bool pattern_tools_run(ActionContext& ctx, PTool tool, int amount, unsigned inst
       text.assign("CLEARED: ");
       append_uint(text, steps);
       text.append(steps == 1u ? " STEP" : " STEPS");
+      if (lane_cleared) {
+        text.append(" + LANE");
+      }
       break;
   }
   return pe::say(ctx, core::Severity::Info, text.c_str());

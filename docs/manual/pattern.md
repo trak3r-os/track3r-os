@@ -227,9 +227,9 @@ The Shift row sets the pads' octave and chooses what the pads do. The octave is 
 | Key | Pads |
 |---|---|
 | `Shift` + `F1` (**OCTAVE**) | moves the pads' lowest C up one octave; after C9 it goes back to C0. The key shows the octave, for example **C3**. It applies to NOTES, PIANO and ISO |
-| `Shift` + `F2` (**NOTES**) | the usual note pads. The LEDs show the scale: the root bright, the other notes of the scale dim, a note outside the scale dark. With SCALE LOCK on only the roots stand out |
-| `Shift` + `F3` (**PIANO**) | two octaves laid out like a piano |
-| `Shift` + `F4` (**ISO**) | each column a semitone, each row up a fourth |
+| `Shift` + `F2` (**NOTES**) | the usual note pads. The LEDs show the scale: a note of the scale is bright (the root too), a note outside the scale is dim. With no scale, or with SCALE LOCK on, every note pad is bright |
+| `Shift` + `F3` (**PIANO**) | two octaves laid out like a piano. The LEDs light the notes the same way as in NOTES: scale notes bright, others dim. The two octave pads are dim at C3 and bright on the side the octave has moved to |
+| `Shift` + `F4` (**ISO**) | each column a semitone, each row up a fourth. The LEDs light the notes the same way as in NOTES |
 | `Shift` + `F5` (**TRACKS**) | each column is a track; rows for track, mute, mute mode and solo |
 | `Shift` + `F6` (**PATS**) | each pad is a pattern, 1 to 48. A tap queues it |
 | `Shift` + `F7` (**VU**) | each column is a track with a level meter. Again: faders |

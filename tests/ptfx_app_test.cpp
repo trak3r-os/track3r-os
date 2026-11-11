@@ -42,6 +42,10 @@ constexpr unsigned kSlot = 2;  // instrument 3
 
 constexpr std::int16_t kMade = 7000;  // what the stand-in writes where it has no input
 constexpr unsigned kEmpty = 5;        // a slot with no instrument
+constexpr int kLoopIns = 3;           // the instruments the screens show (ViewState::instrument, 1-based): the loop, the empty slot, the one after it
+constexpr int kNewIns = 6;
+constexpr int kOtherIns = 7;
+static_assert(kLoopIns == static_cast<int>(kSlot) + 1 && kNewIns == static_cast<int>(kEmpty) + 1 && kOtherIns == kNewIns + 1, "1-based instrument numbers of the slots above");
 
 constexpr std::uintptr_t kInit = 0x100;
 constexpr std::uintptr_t kSet = 0x200;
@@ -81,6 +85,7 @@ GateResult fake_call(const PtfxJob::Plugin&, std::uintptr_t entry, std::uintptr_
   return GateResult::Ok;
 }
 
+std::string text(const char* s) { return s != nullptr ? std::string(s) : std::string(); }  // a refusal text; "" is no refusal
 std::int16_t sample_at(std::uint32_t i) { return static_cast<std::int16_t>(std::lround(8000.0 * std::sin(0.03 * i + 0.4))); }
 
 struct Rig {
@@ -419,6 +424,22 @@ TEST_CASE("ptfx app: a generator on an empty slot goes in like a loaded sample: 
   CHECK(rig.bank.undo_depth(kEmpty) == 1u);
 }
 
+TEST_CASE("ptfx app: a generator that ends while another sample is in view keeps that view's selection") {
+  Rig rig;
+  rig.open_empty();
+  rig.generator();
+  CHECK(rig.start() == nullptr);  // the run is on the empty slot
+  rig.invoke("instrument.select", static_cast<core::ActionArg>(kSlot + 1));  // the view moves to the loop while the run goes on
+  rig.select(100, 300);
+  const std::uint32_t a = rig.st().a;
+  const std::uint32_t b = rig.st().b;
+  NEED(b > a);
+  rig.finish();
+  NEED(rig.bank.pcm(kEmpty).frames == app::kPtfxGeneratorFrames);  // the instrument was made
+  CHECK(rig.st().a == a);  // and the selection of the sample in view was not reset
+  CHECK(rig.st().b == b);
+}
+
 TEST_CASE("ptfx app: a generator that makes nothing, or is cancelled, leaves the empty slot empty and the take released") {
   Rig rig;
   rig.open_empty();
@@ -446,6 +467,43 @@ TEST_CASE("ptfx app: a generator that makes nothing, or is cancelled, leaves the
   CHECK(rig.bank.pcm(kEmpty).frames == app::kPtfxGeneratorFrames);
 }
 
+// OS-CEPTFX fix: a generator that makes a new sample goes through the bank's take path, and take_begin() gives up a live take. The Recorder's Review take is that live take, so the generator
+// was able to overwrite a recording that was not saved. The refusal keeps the take as it is.
+TEST_CASE("ptfx app: a generator that needs the take is refused while the Recorder holds an unsaved take, and the take is kept") {
+  Rig rig;
+  rig.open_empty();
+  std::uint32_t cap = 0;
+  std::int16_t* p = rig.bank.take_begin(cap);  // what the Recorder holds in Review: a live take in the arena
+  NEED(p != nullptr);
+  constexpr std::uint32_t kTake = 3000u;
+  for (std::uint32_t i = 0; i < kTake; ++i) {
+    p[i] = static_cast<std::int16_t>(sample_at(i) + 1);
+  }
+  rig.bank.take_end(kTake);
+  NEED(rig.bank.take().frames == kTake);
+  rig.generator();
+  CHECK(text(rig.app->ptfx_refusal(true)) == "A RECORDING OR A TAKE IS IN PROGRESS");
+  CHECK(text(rig.start()) == "A RECORDING OR A TAKE IS IN PROGRESS");
+  rig.finish();
+  CHECK(!rig.app->ptfx_busy());
+  CHECK(rig.bank.pcm(kEmpty).frames == 0u);
+  NEED(rig.bank.take().frames == kTake);
+  bool intact = true;
+  for (std::uint32_t i = 0; i < kTake; ++i) {
+    intact = intact && rig.bank.take().data[i] == static_cast<std::int16_t>(sample_at(i) + 1);
+  }
+  CHECK(intact);
+  // a generator on a slot that has a sample replaces it through the edit buffer, not the take: that stays allowed
+  rig.expire();
+  CHECK(text(rig.app->ptfx_refusal(false)) != "A RECORDING OR A TAKE IS IN PROGRESS");
+  // and with the take given up (the Recorder discards it) the generator runs
+  rig.bank.take_drop(true);
+  rig.expire();
+  CHECK(rig.start() == nullptr);
+  rig.finish();
+  CHECK(rig.bank.pcm(kEmpty).frames == app::kPtfxGeneratorFrames);
+}
+
 TEST_CASE("ptfx app: a generator is refused on a slot that holds another kind of instrument") {
   Rig rig;
   model::Instrument in;
@@ -457,6 +515,176 @@ TEST_CASE("ptfx app: a generator is refused on a slot that holds another kind of
   rig.generator();
   CHECK(std::string(rig.start()) == "NO SAMPLE INSTRUMENT HERE");
   CHECK(rig.bank.pcm(kEmpty).frames == 0u);
+}
+
+// OS-GENNEW (F4 NEW INS): the target slot is a parameter of the run. The key's refusals (not a generator, no free slot) are the PLUGINS page's, in sample_edit_screen_test.cpp.
+TEST_CASE("ptfx app: a run into another slot makes Gen NN there, shows it, and F1 after it regenerates with one history step") {
+  Rig rig;  // the loop (instrument 3) is in view
+  rig.generator();
+  CHECK(text(rig.app->ptfx_refusal(true, static_cast<int>(kEmpty))) == "");
+  CHECK(text(rig.app->ptfx_refusal(false, static_cast<int>(kEmpty))) == "OPEN A SAMPLE IN SAMPLE EDIT");  // an effect needs a sample
+  CHECK(text(rig.app->ptfx_refusal(true, static_cast<int>(app::SampleBank::kSlots))) == "NO FREE INSTRUMENT");
+  NEED(rig.app->state().instrument == kLoopIns);
+  CHECK(text(rig.app->run_ptfx(rig.plugin, static_cast<int>(kEmpty))) == "");
+  CHECK(rig.app->state().instrument == kLoopIns);  // the view moves when the run has succeeded, not before
+  rig.finish();
+  NEED(rig.bank.pcm(kEmpty).frames == app::kPtfxGeneratorFrames);
+  CHECK(rig.bank.undo_depth(kEmpty) == 0u);  // the creation is no history step
+  const model::Instrument* in = rig.arena->project.instrument(kEmpty);
+  NEED(in != nullptr);
+  CHECK(std::string(in->name) == "Gen 06");
+  CHECK(rig.app->state().screen == ScreenId::SampleEdit);
+  CHECK(rig.app->state().instrument == kNewIns);  // the new instrument is in view
+  CHECK(rig.same_as_original());                      // the instrument that was in view is untouched
+  // F1 APPLY (the slot in view) regenerates over it: one history step
+  g.produce_limit = 0xFFFFFFFFu;
+  rig.expire();
+  CHECK(text(rig.start()) == "");
+  rig.finish();
+  CHECK(rig.bank.undo_depth(kEmpty) == 1u);
+  CHECK(rig.app->state().instrument == kNewIns);
+  CHECK(rig.same_as_original());
+}
+
+TEST_CASE("ptfx app: a refused or cancelled run into another slot changes nothing and leaves the view") {
+  Rig rig;
+  rig.generator();
+  // a job running
+  CHECK(text(rig.start()) == "");  // F1 on the loop: a generator replacing it
+  CHECK(text(rig.app->run_ptfx(rig.plugin, static_cast<int>(kEmpty))) == "ANOTHER JOB IS RUNNING");
+  rig.finish();
+  CHECK(rig.bank.pcm(kEmpty).frames == 0u);
+  CHECK(rig.app->state().instrument == kLoopIns);  // (the first run was F1's: no jump)
+  // the Recorder's unsaved take
+  std::uint32_t cap = 0;
+  std::int16_t* p = rig.bank.take_begin(cap);
+  NEED(p != nullptr);
+  p[0] = 1;
+  rig.bank.take_end(100);
+  g.produce_limit = 0xFFFFFFFFu;
+  rig.expire();
+  CHECK(text(rig.app->run_ptfx(rig.plugin, static_cast<int>(kEmpty))) == "A RECORDING OR A TAKE IS IN PROGRESS");
+  CHECK(rig.bank.take().frames == 100u);
+  CHECK(rig.bank.pcm(kEmpty).frames == 0u);
+  CHECK(rig.app->state().instrument == kLoopIns);
+  rig.bank.take_drop(true);
+  // cancelled mid-run: no instrument, the view stays
+  rig.expire();
+  CHECK(text(rig.app->run_ptfx(rig.plugin, static_cast<int>(kEmpty))) == "");
+  rig.app->cancel_ptfx();
+  rig.finish();
+  CHECK(rig.bank.pcm(kEmpty).frames == 0u);
+  const model::Instrument* in = rig.arena->project.instrument(kEmpty);
+  CHECK((in == nullptr || in->kind == model::InstrumentKind::None));
+  CHECK(rig.app->state().instrument == kLoopIns);
+  CHECK(!rig.app->ptfx_busy());
+  // and a run after them goes through and jumps (the remembered view was cleared by the job's end)
+  rig.expire();
+  CHECK(text(rig.app->run_ptfx(rig.plugin, static_cast<int>(kEmpty))) == "");
+  rig.finish();
+  CHECK(rig.bank.pcm(kEmpty).frames == app::kPtfxGeneratorFrames);
+  CHECK(rig.app->state().instrument == kNewIns);
+}
+
+TEST_CASE("ptfx app: a run into another slot does not move a view that changed while it ran") {
+  Rig rig;
+  rig.generator();
+  CHECK(text(rig.app->run_ptfx(rig.plugin, static_cast<int>(kEmpty))) == "");
+  rig.invoke("instrument.select", static_cast<core::ActionArg>(kEmpty + 2));  // the view goes to another instrument meanwhile
+  NEED(rig.app->state().instrument == kOtherIns);
+  rig.finish();
+  CHECK(rig.bank.pcm(kEmpty).frames == app::kPtfxGeneratorFrames);  // the instrument was made
+  CHECK(rig.app->state().instrument == kOtherIns);               // and the view is where the person put it
+  CHECK(rig.app->state().screen == ScreenId::SampleEdit);
+}
+
+// OS-GENNEW review fold: a deleted instrument (instrument_delete) leaves its PCM in the bank, so a slot with no instrument can hold audio. The path follows the instrument.
+TEST_CASE("ptfx app: a run into a deleted instrument's slot takes the take path: Gen NN, leftover audio replaced, the old history gone, the view shown") {
+  Rig rig;
+  CHECK(rig.start() == nullptr);  // an edit of the loop first: one history step on its slot
+  rig.finish();
+  NEED(rig.bank.undo_depth(kSlot) == 1u);
+  rig.expire();
+  rig.generator();
+  NEED(rig.editor->clear_instrument(kSlot) == model::Status::Ok);
+  NEED(rig.arena->project.instrument(kSlot) == nullptr);
+  NEED(rig.bank.pcm(kSlot).frames == kFrames);  // the audio is still there
+  const std::int16_t* const old_audio = rig.bank.pcm(kSlot).data;
+  CHECK(text(rig.app->ptfx_refusal(true, static_cast<int>(kSlot))) == "");
+  CHECK(text(rig.app->run_ptfx(rig.plugin, static_cast<int>(kSlot))) == "");
+  rig.finish();
+  NEED(rig.bank.pcm(kSlot).frames == app::kPtfxGeneratorFrames);
+  CHECK(rig.bank.pcm(kSlot).data != old_audio);
+  CHECK(rig.bank.pcm(kSlot).data[0] == kMade);
+  CHECK(rig.bank.undo_depth(kSlot) == 0u);  // the history was of the audio that is gone
+  const model::Instrument* in = rig.arena->project.instrument(kSlot);
+  NEED(in != nullptr);
+  CHECK(in->kind == model::InstrumentKind::Sample);
+  CHECK(std::string(in->name) == "Gen 03");
+  CHECK(rig.app->state().screen == ScreenId::SampleEdit);
+  CHECK(rig.app->state().instrument == kLoopIns);
+  CHECK(!rig.app->ptfx_busy());
+}
+
+TEST_CASE("ptfx app: a run into a deleted instrument's slot leaves the history of another slot") {
+  Rig rig;
+  model::Instrument in;
+  model::init_instrument(in, model::InstrumentKind::Sample);
+  NEED(rig.arena->project.set_instrument(kEmpty, in) == model::Status::Ok);
+  std::uint32_t cap = 0;
+  std::int16_t* const audio = rig.bank.reserve(cap);
+  NEED(audio != nullptr && cap >= 1000u);
+  for (std::uint32_t i = 0; i < 1000u; ++i) {
+    audio[i] = sample_at(i);
+  }
+  NEED(rig.bank.commit_load(kEmpty, audio, 1000u));
+  rig.bank.rebind_now(kEmpty);
+  rig.generator();
+  CHECK(text(rig.start()) == "");  // F1: a generator over the loop (kSlot): one history step there
+  rig.finish();
+  NEED(rig.bank.undo_depth(kSlot) == 1u);
+  rig.expire();
+  NEED(rig.editor->clear_instrument(kEmpty) == model::Status::Ok);
+  CHECK(text(rig.app->run_ptfx(rig.plugin, static_cast<int>(kEmpty))) == "");
+  rig.finish();
+  CHECK(rig.bank.pcm(kEmpty).frames == app::kPtfxGeneratorFrames);
+  CHECK(rig.bank.undo_depth(kSlot) == 1u);  // edit_begin of the other slot would have cleared it
+}
+
+TEST_CASE("ptfx app: F1 on a deleted instrument's slot: a generator makes Gen NN there, an effect is refused and nothing changes") {
+  Rig rig;
+  NEED(rig.editor->clear_instrument(kSlot) == model::Status::Ok);
+  NEED(rig.bank.pcm(kSlot).frames == kFrames);
+  CHECK(text(rig.app->ptfx_refusal(false)) == "OPEN A SAMPLE IN SAMPLE EDIT");
+  CHECK(text(rig.start()) == "OPEN A SAMPLE IN SAMPLE EDIT");  // an effect plugin
+  CHECK(!rig.app->ptfx_busy());
+  CHECK(rig.same_as_original());
+  CHECK(rig.bank.undo_depth(kSlot) == 0u);
+  CHECK(rig.arena->project.instrument(kSlot) == nullptr);
+  rig.generator();
+  CHECK(text(rig.app->ptfx_refusal(true)) == "");
+  CHECK(text(rig.start()) == "");
+  rig.finish();
+  NEED(rig.bank.pcm(kSlot).frames == app::kPtfxGeneratorFrames);
+  CHECK(rig.bank.undo_depth(kSlot) == 0u);
+  const model::Instrument* in = rig.arena->project.instrument(kSlot);
+  NEED(in != nullptr);
+  CHECK(std::string(in->name) == "Gen 03");
+}
+
+TEST_CASE("ptfx app: a deleted slot with a Recorder take in progress refuses a generator and keeps the take") {
+  Rig rig;
+  NEED(rig.editor->clear_instrument(kSlot) == model::Status::Ok);
+  std::uint32_t cap = 0;
+  std::int16_t* const p = rig.bank.take_begin(cap);
+  NEED(p != nullptr);
+  p[0] = 1;
+  rig.bank.take_end(100);
+  rig.generator();
+  CHECK(text(rig.app->ptfx_refusal(true)) == "A RECORDING OR A TAKE IS IN PROGRESS");
+  CHECK(text(rig.app->run_ptfx(rig.plugin, static_cast<int>(kSlot))) == "A RECORDING OR A TAKE IS IN PROGRESS");
+  CHECK(rig.bank.take().frames == 100u);
+  CHECK(rig.arena->project.instrument(kSlot) == nullptr);
 }
 
 TEST_CASE("ptfx app: a sample instrument whose audio is missing keeps its name, volume and settings; only the audio and the wavetable fields are set") {

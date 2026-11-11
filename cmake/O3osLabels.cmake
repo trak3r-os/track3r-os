@@ -40,7 +40,7 @@ set(O3OS_LABEL_RULES
   "^qanet_random_user_fatfs_[0-9]+of[0-9]+$" "app,platform,qanet,e2e"  # OS-QANET D1: the random user on the FAT32 image, the 200 seeds in shards; on demand like the folder's
   "^qanet_random_user_fatfs_short$" "app,platform,qanet"  # OS-QANET D1: seeds 1..2 on the image (ci.sh host)
   "^qanet_random_user_[0-9]+of[0-9]+$" "app,qanet,e2e,long"  # OS-QANET B1: the 200 seeds of the random user, in shards; on demand (tools/ci.sh e2e, tools/remote_ci.sh e2e); the seed range and steps come from the environment
-  "^qanet_(random_rules_selftest|random_rules23_selftest|random_user_short|shrink_selftest)$" "app,qanet,slow"  # OS-CISPEED: 177 s, 74 s, 67 s, 58 s under the sanitizers; a full run keeps them
+  "^qanet_(random_rules_selftest|random_rules2_selftest|random_rules3_selftest|random_user_short|shrink_selftest)$" "app,qanet,slow"  # OS-CISPEED: 177 s, 74 s, 67 s, 58 s under the sanitizers; a full run keeps them
   "^qanet_" "app,qanet"                 # OS-QANET: the rule tests over every bound action (tests/qanet/); `qanet` selects them with ctest -L, `app` is their scope
   "^unit_fuzz$" "fuzz"
   "^unit_model$" "model"
@@ -67,7 +67,7 @@ set(O3OS_LABEL_RULES
   "^e2e_((card|pro)_)?fixture_fresh$" "app,formats,python"  # OS-E2E-1b, OS-E2E-13, J2: the generated cards of the journeys (tests/e2e_card_fixture_test.py, e2e_pro_fixture_test.py, e2e_og_fixture_test.py): a sim, format or python change runs them
   "^(project_python|preset_python|heavy_song_python|hil_songs_python|midisync_songs_python|mtc_tempo_song_python|med_python|med_import_python|med_openmpt|mod_python|modimp_openmpt)$" "formats,python"  # the o3pj_tool-generated songs and their python checks (OS-MTC A2: mtc_tempo_song_python is the mtc-tempo song's); OS-MODPRESET P2: preset_python is tools/o3preset.py against the O3MP fixture
   "^corefx_openmpt$" "formats,seq,audio,python"  # OS-COREFX: importer -> sequencer -> engine against libopenmpt
-  "^(med_python_selftest|mod_python_selftest|manual_tools_selftest|manual_tables_selftest|o3merge_selftest|starter_python|modpreset_packs|testdata_python|ptfx_fixtures|ptfx_pack|e2e_report_selftest|qa_sheet_python_selftest)$" "python"
+  "^(med_python_selftest|mod_python_selftest|manual_tools_selftest|manual_tables_selftest|o3merge_selftest|starter_python|modpreset_packs|testdata_python|ptfx_fixtures|ptfx_pack|e2e_report_selftest|qa_sheet_python_selftest|ctx_cap_python|git_guard_python|land_python)$" "python"
   "^deflate_pack_selftest$" "core,python"   # OS-FLASHDIET A2: the deterministic raw-deflate encoder's self-test (tools/deflate_pack.py --self-test): a change of the tool (scope map: tools/*.py -> python) or of core runs it
   "^text_pack_selftest$" "platform,python"  # OS-FLASHDIET P5: the platform text packer's self-test (tools/text_pack.py --self-test; it also parses platform/mk66/text/*_text.txt)
   "^cechip_" "audio"  # OS-CECHIP C1: the CHIP oracle (tests/cechip_oracle_smoke_test.cpp; third_party/tracker-ce-chip)

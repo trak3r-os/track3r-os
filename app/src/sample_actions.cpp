@@ -12,14 +12,7 @@
 
 namespace o3os::app {
 
-namespace {
-
-// OS-USBDISK 4.3: while the computer has the card the news is asked, ahead of the persistent disk strip (save_actions.cpp).
-bool say(ActionContext& ctx, core::Severity severity, const char* text) noexcept {
-  return ctx.view.card_on_computer ? ctx.view.notify.ask(severity, text, "sample", ViewState::kMessageMs) : ctx.view.notify.upsert(severity, text, "sample", ViewState::kMessageMs);
-}
-
-// The first instrument slot (0-based) the project has nothing in; -1 when all are used.
+// The first instrument slot (0-based) the project has nothing in; -1 when all are used (Sample load's target, and the Sample edit plugin page's NEW INS).
 int first_free_slot(const model::Project& project) noexcept {
   for (std::uint32_t i = 0; i < model::kMaxInstruments; ++i) {
     if (project.instrument(i) == nullptr) {
@@ -27,6 +20,13 @@ int first_free_slot(const model::Project& project) noexcept {
     }
   }
   return -1;
+}
+
+namespace {
+
+// OS-USBDISK 4.3: while the computer has the card the news is asked, ahead of the persistent disk strip (save_actions.cpp).
+bool say(ActionContext& ctx, core::Severity severity, const char* text) noexcept {
+  return ctx.view.card_on_computer ? ctx.view.notify.ask(severity, text, "sample", ViewState::kMessageMs) : ctx.view.notify.upsert(severity, text, "sample", ViewState::kMessageMs);
 }
 
 // OS-AUDIT-A7: the listing is still being read (or not started): its rows move as entries arrive, so a mark by row is not safe yet. Cancelled / failed lists stay as they are.

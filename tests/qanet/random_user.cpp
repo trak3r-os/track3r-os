@@ -397,9 +397,11 @@ struct Options {
   bool plant_r2 = false;     // self-test: after a sample slot holds audio, the first judged key is judged as if it had changed and said nothing
   bool plant_r3 = false;     // self-test: after a pattern selection exists, the first unit is judged as a block copy that also edited a step
   bool rules23_selftest = false;
+  std::string rules_case;  // --rules-case R2|R3: the rules23 self-test runs that rule only (empty: both)
   unsigned rules_every = 0;  // B4: the rules of part A judge every n-th input of the walk (1: every one, 0: none)
   bool overwrite_report = false;  // B4 fold: one line for every WAV load over a used slot that changed the slot and that no rule flagged, with why it passed (measurement only)
   bool plant_r1 = false;     // self-test: after a sample slot holds audio, one input is judged as if it had changed the document with no unit
+  bool stop_at_plant = false;  // self-test (OS-OPS-CIPOLE): the walk ends after the step that carried a planted breach (what follows proves nothing more and costs minutes under the sanitizers)
   unsigned min_keys = 0;        // the run fails when rule 2 judged fewer keys than this (a walk whose keys are all excused or unquiet proves nothing)
   unsigned min_sel = 0;         // ... and when rule 3 judged fewer inputs than this
   unsigned min_conclusive = 0;  // the run fails when fewer undo bursts than this ended in a compare (a walk that never compares proves nothing)
@@ -936,6 +938,9 @@ class Run {
       }
       if (opt_.plant_leak_at >= 0 && static_cast<int>(step_) >= opt_.plant_leak_at && !planted_) {
         plant_leak();
+      }
+      if (opt_.stop_at_plant && (planted_r1_ || planted_r2_ || planted_r3_)) {
+        break;
       }
     }
     // B5: the relations come after the walk (they move the document and the screens, so before a step they would move every later step of the walk and the baseline's repros with it).
@@ -3837,6 +3842,7 @@ int rules_selftest(const Options& base) {
   o.steps = 300;
   o.rules_every = 1;
   o.plant_r1 = true;
+  o.stop_at_plant = true;
   return plant_check(o, "R1", [](const RunStats& s) { return s.first_fill_step < 0 ? -1 : s.first_fill_step + 1; }, "a sample slot was filled");  // (the breach is planted in the input after the fill)
 }
 
@@ -3846,16 +3852,27 @@ int rules23_selftest(const Options& base) {
     std::fprintf(stderr, "--rules23-selftest needs --found-dir\n");
     return 2;
   }
+  if (!base.rules_case.empty() && base.rules_case != "R2" && base.rules_case != "R3") {
+    std::fprintf(stderr, "--rules-case is R2 or R3\n");
+    return 2;
+  }
   Options o = base;
   o.steps = 150;
   o.rules_every = 1;
   o.plant_r2 = true;
-  int bad = plant_check(o, "R2", [](const RunStats& s) { return s.first_change_step + 1; }, "the document first changed");
+  o.stop_at_plant = true;
+  int bad = 0;
+  if (base.rules_case.empty() || base.rules_case == "R2") {  // (OS-OPS-CIPOLE: `--rules-case R2|R3` runs one rule, so that the two are ctests of their own and run side by side)
+    bad += plant_check(o, "R2", [](const RunStats& s) { return s.first_change_step + 1; }, "the document first changed");
+  }
   Options o3 = base;
   o3.steps = 150;
   o3.rules_every = 1;
   o3.plant_r3 = true;
-  bad += plant_check(o3, "R3", [](const RunStats& s) { return s.first_sel_step; }, "a pattern selection first stood");
+  o3.stop_at_plant = true;
+  if (base.rules_case.empty() || base.rules_case == "R3") {
+    bad += plant_check(o3, "R3", [](const RunStats& s) { return s.first_sel_step; }, "a pattern selection first stood");
+  }
   return bad == 0 ? 0 : 1;
 }
 
@@ -3952,6 +3969,10 @@ int main(int argc, char** argv) {
       o.overwrite_report = true;
     } else if (a == "--plant-r2") {
       o.plant_r2 = true;
+    } else if (a == "--rules-case") {
+      o.rules_case = next();
+    } else if (a == "--stop-at-plant") {
+      o.stop_at_plant = true;
     } else if (a == "--plant-r3") {
       o.plant_r3 = true;
     } else if (a == "--rules23-selftest") {

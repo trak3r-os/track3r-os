@@ -2,6 +2,7 @@
 name: doc-keeper
 description: Keeps the project's handoff documents accurate after a milestone - the status file, the backlog and the build docs. Give it the facts (commits, hashes, sizes, decisions); it updates the docs without inventing anything.
 model: haiku
+maxTurns: 60
 effort: low
 ---
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Promo poster for track3r-os v1.3.0 in the style of a 90s Amiga magazine ad.
 # Everything is drawn pixel by pixel: the tracker's own bitmap fonts (Terminus, Spleen), its Amiga
 # theme palette, real simulator screenshots at 1:1, copper bars, ordered dithering. No smoothing.

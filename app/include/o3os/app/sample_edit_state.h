@@ -46,6 +46,7 @@ struct SampleEditState {
   std::uint8_t plug_focus = 0;
   bool plug_scan = false;
   bool plug_apply = false;  // OS-CEPTFX S4b: F1 APPLY asked (the App's pass runs the picked plugin: a key never touches the card)
+  bool plug_new = false;    // OS-GENNEW: with plug_apply, F4 NEW INS: the run makes a new instrument in the first free slot (a generator only)
 
   std::uint32_t first = 0;  // the window: `span` frames from `first`; 0 is the whole sample
   std::uint32_t span = 0;

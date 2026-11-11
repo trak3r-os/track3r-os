@@ -9,6 +9,7 @@ The repository ships the set-up the maintainer works with in Claude Code: `CLAUD
 | `CLAUDE.md` (hard rules, layout, standards, branches, decisions) | project | The rules apply to every contributor, with or without an agent. |
 | `app/ audio/ formats/ midi/ model/ module/ seq/ sim/ ui/` `CLAUDE.md` | project | Entry points and scoped tests per area. |
 | `docs/maintainer-workflow.md` | maintainer | Roles, lanes, the CI lock, core pinning, the remote build machine. Imported by the last line of the root `CLAUDE.md`. |
+| `.claude/ops-params.ini` | maintainer | The operating parameters (lane count, CI rules and job counts, agent context caps, backlog limits), printed by the SessionStart brief. Set your own numbers. |
 | `.claude/hooks/guard_flash.py` | project safety | Refuses uploaders, debug probes and raw block-device writes. Keep it. |
 | `.claude/hooks/syntax_check.py` | tooling | Syntax-checks a C/C++ file after an edit, through `compile_commands.json`. Needs a host build once: `cmake -S . -B build-os-host -DO3OS_SANITIZE=ON`. |
 | `.claude/hooks/verify_gate.py` | habit | Asks an agent to run a test before it stops, once. |
@@ -21,7 +22,7 @@ The repository ships the set-up the maintainer works with in Claude Code: `CLAUD
 
 ## What to change on your machine
 
-1. **Build parallelism.** `tools/ci.sh` takes `O3OS_CI_JOBS` (default 4). The maintainer's `taskset -c 2-19`, 18 jobs and CI lock are for a 20-thread machine; ignore them, or set your own numbers.
+1. **Build parallelism.** Edit `.claude/ops-params.ini` (lanes, job counts, limits). `tools/ci.sh` takes `O3OS_CI_JOBS` (default 4). The maintainer's `taskset -c 2-19`, 18 jobs and CI lock are for a 20-thread machine; ignore them, or set your own numbers.
 2. **Remote CI.** Optional. `tools/remote_ci.sh` needs `O3OS_REMOTE_CI=<ssh-host>:<root>` in your local environment (`.claude/settings.local.json`, which is git-ignored; start from `.claude/settings.local.json.example`). Without it the script exits 3 and you run `tools/ci.sh` locally, which is what the rules say.
 3. **Toolchain.** The Arm GNU toolchain lives outside the repository: `docs/toolchain.md`.
 4. **LSP.** The set-up assumes clangd on `build-os-host/compile_commands.json` (`.clangd`). Without it, `code_nav_guard.py` will send you to a tool you do not have: remove its entry from `.claude/settings.json`.

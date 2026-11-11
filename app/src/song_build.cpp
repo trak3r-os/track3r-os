@@ -137,6 +137,9 @@ void song_build_text(SongBuildKind kind, const SongBuildInfo& info, core::FixedS
       append_uint(out, info.have);
       out.append(" FREE");
       break;
+    case SongBuildRefusal::NoLanes:
+      out.assign("NO ROOM FOR THE MIDI LANES");
+      break;
     case SongBuildRefusal::NoNext:
       out.assign("NO NEXT SLOT");
       break;
@@ -188,7 +191,7 @@ std::uint16_t song_form_tracks(std::uint8_t groups, unsigned drums) noexcept {
   return mask;
 }
 
-void song_form_plan(const model::Project& project, const SongRect& rect, SongForm form, unsigned drums, SongBuildPlan& plan) noexcept {
+void song_form_plan(const model::Project& project, const SongRect& rect, SongForm form, unsigned drums, SongBuildPlan& plan, const model::LaneStore* lanes) noexcept {
   plan = SongBuildPlan{};
   SongBuildInfo& info = plan.info;
   const int count = static_cast<int>(project.song_length());
@@ -265,9 +268,18 @@ void song_form_plan(const model::Project& project, const SongRect& rect, SongFor
   if (!song_build_assign_numbers(project, plan)) {
     return;  // (refused: it said why)
   }
+  std::uint32_t lane_events = 0;  // the lane pool the copies take together (OS-MIDIREC-P1 S7a): song_form_apply cannot be allowed to answer Full midway
+  std::uint32_t lane_count = 0;
+  for (unsigned c = 0; c < info.copies; ++c) {
+    lane_copy_counts(project, lanes, plan.copy[c].from, static_cast<std::uint16_t>(~plan.copy[c].cleared), lane_events, lane_count);
+  }
+  if (!lane_pool_fits(lanes, lane_events, lane_count)) {
+    info.refusal = SongBuildRefusal::NoLanes;
+    return;
+  }
   std::size_t body = 0;
   for (unsigned c = 0; c < info.copies; ++c) {
-    body += copy_pattern_body_masked(project, plan.copy[c].from, plan.copy[c].cleared);
+    body += copy_pattern_body_masked(project, plan.copy[c].from, plan.copy[c].cleared, lanes);
   }
   for (unsigned k = 0; k < n; ++k) {
     if (slot_copy[k] != kNoCopy) {

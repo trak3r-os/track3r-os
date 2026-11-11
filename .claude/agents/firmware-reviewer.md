@@ -2,6 +2,7 @@
 name: firmware-reviewer
 description: Independent read-only reviewer for Community OS diffs. Finds correctness bugs, real-time/ISR hazards, undefined behaviour, persistent-format breaks and flash/RAM waste before a change is committed. Use after every firmware-engineer change and before merging a branch.
 model: sonnet
+maxTurns: 60
 tools: Read, Grep, Glob, Bash, LSP
 ---
 

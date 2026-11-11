@@ -191,7 +191,7 @@ void mode_roles(const Model& model, const ViewState& view, const PatternContent&
   if (view.padmode.fixed() == PadMode::Notes) {  // OS-NOTESLED: the NOTES board lit as PIANO and ISO light their notes (nothing else on the pads: no jump, no octave pads)
     for (unsigned pad = 0; pad < kPadCount; ++pad) {
       const unsigned n = view.edit.pads.note(pad);
-      roles[pad] = e.is_root(n) ? PadRole::Front : (e.in_scale(n) ? PadRole::Back : PadRole::Off);  // (with SCALE LOCK the board holds scale notes only: the roots stand out)
+      roles[pad] = n == kNoNote ? PadRole::Off : (e.in_scale(n) ? PadRole::Front : PadRole::Back);  // OS-NOTESLED2: scale notes HIGH, the others LOW (with SCALE LOCK or no scale: all Front)
     }
     return;
   }
@@ -211,17 +211,19 @@ void mode_roles(const Model& model, const ViewState& view, const PatternContent&
     switch (fn.kind) {
       case PadKey::Note: {
         const unsigned n = pad_fn_note(e, fn);
-        role = n == kNoNote ? PadRole::Off : (e.is_root(n) ? PadRole::Front : (e.in_scale(n) ? PadRole::Back : PadRole::Off));
+        // OS-NOTESLED2: with SCALE LOCK the pad plays the locked note (pad_mode_actions.cpp), so every note pad is in the scale
+        role = n == kNoNote ? PadRole::Off : (e.lock != 0u || e.in_scale(n) ? PadRole::Front : PadRole::Back);
         break;
       }
       case PadKey::Nav:
         role = PadRole::Back;
         break;
       case PadKey::OctUp:
-        role = e.octave + 1u < kEntryOctaves ? PadRole::Back : PadRole::Off;
+        // OS-NOTESLED2: Front while the octave is shifted up from the default, Back otherwise, Off at the end of the range
+        role = e.octave + 1u >= kEntryOctaves ? PadRole::Off : (e.octave > kEntryDefaultOctave ? PadRole::Front : PadRole::Back);
         break;
       case PadKey::OctDown:
-        role = e.octave > 0u ? PadRole::Back : PadRole::Off;
+        role = e.octave == 0u ? PadRole::Off : (e.octave < kEntryDefaultOctave ? PadRole::Front : PadRole::Back);
         break;
       default:
         break;

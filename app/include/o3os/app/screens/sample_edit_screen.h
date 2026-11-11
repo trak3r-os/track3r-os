@@ -14,8 +14,8 @@ inline constexpr const char* kSampleEditBusySoftKeys[8] = {"CROP", "NORM", "REVE
 inline constexpr const char* kSampleEditFxBusySoftKeys[8] = {"FILTER", "COMPRESS", "-", "-", "-", "-", "PREVIEW", "CANCEL"};
 // The PLUGINS page (OS-CEPTFX S4a, new Community OS behaviour; the Sample edit button once more): the plugins of /Effects with their parameters. F1 applies the plugin (S4b wires it), F2 reads the folder again, F3 puts
 // every parameter back to its default. The Shift row is the edit page's.
-inline constexpr const char* kSampleEditPlugSoftKeys[8] = {"APPLY", "RESCAN", "DEFAULTS", "-", "-", "-", "PREVIEW", "UNDO"};
-inline constexpr const char* kSampleEditPlugBusySoftKeys[8] = {"APPLY", "RESCAN", "DEFAULTS", "-", "-", "-", "PREVIEW", "CANCEL"};
+inline constexpr const char* kSampleEditPlugSoftKeys[8] = {"APPLY", "RESCAN", "DEFAULTS", "NEW INS", "-", "-", "PREVIEW", "UNDO"};
+inline constexpr const char* kSampleEditPlugBusySoftKeys[8] = {"APPLY", "RESCAN", "DEFAULTS", "NEW INS", "-", "-", "PREVIEW", "CANCEL"};
 // While Shift is held (OS-SHIFTROW): F1 / F2 the AMIGA conversion at 8,287 / 16,574 Hz, F3 its 8-bit option (OS-AMG1), F4 DC REMOVE (OS-SEDFX), F6 the sample as a WAV, F7 PREVIEW from the selection's edge, F8 REDO.
 inline constexpr const char* kSampleEditShiftKeys[8] = {"AMG 8K", "AMG 16K", "Q8", "DC REM", "NEXT INS", "SAVE WAV", "PRV EDGE", "REDO"};
 

@@ -48,6 +48,7 @@ struct LaneRec {
   std::uint8_t cc_have = 0;
   bool said_cc = false;             // this recording has said once that a letter records nothing (PROG, CH AT, POLY AT, unassigned)
   bool said_ci = false;             // ... and once that a move in the count-in is not recorded
+  bool said_order = false;          // S7b: this arming has said once that a lane records in the forward order only (reset when the order is forward again or the recording is not wanted)
   bool run = false;                 // a count-in or a take is under way: said_cc / said_ci belong to it (not reset when the take is armed out of the count-in)
   // S5, STEP mode (REC, no stamps): the chord being held. Its notes go into the take as they are pressed (LEN one step, at the cursor step's first tick); the last key up commits it and moves the cursor on.
   bool step_open = false;

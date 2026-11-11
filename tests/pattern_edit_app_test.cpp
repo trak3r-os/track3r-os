@@ -3545,6 +3545,47 @@ TEST_CASE("OS-PTOOLS2 S2 F1 APPLY INSTRUMENT: every note of the block takes the 
   CHECK(rig.step(0, 0).note == 61);
 }
 
+// OS-MIDIREC-P1 S7a, CLEAR LANE (new Community OS behaviour): TOOLS CLEAR of ALL over the whole cursor track also clears that track's MIDI lane, in the one undo unit; another track's lane stays.
+TEST_CASE("OS-MIDIREC-P1 S7a: TOOLS CLEAR of the whole track clears the track's MIDI lane in one undo unit, undo brings steps and lane back") {
+  static model::LaneStore store;
+  Rig rig(true, 16);
+  rig.edit_mode();
+  store.clear();
+  store.adopt(rig.project().load_epoch());
+  rig.editor->attach_lanes(&store);
+  put(rig, 0, 0, note_at(61, 3));
+  model::LaneEvent ev[2]{};
+  ev[0].tick = 10;
+  ev[0].kind_channel = static_cast<std::uint8_t>(1u << 4);
+  ev[0].a = 1;
+  ev[0].b = 50;
+  ev[1] = ev[0];
+  ev[1].tick = 200;
+  NEED(rig.editor->lane_replace(1, 0, 0, 768, ev, 2) == model::Status::Ok);
+  NEED(rig.editor->lane_replace(1, 1, 0, 768, ev, 2) == model::Status::Ok);
+  rig.flush();
+  const unsigned depth = rig.depth();
+  (void)rig.invoke("select.clear");
+  (void)rig.invoke("select.column_all");
+  (void)rig.invoke("select.column_all");
+  NEED(rig.state().edit.selection.block(rig.view().row(), rig.view().track()).whole_steps());
+  rig.tap(Button::F7);
+  rig.pad(0);
+  rig.tap(Button::Right);
+  rig.tap(Button::Right);  // OP: CLEAR
+  NEED(rig.state().ptools.tool == app::PTool::Clear);
+  rig.tap(Button::F1);
+  CHECK(rig.step(0, 0).note == model::kNoteEmpty);
+  CHECK(store.lane(1, 0).count == 0u);
+  CHECK(store.lane(1, 1).count == 2u);  // another track's lane stays
+  CHECK(std::string(rig.message()).find("+ LANE") != std::string::npos);
+  CHECK(rig.depth() == depth + 1);
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  CHECK(rig.step(0, 0).note == 61);
+  CHECK(store.lane(1, 0).count == 2u);
+  CHECK(store.lane(1, 1).count == 2u);
+}
+
 TEST_CASE("OS-PTOOLS2 S2 the dialog's column rule at open: TRANSPOSE on a Vol-column block and INSTRUMENT on a Note-column block open no dialog, with the message, nothing written") {
   Rig rig(true, 16);
   rig.edit_mode();

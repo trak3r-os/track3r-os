@@ -1036,6 +1036,10 @@ unsigned App::poll_midi_notes(midi::CcInput& in) noexcept {
   const unsigned in_channel = static_cast<unsigned>(model_.device.get(ds::MidiInChannel));
   // OS-MIDIREC-P1 S3: REC STORE = Lane on a MIDI instrument: the keyboard's notes and control changes go to the take (stamped by the render), not to the grid. Before sync_take, so that the commit of a
   // finished take still joins the take's undo group when it is open.
+  static_assert(audio::PlayPosition::kTrackWords == seq::kPerfTracks, "one play mode per Perform track");
+  for (unsigned t = 0; t < seq::kPerfTracks; ++t) {  // S7b: the order each track plays in (a lane take is forward only)
+    state_.track_mode[t] = perform_ != nullptr ? static_cast<std::uint8_t>(perform_->bank.play_mode(t)) : std::uint8_t{0};
+  }
   const bool lane = lane_poll(lane_rec_, in, session_.state_editor(), model_, state_, in_port, in_channel);
   sync_take();
   const std::uint32_t drops = in.note_dropped();
@@ -1351,6 +1355,7 @@ void App::report_jobs() noexcept {
       dirty_ = true;
       nothing_done = finish_edit(st);
       edit_ptfx_ = false;
+      edit_new_from_ = 0;
     }
     if (static_cast<int>(slot) == preview_slot_) {  // a failed audition read
       preview_slot_ = -1;
@@ -2891,6 +2896,20 @@ void App::poll_ptfx() noexcept {
   }
 }
 
+namespace {
+
+// OS-GENNEW: the slot holds a sample an effect can edit: audio AND an instrument. A deleted instrument leaves its PCM in the bank until the next project load (instrument_delete), so audio alone says
+// nothing: such a slot is empty for every plugin check and a generator goes in by the take path (finish_generated), which replaces the leftover audio like a load does.
+bool slot_has_sample(const SampleBank& bank, unsigned slot) noexcept {
+  if (bank.pcm(slot).frames == 0u) {
+    return false;
+  }
+  const model::Instrument* const in = bank.project().instrument(slot);
+  return in != nullptr && in->kind != model::InstrumentKind::None;
+}
+
+}  // namespace
+
 // OS-CEPTFX S4b (docs/specs/OS-CEPTFX.md 3.7): F1 APPLY runs the picked plugin with the page's values through the S3b path (run_ptfx and its gates; the job ends in finish_edit). Every refusal is one strip
 // text and changes nothing. A generator (OS-CEPTFX S4c) needs no sample: on an empty slot it makes the sample and the instrument (finish_generated).
 void App::apply_ptfx() noexcept {
@@ -2899,6 +2918,9 @@ void App::apply_ptfx() noexcept {
     return;
   }
   st.plug_apply = false;
+  const bool fresh = st.plug_new;  // OS-GENNEW: F4 NEW INS: a generator into the first free instrument (refusals change nothing)
+  st.plug_new = false;
+  int target = kPtfxViewSlot;
   PtfxPage* const page = samples_ != nullptr ? samples_->ptfx_page() : nullptr;
   const char* why = "NO PLUGINS HERE";
   if (page != nullptr && page->cat != nullptr) {
@@ -2911,14 +2933,18 @@ void App::apply_ptfx() noexcept {
       const module::PtfxEntry& e = cat.entry(sel);
       if (e.status != module::PtfxStatus::Ok || e.quarantined) {
         why = ptfx_refusal_text(e);
-      } else if ((e.flags & module::kPtfxFlagGenerator) == 0u && samples_->pcm(wave_slot(state_)).frames == 0u) {
+      } else if (fresh && (e.flags & module::kPtfxFlagGenerator) == 0u) {
+        why = "NEW INS NEEDS A GENERATOR";
+      } else if (fresh && (target = first_free_slot(samples_->project())) < 0) {
+        why = "NO FREE INSTRUMENT";
+      } else if (!fresh && (e.flags & module::kPtfxFlagGenerator) == 0u && !slot_has_sample(*samples_, wave_slot(state_))) {
         why = "NO SAMPLE";
       } else if (!page->loaded(sel) || !page->ready()) {
         why = "PLUGIN FILE DAMAGED";  // the header could not be read again (the card, or another file under the name)
       } else if (ptfx_runner_ == nullptr) {
         why = "PLUGINS RUN ON THE TRACKER";  // (the simulator with no stand-in for this plugin)
       } else {
-        why = ptfx_runner_(ptfx_runner_ctx_, sel, page->values());
+        why = ptfx_runner_(ptfx_runner_ctx_, sel, page->values(), target);
       }
     }
   }
@@ -3016,15 +3042,23 @@ void App::poll_sedit() noexcept {
 // Note: edit_begin (the job's Size step) clears the undo and redo history of the bank when the slot is not the one the history is for, even if the run is cancelled afterwards.
 // OS-CEPTFX S4c: a generator ignores the selection and replaces the whole sample (one history step); on an empty slot it makes the sample (the bank's take path, like a load: mono, no history step) and
 // the instrument `Gen NN`, so it needs the Sample edit screen (the PLUGINS page) but no sample; a slot that holds another kind of instrument is refused.
-const char* App::ptfx_refusal(bool generator) const noexcept {
-  const SampleBank::Pcm pcm = samples_ != nullptr ? samples_->pcm(wave_slot(state_)) : SampleBank::Pcm{};
-  if ((pcm.frames == 0u && !generator) || state_.screen != ScreenId::SampleEdit) {  // sample.commit is enabled on the Sample edit screen only: the run needs it in view (the selection is its too)
+const char* App::ptfx_refusal(bool generator, int target) const noexcept {
+  const unsigned slot = target < 0 ? wave_slot(state_) : static_cast<unsigned>(target);  // OS-GENNEW: NEW INS runs into another slot than the one in view
+  if (slot >= SampleBank::kSlots) {
+    return "NO FREE INSTRUMENT";
+  }
+  const bool filled = samples_ != nullptr && slot_has_sample(*samples_, slot);
+  if ((!filled && !generator) || state_.screen != ScreenId::SampleEdit) {  // sample.commit is enabled on the Sample edit screen only: the run needs it in view (the selection is its too)
     return "OPEN A SAMPLE IN SAMPLE EDIT";
   }
-  if (pcm.frames == 0u && samples_ != nullptr) {
-    const model::Instrument* in = samples_->project().instrument(wave_slot(state_));
+  if (!filled && samples_ != nullptr) {
+    const model::Instrument* in = samples_->project().instrument(slot);
     if (in != nullptr && in->kind != model::InstrumentKind::None && in->kind != model::InstrumentKind::Sample) {
       return "NO SAMPLE INSTRUMENT HERE";  // (the text of the engine and play-mode refusals: one literal)
+    }
+    // The new sample goes through the bank's take path, and take_begin() gives up a live take: the Recorder's unsaved take (Review) would be overwritten. The DJ scratch asks the same (dj_actions.cpp).
+    if (generator && (samples_->take_held() || samples_->take().frames != 0u || (model_.rec != nullptr && model_.rec->arena_busy()))) {
+      return "A RECORDING OR A TAKE IS IN PROGRESS";
     }
   }
   return edit_slot_ >= 0 || import_slot_ >= 0 ? "ANOTHER JOB IS RUNNING" : nullptr;
@@ -3032,15 +3066,15 @@ const char* App::ptfx_refusal(bool generator) const noexcept {
 
 const char* App::ptfx_not_ready_why() noexcept { return samples_ != nullptr ? samples_->ptfx_job().not_ready_why() : nullptr; }
 
-const char* App::run_ptfx(const PtfxJob::Plugin& plugin) noexcept {
+const char* App::run_ptfx(const PtfxJob::Plugin& plugin, int target) noexcept {
   if (samples_ != nullptr) {
     samples_->ptfx_job().clear_not_ready_why();  // (a refusal before the job's own must not show the last run's)
   }
   const bool generator = plugin.info != nullptr && (plugin.info->flags & module::kPtfxFlagGenerator) != 0u;
-  if (const char* why = ptfx_refusal(generator)) {
+  if (const char* why = ptfx_refusal(generator, target)) {
     return why;
   }
-  const unsigned slot = wave_slot(state_);
+  const unsigned slot = target < 0 ? wave_slot(state_) : static_cast<unsigned>(target);
   const SampleBank::Pcm pcm = samples_->pcm(slot);
   PtfxJob::Source src;
   src.pcm = pcm.data;
@@ -3051,7 +3085,7 @@ const char* App::run_ptfx(const PtfxJob::Plugin& plugin) noexcept {
   src.side = pcm.side;
   src.alloc = [](void* self, std::uint32_t frames, bool stereo) noexcept -> std::int16_t* {
     App* const app = static_cast<App*>(self);
-    if (app->samples_->pcm(app->edit_target_).frames != 0u) {
+    if (!app->samples_->ptfx_job().generator() || slot_has_sample(*app->samples_, app->edit_target_)) {  // an effect always edits; a generator on a slot with no instrument or no audio takes the take path
       return app->samples_->edit_begin(app->edit_target_, frames, stereo);  // S5: M and S for a stereo run (a CONVERT_TO_MONO result is committed as mono from it)
     }
     // OS-CEPTFX S4c: a generator on an empty slot writes into a take (the bank's load path: no history); edit_dst_ marks that this run holds it, and finish_edit commits or releases it
@@ -3087,6 +3121,7 @@ const char* App::run_ptfx(const PtfxJob::Plugin& plugin) noexcept {
   edit_dst_ = nullptr;
   edit_op_ = EditOp::Amplify;
   edit_ptfx_ = true;
+  edit_new_from_ = target >= 0 ? state_.instrument : 0;  // OS-GENNEW: a NEW INS run remembers the instrument in view, finish_generated jumps to the new one only if it is still the one in view
   state_.sedit.running = true;
   dirty_ = true;
   shown_percent_[js] = -1;
@@ -3213,9 +3248,14 @@ bool App::finish_generated(std::uint32_t frames) noexcept {
       session_.reset_history();
     }
   }
-  SampleEditState& st = state_.sedit;
-  st.a = st.b = 0;
-  st.first = st.span = 0;
+  if (state_.screen == ScreenId::SampleEdit && wave_slot(state_) == slot) {  // the selection and the zoom belong to the sample in view: another view keeps its own
+    SampleEditState& st = state_.sedit;
+    st.a = st.b = 0;
+    st.first = st.span = 0;
+  }
+  if (edit_new_from_ != 0 && state_.screen == ScreenId::SampleEdit && state_.instrument == edit_new_from_) {  // OS-GENNEW: F4 NEW INS shows the new instrument, unless the view moved on while it ran
+    (void)invoke(core::action_id("sedit.show"), static_cast<core::ActionArg>(slot + 1u));
+  }
   dirty_ = true;
   core::FixedString<core::kNotifyTextChars> text;
   text.assign("GENERATED: ");

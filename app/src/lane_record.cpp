@@ -47,11 +47,15 @@ bool lane_wanted(const Model& model, const ViewState& view, std::uint8_t& track,
   return pattern_recording(model, view) && midi_lane(model, view, track, route);
 }
 
+// S7b (new Community OS behaviour): the take's ticks are the track's playhead, and the lane is read by (step, microstep) of the step being played: in Backward, PingPong, Random and the custom
+// orders the playhead of one pass does not run forward through the pattern, so a take is refused there (the grid takes the keyboard instead). A track the Perform bank has no mode for is Forward.
+bool order_ok(const ViewState& view, std::uint32_t track) noexcept { return track >= audio::PlayPosition::kTrackWords || view.track_mode[track] == 0u; }
+
 // ... and the count-in of such a recording (the take is armed from it: decision (b) holds from the arm).
 bool lane_counting_in(const Model& model, const ViewState& view) noexcept {
   std::uint8_t track = 0;
   seq::MidiRoute route{};
-  return pattern_counting_in(model, view) && midi_lane(model, view, track, route);
+  return pattern_counting_in(model, view) && midi_lane(model, view, track, route) && order_ok(view, track);
 }
 
 // ... and the Pattern screen in STEP (Edit with the cursor free), a single cell selected (a block takes no note, as in the grid).
@@ -209,7 +213,25 @@ bool lane_poll(LaneRec& r, midi::CcInput& in, model::Editor* editor, const Model
       step_end(r, editor, model, view, false);
     }
   }
-  const bool want = lane_wanted(model, view, track, route);
+  const bool base = lane_wanted(model, view, track, route);
+  if (r.capturing() && !order_ok(view, r.track)) {  // S7b: the order changed under a take: its ticks mean nothing now, so nothing is committed
+    in.close_take();
+    r.take->reset();
+    r.track = LaneRec::kNone;
+    r.said_drop = false;
+    r.cc_have = 0;
+    r.run = false;
+    r.said_order = true;
+    say(view, core::Severity::Info, "LANE REC: FORWARD ONLY");
+  }
+  const bool refused = base && !order_ok(view, track);
+  if (refused && !r.said_order) {
+    r.said_order = true;
+    say(view, core::Severity::Info, "LANE REC: FORWARD ONLY");
+  } else if (!refused) {
+    r.said_order = false;
+  }
+  const bool want = base && !refused;
   if (r.capturing() && (!want || track != r.track || route.ch != r.channel || route.ports != r.port)) {
     stop(r, in, editor, model, view, in_port, in_channel);
     r.run = false;
@@ -382,6 +404,7 @@ void lane_discard(LaneRec& r) noexcept {
   r.cc_have = 0;
   r.said_cc = false;
   r.said_ci = false;
+  r.said_order = false;
   r.run = false;
 }
 

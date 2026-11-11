@@ -523,7 +523,7 @@ TEST_CASE("TRACKS pads: the LEDs of each row (Front = yours, Back = silenced by 
   }
   rig.release(Button::Shift);
   rig.pass(1);
-  NEED(rig.lights(roles));  // NOTES again: its own lights (OS-NOTESLED), the root Front
+  NEED(rig.lights(roles));  // NOTES again: its own lights (OS-NOTESLED2: a note in the scale Front; no scale, every note)
   CHECK(roles[36] == PadRole::Front);
 }
 
@@ -747,64 +747,94 @@ TEST_CASE("PIANO: Shift + F3 keeps it, a pad enters its note in Edit, the octave
   CHECK(rig.state().pattern.row() == 8);
 }
 
-TEST_CASE("PIANO: the LEDs light the existing keys, the root Front, the in-scale keys Back, the rest Off") {
+TEST_CASE("PIANO: the LEDs light the existing keys by scale (in the scale Front, outside Back, the root like the rest), no key Off, the jump and octave pads as before (OS-NOTESLED2)") {
   Rig rig;
   rig.shift_tap(Button::F3);
   PadRole roles[48];
   NEED(rig.lights(roles));
-  CHECK(roles[37] == PadRole::Front);  // C (the root)
-  CHECK(roles[38] == PadRole::Back);   // D: Chromatic lights every note
+  CHECK(roles[37] == PadRole::Front);  // C
+  CHECK(roles[38] == PadRole::Front);  // D: Chromatic has every note in the scale
   CHECK(roles[0] == PadRole::Back);    // the navigation column
   CHECK(roles[4] == PadRole::Off);     // no key there
   CHECK(roles[21] == PadRole::Off);    // (row 2 col 10: unused)
   CHECK(roles[11] == PadRole::Back);   // octave up
   rig.set_entry(2, 1, 0);  // D major
   NEED(rig.lights(roles));
-  CHECK(roles[38] == PadRole::Front);  // D
-  CHECK(roles[39] == PadRole::Back);   // E
-  CHECK(roles[40] == PadRole::Off);    // F is not in D major
-  CHECK(roles[26] == PadRole::Back);   // C#, the 7th of D major
+  CHECK(roles[38] == PadRole::Front);  // D (the root: no marker of its own)
+  CHECK(roles[39] == PadRole::Front);  // E
+  CHECK(roles[40] == PadRole::Back);   // F is not in D major
+  CHECK(roles[26] == PadRole::Front);  // C#, the 7th of D major
+  CHECK(roles[0] == PadRole::Back);    // the jump and octave pads do not follow the scale
+  CHECK(roles[11] == PadRole::Back);
+  CHECK(roles[4] == PadRole::Off);
+  rig.set_entry(2, 1, 1);  // SCALE LOCK on: a key plays the locked note, so every key is lit Front (F plays E or F#)
+  NEED(rig.lights(roles));
+  CHECK(roles[38] == PadRole::Front);
+  CHECK(roles[40] == PadRole::Front);
+  CHECK(roles[26] == PadRole::Front);
+  CHECK(roles[0] == PadRole::Back);   // the jump pad is unchanged
+  CHECK(roles[4] == PadRole::Off);    // no key there
 }
 
-// OS-NOTESLED: the NOTES board lit as PIANO and ISO light theirs; what a pad plays is not touched.
-TEST_CASE("NOTES: the LEDs light the board, the root Front, the other notes of the scale Back, a chromatic note outside the scale Off, and with SCALE LOCK only the roots stand out (OS-NOTESLED)") {
+TEST_CASE("PIANO: the octave pads light HIGH in the direction the octave is shifted from the default 3, Off at the end of the range (OS-NOTESLED2)") {
+  Rig rig;
+  rig.shift_tap(Button::F3);
+  PadRole roles[48];
+  struct Want {
+    unsigned octave;
+    PadRole up, down;
+  };
+  // Shift + F1 steps the octave up by one, 9 wraps to 0: 3 -> 5 -> 9 -> 0 -> 2 -> 3
+  const Want wants[] = {
+      {3, PadRole::Back, PadRole::Back},  {5, PadRole::Front, PadRole::Back}, {9, PadRole::Off, PadRole::Back},
+      {0, PadRole::Back, PadRole::Off},   {2, PadRole::Back, PadRole::Front}, {3, PadRole::Back, PadRole::Back},
+  };
+  NEED(rig.state().edit.entry.octave == app::kEntryDefaultOctave);
+  const unsigned taps[] = {0, 2, 4, 1, 2, 1};
+  for (unsigned i = 0; i < 6; ++i) {
+    for (unsigned t = 0; t < taps[i]; ++t) {
+      rig.shift_tap(Button::F1);
+    }
+    NEED(rig.state().edit.entry.octave == wants[i].octave);
+    NEED(rig.lights(roles));
+    CHECK_MESSAGE(roles[11] == wants[i].up, "octave " << wants[i].octave << " up pad");
+    CHECK_MESSAGE(roles[47] == wants[i].down, "octave " << wants[i].octave << " down pad");
+  }
+}
+
+// OS-NOTESLED / OS-NOTESLED2: the NOTES board lit as PIANO and ISO light theirs; what a pad plays is not touched.
+TEST_CASE("NOTES: the LEDs light by scale, a note in the scale Front (the root too), one outside Back, and with SCALE LOCK or no scale every pad Front (OS-NOTESLED2)") {
   Rig rig;
   PadRole roles[48];
   NEED(rig.state().padmode.fixed() == app::PadMode::Notes);
-  NEED(rig.lights(roles));
-  CHECK(roles[36] == PadRole::Front);  // C-3, the root (pad 36 is the bottom row's first pad)
-  CHECK(roles[37] == PadRole::Back);   // C#: Chromatic lights every note
-  CHECK(roles[24] == PadRole::Front);  // C-4, the root an octave up (the next row up)
+  NEED(rig.lights(roles));  // no scale (Chromatic): every note is in the scale
+  for (const PadRole r : roles) {
+    CHECK(r == PadRole::Front);
+  }
   rig.set_entry(2, 1, 0);  // D major, lock off: the board keeps its chromatic notes
   NEED(rig.lights(roles));
+  unsigned back = 0;
   for (unsigned pad = 0; pad < 48u; ++pad) {
     const unsigned n = rig.state().edit.pads.note(pad);
-    const bool root = n % 12u == 2u;
-    const bool in_scale = root || n % 12u == 4u || n % 12u == 6u || n % 12u == 7u || n % 12u == 9u || n % 12u == 11u || n % 12u == 1u;  // D E F# G A B C#
-    CHECK(roles[pad] == (root ? PadRole::Front : (in_scale ? PadRole::Back : PadRole::Off)));
+    const unsigned pc = n % 12u;
+    const bool in_scale = pc == 2u || pc == 4u || pc == 6u || pc == 7u || pc == 9u || pc == 11u || pc == 1u;  // D E F# G A B C#
+    CHECK(roles[pad] == (in_scale ? PadRole::Front : PadRole::Back));
+    back += roles[pad] == PadRole::Back ? 1u : 0u;
   }
-  unsigned off = 0;
-  for (const PadRole r : roles) {
-    off += r == PadRole::Off ? 1u : 0u;
-  }
-  CHECK(off > 0u);  // F, G#, A#, D#, C are on the chromatic board and not in the scale
+  CHECK(back > 0u);  // F, G#, A#, D#, C are on the chromatic board and not in the scale
+  CHECK(roles[36 + 2] == PadRole::Front);  // D, the root: lit like the other scale notes
   rig.set_entry(2, 1, 1);  // SCALE LOCK on: the board holds the scale's notes only
   NEED(rig.lights(roles));
-  unsigned fronts = 0;
   for (unsigned pad = 0; pad < 48u; ++pad) {
-    const unsigned n = rig.state().edit.pads.note(pad);
-    CHECK(roles[pad] == (n % 12u == 2u ? PadRole::Front : PadRole::Back));  // no pad is Off: every note of the board is in the scale
-    fronts += roles[pad] == PadRole::Front ? 1u : 0u;
+    CHECK(roles[pad] == PadRole::Front);  // every note of the board is in the scale
   }
-  CHECK(fronts > 0u);
-  CHECK(fronts < 48u);
   // PIANO keeps its own lights and leaving it for NOTES brings these back.
   rig.shift_tap(Button::F3);
   NEED(rig.lights(roles));
   CHECK(roles[0] == PadRole::Back);  // PIANO's navigation column
   rig.shift_tap(Button::F2);
   NEED(rig.lights(roles));
-  CHECK(roles[0] == (rig.state().edit.pads.note(0) % 12u == 2u ? PadRole::Front : PadRole::Back));
+  CHECK(roles[0] == PadRole::Front);
 }
 
 // ---- OS-PADS-B: ISOMORPHIC ----------------------------------------------------------------------------------------------------------------------
@@ -828,13 +858,19 @@ TEST_CASE("ISO: a column is a semitone and a row up is a fourth; Shift + F4 keep
   CHECK(rig.step(0).note == 42);
   PadRole roles[48];
   NEED(rig.lights(roles));
-  CHECK(roles[36] == PadRole::Front);  // C-3, the root
+  CHECK(roles[36] == PadRole::Front);  // C-3
   CHECK(roles[31] == PadRole::Front);  // C-4: 12 above, 7 columns right and a row up (7 + 5)
-  CHECK(roles[37] == PadRole::Back);   // Chromatic: every note is in the scale
+  CHECK(roles[37] == PadRole::Front);  // Chromatic: every note is in the scale (OS-NOTESLED2: Front by scale, no root marker)
   rig.set_entry(0, 1, 0);              // C major
   NEED(rig.lights(roles));
-  CHECK(roles[37] == PadRole::Off);    // C#
-  CHECK(roles[38] == PadRole::Back);   // D
+  CHECK(roles[36] == PadRole::Front);  // C, the root: like the other scale notes
+  CHECK(roles[37] == PadRole::Back);   // C# is outside the scale
+  CHECK(roles[38] == PadRole::Front);  // D
+  rig.set_entry(2, 1, 1);              // D major with SCALE LOCK: the pads play the locked notes, so every pad is Front
+  NEED(rig.lights(roles));
+  for (unsigned pad = 0; pad < 48u; ++pad) {
+    CHECK_MESSAGE(roles[pad] == PadRole::Front, "pad " << pad);
+  }
 }
 
 // ---- OS-PADS-B: STEP ----------------------------------------------------------------------------------------------------------------------------

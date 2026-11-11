@@ -5,7 +5,7 @@
 //
 //   NOTES    today's pads: preview in Browse, a note, an instrument, a volume or an FX value in Edit, by the column under the cursor.
 //   PIANO    OS-PADS-B (pad_maps.h): two octaves drawn as a piano, the pattern jumps on column 1 and the octave keys on column 12; the pads play and enter notes (action pads.play).
-//   ISO      OS-PADS-B (pad_maps.h): every column a semitone, every row up a fourth (+5); the root pads Front, the in-scale ones Back.
+//   ISO      OS-PADS-B (pad_maps.h): every column a semitone, every row up a fourth (+5); a pad in the scale Front, one outside it Back (OS-NOTESLED2).
 //   STEP     OS-PADS-B (pad_mode_actions.cpp): the pads are the steps of the cursor's track; see there.
 //   PATS     OS-PADS-B (pad_mode_actions.cpp): the pads are patterns 1..48: lit = has content, Front = playing, blinking = queued; a tap queues it (stopped: selects it).
 //   VU       OS-PADS-B (pad_lights.h): the 12 columns are the 12 tracks, a 4-row level meter each (the engine's published meters). Shift + F7 again: FADERS, the same pads as 12 track

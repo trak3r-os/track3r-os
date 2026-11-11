@@ -130,7 +130,7 @@ bool write_edit(ActionContext& ctx, const SongEdit& edit, const SongPlan& plan, 
   const model::Project& p = ctx.edit->project();
   SongUnique u;
   if (unique) {
-    song_unique_plan(p, edit.rect.s0, edit.rect.s1, &plan.shared_ids, u);
+    song_unique_plan(p, edit.rect.s0, edit.rect.s1, &plan.shared_ids, u, ctx.edit->lanes());
     if (u.no_room) {
       return say(ctx, core::Severity::Warn, "NO FREE PATTERN");
     }
@@ -386,7 +386,7 @@ bool song_unique(ActionContext& ctx, core::ActionArg) noexcept {
   const model::Project& p = ctx.edit->project();
   const bool one = !ctx.view.song.selecting();
   SongUnique u;
-  song_unique_plan(p, rect.s0, rect.s1, nullptr, u);
+  song_unique_plan(p, rect.s0, rect.s1, nullptr, u, ctx.edit->lanes());
   if (u.no_room) {
     return say(ctx, core::Severity::Warn, "NO FREE PATTERN");
   }
@@ -575,7 +575,7 @@ bool songtools_apply(ActionContext& ctx, core::ActionArg) noexcept {
     }
     case SongTool::Form: {  // OS-SONG-BUILD: the slots of the form after the rectangle, with the copies they need (song_build.h)
       SongBuildPlan plan;
-      song_form_plan(ctx.edit->project(), t.rect, t.form, t.drums, plan);
+      song_form_plan(ctx.edit->project(), t.rect, t.form, t.drums, plan, ctx.edit->lanes());
       core::FixedString<core::kNotifyTextChars> name;
       name.assign("FORM ");
       name.append(song_form_name(t.form));

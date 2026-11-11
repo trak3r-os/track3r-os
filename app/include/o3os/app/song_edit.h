@@ -21,6 +21,7 @@
 namespace o3os::model {
 class Project;
 class Editor;
+class LaneStore;
 }  // namespace o3os::model
 
 namespace o3os::app {
@@ -104,7 +105,8 @@ struct SongUnique {
   bool no_room = false;
   std::size_t bytes = 0;
 };
-void song_unique_plan(const model::Project& project, int s0, int s1, const SongIdSet* only, SongUnique& out) noexcept;
+// `lanes` (the app's lane store, OS-MIDIREC-P1 S7a; null: none) adds the copies' lane records to `bytes`.
+void song_unique_plan(const model::Project& project, int s0, int s1, const SongIdSet* only, SongUnique& out, const model::LaneStore* lanes = nullptr) noexcept;
 void song_unique_apply(model::Editor& editor, int s0, int s1, const SongIdSet* only, SongUnique& out) noexcept;
 
 // The pattern `from` copied to the new number `to` through the editor: its name, every track's length and every track's steps (the ones past a track's length too: a copy is exact). A pattern that does not exist

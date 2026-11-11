@@ -2145,3 +2145,100 @@ TEST_CASE("rec lane: a stop during the count-in ends the take at its first stamp
   const model::LaneStore::View v = rig.lane();
   CHECK(v.count == 2u);  // the old note at 4000 stays
 }
+
+// ---- OS-MIDIREC-P1 S7b: a lane records in the forward order only -------------------------------------------------------------------------------------------------
+
+namespace {
+
+app::PerformBoard g_mode_board;  // static, like the store: the Perform bank is not small
+
+// The LaneRig with a Perform bank attached: slot 1 holds PLAYMODE and track 1 is affected, so `mode(m)` is what a mapped CC on that slot does (the bank wants play mode m for the track).
+struct ModeRig : LaneRig {
+  ModeRig() {
+    g_mode_board.bank.reset();
+    app->attach_perform(&g_mode_board);
+    pass();  // the first pass sees the screen change and turns the Perform tracks off: toggle them after it, as a mapped CC leaves them
+    while (g_mode_board.bank.fx(0) != seq::PerfFx::PatternPlayMode) {
+      (void)g_mode_board.bank.change_fx(0, 1, g_mode_board.sink());
+    }
+    (void)g_mode_board.bank.toggle_track(0, g_mode_board.sink());
+    pass();
+  }
+  void mode(int m) {
+    for (unsigned v = 0; v < 128; ++v) {
+      (void)g_mode_board.bank.set_cc(0, v, g_mode_board.sink());
+      if (g_mode_board.bank.live(0) == m) {
+        break;
+      }
+    }
+    CHECK(g_mode_board.bank.live(0) == m);
+    pass();
+    (void)send({});  // the platform's keyboard poll of the frame: it reads the order and ends a take that is now in a non-forward one
+  }
+};
+
+}  // namespace
+
+TEST_CASE("rec lane order: an order change under a take (Backward, PingPong, Random, a custom order) drops the take, commits nothing, says FORWARD ONLY once, and the grid takes the keyboard") {
+  for (const int m : {1, 2, 3, 4, 23}) {
+    CAPTURE(m);
+    ModeRig rig;
+    CHECK(rig.keys.take_track() == 0u);  // armed in the forward order
+    const unsigned before = rig.depth();
+    rig.stamped(100, {0x90, 60, 90});
+    rig.mode(m);
+    CHECK(rig.state().track_mode[0] == m);
+    CHECK(rig.keys.take_track() == midi::CcInput::kNoTrack);
+    CHECK_FALSE(g_lane_take.open());
+    CHECK(std::string(rig.message()).find("LANE REC: FORWARD ONLY") != std::string::npos);
+    rig.flush_messages();
+    rig.play(3, 0);
+    (void)rig.send({0x90, 62, 100});
+    CHECK(std::string(rig.message()).empty());  // said once
+    CHECK(rig.step(0, 3).note == 63u);          // the grid has it
+    (void)rig.send({0x80, 62, 0});
+    rig.stop();
+    (void)rig.send({});
+    CHECK(rig.lane().count == 0u);  // nothing was written to the lane
+    CHECK(rig.depth() == before + 1u);  // only the grid's note
+  }
+}
+
+TEST_CASE("rec lane order: arming in a non-forward order is refused with the notice and no take; back to forward it records into the lane") {
+  ModeRig rig;
+  rig.stop();
+  (void)rig.send({});
+  rig.live();  // a stop leaves LIVE (the cursor is free): the way back to it, as the Rig does at the start
+  rig.mode(3);  // Random
+  rig.play(0, 0);
+  (void)rig.send({});
+  CHECK(rig.keys.take_track() == midi::CcInput::kNoTrack);
+  CHECK(std::string(rig.message()).find("FORWARD ONLY") != std::string::npos);
+  rig.mode(0);  // Forward again
+  rig.play(0, 0);
+  (void)rig.send({});
+  CHECK(rig.keys.take_track() == 0u);
+  rig.stamped(100, {0x90, 60, 90});
+  rig.stamped(160, {0x80, 60, 0});
+  rig.play(4, 0);
+  rig.stop();
+  (void)rig.send({});
+  CHECK(rig.lane().count == 1u);
+  CHECK(rig.step(0, 2).note == 0u);
+}
+
+TEST_CASE("rec lane order: a mode on another track leaves this track's take alone") {
+  ModeRig rig;
+  (void)g_mode_board.bank.toggle_track(0, g_mode_board.sink());  // track 1 is not affected any more
+  (void)g_mode_board.bank.toggle_track(1, g_mode_board.sink());  // track 2 is
+  rig.mode(2);
+  CHECK(rig.state().track_mode[0] == 0u);
+  CHECK(rig.state().track_mode[1] == 2u);
+  CHECK(rig.keys.take_track() == 0u);
+  rig.stamped(100, {0x90, 60, 90});
+  rig.stamped(160, {0x80, 60, 0});
+  rig.play(4, 0);
+  rig.stop();
+  (void)rig.send({});
+  CHECK(rig.lane().count == 1u);
+}

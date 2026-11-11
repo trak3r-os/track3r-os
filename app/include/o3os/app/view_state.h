@@ -276,6 +276,7 @@ struct ViewState {
   };
   CountIn count_in;
   std::uint32_t track_pat[audio::PlayPosition::kTrackWords] = {};  // E-PERF-07: each track's source pattern word as the App last read it (PlayPosition::track_pattern; 0 while stopped): the Perform boxes
+  std::uint8_t track_mode[audio::PlayPosition::kTrackWords] = {};  // OS-MIDIREC-P1 S7b: each track's play mode as the Perform bank wants it (seq::TrackPlayMode, 0 = Forward); App::poll_midi_notes fills it before lane_poll, which refuses a Lane take in any other order
   bool blink = false;  // the phase of what blinks (the Song screen's slot waiting for a live jump; ~2 Hz): the App sets it from its clock while there is something to blink
   bool mute_blink = false;  // the same phase for the Pattern screen's MUTE tag of a track whose quantised mute is pending (OS-MUTEVIS); set only while one is, so a still screen redraws nothing
   int instrument = 1;  // the last used instrument, 1..64 (the status strip's INS; a new note takes it)

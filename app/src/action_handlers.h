@@ -370,6 +370,8 @@ bool sedit_plug_do(ActionContext& ctx, core::ActionArg arg) noexcept;      // ar
 bool sedit_amiga(ActionContext& ctx, core::ActionArg arg) noexcept;     // Shift + F1 / F2: the AMIGA conversion, arg 0: 8,287 Hz, 1: 16,574 Hz (OS-AMG1)
 bool sedit_q8(ActionContext& ctx, core::ActionArg arg) noexcept;          // Shift + F3: its 8-bit option
 bool sedit_instrument(ActionContext& ctx, core::ActionArg arg) noexcept;  // Shift + F5: the next instrument, 1..64 round (OS-QAFIX-27, OS-SLD-RANGE-ALL; a pad picks one of 1..48 too)
+bool sedit_show(ActionContext& ctx, core::ActionArg arg) noexcept;        // OS-GENNEW: the instrument arg (1..64) in view, as a pad or Shift + F5 would pick it (the App invokes it when NEW INS has made one)
+int first_free_slot(const model::Project& project) noexcept;              // the first instrument slot (0-based) with nothing in it, -1 when all are used
 bool sample_commit(ActionContext& ctx, core::ActionArg arg) noexcept;      // the finished effect's result becomes the slot's audio (the App invokes it)
 bool sedit_undo(ActionContext& ctx, core::ActionArg arg) noexcept;         // the sample's own history, one step back
 bool sedit_redo(ActionContext& ctx, core::ActionArg arg) noexcept;

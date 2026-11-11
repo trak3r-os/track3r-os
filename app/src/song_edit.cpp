@@ -6,6 +6,7 @@
 
 #include <o3os/app/song_clip.h>
 #include <o3os/model/editor.h>
+#include <o3os/model/lane_store.h>
 #include <o3os/model/limits.h>
 #include <o3os/model/project.h>
 #include <o3os/model/step_edit.h>
@@ -188,8 +189,24 @@ struct WriteSink {
 
 // ---- UNIQUE ------------------------------------------------------------------------------------------------------------------
 
-// The journal bytes song_copy_pattern writes for `from` (the same records, in the same conditions: keep the two together).
-std::size_t copy_pattern_body(const model::Project& p, unsigned from) noexcept {
+// The journal bytes of the lane copies of the tracks in `mask` (OS-MIDIREC-P1 S7a: one insert record a lane that has events below the track's end, as Editor::lane_copy writes it); 0 without a store.
+std::size_t lane_copy_body(const model::Project& p, const model::LaneStore* lanes, unsigned from, std::uint16_t mask) noexcept {
+  const model::Pattern* src = p.pattern(from);
+  if (lanes == nullptr || src == nullptr || !lanes->in_sync(p.load_epoch())) {
+    return 0;
+  }
+  std::size_t body = 0;
+  for (std::uint32_t t = 0; t < model::kMaxTracks; ++t) {
+    if (((mask >> t) & 1u) != 0u) {
+      const std::uint32_t n = model::LaneStore::lower_bound(lanes->lane(from, t), src->track_length[t] * model::kLaneTicksPerStep);
+      body += n != 0u ? song_record_bytes(6u + n * sizeof(model::LaneEvent)) : 0u;  // [id, track, index, count], the events
+    }
+  }
+  return body;
+}
+
+// The journal bytes song_copy_pattern writes for `from` (the same records, in the same conditions: keep the two together), the lanes' (`lanes` given) last.
+std::size_t copy_pattern_body(const model::Project& p, unsigned from, const model::LaneStore* lanes = nullptr) noexcept {
   const model::Pattern* src = p.pattern(from);
   std::size_t body = song_record_bytes(2);  // create_pattern
   if (src == nullptr) {
@@ -213,7 +230,7 @@ std::size_t copy_pattern_body(const model::Project& p, unsigned from) noexcept {
   if (name != 0u) {
     body += song_record_bytes(3u + name);  // set_pattern_name: [id, len], the text, [old len], no old text
   }
-  return body;
+  return body + lane_copy_body(p, lanes, from, 0xFFFFu);
 }
 
 // The span of track `t` that a masked copy writes: from the first step that holds something to the last, inside the track's length; none (count 0) for a cleared track or one with nothing in it.
@@ -247,6 +264,24 @@ unsigned free_number(const model::Project& p, const SongIdSet& named, const Song
     }
   }
   return 0;
+}
+
+void lane_copy_counts(const model::Project& p, const model::LaneStore* lanes, unsigned from, std::uint16_t mask, std::uint32_t& events, std::uint32_t& lane_count) noexcept {
+  const model::Pattern* src = p.pattern(from);
+  if (lanes == nullptr || src == nullptr || !lanes->in_sync(p.load_epoch())) {
+    return;
+  }
+  for (std::uint32_t t = 0; t < model::kMaxTracks; ++t) {
+    if (((mask >> t) & 1u) != 0u) {
+      const std::uint32_t n = model::LaneStore::lower_bound(lanes->lane(from, t), src->track_length[t] * model::kLaneTicksPerStep);
+      events += n;
+      lane_count += n != 0u ? 1u : 0u;
+    }
+  }
+}
+
+bool lane_pool_fits(const model::LaneStore* lanes, std::uint32_t events, std::uint32_t lane_count) noexcept {
+  return lanes == nullptr || events == 0u || (lanes->total_events() + events <= model::kMaxLanePoolEvents && lanes->lane_count() + lane_count <= model::kMaxLanes);
 }
 
 namespace {
@@ -296,8 +331,12 @@ struct UniquePlanSink {
   const model::Project& project;
   SongUnique& out;
   std::size_t body = 0;
+  const model::LaneStore* lanes = nullptr;
+  std::uint32_t lane_events = 0;  // the lane pool all the copies take together (OS-MIDIREC-P1 S7a)
+  std::uint32_t lane_count = 0;
   void copy(unsigned from, unsigned, int s, int s1) noexcept {
-    body += copy_pattern_body(project, from);
+    body += copy_pattern_body(project, from, lanes);
+    lane_copy_counts(project, lanes, from, 0xFFFFu, lane_events, lane_count);
     for (int k = s; k <= s1; ++k) {
       body += project.order(static_cast<std::uint32_t>(k)) == from ? song_record_bytes(3) : 0u;  // set_order: [pos, new, old]
     }
@@ -308,7 +347,7 @@ struct UniqueWriteSink {
   model::Editor& editor;
   void copy(unsigned from, unsigned to, int s, int s1) noexcept {
     if (song_copy_pattern(editor, from, to) != model::Status::Ok) {
-      return;  // (the caller checked the pool: a refusal here is a bug, and the slots stay where they are)
+      return;  // (the caller checked the pattern pool and the lane pool, song_unique_plan: a refusal here is a bug, and the slots stay where they are)
     }
     for (int k = s; k <= s1; ++k) {
       if (editor.project().order(static_cast<std::uint32_t>(k)) == from) {
@@ -381,6 +420,9 @@ bool song_copy_cells(const model::Project& project, const SongRect& rect, SongCl
 model::Status song_copy_pattern(model::Editor& e, unsigned from, unsigned to) noexcept {
   const model::Pattern* src = e.project().pattern(from);
   const std::uint32_t whole = src != nullptr ? e.project().pattern_length(from) : 0u;
+  if (src != nullptr && !e.lanes_copy_fit(from, 0xFFFFu, copy_pattern_body(e.project(), from))) {
+    return model::Status::Full;  // the lanes would not fit the pool or the undo ring: nothing is created (OS-MIDIREC-P1 S7a)
+  }
   const model::Status st = e.create_pattern(to, whole != 0u ? whole : e.project().default_pattern_length());
   if (st != model::Status::Ok || src == nullptr) {
     return st;
@@ -397,12 +439,13 @@ model::Status song_copy_pattern(model::Editor& e, unsigned from, unsigned to) no
     if (any) {
       (void)e.set_steps(to, t, 0, src->steps[t], model::kMaxPatternLength);
     }
+    (void)e.lane_copy(from, to, t);  // checked above: it fits
   }
   (void)e.set_pattern_name(to, src->name, std::strlen(src->name));
   return model::Status::Ok;
 }
 
-std::size_t copy_pattern_body_masked(const model::Project& p, unsigned from, std::uint16_t cleared_tracks) noexcept {
+std::size_t copy_pattern_body_masked(const model::Project& p, unsigned from, std::uint16_t cleared_tracks, const model::LaneStore* lanes) noexcept {
   const model::Pattern* src = p.pattern(from);
   std::size_t body = song_record_bytes(2);  // create_pattern
   if (src == nullptr) {
@@ -425,13 +468,17 @@ std::size_t copy_pattern_body_masked(const model::Project& p, unsigned from, std
   if (name != 0u) {
     body += song_record_bytes(3u + name);  // set_pattern_name: [id, len], the text, [old len], no old text
   }
-  return body;
+  return body + lane_copy_body(p, lanes, from, static_cast<std::uint16_t>(~cleared_tracks));  // the lanes of the tracks that are not cleared
 }
 
 model::Status song_copy_pattern_masked(model::Editor& e, unsigned from, unsigned to, std::uint16_t cleared_tracks) noexcept {
   const model::Pattern* src = e.project().pattern(from);
   if (src == nullptr) {
     return model::Status::NotFound;
+  }
+  const std::uint16_t kept = static_cast<std::uint16_t>(~cleared_tracks);
+  if (!e.lanes_copy_fit(from, kept, copy_pattern_body_masked(e.project(), from, cleared_tracks, nullptr))) {
+    return model::Status::Full;  // the lanes would not fit the pool or the undo ring: nothing is created (OS-MIDIREC-P1 S7a)
   }
   const std::uint32_t whole = e.project().pattern_length(from);
   const model::Status st = e.create_pattern(to, whole != 0u ? whole : e.project().default_pattern_length());
@@ -449,15 +496,21 @@ model::Status song_copy_pattern_masked(model::Editor& e, unsigned from, unsigned
     if (count != 0u) {
       (void)e.set_steps(to, t, first, &src->steps[t][first], count);
     }
+    if (((kept >> t) & 1u) != 0u) {
+      (void)e.lane_copy(from, to, t);  // checked above: it fits
+    }
   }
   (void)e.set_pattern_name(to, src->name, std::strlen(src->name));
   return model::Status::Ok;
 }
 
-void song_unique_plan(const model::Project& project, int s0, int s1, const SongIdSet* only, SongUnique& out) noexcept {
+void song_unique_plan(const model::Project& project, int s0, int s1, const SongIdSet* only, SongUnique& out, const model::LaneStore* lanes) noexcept {
   out = SongUnique{};
-  UniquePlanSink sink{project, out, 0};
+  UniquePlanSink sink{project, out, 0, lanes};
   unique_walk(project, s0, s1, only, out, sink);
+  if (!lane_pool_fits(lanes, sink.lane_events, sink.lane_count)) {
+    out.no_room = true;  // the copies' lanes together do not fit the lane pool: no copy is made (a skipped copy would leave its slots shared)
+  }
   out.bytes = sink.body != 0u ? kSongUnitOverhead + sink.body : 0u;
 }
 

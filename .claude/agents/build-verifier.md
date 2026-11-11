@@ -2,6 +2,7 @@
 name: build-verifier
 description: Fast mechanical verification of a change to the Community OS - host build, ctest, and (when asked) the QEMU, MK66 and image gates. Use after an implementation step or before a commit/merge when you need numbers, not judgement.
 model: haiku
+maxTurns: 60
 effort: low
 tools: Read, Bash
 ---
