@@ -6,7 +6,7 @@ User-visible changes of the Community OS, newest first, one entry per change, in
 
 **Copy the new modules zip to the card.** TB-303, Chip, FM and SID now load from the card (`/modules/instruments/`); without them those instruments are muted and say `MODULE ... NOT LOADED`.
 
-Everything below is merged and tested on the host and in the emulator. Where a line says "checked on the unit" a Tracker ran it. More testing is needed on units (see "More testing needed" in the [release notes](release/v1.3.0.md)).
+Everything below is merged and tested on the host and in the emulator. Where a line says "checked on the unit" a Tracker ran it. The unit results are in the [release notes](release/v1.3.0.md).
 
 ### New
 
@@ -31,7 +31,7 @@ Everything below is merged and tested on the host and in the emulator. Where a l
 
 - **Master + Insert opens the Mixer's INSERTS page** from any screen (issue #5). Checked on the unit.
 - **Shift + pad plays the instrument** on the Instrument screen instead of selecting it (issue #9). Checked on the unit.
-- **Slice pads play their own slice** (issue #7). Pads checked on the unit; the Slice FX in SLICE mode needs more testing.
+- **Slice pads play their own slice** (issue #7). Pads checked on the unit.
 - **Quieter power-off** (issue #8): the codec's reference voltage ramps down on its own first. Checked by ear on the unit.
 
 

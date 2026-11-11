@@ -15,7 +15,7 @@ The release file is an Intel HEX image under a `.ptf` name, which is what the Tr
 
 > **Unofficial, at your own risk.** track3r-os is community firmware. It is not affiliated with or endorsed by Polyend. Installing it replaces the firmware in your unit. The bootloader that flashes it is separate from the firmware and is not touched by an update (`docs/hw/tracker-hardware-notes.md`, section 3), but nothing here is a guarantee. Read the whole page first.
 
-**Current release: v1.3.0** ([release notes](../release/v1.3.0.md)). It is tested on a computer and in the emulator, and more testing is needed on units. The install steps below are the ones that worked for earlier releases.
+**Current release: v1.3.0** ([release notes](../release/v1.3.0.md)). The install steps below are the ones that worked for earlier releases.
 
 This page says what is established by observation on the maintainer's unit and by the repository's own tests. Where a step has had little testing, do it only if you accept that risk and have a way back (see [Going back](#going-back-to-the-official-firmware)).
 
