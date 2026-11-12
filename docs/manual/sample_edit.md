@@ -75,7 +75,7 @@ A long process, such as the compressor on a sample of tens of seconds, can be st
 The filter starts from silence at the first frame of the selection, so a selection that starts in the middle of a loud sound may click at its start. The exception is a looping instrument whose processed range starts at its loop start (in practice a loop that starts at the first frame, with the whole sample or a selection from 0): the filter and the compressor first run over the end of the loop, so the loop wraps without a click. Edge handles do not snap to the loop markers. If the loop starts in the middle of the sample (a sustain loop) and you process the whole sample, a click can remain at the wrap; process from the loop start instead. <!-- QA-SED-022 --> A long sample takes a while, the compressor longer than the filter Listen to the result before you keep it. The values you set stay until you switch the unit off.
 
 ### Run a plugin
-<!-- sync: src=app/src/sample_edit_actions.cpp,app/src/ptfx_page.cpp,app/src/app.cpp qa=QA-SED-033,QA-SED-034,QA-SED-035,QA-SED-036,QA-SED-037,QA-SED-038,QA-SED-039,QA-SED-040,QA-SED-041,QA-SED-042,QA-SED-043,QA-SED-044,QA-SED-045,QA-SED-046,QA-SED-047,QA-SED-048 -->
+<!-- sync: src=app/src/sample_edit_actions.cpp,app/src/ptfx_page.cpp,app/src/app.cpp qa=QA-SED-033,QA-SED-034,QA-SED-035,QA-SED-036,QA-SED-037,QA-SED-038,QA-SED-039,QA-SED-040,QA-SED-041,QA-SED-042,QA-SED-043,QA-SED-044,QA-SED-045,QA-SED-046,QA-SED-047,QA-SED-048,QA-SED-055,QA-SED-056 -->
 
 New in track3r-os. A plugin is a small `.ptfx` file in the `Effects` folder at the root of the card. On the **PLUGINS** page (press `Sample Edit` twice) it works on the sample like the other processes.
 
@@ -101,6 +101,7 @@ Three kinds of plugin act differently from an effect:
 
 - **A generator** (tag **GEN**) makes a sound from nothing: up to two seconds, mono. It ignores the selection and replaces the whole sample, as one undo step: `F8` brings the old sample back. On an empty slot it needs no sample: the result goes in like a loaded sample and the instrument is named **Gen NN**, with NN the slot number as the screens show it; the strip says **GENERATED** (then the waveform preview line), and there is nothing to undo. A generator does not run on a stereo sample (make it mono first). <!-- QA-SED-035 --><!-- QA-SED-036 -->
 - **A wavetable plugin** (tag **WT**) also sets the instrument's play mode to **WAVETABLE** after the run. `F8` takes the sound back and the play mode with it (the play mode and the wavetable window go back to what they were); `Shift` + `F8` does both again. <!-- QA-SED-037 -->
+- **A wavetable plugin also sets WT SIZE.** Its result is made for windows of 2048 frames, so after the run the instrument's WT SIZE is 2048, whatever size the instrument had before (a result shorter than 2048 frames gets the largest size it can hold). `F8` brings the old size back together with the old sound and the old play mode. <!-- QA-SED-055 QA-SED-056 -->
 - **A plugin that adds silence** makes the sample longer. Your start, loop and end points keep pointing at the same sound. `F8` brings back the old length and points. <!-- QA-SED-038 -->
 
 The strip also says **NO SAMPLE INSTRUMENT HERE** when you run a generator on an empty-looking slot that holds a MIDI or other non-sample instrument, and **NOTHING PRODUCED** when a generator made no sound.

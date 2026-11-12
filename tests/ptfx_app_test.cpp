@@ -789,6 +789,143 @@ TEST_CASE("ptfx app: a WAVETABLE run is one undo unit with the play mode: F8 res
   CHECK(sp().wavetable_window == pos_after);
 }
 
+// OS-PTFXWTSIZE: a WAVETABLE result is made for a 2048-frame window, whatever WT SIZE the slot had.
+TEST_CASE("ptfx app: a WAVETABLE run sets WT SIZE to 2048 on a slot that had 256, 512 or 1024, in the same undo unit: F8 restores the old size") {
+  for (const unsigned had : {256u, 512u, 1024u}) {
+    CAPTURE(had);
+    Rig rig;
+    model::Instrument in = *rig.arena->project.instrument(kSlot);
+    in.sampler.play_mode = app::kPlayModeWavetable;
+    in.sampler.sample_type = 1;
+    in.sampler.wavetable_window_size = static_cast<std::uint16_t>(had);
+    in.sampler.wavetable_window = 16;  // frame 16 * had
+    NEED(rig.arena->project.set_instrument(kSlot, in) == model::Status::Ok);
+    rig.generator(module::kPtfxFlagWavetable);
+    CHECK(rig.start() == nullptr);
+    rig.finish();
+    const auto sp = [&]() -> const model::SamplerParams& { return rig.arena->project.instrument(kSlot)->sampler; };
+    NEED(rig.pcm().frames >= 2048u * 9u);
+    CHECK(sp().play_mode == app::kPlayModeWavetable);
+    CHECK(sp().wavetable_window_size == 2048u);
+    CHECK(sp().wavetable_window == 16u * had / 2048u);  // the same part of the sample, in windows of the new size
+    CHECK(rig.bank.undo_depth(kSlot) == 1u);
+    rig.expire();
+    rig.tap(Button::F8);
+    CHECK(rig.same_as_original());
+    CHECK(sp().play_mode == app::kPlayModeWavetable);
+    CHECK(sp().wavetable_window_size == had);
+    CHECK(sp().wavetable_window == 16u);
+    rig.press(Button::Shift);
+    rig.tap(Button::F5);
+    rig.release(Button::Shift);
+    CHECK(sp().wavetable_window_size == 2048u);
+  }
+}
+
+TEST_CASE("ptfx app: a WAVETABLE generator on a sample instrument without audio sets WT SIZE to 2048 over the size it had") {
+  Rig rig;
+  model::Instrument in;
+  model::init_instrument(in, model::InstrumentKind::Sample);
+  in.sampler.play_mode = app::kPlayModeWavetable;
+  in.sampler.wavetable_window_size = 512;
+  in.sampler.wavetable_window = 3;
+  NEED(rig.arena->project.set_instrument(kEmpty, in) == model::Status::Ok);
+  rig.open_empty();
+  rig.generator(module::kPtfxFlagWavetable);
+  g.produce_limit = 4096;
+  CHECK(rig.start() == nullptr);
+  rig.finish();
+  NEED(rig.bank.pcm(kEmpty).frames == 4096u);
+  const model::SamplerParams& sp = rig.arena->project.instrument(kEmpty)->sampler;
+  CHECK(sp.play_mode == app::kPlayModeWavetable);
+  CHECK(sp.wavetable_window_size == 2048u);
+  CHECK(sp.wavetable_window == 0u);
+}
+
+TEST_CASE("ptfx app: a WAVETABLE result shorter than 2048 frames gets the largest window it holds; under 32 frames the mode and the size stay") {
+  {
+    Rig rig;
+    rig.open_empty();
+    rig.generator(module::kPtfxFlagWavetable);
+    g.produce_limit = 1000;
+    CHECK(rig.start() == nullptr);
+    rig.finish();
+    NEED(rig.bank.pcm(kEmpty).frames == 1000u);
+    CHECK(rig.arena->project.instrument(kEmpty)->sampler.wavetable_window_size == 512u);
+  }
+  for (const std::uint32_t made : {1000u, 20u}) {
+    CAPTURE(made);
+    Rig rig;
+    model::Instrument in = *rig.arena->project.instrument(kSlot);
+    in.sampler.wavetable_window_size = 256;
+    in.sampler.wavetable_window = 9;
+    NEED(rig.arena->project.set_instrument(kSlot, in) == model::Status::Ok);
+    rig.generator(module::kPtfxFlagWavetable);
+    g.produce_limit = made;
+    CHECK(rig.start() == nullptr);
+    rig.finish();
+    NEED(rig.pcm().frames == made);
+    const model::SamplerParams& sp = rig.arena->project.instrument(kSlot)->sampler;
+    if (made == 1000u) {
+      CHECK(sp.play_mode == app::kPlayModeWavetable);
+      CHECK(sp.wavetable_window_size == 512u);
+      CHECK(sp.wavetable_window == 0u);  // one whole window only
+    } else {
+      CHECK(sp.play_mode == 0u);  // the strip's warning is not read here: the peaks job of the new audio writes its own text over it before the passes end
+      CHECK(sp.wavetable_window_size == 256u);
+      CHECK(sp.wavetable_window == 9u);
+    }
+    CHECK(rig.bank.undo_depth(kSlot) == 1u);
+  }
+}
+
+// The route no plugin had walked: an EFFECT (not a generator) with the WAVETABLE flag whose result is shorter than its input.
+TEST_CASE("ptfx app: a WAVETABLE effect that shortens the sample sets mode 6, type 1 and a fitted window, keeps the points in order, and is one undo unit") {
+  Rig rig;
+  model::Instrument in = *rig.arena->project.instrument(kSlot);
+  in.sampler.start = 1000;
+  in.sampler.loop_start = 16384;
+  in.sampler.loop_end = 32768;
+  in.sampler.end = 60000;
+  in.sampler.wavetable_window_size = 256;
+  in.sampler.wavetable_window = 70;  // frame 17920: past the end of the result
+  NEED(rig.arena->project.set_instrument(kSlot, in) == model::Status::Ok);
+  rig.info.flags = module::kPtfxFlagWavetable;
+  g.produce_limit = 5000;
+  CHECK(rig.app->ptfx_refusal(false) == nullptr);
+  CHECK(rig.start() == nullptr);
+  rig.finish();
+  NEED(rig.pcm().frames == 5000u);
+  CHECK(rig.pcm().data[5] == rig.original[5] * 2);
+  const auto sp = [&]() -> const model::SamplerParams& { return rig.arena->project.instrument(kSlot)->sampler; };
+  CHECK(sp().play_mode == app::kPlayModeWavetable);
+  CHECK(sp().sample_type == 1u);
+  CHECK(sp().wavetable_window_size == 2048u);
+  CHECK(sp().wavetable_window == 1u);  // 5000 frames hold two whole windows: the position is held to the last
+  CHECK(sp().start <= sp().loop_start);
+  CHECK(sp().loop_start < sp().loop_end);
+  CHECK(sp().loop_end <= sp().end);
+  CHECK(rig.bank.undo_depth(kSlot) == 1u);
+  rig.expire();
+  rig.tap(Button::F8);
+  CHECK(rig.same_as_original());
+  CHECK(sp().play_mode == 0u);
+  CHECK(sp().sample_type == 0u);
+  CHECK(sp().wavetable_window_size == 256u);
+  CHECK(sp().wavetable_window == 70u);
+  CHECK(sp().start == 1000u);
+  CHECK(sp().loop_start == 16384u);
+  CHECK(sp().loop_end == 32768u);
+  CHECK(sp().end == 60000u);
+  rig.press(Button::Shift);
+  rig.tap(Button::F5);
+  rig.release(Button::Shift);
+  CHECK(rig.pcm().frames == 5000u);
+  CHECK(sp().play_mode == app::kPlayModeWavetable);
+  CHECK(sp().wavetable_window_size == 2048u);
+  CHECK(sp().wavetable_window == 1u);
+}
+
 TEST_CASE("ptfx app: Add Silence lengthens the sample, the points follow the frames, and F8 restores both") {
   Rig rig;
   model::Instrument in = *rig.arena->project.instrument(kSlot);

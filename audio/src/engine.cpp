@@ -397,6 +397,7 @@ void Engine::play_live() noexcept {
           modules_->release_track(s.track);  // a sample note on a track a module held: the module's note ends and its block is no longer the track's
         }
         voices_->live_bend_track(s.track);  // OS-PIANOBEND: a note that starts while a pad bend is held starts bent (before note_on: its offset is tune_base_q16)
+        voices_->live_vib_track(s.track);   // OS-PIANOVIB: likewise a note that starts while the vibrato pad is held starts with the Finetune LFO (before note_on: mods_start reads step_lfo_)
         if (voices_->note_on(s.track, note, slot, velocity)) {
           graph_.set_voice_pan(s.track, voices_->sample(slot).pan);  // as dispatch(): the instrument's pan goes to the track where the note starts
           graph_.set_voice_sends(s.track, voices_->sample(slot).delay_send, voices_->sample(slot).reverb_send);
@@ -422,9 +423,18 @@ void Engine::play_live() noexcept {
       case LiveKind::Bend:  // OS-PIANOBEND: the pad strip's bend on the live notes (sampler voices; a MIDI instrument's was the MIDI link's above)
         voices_->live_bend(static_cast<std::int8_t>(e.note), held.tracks());
         break;
+      case LiveKind::BendFine: {  // OS-PIANOBEND-REC: the MIDI-in wheel, +-2 semitones over the 14 bits (8192 centre), the same offset as the strip's
+        const int v14 = static_cast<int>(((e.note & 0x7Fu) << 7) | (e.key & 0x7Fu));
+        voices_->live_bend_set((v14 - 8192) * 16, held.tracks());
+        break;
+      }
+      case LiveKind::Vibrato:  // OS-PIANOVIB: the vibrato pad on the live notes (sampler voices; a MIDI instrument's CC1 was the MIDI link's above)
+        voices_->live_vib(e.key != 0u, held.tracks());
+        break;
       case LiveKind::AllOff: {
         if (e.source == kLiveSourcePad || e.source == kLiveAllSources) {
           voices_->live_bend(0, 0u);  // the pads are let go: back in tune
+          voices_->live_vib(false, 0u);  // OS-PIANOVIB: and the vibrato ends
         }
         const std::uint32_t tracks = held.end_all(e.source);
         for (unsigned t = 0; t < kLiveTracks; ++t) {
@@ -670,6 +680,7 @@ bool Engine::offline_enter(const EventSource& source) noexcept {
   graph_.set_spectrum_enabled(false);
   graph_.loop().park(true);  // OS-LOOPER: an export hears no loop and moves none
   if (voices_ != nullptr) {  // OS-PERFFX P0: the export's sequencer has no Perform layer, so the live one (held in Master or Song) is put away: it must not colour the export's notes, and the export's own events must not wipe it
+    voices_->live_vib(false, 0u);  // OS-PIANOVIB: the vibrato pad's step_lfo_ row first: perf_save would keep it and perf_restore bring a vibrato nobody holds back after the export
     voices_->perf_save(perf_voices_);
     voices_->perf_clear();
   }
@@ -696,6 +707,7 @@ void Engine::stop_live_notes() noexcept {
   std::uint32_t count = notes.held();
   if (voices_ != nullptr) {
     voices_->live_bend(0, 0u);  // OS-PIANOBEND: the pitch-bend strip's hold ends with the notes (the export is unbent; a Bend still in the queue is dropped below, its state is the centre already); the MIDI route is centred by stop_live below
+    voices_->live_vib(false, 0u);  // OS-PIANOVIB: likewise the vibrato (a Vibrato still in the queue is dropped below); the MIDI route's CC1 0 goes with the centre
   }
   (void)notes.end_all(kLiveAllSources);
   // What the live source holds outside the table (the pads on a MIDI instrument, sent as MIDI by the link): its offs go out now.

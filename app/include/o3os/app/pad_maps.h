@@ -7,7 +7,8 @@
 //
 //   PIANO  col 1 (0) rows 1-4: the pattern's start, 1/4, 1/2, 3/4. Cols 2..9 (1..8): the white keys C D E F G A B C on rows 2 and 4, the black keys C# D# F# G# A# on the cols 3, 4, 6, 7, 8 (2, 3, 5, 6, 7)
 //          of rows 1 and 3, as a piano is drawn; rows 1-2 are the octave above rows 3-4. Cols 10-11 (9, 10): the bend strip (OS-PIANOBEND, new Community OS behaviour):
-//          rows 1 to 4 bend +2, +1, -1, -2 semitones while held, both columns of a row alike. Col 12 (11): row 1 octave up, row 4 octave down.
+//          rows 1 to 4 bend +2, +1, -1, -2 semitones while held, both columns of a row alike. Col 12 (11): row 1 octave up, row 4 octave down, rows 2-3 one held vibrato pad
+//          (OS-PIANOVIB, new Community OS behaviour: the Finetune LFO on the voices, CC1 127 / 0 on a MIDI instrument).
 //   ISO    every column is a semitone and every row up is a fourth (+5 semitones): the same shape of a chord on every key.
 //   A pad plays `12 * octave + semitone` (the octave of the note-entry settings, C based whatever the root is); one above the pad board's 120 does not exist and its pad is dead.
 
@@ -22,10 +23,10 @@ namespace o3os::app {
 inline constexpr int kStepPage = 48;
 constexpr int step_row(int cursor_row, unsigned pad) noexcept { return cursor_row / kStepPage * kStepPage + static_cast<int>(pad); }
 
-enum class PadKey : std::uint8_t { None, Note, Nav, OctUp, OctDown, Bend };
+enum class PadKey : std::uint8_t { None, Note, Nav, OctUp, OctDown, Bend, Vib };
 struct PadFn {
   PadKey kind = PadKey::None;
-  std::uint8_t value = 0;  // Note: the semitones above the C of the settings' octave; Nav: n of n/4 of the pattern; Bend: the bend in semitones + 2 (bend_semitones)
+  std::uint8_t value = 0;  // Note: the semitones above the C of the settings' octave; Nav: n of n/4 of the pattern; Bend: the bend in semitones + 2 (bend_semitones); Vib: 0 (row 2) or 1 (row 3), its bit in VibHold
 };
 
 constexpr PadFn piano_pad(unsigned pad) noexcept {
@@ -40,7 +41,7 @@ constexpr PadFn piano_pad(unsigned pad) noexcept {
     return {PadKey::Nav, static_cast<std::uint8_t>(row)};
   }
   if (col == 11u) {
-    return row == 0u ? PadFn{PadKey::OctUp, 0} : (row == 3u ? PadFn{PadKey::OctDown, 0} : PadFn{});
+    return row == 0u ? PadFn{PadKey::OctUp, 0} : (row == 3u ? PadFn{PadKey::OctDown, 0} : PadFn{PadKey::Vib, static_cast<std::uint8_t>(row - 1u)});  // rows 2-3 (1, 2): the vibrato pad (OS-PIANOVIB)
   }
   if (col > 8u) {  // cols 10-11 (9, 10): the bend strip, rows 1..4 = +2, +1, -1, -2 semitones (value = semitones + 2)
     return col <= 10u ? PadFn{PadKey::Bend, static_cast<std::uint8_t>(row == 0u ? 4u : (row == 1u ? 3u : (row == 2u ? 1u : 0u)))} : PadFn{};
@@ -60,6 +61,7 @@ struct BendHold {
   std::uint8_t order[8] = {};
   std::uint8_t n = 0;
   std::int8_t semis[8] = {};  // each held pad's bend, in the same order
+  std::uint8_t gen = 0;       // counts presses, releases and clears (wraps): the MIDI wheel's sender sees that the strip moved the voices' offset since
 
   constexpr int active() const noexcept { return n == 0u ? 0 : semis[n - 1u]; }
   constexpr bool holds(unsigned pad) const noexcept {
@@ -72,7 +74,7 @@ struct BendHold {
   }
   // A bend pad went down (a pad already held moves to the end: a repeated press); returns the bend now in force.
   constexpr int press(unsigned pad, int semitones) noexcept {
-    (void)release(pad);
+    (void)release(pad);  // (counts)
     if (n < 8u) {
       order[n] = static_cast<std::uint8_t>(pad);
       semis[n] = static_cast<std::int8_t>(semitones);
@@ -82,6 +84,7 @@ struct BendHold {
   }
   // A pad came up; returns the bend now in force (the previous held pad's, or 0). A pad that is not held changes nothing.
   constexpr int release(unsigned pad) noexcept {
+    ++gen;
     for (unsigned i = 0; i < n; ++i) {
       if (order[i] == pad) {
         for (unsigned j = i + 1u; j < n; ++j) {
@@ -94,7 +97,36 @@ struct BendHold {
     }
     return active();
   }
-  constexpr void clear() noexcept { n = 0; }
+  constexpr void clear() noexcept {
+    ++gen;
+    n = 0;
+  }
+};
+
+// OS-PIANOVIB: the two vibrato pads held (bit 0 the upper, bit 1 the lower, PadFn::value); the vibrato is on while either is. Pure state, main loop only. Each call returns true when the vibrato's
+// state changed (the edge the sink is told).
+struct VibHold {
+  std::uint8_t mask = 0;
+
+  // The bit of the pad that a Vib key sits on in the PIANO map (23, 35: col 12, rows 2 and 3), -1 for any other pad (a release does not look at the mode: the mode may have changed meanwhile).
+  static constexpr int bit_of(unsigned pad) noexcept { return pad == 23u ? 0 : (pad == 35u ? 1 : -1); }
+  constexpr bool on() const noexcept { return mask != 0u; }
+  constexpr bool holds(unsigned bit) const noexcept { return ((mask >> bit) & 1u) != 0u; }
+  constexpr bool press(unsigned bit) noexcept {
+    const bool was = on();
+    mask = static_cast<std::uint8_t>(mask | (1u << (bit & 1u)));
+    return !was;
+  }
+  constexpr bool release(unsigned bit) noexcept {
+    const bool was = on();
+    mask = static_cast<std::uint8_t>(mask & ~(1u << (bit & 1u)));
+    return was && !on();
+  }
+  constexpr bool clear() noexcept {
+    const bool was = on();
+    mask = 0;
+    return was;
+  }
 };
 
 constexpr PadFn iso_pad(unsigned pad) noexcept {

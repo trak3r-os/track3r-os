@@ -737,3 +737,131 @@ TEST_CASE("paramauto rec: a track whose sounding instrument is MIDI refuses the 
   CHECK(rig.midicc(1, 77, 127) == DispatchResult::Changed);
   CHECK(rig.step(0, 6).fx[0].type == seq::fx::kCcA);
 }
+
+// OS-PIANOBEND-REC (docs/specs/OS-PIANOBEND.md): the PIANO bend strip written as Slide FX 41/42 during a take. Strip pads: 9 = +2, 22 = +1, 46 = -2 (pad_modes_test.cpp).
+namespace {
+void piano(Rig& rig) { (void)rig.invoke("pads.mode", static_cast<ActionArg>(app::PadMode::Piano)); }
+}  // namespace
+
+TEST_CASE("bend rec: a strip pad down writes Slide up/down of 16 per semitone at the play line, its release writes Slide 0 where the pad came up (OS-PIANOBEND-REC)") {
+  Rig rig;
+  piano(rig);
+  rig.play(3);
+  rig.pad_down(9);  // +2
+  CHECK(rig.step(0, 3).fx[0].type == seq::fx::kSlideUp);
+  CHECK(rig.step(0, 3).fx[0].value == 32);
+  CHECK(rig.step(0, 3).fx[1].type == model::kFxNone);
+  rig.play(6);
+  rig.pad_up(9);  // back to the note's pitch
+  CHECK(rig.step(0, 6).fx[0].type == seq::fx::kSlideUp);
+  CHECK(rig.step(0, 6).fx[0].value == 0);
+  CHECK(rig.step(0, 3).fx[0].value == 32);  // the press stays
+  // a down bend: Slide down, and the strip pad 22 (+1) is 16
+  rig.play(8);
+  rig.pad_down(46);  // -2
+  CHECK(rig.step(0, 8).fx[0].type == seq::fx::kSlideDown);
+  CHECK(rig.step(0, 8).fx[0].value == 32);
+  rig.play(10);
+  rig.pad_up(46);
+  CHECK(rig.step(0, 10).fx[0].type == seq::fx::kSlideUp);
+  CHECK(rig.step(0, 10).fx[0].value == 0);
+  rig.play(11);
+  rig.pad_down(22);  // +1
+  CHECK(rig.step(0, 11).fx[0].type == seq::fx::kSlideUp);
+  CHECK(rig.step(0, 11).fx[0].value == 16);
+  rig.play(12);
+  rig.pad_up(22);
+  CHECK(rig.step(0, 12).fx[0].value == 0);
+  for (int t = 1; t < 12; ++t) {
+    CHECK(rig.step(t, 3).fx[0].type == model::kFxNone);  // only the cursor's track
+  }
+  CHECK(rig.step(0, 3).note == 0);  // no note is written by a bend
+}
+
+TEST_CASE("bend rec: a release on the press's own step goes to the next step; the second pad's release hands the bend over to the first pad's value (OS-PIANOBEND-REC)") {
+  Rig rig;
+  piano(rig);
+  rig.play(3);
+  rig.pad_down(9);
+  rig.pad_up(9);  // a short tap: the same row
+  CHECK(rig.step(0, 3).fx[0].type == seq::fx::kSlideUp);
+  CHECK(rig.step(0, 3).fx[0].value == 32);  // the press is kept for its step
+  CHECK(rig.step(0, 4).fx[0].type == seq::fx::kSlideUp);
+  CHECK(rig.step(0, 4).fx[0].value == 0);
+  // two pads: -2 on top of +2, then the older lets go (the newer stays in force, nothing new is written), then the newer
+  rig.play(6);
+  rig.pad_down(9);
+  rig.play(7);
+  rig.pad_down(46);
+  CHECK(rig.step(0, 7).fx[0].type == seq::fx::kSlideDown);
+  rig.play(8);
+  rig.pad_up(9);
+  CHECK(rig.step(0, 8).fx[0].type == model::kFxNone);
+  rig.play(9);
+  rig.pad_up(46);
+  CHECK(rig.step(0, 9).fx[0].type == seq::fx::kSlideUp);
+  CHECK(rig.step(0, 9).fx[0].value == 0);
+}
+
+TEST_CASE("bend rec: the press and the release of a bend are one undo unit (Slide and spring-back together), and a bend with Rec off writes nothing and costs no undo unit (OS-PIANOBEND-REC)") {
+  Rig rig;
+  piano(rig);
+  rig.stop();
+  const unsigned d0 = rig.depth();
+  rig.pad_down(9);  // transport stopped: not recording
+  rig.pad_up(9);
+  CHECK(no_fx_anywhere(rig));
+  CHECK(rig.depth() == d0);
+  CHECK(rig.state().edit.rec_bend == 0u);
+  rig.play(3);
+  rig.pad_down(9);
+  rig.play(6);
+  rig.pad_up(9);
+  rig.stop();  // the take ends
+  CHECK(rig.depth() == d0 + 1u);
+  CHECK(rig.state().edit.rec_bend == 0u);
+  (void)rig.invoke("edit.undo");
+  CHECK(no_fx_anywhere(rig));
+  // a pad held when the transport stops: the release writes nothing and the hold is over
+  rig.play(3);
+  rig.pad_down(9);
+  rig.stop();
+  rig.pad_up(9);
+  CHECK(rig.state().edit.rec_bend == 0u);
+}
+
+TEST_CASE("bend rec: a MIDI instrument is refused once per take with a message, a full FX column says so once and keeps the step (OS-PIANOBEND-REC)") {
+  Rig rig;
+  piano(rig);
+  model::Instrument mi;
+  model::init_instrument(mi, model::InstrumentKind::Midi);
+  mi.midi_channel = 1;
+  NEED(rig.project().set_instrument(0, mi) == model::Status::Ok);
+  rig.play(3);
+  rig.pad_down(9);
+  CHECK(rig.last_note() == "REC BEND: SAMPLE INSTRUMENTS ONLY");
+  CHECK(no_fx_anywhere(rig));
+  rig.play(6);
+  rig.pad_up(9);
+  CHECK(no_fx_anywhere(rig));
+  CHECK(rig.state().edit.rec_bend == 0u);
+  rig.stop();
+  CHECK_FALSE(rig.state().edit.rec_bend_said);  // the flag goes with the take
+}
+
+TEST_CASE("bend rec: a step whose two FX columns are taken keeps them, says so, and the release writes no stray spring-back (OS-PIANOBEND-REC)") {
+  Rig rig;
+  piano(rig);
+  // the step's two columns taken by FX of no group
+  model::Step full = model::kEmptyStep;
+  full.fx[0] = {seq::fx::kChance, 80};
+  full.fx[1] = {seq::fx::kMicroMove, 20};
+  NEED(rig.project().set_step(1, 0, 3, full) == model::Status::Ok);
+  rig.play(3);
+  rig.pad_down(9);
+  CHECK(std::memcmp(&rig.step(0, 3), &full, sizeof full) == 0);
+  CHECK(rig.last_note().find("REC FX: NO FREE FX COLUMN") != std::string::npos);
+  rig.play(6);
+  rig.pad_up(9);  // nothing was written for the press: the release writes no stray spring-back either
+  CHECK(rig.step(0, 6).fx[0].type == model::kFxNone);
+}

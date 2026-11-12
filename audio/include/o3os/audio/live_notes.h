@@ -44,6 +44,8 @@ enum class LiveKind : std::uint8_t {
   Off = 2,     // the note that `source`/`key` started enters its release; no such note: nothing happens
   AllOff = 3,  // every note of `source` (kLiveAllSources: of every source) enters its release
   Bend = 4,    // OS-PIANOBEND: the live notes are bent by `note` (an int8 of semitones, -2..+2, 0 = in tune); `instrument` 1..64 names the instrument in view (a MIDI one gets a pitch bend)
+  BendFine = 5,  // OS-PIANOBEND-REC: the MIDI-in pitch wheel, 14 bit: key = the low 7 bits, `note` = the high 7 bits (8192 = in tune; the sampler voices bend +-2 semitones across it, a MIDI instrument gets the value as it is)
+  Vibrato = 6,   // OS-PIANOVIB: the PIANO vibrato pad: `key` 1 = on, 0 = off; the live notes run the Finetune LFO (FX 33), a MIDI instrument (`instrument` 1..64 in view) gets CC1 127 / 0
 };
 
 // Who started a note: the key a Note Off names is the pair (source, key), so a pad and a keyboard key never end each other's note.

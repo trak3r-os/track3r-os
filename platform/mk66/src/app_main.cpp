@@ -581,6 +581,25 @@ class LivePreview final : public app::PreviewSink {
       (void)push(e);
     }
   }
+  // OS-PIANOVIB: the PIANO vibrato pad (key 1 held, 0 let go); the let go goes by release() like the strip's, so a refused one is repaired by the all-notes-off (which also ends the vibrato).
+  void pad_vibrato(bool on, unsigned instrument) noexcept override {
+    const audio::LiveEvent e{audio::LiveKind::Vibrato, audio::kLiveSourcePad, static_cast<std::uint8_t>(on ? 1u : 0u), 0, clamp_instrument(instrument), 0, 0, 0};
+    if (on) {
+      (void)push(e);
+    } else {
+      release(e);
+    }
+  }
+  // OS-PIANOBEND-REC: the MIDI keyboard's pitch wheel (14 bit): key = the low 7 bits, note = the high 7; the centre goes by release() like the strip's let go.
+  void midi_bend(unsigned value14, unsigned instrument) noexcept override {
+    const unsigned v = value14 > 16383u ? 16383u : value14;
+    const audio::LiveEvent e{audio::LiveKind::BendFine, audio::kLiveSourceMidi, static_cast<std::uint8_t>(v & 0x7Fu), static_cast<std::uint8_t>(v >> 7), clamp_instrument(instrument), 0, 0, 0};
+    if (v == 8192u) {
+      release(e);
+    } else {
+      (void)push(e);
+    }
+  }
   void midi_note(bool on, unsigned track, unsigned instrument, unsigned note, unsigned velocity, unsigned channel) noexcept override {
     if (note > 127u) {
       return;
@@ -650,7 +669,7 @@ class LivePreview final : public app::PreviewSink {
   static std::uint8_t clamp_track(unsigned v) noexcept { return static_cast<std::uint8_t>(v < audio::kLiveTracks ? v : 0u); }
 
   bool push(const audio::LiveEvent& e) noexcept {
-    if (g_live == nullptr || !audio_running() || (audio_engine().offline_wanted() && e.kind == audio::LiveKind::On)) {  // (OS-WAVEXP: no new live note while the engine is the export's: nothing consumes the queue, and a burst of stale notes must not play when it ends. A release goes through: an export stops the notes that are held when it takes the engine (Engine::offline_enter, OS-EXPNOTE: the table forgets them, so a release that arrives later finds no note and does nothing; the releases queued during the export are sent when the engine is given back and find none))
+    if (g_live == nullptr || !audio_running() || (audio_engine().offline_wanted() && (e.kind == audio::LiveKind::On || e.kind == audio::LiveKind::BendFine || (e.kind == audio::LiveKind::Vibrato && e.key != 0u)))) {  // (OS-PIANOBEND-REC: nor a wheel value: it would bend the export's own voices; OS-PIANOVIB: nor a vibrato on, likewise. OS-WAVEXP: no new live note while the engine is the export's: nothing consumes the queue, and a burst of stale notes must not play when it ends. A release goes through: an export stops the notes that are held when it takes the engine (Engine::offline_enter, OS-EXPNOTE: the table forgets them, so a release that arrives later finds no note and does nothing; the releases queued during the export are sent when the engine is given back and find none))
       return false;
     }
     if (!g_outputs_open) {

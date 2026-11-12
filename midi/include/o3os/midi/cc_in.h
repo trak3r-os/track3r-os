@@ -94,7 +94,7 @@ static_assert(sizeof(StampMsg) == 8, "a stamped message is two words");
 
 // One channel message that the parser picked out: a control change (`cc` is the controller, `value` its value) or a note message (see NoteMsg; `note` is in `cc`, `velocity` in `value`).
 struct ChannelMsg {
-  enum class Kind : std::uint8_t { Cc, Note };
+  enum class Kind : std::uint8_t { Cc, Note, Bend };  // Bend (OS-PIANOBEND-REC): the pitch wheel, `cc` = the low 7 bits and `value` the high 7 bits of the 14-bit value (8192 = centre)
   Kind kind;
   NoteKind note_kind;  // when kind is Note
   std::uint8_t ch;     // 0..15 as on the wire
@@ -166,8 +166,11 @@ class CcParser {
           return true;
         }
         return false;
+      case 0xE0u:
+        m.kind = ChannelMsg::Kind::Bend;
+        return true;
       default:
-        return false;  // poly pressure, pitch bend
+        return false;  // poly pressure
     }
   }
   void reset() noexcept { *this = CcParser{}; }
@@ -208,6 +211,15 @@ class CcInput {
     if (!parser_[port].next(item.byte, m)) {
       return;
     }
+    if (m.kind == ChannelMsg::Kind::Bend) {
+      const std::uint32_t f = bend_filter_.load(std::memory_order_relaxed);  // MIDI IN / IN CHANNEL: a bend of another port or channel must not overwrite one that is listened to
+      if (((f >> 8) < 2u && (f >> 8) != port) || ((f & 0xFFu) != 0u && (f & 0xFFu) != m.ch + 1u)) {
+        return;
+      }
+      // OS-PIANOBEND-REC: the wheel is a level, so only the latest value matters: one mailbox word (a flood of bends cannot fill the note ring and cost a note), not stamped into a take.
+      bend_.store(kBendPending | (port << 24) | ((m.ch + 1u) << 16) | (static_cast<std::uint32_t>(m.value) << 7) | m.cc, std::memory_order_release);
+      return;
+    }
     if (stamp_on_) {
       push_stamped(static_cast<std::uint8_t>(port), m);
     }
@@ -241,6 +253,25 @@ class CcInput {
       return false;
     }
     out = note_unpack(w);
+    return true;
+  }
+  // OS-PIANOBEND-REC: the latest pitch bend since the last call (main loop): `value14` 0..16383 (8192 = centre), `channel` 1..16, `port`. False when none came. A bend that arrives between
+  // two calls replaces the one before (single mailbox word, exchange: a store of the render after the exchange is taken by the next call).
+  struct BendMsg {
+    std::uint8_t port;
+    std::uint8_t channel;
+    std::uint16_t value14;
+  };
+  // The ports and channel the wheel is listened to (the device settings MIDI IN: 0, 1 or 2 = both, and IN CHANNEL: 0 = every channel, else 1..16); the main loop sets it each pass, the render filters by it before the store.
+  void set_bend_filter(unsigned in_port, unsigned in_channel) noexcept {
+    bend_filter_.store(((in_port < 2u ? in_port : 2u) << 8) | (in_channel & 0xFFu), std::memory_order_relaxed);
+  }
+  bool take_bend(BendMsg& out) noexcept {
+    const std::uint32_t w = bend_.exchange(0u, std::memory_order_acquire);
+    if ((w & kBendPending) == 0u) {
+      return false;
+    }
+    out = BendMsg{static_cast<std::uint8_t>((w >> 24) & 0x0Fu), static_cast<std::uint8_t>((w >> 16) & 0xFFu), static_cast<std::uint16_t>(w & 0x3FFFu)};
     return true;
   }
   // OS-MIDIREC-P1 S3: the next stamped message of the open take (main loop).
@@ -283,6 +314,9 @@ class CcInput {
   MidiMonitor monitor_;
   std::atomic<std::uint32_t> dropped_{0};
   std::atomic<std::uint32_t> note_dropped_{0};
+  static constexpr std::uint32_t kBendPending = 0x80000000u;
+  std::atomic<std::uint32_t> bend_filter_{2u << 8};  // port bits 8.., channel bits 0..7 (set_bend_filter): the main loop writes, the render reads; the default listens to everything
+  std::atomic<std::uint32_t> bend_{0};  // the latest pitch bend: pending bit 31, port bits 24..27, channel 1..16 bits 16..23, value 14 bits; the render stores, the main loop exchanges
 };
 
 }  // namespace o3os::midi

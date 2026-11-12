@@ -175,6 +175,11 @@ TEST_CASE("notes in: note on, note off, velocity 0, all-notes-off, running statu
   CHECK_FALSE(in.pop_note(m));
   CHECK_FALSE(in.pop(c));  // none of them is a control change (the ring of MIDI Learn is untouched)
   CHECK(in.note_dropped() == 0u);
+  // The pitch bend of that run is in the wheel's mailbox, not in a ring (OS-PIANOBEND-REC): 14 bit, low byte first.
+  midi::CcInput::BendMsg bm{};
+  NEED(in.take_bend(bm));
+  CHECK((bm.port == 0 && bm.channel == 1 && bm.value14 == ((2u << 7) | 1u)));
+  CHECK_FALSE(in.take_bend(bm));
 
   // A flood of control changes does not take the notes' room, nor the reverse.
   for (std::uint32_t i = 0; i < midi::CcInput::kRingSize + 10u; ++i) {
@@ -257,4 +262,73 @@ TEST_CASE("stamped ring: nothing is stamped without a stamp, the stamp is carrie
   CHECK(got == midi::CcInput::kStampRingSize);
   in.close_take();
   CHECK(in.take_track() == midi::CcInput::kNoTrack);
+}
+
+TEST_CASE("cc parser and input: the pitch wheel is a 14-bit level in a mailbox that keeps the latest value (OS-PIANOBEND-REC)") {
+  midi::CcParser p;
+  midi::ChannelMsg m{};
+  CHECK_FALSE(p.next(0xE3, m));
+  CHECK_FALSE(p.next(0x7F, m));
+  NEED(p.next(0x7F, m));  // LSB first, then MSB
+  CHECK((m.kind == midi::ChannelMsg::Kind::Bend && m.ch == 3 && m.cc == 0x7F && m.value == 0x7F));
+  // running status: the next pair is another bend of the channel
+  CHECK_FALSE(p.next(0x00, m));
+  NEED(p.next(0x40, m));
+  CHECK((m.kind == midi::ChannelMsg::Kind::Bend && m.ch == 3 && ((m.value << 7) | m.cc) == 8192));
+  // a clock inside changes nothing; CcParser::feed reports controllers only
+  CHECK_FALSE(p.next(0x01, m));
+  CHECK_FALSE(p.next(0xF8, m));
+  NEED(p.next(0x20, m));
+  CHECK(((m.value << 7) | m.cc) == ((0x20 << 7) | 1));
+  std::uint8_t ch = 0, cc = 0, v = 0;
+  CHECK_FALSE(p.feed(0xE0, ch, cc, v));
+  CHECK_FALSE(p.feed(1, ch, cc, v));
+  CHECK_FALSE(p.feed(2, ch, cc, v));
+
+  static midi::CcInput in;
+  const auto feed = [&](std::initializer_list<std::uint8_t> bytes, std::uint8_t port) {
+    for (std::uint8_t b : bytes) {
+      in.feed(midi::RtItem{0, b, port, 0});
+    }
+  };
+  midi::CcInput::BendMsg bm{};
+  CHECK_FALSE(in.take_bend(bm));
+  // a flood of bends fills no ring, not the notes' and not Learn's; only the last value is kept, with its port and channel
+  for (unsigned i = 0; i < 200u; ++i) {
+    feed({0xE0, static_cast<std::uint8_t>(i & 0x7Fu), 0x40}, 0);
+  }
+  feed({0xE4, 0x00, 0x00}, 1);  // the bottom of the wheel
+  midi::NoteMsg n{};
+  midi::CcMsg c{};
+  CHECK_FALSE(in.pop_note(n));
+  CHECK_FALSE(in.pop(c));
+  CHECK(in.note_dropped() == 0u);
+  CHECK(in.dropped() == 0u);
+  NEED(in.take_bend(bm));
+  CHECK((bm.port == 1 && bm.channel == 5 && bm.value14 == 0));
+  CHECK_FALSE(in.take_bend(bm));  // taken once
+  feed({0xE0, 0x7F, 0x7F}, 0);    // the top: 16383
+  NEED(in.take_bend(bm));
+  CHECK((bm.port == 0 && bm.channel == 1 && bm.value14 == 16383));
+  // a take that is open does not stamp it (a bend is no lane message)
+  in.open_take(0);
+  in.set_stamp(1, 5);
+  feed({0xE0, 0x00, 0x40}, 0);
+  midi::StampMsg s{};
+  CHECK_FALSE(in.pop_stamped(s));
+  NEED(in.take_bend(bm));
+  CHECK(bm.value14 == 8192);
+
+  // the filter is applied before the mailbox store: a bend of a port or channel not listened to must not overwrite one that is (OS-PIANOBEND-REC fold)
+  in.set_bend_filter(0, 3);  // port 0, channel 3 (1-based)
+  feed({0xE2, 0x00, 0x30}, 0);  // channel 3 of port 0: listened to
+  feed({0xE0, 0x00, 0x10}, 0);  // channel 1: not listened to
+  feed({0xE2, 0x00, 0x50}, 1);  // channel 3 of port 1: not listened to
+  NEED(in.take_bend(bm));
+  CHECK((bm.port == 0 && bm.channel == 3 && bm.value14 == (0x30 << 7)));
+  CHECK_FALSE(in.take_bend(bm));
+  in.set_bend_filter(2, 0);  // every port, every channel again
+  feed({0xE0, 0x00, 0x10}, 1);
+  NEED(in.take_bend(bm));
+  CHECK((bm.port == 1 && bm.channel == 1));
 }

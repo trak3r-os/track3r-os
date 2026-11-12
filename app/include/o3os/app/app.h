@@ -524,6 +524,9 @@ class App {
   core::ParamRing* params_out_ = nullptr;
   PreviewSink* preview_ = nullptr;
   std::uint32_t midi_note_drops_ = 0;  // midi::CcInput::note_dropped() at the last poll_midi_notes()
+  static constexpr std::uint16_t kBendUnknown = 0xFFFF;  // not a 14-bit value: the voices' offset is not the wheel's
+  std::uint8_t midi_bend_gen_ = 0;                          // edit.bend.gen as last seen
+  std::uint16_t midi_bend_value_ = 8192;  // OS-PIANOBEND-REC: the keyboard's pitch wheel (14 bit) as last sent to the voices; 8192 = centre. Main loop only
   LaneRec lane_rec_;                   // OS-MIDIREC-P1 S3: the Lane recording's state (lane_record.h); main loop only
   TransportSink* transport_ = nullptr;
   ProjectSink* project_ = nullptr;

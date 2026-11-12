@@ -543,6 +543,65 @@ TEST_CASE("live notes: a pad goes down with its track and instrument and its rel
   CHECK(rig.app->poll_midi_notes(in) == 0u);
 }
 
+namespace {
+// The pitch wheel (OS-PIANOBEND-REC): what the keyboard hands the voices.
+struct BendSink final : app::PreviewSink {
+  std::vector<std::pair<unsigned, unsigned>> log;  // value14, instrument
+  void preview(unsigned, unsigned) noexcept override {}
+  void midi_bend(unsigned value14, unsigned instrument) noexcept override { log.emplace_back(value14, instrument); }
+};
+}  // namespace
+
+TEST_CASE("live notes: the MIDI pitch wheel reaches the sink once per change and follows MIDI IN and IN CHANNEL (OS-PIANOBEND-REC)") {
+  namespace ds = model::device_setting;
+  Rig rig;
+  BendSink sink;
+  rig.app->attach_preview(&sink);
+  static midi::CcInput in;
+  (void)rig.app->poll_midi_notes(in);  // drop anything left over
+  sink.log.clear();
+  send_midi(in, 0, {0xE0, 0x01, 0x02});  // channel 1, LSB 1, MSB 2
+  (void)rig.app->poll_midi_notes(in);
+  NEED(sink.log.size() == 1u);
+  CHECK(sink.log[0].first == ((2u << 7) | 1u));
+  CHECK(sink.log[0].second == static_cast<unsigned>(rig.app->instrument()));
+  // The same value again is not sent twice.
+  send_midi(in, 0, {0xE0, 0x01, 0x02});
+  (void)rig.app->poll_midi_notes(in);
+  CHECK(sink.log.size() == 1u);
+  // A new value, back to the centre.
+  send_midi(in, 0, {0xE0, 0x00, 0x40});
+  (void)rig.app->poll_midi_notes(in);
+  NEED(sink.log.size() == 2u);
+  CHECK(sink.log[1].first == 8192u);
+  // IN CHANNEL 3: channel 1 is not this device's, channel 3 is.
+  CHECK(rig.app->device_settings().set(ds::MidiInChannel, 3.0f) == model::Status::Ok);
+  send_midi(in, 0, {0xE0, 0x7F, 0x7F});
+  (void)rig.app->poll_midi_notes(in);
+  CHECK(sink.log.size() == 2u);
+  send_midi(in, 1, {0xE2, 0x00, 0x00});
+  (void)rig.app->poll_midi_notes(in);
+  NEED(sink.log.size() == 3u);
+  CHECK(sink.log[2].first == 0u);
+  // A bend of a channel that is not listened to, after one that is, in the same pass, must not replace it (the filter runs before the mailbox store).
+  send_midi(in, 1, {0xE2, 0x00, 0x30});  // channel 3: the value in force
+  send_midi(in, 0, {0xE0, 0x7F, 0x7F});  // channel 1: not listened to
+  (void)rig.app->poll_midi_notes(in);
+  NEED(sink.log.size() == 4u);
+  CHECK(sink.log[3].first == (0x30u << 7));
+  // After a reset (the all-sources all-notes-off centres the voices) the same wheel value is sent again: what the voices hold is no longer the wheel's.
+  rig.app->reset_input();
+  send_midi(in, 1, {0xE2, 0x00, 0x30});
+  (void)rig.app->poll_midi_notes(in);
+  NEED(sink.log.size() == 5u);
+  CHECK(sink.log[4].first == (0x30u << 7));
+  // Without a sink the value is taken and dropped.
+  rig.app->attach_preview(nullptr);
+  send_midi(in, 1, {0xE2, 0x00, 0x30});
+  (void)rig.app->poll_midi_notes(in);
+  CHECK(sink.log.size() == 5u);
+}
+
 // OS-BUG-STEPSND: in STEP (Edit) a pad writes the note AND sounds, on the selected track, stopped or playing; the release comes through as in Browse.
 TEST_CASE("OS-BUG-STEPSND: a pad in STEP sounds as well as writes, on the cursor's track; its release ends it") {
   Rig rig;

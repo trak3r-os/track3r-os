@@ -2447,7 +2447,11 @@ std::int32_t VoicePool::tune_base_q16(unsigned track) const noexcept {
 // OS-PIANOBEND: see voices.h. A track in the new mask whose bend changes moves its sounding voice by the difference, like a TUNE change; 0 clears the mask.
 void VoicePool::live_bend(int semitones, std::uint32_t tracks) noexcept {
   const int s = semitones < -24 ? -24 : (semitones > 24 ? 24 : semitones);
-  const std::int32_t to = s * 65536;
+  live_bend_set(s * 65536, tracks);
+}
+
+void VoicePool::live_bend_set(std::int32_t q16, std::uint32_t tracks) noexcept {
+  const std::int32_t to = q16 < -24 * 65536 ? -24 * 65536 : (q16 > 24 * 65536 ? 24 * 65536 : q16);
   const std::uint16_t old_mask = bend_mask_;
   const std::int32_t old = bend_q16_;
   const std::uint16_t new_mask = to == 0 ? std::uint16_t{0} : static_cast<std::uint16_t>(old_mask | (tracks & 0xFFFFu));
@@ -2466,6 +2470,24 @@ void VoicePool::live_bend(int semitones, std::uint32_t tracks) noexcept {
   }
   bend_q16_ = to;
   bend_mask_ = new_mask;
+}
+
+// OS-PIANOVIB: see voices.h. step_lfo_ row 2 is the Finetune LFO FX 33's (the rate index + 1); perf_sync starts, or ends, the LFO on the sounding voice.
+void VoicePool::live_vib(bool on, std::uint32_t tracks) noexcept {
+  const std::uint32_t touch = (on ? tracks : 0u) | vib_mask_;  // (kVoiceTracks is 16: a bit above it is never looked at)
+  const std::uint8_t to = on ? static_cast<std::uint8_t>(kLiveVibRate + 1u) : std::uint8_t{0};
+  vib_on_ = on;
+  vib_mask_ = on ? static_cast<std::uint16_t>(touch) : std::uint16_t{0};
+  for (unsigned t = 0; t < kVoiceTracks; ++t) {
+    if (((touch >> t) & 1u) == 0u || step_lfo_[2][t] == to) {
+      continue;
+    }
+    step_lfo_[2][t] = to;
+    const unsigned i = find(t);
+    if (i != kNone && v_[i].playing) {
+      perf_sync(v_[i], 2u);
+    }
+  }
 }
 
 // OS-PFX, SLIDE FX: the pitch offset goes from where it is to `sixteenths` of a semitone in one step of the tempo (576 ticks, tick_rate_q_ of them a sample in Q24): the one 64-bit

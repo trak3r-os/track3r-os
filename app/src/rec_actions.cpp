@@ -182,6 +182,88 @@ bool rec_note_off(ActionContext& ctx, core::ActionArg arg) noexcept {
   return done;
 }
 
+// OS-PIANOBEND-REC (docs/specs/OS-PIANOBEND.md; new Community OS behaviour): the PIANO bend strip written into the pattern as the existing Slide FX, no new FX id. `semitones` is the strip's active
+// bend, -2..2: a value writes Slide up 41 / down 42 of |n| x 16 sixteenths of a semitone at the play line's step (rec_row_now) of the tracks that hold a recorded note, else the cursor's track; 0 (the
+// release, or a fall back to no pad) writes Slide up 0, the pitch of the note, at the step the release lands on (the next one when that is the press's own step, so a short tap still bends for a step).
+// A Slide holds until the note or the FX ends (voices.h SLIDE FX), so playback bends where the pad went down and springs back where it came up. Sample instruments only: the other kinds do not
+// slide, and say so once per take. Main loop only (an action); the live sound is the PreviewSink's, not this.
+bool rec_bend(ActionContext& ctx, int semitones) noexcept {
+  ViewState& v = ctx.view;
+  const bool release = semitones == 0;
+  if (semitones < -2 || semitones > 2 || (release && v.edit.rec_bend == 0u)) {
+    return false;
+  }
+  if (!rec_active(ctx) || v.play.pattern != v.edit.pattern) {
+    if (release) {
+      v.edit.rec_bend = 0;  // recording ended or left the pattern under the finger: nothing is written, the hold is over
+    }
+    return false;
+  }
+  const PatternSource src(ctx.model, v.edit.pattern);
+  const int tracks = src.tracks() < kRecTracks ? src.tracks() : kRecTracks;
+  std::uint16_t mask = v.edit.rec_bend;
+  if (!release) {
+    const model::Instrument* in = ctx.model.project != nullptr ? ctx.model.project->instrument(static_cast<unsigned>(pe::clampi(v.instrument, 1, static_cast<int>(model::kMaxInstruments))) - 1u) : nullptr;
+    if (in == nullptr || in->kind != model::InstrumentKind::Sample) {
+      if (!v.edit.rec_bend_said) {  // once per take
+        v.edit.rec_bend_said = true;
+        (void)v.notify.post(core::Severity::Info, "REC BEND: SAMPLE INSTRUMENTS ONLY", "rec_fx", ViewState::kMessageMs);
+      }
+      return false;
+    }
+    const int cursor = v.pattern.track();
+    mask = static_cast<std::uint16_t>(mask | (v.edit.rec_open != 0u ? v.edit.rec_open : (cursor >= 0 && cursor < kRecTracks ? 1u << cursor : 0u)));
+  }
+  const std::uint8_t type = semitones < 0 ? seq::fx::kSlideDown : seq::fx::kSlideUp;
+  const std::uint8_t value = static_cast<std::uint8_t>((semitones < 0 ? -semitones : semitones) * 16);
+  bool done = false;
+  for (int t = 0; t < tracks; ++t) {
+    if (((mask >> t) & 1u) == 0u) {
+      continue;
+    }
+    const int length = src.track_length(t);
+    int row = rec_row_now(ctx, src, t);
+    if (row < 0 || row >= length) {
+      continue;
+    }
+    if (release && row == v.edit.rec_bend_row[t] && length > 1) {
+      row = (row + 1) % length;
+    }
+    model::Step s = src.step(t, row);
+    const model::Step before = s;
+    if (rec::rec_fx_place(s, type, value) < 0) {
+      if (!v.edit.rec_fx_full) {  // once per take
+        v.edit.rec_fx_full = true;
+        (void)v.notify.post(core::Severity::Info, "REC FX: NO FREE FX COLUMN", "rec_fx", ViewState::kMessageMs);
+      }
+      continue;
+    }
+    if (!release) {
+      v.edit.rec_bend_row[t] = static_cast<std::uint8_t>(row);
+      v.edit.rec_bend = static_cast<std::uint16_t>(v.edit.rec_bend | (1u << t));  // the release writes the spring-back on this track: set once the Slide fits the cell (also when the cell already held it); a track whose FX columns were full is not marked
+    }
+    if (std::memcmp(&s, &before, sizeof s) == 0) {
+      continue;  // the cell already holds it
+    }
+    bool exists = src.exists();
+    if (!pe::create_if_missing(ctx, exists, static_cast<unsigned>(src.length()))) {
+      continue;
+    }
+    const std::size_t journal_before = ctx.edit->journal().open_bytes();
+    if (ctx.edit->set_steps(v.edit.pattern, static_cast<std::uint32_t>(t), static_cast<std::uint32_t>(row), &s, 1) == model::Status::Ok) {
+      done = true;
+    }
+    note_take_write(v, journal_before, *ctx.edit);
+  }
+  if (release) {
+    v.edit.rec_bend = 0;
+  }
+  return done;
+}
+
+// The action of the release (App::run_once; arg = the strip's bend now + 2, so 2 is the spring-back).
+bool rec_bend_action(ActionContext& ctx, core::ActionArg arg) noexcept { return rec_bend(ctx, static_cast<int>(arg) - 2); }
+
 // ---- the take ------------------------------------------------------------------------------------------------------------------------------------------------
 
 // OS-FXREC S2 (docs/specs/OS-FXREC.md 3.2, 3.3, 3.5): a mapped parameter move of a LIVE take is written as the step FX at the play line of the cursor's track. Called from apply_cc after
@@ -342,6 +424,8 @@ bool rec_keeps_take(const ActionDef& action, const ViewState& view) noexcept {
   return true;
 }
 
+// (A strip still held when the take ends, by a stop or by the long-take split, clears rec_bend without a spring-back: the transport is stopped or the take is a new one, nothing writes at that
+// row any more; the Slide the press left holds to the next note of its track. Documented in docs/specs/OS-PIANOBEND.md, QA-PAT-545.)
 void rec_take_end(model::Editor* editor, PatternEdit& edit) noexcept {
   if (edit.take_open) {
     edit.take_open = false;
@@ -349,6 +433,8 @@ void rec_take_end(model::Editor* editor, PatternEdit& edit) noexcept {
     edit.rec_fx_said = false;  // OS-FXREC: the take's strip flags go with it
     edit.rec_fx_full = false;
     edit.rec_cc_full = false;
+    edit.rec_bend_said = false;  // OS-PIANOBEND-REC
+    edit.rec_bend = 0;
     if (editor != nullptr) {
       editor->end_group();  // commits the unit if it has records; an empty take leaves no entry
     }

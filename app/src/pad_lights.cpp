@@ -221,6 +221,9 @@ void mode_roles(const Model& model, const ViewState& view, const PatternContent&
       case PadKey::Bend:  // OS-PIANOBEND: dim at rest, bright while the finger is on it
         role = view.edit.bend.holds(pad) ? PadRole::Front : PadRole::Back;
         break;
+      case PadKey::Vib:  // OS-PIANOVIB: both pads are one control: dim at rest, both bright while either is held
+        role = view.edit.vib.on() ? PadRole::Front : PadRole::Back;
+        break;
       case PadKey::OctUp:
         // OS-NOTESLED2: Front while the octave is shifted up from the default, Back otherwise, Off at the end of the range
         role = e.octave + 1u >= kEntryOctaves ? PadRole::Off : (e.octave > kEntryDefaultOctave ? PadRole::Front : PadRole::Back);

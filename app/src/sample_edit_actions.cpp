@@ -335,14 +335,17 @@ bool sample_commit(ActionContext& ctx, core::ActionArg) noexcept {
     after = run->generator() ? PointsRec{} : insert_points(before, old_frames, run->body_a(), run->body_b(), run->prepend(), run->append());
   }
   const bool wavetable = run != nullptr && run->wavetable();
-  const unsigned wsize = wavetable ? wt_fit_size(in->sampler.wavetable_window_size, st.staged_frames) : 0u;
+  // OS-PTFXWTSIZE: the result is made for the default window (2048 frames; a .ptfx declares no size), so the slot's own WT SIZE is not kept: 2048 held to the result's length.
+  const unsigned wsize = wavetable ? wt_fit_size(0u, st.staged_frames) : 0u;
   if (wsize != 0u) {  // the plugin makes single-cycle frames: the instrument plays them as a wavetable, in the same undo unit as the audio (F8 puts the mode back)
     before.pm = in->sampler.play_mode;
     before.wsz = in->sampler.wavetable_window_size;
     before.wpos = in->sampler.wavetable_window;
     after.pm = kPlayModeWavetable;
     after.wsz = static_cast<std::uint16_t>(wsize);
-    after.wpos = wt_clamp_pos(st.staged_frames, wsize, in->sampler.wavetable_window);
+    const unsigned old = wt_size_eff(in->sampler.wavetable_window_size);  // the position names the same part of the sample in windows of the new size (both are powers of two)
+    const std::uint32_t pos = in->sampler.wavetable_window;
+    after.wpos = wt_clamp_pos(st.staged_frames, wsize, old >= wsize ? pos * (old / wsize) : pos / (wsize / old));
   }
   if (st.ready_op == EditOp::Amiga) {  // one undo unit: the audio, and the rate, engine and tune it goes with (the points are fractions of the length: they follow it)
     const int tune = in->sampler.tune + (st.ready_period == kAmigaPeriod16 ? kAmigaTune16 : 0);

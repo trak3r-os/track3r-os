@@ -191,10 +191,18 @@ void App::run_once() noexcept {
       preview_->pad_up(event.id);  // a pad's release ends the note it started (OS-005g); the sink knows which pads it holds
     }
     if (event.kind == core::InputKind::Pad && event.value == 0 && event.id < kPadCount && state_.edit.bend.holds(event.id)) {
+      const int bend_was = state_.edit.bend.active();
       const int bend = state_.edit.bend.release(event.id);  // OS-PIANOBEND: a bend pad's release (whatever the mode is by now): the previous held bend pad's, or back in tune
       if (preview_ != nullptr) {
         preview_->pad_bend(bend, static_cast<unsigned>(state_.instrument));
       }
+      if (state_.edit.rec_bend != 0u && bend != bend_was) {  // an older pad's release leaves the newer one in force: nothing to write
+        (void)invoke(core::action_id("rec.bend"), bend + 2);  // OS-PIANOBEND-REC: the recorded bend goes back (to the previous held pad's, or in tune), at the release's step
+      }
+    }
+    const int vib_bit = event.kind == core::InputKind::Pad && event.value == 0 ? VibHold::bit_of(event.id) : -1;
+    if (vib_bit >= 0 && state_.edit.vib.release(static_cast<unsigned>(vib_bit)) && preview_ != nullptr) {  // (a pad that was not held changes nothing: release() answers false)
+      preview_->pad_vibrato(false, static_cast<unsigned>(state_.instrument));  // OS-PIANOVIB: the last vibrato pad up (whatever the mode is by now): the vibrato ends
     }
     if (event.kind == core::InputKind::Pad && event.value == 0 && state_.edit.step_hold.row >= 0) {
       (void)invoke(core::action_id("pads.step_up"), event.id);  // OS-PADS-B: a STEP pad's release ends its hold, and clears a lit step that was only tapped
@@ -598,6 +606,7 @@ void App::reset_input() noexcept {
   stop_hold();
   state_.inst_pads = 0;
   state_.edit.bend.clear();  // OS-PIANOBEND: (the notes_off below puts the voices and the MIDI channel back in tune)
+  state_.edit.vib.clear();   // OS-PIANOVIB: (the notes_off below ends the vibrato: the all-notes-off of every source)
   tap_pads_ = 0;  // OS-PATTEMPO: a tap's release may have been lost too: the next release of that pad is a normal one
   enc_keys_ = 0;  // OS-ENCLEARN: likewise
   if (state_.edit.enc_take || state_.edit.enc_said) {
@@ -609,6 +618,7 @@ void App::reset_input() noexcept {
     perform_->pads = 0;  // OS-QAFIX-E-PERF-08: (the notes_off below and the bank's own reset let go of the slots)
   }
   state_.peeking = false;  // (OS-SONGPEEK) the release of the Song key may have been lost: the screen in view stays
+  midi_bend_value_ = kBendUnknown;  // (the all-sources all-notes-off below centres the voices' offset: the wheel's next value is sent)
   if (preview_ != nullptr) {
     preview_->notes_off(false);  // a release may have been lost with the input: no pad's note may ring on
   }
@@ -1110,6 +1120,18 @@ unsigned App::poll_midi_notes(midi::CcInput& in) noexcept {
         preview_->notes_off(true);
         break;
     }
+  }
+  // OS-PIANOBEND-REC: the keyboard's pitch wheel, once a pass (the latest value; the mailbox keeps no history). Control rate: the voices re-pitch at their next block. A repeat of the value in force is not sent.
+  // The wheel, the pad strip, an all-notes-off and an export share one offset in the voices: when any other moved it since the last wheel value was sent, that value is no longer in force, so the next one is always applied.
+  in.set_bend_filter(in_port, in_channel);
+  if (state_.edit.bend.gen != midi_bend_gen_ || state_.xport.running) {
+    midi_bend_gen_ = state_.edit.bend.gen;
+    midi_bend_value_ = kBendUnknown;
+  }
+  midi::CcInput::BendMsg bend;
+  if (in.take_bend(bend) && preview_ != nullptr && midi_in_accepts(in_port, in_channel, bend.port, bend.channel) && bend.value14 != midi_bend_value_) {
+    midi_bend_value_ = bend.value14;
+    preview_->midi_bend(bend.value14, static_cast<unsigned>(state_.instrument));
   }
   return played;
 }

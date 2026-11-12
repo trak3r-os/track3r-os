@@ -111,7 +111,14 @@ struct PatternEdit {
   std::uint8_t rec_note[16] = {};
   std::uint8_t rec_row[16] = {};
   std::uint8_t rec_head[16] = {};
-  PadBoard pads;                  // the NOTES mode's layout: scale, root from `entry` (apply_entry), the row offset from the device setting PAD OFFSET (App::poll_pad_offset; 12 until it moves)
+  // OS-PIANOBEND-REC (rec_actions.cpp rec_bend): the tracks that hold a recorded bend (a slide FX written for a held strip pad, bit n = track n) and the step each was written to, so the release
+  // writes the spring-back (slide 0) on the same tracks, and never on the press's own step. `rec_bend_said`: the take's one "REC FX: BEND NEEDS A SAMPLE INSTRUMENT" line. Main loop only; cleared
+  // with the take (rec_take_end).
+  std::uint16_t rec_bend = 0;
+  std::uint8_t rec_bend_row[16] = {};
+  bool rec_bend_said = false;
+  VibHold vib;                   // OS-PIANOVIB: the PIANO vibrato pads under the fingers (pad_maps.h); the release is App::run_once's, whatever the mode is by then. Main loop only (placed in the padding after the bool)
+  PadBoard pads;                // the NOTES mode's layout: scale, root from `entry` (apply_entry), the row offset from the device setting PAD OFFSET (App::poll_pad_offset; 12 until it moves)
   NoteEntry entry;                // OS-PADS-B: root, scale, octave and SCALE LOCK of the note entry (held Note, note_entry.h); the jump is edit_step
   std::uint8_t pad_held[48] = {};    // the note + 1 that the PIANO / ISO pad under the finger started (0: none), so its release ends that note even if the octave changed meanwhile
   BendHold bend;                     // OS-PIANOBEND: the PIANO bend pads under the fingers (pad_maps.h); the release is App::run_once's, whatever the mode is by then. Main loop only

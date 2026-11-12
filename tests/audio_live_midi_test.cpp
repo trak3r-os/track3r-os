@@ -423,6 +423,27 @@ TEST_CASE("live midi: a bend pad sends a 14-bit pitch bend on the instrument's c
   CHECK(rig().link().out().book().owed() == 0u);
 }
 
+TEST_CASE("live midi: the MIDI-in wheel reaches a MIDI instrument as the raw 14-bit value whatever its range, and the centre returns to 8192 (OS-PIANOBEND-REC)") {
+  setup(rig());
+  const auto fine = [](unsigned v14, std::uint8_t instrument) {
+    return LiveEvent{LiveKind::BendFine, audio::kLiveSourceMidi, static_cast<std::uint8_t>(v14 & 0x7Fu), static_cast<std::uint8_t>((v14 >> 7) & 0x7Fu), instrument, 0, 0, 0};
+  };
+  push(fine(12345, 12));
+  rig().settle();
+  CHECK(bends_of(1) == Bends{{0, 12345}});
+  CHECK(bends_of(0) == Bends{{0, 12345}});
+  midi_slot_range(11, 1, 12);  // a range of 12 does not scale it: the keyboard's wheel is already in the instrument's own units
+  push(fine(1, 12));
+  rig().settle();
+  CHECK(bends_of(1).back() == std::make_pair(0, 1));
+  push(fine(8192, 12));  // the centre
+  rig().settle();
+  CHECK(bends_of(1).back() == std::make_pair(0, 8192));
+  CHECK(rig().notes().empty());
+  CHECK(rig().pool().voices_in_use() == 0);
+  CHECK(rig().link().out().book().owed() == 0u);
+}
+
 TEST_CASE("live midi: a bend scales by the instrument's range, range 0 stays at the centre, another route is centred first (OS-PIANOBEND)") {
   setup(rig());
   midi_slot_range(11, 1, 12);  // instrument 12: channel 1, range 12 semitones: +2 is a sixth of the travel
@@ -504,5 +525,104 @@ TEST_CASE("live midi: an export starts with the strip's bend gone, on the voices
   rig().settle();
   CHECK(bends_of(1).size() == 2u);
   CHECK(rig().pool().live_bend_q16() == 0);
+  ports_agree();
+}
+
+// OS-PIANOVIB: the vibrato pad of PIANO mode on a MIDI instrument (a Vibrato live event, seq/midi_link.h): CC1 127 on the press, CC1 0 on the release, both on the instrument's route.
+namespace {
+
+LiveEvent vib(bool on, std::uint8_t instrument) {
+  return LiveEvent{LiveKind::Vibrato, audio::kLiveSourcePad, static_cast<std::uint8_t>(on ? 1 : 0), 0, instrument, 0, 0, 0};
+}
+
+// The CC1 messages of one port as (channel, value).
+Bends ccs_of(std::uint8_t port) {
+  Bends r;
+  for (const WireMsg& m : rig().msgs_of(port)) {
+    if ((m.b[0] & 0xF0u) == 0xB0u && m.b[1] == 1u) {
+      r.emplace_back(m.b[0] & 0x0F, m.b[2]);
+    }
+  }
+  return r;
+}
+
+}  // namespace
+
+TEST_CASE("live midi: the vibrato pad sends CC1 127 on the instrument's channel and CC1 0 on release, on both ports, no note and no voice (OS-PIANOVIB)") {
+  setup(rig());
+  push(vib(true, 12));  // channel 1
+  rig().blocks(2);
+  CHECK(ccs_of(1) == Bends{{0, 127}});
+  CHECK(ccs_of(0) == Bends{{0, 127}});
+  CHECK(!rig().pool().live_vib_on());  // taken by the MIDI link: the voices get no LFO
+  push(vib(false, 12));
+  rig().settle();
+  CHECK(ccs_of(1) == Bends{{0, 127}, {0, 0}});
+  CHECK(rig().notes().empty());
+  CHECK(rig().pool().voices_in_use() == 0);
+  CHECK(rig().link().out().book().owed() == 0u);
+  push(vib(false, 12));  // a release with nothing on sends nothing
+  rig().settle();
+  CHECK(ccs_of(1).size() == 2u);
+  ports_agree();
+}
+
+TEST_CASE("live midi: an all-notes-off of the pads or of all sources ends a vibrato, the keyboard's does not; another route is ended first (OS-PIANOVIB)") {
+  setup(rig());
+  push(vib(true, 13));  // channel 16
+  rig().blocks(2);
+  push(all_off(audio::kLiveSourceMidi));
+  rig().blocks(2);
+  CHECK(ccs_of(1) == Bends{{15, 127}});
+  push(all_off(audio::kLiveSourcePad));
+  rig().settle();
+  CHECK(ccs_of(1) == Bends{{15, 127}, {15, 0}});
+  push(all_off(audio::kLiveAllSources));  // nothing is on now: nothing more is sent
+  rig().settle();
+  CHECK(ccs_of(1).size() == 2u);
+  push(vib(true, 13));
+  push(vib(true, 12));  // the instrument in view changed while the pad was held: the first route goes back to 0 before the second starts
+  rig().settle();
+  CHECK(ccs_of(1) == Bends{{15, 127}, {15, 0}, {15, 127}, {15, 0}, {0, 127}});
+  push(all_off(audio::kLiveAllSources));  // App::reset_input()
+  rig().settle();
+  CHECK(ccs_of(1).back() == std::make_pair(0, 0));
+  ports_agree();
+}
+
+TEST_CASE("live midi: a vibrato on a sample instrument or on none is left to the voices and sends no CC; a release on a sample instrument still ends the MIDI route (OS-PIANOVIB)") {
+  setup(rig());
+  push(vib(true, 1));   // a sample instrument
+  push(vib(true, 0));   // none
+  push(vib(true, 30));  // a free slot
+  rig().settle();
+  CHECK(ccs_of(1).empty());
+  CHECK(ccs_of(0).empty());
+  push(vib(false, 1));
+  push(vib(true, 12));
+  rig().settle();
+  push(vib(false, 1));
+  rig().settle();
+  CHECK(ccs_of(1) == Bends{{0, 127}, {0, 0}});
+}
+
+TEST_CASE("live midi: an export starts with the vibrato off, on the voices and on the MIDI route; the late release adds nothing (OS-PIANOVIB)") {
+  setup(rig());
+  push(vib(true, 13));
+  rig().settle();
+  CHECK(ccs_of(1) == Bends{{15, 127}});
+  rig().pool().live_vib(true, 1u);  // and the voices' own LFO, as a pad on a sampler track holds it
+  CHECK(rig().pool().live_vib_on());
+  rig().engine().offline_request();
+  rig().engine().offline_enter(audio::EventSource{});
+  CHECK(!rig().pool().live_vib_on());
+  rig().settle();
+  CHECK(ccs_of(1) == Bends{{15, 127}, {15, 0}});
+  CHECK(ccs_of(0) == Bends{{15, 127}, {15, 0}});
+  rig().engine().offline_leave();
+  push(vib(false, 13));  // the late release
+  rig().settle();
+  CHECK(ccs_of(1).size() == 2u);
+  CHECK(!rig().pool().live_vib_on());
   ports_agree();
 }

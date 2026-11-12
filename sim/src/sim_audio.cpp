@@ -146,6 +146,25 @@ class SimAudio::Preview final : public app::PreviewSink {
       (void)push(e);
     }
   }
+  // OS-PIANOVIB: the PIANO vibrato pad (key 1 held, 0 let go); the let go goes by release() like the strip's.
+  void pad_vibrato(bool on, unsigned instrument) noexcept override {
+    const audio::LiveEvent e{audio::LiveKind::Vibrato, audio::kLiveSourcePad, static_cast<std::uint8_t>(on ? 1u : 0u), 0, clamp_instrument(instrument), 0, 0, 0};
+    if (on) {
+      (void)push(e);
+    } else {
+      release(e);
+    }
+  }
+  // OS-PIANOBEND-REC: the MIDI keyboard's pitch wheel (14 bit): key = the low 7 bits, note = the high 7; the centre goes by release() like the strip's let go.
+  void midi_bend(unsigned value14, unsigned instrument) noexcept override {
+    const unsigned v = value14 > 16383u ? 16383u : value14;
+    const audio::LiveEvent e{audio::LiveKind::BendFine, audio::kLiveSourceMidi, static_cast<std::uint8_t>(v & 0x7Fu), static_cast<std::uint8_t>(v >> 7), clamp_instrument(instrument), 0, 0, 0};
+    if (v == 8192u) {
+      release(e);
+    } else {
+      (void)push(e);
+    }
+  }
   void midi_note(bool on, unsigned track, unsigned instrument, unsigned note, unsigned velocity, unsigned channel) noexcept override {
     if (note > 127u) {
       return;

@@ -59,13 +59,18 @@ bool play_fn(ActionContext& ctx, unsigned pad, PadFn fn) noexcept {
       return octave_by(ctx.view, 1);
     case PadKey::OctDown:
       return octave_by(ctx.view, -1);
-    case PadKey::Bend: {  // OS-PIANOBEND: momentary, last pressed wins; the release is App::run_once's. Nothing is written to the pattern
+    case PadKey::Bend: {  // OS-PIANOBEND: momentary, last pressed wins; the release is App::run_once's. OS-PIANOBEND-REC: recording writes the Slide FX (rec_bend)
       const int bend = ctx.view.edit.bend.press(pad, bend_semitones(fn));
       if (ctx.preview != nullptr) {
         ctx.preview->pad_bend(bend, static_cast<unsigned>(ctx.view.instrument));
       }
-      return false;
+      return rec_bend(ctx, bend);
     }
+    case PadKey::Vib:  // OS-PIANOVIB: momentary; the sink is told on the edge (the first of the two pads down); the release is App::run_once's
+      if (ctx.view.edit.vib.press(fn.value) && ctx.preview != nullptr) {
+        ctx.preview->pad_vibrato(true, static_cast<unsigned>(ctx.view.instrument));
+      }
+      return true;
     default:
       return false;
   }

@@ -1,6 +1,6 @@
 # OS-PIANOBEND: a pitch-bend strip in PIANO pad mode
 
-Level C (audio path). New Community OS behaviour (backlog row OS-PIANOBEND). Not recorded into the pattern (OS-PIANOBEND-REC is separate).
+Level C (audio path). New Community OS behaviour (backlog row OS-PIANOBEND). Recording into the pattern and MIDI-in pitch bend: section OS-PIANOBEND-REC below.
 
 ## Goal
 
@@ -47,3 +47,39 @@ Host (`pad_bend_test`, label `app`): pad-to-bend map (8 pads, four values, no ze
 ## Risks
 
 A lost release leaves a bent note: covered by the AllOff reset and by the mask being cleared on 0. A full queue could drop a 0: the sink keeps a pending flag and resends it (same repair as a lost Note Off). Unit checks owed: audible bend of a sampler note and a MIDI synth, release returns to pitch, two pads held.
+
+## OS-PIANOBEND-REC: recording the strip, and MIDI-in pitch bend
+
+Level C (audio path, ISR-fed input). New Community OS behaviour, approved by the maintainer. No persistent-format change.
+
+### Decision (a): recording
+
+The strip writes the existing slide FX, no new FX id: press of a +n / -n pad writes `kSlideUp` / `kSlideDown` (41 / 42) with value `n * 16` (sixteenths of a semitone, `seq::slide_sixteenths`, `seq/include/o3os/seq/fx.h:347`) into an FX column of the step the press lands on; release writes `kSlideUp` value 0 (back to the note's pitch) on the step the release lands on. Slide holds until the note or FX ends, so playback bends at the press step and springs back at the release step. A press and a release on one step overwrite the column (the release wins, as `rec_fx_write` does for the same type). Targets: the `rec_open` tracks of the take, else the cursor track; only Sample instruments (Amiga, module and MIDI instruments do not slide, `rec_fx_place` is not called for them). Chords of pads: only the active value of `BendHold` is written (one FX per change, same rule as the live send). Full FX columns raise the existing once-per-take notice (`rec_fx_full`);.
+
+Path: `play_fn` (`app/src/pad_mode_actions.cpp:62`, `PadKey::Bend`) calls `rec::rec_bend` on press; the release in `app/src/app.cpp` (next to `bend.release`) invokes action `rec.bend` (arg = bend + 2) only while `edit.take_open`. The write reuses the take machinery of `app/src/rec_actions.cpp` (`rec_fx_write`, one undo group per take).
+
+### Decision (b): MIDI-in pitch bend
+
+`CcParser::next` (`midi/include/o3os/midi/cc_in.h`) today drops `0xE0`. It now returns `ChannelMsg::Kind::Bend` (14 bit). `CcInput::feed` (render) stores the latest value in one atomic word (a mailbox, single writer render, single reader main loop; a bend flood cannot fill the 32-entry note ring or drop notes). `App::poll_midi_notes` takes it after the note loop, applies `midi_in_accepts`, drops an unchanged value, and calls `PreviewSink::midi_bend(value14, instrument)`. Sinks push `LiveKind::BendFine` (`audio/include/o3os/audio/live_notes.h`; key = low 7, note = high 7; `LiveEvent` stays 8 B); the centre 8192 goes through `release()` (flush repair, as a pad bend 0).
+
+Range and smoothing: fixed +-2 semitones, full travel = 8192 counts (the standard bend range, and the strip's own range; the sampler offset is q16 `(v14 - 8192) << 4`: no division, no float). MIDI instruments get the raw 14-bit value (`MidiLink::live_event`, `seq/src/midi_link.cpp:174`). No extra glide: the value is applied once per block by the existing `mod_block` re-pitch; the wheel's own 14-bit resolution is finer than a block step; the main loop coalesces to the last value per pass.
+
+### Facts
+
+- Live bend today: `VoicePool::live_bend(int, mask)` (`audio/src/voices.cpp:2437`) writes `bend_q16_` / `bend_mask_` (render only) and moves a sounding voice's `slide_q16` / `slide_tgt` by the difference; refactored to a q16 core that both the semitone and the fine event call.
+- Note path of MIDI in: render -> `notes_` ring -> main loop (`cc_in.h` `pop_note`); the bend does not use it.
+
+### Real-time safety
+
+Render: parser branch plus one atomic store; one extra switch case in the existing bounded drain; integer maths only. Main loop: one atomic exchange per pass. No heap, no blocking, no `double`, no printf. Atomic `std::uint32_t` (lock-free on the M4).
+
+### Tests
+
+`pad_bend_test` / `pad_modes_test`: press and release on expected steps with the expected FX (slide 41/42 values 16/32, release 0), full-column notice, non-sample instrument writes nothing, playback bends a sampler voice and springs back at the release step. `midi_cc_in_test`: the parser routes 0xE0 (14-bit, channel), the mailbox keeps the last value. Engine: `BendFine` scales (+8191 = just under +2 semitones, 0 centre, -8192 = -2) and the voice offset follows; MIDI route sends the raw value. Goldens: none (no screen change).
+
+### Fold (review minors)
+
+- The wheel's mailbox is filtered by MIDI IN / IN CHANNEL in the render before the store (`CcInput::set_bend_filter`, set by the main loop each pass), so a bend of another port or channel cannot overwrite one that is listened to.
+- The App forgets the last wheel value sent (`midi_bend_value_` = 0xFFFF) when the strip moved the shared offset (`BendHold::gen`), on `reset_input` (all-sources all-notes-off) and while an export runs, so the next wheel value is always applied.
+- The platform refuses `BendFine` while the engine is the export's (`offline_wanted`), like a new note; the simulator has no such refusal.
+- A strip still held when the take ends (stop, long-take split) writes no spring-back: nothing records at that row any more; the Slide holds to the next note of the track. Known limit, no data hazard.

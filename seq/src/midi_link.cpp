@@ -136,7 +136,8 @@ std::uint32_t MidiLink::stop_live_pads(std::uint32_t* count) noexcept {
     ++n;
     live_release(pad);
   }
-  const bool centred = live_bend_centre();  // OS-PIANOBEND: an export starts with the receiver in tune, whatever the strip held
+  bool centred = live_ctl_end(false);  // OS-PIANOBEND: an export starts with the receiver in tune, whatever the strip held
+  centred = live_ctl_end(true) || centred;  // OS-PIANOVIB: and with the vibrato off
   if (n != 0u || centred) {
     out_.flush(core::cycles_from_samples(last_block_end_));  // as step() ends: the offs go to the ports now
     if (hooks_.kick != nullptr) {
@@ -148,44 +149,51 @@ std::uint32_t MidiLink::stop_live_pads(std::uint32_t* count) noexcept {
   return word;
 }
 
-// OS-PIANOBEND: one MidiPitchBend of `value` (0..16383) on the route in `word` (the live_pad_ encoding: ports, OFFSET, channel).
-bool MidiLink::live_bend_send(std::uint32_t word, std::uint16_t value) noexcept {
+// OS-PIANOBEND, OS-PIANOVIB: one controller of a route-held pair on the route in `word` (the live_pad_ encoding: ports, OFFSET, channel): the pitch bend (`vib` false, `value` 0..16383) or CC1, the modulation wheel (`vib` true, `value` 0..127).
+bool MidiLink::live_ctl_send(std::uint32_t word, bool vib, std::uint16_t value) noexcept {
   audio::SeqEvent ev{};
-  ev.kind = EventKind::MidiPitchBend;
+  ev.kind = vib ? EventKind::MidiCc : EventKind::MidiPitchBend;
   ev.track = audio::kNoTrack;
-  ev.a = static_cast<std::uint8_t>(value & 0x7Fu);
-  ev.b = static_cast<std::uint8_t>(value >> 7);
+  ev.a = vib ? static_cast<std::uint8_t>(audio::kMidiCcExplicit | 1u) : static_cast<std::uint8_t>(value & 0x7Fu);
+  ev.b = vib ? static_cast<std::uint8_t>(value) : static_cast<std::uint8_t>(value >> 7);
   ev.c = static_cast<std::uint8_t>((word >> 8) & 0x0Fu);
   ev.flags = static_cast<std::uint8_t>((word >> kLivePortsShift) & audio::kRoutePorts);
   ev.value = static_cast<std::int32_t>((word >> kLiveDelayShift) & 0x7Fu) * 1000;
   return out_.send(ev, last_block_end_);
 }
 
-// The centre goes to the route the strip last bent, if it did. MidiOut::send accepts a pitch bend even when staging is full (out.cpp ignores stage() for it), so a centre lost to a full queue is not retried; a later bend and release, route change or AllOff sends one again.
-// True when a centre was sent.
-bool MidiLink::live_bend_centre() noexcept {
-  if ((bend_route_ & kLiveHeld) != 0u && live_bend_send(bend_route_, kBendCentre)) {
-    bend_route_ = 0;
+// The centre (bend) or CC1 0 (vibrato) goes to the route the control last switched on, if it did. True when it was sent (the route is forgotten then). MidiOut::send takes a pitch bend and a CC even when staging is full
+// (out.cpp ignores stage() for both), so a centre or a CC1 0 lost to a full queue is not retried; a later press and release, route change or AllOff sends one again.
+bool MidiLink::live_ctl_end(bool vib) noexcept {
+  std::uint32_t& route = vib ? vib_route_ : bend_route_;
+  if ((route & kLiveHeld) != 0u && live_ctl_send(route, vib, vib ? 0u : kBendCentre)) {
+    route = 0;
     return true;
   }
   return false;
 }
 
 bool MidiLink::live_event(const audio::LiveEvent& e) noexcept {
-  if (e.kind == audio::LiveKind::Bend) {
+  if (e.kind == audio::LiveKind::Vibrato || e.kind == audio::LiveKind::Bend || e.kind == audio::LiveKind::BendFine) {
+    // Vibrato (OS-PIANOVIB, the pad: key 1 held, 0 let go) is CC1 127 / 0. BendFine (OS-PIANOBEND-REC, the MIDI-in wheel): the 14-bit value as it came (key = low 7, note = high 7), sent unscaled, so the receiver's own
+    // range applies; Bend is the strip's semitones.
+    const bool vib = e.kind == audio::LiveKind::Vibrato;
+    const bool fine = e.kind == audio::LiveKind::BendFine;
+    const std::uint16_t raw = static_cast<std::uint16_t>(((e.note & 0x7Fu) << 7) | (e.key & 0x7Fu));
     const int semis = static_cast<std::int8_t>(e.note);
     const model::Instrument* in = e.instrument >= 1u ? seq_.project().instrument(static_cast<std::uint32_t>(e.instrument) - 1u) : nullptr;
-    if (semis == 0 || in == nullptr || in->kind != model::InstrumentKind::Midi) {
-      live_bend_centre();  // let go (or the instrument in view is not a MIDI one): the bent route is put back; the voices get the event too
+    if ((vib ? e.key == 0u : (fine ? raw == kBendCentre : semis == 0)) || in == nullptr || in->kind != model::InstrumentKind::Midi) {
+      live_ctl_end(vib);  // let go (or the instrument in view is not a MIDI one): the route that was on is put back; the voices get the event too
       return false;
     }
     const MidiRoute r = midi_route(*in);
     const std::uint32_t word = kLiveHeld | (static_cast<std::uint32_t>(r.ports) << kLivePortsShift) | (static_cast<std::uint32_t>(r.delay_ms) << kLiveDelayShift) | (static_cast<std::uint32_t>(r.ch) << 8);
-    if (word != bend_route_) {
-      live_bend_centre();  // another route: the one bent before goes back to the centre
+    std::uint32_t& route = vib ? vib_route_ : bend_route_;
+    if (word != route) {
+      live_ctl_end(vib);  // another route: the one switched on before goes back to the centre / CC1 0
     }
-    live_bend_send(word, pitch_bend_value(semis * 100, in->midi_pb_range));
-    bend_route_ = word;
+    live_ctl_send(word, vib, vib ? 127u : (fine ? raw : pitch_bend_value(semis * 100, in->midi_pb_range)));
+    route = word;
     return true;
   }
   if (e.kind == audio::LiveKind::On) {
@@ -228,7 +236,8 @@ bool MidiLink::live_event(const audio::LiveEvent& e) noexcept {
     for (std::uint32_t pad = 0; pad < kLivePads; ++pad) {
       live_release(pad);
     }
-    live_bend_centre();  // OS-PIANOBEND: the pads are let go, so is their bend
+    live_ctl_end(false);  // OS-PIANOBEND: the pads are let go, so is their bend
+    live_ctl_end(true);   // OS-PIANOVIB: and their vibrato
   }
   return false;
 }

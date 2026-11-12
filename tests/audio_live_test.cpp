@@ -23,6 +23,8 @@ struct PianoBendTest {
   static std::int32_t offset(VoicePool& p, unsigned track) { return p.v_[p.find(track)].slide_q16; }
   static std::int32_t target(VoicePool& p, unsigned track) { return p.v_[p.find(track)].slide_tgt; }
   static std::int32_t base(VoicePool& p, unsigned track) { return p.tune_base_q16(track); }
+  static unsigned vib_rate(const VoicePool& p, unsigned track) { return p.step_lfo_[2][track]; }  // OS-PIANOVIB: the TUNE row of the step LFO (rate index + 1, 0 = off)
+  static int mmask(VoicePool& p, unsigned track) { return static_cast<int>(p.v_[p.find(track)].mmask); }
 };
 }  // namespace o3os::audio
 
@@ -528,4 +530,209 @@ TEST_CASE("live: a bend moves the voices of the held pad notes by the semitones 
   CHECK(box.queue.push(bend(0)));
   render(e, r);
   CHECK(p.live_bend_q16() == 0);
+}
+
+namespace {
+// The 14-bit wheel of a MIDI keyboard (OS-PIANOBEND-REC): key = low 7 bits, note = high 7 bits.
+LiveEvent bend_fine(unsigned v14) {
+  return LiveEvent{LiveKind::BendFine, kLiveSourceMidi, static_cast<std::uint8_t>(v14 & 0x7Fu), static_cast<std::uint8_t>((v14 >> 7) & 0x7Fu), 1, 0, 0, 0};
+}
+}  // namespace
+
+TEST_CASE("live: the 14-bit wheel scales to +-2 semitones, moves the held voices and a note started under it starts bent (OS-PIANOBEND-REC)") {
+  using o3os::audio::PianoBendTest;
+  static std::int16_t dc[4000];
+  for (std::int16_t& s : dc) {
+    s = 16384;
+  }
+  static o3os::test::StaticSlot<Engine> engine_slot;
+  static o3os::audio::TapMem taps;
+  static o3os::test::StaticSlot<VoicePool> pool_slot;
+  static LiveBox box;
+  box.notes = LiveNotes{};
+  Engine& e = engine_slot.make(&fake_cycles, taps);
+  VoicePool& p = pool_slot.make();
+  p.set_sample(0, SampleDesc{dc, 4000, 0, 0, 65536});
+  e.attach_voices(&p);
+  e.attach_live(&box);
+  Rig r;
+
+  CHECK(box.queue.push(on(kLiveSourceMidi, 60, 60, 1, 0)));
+  render(e, r);
+  NEED(PianoBendTest::has_voice(p, 0));
+  CHECK(p.live_bend_q16() == 0);
+
+  CHECK(box.queue.push(bend_fine(8192)));  // the centre
+  render(e, r);
+  CHECK(p.live_bend_q16() == 0);
+  CHECK(PianoBendTest::offset(p, 0) == 0);
+
+  CHECK(box.queue.push(bend_fine(16383)));  // the top: just under +2
+  render(e, r);
+  CHECK(p.live_bend_q16() == (16383 - 8192) * 16);
+  CHECK(p.live_bend_q16() == 2 * kSemi - 16);
+  CHECK(PianoBendTest::offset(p, 0) == p.live_bend_q16());
+
+  CHECK(box.queue.push(bend_fine(0)));  // the bottom: -2
+  render(e, r);
+  CHECK(p.live_bend_q16() == -2 * kSemi);
+  CHECK(PianoBendTest::offset(p, 0) == -2 * kSemi);
+
+  CHECK(box.queue.push(bend_fine(8192 + 4096)));  // half way up: +1
+  render(e, r);
+  CHECK(p.live_bend_q16() == kSemi);
+  CHECK(PianoBendTest::base(p, 0) == kSemi);
+
+  // A second note under the wheel starts bent.
+  CHECK(box.queue.push(on(kLiveSourceMidi, 64, 64, 1, 1)));
+  render(e, r);
+  NEED(PianoBendTest::has_voice(p, 1));
+  CHECK(PianoBendTest::offset(p, 1) == kSemi);
+
+  // The wheel is independent of the keyboard's all-notes-off; the pad source's all-off puts it back (the pad strip shares the one offset).
+  CHECK(box.queue.push(all_off(kLiveSourceMidi)));
+  render(e, r);
+  CHECK(p.live_bend_q16() == kSemi);
+  CHECK(box.queue.push(all_off(kLiveSourcePad)));
+  render(e, r);
+  CHECK(p.live_bend_q16() == 0);
+  CHECK(box.queue.push(bend_fine(8192)));
+  render(e, r);
+  CHECK(p.live_bend_q16() == 0);
+}
+
+namespace {
+LiveEvent vibrato(bool on) {
+  return LiveEvent{LiveKind::Vibrato, kLiveSourcePad, static_cast<std::uint8_t>(on ? 1 : 0), 0, 1, 0, 0, 0};
+}
+}  // namespace
+
+TEST_CASE("live: the vibrato pad runs the Finetune LFO on the held pad notes, a note started under it has it, the release, an all-notes-off and an export end it (OS-PIANOVIB)") {
+  using o3os::audio::PianoBendTest;
+  static std::int16_t dc[4000];
+  for (std::int16_t& s : dc) {
+    s = 16384;
+  }
+  static o3os::test::StaticSlot<Engine> engine_slot;
+  static o3os::audio::TapMem taps;
+  static o3os::test::StaticSlot<VoicePool> pool_slot;
+  static LiveBox box;
+  box.notes = LiveNotes{};
+  Engine& e = engine_slot.make(&fake_cycles, taps);
+  VoicePool& p = pool_slot.make();
+  p.set_sample(0, SampleDesc{dc, 4000, 0, 0, 65536});
+  e.attach_voices(&p);
+  e.attach_live(&box);
+  Rig r;
+  constexpr unsigned kOn = VoicePool::kLiveVibRate + 1u;
+
+  CHECK(box.queue.push(on(kLiveSourcePad, 3, 60, 1, 0)));  // track 1
+  render(e, r);
+  NEED(PianoBendTest::has_voice(p, 0));
+  CHECK(PianoBendTest::mmask(p, 0) == 0);
+  CHECK(!p.live_vib_on());
+
+  CHECK(box.queue.push(vibrato(true)));
+  render(e, r);
+  CHECK(p.live_vib_on());
+  CHECK(PianoBendTest::vib_rate(p, 0) == kOn);
+  CHECK(PianoBendTest::mmask(p, 0) != 0);  // the sounding voice has its modulator
+  CHECK(PianoBendTest::vib_rate(p, 5) == 0u);  // a track that holds no pad note has none
+
+  // A second pad note under the vibrato starts with it.
+  CHECK(box.queue.push(on(kLiveSourcePad, 4, 64, 1, 1)));
+  render(e, r);
+  NEED(PianoBendTest::has_voice(p, 1));
+  CHECK(PianoBendTest::vib_rate(p, 1) == kOn);
+  CHECK(PianoBendTest::mmask(p, 1) != 0);
+
+  // The release: the LFO ends on both and a later note starts plain.
+  CHECK(box.queue.push(vibrato(false)));
+  render(e, r);
+  CHECK(!p.live_vib_on());
+  CHECK(PianoBendTest::vib_rate(p, 0) == 0u);
+  CHECK(PianoBendTest::vib_rate(p, 1) == 0u);
+  CHECK(PianoBendTest::mmask(p, 0) == 0);
+  CHECK(PianoBendTest::mmask(p, 1) == 0);
+  CHECK(box.queue.push(on(kLiveSourcePad, 5, 67, 1, 2)));
+  render(e, r);
+  NEED(PianoBendTest::has_voice(p, 2));
+  CHECK(PianoBendTest::mmask(p, 2) == 0);
+
+  // A note let go while the pad is held: the track stays in the vibrato until the pad is let go (known limit, as the bend), and the release ends it.
+  CHECK(box.queue.push(vibrato(true)));
+  render(e, r);
+  CHECK(PianoBendTest::vib_rate(p, 2) == kOn);
+  CHECK(box.queue.push(off(kLiveSourcePad, 5)));
+  render(e, r);
+  CHECK(PianoBendTest::vib_rate(p, 2) == kOn);
+  CHECK(box.queue.push(vibrato(false)));
+  render(e, r);
+  CHECK(PianoBendTest::vib_rate(p, 2) == 0u);
+
+  // An all-notes-off of the pads ends it (a lost release); a keyboard's leaves it.
+  CHECK(box.queue.push(vibrato(true)));
+  render(e, r);
+  CHECK(box.queue.push(all_off(kLiveSourceMidi)));
+  render(e, r);
+  CHECK(p.live_vib_on());
+  CHECK(box.queue.push(all_off(kLiveSourcePad)));
+  render(e, r);
+  CHECK(!p.live_vib_on());
+  CHECK(PianoBendTest::vib_rate(p, 0) == 0u);
+  CHECK(PianoBendTest::vib_rate(p, 1) == 0u);
+
+  // An export takes the engine with the vibrato off, in the row the Perform save keeps too.
+  CHECK(box.queue.push(vibrato(true)));
+  render(e, r);
+  CHECK(p.live_vib_on());
+  e.offline_request();
+  e.offline_enter(o3os::audio::EventSource{});
+  CHECK(!p.live_vib_on());
+  CHECK(PianoBendTest::vib_rate(p, 0) == 0u);
+  e.offline_leave();
+  CHECK(PianoBendTest::vib_rate(p, 0) == 0u);  // and perform_restore brings none back
+}
+
+TEST_CASE("live: a pattern FX 33 on a track the vibrato pad holds replaces the pad's rate, the release clears the row (OS-PIANOVIB)") {
+  using o3os::audio::PianoBendTest;
+  static std::int16_t dc[4000];
+  for (std::int16_t& s : dc) {
+    s = 16384;
+  }
+  static o3os::test::StaticSlot<Engine> engine_slot;
+  static o3os::audio::TapMem taps;
+  static o3os::test::StaticSlot<VoicePool> pool_slot;
+  static LiveBox box;
+  box.notes = LiveNotes{};
+  Engine& e = engine_slot.make(&fake_cycles, taps);
+  VoicePool& p = pool_slot.make();
+  p.set_sample(0, SampleDesc{dc, 4000, 0, 0, 65536});
+  e.attach_voices(&p);
+  e.attach_live(&box);
+  Rig r;
+  constexpr unsigned kOn = VoicePool::kLiveVibRate + 1u;
+
+  CHECK(box.queue.push(on(kLiveSourcePad, 3, 60, 1, 0)));
+  CHECK(box.queue.push(vibrato(true)));
+  render(e, r);
+  NEED(PianoBendTest::has_voice(p, 0));
+  CHECK(PianoBendTest::vib_rate(p, 0) == kOn);
+
+  // The step FX 33 (rate index 3) of the pattern, as Engine::dispatch hands it over: the last writer wins, the pad stays held.
+  o3os::audio::SeqEvent fx{};
+  fx.kind = o3os::audio::EventKind::ModSet;
+  fx.track = 0;
+  fx.a = o3os::audio::kFxLfoFinetune;
+  fx.b = 3;
+  fx.c = o3os::audio::kLayerFx1;
+  fx.flags = static_cast<std::uint8_t>(o3os::audio::kModGroupLfoFinetune);
+  p.fx_event(0, fx);
+  CHECK(PianoBendTest::vib_rate(p, 0) == 4u);
+  CHECK(p.live_vib_on());
+
+  // The release of the pad clears the row (the FX 33's rate with it, until its next step sets it).
+  CHECK(box.queue.push(vibrato(false)));
+  render(e, r);
+  CHECK(PianoBendTest::vib_rate(p, 0) == 0u);
 }

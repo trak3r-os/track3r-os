@@ -181,6 +181,9 @@ bool rec_counting_in(const ActionContext& ctx) noexcept;  // OS-METRO: Edit is a
 bool rec_note(ActionContext& ctx, unsigned note, unsigned velocity) noexcept;
 bool rec_pad(ActionContext& ctx, unsigned pad) noexcept;
 bool rec_note_off(ActionContext& ctx, core::ActionArg arg) noexcept;
+// OS-PIANOBEND-REC: the PIANO bend strip recorded as the Slide FX (rec_bend: the strip's active bend -2..2, 0 the spring-back; pads.play calls it on a press, rec.bend is the release, arg = bend + 2).
+bool rec_bend(ActionContext& ctx, int semitones) noexcept;
+bool rec_bend_action(ActionContext& ctx, core::ActionArg arg) noexcept;
 // OS-FXREC S2 (rec_actions.cpp): a mapped parameter move of a LIVE take writes its step FX at the play line of the cursor's track (spec 3.2 / 3.3 / 3.5); apply_cc calls it after the parameter
 // write changed. `name` is the parameter's caption, for the strip's "REC FX: <PARAMETER>".
 bool rec_fx_write(ActionContext& ctx, core::ParamId id, const char* name, bool enc = false) noexcept;

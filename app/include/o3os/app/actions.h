@@ -60,6 +60,16 @@ class PreviewSink {
     (void)semitones;
     (void)instrument;
   }
+  // OS-PIANOVIB: the PIANO vibrato pad (held: on, let go: off): the live notes run the Finetune LFO (FX 33) on the voices and a MIDI instrument gets CC1 127 / 0 on its channel. Nothing by default.
+  virtual void pad_vibrato(bool on, unsigned instrument) noexcept {
+    (void)on;
+    (void)instrument;
+  }
+  // OS-PIANOBEND-REC: the MIDI keyboard's pitch wheel (14 bit, 8192 = centre; after MIDI IN and IN CHANNEL): the live notes bend by +-2 semitones across it, a MIDI instrument's channel gets the value. Nothing by default.
+  virtual void midi_bend(unsigned value14, unsigned instrument) noexcept {
+    (void)value14;
+    (void)instrument;
+  }
   // A note from the MIDI keyboard, after the device settings MIDI IN and IN CHANNEL let it through: the selected track and the last used instrument play it. `velocity` 1..127, `channel` 1..16 (the one it came on:
   // named by the export's refusal while the note is held, nothing plays differently).
   virtual void midi_note(bool on, unsigned track, unsigned instrument, unsigned note, unsigned velocity, unsigned channel) noexcept {

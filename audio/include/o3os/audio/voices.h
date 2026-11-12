@@ -1138,6 +1138,8 @@ class VoicePool {
   // voice of each moves by the difference (offset and target alike, as a TUNE change: layer_event), a note that starts on a bent track starts bent (tune_base_q16), and 0 puts every bent track back.
   // Flash, once an event; render context (Engine::play_live) only. Sampler voices only: Amiga and module notes do not follow the offset.
   O3OS_AUDIO_COLD void live_bend(int semitones, std::uint32_t tracks) noexcept;
+  // The same in 1/65536 semitone (OS-PIANOBEND-REC: the MIDI-in wheel, +-2 semitones across its 14 bits); live_bend(s, t) is live_bend_set(s * 65536, t). 0 ends it.
+  O3OS_AUDIO_COLD void live_bend_set(std::int32_t q16, std::uint32_t tracks) noexcept;
   // A live note starts on `track` (before note_on): while a bend is in force the track joins it.
   void live_bend_track(unsigned track) noexcept {
     if (bend_q16_ != 0 && track < kVoiceTracks) {
@@ -1145,6 +1147,20 @@ class VoicePool {
     }
   }
   std::int32_t live_bend_q16() const noexcept { return bend_q16_; }
+
+  // OS-PIANOVIB (docs/specs/OS-PIANOVIB.md): the PIANO vibrato pad. On: the Finetune LFO (FX 33's machinery, step_lfo_ row 2) at rate index kLiveVibRate runs on the tracks of `tracks` (bit t: the live notes) and on
+  // those already in; the sounding voice of each takes it at once (perf_sync), a note that starts on one of them starts with it. Off (`tracks` is ignored): every track it holds is let go, the voices'
+  // own modulator comes back. Flash, once an event; render context (Engine::play_live, or the main loop with the render parked: stop_live_notes) only. Sampler voices only, as the bend.
+  static constexpr std::uint8_t kLiveVibRate = 13;  // kLfoRate[13] = 1.5 steps a cycle (about 5.3 Hz at 120 BPM)
+  O3OS_AUDIO_COLD void live_vib(bool on, std::uint32_t tracks) noexcept;
+  // A live note starts on `track` (before note_on): while the vibrato is on the track joins it.
+  void live_vib_track(unsigned track) noexcept {
+    if (vib_on_ && track < kVoiceTracks) {
+      vib_mask_ = static_cast<std::uint16_t>(vib_mask_ | (1u << track));
+      step_lfo_[2][track] = kLiveVibRate + 1u;
+    }
+  }
+  bool live_vib_on() const noexcept { return vib_on_; }
 
   // ---- The voices' load (OS-VOX: the status strip's "VOX 9/16" and `diag voices`) ----
   // Three words the render alone writes, in end_block() once a block, relaxed, no loop (the single-writer rule of status.h; each is monotonic or a plain level, so a reader that
@@ -1548,6 +1564,9 @@ class VoicePool {
   // Engine::play_live (render context); read by tune_base_q16 (render context, flash).
   std::int32_t bend_q16_ = 0;
   std::uint16_t bend_mask_ = 0;
+  // OS-PIANOVIB (declared last): the vibrato pad is held, and the tracks whose step_lfo_ row 2 it set. Single writer: the render (live_vib, live_vib_track from Engine::play_live; stop_live_notes with the render parked).
+  bool vib_on_ = false;
+  std::uint16_t vib_mask_ = 0;
 };
 
 }  // namespace o3os::audio

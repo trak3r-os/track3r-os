@@ -680,8 +680,8 @@ TEST_CASE("PIANO: the pad map is a piano drawn on the pads, two octaves, the nav
   CHECK(app::piano_pad(36).value == 3);
   CHECK(app::piano_pad(11).kind == PadKey::OctUp);  // column 12: row 1 up, row 4 down
   CHECK(app::piano_pad(47).kind == PadKey::OctDown);
-  CHECK(app::piano_pad(23).kind == PadKey::None);
-  CHECK(app::piano_pad(35).kind == PadKey::None);
+  CHECK(app::piano_pad(23).kind == PadKey::Vib);  // column 12, rows 2 and 3: the vibrato pad (OS-PIANOVIB)
+  CHECK(app::piano_pad(35).kind == PadKey::Vib);
   for (unsigned row = 0; row < 4; ++row) {  // columns 10 and 11: the bend strip (OS-PIANOBEND): rows 1, 2 up by 2, 1; rows 3, 4 down by 1, 2
     const int semis[4] = {2, 1, -1, -2};
     CHECK(app::piano_pad(12 * row + 9).kind == PadKey::Bend);
@@ -823,6 +823,88 @@ TEST_CASE("BendHold: the order of the holds decides the bend, a pad pressed agai
   CHECK(app::bend_semitones(app::PadFn{app::PadKey::Note, 4}) == 0);
 }
 
+namespace {
+struct VibLog final : app::PreviewSink {
+  struct Call {
+    bool on;
+    unsigned instrument;
+  };
+  std::vector<Call> calls;
+  void preview(unsigned, unsigned) noexcept override {}
+  void pad_vibrato(bool on, unsigned instrument) noexcept override { calls.push_back({on, instrument}); }
+};
+}  // namespace
+
+TEST_CASE("PIANO: the vibrato pads (col 12, rows 2 and 3) are one control: on at the first pad down, off at the last release, lit while held, nothing is written (OS-PIANOVIB)") {
+  Rig rig;
+  VibLog sink;
+  rig.app->attach_preview(&sink);
+  rig.edit_mode();
+  rig.shift_tap(Button::F3);
+  NEED(rig.state().padmode.fixed() == app::PadMode::Piano);
+  const unsigned depth = rig.depth();
+  PadRole roles[48];
+  NEED(rig.lights(roles));
+  CHECK(roles[23] == PadRole::Back);
+  CHECK(roles[35] == PadRole::Back);
+  rig.pad_down(23);
+  NEED(sink.calls.size() == 1u);
+  CHECK(sink.calls[0].on);
+  CHECK(rig.state().edit.vib.on());
+  NEED(rig.lights(roles));
+  CHECK(roles[23] == PadRole::Front);
+  rig.pad_down(35);  // the second pad: still one vibrato, no second call
+  CHECK(sink.calls.size() == 1u);
+  rig.pad_up(23);    // one pad still down: the vibrato goes on
+  CHECK(sink.calls.size() == 1u);
+  CHECK(rig.state().edit.vib.on());
+  rig.pad_up(35);    // the last one: off
+  NEED(sink.calls.size() == 2u);
+  CHECK_FALSE(sink.calls[1].on);
+  CHECK_FALSE(rig.state().edit.vib.on());
+  NEED(rig.lights(roles));
+  CHECK(roles[23] == PadRole::Back);
+  // A release after the PADS mode changed still lets go (the release is the app's).
+  rig.pad_down(35);
+  CHECK(sink.calls.size() == 3u);
+  rig.shift_tap(Button::F4);
+  rig.pad_up(35);
+  CHECK_FALSE(sink.calls.back().on);
+  CHECK_FALSE(rig.state().edit.vib.on());
+  CHECK(rig.depth() == depth);  // no undo unit
+  CHECK(rig.step(0).note == 0);
+  // A lost release: the same pad twice is one hold, reset_input() clears it without a sink call (the all-off of the notes ends the voices).
+  rig.shift_tap(Button::F3);
+  rig.pad_down(23);
+  rig.pad_down(23);
+  CHECK(rig.state().edit.vib.on());
+  const std::size_t n = sink.calls.size();
+  rig.app->reset_input();
+  CHECK_FALSE(rig.state().edit.vib.on());
+  CHECK(sink.calls.size() == n);
+}
+
+TEST_CASE("VibHold: two pads, on while any is down, a release of a pad not held changes nothing (OS-PIANOVIB)") {
+  app::VibHold h;
+  CHECK_FALSE(h.on());
+  CHECK(app::VibHold::bit_of(23) == 0);
+  CHECK(app::VibHold::bit_of(35) == 1);
+  CHECK(app::VibHold::bit_of(22) == -1);
+  CHECK(h.press(0));        // the first: the edge
+  CHECK_FALSE(h.press(1));
+  CHECK_FALSE(h.press(0));  // again: no edge
+  CHECK_FALSE(h.release(0));
+  CHECK(h.on());
+  CHECK_FALSE(h.release(0));  // not held any more
+  CHECK(h.release(1));        // the last: the edge
+  CHECK_FALSE(h.on());
+  CHECK(h.press(1));
+  CHECK(h.clear());
+  CHECK_FALSE(h.on());
+  CHECK_FALSE(h.holds(1));
+  CHECK_FALSE(h.clear());
+}
+
 TEST_CASE("PIANO: the LEDs light the existing keys by scale (in the scale Front, outside Back, the root like the rest), no key Off, the jump and octave pads as before (OS-NOTESLED2)") {
   Rig rig;
   rig.shift_tap(Button::F3);
@@ -833,7 +915,7 @@ TEST_CASE("PIANO: the LEDs light the existing keys by scale (in the scale Front,
   CHECK(roles[0] == PadRole::Back);    // the navigation column
   CHECK(roles[4] == PadRole::Off);     // no key there
   CHECK(roles[21] == PadRole::Back);   // (row 2 col 10: a bend pad, OS-PIANOBEND)
-  CHECK(roles[35] == PadRole::Off);    // (row 3 col 12: no key)
+  CHECK(roles[35] == PadRole::Back);   // (row 3 col 12: the vibrato pad at rest, OS-PIANOVIB)
   CHECK(roles[11] == PadRole::Back);   // octave up
   rig.set_entry(2, 1, 0);  // D major
   NEED(rig.lights(roles));

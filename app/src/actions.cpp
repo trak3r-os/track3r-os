@@ -304,6 +304,7 @@ constexpr ActionDef kActions[] = {
     make_action("text.auto", text_auto),
     make_action("text.accept", text_accept, core::kActionUndoableIfOpen),  // OS-INSTUI S7: the Instrument name is an undo unit (the Save As does not edit anything)
     make_action("rec.note_off", rec_note_off, kStepRec),  // OS-FU2: the release of a note recorded at the playhead
+    make_action("rec.bend", rec_bend_action, kStepRec),  // OS-PIANOBEND-REC: the strip's release (or fall back) writes the spring-back
     make_action("step.note_delta", step_note_delta, kStep, pe::edit_enabled),
     make_action("step.note_octave", step_note_octave, kStep, pe::edit_enabled),
     make_action("step.instrument", step_instrument, kStep, pe::edit_enabled),

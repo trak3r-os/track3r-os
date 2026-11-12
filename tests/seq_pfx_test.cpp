@@ -866,6 +866,39 @@ TEST_CASE("seq pfx: Slide goes to the voice as a modulation before the note, end
   CHECK(g_col.count(EventKind::ModSet, 1) == 1u);
 }
 
+TEST_CASE("seq pfx: the slide a recorded PIANO bend writes plays as a slide on the held voice and its Slide up 0 on the release row is the spring-back (OS-PIANOBEND-REC)") {
+  pattern16();
+  model::Project& p = seq_project();
+  CHECK(p.set_step(1, 0, 0, make_step(60, 1)) == model::Status::Ok);        // the held note
+  CHECK(p.set_step(1, 0, 3, fx_step(fx::kSlideUp, 32)) == model::Status::Ok);  // pad down at row 3: +2 semitones
+  CHECK(p.set_step(1, 0, 6, fx_step(fx::kSlideUp, 0)) == model::Status::Ok);   // pad up at row 6: back to the note's pitch
+  CHECK(p.set_step(1, 1, 0, make_step(60, 1)) == model::Status::Ok);
+  CHECK(p.set_step(1, 1, 2, fx_step(fx::kSlideDown, 32)) == model::Status::Ok);  // a down bend on another track, released next row
+  CHECK(p.set_step(1, 1, 3, fx_step(fx::kSlideUp, 0)) == model::Status::Ok);
+  seq::Sequencer& s = make();
+  s.play_pattern(1);
+  g_col.run(s, 0, at_us(8, 0), 64);
+  const Rec* bend = find_at(EventKind::ModSet, 0, at_us(3, 0));
+  NEED(bend != nullptr);
+  CHECK(bend->ev.flags == audio::kModGroupSlide);
+  CHECK(bend->ev.a == fx::kSlideUp);
+  CHECK(bend->ev.b == 32);
+  CHECK(g_col.count(EventKind::NoteOn, 0) == 1u);  // no new note: the slide is on the sounding voice
+  const Rec* back = find_at(EventKind::ModSet, 0, at_us(6, 0));
+  NEED(back != nullptr);
+  CHECK(back->ev.flags == audio::kModGroupSlide);
+  CHECK(back->ev.a == fx::kSlideUp);
+  CHECK(back->ev.b == 0);  // VoicePool::fx_event: a Slide of 0 glides to the note's own pitch (audio_voices_test.cpp)
+  const Rec* down = find_at(EventKind::ModSet, 1, at_us(2, 0));
+  NEED(down != nullptr);
+  CHECK(down->ev.a == fx::kSlideDown);
+  CHECK(down->ev.b == 32);
+  const Rec* up = find_at(EventKind::ModSet, 1, at_us(3, 0));
+  NEED(up != nullptr);
+  CHECK(up->ev.a == fx::kSlideUp);
+  CHECK(up->ev.b == 0);
+}
+
 TEST_CASE("seq ifx: Glide, Overdrive and Bit depth go to the voices as modulations of their own groups, a plain note ends them (OS-IFX1)") {
   pattern16();
   model::Project& p = seq_project();
