@@ -2497,7 +2497,9 @@ TEST_CASE("step popups: with Note held the encoder and Up / Down walk the 39 sca
   rig.go(2);
   hold_open(rig, Button::Note);
   CHECK(rig.state().popup.kind == app::StepPopupView::Note);
-  CHECK(rig.state().edit.entry.scale == 0);  // Chromatic, the default
+  CHECK(rig.state().edit.entry.scale == 2);  // Major, the default of a new project (OS-DEFSCALE)
+  rig.pad(12);                               // pad 1 of row 2: Chromatic, the start of the ring in the counts below
+  CHECK(rig.state().edit.entry.scale == 0);
   rig.turn(1);
   CHECK(rig.state().edit.entry.scale == 1);   // Minor: the official order, one a detent
   rig.turn(-2);
@@ -2544,6 +2546,7 @@ TEST_CASE("step popups: Shift + encoder does nothing in the Note panel, whatever
   rig.go(2);
   hold_open(rig, Button::Note);
   CHECK(rig.state().popup.kind == app::StepPopupView::Note);
+  rig.pad(12);  // Chromatic first (a new project starts in Major, OS-DEFSCALE): the counts below start from it
   rig.turn(5);  // Pent. min: a scale that is neither the first nor the last
   const app::NoteEntry before = rig.state().edit.entry;
   CHECK(before.scale == 5);

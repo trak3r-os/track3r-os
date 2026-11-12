@@ -587,8 +587,8 @@ TEST_CASE("note entry: the panel's pads set root, scale, jump, octave and lock, 
   CHECK(p.entry.root == 4);
   CHECK(p.pads.note(36) == 40);
   CHECK_FALSE(p.entry_pad(4));   // no change
-  CHECK(p.entry_pad(12 + 1));    // row 2: SCALE Major, pad 2 (the official 2; which is only the lock's layout, the lock being off)
-  CHECK(p.entry.scale == 2);
+  CHECK(p.entry.scale == 2);     // a new project starts in Major (OS-DEFSCALE)
+  CHECK_FALSE(p.entry_pad(12 + 1));  // row 2: SCALE Major is already the scale: no change
   CHECK(p.entry_pad(12 + 0));    // pad 1: Chromatic, the official 0
   CHECK(p.entry.scale == 0);
   CHECK(p.entry_pad(12 + 11));   // pad 12: Whole tone, the official 23 (OS-SCALES28: row 2 goes through model::kNotePanelScales)
@@ -621,7 +621,8 @@ TEST_CASE("note entry: the held Note button's pads set the entry, light each row
   NEED(rig.lights(roles));
   CHECK(roles[0] == PadRole::Front);      // ROOT C
   CHECK(roles[1] == PadRole::Back);
-  CHECK(roles[12] == PadRole::Front);     // SCALE Chromatic
+  CHECK(roles[12] == PadRole::Back);      // SCALE Chromatic is not the default any more (OS-DEFSCALE)
+  CHECK(roles[12 + 1] == PadRole::Front); // SCALE Major, the default of a new project
   CHECK(roles[24 + 1] == PadRole::Front); // JUMP 1 (the edit step's default)
   CHECK(roles[36 + 3] == PadRole::Front); // OCTAVE 3
   CHECK(roles[36 + 10] == PadRole::Front);  // LOCK off
@@ -681,9 +682,12 @@ TEST_CASE("PIANO: the pad map is a piano drawn on the pads, two octaves, the nav
   CHECK(app::piano_pad(47).kind == PadKey::OctDown);
   CHECK(app::piano_pad(23).kind == PadKey::None);
   CHECK(app::piano_pad(35).kind == PadKey::None);
-  for (unsigned row = 0; row < 4; ++row) {
-    CHECK(app::piano_pad(12 * row + 9).kind == PadKey::None);  // columns 10 and 11 are not used
-    CHECK(app::piano_pad(12 * row + 10).kind == PadKey::None);
+  for (unsigned row = 0; row < 4; ++row) {  // columns 10 and 11: the bend strip (OS-PIANOBEND): rows 1, 2 up by 2, 1; rows 3, 4 down by 1, 2
+    const int semis[4] = {2, 1, -1, -2};
+    CHECK(app::piano_pad(12 * row + 9).kind == PadKey::Bend);
+    CHECK(app::piano_pad(12 * row + 10).kind == PadKey::Bend);
+    CHECK(app::bend_semitones(app::piano_pad(12 * row + 9)) == semis[row]);
+    CHECK(app::bend_semitones(app::piano_pad(12 * row + 10)) == semis[row]);
   }
   // The white keys, C..C, on rows 2 (the upper octave) and 4 (the lower)
   const unsigned white[8] = {0, 2, 4, 5, 7, 9, 11, 12};
@@ -736,6 +740,89 @@ TEST_CASE("PIANO: Shift + F3 keeps it, a pad enters its note in Edit, the octave
   CHECK(rig.state().pattern.row() == 8);
 }
 
+namespace {
+struct BendLog final : app::PreviewSink {
+  struct Call {
+    int semis;
+    unsigned instrument;
+  };
+  std::vector<Call> calls;
+  void preview(unsigned, unsigned) noexcept override {}
+  void pad_bend(int semitones, unsigned instrument) noexcept override { calls.push_back({semitones, instrument}); }
+};
+}  // namespace
+
+TEST_CASE("PIANO: the bend strip bends while held, the last pad pressed wins and the release gives the previous pad's bend or 0, nothing is written (OS-PIANOBEND)") {
+  Rig rig;
+  BendLog sink;
+  rig.app->attach_preview(&sink);
+  rig.edit_mode();
+  rig.shift_tap(Button::F3);
+  NEED(rig.state().padmode.fixed() == app::PadMode::Piano);
+  const unsigned depth = rig.depth();
+  rig.pad_down(9);  // row 1 col 10: +2
+  NEED(sink.calls.size() == 1u);
+  CHECK(sink.calls[0].semis == 2);
+  CHECK(rig.state().edit.bend.holds(9));
+  CHECK(rig.state().edit.bend.active() == 2);
+  PadRole roles[48];
+  NEED(rig.lights(roles));
+  CHECK(roles[9] == PadRole::Front);   // held
+  CHECK(roles[10] == PadRole::Back);   // the other pad of the row, at rest
+  rig.pad_down(46);  // row 4 col 11: -2, on top of +2
+  NEED(sink.calls.size() == 2u);
+  CHECK(sink.calls[1].semis == -2);
+  rig.pad_up(9);  // the older pad lets go: the newer one stays in force, nothing is sent that changes the pitch... the sink hears the same bend
+  CHECK(rig.state().edit.bend.active() == -2);
+  CHECK(sink.calls.back().semis == -2);
+  rig.pad_up(46);  // the last one: back in tune
+  CHECK(sink.calls.back().semis == 0);
+  CHECK(rig.state().edit.bend.n == 0u);
+  CHECK_FALSE(rig.state().edit.bend.holds(46));
+  // A release with the PADS mode changed in between still lets go (the release is the app's, not the mode's).
+  rig.pad_down(22);  // row 2 col 11: +1
+  CHECK(sink.calls.back().semis == 1);
+  rig.shift_tap(Button::F4);  // ISO: pad 22 is a note there, but its release is still the bend's
+  rig.pad_up(22);
+  CHECK(sink.calls.back().semis == 0);
+  CHECK(rig.state().edit.bend.n == 0u);
+  CHECK(rig.depth() == depth);  // no undo unit: nothing written to the pattern
+  CHECK(rig.step(0).note == 0);
+  // The bend carries the instrument in view; a pad outside the strip does not touch the hold.
+  rig.shift_tap(Button::F3);
+  const std::size_t n = sink.calls.size();
+  rig.tap_pad(37);  // a key
+  CHECK(sink.calls.size() == n);
+  // A pad of the strip pressed twice without a release (a lost one) is one hold; reset_input() clears it.
+  rig.pad_down(21);
+  rig.pad_down(21);
+  CHECK(rig.state().edit.bend.n == 1u);
+  rig.app->reset_input();
+  CHECK(rig.state().edit.bend.n == 0u);
+}
+
+TEST_CASE("BendHold: the order of the holds decides the bend, a pad pressed again moves to the end, a release of a pad not held changes nothing, eight at most (OS-PIANOBEND)") {
+  app::BendHold h;
+  CHECK(h.active() == 0);
+  CHECK(h.press(1, 2) == 2);
+  CHECK(h.press(2, -1) == -1);
+  CHECK(h.press(1, 2) == 2);   // pressed again: now the newest
+  CHECK(h.n == 2u);
+  CHECK(h.release(1) == -1);
+  CHECK(h.release(7) == -1);   // not held
+  CHECK(h.release(2) == 0);
+  CHECK(h.release(2) == 0);
+  for (unsigned i = 0; i < 12; ++i) {
+    (void)h.press(i, 1);
+  }
+  CHECK(h.n == 8u);  // a ninth is not remembered (its own release finds nothing)
+  h.clear();
+  CHECK(h.n == 0u);
+  CHECK(h.active() == 0);
+  CHECK(app::bend_semitones(app::PadFn{}) == 0);
+  CHECK(app::bend_semitones(app::PadFn{app::PadKey::Note, 4}) == 0);
+}
+
 TEST_CASE("PIANO: the LEDs light the existing keys by scale (in the scale Front, outside Back, the root like the rest), no key Off, the jump and octave pads as before (OS-NOTESLED2)") {
   Rig rig;
   rig.shift_tap(Button::F3);
@@ -745,7 +832,8 @@ TEST_CASE("PIANO: the LEDs light the existing keys by scale (in the scale Front,
   CHECK(roles[38] == PadRole::Front);  // D: Chromatic has every note in the scale
   CHECK(roles[0] == PadRole::Back);    // the navigation column
   CHECK(roles[4] == PadRole::Off);     // no key there
-  CHECK(roles[21] == PadRole::Off);    // (row 2 col 10: unused)
+  CHECK(roles[21] == PadRole::Back);   // (row 2 col 10: a bend pad, OS-PIANOBEND)
+  CHECK(roles[35] == PadRole::Off);    // (row 3 col 12: no key)
   CHECK(roles[11] == PadRole::Back);   // octave up
   rig.set_entry(2, 1, 0);  // D major
   NEED(rig.lights(roles));
@@ -796,7 +884,8 @@ TEST_CASE("NOTES: the LEDs light by scale, a note in the scale Front (the root t
   Rig rig;
   PadRole roles[48];
   NEED(rig.state().padmode.fixed() == app::PadMode::Notes);
-  NEED(rig.lights(roles));  // no scale (Chromatic): every note is in the scale
+  rig.set_entry(0, 0, 0);   // Chromatic (a new project starts in C major, OS-DEFSCALE): every note is in the scale
+  NEED(rig.lights(roles));
   for (const PadRole r : roles) {
     CHECK(r == PadRole::Front);
   }
@@ -846,6 +935,7 @@ TEST_CASE("ISO: a column is a semitone and a row up is a fourth; Shift + F4 keep
   rig.tap_pad(24);  // F-3 (note 41, byte 42)
   CHECK(rig.step(0).note == 42);
   PadRole roles[48];
+  rig.set_entry(0, 0, 0);              // Chromatic (a new project starts in C major, OS-DEFSCALE)
   NEED(rig.lights(roles));
   CHECK(roles[36] == PadRole::Front);  // C-3
   CHECK(roles[31] == PadRole::Front);  // C-4: 12 above, 7 columns right and a row up (7 + 5)

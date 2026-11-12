@@ -14,6 +14,7 @@
 #include "support/seq_fixture.h"
 
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 using namespace o3os;
@@ -366,4 +367,142 @@ TEST_CASE("live midi: an export stops a pad held on a MIDI instrument: its note-
   ports_agree();
   CHECK(LiveMidiRig::balanced(rig().notes()));
   CHECK(rig().link().out().book().owed() == 0u);
+}
+
+// OS-PIANOBEND: the pitch-bend strip of PIANO mode on a MIDI instrument (a Bend live event, seq/midi_link.h): one 14-bit pitch bend a press, the centre on release.
+namespace {
+
+LiveEvent bend(int semitones, std::uint8_t instrument) {
+  return LiveEvent{LiveKind::Bend, audio::kLiveSourcePad, 0, static_cast<std::uint8_t>(static_cast<std::int8_t>(semitones)), instrument, 0, 0, 0};
+}
+
+using Bends = std::vector<std::pair<int, int>>;
+
+// The pitch bends of one port as (channel, 14-bit value).
+Bends bends_of(std::uint8_t port) {
+  Bends r;
+  for (const WireMsg& m : rig().msgs_of(port)) {
+    if ((m.b[0] & 0xF0u) == 0xE0u) {
+      r.emplace_back(m.b[0] & 0x0F, m.b[1] | (m.b[2] << 7));
+    }
+  }
+  return r;
+}
+
+void midi_slot_range(std::uint32_t slot, std::uint8_t channel, std::uint8_t range) {
+  model::Instrument in;
+  model::init_instrument(in, model::InstrumentKind::Midi);
+  in.midi_channel = channel;
+  in.midi_pb_range = range;
+  CHECK(seq_project().set_instrument(slot, in) == model::Status::Ok);
+}
+
+}  // namespace
+
+TEST_CASE("live midi: a bend pad sends a 14-bit pitch bend on the instrument's channel, +-2 at the default range is the full travel, release returns to the centre (OS-PIANOBEND)") {
+  setup(rig());
+  push(bend(2, 12));  // channel 1, range 2: +2 semitones is the top
+  rig().blocks(2);
+  CHECK(bends_of(1) == Bends{{0, 16383}});
+  CHECK(bends_of(0) == Bends{{0, 16383}});  // both ports
+  push(bend(-2, 12));
+  rig().blocks(2);
+  CHECK(bends_of(1) == Bends{{0, 16383}, {0, 0}});
+  push(bend(1, 12));
+  rig().blocks(2);
+  const Bends one = bends_of(1);
+  NEED(one.size() == 3u);
+  CHECK(one[2].second > 8192 + 4000);  // half of the travel
+  CHECK(one[2].second < 8192 + 4200);
+  push(bend(0, 12));  // the release
+  rig().settle();
+  CHECK(bends_of(1).size() == 4u);
+  CHECK(bends_of(1).back() == std::make_pair(0, 8192));
+  CHECK(rig().notes().empty());  // no note: the bend is not a note
+  CHECK(rig().pool().voices_in_use() == 0);
+  CHECK(rig().link().out().book().owed() == 0u);
+}
+
+TEST_CASE("live midi: a bend scales by the instrument's range, range 0 stays at the centre, another route is centred first (OS-PIANOBEND)") {
+  setup(rig());
+  midi_slot_range(11, 1, 12);  // instrument 12: channel 1, range 12 semitones: +2 is a sixth of the travel
+  midi_slot_range(12, 16, 0);  // instrument 13: channel 16, range 0
+  push(bend(2, 12));
+  rig().settle();  // (a centre of the sequencer's kind drops the bends of its channel that are still staged, so each event gets its own settle)
+  push(bend(2, 13));  // another route: the first goes back to the centre before this one is bent
+  rig().settle();
+  const Bends b = bends_of(1);
+  NEED(b.size() == 3u);
+  CHECK(b[0].first == 0);
+  CHECK(b[0].second > 8192 + 1300);  // 8192 * 2 / 12 = 1365
+  CHECK(b[0].second < 8192 + 1400);
+  CHECK(b[1] == std::make_pair(0, 8192));   // the old route centred
+  CHECK(b[2] == std::make_pair(15, 8192));  // range 0: the centre (no bend)
+  push(bend(-1, 12));
+  rig().settle();
+  const Bends c = bends_of(1);
+  NEED(c.size() >= 5u);
+  CHECK(c[c.size() - 2] == std::make_pair(15, 8192));  // channel 16 centred when channel 1 is bent again
+  CHECK(c.back().first == 0);
+  CHECK(c.back().second < 8192 - 600);
+}
+
+TEST_CASE("live midi: an all-notes-off of the pads or of all sources centres a bent route, the keyboard's does not (OS-PIANOBEND)") {
+  setup(rig());
+  push(bend(2, 13));  // channel 16
+  rig().blocks(2);
+  push(all_off(audio::kLiveSourceMidi));
+  rig().blocks(2);
+  CHECK(bends_of(1) == Bends{{15, 16383}});
+  push(all_off(audio::kLiveSourcePad));
+  rig().settle();
+  CHECK(bends_of(1) == Bends{{15, 16383}, {15, 8192}});
+  push(all_off(audio::kLiveAllSources));  // nothing is bent now: nothing more is sent
+  rig().settle();
+  CHECK(bends_of(1).size() == 2u);
+  push(bend(-2, 12));
+  rig().settle();
+  push(all_off(audio::kLiveAllSources));  // App::reset_input()
+  rig().settle();
+  CHECK(bends_of(1).size() == 4u);
+  CHECK(bends_of(1).back() == std::make_pair(0, 8192));
+  ports_agree();
+}
+
+TEST_CASE("live midi: a bend on a sample instrument or on none is not consumed, a release with nothing bent sends nothing (OS-PIANOBEND)") {
+  setup(rig());
+  push(bend(2, 1));    // a sample instrument
+  push(bend(1, 0));    // none
+  push(bend(-1, 30));  // a free slot
+  push(bend(0, 12));   // a release with nothing bent
+  rig().settle();
+  CHECK(bends_of(1).empty());
+  CHECK(bends_of(0).empty());
+  // A bend released on a sample instrument (the instrument in view changed during the hold) still puts the MIDI route back.
+  push(bend(2, 12));
+  rig().settle();
+  push(bend(0, 1));
+  rig().settle();
+  CHECK(bends_of(1) == Bends{{0, 16383}, {0, 8192}});
+}
+
+TEST_CASE("live midi: an export starts with the strip's bend gone, on the voices and on the MIDI route; the late release adds nothing (OS-PIANOBEND)") {
+  setup(rig());
+  push(bend(2, 13));  // a MIDI route bent (channel 16)
+  rig().settle();
+  CHECK(bends_of(1) == Bends{{15, 16383}});
+  rig().pool().live_bend(-2, 1u);  // and the voices' own bend, as a strip on a sampler track holds it
+  CHECK(rig().pool().live_bend_q16() == -2 * 65536);
+  rig().engine().offline_request();
+  rig().engine().offline_enter(audio::EventSource{});
+  CHECK(rig().pool().live_bend_q16() == 0);  // the export renders unbent
+  rig().settle();
+  CHECK(bends_of(1) == Bends{{15, 16383}, {15, 8192}});  // the receiver is back in tune before the export's own events
+  CHECK(bends_of(0) == Bends{{15, 16383}, {15, 8192}});
+  rig().engine().offline_leave();
+  push(bend(0, 13));  // the late release
+  rig().settle();
+  CHECK(bends_of(1).size() == 2u);
+  CHECK(rig().pool().live_bend_q16() == 0);
+  ports_agree();
 }

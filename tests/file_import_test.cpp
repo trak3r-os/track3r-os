@@ -88,6 +88,7 @@ struct Rig {
   Rig() {
     model::ModelArena& arena = test::arena(1);
     test::fill_small(arena.project);
+    arena.project.start_new();  // C major, the runtime's default: the document is not unsaved at the start (OS-DEFSCALE)
     journal.begin(g_ring, sizeof g_ring);
     editor = std::make_unique<model::Editor>(arena.project, journal);
     app->attach_document(editor.get());

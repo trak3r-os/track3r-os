@@ -148,6 +148,9 @@ inline constexpr std::uint8_t kNoteOctaveMax = 9;       // app::kEntryOctaves - 
 inline constexpr std::uint8_t kNoteJumpMax = 32;        // 0..32
 inline constexpr std::uint8_t kNoteDefaultOctave = 3;   // with the C root, the C-3 that the pad board always started at
 inline constexpr std::uint8_t kNoteDefaultJump = 1;
+// OS-DEFSCALE (new Community OS behaviour, maintainer 2026-11-12): a NEW document starts in C major (the official index 2 = kNotePanelScales[1], core::kScaleNames[3] "Major"), so the scale pads light bright
+// and the others dim. Only Project::start_new() puts it in: init_note_state() (a file with no NOTE chunk, the reader's default) stays Chromatic, so every existing file loads exactly as before.
+inline constexpr std::uint8_t kNoteNewProjectScale = 2;
 
 // OS-SCALES28: the panel's twelve scales, pad of row 2 (1..12) -> the official index; the NOTE 1.0 byte is the pad - 1. A format fact (what the 1.0 byte means), so it lives here, where the
 // codec maps it, and app/note_entry.h uses it (no second copy).

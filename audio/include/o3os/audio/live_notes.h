@@ -43,6 +43,7 @@ enum class LiveKind : std::uint8_t {
   On = 1,      // note on: `note` 0..127 of `instrument` 1..64, `velocity` 1..127 or kLiveVelocityDefault, searching for a track from `track`
   Off = 2,     // the note that `source`/`key` started enters its release; no such note: nothing happens
   AllOff = 3,  // every note of `source` (kLiveAllSources: of every source) enters its release
+  Bend = 4,    // OS-PIANOBEND: the live notes are bent by `note` (an int8 of semitones, -2..+2, 0 = in tune); `instrument` 1..64 names the instrument in view (a MIDI one gets a pitch bend)
 };
 
 // Who started a note: the key a Note Off names is the pair (source, key), so a pad and a keyboard key never end each other's note.
@@ -171,6 +172,15 @@ class LiveNotes {
       }
     }
     return tracks;
+  }
+
+  // The tracks of the held notes, a bit a track (OS-PIANOBEND).
+  constexpr std::uint32_t tracks() const noexcept {
+    std::uint32_t m = 0;
+    for (const Slot& s : slots_) {
+      m |= s.id != kFree ? 1u << s.track : 0u;
+    }
+    return m;
   }
 
   constexpr unsigned held() const noexcept {

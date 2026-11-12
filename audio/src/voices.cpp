@@ -2434,10 +2434,38 @@ std::uint64_t VoicePool::smp_window(unsigned track, const SampleDesc& s, bool lo
 
 // OS-PERFFX P5: the layer's TUNE of a track as the offset's zero (voices.h PERFORMANCE LAYER, TUNE): semitones x 65536, 0 when the layer holds none.
 std::int32_t VoicePool::tune_base_q16(unsigned track) const noexcept {
-  if (track >= kVoiceTracks || ((perf_.on[kPerfTuneSlot] >> track) & 1u) == 0u) {
+  if (track >= kVoiceTracks) {
     return 0;
   }
-  return static_cast<std::int32_t>(perf_.val[track][kPerfTuneSlot]) * 65536;
+  const std::int32_t bend = ((bend_mask_ >> track) & 1u) != 0u ? bend_q16_ : 0;  // OS-PIANOBEND: the live bend
+  if (((perf_.on[kPerfTuneSlot] >> track) & 1u) == 0u) {
+    return bend;
+  }
+  return static_cast<std::int32_t>(perf_.val[track][kPerfTuneSlot]) * 65536 + bend;
+}
+
+// OS-PIANOBEND: see voices.h. A track in the new mask whose bend changes moves its sounding voice by the difference, like a TUNE change; 0 clears the mask.
+void VoicePool::live_bend(int semitones, std::uint32_t tracks) noexcept {
+  const int s = semitones < -24 ? -24 : (semitones > 24 ? 24 : semitones);
+  const std::int32_t to = s * 65536;
+  const std::uint16_t old_mask = bend_mask_;
+  const std::int32_t old = bend_q16_;
+  const std::uint16_t new_mask = to == 0 ? std::uint16_t{0} : static_cast<std::uint16_t>(old_mask | (tracks & 0xFFFFu));
+  for (unsigned t = 0; t < kVoiceTracks; ++t) {
+    const std::int32_t was = ((old_mask >> t) & 1u) != 0u ? old : 0;
+    const std::int32_t now = ((new_mask >> t) & 1u) != 0u ? to : 0;
+    const std::int32_t d = now - was;
+    const unsigned i = d != 0 ? find(t) : kNone;
+    if (i != kNone && v_[i].playing) {
+      Voice& vo = v_[i];
+      vo.slide_q16 += d;
+      vo.slide_tgt += d;
+      vo.mmask = static_cast<std::uint8_t>(vo.mmask | kMmSlide);
+      vo.mneed = true;
+    }
+  }
+  bend_q16_ = to;
+  bend_mask_ = new_mask;
 }
 
 // OS-PFX, SLIDE FX: the pitch offset goes from where it is to `sixteenths` of a semitone in one step of the tempo (576 ticks, tick_rate_q_ of them a sample in Q24): the one 64-bit

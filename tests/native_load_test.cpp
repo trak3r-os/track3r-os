@@ -197,6 +197,9 @@ TEST_CASE("native load: the fresh form resets the document to the model's defaul
   CHECK(p.active_tracks() == 12u);  // ADR 0003
   CHECK(p.instrument_count() == 0u);
   CHECK(p.module_count() == 0u);
+  CHECK(p.note().scale == 2u);  // OS-DEFSCALE: a new project starts in C major, the NOTE part present
+  CHECK(p.note().root == 0u);
+  CHECK((p.state_present() & o3os::model::Project::kStateNote) != 0);
   char line[32];
   (void)app::describe_native_load(loader, line, sizeof line);
   CHECK(std::string(line) == "new project");

@@ -1134,6 +1134,18 @@ class VoicePool {
   }
   std::uint32_t live_position() const noexcept { return live_pos_.load(std::memory_order_relaxed); }
 
+  // OS-PIANOBEND (docs/specs/OS-PIANOBEND.md): the live pitch bend of the PIANO pad strip, `semitones` -2..+2 (0 ends it) on the tracks of `tracks` (bit t: the live notes) and those it already bends. The sounding
+  // voice of each moves by the difference (offset and target alike, as a TUNE change: layer_event), a note that starts on a bent track starts bent (tune_base_q16), and 0 puts every bent track back.
+  // Flash, once an event; render context (Engine::play_live) only. Sampler voices only: Amiga and module notes do not follow the offset.
+  O3OS_AUDIO_COLD void live_bend(int semitones, std::uint32_t tracks) noexcept;
+  // A live note starts on `track` (before note_on): while a bend is in force the track joins it.
+  void live_bend_track(unsigned track) noexcept {
+    if (bend_q16_ != 0 && track < kVoiceTracks) {
+      bend_mask_ = static_cast<std::uint16_t>(bend_mask_ | (1u << track));
+    }
+  }
+  std::int32_t live_bend_q16() const noexcept { return bend_q16_; }
+
   // ---- The voices' load (OS-VOX: the status strip's "VOX 9/16" and `diag voices`) ----
   // Three words the render alone writes, in end_block() once a block, relaxed, no loop (the single-writer rule of status.h; each is monotonic or a plain level, so a reader that
   // sees them from slightly different blocks is not wrong): the voices in use (sounding or fading) at the end of the last block, the most that was in use at the end of a block since
@@ -1159,6 +1171,7 @@ class VoicePool {
   friend struct MovePositionSweepTest;  // tests/audio_wavetable_test.cpp: drives move_position on a hand-made Voice over a sweep of mod and window counts (OS-FLASHDIET T3); no code
   friend struct FxEnvW6aTest;  // tests/audio_voices_test.cpp: reads a voice's envelope pointer, pmask and the FX copies (OS-CEWTENV W6a); no code
   friend struct GranLenW5Test;  // tests/audio_granular_test.cpp: reads a voice's grain state and mmask and the pool's grlen arrays (OS-CEWTENV W5); no code
+  friend struct PianoBendTest;  // tests/audio_live_test.cpp: reads a voice's pitch offset and the bend state (OS-PIANOBEND); no code
   struct Voice {
     const std::int16_t* data = nullptr;
     std::uint64_t phase = 0;      // Q32.32 position in samples
@@ -1531,6 +1544,10 @@ class VoicePool {
   std::uint8_t st_touched_ = 0;
   std::uint16_t side_mask_ = 0;
   std::uint8_t side_idx_[kVoiceTracks] = {};
+  // OS-PIANOBEND (declared last, as the members above): the live pitch bend, semitones x 65536, and the tracks it bends (bit t). Added to tune_base_q16 of those tracks. Single writer: live_bend() from
+  // Engine::play_live (render context); read by tune_base_q16 (render context, flash).
+  std::int32_t bend_q16_ = 0;
+  std::uint16_t bend_mask_ = 0;
 };
 
 }  // namespace o3os::audio

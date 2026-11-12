@@ -181,7 +181,7 @@ def sine(freq, amp, n):
     return [int(round(amp * math.sin(2 * math.pi * freq * i / 44100.0))) for i in range(n)]
 
 
-def run_plugin(so, info, scratch_size, defaults):
+def run_plugin(so, info, scratch_size, defaults, block=BLOCK):
     """The sound the plugin makes for the defaults: (outputs per channel, returns, extra-samples calls)."""
     lib = ctypes.CDLL(so)
     libm = ctypes.CDLL("libm.so.6")
@@ -206,16 +206,16 @@ def run_plugin(so, info, scratch_size, defaults):
     for i, d in enumerate(defaults):
         lib.plugin_set_param(i, d)
     nch = 2 if info["flags"] & 0x2 else 1
-    n = BLOCK * BLOCKS
+    n = block * BLOCKS
     ins = [sine(440.0, 8000, n), sine(660.0, 6000, n)][:nch]
     outs = [[] for _ in range(nch)]
     rets = []
     for b in range(BLOCKS):
-        in_bufs = [(ctypes.c_int16 * BLOCK)(*ins[c][b * BLOCK:(b + 1) * BLOCK]) for c in range(nch)]
-        out_bufs = [(ctypes.c_int16 * BLOCK)() for _ in range(nch)]
+        in_bufs = [(ctypes.c_int16 * block)(*ins[c][b * block:(b + 1) * block]) for c in range(nch)]
+        out_bufs = [(ctypes.c_int16 * block)() for _ in range(nch)]
         in_arr = (ctypes.c_void_p * nch)(*[ctypes.addressof(x) for x in in_bufs])
         out_arr = (ctypes.c_void_p * nch)(*[ctypes.addressof(x) for x in out_bufs])
-        rets.append(lib.plugin_process_block(ctypes.addressof(in_arr), ctypes.addressof(out_arr), BLOCK, nch))
+        rets.append(lib.plugin_process_block(ctypes.addressof(in_arr), ctypes.addressof(out_arr), block, nch))
         for c in range(nch):
             outs[c].extend(out_bufs[c][:])
     return ins, outs, rets, calls
@@ -248,8 +248,9 @@ def check_smoke(insp):
             # Two runs, each from a freshly loaded copy (a plugin keeps its state in statics, which dlopen shares per file).
             so2 = os.path.join(tmp, stem + "_again.so")
             shutil.copyfile(so, so2)
-            ins, outs, rets, calls = run_plugin(so, info, scratch, defaults)
-            ins2, outs2, rets2, calls2 = run_plugin(so2, info, scratch, defaults)
+            block = 2048 if stem == "wt_resynth" else BLOCK  # WT Resynth takes whole 2048-frame slices: a shorter block ends its run
+            ins, outs, rets, calls = run_plugin(so, info, scratch, defaults, block)
+            ins2, outs2, rets2, calls2 = run_plugin(so2, info, scratch, defaults, block)
             problems = []
             if min(rets) < 0:
                 problems.append("process_block returned %s" % rets)
@@ -292,6 +293,16 @@ def check_smoke(insp):
                 _, outs_flat, _, _ = run_plugin(so2, info, scratch, flat)
                 if any(abs(a - b) > 1 for c in range(2) for a, b in zip(outs_flat[c], ins[c])):
                     problems.append("EQ at its flat defaults changes the sound by more than 1 step")
+            if stem == "pad_stretch" and calls[-1:] != [(0, 8 * 44100)]:
+                problems.append("Pad Stretch asked for %s, expected (0, 352800): Room 8 s behind the sample" % (calls[-1:],))
+            if stem in ("wt_forge", "wt_notes", "grain_lock", "pad_forge", "wt_resynth", "pad_stretch") and max(rets) > block:
+                problems.append("returned more frames than offered: %s" % rets)
+            if stem == "wt_resynth" and rets != [2048] * BLOCKS:
+                problems.append("WT Resynth returned %s, expected one 2048-frame slice a call" % rets)
+            if stem == "wt_resynth":  # offered more than a slice it takes one and the host calls again (a short positive return)
+                _, _, rets_big, _ = run_plugin(so2, info, scratch, defaults, 8192)
+                if rets_big != [2048] * BLOCKS:
+                    problems.append("WT Resynth offered 8192 frames returned %s, expected 2048 a call" % rets_big)
             if stem == "stereo_to_mono":
                 want = [max(-32768, min(32767, (a + b) // 2)) for a, b in zip(ins[0], ins[1])]
                 if all(abs(x - y) > 1 for x, y in zip(outs[0], want)):

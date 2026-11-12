@@ -235,6 +235,7 @@ void Simulator::open_document(bool with_bindings, bool with_new, unsigned tracks
   } else {
     fill_demo_project(document_->arena.project);
   }
+  document_->arena.project.start_new();  // OS-DEFSCALE: the sim's boot document is a new project too (C major, as the unit's boot document)
   if (tracks != 0u) {
     (void)document_->arena.project.set_active_tracks(tracks);  // OS-ZOOM: a project of fewer (or more) tracks than the demo's twelve
   }

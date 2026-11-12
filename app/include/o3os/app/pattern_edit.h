@@ -14,6 +14,7 @@
 
 #include <o3os/app/note_entry.h>
 #include <o3os/app/pad_board.h>
+#include <o3os/app/pad_maps.h>
 #include <o3os/model/step_edit.h>
 
 #include <cstdint>
@@ -113,6 +114,7 @@ struct PatternEdit {
   PadBoard pads;                  // the NOTES mode's layout: scale, root from `entry` (apply_entry), the row offset from the device setting PAD OFFSET (App::poll_pad_offset; 12 until it moves)
   NoteEntry entry;                // OS-PADS-B: root, scale, octave and SCALE LOCK of the note entry (held Note, note_entry.h); the jump is edit_step
   std::uint8_t pad_held[48] = {};    // the note + 1 that the PIANO / ISO pad under the finger started (0: none), so its release ends that note even if the octave changed meanwhile
+  BendHold bend;                     // OS-PIANOBEND: the PIANO bend pads under the fingers (pad_maps.h); the release is App::run_once's, whatever the mode is by then. Main loop only
   StepHold step_hold;
   // OS-MIDIREC-P1 S2: the length chooser's "TOO BIG TO UNDO" question (chooser_actions.cpp set_length): (pattern << 8 | length) the first press asked about, 0 none, and the project generation it
   // was asked at (any edit in between takes the question back). Main loop only.

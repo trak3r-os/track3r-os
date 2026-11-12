@@ -137,6 +137,15 @@ class SimAudio::Preview final : public app::PreviewSink {
     held_ &= ~(std::uint64_t{1} << pad);
     release(audio::LiveEvent{audio::LiveKind::Off, audio::kLiveSourcePad, static_cast<std::uint8_t>(pad), 0, 0, 0, 0, 0});
   }
+  // OS-PIANOBEND: the PIANO strip's bend (semitones -2..+2, 0 = let go): a bend event of the pad source; the return to 0 goes by release(), so a refused one is repaired by the all-notes-off (which also centres).
+  void pad_bend(int semitones, unsigned instrument) noexcept override {
+    const audio::LiveEvent e{audio::LiveKind::Bend, audio::kLiveSourcePad, 0, static_cast<std::uint8_t>(static_cast<std::int8_t>(semitones < -2 ? -2 : (semitones > 2 ? 2 : semitones))), clamp_instrument(instrument), 0, 0, 0};
+    if (semitones == 0) {
+      release(e);
+    } else {
+      (void)push(e);
+    }
+  }
   void midi_note(bool on, unsigned track, unsigned instrument, unsigned note, unsigned velocity, unsigned channel) noexcept override {
     if (note > 127u) {
       return;

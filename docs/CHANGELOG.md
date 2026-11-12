@@ -2,6 +2,12 @@
 
 User-visible changes of the Community OS, newest first, one entry per change, in English. The next release notes link here. A change that touches a saved file or the level of what you hear says so in plain words.
 
+## Next release (version and date to be set at publication)
+
+### New
+
+- **Six Sample Editor plugins of our own in `Effects/`.** Generators: **WT Forge** (a wavetable whose timbre moves, nine modes), **WT Notes** (a wavetable whose windows are notes: the position plays an arpeggio, a scale or chords), **Grain Lock** (a bed for the GRANULAR play mode, built on your grain length, shape and loop) and **Pad Forge** (a pad that loops with no seam, as one note or a chord). Effects: **WT Resynth** (a sample becomes a wavetable of its own timbre) and **Pad Stretch** (a sample becomes up to 16 times longer, smeared into a pad). They are in the SD content zip; the firmware does not change. See [Sample edit](manual/sample_edit.md#the-track3r-os-plugins).
+
 ## v1.3.1 (2026-11-12)
 
 A key-layout release: fewer chords, one accept/back grammar, and faster ways to save, loop, chop and pick pads. No saved file changes; the module ABI is 1.13, as in v1.3.0. Use the v1.3.0 modules zip or the v1.3.1 one (same modules).

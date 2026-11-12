@@ -63,6 +63,9 @@
 // is one block (1.45 ms) later than the voice path, which starts at sample 0 of the block it is popped in. A live note is not muted by the track strip (a pad has no track on the MIDI side) and
 // Stopped (stop_all) takes it with the rest: the pad's later Off is then not owed and is dropped (MidiOut::stats().stray_offs). Per block it is bounded by the live queue: kLivePerBlock
 // events, each one MidiOut::send (an AllOff at most kLivePads).
+// OS-PIANOBEND (docs/specs/OS-PIANOBEND.md): a LiveKind::Bend of a MIDI instrument (semitones -2..+2, the PIANO strip) is a MidiPitchBend of pitch_bend_value(semitones x 100, midi_pb_range) on the instrument's
+// route and is taken here (true: the voices get no bend); 0, or an instrument that is not MIDI, sends the centre to the route last bent (`bend_route_`) and returns false so the voices are put back too; an AllOff of the
+// pads or of all sources centres it as well. A stop does not centre: the strip's release does.
 // Known limits (review, 2026-10-14): the hang book is per channel and note and shared with the sequencer, so a sequencer note-off on the same channel and note cuts a held pad
 // note and a pad release cuts a sounding sequencer note (the receiver has one voice per note); a pad pressed in the few blocks after a Stop can be taken by
 // the panic pump; a pad's off that MidiOut's staging refuses (a driver fault) is not sent again, so that note hangs on the receiver until the next Stop or panic, as a sequencer off would.
@@ -206,6 +209,8 @@ class MidiLink {
   core::Q32 mtc_start_q32() const noexcept;
   std::uint32_t chase_rate_q16() const noexcept;
   void live_release(std::uint32_t pad) noexcept;
+  bool live_bend_send(std::uint32_t word, std::uint16_t value) noexcept;  // OS-PIANOBEND: true when the queue took it
+  bool live_bend_centre() noexcept;
   std::int32_t in_offset_us() const noexcept { return midi::offset_us(cfg_.in_offset_dms[static_cast<unsigned>(cfg_.in_port)]); }
 
   Sequencer& seq_;
@@ -238,6 +243,7 @@ class MidiLink {
   static constexpr unsigned kLivePortsShift = 24;
   static constexpr unsigned kLiveDelayShift = 16;
   std::uint32_t live_pad_[kLivePads] = {};
+  std::uint32_t bend_route_ = 0;     // OS-PIANOBEND (live_event, render only): the route (live_pad_'s bits, no note) the pad bend strip last bent, kLiveHeld set while it is bent; the centre goes to it on release
   std::uint32_t handed_ = 0;         // MidiOut's handed counter at the last block: a change means the ports have something new
   Stats stats_{};
 

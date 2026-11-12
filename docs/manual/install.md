@@ -17,7 +17,7 @@ This page says what is established by observation on the maintainer's unit and b
 A release (GitHub, "Releases") has four files (v1.3.1):
 
 - `track3r-os-v1.3.1.ptf`: the update file. It is the device image in Intel HEX form under a `.ptf` name, which is what the Tracker's bootloader flashes. Its name never starts with `Polyend`, so it cannot be mistaken for an official file. For a first install through the reset button you rename your copy on the card (section 1).
-- `track3r-os-v1.3.1-modules.zip`: every external module: the apps, the effects, the instruments (`tb303`, `chip`, `fm`, `sid`, `sine`; they are not inside the firmware) with their licence texts, the `tracker` importer for MOD, S3M and MED, the factory presets, and the thirteen Sample Editor plugins (`.ptfx`, which go in `Effects/`).
+- `track3r-os-v1.3.1-modules.zip`: every external module: the apps, the effects, the instruments (`tb303`, `chip`, `fm`, `sid`, `sine`; they are not inside the firmware) with their licence texts, the `tracker` importer for MOD, S3M and MED, the factory presets, and the nineteen Sample Editor plugins (`.ptfx`, which go in `Effects/`).
 - `track3r-os-v1.3.1-examples.zip`: demo projects, a drum kit, wavetables, an OctaMED module and the licences of the files.
 - `SHA256SUMS`: the checksums of the three files. Check your download before using it: `sha256sum -c SHA256SUMS`. The release notes also give the CRC-32 that `o3console.py --update --crc` asks for.
 

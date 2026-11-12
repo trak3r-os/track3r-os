@@ -24,7 +24,7 @@ This page says what is established by observation on the maintainer's unit and b
 A release (GitHub, "Releases") has four files (v1.3.1):
 
 - `track3r-os-v1.3.1.ptf`: the update file. It is the device image in Intel HEX form under a `.ptf` name, which is what the Tracker's bootloader flashes. Its name never starts with `Polyend`, so it cannot be mistaken for an official file. For a first install through the reset button you rename your copy on the card (section 1).
-- `track3r-os-v1.3.1-modules.zip`: every external module: the apps, the effects, the instruments (`tb303`, `chip`, `fm`, `sid`, `sine`; they are not inside the firmware) with their licence texts, the `tracker` importer for MOD, S3M and MED, the factory presets, and the thirteen Sample Editor plugins (`.ptfx`, which go in `Effects/`).
+- `track3r-os-v1.3.1-modules.zip`: every external module: the apps, the effects, the instruments (`tb303`, `chip`, `fm`, `sid`, `sine`; they are not inside the firmware) with their licence texts, the `tracker` importer for MOD, S3M and MED, the factory presets, and the nineteen Sample Editor plugins (`.ptfx`, which go in `Effects/`).
 - `track3r-os-v1.3.1-examples.zip`: demo projects, a drum kit, wavetables, an OctaMED module and the licences of the files.
 - `SHA256SUMS`: the checksums of the three files. Check your download before using it: `sha256sum -c SHA256SUMS`. The release notes also give the CRC-32 that `o3console.py --update --crc` asks for.
 
@@ -177,7 +177,7 @@ A starter zip is not part of this release. If you have one, you unpack it into t
 | `modules/effects/` | the effect modules for a track's insert |
 | `modules/instruments/` | the instrument modules: TB-303, Chip, FM, SID and Sine. They are not inside the firmware (it keeps the flash free): a project that uses one without its file shows it greyed, **MODULE NOT ON THE CARD**. |
 | `modules/importers/` | the importer module `tracker.tmod`, which the firmware loads from the card to read MOD, S3M and OctaMED files on IMPORT (File screen, F6). Without it an import says **NO IMPORTER** and changes nothing. |
-| `Effects/` | the Sample Editor plugins (`.ptfx`): Add Silence, Analog Kick, Chiptune, Multimode Filter, Stereo Delay, Stereo to Mono, Overdrive, Delay, Bitcrusher, Chorus, Flanger, Limiter and Three-Band EQ |
+| `Effects/` | the Sample Editor plugins (`.ptfx`): Add Silence, Analog Kick, Chiptune, Multimode Filter, Stereo Delay, Stereo to Mono, Overdrive, Delay, Bitcrusher, Chorus, Flanger, Limiter, Three-Band EQ, and six of our own: WT Forge, WT Notes, Grain Lock, Pad Forge, WT Resynth and Pad Stretch |
 | `Samples/` | a drum kit and other one-shots |
 | `WTABLE/` | wavetables |
 | `Songs/` | tracker songs for the importers |
@@ -1769,6 +1769,33 @@ Three kinds of plugin act differently from an effect:
 The strip also says **NO SAMPLE INSTRUMENT HERE** when you run a generator on an empty-looking slot that holds a MIDI or other non-sample instrument, and **NOTHING PRODUCED** when a generator made no sound.
 
 Status: the effect path is verified in the simulator and on the host; generators, the wavetable mode and Add Silence are verified on the host only (the simulator has no stand-in for them); all of it is still to be checked on the unit.
+
+### The track3r-os plugins
+
+New in track3r-os. Six of the plugins in `Effects` are not in the official firmware's set: four generators that make an instrument from nothing, and two effects that turn a sample you have into something else.
+
+| Plugin | Kind | What it makes |
+|---|---|---|
+| **WT Forge** | GEN, WT | A wavetable whose timbre moves from the first window to the last, in nine ways (**Mode**) |
+| **WT Notes** | GEN, WT | A wavetable whose windows are notes: the wavetable position plays an arpeggio, a scale or chords on one held key |
+| **Grain Lock** | GEN | A bed for the **GRANULAR** play mode, built on the grain length, shape and loop you give it |
+| **Pad Forge** | GEN | A pad that loops with no seam: strings, choirs, organ, brass or glass, as one note or a chord |
+| **WT Resynth** | effect, WT | Your sample as a wavetable of its own timbre, with the pitch taken out |
+| **Pad Stretch** | effect | Your sample up to 16 times longer, smeared into a pad or a drone |
+
+**Make a wavetable (WT Forge, WT Notes).** Pick the plugin and press `F4` (**NEW INS**). The new instrument is already in **WAVETABLE** mode with a window of 2,048. Move the wavetable position, by hand or with an LFO, to hear the table move.
+
+**Make a granular bed (Grain Lock).** Set the plugin's grain length, shape and loop to the values you will use on the instrument's granular page, then `F4`. Set the instrument's play mode to **GRANULAR** with the same values: the grain then holds whole cycles of the sound and loops with no click. **Motion** makes the timbre change along the sample, so the granular position becomes a timbre control.
+
+**Make a pad (Pad Forge).** Pick **Type**, **Note**, **Octave** and, if you want one, a **Chord**; press `F4`. On the Instrument screen loop the whole sample forward: the sample is exactly one loop, so it holds for as long as the note. Leave **Note** at C and the keys play the notes they name. **Detune** sets how wide the pad is (0 is almost still, 100 a wash), **Voices** how smooth, **Length** how long the loop is (up to 2 seconds). A pad has at most 1,024 sines: a chord of four notes with 16 voices is duller than one with 8.
+
+**Turn a sample into a wavetable (WT Resynth).** Open a sample with one voice or one held note, then `F1` (**APPLY**). Every 2,048 frames of the sample become one window with the sample's timbre at that moment, all at one pitch; the sample becomes mono and the play mode **WAVETABLE**. A spoken word gives a table that speaks as the position moves. Crop to the part you want first: a long sample gives a long table.
+
+**Stretch a sample into a pad (Pad Stretch).** Open the sample, set **Stretch** (x1 to x16) and `F1`. The attack and the rhythm go; the colour of the sound stays and moves slowly. **Room** is the most the sample may grow, in seconds: if the strip says **NO ROOM FOR THE EDIT**, lower it. **Shimmer** and **Sub** add the octave above and below, **Blur** holds the colour for longer. Only the first 6.3 seconds of the sample are used, so crop a long one first. Look at the instrument's loop and end points afterwards.
+
+These plugins work in small pieces, so a long result takes a moment: the strip shows the progress, and `F8` cancels.
+
+Status: verified on the host only (each plugin was rendered on a desktop computer and measured); still to be checked on the unit.
 
 ### Convert to an Amiga rate
 
@@ -4835,7 +4862,7 @@ The other rows move one a click, `Shift` makes a coarse step, `Delete` puts the 
 | **VELOCITY** | 1 to 127 (127) | The default velocity of its notes. |
 | **PROGRAM** | **NONE**, 0 to 127 | Sends a Program Change on the channel when you edit it, and once before the first note after a project load.  |
 | **OUT** | **Config**, **DIN**, **USB**, **DIN + USB** (**Config**) | The port the notes and CCs go to. **Config** follows the MIDI OUT port of Config.  |
-| **PB RANGE** | 0 to 24 semitones (2) | Turns the Micro-tune FX into a pitch bend; 0 sends none.  |
+| **PB RANGE** | 0 to 24 semitones (2) | Turns the Micro-tune FX into a pitch bend; 0 sends none. The PIANO bend strip of the Pattern pads sends -2 to +2 semitones of bend scaled by this range: at 2 the outer pads are the full range.  |
 | **OFFSET** | 0 to 100 ms (0) | Delays the notes of this instrument. The length of a note is unchanged.  |
 
 Press `F2` (**CC**) for the controller page: six rows **CC A** to **CC F**, all **CONFIG** (the number set on the Config page) at first. `F1` and `F2` switch between the two pages. Turn a row through `CC 0` to `CC 127`, then **PROG**, **CH AT** and **POLY AT**.  A step FX then sends the slot. With CC A at `CC 74`, CC B at **PROG**, CC C at **CH AT** and CC D at **POLY AT**, FX 8, 9, 10 and 11 send a controller, a Program Change, channel aftertouch and key aftertouch. **POLY AT** sends nothing when no note sounds. FX 37 sends **CC F**, not a Program Change; to send a Program Change, set a slot to **PROG**.
@@ -5200,7 +5227,7 @@ Start on the Pattern screen. Hold `Note` for half a second: the **NOTE ENTRY** p
 1. Turn the encoder, or press `Up` or `Down`, to step through all 39 keys, one a detent, wrapping at both ends.
 2. Or press a pad of the second pad row: it holds twelve of the keys. For any of the other 27 no pad of the row is lit.
 
-You should see the top line name the key at every step, for example `C Hirajoshi - Jump 1 - Oct 3 - Lock off`, and the info line read `scale Hirajoshi C-4`.  Turn **SCALE LOCK** on (the last pad) and the pads and a MIDI keyboard snap to the key: a C# played in is written as the C of the key.  The key is saved with the project: save, switch the unit off and on, open the project again, and the panel opens on the same key.  Two pairs of keys have the same notes (Hung. minor and Gypsy minor, Diminished and Whole-half), and Todi keeps the standard notes of its name here.  The same 39 keys the original firmware lists under its Config's Notes scale are on this panel. New in track3r-os.
+You should see the top line name the key at every step, for example `C Hirajoshi - Jump 1 - Oct 3 - Lock off`, and the info line read `scale Hirajoshi C-4`.  Turn **SCALE LOCK** on (the last pad) and the pads and a MIDI keyboard snap to the key: a C# played in is written as the C of the key.  The key is saved with the project: save, switch the unit off and on, open the project again, and the panel opens on the same key.  A new project starts in **C Major**, so the pads light the notes of the scale at once; pick **Chromatic** (the first pad of the second row) to light every note. A project saved before this version has no key stored and opens in Chromatic, as it did. New in track3r-os.  Two pairs of keys have the same notes (Hung. minor and Gypsy minor, Diminished and Whole-half), and Todi keeps the standard notes of its name here.  The same 39 keys the original firmware lists under its Config's Notes scale are on this panel. New in track3r-os.
 
 ### Open the Navigator
 
@@ -5263,8 +5290,8 @@ The Shift row sets the pads' octave and opens the PADS picker. The octave is the
 
 | Key | Pads |
 |---|---|
-| `F1` (**NOTES**) | the usual note pads. The LEDs show the scale: a note of the scale is bright (the root too), a note outside the scale is dim. With no scale, or with SCALE LOCK on, every note pad is bright |
-| `F2` (**PIANO**) | two octaves laid out like a piano. The LEDs light the notes the same way as in NOTES: scale notes bright, others dim. The two octave pads are dim at C3 and bright on the side the octave has moved to |
+| `F1` (**NOTES**) | the usual note pads. The LEDs show the scale: a note of the scale is bright (the root too), a note outside the scale is dim. With no scale (Chromatic), or with SCALE LOCK on, every note pad is bright; a new project starts in C Major |
+| `F2` (**PIANO**) | two octaves laid out like a piano. The LEDs light the notes the same way as in NOTES: scale notes bright, others dim. The two octave pads are dim at C3 and bright on the side the octave has moved to. The eight pads of columns 10 and 11 are a pitch-bend strip: rows 1 to 4 bend +2, +1, -1 and -2 semitones while held, and the pitch returns when you let go (a MIDI instrument gets a pitch bend scaled by its bend range). Amiga and module instruments are not bent; nothing is recorded into the pattern. New in track3r-os.  |
 | `F3` (**ISO**) | each column a semitone, each row up a fourth. The LEDs light the notes the same way as in NOTES |
 | `F4` (**TRACKS**) | each column is a track; rows for track, mute, mute mode and solo |
 | `F5` (**PATS**) | each pad is a pattern, 1 to 48. A tap queues it |

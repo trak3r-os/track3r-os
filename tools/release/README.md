@@ -33,7 +33,7 @@ python3 -I tools/release/make_starter.py --version 0.7.0 --ptf <track3r-os-0.7.0
     next to them (`modules/instruments/NOTICES.txt`: the notice, Open303's MIT text and tracker-ce's, as the image carried them before) and in
     `LICENSES/` (`Open303-MIT.txt`, `CHIP-tracker-ce-MIT.txt`); `CREDITS.txt` names them. Their factory presets are packed too (`presets`).
   - Importers: `tracker` (OS-FLASHDIET I3), the MOD / S3M / MED reader the firmware loads from the card on IMPORT, so the zip must carry it.
-  - `.ptfx` plugins (OS-PTFXPACK): the thirteen folders of `modules/ptfx`, built by the CMake target `o3_ptfx` (`tools/ptfx_pack.py`) and copied to
+  - `.ptfx` plugins (OS-PTFXPACK): the nineteen folders of `modules/ptfx`, built by the CMake target `o3_ptfx` (`tools/ptfx_pack.py`) and copied to
     `Effects/`: the six `editor-fx-sdk` examples of polyend/tracker-ce (add_silence, analog_kick_gen, chiptune_gen, multimode_filter, stereo_delay,
     stereo_to_mono) and seven Sample Editor effects rebuilt from its `core/effector` (overdrive, delay, bitcrusher, chorus, flanger, limiter, eq3). Wavetable Smoother, Cut and Time-stretch are not
     rebuilt (OS-PTFXPACK P3): one block at a time, a plugin cannot read the whole selection (Smoother, Time-stretch), cannot ask for the project tempo, or produce an output length
@@ -41,6 +41,9 @@ python3 -I tools/release/make_starter.py --version 0.7.0 --ptf <track3r-os-0.7.0
     maintainer approved these components (CLAUDE.md, hard rule 1; `THIRD_PARTY.md`). They are MIT, which is allowed for this section only: each
     file is read back through the checks of `tools/ptfx_inspect.py`, its source must say `SPDX-License-Identifier: MIT`, the licence text goes to
     `LICENSES/MIT-tracker-ce.txt` and `CREDITS.txt` names the files. No `.ptfx` is committed.
+    The other six folders are plugins of our own (maintainer 2026-11-12): the generators wt_forge, wt_notes, grain_lock and pad_forge and the effects wt_resynth and
+    pad_stretch, written against the SDK header with no tracker-ce code or algorithm. They are MIT too, (c) the track3r-os contributors (`PTFX_OWN` of
+    `make_starter.py`): `CREDITS.txt` lists them apart, under their own MIT text.
   - Not packed: the `modules/templates` examples (SDK scaffolding) and our own `.ptfx` test fixtures (`tests/ptfx`: fault, hang and ABI probes, an
     integer gain, a test ramp), which are not tools for a user. A plugin from another tracker-ce component is never packed without the
     maintainer's approval of that component.

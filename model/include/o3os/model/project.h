@@ -121,6 +121,8 @@ class Project {
   // Back to the empty default project; keeps counting generations (every counter advances).
   // `keep_instruments` (OS-NEWKEEP, File > NEW > KEEP INSTRUMENTS): the instrument table and the module table stay byte for byte; everything else is reset.
   void reset(bool keep_instruments = false) noexcept;
+  // OS-DEFSCALE: what a NEW document (not a loaded one) has beyond reset(): the NOTE part present, at C major. The new-project path and the platform's boot document call it after reset().
+  void start_new() noexcept;
 
   // ---- reads --------------------------------------------------------------------------------------------
 

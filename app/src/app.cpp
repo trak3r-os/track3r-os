@@ -190,6 +190,12 @@ void App::run_once() noexcept {
     if (event.kind == core::InputKind::Pad && event.value == 0 && preview_ != nullptr && !tracks_pad) {
       preview_->pad_up(event.id);  // a pad's release ends the note it started (OS-005g); the sink knows which pads it holds
     }
+    if (event.kind == core::InputKind::Pad && event.value == 0 && event.id < kPadCount && state_.edit.bend.holds(event.id)) {
+      const int bend = state_.edit.bend.release(event.id);  // OS-PIANOBEND: a bend pad's release (whatever the mode is by now): the previous held bend pad's, or back in tune
+      if (preview_ != nullptr) {
+        preview_->pad_bend(bend, static_cast<unsigned>(state_.instrument));
+      }
+    }
     if (event.kind == core::InputKind::Pad && event.value == 0 && state_.edit.step_hold.row >= 0) {
       (void)invoke(core::action_id("pads.step_up"), event.id);  // OS-PADS-B: a STEP pad's release ends its hold, and clears a lit step that was only tapped
     }
@@ -591,6 +597,7 @@ void App::reset_input() noexcept {
   state_.hold.pending = false;
   stop_hold();
   state_.inst_pads = 0;
+  state_.edit.bend.clear();  // OS-PIANOBEND: (the notes_off below puts the voices and the MIDI channel back in tune)
   tap_pads_ = 0;  // OS-PATTEMPO: a tap's release may have been lost too: the next release of that pad is a normal one
   enc_keys_ = 0;  // OS-ENCLEARN: likewise
   if (state_.edit.enc_take || state_.edit.enc_said) {

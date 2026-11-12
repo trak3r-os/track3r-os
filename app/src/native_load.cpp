@@ -91,6 +91,7 @@ NativeFolderLoader::State NativeFolderLoader::step(std::size_t byte_budget) noex
   if (fresh_) {  // a new project: the model's defaults, one step (the app's frames are held, the transport is stopped and the voices have settled: the platform's phases)
     model::Project& project = arena_->project;
     project.reset(keep_instruments_);
+    project.start_new();  // OS-DEFSCALE: a new project starts in C major (a load keeps the reader's defaults)
     if (lanes_ != nullptr) {
       lanes_->sync(project.load_epoch());  // the reset moved the epoch: no lane of the old project survives (OS-MIDIREC-P1)
     }

@@ -62,6 +62,7 @@ struct AppRig {
 
   explicit AppRig(model::ModelArena& a) : arena(a) {
     arena.project.reset();
+    arena.project.start_new();  // C major, the runtime's default: the document is not unsaved at the start (OS-DEFSCALE)
     (void)arena.project.create_pattern(1, 16);
     (void)arena.project.append_order(1);
     journal.begin(g_ring, sizeof g_ring);

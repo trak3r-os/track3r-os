@@ -107,6 +107,34 @@ The strip also says **NO SAMPLE INSTRUMENT HERE** when you run a generator on an
 
 Status: the effect path is verified in the simulator and on the host; generators, the wavetable mode and Add Silence are verified on the host only (the simulator has no stand-in for them); all of it is still to be checked on the unit.
 
+### The track3r-os plugins
+<!-- sync: src=modules/ptfx/wt_forge/wt_forge.c,modules/ptfx/wt_notes/wt_notes.c,modules/ptfx/grain_lock/grain_lock.c,modules/ptfx/pad_forge/pad_forge.c,modules/ptfx/wt_resynth/wt_resynth.c,modules/ptfx/pad_stretch/pad_stretch.c qa=QA-SED-049,QA-SED-050,QA-SED-051,QA-SED-052,QA-SED-053,QA-SED-054 -->
+
+New in track3r-os. Six of the plugins in `Effects` are not in the official firmware's set: four generators that make an instrument from nothing, and two effects that turn a sample you have into something else.
+
+| Plugin | Kind | What it makes |
+|---|---|---|
+| **WT Forge** | GEN, WT | A wavetable whose timbre moves from the first window to the last, in nine ways (**Mode**) |
+| **WT Notes** | GEN, WT | A wavetable whose windows are notes: the wavetable position plays an arpeggio, a scale or chords on one held key |
+| **Grain Lock** | GEN | A bed for the **GRANULAR** play mode, built on the grain length, shape and loop you give it |
+| **Pad Forge** | GEN | A pad that loops with no seam: strings, choirs, organ, brass or glass, as one note or a chord |
+| **WT Resynth** | effect, WT | Your sample as a wavetable of its own timbre, with the pitch taken out |
+| **Pad Stretch** | effect | Your sample up to 16 times longer, smeared into a pad or a drone |
+
+**Make a wavetable (WT Forge, WT Notes).** Pick the plugin and press `F4` (**NEW INS**). The new instrument is already in **WAVETABLE** mode with a window of 2,048. Move the wavetable position, by hand or with an LFO, to hear the table move. <!-- QA-SED-049 --> <!-- QA-SED-050 -->
+
+**Make a granular bed (Grain Lock).** Set the plugin's grain length, shape and loop to the values you will use on the instrument's granular page, then `F4`. Set the instrument's play mode to **GRANULAR** with the same values: the grain then holds whole cycles of the sound and loops with no click. **Motion** makes the timbre change along the sample, so the granular position becomes a timbre control. <!-- QA-SED-051 -->
+
+**Make a pad (Pad Forge).** Pick **Type**, **Note**, **Octave** and, if you want one, a **Chord**; press `F4`. On the Instrument screen loop the whole sample forward: the sample is exactly one loop, so it holds for as long as the note. Leave **Note** at C and the keys play the notes they name. **Detune** sets how wide the pad is (0 is almost still, 100 a wash), **Voices** how smooth, **Length** how long the loop is (up to 2 seconds). A pad has at most 1,024 sines: a chord of four notes with 16 voices is duller than one with 8. <!-- QA-SED-052 -->
+
+**Turn a sample into a wavetable (WT Resynth).** Open a sample with one voice or one held note, then `F1` (**APPLY**). Every 2,048 frames of the sample become one window with the sample's timbre at that moment, all at one pitch; the sample becomes mono and the play mode **WAVETABLE**. A spoken word gives a table that speaks as the position moves. Crop to the part you want first: a long sample gives a long table. <!-- QA-SED-053 -->
+
+**Stretch a sample into a pad (Pad Stretch).** Open the sample, set **Stretch** (x1 to x16) and `F1`. The attack and the rhythm go; the colour of the sound stays and moves slowly. **Room** is the most the sample may grow, in seconds: if the strip says **NO ROOM FOR THE EDIT**, lower it. **Shimmer** and **Sub** add the octave above and below, **Blur** holds the colour for longer. Only the first 6.3 seconds of the sample are used, so crop a long one first. Look at the instrument's loop and end points afterwards. <!-- QA-SED-054 -->
+
+These plugins work in small pieces, so a long result takes a moment: the strip shows the progress, and `F8` cancels.
+
+Status: verified on the host only (each plugin was rendered on a desktop computer and measured); still to be checked on the unit.
+
 ### Convert to an Amiga rate
 <!-- sync: src=app/src/sample_edit_actions.cpp qa=QA-SED-001,QA-SED-012,QA-SED-013,QA-SLD-009 -->
 

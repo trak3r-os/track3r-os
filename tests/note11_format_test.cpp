@@ -113,6 +113,52 @@ TEST_CASE("note11: every one of the 39 scales round-trips; the twelve write NOTE
   }
 }
 
+// OS-DEFSCALE: a new project is C major and saves and reloads as it; the user's Chromatic saves and reloads as Chromatic; a file with no NOTE chunk reads Chromatic, whatever the document held before.
+TEST_CASE("defscale: a new project is C major and round-trips; Chromatic round-trips; a file with no NOTE chunk loads Chromatic") {
+  Project& p = proj(0);
+  p.reset();
+  CHECK(p.note().scale == 0u);  // the reader's default
+  CHECK((p.state_present() & Project::kStateNote) == 0);
+  p.start_new();
+  CHECK(p.note().scale == 2u);  // Major, the official index
+  CHECK(p.note().scale == kNotePanelScales[1]);
+  CHECK(p.note().root == 0u);
+  CHECK((p.state_present() & Project::kStateNote) != 0);
+  Bytes major;
+  NEED(test::save(p, major) == Progress::Done);
+  CHECK(find(test::split_chunks(major), kChunkNote)->payload == Bytes({0x01, 0x00, 0, 1, 3, 0, 1}));  // 1.0: C, pad 2 - 1 = Major, octave 3, lock off, jump 1
+  Report rep;
+  NEED(test::load(test::arena(1), major, &rep) == Progress::Done);
+  CHECK(proj(1).note().scale == 2u);
+  CHECK(proj(1).note() == p.note());
+
+  // the user sets Chromatic on the new project: written, and read back as Chromatic
+  NoteState n = p.note();
+  n.scale = 0;
+  CHECK(p.set_note(n) == Status::Ok);
+  Bytes chromatic;
+  NEED(test::save(p, chromatic) == Progress::Done);
+  CHECK(find(test::split_chunks(chromatic), kChunkNote)->payload == Bytes({0x01, 0x00, 0, 0, 3, 0, 1}));
+  NEED(test::load(test::arena(1), chromatic, &rep) == Progress::Done);
+  CHECK(proj(1).note().scale == 0u);
+  CHECK((proj(1).state_present() & Project::kStateNote) != 0);
+
+  // an old file: no NOTE chunk. Loaded over a document that was a new project, it is Chromatic and the part is absent
+  Project& old = proj(2);
+  old.reset();
+  Bytes none;
+  NEED(test::save(old, none) == Progress::Done);
+  CHECK(find(test::split_chunks(none), kChunkNote) == nullptr);
+  proj(1).reset();
+  proj(1).start_new();
+  NEED(test::load(test::arena(1), none, &rep) == Progress::Done);
+  CHECK(proj(1).note().scale == 0u);
+  CHECK((proj(1).state_present() & Project::kStateNote) == 0);
+  Bytes again;
+  NEED(test::save(proj(1), again) == Progress::Done);
+  CHECK(again == none);  // the same bytes: an old file saves as it always did
+}
+
 TEST_CASE("note11: the exact bytes of the two shapes (Blues 1.0, Hirajoshi 1.1)") {
   NoteState n;
   init_note_state(n);

@@ -28,7 +28,7 @@ inline constexpr std::uint8_t kEntryDefaultOctave = 3;  // the octave of a new N
 
 struct NoteEntry {
   std::uint8_t root = 0;     // the pitch class 0..11 (C..B)
-  std::uint8_t scale = 0;    // 0..model::kNoteScaleMax (38): the official scale numbering (OS-SCALES28); the panel's pad row 2 goes through model::kNotePanelScales
+  std::uint8_t scale = model::kNoteNewProjectScale;    // OS-DEFSCALE: C major to start (a new project, the boot state; a loaded file sets its own); 0..model::kNoteScaleMax (38): the official scale numbering (OS-SCALES28); the panel's pad row 2 goes through model::kNotePanelScales
   std::uint8_t octave = kEntryDefaultOctave;   // 0..9; with the C root, the 36 (C-3) that the pad board always started at
   std::uint8_t lock = 0;     // SCALE LOCK: 0 off, 1 on. The pads of the NOTES mode lay out the scale and the pads and the MIDI keyboard snap to it
 

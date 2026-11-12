@@ -190,7 +190,7 @@ The other rows move one a click, `Shift` makes a coarse step, `Delete` puts the 
 | **VELOCITY** | 1 to 127 (127) | The default velocity of its notes. |
 | **PROGRAM** | **NONE**, 0 to 127 | Sends a Program Change on the channel when you edit it, and once before the first note after a project load. <!-- QA-INS-075, QA-INS-076 --> |
 | **OUT** | **Config**, **DIN**, **USB**, **DIN + USB** (**Config**) | The port the notes and CCs go to. **Config** follows the MIDI OUT port of Config. <!-- QA-INS-077 --> |
-| **PB RANGE** | 0 to 24 semitones (2) | Turns the Micro-tune FX into a pitch bend; 0 sends none. <!-- QA-INS-078 --> |
+| **PB RANGE** | 0 to 24 semitones (2) | Turns the Micro-tune FX into a pitch bend; 0 sends none. The PIANO bend strip of the Pattern pads sends -2 to +2 semitones of bend scaled by this range: at 2 the outer pads are the full range. <!-- QA-INS-078 --> |
 | **OFFSET** | 0 to 100 ms (0) | Delays the notes of this instrument. The length of a note is unchanged. <!-- QA-INS-080 --> |
 
 Press `F2` (**CC**) for the controller page: six rows **CC A** to **CC F**, all **CONFIG** (the number set on the Config page) at first. `F1` and `F2` switch between the two pages. Turn a row through `CC 0` to `CC 127`, then **PROG**, **CH AT** and **POLY AT**. <!-- QA-INS-072, QA-INS-073 --> A step FX then sends the slot. With CC A at `CC 74`, CC B at **PROG**, CC C at **CH AT** and CC D at **POLY AT**, FX 8, 9, 10 and 11 send a controller, a Program Change, channel aftertouch and key aftertouch. **POLY AT** sends nothing when no note sounds. FX 37 sends **CC F**, not a Program Change; to send a Program Change, set a slot to **PROG**. <!-- QA-INS-079, QA-INS-069 -->

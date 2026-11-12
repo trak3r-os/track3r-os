@@ -59,6 +59,13 @@ bool play_fn(ActionContext& ctx, unsigned pad, PadFn fn) noexcept {
       return octave_by(ctx.view, 1);
     case PadKey::OctDown:
       return octave_by(ctx.view, -1);
+    case PadKey::Bend: {  // OS-PIANOBEND: momentary, last pressed wins; the release is App::run_once's. Nothing is written to the pattern
+      const int bend = ctx.view.edit.bend.press(pad, bend_semitones(fn));
+      if (ctx.preview != nullptr) {
+        ctx.preview->pad_bend(bend, static_cast<unsigned>(ctx.view.instrument));
+      }
+      return false;
+    }
     default:
       return false;
   }

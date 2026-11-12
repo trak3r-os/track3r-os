@@ -119,6 +119,7 @@ struct Rig {
     card.gate_status = writable ? hal::storage::WriteStatus::Ok : hal::storage::WriteStatus::WriteProtected;
     model::ModelArena& arena = test::arena(1);
     test::fill_small(arena.project);
+    arena.project.start_new();  // C major, the runtime's default: the document is not unsaved at the start (OS-DEFSCALE)
     (void)arena.project.set_name("", 0);  // (OS-NAMES: a title is what SAVE AS offers as the folder's name; these tests are about the automatic "Track nn", names_test.cpp about the title)
     journal.begin(g_ring, sizeof g_ring);
     editor = std::make_unique<model::Editor>(arena.project, journal);

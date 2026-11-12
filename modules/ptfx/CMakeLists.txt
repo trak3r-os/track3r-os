@@ -9,6 +9,8 @@
 #     the top of each file, LICENSE-tracker-ce.txt, THIRD_PARTY.md);
 #   - overdrive, delay, bitcrusher, chorus, flanger, limiter, eq3: our rebuilds of the same-named effects of tracker-ce's core/effector (P2, P3): a port of each algorithm, see
 #     the header of each file for what is the original's and what is changed. Not rebuilt: Wavetable Smoother, Cut, Time-stretch (tools/release/README.md).
+#   - wt_forge, wt_notes, grain_lock, pad_forge (generators), wt_resynth, pad_stretch (effects): our own plugins, written against the SDK header only (MIT, (c) the
+#     track3r-os contributors; maintainer 2026-11-12, no backlog row). Each does a small piece of work a call and returns fewer frames than offered.
 # Needs arm-none-eabi-gcc like the .tmod targets (O3M_ARM_CXX of modules/CMakeLists.txt): without it no .ptfx target exists and ctest ptfx_pack says so.
 if(O3OS_CROSS)
   return()  # the firmware builds (mk66, qemu) have no use for the plugins: the host build makes them, so no image build step changes
@@ -24,7 +26,8 @@ set(O3_PTFX_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/sdk")
 string(REGEX REPLACE "g\\+\\+(\\.exe)?$" "" O3_PTFX_PREFIX "${O3M_ARM_CXX}")  # .../arm-none-eabi- , the prefix ptfx_pack.py takes as --toolchain
 
 set(O3_PTFX_STEMS add_silence analog_kick_gen chiptune_gen multimode_filter stereo_delay stereo_to_mono
-    overdrive delay bitcrusher chorus flanger limiter eq3)
+    overdrive delay bitcrusher chorus flanger limiter eq3
+    wt_forge wt_notes grain_lock pad_forge wt_resynth pad_stretch)
 set(O3_PTFX_OUTPUTS)
 foreach(stem IN LISTS O3_PTFX_STEMS)
   set(src "${CMAKE_CURRENT_SOURCE_DIR}/${stem}/${stem}.c")

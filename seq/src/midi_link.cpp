@@ -136,7 +136,8 @@ std::uint32_t MidiLink::stop_live_pads(std::uint32_t* count) noexcept {
     ++n;
     live_release(pad);
   }
-  if (n != 0u) {
+  const bool centred = live_bend_centre();  // OS-PIANOBEND: an export starts with the receiver in tune, whatever the strip held
+  if (n != 0u || centred) {
     out_.flush(core::cycles_from_samples(last_block_end_));  // as step() ends: the offs go to the ports now
     if (hooks_.kick != nullptr) {
       hooks_.kick(hooks_.ctx);
@@ -147,7 +148,46 @@ std::uint32_t MidiLink::stop_live_pads(std::uint32_t* count) noexcept {
   return word;
 }
 
+// OS-PIANOBEND: one MidiPitchBend of `value` (0..16383) on the route in `word` (the live_pad_ encoding: ports, OFFSET, channel).
+bool MidiLink::live_bend_send(std::uint32_t word, std::uint16_t value) noexcept {
+  audio::SeqEvent ev{};
+  ev.kind = EventKind::MidiPitchBend;
+  ev.track = audio::kNoTrack;
+  ev.a = static_cast<std::uint8_t>(value & 0x7Fu);
+  ev.b = static_cast<std::uint8_t>(value >> 7);
+  ev.c = static_cast<std::uint8_t>((word >> 8) & 0x0Fu);
+  ev.flags = static_cast<std::uint8_t>((word >> kLivePortsShift) & audio::kRoutePorts);
+  ev.value = static_cast<std::int32_t>((word >> kLiveDelayShift) & 0x7Fu) * 1000;
+  return out_.send(ev, last_block_end_);
+}
+
+// The centre goes to the route the strip last bent, if it did. MidiOut::send accepts a pitch bend even when staging is full (out.cpp ignores stage() for it), so a centre lost to a full queue is not retried; a later bend and release, route change or AllOff sends one again.
+// True when a centre was sent.
+bool MidiLink::live_bend_centre() noexcept {
+  if ((bend_route_ & kLiveHeld) != 0u && live_bend_send(bend_route_, kBendCentre)) {
+    bend_route_ = 0;
+    return true;
+  }
+  return false;
+}
+
 bool MidiLink::live_event(const audio::LiveEvent& e) noexcept {
+  if (e.kind == audio::LiveKind::Bend) {
+    const int semis = static_cast<std::int8_t>(e.note);
+    const model::Instrument* in = e.instrument >= 1u ? seq_.project().instrument(static_cast<std::uint32_t>(e.instrument) - 1u) : nullptr;
+    if (semis == 0 || in == nullptr || in->kind != model::InstrumentKind::Midi) {
+      live_bend_centre();  // let go (or the instrument in view is not a MIDI one): the bent route is put back; the voices get the event too
+      return false;
+    }
+    const MidiRoute r = midi_route(*in);
+    const std::uint32_t word = kLiveHeld | (static_cast<std::uint32_t>(r.ports) << kLivePortsShift) | (static_cast<std::uint32_t>(r.delay_ms) << kLiveDelayShift) | (static_cast<std::uint32_t>(r.ch) << 8);
+    if (word != bend_route_) {
+      live_bend_centre();  // another route: the one bent before goes back to the centre
+    }
+    live_bend_send(word, pitch_bend_value(semis * 100, in->midi_pb_range));
+    bend_route_ = word;
+    return true;
+  }
   if (e.kind == audio::LiveKind::On) {
     if (e.source != audio::kLiveSourcePad || e.key >= kLivePads) {
       return false;
@@ -188,6 +228,7 @@ bool MidiLink::live_event(const audio::LiveEvent& e) noexcept {
     for (std::uint32_t pad = 0; pad < kLivePads; ++pad) {
       live_release(pad);
     }
+    live_bend_centre();  // OS-PIANOBEND: the pads are let go, so is their bend
   }
   return false;
 }

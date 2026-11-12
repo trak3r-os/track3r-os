@@ -75,6 +75,22 @@ REQUIRED = ("dest", "url", "sha256", "licence", "author", "title", "source")
 # The `ptfx` section (OS-PTFXPACK): built .ptfx files copied to Effects/ (the folder the firmware scans: module/include/o3os/module/ptfx_catalog.h, app/src/ptfx_page.cpp).
 # Its one licence is MIT, which ALLOWED_LICENCES (for `files`) does not include on purpose.
 PTFX_LICENCE = "MIT"
+# Our own plugins (maintainer 2026-11-12): MIT too, but (c) the track3r-os contributors only, with no tracker-ce code or algorithm, so CREDITS.txt names them apart
+# and carries their licence text itself (the tracker-ce text, with its Part 2 conditions, is not theirs).
+PTFX_OWN = ("wt_forge", "wt_notes", "grain_lock", "pad_forge", "wt_resynth", "pad_stretch")
+PTFX_OWN_MIT = [
+    "Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files",
+    "(the \"Software\"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge,",
+    "publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do",
+    "so, subject to the following conditions:",
+    "",
+    "The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.",
+    "",
+    "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF",
+    "MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE",
+    "FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION",
+    "WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.",
+]
 PTFX_FOLDER = "Effects/"
 PTFX_LICENCE_TEXT = "LICENSES/MIT-tracker-ce.txt"
 PTFX_LICENCE_SRC = os.path.join("modules", "ptfx", "LICENSE-tracker-ce.txt")      # relative to the repository root
@@ -488,8 +504,19 @@ def credits_text(version, files, generated, ptfx=(), synths=False):
                   "they rebuild); the rebuilt plugins are also (c) 2026 the track3r-os contributors. Source: github.com/polyend/tracker-ce, from",
                   "editor-fx-sdk/effects (taken as is) and core/effector (rebuilt in C). The licence text, with its conditions, is the file named above.", ""]
         for stem, name, size in ptfx:
-            lines.append("  %-44s %s" % (PTFX_FOLDER + stem + ".ptfx", name))
+            if stem not in PTFX_OWN:
+                lines.append("  %-44s %s" % (PTFX_FOLDER + stem + ".ptfx", name))
         lines.append("")
+        own = [(stem, name) for stem, name, size in ptfx if stem in PTFX_OWN]
+        if own:
+            lines += ["%s: the track3r-os plugins" % PTFX_LICENCE, "-" * 60,
+                      "Sample Editor plugins in Effects/ (.ptfx) written for track3r-os, built from modules/ptfx of its source. They hold no code and no",
+                      "algorithm of tracker-ce. Copyright (c) 2026 the track3r-os contributors. Pad Forge follows the idea of the PADsynth algorithm and Pad",
+                      "Stretch that of Paul's Extreme Sound Stretch, both by Nasca Octavian Paul (the algorithms are public domain; the code is ours).", ""]
+            lines += PTFX_OWN_MIT + [""]
+            for stem, name in own:
+                lines.append("  %-44s %s" % (PTFX_FOLDER + stem + ".ptfx", name))
+            lines.append("")
     for lic in ALLOWED_LICENCES:
         group = [e for e in files if e["licence"] == lic]
         if not group:
@@ -564,8 +591,8 @@ the Sample load screen.
 Licences
 --------
 The content made for this archive is CC0 (public domain). The other files keep their own licence: CC0, Public Domain, CC BY 4.0
-(the author must be named: see LICENSES/CREDITS.txt) and GPL-3.0 (the Surge wavetables). The Effects/ plugins are MIT, from
-Polyend's open tracker-ce source (LICENSES/MIT-tracker-ce.txt). Nothing in here comes from the official firmware's binaries.
+(the author must be named: see LICENSES/CREDITS.txt) and GPL-3.0 (the Surge wavetables). The Effects/ plugins are MIT: most are from
+Polyend's open tracker-ce source (LICENSES/MIT-tracker-ce.txt), six are our own (LICENSES/CREDITS.txt). Nothing in here comes from the official firmware's binaries.
 
 The manual
 ----------

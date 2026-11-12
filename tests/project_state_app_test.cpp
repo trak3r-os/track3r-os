@@ -116,7 +116,7 @@ TEST_CASE("project state (app): a change of the mixer board is the project's at 
   Rig rig;
   model::Project& p = rig.project();
   const model::MixState def = p.mix();
-  CHECK(p.state_present() == 0);  // nothing yet: the boot state is not a change
+  CHECK(p.state_present() == model::Project::kStateNote);  // nothing yet but the new project's C major scale (OS-DEFSCALE): the boot state is not a change
   CHECK(rig.editor->set_name("Song", 4) == model::Status::Ok);
   CHECK(rig.editor->can_undo());
   rig.board->route[2] = 1 | 4;

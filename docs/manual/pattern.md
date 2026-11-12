@@ -164,14 +164,14 @@ The zoom cycles from 5 tracks to 8 and then to 12, and back to 5. Every level sh
 A tap of `Note` selects the Note column; a hold of half a second opens the Note popup. <!-- QA-PAT-240 -->
 
 ### Choose the key: hold `Note`
-<!-- sync: src=app/src/step_popup_actions.cpp,app/src/screens/step_popup_overlay.cpp,app/include/o3os/app/note_entry.h,core/include/o3os/core/scales.h qa=QA-PAT-429,QA-PAT-430,QA-PAT-431,QA-PAT-432,QA-PAT-433,QA-PAT-434 -->
+<!-- sync: src=app/src/step_popup_actions.cpp,app/src/screens/step_popup_overlay.cpp,app/include/o3os/app/note_entry.h,core/include/o3os/core/scales.h qa=QA-PAT-429,QA-PAT-430,QA-PAT-431,QA-PAT-432,QA-PAT-433,QA-PAT-434,QA-PAT-544 -->
 
 Start on the Pattern screen. Hold `Note` for half a second: the **NOTE ENTRY** panel opens, and its top line names the key in force.
 
 1. Turn the encoder, or press `Up` or `Down`, to step through all 39 keys, one a detent, wrapping at both ends. <!-- QA-PAT-429, QA-PAT-430 -->
 2. Or press a pad of the second pad row: it holds twelve of the keys. For any of the other 27 no pad of the row is lit. <!-- QA-PAT-431 -->
 
-You should see the top line name the key at every step, for example `C Hirajoshi - Jump 1 - Oct 3 - Lock off`, and the info line read `scale Hirajoshi C-4`. <!-- QA-PAT-433 --> Turn **SCALE LOCK** on (the last pad) and the pads and a MIDI keyboard snap to the key: a C# played in is written as the C of the key. <!-- QA-PAT-432 --> The key is saved with the project: save, switch the unit off and on, open the project again, and the panel opens on the same key. <!-- QA-PAT-434 --> Two pairs of keys have the same notes (Hung. minor and Gypsy minor, Diminished and Whole-half), and Todi keeps the standard notes of its name here. <!-- docs/specs/OS-SCALES28.md A7, A8 --> The same 39 keys the original firmware lists under its Config's Notes scale are on this panel. New in track3r-os. <!-- docs/specs/OS-SCALES28.md F2 -->
+You should see the top line name the key at every step, for example `C Hirajoshi - Jump 1 - Oct 3 - Lock off`, and the info line read `scale Hirajoshi C-4`. <!-- QA-PAT-433 --> Turn **SCALE LOCK** on (the last pad) and the pads and a MIDI keyboard snap to the key: a C# played in is written as the C of the key. <!-- QA-PAT-432 --> The key is saved with the project: save, switch the unit off and on, open the project again, and the panel opens on the same key. <!-- QA-PAT-434 --> A new project starts in **C Major**, so the pads light the notes of the scale at once; pick **Chromatic** (the first pad of the second row) to light every note. A project saved before this version has no key stored and opens in Chromatic, as it did. New in track3r-os. <!-- QA-PAT-544 --> Two pairs of keys have the same notes (Hung. minor and Gypsy minor, Diminished and Whole-half), and Todi keeps the standard notes of its name here. <!-- docs/specs/OS-SCALES28.md A7, A8 --> The same 39 keys the original firmware lists under its Config's Notes scale are on this panel. New in track3r-os. <!-- docs/specs/OS-SCALES28.md F2 -->
 
 ### Open the Navigator
 <!-- sync: src=app/src/bindings.cpp qa=QA-MOD-002,QA-GLB-018 -->
@@ -239,8 +239,8 @@ The Shift row sets the pads' octave and opens the PADS picker. The octave is the
 
 | Key | Pads |
 |---|---|
-| `F1` (**NOTES**) | the usual note pads. The LEDs show the scale: a note of the scale is bright (the root too), a note outside the scale is dim. With no scale, or with SCALE LOCK on, every note pad is bright |
-| `F2` (**PIANO**) | two octaves laid out like a piano. The LEDs light the notes the same way as in NOTES: scale notes bright, others dim. The two octave pads are dim at C3 and bright on the side the octave has moved to |
+| `F1` (**NOTES**) | the usual note pads. The LEDs show the scale: a note of the scale is bright (the root too), a note outside the scale is dim. With no scale (Chromatic), or with SCALE LOCK on, every note pad is bright; a new project starts in C Major |
+| `F2` (**PIANO**) | two octaves laid out like a piano. The LEDs light the notes the same way as in NOTES: scale notes bright, others dim. The two octave pads are dim at C3 and bright on the side the octave has moved to. The eight pads of columns 10 and 11 are a pitch-bend strip: rows 1 to 4 bend +2, +1, -1 and -2 semitones while held, and the pitch returns when you let go (a MIDI instrument gets a pitch bend scaled by its bend range). Amiga and module instruments are not bent; nothing is recorded into the pattern. New in track3r-os. <!-- QA-PAT-532 --> |
 | `F3` (**ISO**) | each column a semitone, each row up a fourth. The LEDs light the notes the same way as in NOTES |
 | `F4` (**TRACKS**) | each column is a track; rows for track, mute, mute mode and solo |
 | `F5` (**PATS**) | each pad is a pattern, 1 to 48. A tap queues it |

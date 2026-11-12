@@ -168,6 +168,15 @@ def test_manifest(ms, root):
         with open(os.path.join(root, "modules", "ptfx", stem, stem + ".c")) as f:
             check(f.readline().strip() == "// SPDX-License-Identifier: MIT", "modules/ptfx/%s is MIT" % stem)
     check(os.path.isfile(os.path.join(root, ms.PTFX_LICENCE_SRC)), "the MIT licence text of the plugins is in the repository")
+    for stem in ms.PTFX_OWN:  # our own plugins: packed, and with no tracker-ce notice (CREDITS.txt lists them apart, under their own MIT text)
+        check(stem in real["ptfx"], "the own plugin %s is in the manifest" % stem)
+        with open(os.path.join(root, "modules", "ptfx", stem, stem + ".c")) as f:
+            src = f.read()
+            check("Polyend" not in src and "Part 2" not in src, "modules/ptfx/%s names no tracker-ce source or licence part" % stem)
+    own_credits = ms.credits_text("9.9.9", [], [], [("overdrive", "Overdrive", 488), ("pad_forge", "Pad Forge", 5784)])
+    check("MIT: the track3r-os plugins" in own_credits and own_credits.index("Effects/pad_forge.ptfx") > own_credits.index("MIT: the track3r-os plugins")
+          and own_credits.index("Effects/overdrive.ptfx") < own_credits.index("MIT: the track3r-os plugins") and "THE SOFTWARE IS PROVIDED" in own_credits,
+          "CREDITS.txt lists an own plugin under its own MIT text, apart from the tracker-ce ones")
     check("MIT" not in ms.ALLOWED_LICENCES, "MIT is not allowed for `files`: only the `ptfx` section carries it")
     ms.validate_manifest(fake_manifest())
 

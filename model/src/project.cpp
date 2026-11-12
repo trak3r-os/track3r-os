@@ -734,6 +734,13 @@ Status Project::set_perf(const PerfState& value) noexcept {
   return Status::Ok;
 }
 
+void Project::start_new() noexcept {
+  NoteState n;
+  init_note_state(n);
+  n.scale = kNoteNewProjectScale;
+  (void)set_note(n);
+}
+
 Status Project::set_note(const NoteState& value) noexcept {
   if (validate_note_state(value) != nullptr) {
     return Status::BadValue;

@@ -396,6 +396,7 @@ void Engine::play_live() noexcept {
         if (modules_ != nullptr) {
           modules_->release_track(s.track);  // a sample note on a track a module held: the module's note ends and its block is no longer the track's
         }
+        voices_->live_bend_track(s.track);  // OS-PIANOBEND: a note that starts while a pad bend is held starts bent (before note_on: its offset is tune_base_q16)
         if (voices_->note_on(s.track, note, slot, velocity)) {
           graph_.set_voice_pan(s.track, voices_->sample(slot).pan);  // as dispatch(): the instrument's pan goes to the track where the note starts
           graph_.set_voice_sends(s.track, voices_->sample(slot).delay_send, voices_->sample(slot).reverb_send);
@@ -418,7 +419,13 @@ void Engine::play_live() noexcept {
         }
         break;
       }
+      case LiveKind::Bend:  // OS-PIANOBEND: the pad strip's bend on the live notes (sampler voices; a MIDI instrument's was the MIDI link's above)
+        voices_->live_bend(static_cast<std::int8_t>(e.note), held.tracks());
+        break;
       case LiveKind::AllOff: {
+        if (e.source == kLiveSourcePad || e.source == kLiveAllSources) {
+          voices_->live_bend(0, 0u);  // the pads are let go: back in tune
+        }
         const std::uint32_t tracks = held.end_all(e.source);
         for (unsigned t = 0; t < kLiveTracks; ++t) {
           if ((tracks & (1u << t)) != 0u) {
@@ -687,6 +694,9 @@ void Engine::stop_live_notes() noexcept {
   LiveNotes& notes = live_->notes;
   std::uint32_t what = notes.oldest();
   std::uint32_t count = notes.held();
+  if (voices_ != nullptr) {
+    voices_->live_bend(0, 0u);  // OS-PIANOBEND: the pitch-bend strip's hold ends with the notes (the export is unbent; a Bend still in the queue is dropped below, its state is the centre already); the MIDI route is centred by stop_live below
+  }
   (void)notes.end_all(kLiveAllSources);
   // What the live source holds outside the table (the pads on a MIDI instrument, sent as MIDI by the link): its offs go out now.
   if (live_source_.stop_live != nullptr) {

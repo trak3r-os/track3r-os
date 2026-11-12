@@ -16,6 +16,16 @@
 
 #include <cstdint>
 
+namespace o3os::audio {
+// The test's view of the pool's private state (voices.h friend): a track's voice pitch offset (1/65536 semitone) and the bend in force (OS-PIANOBEND).
+struct PianoBendTest {
+  static bool has_voice(VoicePool& p, unsigned track) { return p.find(track) < kMaxVoices; }
+  static std::int32_t offset(VoicePool& p, unsigned track) { return p.v_[p.find(track)].slide_q16; }
+  static std::int32_t target(VoicePool& p, unsigned track) { return p.v_[p.find(track)].slide_tgt; }
+  static std::int32_t base(VoicePool& p, unsigned track) { return p.tune_base_q16(track); }
+};
+}  // namespace o3os::audio
+
 namespace {
 
 namespace haudio = o3os::hal::audio;
@@ -433,4 +443,89 @@ TEST_CASE("live: the engine is idle for the sample handover only with an empty q
   CHECK_FALSE(e.live_idle());
   render(e, r);
   CHECK(e.live_idle());
+}
+
+namespace {
+LiveEvent bend(int semitones) {
+  return LiveEvent{LiveKind::Bend, kLiveSourcePad, 0, static_cast<std::uint8_t>(static_cast<std::int8_t>(semitones)), 1, 0, 0, 0};
+}
+constexpr std::int32_t kSemi = 65536;
+}  // namespace
+
+TEST_CASE("live: a bend moves the voices of the held pad notes by the semitones and a release puts them back; a note started under the bend starts bent (OS-PIANOBEND)") {
+  using o3os::audio::PianoBendTest;
+  static std::int16_t dc[4000];
+  for (std::int16_t& s : dc) {
+    s = 16384;
+  }
+  static o3os::test::StaticSlot<Engine> engine_slot;
+  static o3os::audio::TapMem taps;
+  static o3os::test::StaticSlot<VoicePool> pool_slot;
+  static LiveBox box;
+  box.notes = LiveNotes{};
+  Engine& e = engine_slot.make(&fake_cycles, taps);
+  VoicePool& p = pool_slot.make();
+  p.set_sample(0, SampleDesc{dc, 4000, 0, 0, 65536});
+  e.attach_voices(&p);
+  e.attach_live(&box);
+  Rig r;
+
+  CHECK(box.queue.push(on(kLiveSourcePad, 3, 60, 1, 0)));  // track 1
+  render(e, r);
+  NEED(PianoBendTest::has_voice(p, 0));
+  CHECK(PianoBendTest::offset(p, 0) == 0);
+  CHECK(p.live_bend_q16() == 0);
+
+  CHECK(box.queue.push(bend(2)));
+  render(e, r);
+  CHECK(p.live_bend_q16() == 2 * kSemi);
+  CHECK(PianoBendTest::offset(p, 0) == 2 * kSemi);
+  CHECK(PianoBendTest::target(p, 0) == 2 * kSemi);
+  CHECK(PianoBendTest::base(p, 0) == 2 * kSemi);
+  CHECK(PianoBendTest::base(p, 5) == 0);  // a track that holds no pad note is not bent
+
+  // The other pad: a second note under the bend starts at the bend (the offset's zero is the bend), the track it takes joins the mask.
+  CHECK(box.queue.push(on(kLiveSourcePad, 4, 64, 1, 1)));
+  render(e, r);
+  NEED(PianoBendTest::has_voice(p, 1));
+  CHECK(PianoBendTest::offset(p, 1) == 2 * kSemi);
+
+  // Another strip pad: -1 replaces +2, the voices move by the difference.
+  CHECK(box.queue.push(bend(-1)));
+  render(e, r);
+  CHECK(PianoBendTest::offset(p, 0) == -kSemi);
+  CHECK(PianoBendTest::offset(p, 1) == -kSemi);
+
+  // The release: back to the pitch of the note, and the bend is gone for later notes.
+  CHECK(box.queue.push(bend(0)));
+  render(e, r);
+  CHECK(p.live_bend_q16() == 0);
+  CHECK(PianoBendTest::offset(p, 0) == 0);
+  CHECK(PianoBendTest::offset(p, 1) == 0);
+  CHECK(PianoBendTest::target(p, 0) == 0);
+  CHECK(PianoBendTest::base(p, 0) == 0);
+  CHECK(box.queue.push(off(kLiveSourcePad, 4)));
+  CHECK(box.queue.push(on(kLiveSourcePad, 5, 67, 1, 2)));
+  render(e, r);
+  NEED(PianoBendTest::has_voice(p, 2));
+  CHECK(PianoBendTest::offset(p, 2) == 0);
+
+  // An all-notes-off of the pads while bent puts the bend back too (a lost release).
+  CHECK(box.queue.push(bend(1)));
+  render(e, r);
+  CHECK(PianoBendTest::offset(p, 0) == kSemi);
+  CHECK(box.queue.push(all_off(kLiveSourcePad)));
+  render(e, r);
+  CHECK(p.live_bend_q16() == 0);
+  CHECK(PianoBendTest::base(p, 0) == 0);
+  CHECK(PianoBendTest::offset(p, 0) == 0);
+  // A keyboard's all-notes-off leaves a bend alone.
+  CHECK(box.queue.push(bend(2)));
+  render(e, r);
+  CHECK(box.queue.push(all_off(kLiveSourceMidi)));
+  render(e, r);
+  CHECK(p.live_bend_q16() == 2 * kSemi);
+  CHECK(box.queue.push(bend(0)));
+  render(e, r);
+  CHECK(p.live_bend_q16() == 0);
 }

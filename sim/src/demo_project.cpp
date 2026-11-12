@@ -76,6 +76,7 @@ void fill_demo_project(model::Project& p) noexcept {
     set(p, i, ip::envelope(2, ip::EnvSustain), 0.2f);
     set(p, i, ip::envelope(2, ip::EnvRelease), 1500.0f);
   }
+  p.start_new();  // OS-DEFSCALE: a demo document is a new project (C major), like the runtime's NoteEntry default
 }
 
 void fill_sound_project(model::Project& p) noexcept {
@@ -103,6 +104,7 @@ void fill_sound_project(model::Project& p) noexcept {
     set(p, i, ip::BitDepth, 16.0f);
     set(p, i, ip::envelope(0, ip::EnvEnable), 0.0f);
   }
+  p.start_new();  // OS-DEFSCALE (as fill_demo_project)
 }
 
 void fill_insert_project(model::Project& p) noexcept {

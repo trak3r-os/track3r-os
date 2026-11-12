@@ -124,7 +124,12 @@ TEST_CASE("persist2 (app): the model's ranges and defaults are the runtime's") {
   app::PatternEdit edit;
   model::NoteState def;
   model::init_note_state(def);
-  CHECK(app::note_state_of(edit) == def);  // the defaults of the runtime (NoteEntry, edit_step) are the model's defaults
+  // OS-DEFSCALE: the runtime starts at C major (a new project's scale); the model's init_note_state() stays Chromatic (the reader's default for a file with no NOTE chunk)
+  model::NoteState fresh = def;
+  fresh.scale = model::kNoteNewProjectScale;
+  CHECK(app::note_state_of(edit) == fresh);
+  CHECK(model::kNoteNewProjectScale == model::kNotePanelScales[1]);
+  CHECK(def.scale == 0u);
   CHECK(def.jump == edit.edit_step);
   CHECK(def.octave == app::NoteEntry{}.octave);
   CHECK(model::kNoteScaleMax == 38u);  // OS-SCALES28: the official numbering, in the model and in the runtime
@@ -301,7 +306,7 @@ TEST_CASE("persist2 (app): the Perform bank's scenes and LATCH are the project's
 TEST_CASE("persist2 (app): a change of the mute modes, the send controls, the note entry or the scenes is the project's at the next pass, keeps the undo history, and writes nothing twice") {
   Rig rig;
   model::Project& p = rig.project();
-  CHECK((p.state_present() & kSession) == 0);  // the boot state is not a change
+  CHECK((p.state_present() & kSession) == model::Project::kStateNote);  // the boot state is not a change (a new project says its C major scale: OS-DEFSCALE)
   CHECK(rig.editor->set_name("Song", 4) == model::Status::Ok);
   CHECK(rig.editor->can_undo());
   const unsigned depth = rig.journal.depth();
@@ -352,6 +357,37 @@ TEST_CASE("persist2 (app): a change of the mute modes, the send controls, the no
   CHECK(p.generation() != generation);
   CHECK(p.mute().mode[3] == 0);
   CHECK(p.send_fx().value[3] == 750);
+}
+
+// OS-DEFSCALE: a new project is C major (the scale pads light bright, the others dim); a project with no NOTE chunk (an old file, an OG import) is Chromatic as before; the user's Chromatic is kept.
+TEST_CASE("persist2 (app): a new project starts in C major, a project with no NOTE part in Chromatic, and neither moves the unsaved state") {
+  Rig rig;
+  model::Project& p = rig.project();
+  p.reset();
+  p.start_new();
+  CHECK((p.state_present() & model::Project::kStateNote) != 0);
+  rig.app->document_replaced();
+  CHECK(rig.state().edit.entry.scale == model::kNotePanelScales[1]);
+  CHECK(std::string(rig.state().edit.entry.scale_name()) == "Major");
+  CHECK(rig.state().edit.entry.root == 0);
+  const std::uint32_t generation = p.generation();
+  rig.pass();
+  CHECK(p.generation() == generation);  // the Major the runtime holds is the project's: the pass writes nothing
+  // the user picks Chromatic: the project follows and keeps it
+  rig.panel(0, 0, 1, 3, 0);  // ROOT C, SCALE pad 1 = Chromatic
+  rig.pass();
+  CHECK(rig.state().edit.entry.scale == 0);
+  CHECK(p.note().scale == 0u);
+  CHECK((p.state_present() & model::Project::kStateNote) != 0);
+  // an old project: reset, no NOTE part: the runtime takes Chromatic, nothing leaks from the C major before
+  p.reset();
+  CHECK((p.state_present() & model::Project::kStateNote) == 0);
+  rig.app->document_replaced();
+  CHECK(rig.state().edit.entry.scale == 0);
+  const std::uint32_t before = p.generation();
+  rig.pass();
+  CHECK(p.generation() == before);
+  CHECK((p.state_present() & model::Project::kStateNote) == 0);  // and it stays unwritten: a save gives the file the bytes it always had
 }
 
 TEST_CASE("persist2 (app): a project that is loaded sets the runtime, tells the engine, and a project that has none sets the defaults: nothing leaks from the one before") {

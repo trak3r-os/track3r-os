@@ -48,7 +48,7 @@ A starter zip is not part of this release. If you have one, you unpack it into t
 | `modules/effects/` | the effect modules for a track's insert |
 | `modules/instruments/` | the instrument modules: TB-303, Chip, FM, SID and Sine. They are not inside the firmware (it keeps the flash free): a project that uses one without its file shows it greyed, **MODULE NOT ON THE CARD**. |
 | `modules/importers/` | the importer module `tracker.tmod`, which the firmware loads from the card to read MOD, S3M and OctaMED files on IMPORT (File screen, F6). Without it an import says **NO IMPORTER** and changes nothing. |
-| `Effects/` | the Sample Editor plugins (`.ptfx`): Add Silence, Analog Kick, Chiptune, Multimode Filter, Stereo Delay, Stereo to Mono, Overdrive, Delay, Bitcrusher, Chorus, Flanger, Limiter and Three-Band EQ |
+| `Effects/` | the Sample Editor plugins (`.ptfx`): Add Silence, Analog Kick, Chiptune, Multimode Filter, Stereo Delay, Stereo to Mono, Overdrive, Delay, Bitcrusher, Chorus, Flanger, Limiter, Three-Band EQ, and six of our own: WT Forge, WT Notes, Grain Lock, Pad Forge, WT Resynth and Pad Stretch |
 | `Samples/` | a drum kit and other one-shots |
 | `WTABLE/` | wavetables |
 | `Songs/` | tracker songs for the importers |

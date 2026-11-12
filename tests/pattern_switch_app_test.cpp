@@ -77,6 +77,7 @@ struct Rig {
   explicit Rig(unsigned length = 16) {
     model::Project& p = test::arena(0).project;
     p.reset();
+    p.start_new();  // C major, the runtime's default: the document is not unsaved at the start (OS-DEFSCALE)
     (void)p.create_pattern(1, length);
     (void)p.create_pattern(2, length);
     (void)p.create_pattern(3, length);
@@ -389,8 +390,8 @@ TEST_CASE("patswitch app: the pads light with the patterns while F1 is held, as 
   CHECK(roles[2] == PadRole::Off);    // 3 exists and holds nothing
   CHECK(roles[8] == PadRole::Off);    // 9 does not exist
   rig.release_f1();
-  NEED(rig.lights(roles));  // back to the NOTES board's lights (chromatic: every note in the scale, Front)
-  CHECK(roles[37] == PadRole::Front);
+  NEED(rig.lights(roles));  // back to the NOTES board's lights (C major, OS-DEFSCALE: C# is outside the scale, Back)
+  CHECK(roles[37] == PadRole::Back);
   rig.play(2, 3);
   rig.hold_f1();
   NEED(rig.lights(roles));

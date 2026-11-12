@@ -95,7 +95,7 @@ track3r-os replaces the software that runs on the Tracker. You keep the hardware
 - **Wavetable envelopes and LFOs:** WT ENV and WT LFO on the MOD page, drawn contours or your own from `/Envelopes/`, and step effects to drive them.
 - **Four play engines:** Modern, Amiga (like Paula), 12-bit and 8-bit.
 - **Samples in any common format and rate:** WAV, AIFF and IFF 8SVX, at any sample rate, always in tune. **Stereo samples** play in stereo when you turn STEREO on, or you pick left or right.
-- **Sample editor:** cut, shape and convert (also to the Amiga rates), plus a **PLUGINS** page that runs `.ptfx` effects on the sample with undo; thirteen plugins come in the modules zip.
+- **Sample editor:** cut, shape and convert (also to the Amiga rates), plus a **PLUGINS** page that runs `.ptfx` effects on the sample with undo; nineteen plugins come in the modules zip, six of them our own.
 
 ### Mix and perform
 - **Mixer:** levels, mute and solo, a delay send and a reverb send per track, and a master limiter.

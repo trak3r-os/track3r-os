@@ -55,6 +55,11 @@ class PreviewSink {
     pad_down(pad, track, instrument, note);
   }
   virtual void pad_up(unsigned pad) noexcept { (void)pad; }  // the pad's release (a raw input event: every pad release, whether or not it started a note)
+  // OS-PIANOBEND: the PIANO bend strip: the live notes are bent by `semitones` (-2..+2; 0 = back in tune) on the voices and, for a MIDI instrument, as a pitch bend on its channel. Nothing by default.
+  virtual void pad_bend(int semitones, unsigned instrument) noexcept {
+    (void)semitones;
+    (void)instrument;
+  }
   // A note from the MIDI keyboard, after the device settings MIDI IN and IN CHANNEL let it through: the selected track and the last used instrument play it. `velocity` 1..127, `channel` 1..16 (the one it came on:
   // named by the export's refusal while the note is held, nothing plays differently).
   virtual void midi_note(bool on, unsigned track, unsigned instrument, unsigned note, unsigned velocity, unsigned channel) noexcept {
