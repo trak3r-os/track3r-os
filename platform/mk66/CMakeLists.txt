@@ -128,8 +128,9 @@ if(O3OS_BENCH)
 endif()
 # OS-FLASHDIET B1: the retired one-off A/B benches (`bench cpuopt`, `looper`, `voice_st`, `disk` and `bench disk reset|clean`; the four groups of src/bench.cpp, about 11-13 KB of flash) are kept
 # for the image that needs one: ON (-DO3OS_BENCH_ARCHIVE=ON, with O3OS_BENCH=ON) compiles them into a bench image (tools/ci.sh builds one, `mk66-bench-archive`, so that they do not rot). OFF
-# (default): a bench image carries none of them; the console still lists the four kernels and answers `not in this image (O3OS_BENCH_ARCHIVE)`. A release image (O3OS_BENCH=OFF) carries no bench at all.
-option(O3OS_BENCH_ARCHIVE "Bench image: keep the retired one-off A/B benches (bench cpuopt|looper|voice_st|disk) in the image. OFF (default): they are compiled out and the console answers not in this image (O3OS_BENCH_ARCHIVE)" OFF)
+# (default): a bench image carries none of them; the console still lists the kernels and answers `not in this image (O3OS_BENCH_ARCHIVE)`. A release image (O3OS_BENCH=OFF) carries no bench at all.
+# OS-BENCHDIET: the group also holds `bench burst`, `kernels`, `mem`, `delay`, `reverb`, `reverb_full`, `limiter` and `limiter_q`, so that the bench image ends below 0xFF000 with room for a feature.
+option(O3OS_BENCH_ARCHIVE "Bench image: keep the retired one-off A/B benches (bench cpuopt|looper|voice_st|disk|burst|kernels|mem|delay|reverb|reverb_full|limiter|limiter_q) in the image. OFF (default): they are compiled out and the console answers not in this image (O3OS_BENCH_ARCHIVE)" OFF)
 # OS-006b: the USB0 device driver and the `diag` console on the CDC port (usb/src), with the build identity `diag version` prints. The
 # identity header is written at build time (tools/gen_build_info.cmake: git hash, "-dirty" if the tree differs), only when it changed.
 set(_mk66_gen_dir "${CMAKE_CURRENT_BINARY_DIR}/gen")

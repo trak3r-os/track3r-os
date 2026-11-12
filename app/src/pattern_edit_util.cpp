@@ -180,6 +180,52 @@ int lanes_clear_block(ActionContext& ctx, unsigned pattern, const Selection::Blo
   return changed;
 }
 
+int lanes_transpose_block(ActionContext& ctx, unsigned pattern, const Selection::Block& b, const PatternSource& src, int delta, std::size_t other_bytes) noexcept {
+  const model::LaneStore* store = ctx.edit != nullptr ? ctx.edit->lanes() : nullptr;
+  if (store == nullptr || !b.whole_steps() || delta == 0) {
+    return 0;
+  }
+  std::uint16_t mask = 0;
+  std::uint32_t lo[model::kMaxTracks] = {};
+  std::uint32_t hi[model::kMaxTracks] = {};
+  for (int t = b.track0; t <= b.track1 && t < src.tracks() && t < static_cast<int>(model::kMaxTracks); ++t) {
+    const int r1 = b.row1 < src.track_length(t) - 1 ? b.row1 : src.track_length(t) - 1;
+    if (b.row0 > r1) {
+      continue;
+    }
+    lo[t] = static_cast<std::uint32_t>(b.row0) * kTps;
+    hi[t] = static_cast<std::uint32_t>(r1 + 1) * kTps;
+    std::uint32_t first = 0;
+    std::uint32_t last = 0;
+    if (ctx.edit->lane_transpose_span(pattern, static_cast<std::uint32_t>(t), lo[t], hi[t], delta, first, last) != 0u) {
+      mask = static_cast<std::uint16_t>(mask | (1u << t));
+    }
+  }
+  if (mask == 0) {
+    return 0;
+  }
+  // The tracks of a block may end at different rows, so the dry run takes the widest range; the records are per track and only cover the changed notes' span.
+  std::uint32_t wide_lo = 0xFFFFFFFFu;
+  std::uint32_t wide_hi = 0;
+  for (unsigned t = 0; t < model::kMaxTracks; ++t) {
+    if (((mask >> t) & 1u) != 0u) {
+      wide_lo = lo[t] < wide_lo ? lo[t] : wide_lo;
+      wide_hi = hi[t] > wide_hi ? hi[t] : wide_hi;
+    }
+  }
+  if (!ctx.edit->lanes_transpose_fit(pattern, mask, wide_lo, wide_hi, delta, other_bytes)) {
+    (void)say(ctx, core::Severity::Warn, "TOO BIG TO UNDO: NOTHING CHANGED");
+    return -1;
+  }
+  int changed = 0;
+  for (unsigned t = 0; t < model::kMaxTracks; ++t) {
+    if (((mask >> t) & 1u) != 0u && ctx.edit->lane_transpose(pattern, t, lo[t], hi[t], delta) == model::Status::Ok) {
+      changed = 1;
+    }
+  }
+  return changed;
+}
+
 int lanes_rows(ActionContext& ctx, unsigned pattern, const Selection::Block& b, const PatternSource& src, bool insert) noexcept {
   const model::LaneStore* store = ctx.edit != nullptr ? ctx.edit->lanes() : nullptr;
   if (store == nullptr || !b.whole_steps()) {

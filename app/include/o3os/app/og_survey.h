@@ -28,7 +28,7 @@ struct OgLossItem {
   const char* brief = "";
   const char* full = "";
 };
-inline constexpr unsigned kOgLossMax = 17;
+inline constexpr unsigned kOgLossMax = 18;  // (18 with the LANES kind, OS-MIDIREC-P1 S7d)
 // The kinds that were left out, rewritten or clamped, in the order the user should read them, the quietest last; returns how many (items[0..n)). The C2b counters come first: instruments not written
 // (no audio, no sample memory, 12 / 8 BIT, over the length), the Amiga engine, the 12 / 8 BIT engines, over the length, clamped levels.
 unsigned og_loss_items(const formats::og::ExportDrops& d, OgLossItem (&items)[kOgLossMax]) noexcept;

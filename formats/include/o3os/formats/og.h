@@ -285,6 +285,7 @@ struct ExportDrops {
   std::uint32_t wt_mod = 0;                // OS-CEWTENV W1: WT slots of a sample instrument (an envelope loop of 2 or 3; OG 1.9 has no WT modes): written off (loop 0, enable 0, the shape held to 0..4, the warp and sustain bytes zero), one per slot
   std::uint32_t pattern_names = 0;         // patterns with a name that is not the one in the PAMD file Export writes back
   std::uint32_t settings_ignored = 0;      // OGPM / OGPN chunks that were not valid (or repeated) and so were not used
+  std::uint32_t lane_events = 0;           // OS-MIDIREC-P1 S7d: MIDI take-lane events (the .mtp has no lanes): not written; counted by app/og_export.h from the document's lane store, no writer sees them
   // OS-FILES-C C2b (docs/specs/OS-FILES-C.md section 4): the PCM stage and the levels, counted by app/og_export.h when it plans the sample instruments (no writer counts them).
   std::uint32_t midi_settings = 0;         // implicit-slot MIDI instruments with a non-default INST 1.3 field (program, port, bend range, offset, CC slots, velocity): the OG keeps the channel only
   std::uint32_t resampled = 0;             // sample instruments written resampled to 44,100 Hz (another recorded rate, or the Amiga engine)

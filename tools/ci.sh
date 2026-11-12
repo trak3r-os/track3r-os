@@ -506,7 +506,7 @@ case "${1:-}" in
     run_mode mk66 -DO3OS_PLATFORM=mk66 "-DCMAKE_TOOLCHAIN_FILE=$ROOT/cmake/mk66-toolchain.cmake" "-DARM_GNU_ROOT=$ARM_DIR"
     [ "${O3OS_CI_SCOPE:-all}" = changed ] || BUILD_ONLY_TARGET=o3os_image run_mode mk66-tone -DO3OS_PLATFORM=mk66 -DO3OS_AUDIO_TEST=ON "-DCMAKE_TOOLCHAIN_FILE=$ROOT/cmake/mk66-toolchain.cmake" "-DARM_GNU_ROOT=$ARM_DIR"
     BUILD_ONLY_TARGET=o3os_image run_mode mk66-bench -DO3OS_PLATFORM=mk66 -DO3OS_BENCH=ON "-DCMAKE_TOOLCHAIN_FILE=$ROOT/cmake/mk66-toolchain.cmake" "-DARM_GNU_ROOT=$ARM_DIR"
-    # OS-FLASHDIET B1: the archived A/B benches (cpuopt, looper, voice_st, disk) are compiled (bench.cpp, console.cpp with O3OS_BENCH_ARCHIVE=ON, no link: that image no longer fits the 1 MiB flash), so that the code does not rot.
+    # OS-FLASHDIET B1: the archived A/B benches (cpuopt, looper, voice_st, disk, burst, kernels, mem, delay, reverb, limiter) are compiled (bench.cpp, console.cpp with O3OS_BENCH_ARCHIVE=ON, no link: that image no longer fits the 1 MiB flash), so that the code does not rot.
     [ "${O3OS_CI_SCOPE:-all}" = changed ] || BUILD_ONLY_TARGET=o3os_bench_archive_objs run_mode mk66-bench-archive -DO3OS_PLATFORM=mk66 -DO3OS_BENCH=ON -DO3OS_BENCH_ARCHIVE=ON "-DCMAKE_TOOLCHAIN_FILE=$ROOT/cmake/mk66-toolchain.cmake" "-DARM_GNU_ROOT=$ARM_DIR"
     ;;
   toolchain)

@@ -127,9 +127,20 @@ bool step_note_delta(ActionContext& ctx, core::ActionArg arg) noexcept {
   if (!can_edit(ctx)) {
     return false;
   }
+  // OS-MIDIREC-P1 S7d: a whole-step block moves its lane NOTE events with the steps' notes (A16), first and after a dry run (a refusal changes nothing).
+  bool lane_moved = false;
+  const Selection::Block lb = ctx.view.edit.selection.block(ctx.view.pattern.row(), ctx.view.pattern.track());
+  if (ctx.view.edit.selection.active && lb.whole_steps() && ctx.edit != nullptr && ctx.edit->lanes() != nullptr) {
+    const PatternSource lsrc(ctx.model, ctx.view.edit.pattern);
+    const int lr = pe::lanes_transpose_block(ctx, ctx.view.edit.pattern, lb, lsrc, static_cast<int>(arg), pe::step_bytes(lb.track1 - lb.track0 + 1, static_cast<int>(model::kMaxPatternLength)));
+    if (lr < 0) {
+      return true;
+    }
+    lane_moved = lr > 0;
+  }
   const pe::Edited e = pe::edit_selection(
       ctx, [](model::Step& s, const Rule& r, Last& l, void* p) { model::edit::note_delta(s, *static_cast<const core::ActionArg*>(p), r, l); }, &arg);
-  return pe::finish_entry(ctx, e, false);
+  return pe::finish_entry(ctx, e, false) || lane_moved;
 }
 
 // Shift + encoder (PAR-052): the same rule an octave at a time. The clamp is per note (Q-P1-4).

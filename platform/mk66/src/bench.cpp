@@ -200,14 +200,17 @@ struct Out {
 bool alias_enabled() noexcept { return (regs::at<std::uint32_t>(sdram::kCm0Address) & sdram::kAliasBam) == sdram::kAliasBam; }
 
 // The SDRAM the effects' private memory comes from: the unused `ui_cache` region, at its system-bus address or (variant alias) through the cached ICode alias.
+constexpr std::uint32_t kBenchStateOffset = 320u * mem::kKiB;  // a copy of an instance's state (OS-CEPTFX S2a: below the cache check's scratch in the kept 448 KiB)
+static_assert(kBenchStateOffset + 1024u <= mem::kUiCacheSize, "the bench's state copy fits the ui_cache region");
+#if O3OS_BENCH_ARCHIVE
+std::uintptr_t scratch_base(const Out& out) noexcept { return out.alias() ? mem::sdram_alias(mem::kUiCacheBase) : mem::kUiCacheBase; }
 constexpr std::uint32_t kBenchDelayFrames = 65536u;  // 256 KB of the region
 constexpr std::uint32_t kBenchReverbOffset = 256u * mem::kKiB;
-constexpr std::uint32_t kBenchStateOffset = 320u * mem::kKiB;  // a copy of an instance's state (OS-CEPTFX S2a: below the cache check's scratch in the kept 448 KiB)
-std::uintptr_t scratch_base(const Out& out) noexcept { return out.alias() ? mem::sdram_alias(mem::kUiCacheBase) : mem::kUiCacheBase; }
 std::uint32_t* scratch_ring(const Out& out) noexcept { return reinterpret_cast<std::uint32_t*>(scratch_base(out)); }
 std::int16_t* scratch_reverb(const Out& out) noexcept { return reinterpret_cast<std::int16_t*>(scratch_base(out) + kBenchReverbOffset); }
-static_assert(kBenchReverbOffset + audio::SendReverb::kMemBytes <= kBenchStateOffset && kBenchStateOffset + 1024u <= mem::kUiCacheSize, "the bench's delay ring, reverb memory and state copy fit the ui_cache region");
+static_assert(kBenchReverbOffset + audio::SendReverb::kMemBytes <= kBenchStateOffset, "the bench's delay ring and reverb memory fit below the state copy");
 static_assert(kBenchDelayFrames * 4u == kBenchReverbOffset, "the delay ring is the first 256 KB");
+#endif  // O3OS_BENCH_ARCHIVE
 
 // Room on the main stack for a fixture and its blocks, with a margin: the stack has no guard (README), so the bench checks before it builds one.
 bool stack_room(std::uint32_t need) noexcept {
@@ -217,6 +220,7 @@ bool stack_room(std::uint32_t need) noexcept {
 }
 
 // ---- the kernels -------------------------------------------------------------------------------------------------------------------
+#if O3OS_BENCH_ARCHIVE
 void run_limiter(const Out& out, std::uint32_t blocks, bool loud) noexcept {
   const char* name = loud ? "limiter" : "limiter_q";
   if (out.variant != Variant::Normal) {
@@ -246,6 +250,7 @@ void run_limiter(const Out& out, std::uint32_t blocks, bool loud) noexcept {
       [&] { lim.process(l, r, kBlock); }, [] {});
   out.stat(name, st);
 }
+#endif  // O3OS_BENCH_ARCHIVE
 
 // OS-DJ: the master DJ stages as private instances on the stack, each with its ramps run down (a kill held, the filter at its detent), a block of loud noise through them: what a held kill and a held
 // filter cost a block on the unit.  At rest the graph calls none of them (their slots are bypassed), so the rest cost of the page is not in this kernel: `bench stages` in situ shows it.
@@ -299,6 +304,8 @@ void run_dj(const Out& out, std::uint32_t blocks) noexcept {
   }
 }
 
+#if O3OS_BENCH_ARCHIVE
+// OS-BENCHDIET: `bench delay`, `reverb`, `reverb_full` and `limiter`, `limiter_q` are archived (about 1.2 KB): the per-stage cost is read from `bench stages` and `diag bench worst`.
 void run_delay(const Out& out, std::uint32_t blocks) noexcept {
   if (out.variant == Variant::Sram || (out.alias() && !alias_enabled())) {
     out.na("delay", out.variant == Variant::Sram ? "the ring does not fit SRAM" : "the SDRAM alias is not enabled in this image");
@@ -351,6 +358,7 @@ void run_reverb(const Out& out, std::uint32_t blocks, bool full) noexcept {
       [&] { rv.process(in, ol, orr, kBlock); }, [] {});
   out.stat(name, st, rv.idle() ? "idle: the effect slept" : nullptr);
 }
+#endif  // O3OS_BENCH_ARCHIVE
 
 // `shape`: what the voice is asked to do on top of the plain sample: its instrument filter, the overdrive at 100, the bit depth at 8, or both of the last two (OS-IFX1: the cost of the
 // two passes over the voice's block is the difference to `voice`; with both OFF the pass is skipped, which is the `voice` line).
@@ -578,6 +586,8 @@ void run(const Out& out, std::uint32_t blocks) noexcept {
 }  // namespace voice_st
 #endif  // O3OS_BENCH_ARCHIVE
 
+// OS-BENCHDIET: `bench burst` (the one-off A/B of OS-ODD11, merged) is archived with the other one-off benches.
+#if O3OS_BENCH_ARCHIVE
 // `burst` (OS-ODD11 UTAIL): the cost of a pattern step in the scene of the over-budget tail (cpu_mute_ab: 12 voices on the instrument filter, nothing muted), split in four lines on the LIVE pool
 // (it REFUSES while something sounds: stop the transport; nothing muted, so that no gate is engaged). The code under test is the one a step runs, not a kernel:
 //   burst_on      the 12 note_ons of a step, one per voice (each cut first, untimed)
@@ -683,6 +693,7 @@ void run_burst(const Out& out, std::uint32_t blocks) noexcept {
   out.stat("burst_steady", steady, "12 voices, 1 span");
   out.stat("burst_4span", four, "12 voices, 4 spans");
 }
+#endif  // O3OS_BENCH_ARCHIVE
 
 bool name_has(const char* s, const char* what) noexcept {
   for (; *s != '\0'; ++s) {
@@ -1034,6 +1045,8 @@ void run_stages(const Out& out, std::uint32_t blocks, bool only_strips) noexcept
 }
 
 // ---- the graph's kernels ----------------------------------------------------------------------------------------------------------------
+// OS-BENCHDIET: `bench kernels` (about 2.2 KB; the G2-0 arms of the parked OS-CPUOPT2 are its next user) is archived with the other one-off benches.
+#if O3OS_BENCH_ARCHIVE
 // Each SIMD kernel of the render on 64 samples of noise, cached and idle (the minimum): where the always-on cost of an empty block goes.
 void run_kernels(const Out& out, std::uint32_t blocks) noexcept {
   namespace k = audio::kernel;
@@ -1078,6 +1091,7 @@ void run_kernels(const Out& out, std::uint32_t blocks) noexcept {
   run("k_q15_to_float", [&] { k::q15_to_float(fl, a, kBlock); });
   run("k_float_to_q15", [&] { k::float_to_q15(c, fl, kBlock); });
 }
+#endif  // O3OS_BENCH_ARCHIVE
 
 // ---- OS-CPUOPT1: the loop player and the SVF, old reference against production ----------------------------------------------------------------
 // `ref_*` are the implementations of dev 604d721 copied as they were (the lambda and all): the A of the A/B. The B is the production code of this image, where the commit that changed it adds
@@ -1433,6 +1447,8 @@ void run_worst(const Out& out) noexcept {
 }
 
 // ---- memory characterisation -------------------------------------------------------------------------------------------------------------
+// OS-BENCHDIET: `bench mem` (the placement work's load-cost table) is archived with the other one-off benches.
+#if O3OS_BENCH_ARCHIVE
 // A pass of n 32-bit loads, `stride` bytes apart, timed with the cycle counter. In flash (OS-CEWTENV W3a: the bench image's
 // .ramfunc_l has no room for it — SRAM_L's hot budget is 27 KiB and W3a's WT cutoff work took the last of the bench's margin): the loop is a
 // handful of instructions and should stay in the code cache, but a flash row reads through the same controller and cache, so a large stride may
@@ -1486,6 +1502,7 @@ void run_mem(const Out& out) noexcept {
     out.line(buf, format_mem_row(r.name, seq, far, buf, sizeof buf));
   }
 }
+#endif  // O3OS_BENCH_ARCHIVE
 
 // ---- coherence of the cached alias (the single-alias rule on the unit) --------------------------------------------------------------------
 // `diag cache check`: main loop only, bounded (a few thousand accesses to a 64 KB scratch stretch and one pass over the loaded PCM), the lines and verdicts are cache_check.h's. The
@@ -1921,16 +1938,32 @@ void run(Kernel kernel, std::uint32_t blocks, Variant variant, Emit emit, void* 
       break;
     case Kernel::Tb303: run_tb303(out, blocks, kBlock); break;
     case Kernel::Tb303x128: run_tb303(out, blocks, 2u * kBlock); break;
+#if O3OS_BENCH_ARCHIVE
     case Kernel::Delay: run_delay(out, blocks); break;
     case Kernel::Reverb: run_reverb(out, blocks, false); break;
     case Kernel::ReverbFull: run_reverb(out, blocks, true); break;
     case Kernel::Limiter: run_limiter(out, blocks, true); break;
     case Kernel::LimiterQuiet: run_limiter(out, blocks, false); break;
+#else
+    case Kernel::Delay:
+    case Kernel::Reverb:
+    case Kernel::ReverbFull:
+    case Kernel::Limiter:
+    case Kernel::LimiterQuiet: break;
+#endif
     case Kernel::Strips: run_stages(out, blocks, true); break;
     case Kernel::Stages: run_stages(out, blocks, false); break;
-    case Kernel::Mem: run_mem(out); break;
+    case Kernel::Mem:
+#if O3OS_BENCH_ARCHIVE
+      run_mem(out);
+#endif
+      break;
     case Kernel::Worst: run_worst(out); break;
-    case Kernel::Kernels: run_kernels(out, blocks); break;
+    case Kernel::Kernels:
+#if O3OS_BENCH_ARCHIVE
+      run_kernels(out, blocks);
+#endif
+      break;
     case Kernel::Cpuopt:
 #if O3OS_BENCH_ARCHIVE
       cpuopt::run(out, blocks);
@@ -1946,7 +1979,11 @@ void run(Kernel kernel, std::uint32_t blocks, Variant variant, Emit emit, void* 
       diskbench::run(out, blocks);
 #endif
       break;
-    case Kernel::Burst: run_burst(out, blocks); break;
+    case Kernel::Burst:
+#if O3OS_BENCH_ARCHIVE
+      run_burst(out, blocks);
+#endif
+      break;
     case Kernel::DjMaster: run_dj(out, blocks); break;
     case Kernel::Insert:
       run_insert(out, blocks);

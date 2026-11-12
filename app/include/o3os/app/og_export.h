@@ -18,6 +18,7 @@
 #include <o3os/app/pti_load.h>
 #include <o3os/formats/og.h>
 #include <o3os/hal/save_guard.h>
+#include <o3os/model/lane_store.h>
 #include <o3os/model/project.h>
 
 #include <cstddef>
@@ -68,7 +69,8 @@ class OgExportPlan {
  public:
   // Starts a plan over `project` and the audio in `bank` (null: none): decides each sample instrument (og_instrument_plan), counts the files and takes the revision. False when there is nothing to
   // write (a project without patterns).
-  bool begin(const model::Project& project, const SampleBank* bank) noexcept;
+  // `lanes` (OS-MIDIREC-P1 S7d): the document's MIDI take lanes, only to count their events as lane_events (the .mtp has none); nullptr or a store of another epoch: none.
+  bool begin(const model::Project& project, const SampleBank* bank, const model::LaneStore* lanes = nullptr) noexcept;
   // The document or the audio has changed since begin() (any accepted mutation: an edit, an undo, a MIDI take, a sample commit or edit of any slot).
   bool changed() const noexcept;
   // The next file; false when the plan is over. Does not move: advance() does.

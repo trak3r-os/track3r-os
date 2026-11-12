@@ -59,9 +59,12 @@ inline constexpr KernelInfo kKernelInfo[] = {
 static_assert(sizeof(kKernelInfo) / sizeof(kKernelInfo[0]) == static_cast<std::size_t>(Kernel::Count), "one row per Kernel");
 
 // OS-FLASHDIET B1: the retired one-off A/B benches. They are compiled into a bench image only with -DO3OS_BENCH_ARCHIVE=ON; without it the console still lists them (their help says so) and `run`
-// answers `not in this image (O3OS_BENCH_ARCHIVE)`. The kernels every CPU measurement uses are not archived.
+// answers `not in this image (O3OS_BENCH_ARCHIVE)`. The kernels every CPU measurement uses are not archived. OS-BENCHDIET: `burst` (OS-ODD11, merged), `kernels` (the graph's SIMD kernels, no
+// open measurement) and `mem` (the placement work's load-cost table) join the four, and so do the single-stage `delay`, `reverb`, `reverb_full`, `limiter` and `limiter_q` (the stage costs are in
+// `stages` and `worst`), to keep the bench image inside the flash and its end below 0xFF000.
 constexpr bool archived(Kernel k) noexcept {
-  return k == Kernel::Cpuopt || k == Kernel::Looper || k == Kernel::VoiceSt || k == Kernel::Disk;
+  return k == Kernel::Cpuopt || k == Kernel::Looper || k == Kernel::VoiceSt || k == Kernel::Disk || k == Kernel::Burst || k == Kernel::Kernels || k == Kernel::Mem ||
+         k == Kernel::Delay || k == Kernel::Reverb || k == Kernel::ReverbFull || k == Kernel::Limiter || k == Kernel::LimiterQuiet;
 }
 
 // Where a kernel's data is, for the A/B of the placement work. Normal is the production placement (the live instance's own state; the SDRAM the core works in through the address

@@ -161,9 +161,19 @@ bool verb_transpose(ActionContext& ctx, core::ActionArg arg) noexcept {
   if (!b.whole_steps() && v.pattern.column() != Column::Note) {
     return pe::say(ctx, core::Severity::Info, "TRANSPOSE: WHOLE STEPS OR THE NOTE COLUMN");
   }
+  // OS-MIDIREC-P1 S7d: a whole-step block moves its lane NOTE events by the same amount (A16), first and after a dry run (a refusal changes nothing).
+  bool lane_moved = false;
+  if (v.edit.selection.active && b.whole_steps() && ctx.edit != nullptr && ctx.edit->lanes() != nullptr) {
+    const PatternSource lsrc(ctx.model, v.edit.pattern);
+    const int lr = pe::lanes_transpose_block(ctx, v.edit.pattern, b, lsrc, static_cast<int>(arg), pe::step_bytes(b.track1 - b.track0 + 1, static_cast<int>(model::kMaxPatternLength)));
+    if (lr < 0) {
+      return true;
+    }
+    lane_moved = lr > 0;
+  }
   const pe::Edited e = pe::edit_selection(
       ctx, [](model::Step& s, const model::edit::Rule& r, model::edit::Last& l, void* p) { model::edit::note_delta(s, *static_cast<const core::ActionArg*>(p), r, l); }, &arg, true);
-  return pe::finish_entry(ctx, e, false);
+  return pe::finish_entry(ctx, e, false) || lane_moved;
 }
 
 bool verb_instrument(ActionContext& ctx, core::ActionArg arg) noexcept {

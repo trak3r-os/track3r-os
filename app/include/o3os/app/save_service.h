@@ -284,7 +284,10 @@ class SaveService {
   }
   void attach_claim(Claim claim) noexcept { claim_ = claim; }
   // OS-MIDIREC-P1 S2: the document's MIDI take lanes, written into every native project this layer saves (the store outlives the layer).
-  void attach_lanes(const model::LaneStore* lanes) noexcept { native_.set_lanes(lanes); }
+  void attach_lanes(const model::LaneStore* lanes) noexcept {
+    native_.set_lanes(lanes);
+    og_lanes_ = lanes;  // S7d: the OG export counts their events as not exported
+  }
   // OS-FILES-C T16: a cycle counter (ticks per microsecond) for the per-stage timing of the OG export (og_timing.h). Not attached: no timing, no cost.
   void attach_cycles(OgTiming::Counter counter, std::uint32_t per_us) noexcept { og_timing_.attach(counter, per_us); }
   const OgTiming& og_timing() const noexcept { return og_timing_; }  // `diag ogexp status` prints it; reset when an export starts
@@ -668,6 +671,7 @@ class SaveService {
     char label[hal::storage::save::kNameMax + 1] = {};  // the folder's name, for the strip
   };
   OgRun og_;
+  const model::LaneStore* og_lanes_ = nullptr;  // OS-MIDIREC-P1 S7d: the document's lanes, read by the OG plan only to count lane_events (main loop)
   OgTiming og_timing_;  // (T16) main loop only: the stages of the OG export and of its survey
   // The sliced survey (og_survey_begin / og_survey_step): its own plan, so that a survey never touches the export's; main loop only.
   struct SurveyRun {

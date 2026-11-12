@@ -28,6 +28,8 @@
 #include <o3os/audio/play_position.h>
 #include <o3os/core/input_event.h>
 #include <o3os/model/editor.h>
+#include <o3os/model/param_auto.h>
+#include <o3os/model/params.h>
 #include <o3os/platform/host/fakes.h>
 
 #include <algorithm>
@@ -602,6 +604,18 @@ TEST_CASE("export: nothing stopped, nothing said") {
   rig.start_export();
   rig.settle();
   CHECK(rig.app->state().notify.size() == 1u);
+}
+
+TEST_CASE("export: a project with a mapped CC letter says on the strip that the letters' moves are not rendered (OS-BUG-PARAMAUTO-PLAY)") {
+  Rig rig;
+  const core::ParamId tune = core::param_id(core::ParamKind::Instrument, 0, model::instrument_param::Tune);
+  NEED(rig.editor->set_instrument_cc(0, 0, model::auto_code(tune)) == model::Status::Ok);
+  rig.start_export();
+  rig.settle();
+  CHECK(rig.card.has(kSong1));
+  CHECK(rig.message() == "SAVED EXPORT/UNTITLED/UNTITLED_SONG0001.WAV");  // the result first
+  NEED(rig.app->state().notify.size() == 2u);
+  CHECK(std::string(rig.app->state().notify.at(1).text.c_str()) == "CC LETTER MOVES NOT RENDERED");
 }
 
 TEST_CASE("export: a render that fails, a refusal of the renderer, a full card and a card that goes leave no file and say why") {

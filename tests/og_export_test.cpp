@@ -1551,7 +1551,7 @@ TEST_CASE("og export T4: one counter for every lossy row, exactly those, and the
     return std::vector<std::uint32_t>{d.tracks_beyond_12, d.engine_fx,        d.core_fx,       d.ce_fx,         d.volume_as_fx18,        d.volume_dropped, d.track_settings,    d.audio_on_midi_tracks,
                                       d.track_names_cut,  d.project_settings, d.module_instruments, d.midi_instruments, d.sample_slots_beyond_48, d.unknown_chunks, d.instrument_names_cut,
                                       d.pattern_names,    d.settings_ignored, d.midi_settings, d.resampled,             d.rate_ignored,   d.amiga_engine,      d.bit_engine,
-                                      d.pcm_too_long,     d.instruments_not_written, d.levels_converted, d.levels_clamped};
+                                      d.pcm_too_long,     d.instruments_not_written, d.levels_converted, d.levels_clamped, d.lane_events};
   };
   const auto text = [&](const og_ns::ExportDrops& d) {
     std::string out;
@@ -1849,8 +1849,8 @@ TEST_CASE("og export C2c: with no sample memory every sample instrument is skipp
 
 
 // OS-CEWTENV W3a review: kOgLossMax went to 17 with the WT MOD kind — the loss strip (app/src/screens/file_screen.cpp) draws into an array of kOgLossMax, so every kind the
-// table has must fit: all 17 at once, each once, WT MOD among them.
-TEST_CASE("og export: the loss list holds all kOgLossMax (17) kinds at once, WT MOD among them") {
+// table has must fit: all 18 at once (LANES since OS-MIDIREC-P1 S7d), each once, WT MOD among them.
+TEST_CASE("og export: the loss list holds all kOgLossMax (18) kinds at once, WT MOD among them") {
   og_ns::ExportDrops d{};
   d.instruments_not_written = 30;  // above no_sample_memory, so the "NOT WRITTEN" kind (the rest) is non-zero too
   d.no_sample_memory = 2;
@@ -1878,9 +1878,10 @@ TEST_CASE("og export: the loss list holds all kOgLossMax (17) kinds at once, WT 
   d.pattern_names = 24;
   d.settings_ignored = 25;
   d.rate_ignored = 26;
+  d.lane_events = 27;
   app::OgLossItem items[app::kOgLossMax];
   const unsigned n = app::og_loss_items(d, items);
-  CHECK(app::kOgLossMax == 17u);
+  CHECK(app::kOgLossMax == 18u);
   CHECK(n == app::kOgLossMax);  // every kind fits the strip's array
   bool saw_wt = false;
   for (unsigned i = 0; i < n; ++i) {
@@ -1893,7 +1894,64 @@ TEST_CASE("og export: the loss list holds all kOgLossMax (17) kinds at once, WT 
   CHECK(saw_wt);
 }
 
-// OS-STEREO (e): a stereo instrument is written as its mid M, a mono .pti; the OG format has no place for S, so it is counted (and told in the loss line), and nothing else of the export changes.
+// OS-MIDIREC-P1 S7d (QA-PAT-496): the OG .mtp has no place for the MIDI take lanes, so the writer leaves them out and the report counts their events like the core FX it drops. The files do not change.
+TEST_CASE("og export, OS-MIDIREC-P1 S7d: the lane events are counted as not exported, the survey counts the same, and the files are those of an export without lanes") {
+  static model::LaneStore store;
+  const Fixture f = make_fixture(1);
+  struct Out {
+    std::map<std::string, Bytes> files;
+    og_ns::ExportDrops drops;
+    std::uint32_t survey_lane_events;
+    bool same_signature;
+  };
+  // `epoch_shift` 0: the store belongs to the project (adopted after the import, as the Editor does at a load); 1: it is another document's.
+  const auto run = [&](const model::LaneStore* lanes, std::uint32_t epoch_shift) -> Out {
+    import_fixture(f, export_arena());
+    store.adopt(export_arena().project.load_epoch() + epoch_shift);
+    Rig rig;
+    rig.saves->attach_lanes(lanes);
+    app::OgSurvey survey;
+    CHECK(rig.saves->og_survey(export_arena().project, nullptr, "Projects/Song", survey) == Start::Started);
+    CHECK(rig.saves->start_og_export(rig.jobs, export_arena().project, "Projects/Song", nullptr) == Start::Started);
+    CHECK(rig.run());
+    CHECK(rig.saves->og_state() == OgState::Done);
+    return {rig.card.files, rig.saves->og_drops(), survey.drops.lane_events, app::og_loss_signature(survey.drops) == app::og_loss_signature(rig.saves->og_drops())};
+  };
+  store.clear();
+  {
+    model::LaneEvent* g = store.open_gap(1, 0, 0, 3);
+    NEED(g != nullptr);
+    g[0] = model::LaneEvent{0, 48, 0, 0, 60, 100};
+    g[1] = model::LaneEvent{0, 48, 0, 0, 64, 100};
+    g[2] = model::LaneEvent{96, 0, 1, 0, 74, 20};
+    g = store.open_gap(1, 2, 0, 2);
+    NEED(g != nullptr);
+    g[0] = model::LaneEvent{10, 20, 0, 0, 40, 90};
+    g[1] = model::LaneEvent{300, 0, 1, 0, 1, 5};
+  }
+  NEED(store.total_events() == 5u);
+  const Out none = run(nullptr, 0u);
+  CHECK(none.drops.lane_events == 0u);
+  CHECK_FALSE(none.drops.any_lost());
+  const Out some = run(&store, 0u);
+  CHECK(some.drops.lane_events == 5u);
+  CHECK(some.drops.any_lost());
+  CHECK(some.survey_lane_events == 5u);
+  CHECK(some.same_signature);
+  CHECK(some.files == none.files);  // the lanes change no file
+  app::OgLossItem items[app::kOgLossMax];
+  const unsigned n = app::og_loss_items(some.drops, items);
+  NEED(n == 1u);
+  CHECK(std::string(items[0].brief) == "LANES");
+  CHECK(items[0].n == 5u);
+  CHECK(app::og_loss_signature(some.drops) != app::og_loss_signature(none.drops));
+
+  // A store of another document (its epoch is not the project's) is not this project's lanes: nothing counted.
+  const Out stale = run(&store, 1u);
+  CHECK(stale.drops.lane_events == 0u);
+}
+
+// OS-STEREO (e): a stereo instrument is written as its mid M, a mono .pti; the OG export has no place for S, so it is counted (and told in the loss line), and nothing else of the export changes.
 TEST_CASE("og export, OS-STEREO (e): a stereo instrument writes the very files of the mono one and is counted as MID WRITTEN") {
   const Fixture f = make_fixture(1);
   const std::vector<std::int16_t> m = saw(500, 7);

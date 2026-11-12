@@ -228,7 +228,7 @@ constexpr ActionDef kActions[] = {
     make_action("midi.cc", midi_cc, core::kActionUndoableIfOpen | core::kActionRecords),  // OS-FXREC 3.4: a CC never closes a take; in one its parameter write is final (apply_cc) and only the recorded FX join it
     make_action("enc.assign", enc_assign),  // OS-ENCLEARN: Learn F7 ENC, the Learn row becomes the encoder's target
     make_action("enc.turn", enc_turn, core::kActionUndoableIfOpen | core::kActionRecords),  // OS-ENCLEARN: Instr + FX1 and the encoder; as midi.cc it never closes a take and its parameter write is final in one
-    make_action("param.auto", param_auto, core::kActionUndoableIfOpen | core::kActionRecords),  // OS-PARAMAUTO S2: a played CC letter moves its parameter; like midi.cc it never closes a take, its write is final and no macro keeps it
+    make_action("param.auto", param_auto, core::kActionRecords),  // OS-PARAMAUTO S2: a played CC letter moves its parameter on the audio side only (no undo unit, the project is not written: OS-BUG-PARAMAUTO-PLAY); like midi.cc it never closes a take and no macro keeps it
     // OS-009 P1a.1: the pattern's edit core. Modes, the selection and the pad preview are view state; the step actions are undo units.
     make_action("pattern.edit_toggle", pattern_edit_toggle, kFocus),
     make_action("pattern.rec_free", pattern_rec_free, kFocus),

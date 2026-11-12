@@ -625,21 +625,86 @@ TEST_CASE("paramauto poll: the mask is told on the first pass and again only whe
   rig.pass();
   CHECK(sink.masks == 2);
   CHECK(sink.mask == 0x01);
-  // the sequencer played CC A = 127: the parameter takes its maximum, and the project's generation moves with the write
+  // the sequencer played CC A = 127 (OS-BUG-PARAMAUTO-PLAY): the AUDIO SIDE takes the maximum, the project keeps the base value and its generation does not move
+  const auto drain = [&rig]() {
+    std::vector<core::ParamChange> out;
+    core::ParamChange c;
+    while (rig.ring.pop(c)) {
+      out.push_back(c);
+    }
+    return out;
+  };
+  (void)drain();
+  rig.play(1);  // the sequencer runs
   const float before = rig.value(inst(0, ip::Tune));
+  const std::uint32_t generation = rig.project().generation();
   sink.val[0] = 127;
   sink.pending = 0x01;
   rig.pass();
-  CHECK(rig.value(inst(0, ip::Tune)) != before);
-  CHECK(rig.value(inst(0, ip::Tune)) == doctest::Approx(24.0f));  // TUNE is -24..24 st: 127 is its maximum
+  CHECK(rig.value(inst(0, ip::Tune)) == before);
+  CHECK(rig.project().generation() == generation);
+  std::vector<core::ParamChange> heard = drain();
+  NEED(heard.size() == 1u);
+  CHECK(heard[0].id == inst(0, ip::Tune));
+  CHECK(heard[0].value == doctest::Approx(24.0f));  // TUNE is -24..24 st: 127 is its maximum
   CHECK(sink.pending == 0);
   // a letter of another instrument's slot with the same code is not a second owner: the lowest slot wins
   const float other = rig.value(inst(1, ip::Tune));
   NEED(rig.editor->set_instrument_cc(1, 0, model::auto_code(inst(1, ip::Tune))) == model::Status::Ok);
+  (void)drain();
   sink.val[0] = 0;
   sink.pending = 0x01;
   rig.pass();
   CHECK(rig.value(inst(1, ip::Tune)) == other);
+  heard = drain();
+  NEED(heard.size() == 1u);
+  CHECK(heard[0].id == inst(0, ip::Tune));  // the lowest slot's
+  CHECK(heard[0].value == doctest::Approx(-24.0f));
+  // the sequencer stops: the base value goes to the audio side again, and only once
+  rig.play(1, 0, false);
+  heard = drain();
+  NEED(heard.size() == 1u);
+  CHECK(heard[0].id == inst(0, ip::Tune));
+  CHECK(heard[0].value == before);
+  rig.pass();
+  CHECK(drain().empty());
+  CHECK(rig.value(inst(0, ip::Tune)) == before);
+  // the song ends on a step with a mapped letter: the last value is published and the transport stops in ONE pass; the take comes first, the restore after it, so the base value is what stays
+  rig.play(2);
+  (void)drain();
+  sink.val[0] = 127;
+  sink.pending = 0x01;
+  rig.play(2, 0, false);
+  heard = drain();
+  NEED(heard.size() == 2u);
+  CHECK(heard[0].value == doctest::Approx(24.0f));
+  CHECK(heard[1].id == inst(0, ip::Tune));
+  CHECK(heard[1].value == before);
+  rig.pass();
+  CHECK(drain().empty());
+  // a restore the audio side drops (the ring is full) keeps its bit: the next pass sends it
+  rig.play(3);
+  (void)drain();
+  sink.val[0] = 127;
+  sink.pending = 0x01;
+  rig.pass();
+  NEED(drain().size() == 1u);
+  unsigned filled = 0;
+  while (rig.ring.push(core::ParamChange{inst(1, ip::Tune), 0.0f, 0u})) {
+    ++filled;
+  }
+  CHECK(filled > 0u);
+  const std::uint32_t drops = rig.app->session().param_drops;
+  rig.play(3, 0, false);
+  CHECK(rig.app->session().param_drops == drops + 1u);  // the restore was dropped
+  CHECK(drain().size() == filled);                        // only what the test pushed
+  rig.pass();                                             // room again: the retry
+  heard = drain();
+  NEED(heard.size() == 1u);
+  CHECK(heard[0].id == inst(0, ip::Tune));
+  CHECK(heard[0].value == before);
+  rig.pass();
+  CHECK(drain().empty());
   rig.app->attach_mix(nullptr);
 }
 

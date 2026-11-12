@@ -1063,6 +1063,154 @@ Status Editor::lane_rows(std::uint32_t pattern, std::uint32_t track, std::uint32
   return Status::Ok;
 }
 
+// S7d. EXPAND doubles the ticks, SHRINK halves them (both monotone, so the lane stays sorted); a note's length follows. In place and count-preserving unless an event
+// would pass the new end (A17: deleted, which the doubling and the (L+1)/2 halving never do), so the record is the whole lane before and the kept events after.
+namespace {
+LaneEvent scaled(LaneEvent e, bool expand) noexcept {
+  e.tick = static_cast<std::uint16_t>(expand ? e.tick * 2u : e.tick / 2u);
+  if (e.len != 0) {
+    const std::uint32_t len = expand ? e.len * 2u : (e.len + 1u) / 2u;
+    e.len = static_cast<std::uint16_t>(len > kLaneTicks ? kLaneTicks : len < 1u ? 1u : len);
+  }
+  return e;
+}
+}  // namespace
+
+bool Editor::lanes_scale_fit(std::uint32_t pattern, std::uint16_t tracks, std::size_t other_bytes) noexcept {
+  if (lanes_ == nullptr || project_.pattern(pattern) == nullptr) {
+    return true;
+  }
+  lanes_->sync(project_.load_epoch());
+  std::size_t bytes = 0;
+  for (std::uint32_t t = 0; t < kMaxTracks; ++t) {
+    const std::uint32_t n = ((tracks >> t) & 1u) != 0u ? lanes_->lane(pattern, t).count : 0u;
+    bytes += n != 0 ? 2 * lane_record_bytes(n) : 0u;  // (before and after; the after of a lane that loses events is smaller: conservative)
+  }
+  return bytes == 0 || undo_fits(kLaneDelete, other_bytes + bytes);
+}
+
+Status Editor::lane_scale(std::uint32_t pattern, std::uint32_t track, std::uint32_t new_length, bool expand) noexcept {
+  Scope scope(*this);
+  const Pattern* pat = project_.pattern(pattern);
+  if (lanes_ == nullptr || pat == nullptr) {
+    return Status::NotFound;
+  }
+  if (track >= kMaxTracks) {
+    return Status::BadIndex;
+  }
+  lanes_->sync(project_.load_epoch());
+  const LaneStore::View v = lanes_->lane(pattern, track);
+  if (v.count == 0) {
+    return Status::Ok;
+  }
+  const std::uint32_t limit = new_length * kLaneTicksPerStep;
+  std::uint32_t kept = 0;  // the events that stay: the mapping is monotone, so they are a prefix
+  while (kept < v.count && scaled(v.events[kept], expand).tick < limit) {
+    ++kept;
+  }
+  if (!undo_fits(kLaneDelete, lane_record_bytes(v.count) + lane_record_bytes(kept))) {
+    return Status::Full;
+  }
+  LaneStore::WriteWindow window(*lanes_);
+  LaneEvent* p = lanes_->lane_writable(pattern, track);
+  const std::uint16_t ix = 0;
+  const std::uint16_t old_n = static_cast<std::uint16_t>(v.count);
+  const std::uint8_t id = static_cast<std::uint8_t>(pattern);
+  const std::uint8_t tr = static_cast<std::uint8_t>(track);
+  const Piece before[] = {{&id, 1}, {&tr, 1}, {&ix, 2}, {&old_n, 2}, {p, v.count * sizeof(LaneEvent)}};
+  (void)record(kLaneDelete, before, 5);
+  for (std::uint32_t i = 0; i < kept; ++i) {
+    p[i] = scaled(p[i], expand);
+  }
+  if (v.count > kept) {
+    (void)lanes_->erase(pattern, track, kept, v.count - kept);
+  }
+  if (kept != 0) {
+    p = lanes_->lane_writable(pattern, track);
+    const std::uint16_t new_n = static_cast<std::uint16_t>(kept);
+    const Piece after[] = {{&id, 1}, {&tr, 1}, {&ix, 2}, {&new_n, 2}, {p, kept * sizeof(LaneEvent)}};
+    (void)record(kLaneInsert, after, 5);
+  }
+  (void)project_.touch_lanes(pattern);
+  return Status::Ok;
+}
+
+// S7d, TRANSPOSE. A note event moves by the same amount as a step's note (clamped to 0..127); the other kinds are left alone.
+std::uint32_t Editor::lane_transpose_span(std::uint32_t pattern, std::uint32_t track, std::uint32_t tick_lo, std::uint32_t tick_hi, int delta, std::uint32_t& first,
+                                          std::uint32_t& last) noexcept {
+  first = 0;
+  last = 0;
+  if (lanes_ == nullptr || project_.pattern(pattern) == nullptr || track >= kMaxTracks || tick_lo >= tick_hi || delta == 0) {
+    return 0;
+  }
+  lanes_->sync(project_.load_epoch());
+  const LaneStore::View v = lanes_->lane(pattern, track);
+  std::uint32_t changed = 0;
+  for (std::uint32_t i = LaneStore::lower_bound(v, tick_lo); i < v.count && v.events[i].tick < tick_hi; ++i) {
+    const LaneEvent& e = v.events[i];
+    const int moved = static_cast<int>(e.a) + delta;
+    const int clamped = moved < 0 ? 0 : moved > 127 ? 127 : moved;
+    if ((e.kind_channel >> 4) == 0 && clamped != static_cast<int>(e.a)) {
+      first = changed == 0 ? i : first;
+      last = i;
+      ++changed;
+    }
+  }
+  return changed;
+}
+
+bool Editor::lanes_transpose_fit(std::uint32_t pattern, std::uint16_t tracks, std::uint32_t tick_lo, std::uint32_t tick_hi, int delta, std::size_t other_bytes) noexcept {
+  std::size_t bytes = 0;
+  for (std::uint32_t t = 0; t < kMaxTracks; ++t) {
+    std::uint32_t first = 0;
+    std::uint32_t last = 0;
+    if (((tracks >> t) & 1u) != 0u && lane_transpose_span(pattern, t, tick_lo, tick_hi, delta, first, last) != 0) {
+      bytes += 2 * lane_record_bytes(last - first + 1);
+    }
+  }
+  return bytes == 0 || undo_fits(kLaneDelete, other_bytes + bytes);
+}
+
+Status Editor::lane_transpose(std::uint32_t pattern, std::uint32_t track, std::uint32_t tick_lo, std::uint32_t tick_hi, int delta) noexcept {
+  Scope scope(*this);
+  if (lanes_ == nullptr || project_.pattern(pattern) == nullptr) {
+    return Status::NotFound;
+  }
+  if (track >= kMaxTracks) {
+    return Status::BadIndex;
+  }
+  if (tick_lo >= tick_hi) {
+    return Status::BadValue;
+  }
+  std::uint32_t first = 0;
+  std::uint32_t last = 0;
+  if (lane_transpose_span(pattern, track, tick_lo, tick_hi, delta, first, last) == 0) {
+    return Status::Ok;
+  }
+  const std::uint32_t n = last - first + 1;
+  if (!undo_fits(kLaneDelete, 2 * lane_record_bytes(n))) {
+    return Status::Full;
+  }
+  LaneStore::WriteWindow window(*lanes_);
+  LaneEvent* p = lanes_->lane_writable(pattern, track);
+  const std::uint16_t ix = static_cast<std::uint16_t>(first);
+  const std::uint16_t cnt = static_cast<std::uint16_t>(n);
+  const std::uint8_t id = static_cast<std::uint8_t>(pattern);
+  const std::uint8_t tr = static_cast<std::uint8_t>(track);
+  const Piece before[] = {{&id, 1}, {&tr, 1}, {&ix, 2}, {&cnt, 2}, {p + first, n * sizeof(LaneEvent)}};
+  (void)record(kLaneDelete, before, 5);
+  for (std::uint32_t i = first; i <= last; ++i) {
+    if (p[i].tick >= tick_lo && p[i].tick < tick_hi && (p[i].kind_channel >> 4) == 0) {
+      const int moved = static_cast<int>(p[i].a) + delta;
+      p[i].a = static_cast<std::uint8_t>(moved < 0 ? 0 : moved > 127 ? 127 : moved);
+    }
+  }
+  const Piece after[] = {{&id, 1}, {&tr, 1}, {&ix, 2}, {&cnt, 2}, {p + first, n * sizeof(LaneEvent)}};
+  (void)record(kLaneInsert, after, 5);
+  (void)project_.touch_lanes(pattern);
+  return Status::Ok;
+}
+
 Status Editor::lane_copy(std::uint32_t from, std::uint32_t to, std::uint32_t track) noexcept {
   Scope scope(*this);
   if (lanes_ == nullptr || project_.pattern(from) == nullptr || project_.pattern(to) == nullptr) {

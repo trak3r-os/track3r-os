@@ -397,3 +397,99 @@ TEST_CASE("lane rows S7c: lanes_replace_fit and lanes_rows_fit change nothing an
   CHECK(lane_is(g_store, 1, 0, lane, 2));
   CHECK_FALSE(ed.can_undo());
 }
+
+// ---- OS-MIDIREC-P1 S7d: EXPAND and SHRINK scale the lane ticks, TRANSPOSE moves the lane notes (A16, A17) ----------------------------------------------------------------------------------
+
+namespace {
+LaneEvent nt(std::uint32_t tick, std::uint32_t len, std::uint8_t note, std::uint8_t vel) {
+  LaneEvent e{};
+  e.tick = static_cast<std::uint16_t>(tick);
+  e.len = static_cast<std::uint16_t>(len);
+  e.kind_channel = 0;
+  e.a = note;
+  e.b = vel;
+  return e;
+}
+}  // namespace
+
+TEST_CASE("lane scale S7d: EXPAND doubles ticks and note lengths, SHRINK halves them, each one undo unit that restores the lane exactly") {
+  Rig r;
+  NEED(r.ok);
+  Editor& ed = *r.ed;
+  const LaneEvent lane[] = {nt(5, 20, 60, 100), cc(100, 1, 2), cc(700, 1, 3)};
+  NEED(ed.lane_replace(1, 0, 0, 768, lane, 3) == Status::Ok);
+  ed.history_reset();
+  CHECK(ed.lane_scale(1, 0, 32, true) == Status::Ok);  // EXPAND 16 -> 32 steps (the caller then sets the length)
+  const LaneEvent big[] = {nt(10, 40, 60, 100), cc(200, 1, 2), cc(1400, 1, 3)};
+  CHECK(lane_is(g_store, 1, 0, big, 3));
+  CHECK(ed.undo() == UndoResult::Ok);
+  CHECK(lane_is(g_store, 1, 0, lane, 3));
+  CHECK_FALSE(ed.can_undo());
+  CHECK(ed.redo() == UndoResult::Ok);
+  CHECK(lane_is(g_store, 1, 0, big, 3));
+  CHECK(ed.undo() == UndoResult::Ok);
+  CHECK(ed.lane_scale(1, 0, 8, false) == Status::Ok);  // SHRINK 16 -> 8 steps: (L+1)/2 for a length, never zero
+  const LaneEvent small[] = {nt(2, 10, 60, 100), cc(50, 1, 2), cc(350, 1, 3)};
+  CHECK(lane_is(g_store, 1, 0, small, 3));
+  CHECK(ed.undo() == UndoResult::Ok);
+  CHECK(lane_is(g_store, 1, 0, lane, 3));
+}
+
+TEST_CASE("lane scale S7d: a scaled event that passes the new end is deleted (A17) and undo brings it back; the other lanes and an empty lane are left alone") {
+  Rig r;
+  NEED(r.ok);
+  Editor& ed = *r.ed;
+  NEED(seed(ed));
+  CHECK(ed.lane_scale(1, 0, 4, false) == Status::Ok);  // new end 192: ticks 2, 50 stay, 350 goes
+  const LaneEvent kept[] = {cc(2, 1, 7), cc(50, 1, 8)};
+  CHECK(lane_is(g_store, 1, 0, kept, 2));
+  CHECK(lane_is(g_store, 1, 2, kLane2, 2));
+  CHECK(ed.lane_scale(1, 1, 8, false) == Status::Ok);  // no lane on track 1
+  CHECK(ed.undo() == UndoResult::Ok);                   // (the empty lane recorded nothing: this undoes the first shrink)
+  CHECK(lane_is(g_store, 1, 0, kLane0, 3));
+  CHECK(ed.redo() == UndoResult::Ok);
+  CHECK(lane_is(g_store, 1, 0, kept, 2));
+  CHECK(ed.lane_scale(1, 16, 8, false) == Status::BadIndex);
+  CHECK(ed.lane_scale(9, 0, 8, false) == Status::NotFound);
+}
+
+TEST_CASE("lane scale S7d: a ring that cannot take the lane's records refuses whole (Full), the dry run says the same and nothing changes") {
+  Rig r(8 * 1024);
+  NEED(r.ok);
+  Editor& ed = *r.ed;
+  LaneEvent lane[600];
+  for (std::uint32_t i = 0; i < 600; ++i) lane[i] = cc(i * 767u / 600u, 1, static_cast<std::uint8_t>(i & 127u));
+  NEED(ed.lane_replace(1, 0, 0, 768, lane, 600) == Status::Ok);  // one 4.8 KiB record fits, the before and after of a scale (9.6 KiB) do not
+  ed.history_reset();
+  CHECK_FALSE(ed.lanes_scale_fit(1, 1, 0));
+  CHECK(ed.lanes_scale_fit(1, 2, 0));  // track 1 has no lane: nothing to record
+  CHECK(ed.lane_scale(1, 0, 32, true) == Status::Full);
+  CHECK(lane_is(g_store, 1, 0, lane, 600));
+  CHECK_FALSE(ed.can_undo());
+}
+
+TEST_CASE("lane transpose S7d: the notes of the range move together (a chord stays a chord) and clamp to 0..127, CC and the notes outside the range stay, undo restores") {
+  Rig r;
+  NEED(r.ok);
+  Editor& ed = *r.ed;
+  const LaneEvent lane[] = {nt(10, 30, 60, 90), nt(10, 30, 64, 90), nt(10, 30, 67, 90), cc(20, 1, 55), nt(300, 40, 126, 80), nt(500, 40, 2, 80)};
+  NEED(ed.lane_replace(1, 0, 0, 768, lane, 6) == Status::Ok);
+  ed.history_reset();
+  CHECK(ed.lanes_transpose_fit(1, 1, 0, 192, 3, 0));
+  CHECK_FALSE(ed.lanes_transpose_fit(1, 1, 0, 192, 3, 1024 * 1024));
+  CHECK(ed.lane_transpose(1, 0, 0, 192, 3) == Status::Ok);
+  const LaneEvent chord[] = {nt(10, 30, 63, 90), nt(10, 30, 67, 90), nt(10, 30, 70, 90), cc(20, 1, 55), nt(300, 40, 126, 80), nt(500, 40, 2, 80)};
+  CHECK(lane_is(g_store, 1, 0, chord, 6));
+  CHECK(ed.undo() == UndoResult::Ok);
+  CHECK(lane_is(g_store, 1, 0, lane, 6));
+  CHECK_FALSE(ed.can_undo());
+  CHECK(ed.lane_transpose(1, 0, 0, 768, 12) == Status::Ok);  // 126 clamps to 127; the CC does not move
+  const LaneEvent up[] = {nt(10, 30, 72, 90), nt(10, 30, 76, 90), nt(10, 30, 79, 90), cc(20, 1, 55), nt(300, 40, 127, 80), nt(500, 40, 14, 80)};
+  CHECK(lane_is(g_store, 1, 0, up, 6));
+  CHECK(ed.undo() == UndoResult::Ok);
+  CHECK(ed.lane_transpose(1, 0, 0, 768, -4) == Status::Ok);
+  CHECK(g_store.lane(1, 0).events[5].a == 0);  // 2 - 4 clamps to 0
+  CHECK(ed.lane_transpose(1, 0, 0, 768, 0) == Status::Ok);  // nothing to move records nothing
+  CHECK(ed.lane_transpose(1, 0, 5, 5, 1) == Status::BadValue);
+  CHECK(ed.lane_transpose(1, 16, 0, 768, 1) == Status::BadIndex);
+}

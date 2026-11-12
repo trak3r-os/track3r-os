@@ -845,9 +845,14 @@ void App::poll_param_auto() noexcept {
   std::uint8_t value[6] = {};
   const std::uint8_t taken = sink->auto_take(value);
   for (unsigned letter = 0; taken != 0u && letter < 6u; ++letter) {
-    if (((taken >> letter) & 1u) != 0u && invoke(core::action_id("param.auto"), (letter << 8) | value[letter]) == DispatchResult::Changed) {
-      dirty_ = true;
+    if (((taken >> letter) & 1u) != 0u) {
+      (void)invoke(core::action_id("param.auto"), (letter << 8) | value[letter]);  // audio side only (OS-BUG-PARAMAUTO-PLAY): the document and the view are not changed
     }
+  }
+  // OS-BUG-PARAMAUTO-PLAY: the played letters moved parameters on the audio side only; once the transport has stopped (the key and the sequencer both), each goes back to the project's base value. After the
+  // takes above, so a value the last step published in this very pass cannot outlive the restore; a restore the audio side dropped (full ring) keeps its bit and runs again on the next pass.
+  if (session_.auto_live != 0u && !state_.playing && !state_.play.playing) {
+    (void)invoke(core::action_id("param.auto"), kAutoRestore << 8);
   }
 }
 
@@ -1723,7 +1728,8 @@ void App::finish_export(unsigned slot, core::SlotState st) noexcept {
   core::FixedString<core::kNotifyTextChars> text;
   core::Severity severity = core::Severity::Info;
   std::uint32_t ttl = kMessageMs;
-  if (st == core::SlotState::Done && !next_refused && (!stems || saved >= total)) {
+  const bool ended_well = st == core::SlotState::Done && !next_refused && (!stems || saved >= total);
+  if (ended_well) {
     text.assign("SAVED ");
     if (stems) {
       append_uint(text, saved);
@@ -1769,6 +1775,10 @@ void App::finish_export(unsigned slot, core::SlotState st) noexcept {
   if (x.stopped[0] != '\0') {  // OS-EXPNOTE: what the export stopped (a held pad or MIDI note), named right after how it ended: the overlay is modal, so the strip cannot say it earlier
     (void)state_.notify.post(core::Severity::Info, x.stopped, "export-stopped", 4000);
     x.stopped[0] = '\0';
+  }
+  // OS-BUG-PARAMAUTO-PLAY: the offline render builds its own sequencer with no letter map, so the moves of a mapped CC letter (OS-PARAMAUTO) are not in the file; said once, after the result.
+  if (ended_well && model_.project != nullptr && param_auto_mask(model_) != 0u) {
+    (void)state_.notify.post(core::Severity::Info, "CC LETTER MOVES NOT RENDERED", "export-letters", 4000);
   }
   x.running = false;
   x.slot = -1;

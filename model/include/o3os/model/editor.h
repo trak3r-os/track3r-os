@@ -216,6 +216,21 @@ class Editor {
   // not take it, nothing changes. lanes_rows_fit is its dry run over the tracks in the mask (after `other_bytes` of other records of the unit).
   Status lane_rows(std::uint32_t pattern, std::uint32_t track, std::uint32_t step, bool insert) noexcept;
   bool lanes_rows_fit(std::uint32_t pattern, std::uint16_t tracks, std::uint32_t step, bool insert, std::size_t other_bytes) noexcept;
+  // S7d, A16 (EXPAND / SHRINK of the pattern length tools): lane_scale rescales the ticks of every event of (pattern, track) for a track going from its current length to
+  // `new_length` steps: `expand` doubles the tick and the length of a note, else both are halved (a note keeps at least one tick); an event that would land at or past the new end
+  // is deleted (A17; none does for the doubling or the (L+1)/2 halving). Call it BEFORE set_track_length. The lane keeps its event count (the scaling is in place, so the pool and the
+  // lane count cannot grow); it is one pair of undo records in the open unit. Ok (also with an empty lane); NotFound: no store or pattern; BadIndex: track; Full: the undo ring would not
+  // take it, nothing changes. lanes_scale_fit is its dry run over the tracks in the mask (after `other_bytes` of other records of the unit): false when the unit would not fit.
+  Status lane_scale(std::uint32_t pattern, std::uint32_t track, std::uint32_t new_length, bool expand) noexcept;
+  bool lanes_scale_fit(std::uint32_t pattern, std::uint16_t tracks, std::size_t other_bytes) noexcept;
+  // S7d, TRANSPOSE: lane_transpose adds `delta` semitones to the note of every NOTE event (kind 0; CC and the other kinds are not touched) of (pattern, track) whose tick is in
+  // [tick_lo, tick_hi), each clamped to 0..127 as a step's note is; chords stay chords unless a clamp at 0 or 127 merges notes (every note of one tick moves by the same amount, as steps do). One pair of undo records (the span from
+  // the first changed event to the last) in the open unit. Ok (also when nothing changes); NotFound: no store or pattern; BadIndex: track; BadValue: an empty or reversed range;
+  // Full: the undo ring would not take it, nothing changes. lanes_transpose_fit is its dry run over the tracks in the mask.
+  Status lane_transpose(std::uint32_t pattern, std::uint32_t track, std::uint32_t tick_lo, std::uint32_t tick_hi, int delta) noexcept;
+  bool lanes_transpose_fit(std::uint32_t pattern, std::uint16_t tracks, std::uint32_t tick_lo, std::uint32_t tick_hi, int delta, std::size_t other_bytes) noexcept;
+  // The events lane_transpose would change in the lane of (pattern, track): returns how many, `first` and `last` the lane indices of the first and last of them.
+  std::uint32_t lane_transpose_span(std::uint32_t pattern, std::uint32_t track, std::uint32_t tick_lo, std::uint32_t tick_hi, int delta, std::uint32_t& first, std::uint32_t& last) noexcept;
   // OS-MIDIREC-P1 S3, A10 / A11 / A15: merges a finished take (lane_take.h) into the lane of its (pattern, track) in one pass and one pair of undo records
   // (the changed span before, after). Overdub: the lane's events stay and the take's are merged by tick (a take event goes after the lane's events at its
   // tick); a CC controller the take moved REPLACES the lane's old points of that controller (the take's channel and port) inside the take's intervals.

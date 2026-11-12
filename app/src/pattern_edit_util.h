@@ -192,6 +192,10 @@ class LanePaste {
 // nothing changed). Whole-step blocks only (0 otherwise).
 int lanes_clear_block(ActionContext& ctx, unsigned pattern, const Selection::Block& b, const PatternSource& src, std::size_t other_bytes) noexcept;
 
+// Block transpose (S7d): the NOTE events of the block's tracks and rows move by `delta` semitones, clamped to 0..127 like step notes; CC and other kinds stay. Same result codes as above,
+// whole-step blocks only. `other_bytes`: what the step writes of the same unit may add.
+int lanes_transpose_block(ActionContext& ctx, unsigned pattern, const Selection::Block& b, const PatternSource& src, int delta, std::size_t other_bytes) noexcept;
+
 // Row insert / remove at block row b.row0 over the block's tracks (those whose length reaches the row): the lane ticks move one step with the rows (Editor::lane_rows). Same result codes as above.
 int lanes_rows(ActionContext& ctx, unsigned pattern, const Selection::Block& b, const PatternSource& src, bool insert) noexcept;
 

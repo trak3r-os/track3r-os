@@ -140,6 +140,7 @@ unsigned og_loss_items(const formats::og::ExportDrops& d, OgLossItem (&items)[kO
       {d.module_instruments, "MODULES", "MODULE INSTRUMENTS"},
       {d.engine_fx + d.core_fx + d.ce_fx + d.volume_dropped, "FX", "EFFECT AND VOLUME COLUMNS"},
       {d.tracks_beyond_12, "STEPS 13-16", "STEPS ON TRACKS 13-16"},
+      {d.lane_events, "LANES", "LANE EVENTS NOT EXPORTED"},  // (S7d, QA-PAT-496: the .mtp has no MIDI take lanes)
       {d.track_settings, "TRACK SET", "TRACKS WITH PAN, SOLO OR BUS"},
       {d.midi_instruments + d.midi_settings, "MIDI INSTR", "MIDI INSTRUMENTS AND SETTINGS"},
       {d.sample_slots_beyond_48, "SLOTS 49+", "SAMPLE INSTRUMENTS IN SLOTS 49-64"},
@@ -217,11 +218,12 @@ std::uint32_t og_loss_signature(const formats::og::ExportDrops& d) noexcept {
 
 // ---- The plan ---------------------------------------------------------------------------------------------------------------------------------
 
-bool OgExportPlan::begin(const model::Project& project, const SampleBank* bank) noexcept {
+bool OgExportPlan::begin(const model::Project& project, const SampleBank* bank, const model::LaneStore* lanes) noexcept {
   project_ = &project;
   bank_ = bank;
   generation_ = project.generation();
   drops_ = formats::og::ExportDrops{};
+  drops_.lane_events = lanes != nullptr && lanes->in_sync(project.load_epoch()) ? lanes->total_events() : 0u;  // S7d: the .mtp has no lanes; every event is left out
   write_mask_ = 0;
   bytes_ = 0;
   unsigned instruments = 0;

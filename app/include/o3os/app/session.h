@@ -54,6 +54,10 @@ class Session {
   std::uint32_t param_resyncs = 0;
   // OS-UNDOGRP: when the last click on a parameter row was made (the click group ends 1500 ms after it, param_actions.cpp merge_click).
   core::Tick merge_at = 0;
+  // OS-BUG-PARAMAUTO-PLAY: the parameters the played CC letters A..F (bit L of auto_live) have moved on the audio side only; auto_id[L] is the one letter L moved. A stopped transport sends their base values from the
+  // project again (param_auto). Main loop only; never persisted.
+  core::ParamId auto_id[6] = {};
+  std::uint8_t auto_live = 0;
 
   // The document: the Editor over the project and its journal, owned by the caller. nullptr detaches it. The Learn bindings are another
   // set of bindings now: no knob has caught anything.

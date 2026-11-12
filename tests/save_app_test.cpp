@@ -14,6 +14,7 @@
 #include "support/static_slot.h"
 
 #include <o3os/app/app.h>
+#include <o3os/app/mix_board.h>
 #include <o3os/app/module_import.h>
 #include <o3os/app/native_load.h>
 #include <o3os/app/og_samples.h>
@@ -27,6 +28,7 @@
 #include <o3os/formats/wav_sample.h>
 #include <o3os/hal/audio.h>
 #include <o3os/model/editor.h>
+#include <o3os/model/param_auto.h>
 #include <o3os/model/params.h>
 #include <o3os/module/loader.h>
 #include <o3os/platform/host/fakes.h>
@@ -3026,4 +3028,91 @@ TEST_CASE("save stereo: the flag is written only where the plan wrote or found t
   NEED(re.open(rig, "Projects/Undone"));
   CHECK(re.loader.report().stereo_lost == 0u);
   CHECK(re.arena2.project.instrument(0)->stereo == 0u);  // never a flag without its file
+}
+
+// ---- OS-BUG-PARAMAUTO-PLAY: a CC letter that is played moves the sound, not the document -----------------------------------------------------------------
+
+namespace {
+// The sequencer's per-track side as App::poll_param_auto sees it: it tells nothing but the letters played, handed out once.
+struct LetterSink final : app::TrackSink {
+  std::uint8_t pending = 0;
+  std::uint8_t val[6] = {};
+  bool playing() const noexcept override { return true; }
+  bool mute_defer(unsigned, app::MuteMode, bool) noexcept override { return false; }
+  bool mute_cancel(unsigned) noexcept override { return false; }
+  std::uint16_t mute_pending() const noexcept override { return 0; }
+  std::uint8_t note_count(unsigned) const noexcept override { return 0; }
+  void auto_mask(std::uint8_t) noexcept override {}
+  std::uint8_t auto_take(std::uint8_t* out) noexcept override {
+    std::memcpy(out, val, sizeof val);
+    const std::uint8_t p = pending;
+    pending = 0;
+    return p;
+  }
+  void play(std::uint8_t letter, std::uint8_t v) noexcept {
+    val[letter] = v;
+    pending = static_cast<std::uint8_t>(pending | (1u << letter));
+  }
+};
+
+core::ParamId tune_of(unsigned slot) { return core::param_id(core::ParamKind::Instrument, slot, model::instrument_param::Tune); }
+
+// CC A of instrument 1 owns its TUNE; the rig then holds a project whose letter is mapped and whose TUNE is at its base value.
+struct LetterRig {
+  Rig rig;
+  LetterSink sink;
+  std::unique_ptr<app::MixBoard> board = std::make_unique<app::MixBoard>();
+  float base = 0.0f;
+  bool ready = false;
+  LetterRig() {
+    model::Project& p = test::arena(1).project;
+    ready = p.instrument(0) != nullptr && p.instrument(0)->kind != model::InstrumentKind::Midi &&
+            rig.editor->set_instrument_cc(0, 0, model::auto_code(tune_of(0))) == model::Status::Ok;
+    base = p.get_param(tune_of(0));
+    board->tracks = &sink;
+    rig.app->attach_mix(board.get());
+    rig.pass();
+  }
+  ~LetterRig() { rig.app->attach_mix(nullptr); }
+  float tune() const { return test::arena(1).project.get_param(tune_of(0)); }
+  // One more value of a sweep (0..127 is the whole range of TUNE, -24..+24 st; the base is not on this path's first steps).
+  void sweep(unsigned i) {
+    sink.play(0, static_cast<std::uint8_t>((i * 37u) % 128u));
+    rig.pass();
+  }
+};
+}  // namespace
+
+TEST_CASE("paramauto play: playing a mapped CC letter does not make the project unsaved and leaves the parameter's base value in the document") {
+  LetterRig lr;
+  NEED(lr.ready);
+  lr.rig.go(ScreenId::File);
+  lr.rig.tap(Button::F4);
+  lr.rig.settle();
+  NEED(lr.rig.message() == "SAVE TRACK 01 DONE");
+  NEED(!lr.rig.saves.dirty(test::arena(1).project));
+  const Bytes saved = lr.rig.native_bytes();
+  for (unsigned i = 1; i <= 6; ++i) {
+    lr.sweep(i);
+  }
+  CHECK(lr.tune() == lr.base);  // the base value is the document's, not the last one played
+  CHECK_FALSE(lr.rig.saves.dirty(test::arena(1).project));
+  CHECK(lr.rig.native_bytes() == saved);
+}
+
+TEST_CASE("paramauto play: a save that runs while a mapped CC letter sweeps finishes, and writes the base value") {
+  LetterRig lr;
+  NEED(lr.ready);
+  const Bytes base_bytes = lr.rig.native_bytes();
+  lr.rig.go(ScreenId::File);
+  lr.rig.tap(Button::F4);
+  NEED(lr.rig.saves.busy());
+  unsigned moves = 0;
+  for (unsigned i = 0; i < 4000 && lr.rig.saves.busy(); ++i) {
+    lr.sweep(++moves);  // a new value every pass, as a sweep plays
+  }
+  CHECK(moves > 3u);  // not in one gulp: the writer's slices were crossed by the sweep
+  lr.rig.settle();
+  CHECK(lr.rig.message() == "SAVE TRACK 01 DONE");  // not "CHANGED: TRY AGAIN"
+  CHECK(lr.rig.card.same("Projects/Track 01/project.o3pj", base_bytes));
 }

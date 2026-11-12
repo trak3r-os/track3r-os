@@ -1401,27 +1401,54 @@ std::uint8_t param_auto_mask(const Model& model) noexcept {
 }
 
 // OS-PARAMAUTO S2 (new Community OS behaviour): the value the sequencer played on CC letter `arg >> 8` (A..F = 0..5, low byte 0..127) moves the parameter that owns the letter. The map is read from the project at
-// each call (64 instruments x 6 bytes, a few values a pass at most, never per step), so a project edit needs no rebuild here. The write is final as in a take: the playback is not an edit of the document (no undo
-// record, the project keeps the last value played, so a save has it), and send_param_change tells the audio side.
+// each call (64 instruments x 6 bytes, a few values a pass at most, never per step), so a project edit needs no rebuild here. OS-BUG-PARAMAUTO-PLAY: a played value goes to the AUDIO SIDE ONLY (send_param_change), never
+// into the project: the document keeps the parameter's base value, so playing does not make it unsaved, a save that runs during a sweep sees no change, and the saved file has the base. The action does not change
+// the document, so it returns false. Session::auto_id / auto_live remember what is moved; arg letter kAutoRestore (App::poll_param_auto, once the transport is stopped; a dropped one is retried) sends every remembered parameter's base value again.
+// A source or descriptor field is rebuilt from the project (request_rebind), so only the live ones (the wavetable and grain positions, the MOD fields, a module's parameters, the plain table) sound the played value.
 bool param_auto(ActionContext& ctx, core::ActionArg arg) noexcept {
   const unsigned letter = (arg >> 8) & 0xFFu;
-  if (ctx.edit == nullptr || letter >= model::kAutoLetters) {
+  if (ctx.session == nullptr) {
+    return false;
+  }
+  Session& s = *ctx.session;
+  const auto restore = [&](unsigned l) {
+    float base = 0.0f;
+    const std::uint32_t drops = s.param_drops;
+    if (read_param(ctx.model, s.auto_id[l], base)) {
+      send_param_change(ctx, s.auto_id[l], base);
+      if (s.param_drops != drops) {
+        return;  // the audio side dropped it (full ring, no instance): the bit stays and the next pass retries
+      }
+    }
+    s.auto_live = static_cast<std::uint8_t>(s.auto_live & ~(1u << l));
+  };
+  if (letter == kAutoRestore) {
+    for (unsigned l = 0; l < model::kAutoLetters; ++l) {
+      if (((s.auto_live >> l) & 1u) != 0u) {
+        restore(l);
+      }
+    }
+    return false;
+  }
+  if (letter >= model::kAutoLetters || ctx.model.project == nullptr) {
     return false;
   }
   model::AutoMap map;
-  model::auto_scan(ctx.edit->project(), map);
+  model::auto_scan(*ctx.model.project, map);
   const core::ParamId id = map.id[letter];
-  ParamScratch scratch;
+  ParamScratch scratch{};  // `whole` is set only for a module parameter: zero it, a Sample field reads it too
   const core::ParamDesc* d = id != core::ParamId::None ? describe_param(ctx.model, id, scratch) : nullptr;
   if (d == nullptr || (d->flags & core::kParamLearnable) == 0u) {
     return false;  // a letter that names nothing now (a changed kind, a code a newer build knew), or a parameter that cannot be learned
   }
+  if (((s.auto_live >> letter) & 1u) != 0u && s.auto_id[letter] != id) {
+    restore(letter);  // the letter was remapped while it played: the parameter it moved goes back to its base
+  }
   const unsigned v = arg & 0xFFu;
-  const bool was_final = ctx.edit->final_edits();
-  ctx.edit->set_final(true);
-  const WriteResult r = write_param(ctx, id, core::param_denorm(*d, static_cast<float>(v > 127u ? 127u : v) / 127.0f));
-  ctx.edit->set_final(was_final);
-  return r == WriteResult::Changed;
+  send_param_change(ctx, id, fit_param_value(*d, scratch.whole, core::param_denorm(*d, static_cast<float>(v > 127u ? 127u : v) / 127.0f)));
+  s.auto_id[letter] = id;
+  s.auto_live = static_cast<std::uint8_t>(s.auto_live | (1u << letter));
+  return false;
 }
 
 // OS-ENCLEARN: the encoder turned while Instr + FX1 are held (App::run_once takes it ahead of the bindings): the target moves by `arg` fine steps, a coarse step each with Shift, through the write

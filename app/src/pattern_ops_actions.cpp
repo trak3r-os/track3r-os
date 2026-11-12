@@ -99,8 +99,20 @@ bool pattern_op(ActionContext& ctx, core::ActionArg arg) noexcept {
         lengths[t] = static_cast<std::uint8_t>(model::ops::result_length(op, pat->track_length[t]));
       }
     }
-    if (!ctx.edit->lengths_fit_undo(id, lengths)) {
-      return pe::say(ctx, core::Severity::Warn, "TOO BIG TO UNDO: USE THE LENGTH CHOOSER");
+    // OS-MIDIREC-P1 S7d: EXPAND and SHRINK scale the MIDI lane ticks with the rows (A16), so nothing is cut but what passes the new end after scaling; the lane records
+    // (before and after, per track) replace the cut check, with the step images of the same unit. DUPLICATE only lengthens, so it keeps the cut check (which finds none).
+    if (op == model::ops::Op::Duplicate) {
+      if (!ctx.edit->lengths_fit_undo(id, lengths)) {
+        return pe::say(ctx, core::Severity::Warn, "TOO BIG TO UNDO: USE THE LENGTH CHOOSER");
+      }
+    } else {
+      std::uint16_t scale_mask = 0;
+      for (int t = t0; t <= t1; ++t) {
+        scale_mask = static_cast<std::uint16_t>(scale_mask | (lengths[t] != pat->track_length[t] ? 1u << t : 0u));
+      }
+      if (!ctx.edit->lanes_scale_fit(id, scale_mask, pe::step_bytes(t1 - t0 + 1, static_cast<int>(model::kMaxPatternLength)) + model::kMaxTracks * 32u)) {
+        return pe::say(ctx, core::Severity::Warn, "TOO BIG TO UNDO: USE THE LENGTH CHOOSER");
+      }
     }
   }
   bool changed = false;
@@ -114,6 +126,11 @@ bool pattern_op(ActionContext& ctx, core::ActionArg arg) noexcept {
     }
     changed = write_column(ctx, id, static_cast<unsigned>(t), out) || changed;
     if (out_len != len) {
+      if (op != model::ops::Op::Duplicate) {
+        // S7d: the lane ticks follow the rows, before the length changes (A17 then has nothing left to cut); the pre-check above made it fit
+        const model::Status ls = ctx.edit->lane_scale(id, static_cast<unsigned>(t), out_len, op == model::ops::Op::Expand);
+        too_big = too_big || ls == model::Status::Full;
+      }
       const model::Status st = ctx.edit->set_track_length(id, static_cast<unsigned>(t), out_len);
       changed = changed || st == model::Status::Ok;
       too_big = too_big || st == model::Status::Full;

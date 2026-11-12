@@ -178,7 +178,7 @@ Deterministic and in the repository (Python standard library only): greedy-lazy 
 
 ### 3.7 Bench image (B1)
 
-`-DO3OS_BENCH_ARCHIVE=ON` (default OFF) keeps the retired one-off A/B benches: `cpuopt` (OS-CPUOPT1), `looper` (OS-LOOPER L2b), `voice_st` (OS-STEREO step 1) and `disk` (OS-USBDISK U1d). Without it the console still lists them and answers `not in this image (O3OS_BENCH_ARCHIVE)`, as a release image answers for `bench`. The kernels every CPU measurement uses (`kernels`, `voice*`, `insert`, `tb303`, `reverb`, `delay`, `limiter`, `dj`, `stages`, `burst`, `worst`, `on`) and `diag cache check` (a general tool of the `rt-optimize` skill) stay.
+`-DO3OS_BENCH_ARCHIVE=ON` (default OFF) keeps the retired one-off A/B benches: `cpuopt` (OS-CPUOPT1), `looper` (OS-LOOPER L2b), `voice_st` (OS-STEREO step 1) and `disk` (OS-USBDISK U1d). Without it the console still lists them and answers `not in this image (O3OS_BENCH_ARCHIVE)`, as a release image answers for `bench`. The kernels every CPU measurement uses (`kernels`, `voice*`, `insert`, `tb303`, `reverb`, `delay`, `limiter`, `dj`, `stages`, `burst`, `worst`, `on`) and `diag cache check` (a general tool of the `rt-optimize` skill) stay. **OS-BENCHDIET (2026-11-12):** `burst`, `kernels`, `mem`, `delay`, `reverb`, `reverb_full`, `limiter` and `limiter_q` moved behind the same option (the stage costs stay readable in `stages` and `worst`; `diag bench all` skips them in an image without it), to give the bench image room for a feature.
 
 ### 3.8 The budget after each phase (content bytes, estimates)
 

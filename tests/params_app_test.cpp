@@ -538,7 +538,7 @@ TEST_CASE("params edit: a macro replays parameter edits as one unit") {
   CHECK(rig.value(inst(0, ip::Panning)) == pan);
 }
 
-TEST_CASE("param auto: the value a CC letter played moves the parameter that owns it, scaled to its range, told to the audio side, with no undo unit; a free letter and a bad one do nothing") {
+TEST_CASE("param auto: the value a CC letter played goes to the audio side only, scaled to its range: the project keeps the base value, no undo unit; the stop restores the base; a free letter and a bad one do nothing") {
   Rig rig;
   model::Instrument in = *rig.project().instrument(0);
   NEED(in.kind != model::InstrumentKind::Midi);
@@ -547,21 +547,32 @@ TEST_CASE("param auto: the value a CC letter played moves the parameter that own
   rig.pass(1600);
   rig.heard();
   const unsigned depth = rig.editor->journal().depth();
-  CHECK(rig.invoke("param.auto", (2u << 8) | 0u) == DispatchResult::Changed);
-  CHECK(rig.value(inst(0, ip::Volume)) == 0.0f);
-  CHECK(rig.invoke("param.auto", (2u << 8) | 127u) == DispatchResult::Changed);
-  CHECK(rig.value(inst(0, ip::Volume)) == 100.0f);  // 127 is the top of the range
-  CHECK(rig.invoke("param.auto", (2u << 8) | 64u) == DispatchResult::Changed);
-  CHECK(std::fabs(rig.value(inst(0, ip::Volume)) - 100.0f * 64.0f / 127.0f) < 1.0f);
-  const std::vector<core::ParamChange> heard = rig.heard();
+  const float base = rig.value(inst(0, ip::Volume));
+  const std::uint32_t generation = rig.project().generation();
+  CHECK(rig.invoke("param.auto", (2u << 8) | 0u) == DispatchResult::Unchanged);  // not a change of the document
+  CHECK(rig.invoke("param.auto", (2u << 8) | 127u) == DispatchResult::Unchanged);
+  CHECK(rig.invoke("param.auto", (2u << 8) | 64u) == DispatchResult::Unchanged);
+  std::vector<core::ParamChange> heard = rig.heard();
   NEED(heard.size() == 3u);
-  CHECK(heard[2].id == inst(0, ip::Volume));
-  CHECK(heard[2].value == rig.value(inst(0, ip::Volume)));
+  CHECK(heard[0].id == inst(0, ip::Volume));
+  CHECK(heard[0].value == 0.0f);
+  CHECK(heard[1].value == 100.0f);  // 127 is the top of the range
+  CHECK(std::fabs(heard[2].value - 100.0f * 64.0f / 127.0f) < 1.0f);
+  CHECK(rig.value(inst(0, ip::Volume)) == base);  // the document keeps the base value
+  CHECK(rig.project().generation() == generation);
   CHECK(rig.editor->journal().depth() == depth);  // playback is not an edit of the document
-  const float v = rig.value(inst(0, ip::Volume));
-  CHECK(rig.invoke("param.auto", (0u << 8) | 5u) != DispatchResult::Changed);  // CC A owns nothing
-  CHECK(rig.invoke("param.auto", (9u << 8) | 5u) != DispatchResult::Changed);  // no such letter
-  CHECK(rig.value(inst(0, ip::Volume)) == v);
+  CHECK(rig.invoke("param.auto", (0u << 8) | 5u) == DispatchResult::Unchanged);  // CC A owns nothing
+  CHECK(rig.invoke("param.auto", (9u << 8) | 5u) == DispatchResult::Unchanged);  // no such letter
+  CHECK(rig.heard().empty());
+  // The stop: the base value goes to the audio side again, once.
+  CHECK(rig.invoke("param.auto", 0xFF00u) == DispatchResult::Unchanged);
+  heard = rig.heard();
+  NEED(heard.size() == 1u);
+  CHECK(heard[0].id == inst(0, ip::Volume));
+  CHECK(heard[0].value == base);
+  CHECK(rig.invoke("param.auto", 0xFF00u) == DispatchResult::Unchanged);
+  CHECK(rig.heard().empty());
+  CHECK(rig.project().generation() == generation);
   CHECK(rig.project().check_invariants());
 }
 

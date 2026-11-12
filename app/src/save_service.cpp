@@ -1465,7 +1465,7 @@ SaveService::SurveyStep SaveService::og_survey_step() noexcept {
       }
       return ogs_.n > guard::kOgFolderMaxN ? fail(Start::NoName) : SurveyStep::More;
     case Stage::Plan:
-      if (!ogs_.plan.begin(*ogs_.project, ogs_.bank)) {
+      if (!ogs_.plan.begin(*ogs_.project, ogs_.bank, og_lanes_)) {
         return fail(Start::Empty);
       }
       ogs_.plan.survey_start(ogs_.out.drops);  // the plan's counters, and the writers' as they are added
@@ -1554,7 +1554,7 @@ SaveService::Start SaveService::start_og_export(core::JobRunner& jobs, const mod
   bool planned;
   {
     const OgTiming::Scope timed(&og_timing_, OgTiming::Stage::Plan);
-    planned = og_.plan.begin(project, og_.bank);
+    planned = og_.plan.begin(project, og_.bank, og_lanes_);
   }
   if (!planned) {
     og_.folder[0] = '\0';

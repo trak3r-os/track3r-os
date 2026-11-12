@@ -81,6 +81,7 @@ void ExportDrops::add(const ExportDrops& o) noexcept {
   sum(wt_mod, o.wt_mod);
   sum(pattern_names, o.pattern_names);
   sum(settings_ignored, o.settings_ignored);
+  sum(lane_events, o.lane_events);
   sum(midi_settings, o.midi_settings);
   sum(resampled, o.resampled);
   sum(rate_ignored, o.rate_ignored);
@@ -98,7 +99,7 @@ void ExportDrops::add(const ExportDrops& o) noexcept {
 bool ExportDrops::any_lost() const noexcept {
   return (tracks_beyond_12 | engine_fx | core_fx | ce_fx | volume_dropped | track_settings | track_names_cut | project_settings |
           module_instruments | midi_instruments | sample_slots_beyond_48 | unknown_chunks | instrument_names_cut |
-          pattern_names | settings_ignored | midi_settings | lfo_sine | wt_mod | rate_ignored | amiga_engine | bit_engine | pcm_too_long | instruments_not_written | levels_clamped | stereo_mid) != 0;
+          pattern_names | settings_ignored | lane_events | midi_settings | lfo_sine | wt_mod | rate_ignored | amiga_engine | bit_engine | pcm_too_long | instruments_not_written | levels_clamped | stereo_mid) != 0;
 }
 
 bool inspect_settings(const std::uint8_t* payload, std::uint32_t length, std::uint16_t& groups,

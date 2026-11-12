@@ -1593,6 +1593,9 @@ void cmd_bench(shell::Shell& sh, const shell::Args& a) {
     static constexpr bench::Kernel kAll[] = {bench::Kernel::Voice,   bench::Kernel::VoiceFilter, bench::Kernel::VoiceDrive,     bench::Kernel::VoiceCrush, bench::Kernel::Tb303,        bench::Kernel::Delay,  bench::Kernel::Reverb,
                                              bench::Kernel::ReverbFull, bench::Kernel::Limiter, bench::Kernel::LimiterQuiet, bench::Kernel::Strips};
     for (const bench::Kernel k : kAll) {
+      if (!O3OS_BENCH_ARCHIVE && bench::archived(k)) {
+        continue;  // OS-BENCHDIET: an archived kernel is not in this image; `all` runs what is
+      }
       bench::run(k, blocks, variant, &bench_emit, &sh);
     }
     sh.out().text("BENCH done\n");

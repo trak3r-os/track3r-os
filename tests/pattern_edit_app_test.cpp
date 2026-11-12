@@ -6448,7 +6448,131 @@ TEST_CASE("OS-MIDIREC-P1 S7c: row Insert and Pull move the lane ticks with the r
   rig.app->attach_document(nullptr);
 }
 
-TEST_CASE("OS-MIDIREC-P1 S7c: FILL (the action, the dialog's EUCLID and RANDOM) and the RANDOMISE verb change steps only, the lanes stay as they were") {
+// ---- OS-MIDIREC-P1 S7d: EXPAND / SHRINK scale the lane ticks with the rows, TRANSPOSE moves the lane notes (A16, A17; QA-PAT-527..) -----------------------------------------------------
+
+TEST_CASE("OS-MIDIREC-P1 S7d: EXPAND doubles the lane ticks with the rows and SHRINK halves them, in the steps' one undo unit; an event past the new end is deleted and undo restores everything") {
+  Rig rig(true, 16);
+  lanes_on(rig);
+  NEED(lane_set(rig, 0, {lane_cc(5, 1), lane_cc(99, 2), lane_cc(480, 3)}));
+  NEED(lane_set(rig, 1, {lane_cc(677, 4)}));
+  NEED(lane_set(rig, 2, {lane_cc(100, 5)}));
+  put_note(rig, 0, 3, 50);
+  rig.edit_mode();
+  rig.editor->history_reset();
+  const std::string before = lanes_now();
+  const std::vector<unsigned> len0 = lengths_of(rig);
+  CHECK(rig.invoke("pattern.op", 1) == DispatchResult::Changed);  // EXPAND: 16 -> 32 steps on every track
+  CHECK(rig.depth() == 1u);
+  CHECK(lane_text(0) == "10:1 198:2 960:3");
+  CHECK(lane_text(1) == "1354:4");
+  CHECK(lane_text(2) == "200:5");
+  CHECK(rig.project().pattern(1)->track_length[0] == 32u);
+  CHECK(rig.step(0, 6).note == 50);
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  CHECK(lanes_now() == before);
+  CHECK(lengths_of(rig) == len0);
+  CHECK(rig.step(0, 3).note == 50);
+  rig.flush();
+  CHECK(rig.invoke("pattern.op", 2) == DispatchResult::Changed);  // SHRINK: 16 -> 8 steps
+  CHECK(lane_text(0) == "2:1 49:2 240:3");
+  CHECK(lane_text(1) == "338:4");  // 677 / 2 = 338 is on step 7: it stays
+  CHECK(lane_text(2) == "50:5");
+  CHECK(rig.project().pattern(1)->track_length[0] == 8u);
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  CHECK(lanes_now() == before);
+  CHECK(lengths_of(rig) == len0);
+  CHECK(rig.invoke("edit.redo") == DispatchResult::Changed);
+  CHECK(lane_text(0) == "2:1 49:2 240:3");
+  rig.app->attach_document(nullptr);
+}
+
+TEST_CASE("OS-MIDIREC-P1 S7d: an EXPAND or SHRINK whose lane records do not fit the undo ring is refused whole with the strip notice, steps, lengths and lanes unchanged") {
+  static model::LaneEvent big[4096];
+  for (unsigned i = 0; i < 4096; ++i) {
+    big[i] = lane_cc(i * 6144u / 4096u, i & 0x7Fu);
+  }
+  Rig rig(true, 128, true, 96u * 1024u);  // a 40 KiB Pattern ring: the two lanes (the records of a scale are twice 33 KB) do not fit
+  g_s7c.clear();
+  g_s7c.adopt(rig.project().load_epoch());
+  rig.editor->attach_lanes(&g_s7c);
+  rig.app->attach_document(rig.editor.get());
+  NEED(rig.editor->lane_replace(1, 0, 0, 6144, big, 4096) == model::Status::Ok);
+  put_note(rig, 0, 100, 77);
+  rig.edit_mode();
+  rig.editor->history_reset();
+  const std::vector<unsigned> lengths = lengths_of(rig);
+  (void)rig.invoke("pattern.op", 2);  // (Changed: the strip text is what is redrawn; the pattern is not)
+  CHECK(rig.message() == "TOO BIG TO UNDO: USE THE LENGTH CHOOSER");
+  CHECK(rig.depth() == 0u);
+  CHECK(lengths_of(rig) == lengths);
+  CHECK(g_s7c.lane(1, 0).count == 4096u);
+  CHECK(g_s7c.lane(1, 0).events[1].tick == 1u);  // (6144 / 4096 = 1: not scaled)
+  CHECK(rig.step(0, 100).note == 77);
+  rig.app->attach_document(nullptr);
+}
+
+TEST_CASE("OS-MIDIREC-P1 S7d: TRANSPOSE of a whole-step block moves the lane notes of its tracks and rows with the steps' notes, CC and the other rows stay, one undo unit") {
+  Rig rig(true, 16);
+  lanes_on(rig);
+  model::LaneEvent n1 = lane_cc(10, 90);
+  n1.kind_channel = 0;
+  n1.len = 20;
+  n1.a = 60;
+  model::LaneEvent n2 = n1;
+  n2.a = 64;  // a chord
+  model::LaneEvent n3 = n1;
+  n3.tick = 300;  // step 6: outside the block
+  NEED(lane_set(rig, 0, {n1, n2, lane_cc(20, 55), n3}));
+  NEED(lane_set(rig, 2, {n1}));  // a track outside the block
+  put_note(rig, 0, 0, 61);
+  put_note(rig, 1, 0, 63);
+  rig.edit_mode();
+  rig.editor->history_reset();
+  select_block(rig, 0, 0, 2, 2);
+  CHECK(rig.invoke("verb.transpose", 5) == DispatchResult::Changed);
+  CHECK(rig.depth() == 1u);
+  const model::LaneStore::View v1 = g_s7c.lane(1, 0);
+  NEED(v1.count == 4u);
+  CHECK(v1.events[0].a == 65);
+  CHECK(v1.events[1].a == 69);  // the chord stays a chord
+  CHECK(v1.events[2].a == 1);   // the CC controller number stays
+  CHECK(v1.events[2].b == 55);
+  CHECK(v1.events[3].a == 60);  // step 6 is outside the block
+  CHECK(g_s7c.lane(1, 2).events[0].a == 60);
+  CHECK(rig.step(0, 0).note != 0);
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  const model::LaneStore::View v2 = g_s7c.lane(1, 0);
+  CHECK(v2.events[0].a == 60);
+  CHECK(v2.events[1].a == 64);
+  rig.app->attach_document(nullptr);
+}
+
+TEST_CASE("OS-MIDIREC-P1 S7d: the TOOLS dialog's TRANSPOSE with a bare cursor (no selection) moves the cursor step only, the lane notes stay") {
+  Rig rig(true, 16);
+  lanes_on(rig);
+  model::LaneEvent n1 = lane_cc(10, 90);
+  n1.kind_channel = 0;
+  n1.len = 20;
+  n1.a = 60;
+  NEED(lane_set(rig, 0, {n1}));  // track 0, step 0: under the cursor
+  put(rig, 0, 0, note_at(61, 3));
+  rig.edit_mode();
+  rig.editor->history_reset();
+  rig.tap(Button::F7);
+  rig.pad(0);  // TRANSPOSE: the dialog
+  CHECK(rig.state().overlay == app::OverlayId::PatternTools);
+  rig.tap(Button::Down);
+  rig.turn(1);  // AMOUNT +1
+  CHECK(rig.state().ptools.amount != 0);
+  rig.tap(Button::F1);
+  CHECK(rig.step(0, 0).note != 61);  // the step moved
+  const model::LaneStore::View lv = g_s7c.lane(1, 0);
+  NEED(lv.count == 1u);
+  CHECK(lv.events[0].a == 60);  // the lane note did not
+  rig.app->attach_document(nullptr);
+}
+
+TEST_CASE("OS-MIDIREC-P1 S7d: FILL (the action,the dialog's EUCLID and RANDOM) and the RANDOMISE verb change steps only, the lanes stay as they were") {
   Rig rig(true, 16);
   lanes_on(rig);
   NEED(lane_set(rig, 0, {lane_cc(5, 1), lane_cc(99, 2), lane_cc(480, 3)}));

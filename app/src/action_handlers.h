@@ -283,7 +283,9 @@ bool midi_cc(ActionContext& ctx, core::ActionArg arg) noexcept;
 bool enc_assign(ActionContext& ctx, core::ActionArg arg) noexcept;
 bool enc_turn(ActionContext& ctx, core::ActionArg arg) noexcept;
 // OS-PARAMAUTO S2 (param_actions.cpp): the sequencer played CC A..F on a step of a Sample or Module instrument whose letter is mapped to a parameter (App::poll_param_auto): arg = (letter 0..5 << 8) | value 0..127.
-// The parameter moves to value/127 of its range, final (no undo record); false when the letter owns nothing now or the parameter is not learnable.
+// OS-BUG-PARAMAUTO-PLAY: the value goes to the audio side only (the project keeps the base value; the action never changes the document: always false). Letter kAutoRestore (arg kAutoRestore << 8) sends the
+// base value of every parameter the letters moved (App::poll_param_auto, once the transport is stopped).
+inline constexpr unsigned kAutoRestore = 0xFFu;
 bool param_auto(ActionContext& ctx, core::ActionArg arg) noexcept;
 
 // cc_map.cpp: OS-MIDICCMAP S2, one message of the fixed CC map (app/cc_map.h) — called by midi_cc after both Learn stores, when CC MAP is On and no binding listens.

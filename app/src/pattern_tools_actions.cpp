@@ -166,6 +166,16 @@ bool pattern_tools_run(ActionContext& ctx, PTool tool, int amount, unsigned inst
       lane_cleared = true;
     }
   }
+  // S7d, TRANSPOSE: the lane NOTE events of a whole-step block move by the same amount as the steps' notes (A16; CC untouched), only with a selection (a bare cursor moves its step only), made first and after a dry run, like CLEAR LANE.
+  bool lane_moved = false;
+  if (tool == PTool::Transpose && v.edit.selection.active && b.whole_steps() && lane_store != nullptr) {
+    const PatternSource lsrc(ctx.model, v.edit.pattern);
+    const int lr = pe::lanes_transpose_block(ctx, v.edit.pattern, b, lsrc, amount, pe::step_bytes(b.track1 - b.track0 + 1, static_cast<int>(model::kMaxPatternLength)));
+    if (lr < 0) {
+      return true;  // (said: TOO BIG TO UNDO, nothing changed)
+    }
+    lane_moved = lr > 0;
+  }
   pe::Edited e;
   switch (tool) {
     case PTool::Transpose:
@@ -183,7 +193,7 @@ bool pattern_tools_run(ActionContext& ctx, PTool tool, int amount, unsigned inst
       break;
     }
   }
-  if (!e.changed && !lane_cleared) {
+  if (!e.changed && !lane_cleared && !lane_moved) {
     if (e.failed) {
       return true;  // (said: NO ROOM FOR A NEW PATTERN)
     }
