@@ -93,6 +93,12 @@ endif()
 if(O3OS_PLATFORM STREQUAL "mk66")
   target_compile_definitions(app PRIVATE O3OS_FX_TEXT_CACHE_EXTERNAL=1)
 endif()
+# OS-FLASHDIET R2: the two std::sqrt calls (the compressor's RMS detector, the Amiga resampler's Kaiser window) are one VSQRT.F32 on the target
+# without errno handling: no libm sqrtf (wf_sqrt, ef_sqrt, 100 bytes). The instruction is correctly rounded, so the results are the same;
+# the arguments are never negative (the NaN case differs only in errno). Host and simulator builds are untouched.
+if(O3OS_CROSS)
+  set_source_files_properties(src/sample_dsp.cpp src/amiga_convert.cpp PROPERTIES COMPILE_OPTIONS "-fno-math-errno")
+endif()
 # OS-FLASHDIET P6: on the MK66 image the constexpr built-in bindings table is not linked in; the platform unpacks the blob into SDRAM at boot (start_app in app_main.cpp).
 # Host, the simulator and QEMU keep the constexpr table (and the host test holds the blob to it).
 if(O3OS_PLATFORM STREQUAL "mk66")

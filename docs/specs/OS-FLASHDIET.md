@@ -435,7 +435,7 @@ Q3 is reversed by the maintainer (2026-11-10): the four built-in instrument modu
 | Slice | What | State |
 |---|---|---|
 | R1 | `kBuiltinTable` deflated (P6, 10.6 step 6) | already merged on dev as P6 (a89f9373, merge 01100654); nothing to do here |
-| R2 | developer-text pool (diag, bench and console strings of dev-only paths) | **not done**: about 2-3 KB estimated (about 5 KB of text, gross), diminishing returns after R3; left as a candidate |
+| R2 | developer-text pool (diag, bench and console strings of dev-only paths) | **measured and rejected (OS-FLASHDIET-R2)**: moving 29 `app_main.cpp` boot and load strings into the P5 pool saved only 972 B of product flash (988 B bench) and cost 1,664 B of SDRAM_STATIC (the pool inflates whole; 640 B left on the bench), so it did not land; about 2-3 KB estimated before, the real gain is under 1 KB |
 | R3 | the four built-ins leave the image | done |
 
 R3 as built (**new Community OS behaviour**):
