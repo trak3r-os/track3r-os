@@ -30,7 +30,7 @@ track3r-os replaces the software that runs on the Tracker. You keep the hardware
 - **It can follow a DAW.** MIDI Time Code out and in, next to the MIDI clock.
 - **It is open.** Anyone can read the code, build it and improve it.
 
-**v1.3.1** is the current release (v1.3.0, v1.2.0, v1.1.0, v1.0.1 and v1.0.0 came before). The changes are in the [release notes](docs/release/v1.3.1.md); what is open and what comes next is in [docs/roadmap/BACKLOG.md](docs/roadmap/BACKLOG.md).
+**v1.4.0** is the current release (v1.3.0, v1.2.0, v1.1.0, v1.0.1 and v1.0.0 came before). The changes are in the [release notes](docs/release/v1.4.0.md); what is open and what comes next is in [docs/roadmap/BACKLOG.md](docs/roadmap/BACKLOG.md).
 
 ## Screens
 
@@ -75,7 +75,7 @@ track3r-os replaces the software that runs on the Tracker. You keep the hardware
   - **LIVE** writes where the music is, with a count-in, a metronome, quantize and microtiming.
 - **MIDI recording into lanes:** notes and chords with their sub-step timing and length, external CCs, a Learn knob or the encoder. The **EVENTS** list shows and edits every lane event, and one undo takes a whole take back.
 - **Parameter automation:** any learnable parameter records from the pattern as a CC letter, **CC A** to **CC F**, six per project.
-- **Pads that play the way you want:** notes in a scale (39 scales, with the official numbering), piano layout, isomorphic layout, or one pad per track.
+- **Pads that play the way you want:** notes in a scale (39 scales, with the official numbering), piano layout (with a pitch-bend strip and a vibrato pad), isomorphic layout, or one pad per track.
 - **Pattern tools:** select, press `F7` and pick a verb; fill dialogs (including Euclidean rhythms), TRANSPOSE and INSTRUMENT dialogs, copy and paste, a selection that grows in stages, and `F6` to repeat the last fill or tool.
 - **Undo and redo** for every edit, and names for tracks, patterns and the project.
 
@@ -98,7 +98,7 @@ track3r-os replaces the software that runs on the Tracker. You keep the hardware
 - **Sample editor:** cut, shape and convert (also to the Amiga rates), plus a **PLUGINS** page that runs `.ptfx` effects on the sample with undo; nineteen plugins come in the modules zip, six of them our own.
 
 ### Mix and perform
-- **Mixer:** levels, mute and solo, a delay send and a reverb send per track, and a master limiter.
+- **Mixer:** levels, mute and solo, a delay send and a reverb send per track, a master limiter, and a five-band master EQ with a bass boost.
 - **Insert effects:** two per track and one on the master, with their parameters on MIDI Learn and saved with the project. Eleven effect modules: DRIVE, CRUSH, COMP (with a transient mode and a sidechain key), ENV FILTER, FOLD, PHASER, BIQUAD, PING-PONG (tempo-synced), WIDE, CHORUS and AUTOPAN.
 - **Perform screen:** scenes you can store and recall, live effects, and custom play orders C1 to C20.
 - **DJ page:** put some tracks in group A and some in group B, then mix them live with a crossfader, a filter, band kills, stutters, a scratch and tape stop, and move to the next pattern from the pads. Nothing is written into the song. Open Perform, then press `Perform` again ([manual](docs/manual/perform_dj.md)).
@@ -136,7 +136,7 @@ track3r-os replaces the software that runs on the Tracker. You keep the hardware
 
 ## Get started
 
-- **Download:** the [latest release](https://github.com/trak3r-os/track3r-os/releases/latest) has the firmware file (`track3r-os-v1.3.1.ptf`), `track3r-os-v1.3.1-modules.zip` (the apps, effects, the instruments TB-303, Chip, FM, SID and sine, the importer for MOD, S3M and MED, presets and the `.ptfx` plugins), `track3r-os-v1.3.1-examples.zip` and `SHA256SUMS`. Unzip both zips at the card root: the four synths need their files in `modules/instruments/` and import needs `modules/importers/tracker.tmod`, both from the modules zip.
+- **Download:** the [latest release](https://github.com/trak3r-os/track3r-os/releases/latest) has the firmware file (`track3r-os-v1.4.0.ptf`), `track3r-os-v1.4.0-modules.zip` (the apps, effects, the instruments TB-303, Chip, FM, SID and sine, the importer for MOD, S3M and MED, presets and the `.ptfx` plugins), `track3r-os-v1.4.0-examples.zip` and `SHA256SUMS`. Unzip both zips at the card root: the four synths need their files in `modules/instruments/` and import needs `modules/importers/tracker.tmod`, both from the modules zip.
 - **Install:** read the [install guide](docs/manual/install.md) first. It covers installing from the official firmware, updating, and going back.
 - **Learn it:** the [user manual](docs/manual/index.md), one chapter per screen.
 

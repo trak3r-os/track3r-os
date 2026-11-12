@@ -2,20 +2,21 @@
 
 User-visible changes of the Community OS, newest first, one entry per change, in English. The next release notes link here. A change that touches a saved file or the level of what you hear says so in plain words.
 
-## Next release (version and date to be set at publication)
+## v1.4.0 (2026-11-12)
+
+A master EQ on the Mixer, a bend strip and a vibrato pad on the PIANO pads, a key-layout clean-up (fewer chords, one accept/back grammar) and six Sample Editor plugins of our own. The module ABI is 1.13, as in v1.3.0. One saved-file change: a project with a master EQ gains an optional `MEQ ` chunk (see Changed). Use the v1.4.0 modules zip: it adds the six plugins.
+
+Everything below is merged and tested on the host and in the emulator. Where a line says "checked on the unit" a Tracker ran it. The unit results are in the [release notes](release/v1.4.0.md).
 
 ### New
 
+- **MST EQ: a master EQ and a bass boost.** The Mixer has a sixth page, **MST EQ** (press `Master` to turn to it): a five-band EQ at 115 Hz, 330 Hz, 990 Hz, 3 kHz and 9.9 kHz, each from -12 to +12 dB, and **BASS BOOST** from 0 to 100. They run in the codec, so they shape the headphone and line outputs only: not an exported file, not USB audio and not a resampled take. They are saved with the project. A new project is flat. Nothing lowers the level when you boost a band, so a loud mix can clip. Public issue #6 (the master EQ; a per-channel EQ is still open). Checked on the unit: the page, the clamps, save and reload, the bands and the bass boost heard on the analogue output, and USB audio unchanged.
+- **PIANO pitch-bend strip.** In the PIANO pad mode the eight pads of columns 10 and 11 bend the pitch while held: +2, +1, -1 and -2 semitones, back to the note's own pitch when you let go. A MIDI instrument gets a pitch bend scaled by its bend range. Checked on the unit (+2 561.2 Hz, +1 529.7, -1 471.9, -2 445.4 against 500 Hz; returns on release).
+- **PIANO bend recording.** While you record, the bend is written into the pattern as Slide up and Slide down (FX 41 and 42), with a Slide 0 at the release. A MIDI keyboard's pitch wheel bends the sounding sample voices by -2 to +2 semitones in any pad mode.
+- **PIANO vibrato pad.** The two pads of column 12 in rows 2 and 3: while held, the notes you play get the Finetune LFO (FX 33) at about 5 Hz; a MIDI instrument gets CC1 127 at the press and 0 at the release. Nothing is written to the pattern.
+- **New projects start in C major** (the scale of the note pads), not Chromatic. A project you load keeps its own scale.
+- **Lane edits follow the scale tools.** EXPAND and SHRINK scale the lanes of a MIDI track with the steps, TRANSPOSE moves the lane notes, and an OG export says **LANE EVENTS NOT EXPORTED** when lanes hold events (the OG format has no lanes).
 - **Six Sample Editor plugins of our own in `Effects/`.** Generators: **WT Forge** (a wavetable whose timbre moves, nine modes), **WT Notes** (a wavetable whose windows are notes: the position plays an arpeggio, a scale or chords), **Grain Lock** (a bed for the GRANULAR play mode, built on your grain length, shape and loop) and **Pad Forge** (a pad that loops with no seam, as one note or a chord). Effects: **WT Resynth** (a sample becomes a wavetable of its own timbre) and **Pad Stretch** (a sample becomes up to 16 times longer, smeared into a pad). They are in the SD content zip; the firmware does not change. See [Sample edit](manual/sample_edit.md#the-track3r-os-plugins).
-
-## v1.3.1 (2026-11-12)
-
-A key-layout release: fewer chords, one accept/back grammar, and faster ways to save, loop, chop and pick pads. No saved file changes; the module ABI is 1.13, as in v1.3.0. Use the v1.3.0 modules zip or the v1.3.1 one (same modules).
-
-Everything below is merged and tested on the host and in the emulator. Where a line says "checked on the unit" a Tracker ran it. The unit results are in the [release notes](release/v1.3.1.md).
-
-### New
-
 - **`Shift`+`File` saves from any screen**, the same save as File `F4`. A project with no name yet opens the save-as text entry. Checked on the unit.
 - **Focus Loop.** On Pattern with a block selected, `Shift`+`Play` plays the block and loops it; the strip shows the range (`LOOP 04-11`). Play, or `Shift`+`Play` again, stops. With no block `Shift`+`Play` plays from the cursor as before. Checked on the unit.
 - **One PADS picker.** `Shift`+`F2` on Pattern opens a picker with every pad mode; one press picks, `F8` goes back. `Shift`+`F1` (octave) stays. Checked on the unit.
@@ -27,15 +28,19 @@ Everything below is merged and tested on the host and in the emulator. Where a l
 
 ### Changed
 
+- **Saved files.** A project with a master EQ or bass boost set gains an optional `MEQ ` chunk (8 bytes, written only when a value is not 0). A project that never touched MST EQ is the file it was, byte for byte. An older firmware keeps the chunk as an unknown chunk and plays with a flat output; a save there keeps it. Nothing else changes: the module ABI is 1.13.
 - **`F1` = OK and `F8` = BACK on every overlay, dialog and text entry.** Text entry was `F8` OK / `F7` CANCEL; the Navigator was `F8` GO. Checked on the unit.
 - **The encoder assign moves into the Learn dialog: `F7` ENC.** The `Instr`+`Fx` chord is gone; `Vol`+`Fx` still opens Learn. Checked on the unit.
 - **Pattern `F1` tap opens the pattern chooser**, as the hold does. Checked on the unit.
 - **`Shift`+`Rec` toggles LIVE on and off** from any mode; `Rec` toggles Browse and Edit. Checked on the unit.
 - **Song `F2` = DUP PAT** (the same as `Shift`+`Insert`); the Play button plays the song as before. Checked on the unit.
 - **`Shift`+`F7`/`F8` = INST -/+ on every sample screen.** Checked on the unit.
+- **Wavetable shapes use less flash.** The wavetable contours are computed with the core's own sine and cosine on the unit; the sound is the same (levels identical in an A/B on the unit).
+- **Sample edit PLUGINS: a WAVETABLE result sets WT SIZE.** `F4` NEW INS and `F1` APPLY of a wavetable plugin set the wavetable window size from the result in the same undo step (`F8` brings the old size back), so a slot that held another WT SIZE no longer reads the result wrongly.
 
 ### Fixed
 
+- **Played CC letters no longer change the project.** While a song plays, a CC letter (automation from the pattern) now reaches the sound only: a save during a sweep no longer fails with CHANGED: TRY AGAIN, playing no longer marks the project unsaved, and the base value comes back after stop. An offline export says **CC LETTER MOVES NOT RENDERED** when letters would move parameters.
 - **The Learn dialog is wider**, so all eight key labels sit inside it in every theme. Checked on the unit.
 
 ## v1.3.0 (2026-11-11)
