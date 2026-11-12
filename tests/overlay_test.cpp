@@ -309,7 +309,7 @@ TEST_CASE("overlay: with no overlay nothing is skipped: the pattern and song fra
   app::ViewState song;
   song.screen = ScreenId::Song;
   const Scene s(song, OverlayId::None, true);
-  CHECK(s.words == 572u);  // (OS-SONG3 S1: fifty-three more, the list has the BAR and BARS columns of the ARRANGEMENT page it folded in, NAME and BAR and BARS; OS-SONGMAP: three more, the F5 and F6 labels are UNIQUE and TOOLS, not PAT - and PAT +; OS-SHIFTROW: twelve more, the info line says SHIFT+INS DUP; OS-FU3: six more, the strip's "--" and MEM; OS-VOX: seven, the two-line load group; OS-SONG1: the BPM field)
+  CHECK(s.words == 571u);  // (OS-UXF-PAT 12: one fewer, the F2 label DUP PAT is one tile and PLAY SNG was two; OS-SONG3 S1: fifty-three more, the list has the BAR and BARS columns of the ARRANGEMENT page it folded in, NAME and BAR and BARS; OS-SONGMAP: three more, the F5 and F6 labels are UNIQUE and TOOLS, not PAT - and PAT +; OS-SHIFTROW: twelve more, the info line says SHIFT+INS DUP; OS-FU3: six more, the strip's "--" and MEM; OS-VOX: seven, the two-line load group; OS-SONG1: the BPM field)
 }
 
 TEST_CASE("overlay: the held Note's panel (the step popup, kind Note) is measured: within the standard budget in every theme and both modes, and over the bare screen (OS-SCALES28 S2)") {
@@ -484,7 +484,7 @@ TEST_CASE("overlay: the Navigator covers the most and saves the most, the notifi
     saved[k] = whole.words - skipped.words;
     CHECK(saved[k] > 0u);
   }
-  CHECK(saved[1] > saved[0]);  // the Navigator over Learn
+  CHECK(saved[1] >= saved[0]);  // the Navigator over Learn (Learn is 632 px wide since OS-BUG-LEGIB46: it culls as much)
   CHECK(saved[0] > saved[2]);  // Learn over the strip
   CHECK(saved[2] >= 30u);      // the strip alone drops the info line's hint and its undo depth
 }
@@ -742,7 +742,7 @@ TEST_CASE("overlay: the Navigator draws a cell for every registered screen, the 
     }
     CHECK(blue_cells_seen == static_cast<int>(table.count));
   }
-  // The footer says whether the chosen cell can be opened: F8 GO for a screen (OS-NAV2), the other text for one that is not there. Every screen is there since OS-011c (Record was the
+  // The footer says whether the chosen cell can be opened: F1 GO for a screen (OS-NAV2, OS-UXF-KEYS item 5), the other text for one that is not there. Every screen is there since OS-011c (Record was the
   // last one), so the footer is the same for every cell.
   app::ViewState song;
   song.overlay = OverlayId::Navigator;
@@ -795,18 +795,18 @@ bool key_row_is(const Scene& s, const KeyRowRef& ref) {
   return true;
 }
 
-const char* const kNavigatorPlain[8] = {"GO", "", "", "", "", "", "CLOSE", "GO"};
-const char* const kNavigatorShifted[8] = {"-", "-", "-", "-", "-", "-", "CLOSE", "GO"};
+const char* const kNavigatorPlain[8] = {"GO", "", "", "", "", "", "", "BACK"};
+const char* const kNavigatorShifted[8] = {"GO", "-", "-", "-", "-", "-", "-", "BACK"};
 
-TEST_CASE("overlay: while the Navigator is up the F-key row is its own (F1 GO, F7 CLOSE, F8 GO, the rest blank; no jumps with Shift held, F7 / F8 stay CLOSE / GO), and the screen's own row is back when it closes (OS-NAV2)") {
-  // The labels: F8 is GO here, not the screen's UNDO.
+TEST_CASE("overlay: while the Navigator is up the F-key row is its own (F1 GO, F8 BACK, the rest blank; no jumps with Shift held, F1 / F8 stay GO / BACK), and the screen's own row is back when it closes (OS-NAV2, OS-UXF-KEYS item 5)") {
+  // The labels: F1 is GO and F8 is BACK here, not the screen's UNDO.
   // (The rows the Navigator had before its prompt table: its key row is byte-identical with them, except Shift + F6, which reads "-" like the five before it: OS-KEYROWDLG, Fable's gap (f).)
   const char* const* plain = kNavigatorPlain;
   const char* const* shifted = kNavigatorShifted;
-  const char* const want[8] = {"GO", "", "", "", "", "", "CLOSE", "GO"};
+  const char* const want[8] = {"GO", "", "", "", "", "", "", "BACK"};
   for (unsigned i = 0; i < 8; ++i) {
     CHECK_MESSAGE(std::string(plain[i]) == want[i], "F" << i + 1);
-    CHECK_MESSAGE(std::string(shifted[i]) == (i < 6 ? std::string("-") : std::string(want[i])), "Shift F" << i + 1);  // Shift + F1..F6 are all bound to nothing
+    CHECK_MESSAGE(std::string(shifted[i]) == ((i == 0 || i == 7) ? std::string(want[i]) : std::string("-")), "Shift F" << i + 1);  // Shift + F2..F7 are all bound to nothing
   }
 
   for (unsigned t = 0; t < ui::kThemeCount; ++t) {

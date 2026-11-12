@@ -4,9 +4,7 @@
  "steps": [
   {"say": "the outputs must be open for a module note: the first Play opens them"},
   {"keys": ["-shift"], "gap": 0.2},
-  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "NAVIGATOR"}, "note": "(a leftover Navigator is closed: F7 is CLOSE, F8 would GO since OS-NAV2)"},
-  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
-  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "TEXT_ENTRY"}, "note": "(the on-screen keyboard is cancelled with F7, never accepted)"},
+  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|NAVIGATOR|TEXT_ENTRY)$"}, "note": "(a leftover overlay is put away: F8 is BACK on the Navigator, the keyboard (cancel, never accept: F1 accepts) and the choosers, OS-UXF-KEYS item 5)"},
   {"run": "_play"},
   {"wait": 1.0},
   {"run": "_stop"},
@@ -84,9 +82,7 @@
   {"keys": ["pattern"], "gap": 0.4}
  ],
  "finally": [
-  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "NAVIGATOR"}, "note": "(a leftover Navigator is closed: F7 is CLOSE, F8 would GO since OS-NAV2)"},
-  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
-  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "TEXT_ENTRY"}, "note": "(the on-screen keyboard is cancelled with F7, never accepted)"},
+  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|NAVIGATOR|TEXT_ENTRY)$"}, "note": "(a leftover overlay is put away: F8 is BACK on the Navigator, the keyboard (cancel, never accept: F1 accepts) and the choosers, OS-UXF-KEYS item 5)"},
   {"keys": ["pattern"], "gap": 0.4},
   {"cmd": "mod off 33"},
   {"cmd": "mod off 34"},

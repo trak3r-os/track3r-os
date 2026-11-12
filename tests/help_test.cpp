@@ -504,7 +504,7 @@ TEST_CASE("help: Shift + Config under the Navigator or another dialog does nothi
   NEED(rig.state().overlay == OverlayId::Navigator);
   rig.help();
   CHECK(rig.state().overlay == OverlayId::Navigator);
-  rig.tap(Button::F7);  // CLOSE
+  rig.tap(Button::F8);  // BACK
   NEED(rig.state().overlay == OverlayId::None);
   rig.press(Button::Vol);  // Learn (FX1 + FX2)
   rig.press(Button::Fx);

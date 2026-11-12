@@ -68,9 +68,9 @@ The load ends with one summary line, in the diag console log and in `diag sd` (s
 
 Start on the PROJECTS page.
 
-1. Press `F4` (**SAVE**). The strip says **SAVE <NAME> DONE**, and the earlier file is kept as `project.o3pj.bak`. A project that has no folder yet is saved in the first free folder named **Track nn**, with a title or without one. <!-- QA-FIL-072, QA-FIL-091, QA-FIL-098 -->
-2. To save a copy, press `F5` (**SAVE AS**). The keyboard opens. Type a folder name with the pads: letters, digits, spaces and `-`, at most 31 characters. Press `F8` (**SAVE**). `F6` (**AUTO**) fills in a name for you, and `F7` leaves without saving. `F8` with no name typed says **TYPE A NAME** and the keyboard stays open. <!-- QA-FIL-061 QA-FIL-113 -->
-3. To change the title shown in the header, press `Shift` + `F6` (**NAME**), type up to 32 characters and press `F8`. The strip says **PROJECT NAMED**. <!-- QA-FIL-060 -->
+1. Press `F4` (**SAVE**). The strip says **SAVE <NAME> DONE**, and the earlier file is kept as `project.o3pj.bak`. A project that has no folder yet is saved in the first free folder named **Track nn**, with a title or without one. `Shift` + `File` does the same from any screen; with no folder yet it opens the save-as keyboard instead. <!-- QA-FIL-072, QA-FIL-091, QA-FIL-098, QA-GLB-243 -->
+2. To save a copy, press `F5` (**SAVE AS**). The keyboard opens. Type a folder name with the pads: letters, digits, spaces and `-`, at most 31 characters. Press `F1` (**SAVE**). `F6` (**AUTO**) fills in a name for you, and `F8` (**CANCEL**) leaves without saving. `F1` with no name typed says **TYPE A NAME** and the keyboard stays open. <!-- QA-FIL-061 QA-FIL-113 -->
+3. To change the title shown in the header, press `Shift` + `F6` (**NAME**), type up to 32 characters and press `F1`. The strip says **PROJECT NAMED**. <!-- QA-FIL-060 -->
 
 **SAVE** in a project you opened from an official (OG) folder adds `project.o3pj` beside the original files and leaves them alone: a sample whose `samples/instrNN.wav` already holds the same audio is not rewritten, and only a sample you edited gets a new file (the old one kept as `.bak`). <!-- QA-FIL-104 --> **SAVE AS** writes a new folder and leaves the old one alone. <!-- QA-FIL-040, QA-FIL-034 --> The folder keeps its name when you change the title.
 

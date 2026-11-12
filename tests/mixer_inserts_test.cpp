@@ -1958,7 +1958,7 @@ TEST_CASE("OS-MODPRESET P4: on an insert's page Shift + F5 opens the PRESET NAME
   NEED(v.overlay == app::OverlayId::TextEntry);
   CHECK(v.text.target == app::TextEntryView::Target::Preset);
   CHECK(std::string(v.text.entry.text()) == "pfx");  // the effect's display name
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   CHECK(v.overlay == app::OverlayId::None);
   CHECK(rig.app->state().notify.head().text == "PRESET SAVED: PFX");
   for (unsigned i = 0; i < 400u && !mem.has("modules/presets/pfx/pfx.o3mp"); ++i) {

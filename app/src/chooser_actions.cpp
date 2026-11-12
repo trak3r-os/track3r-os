@@ -147,9 +147,6 @@ bool chooser_toggle(ActionContext& ctx, core::ActionArg arg) noexcept {
   if (ctx.model.project == nullptr) {
     return ui_softkey(ctx, arg);
   }
-  if (arg == kPattern) {
-    return false;  // OS-PATSWITCH (maintainer, 2026-10-17): the PATTERN chooser is the hold of F1 only; a tap leaves nothing open
-  }
   const OverlayId want = overlay_of_kind(arg);
   ctx.view.edit.chooser_held = false;
   if (ctx.view.overlay == want) {
@@ -160,6 +157,9 @@ bool chooser_toggle(ActionContext& ctx, core::ActionArg arg) noexcept {
     return false;  // Learn or the Navigator is up: not ours
   }
   ctx.view.overlay = want;
+  // OS-UXF-PAT item 6: a tap of F1 opens the PATTERN chooser as its hold does (pads, encoder, queue, Copy and Paste), and it stays until F1 or F8. The flag then means "the live PATTERN
+  // chooser": the release of a tap never closes it (only the hold_end of a hold does).
+  ctx.view.edit.chooser_held = arg == kPattern;
   return true;
 }
 

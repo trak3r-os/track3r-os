@@ -1,7 +1,7 @@
 # OS-FINALQA (docs/specs/OS-FINALQA.md): the Wave screen's QA rows, docs/qa/catalogue/wave.md. One `snap qa_wav_NNN` per row with a visible result; the goldens are keyed qa_wave/qa_wav_NNN.
 # OS-SHIFTROW: with Shift held the key row shows the Shift layer: a label only on a key that does something, "-" elsewhere; Shift + F never falls through to the plain key.
 
-# QA-WAV-001: the WAVE page with Shift held: MODE - - - - PRV SEL - REDO (F1 is MODE since OS-INSTUI S4).
+# QA-WAV-001: the WAVE page with Shift held: MODE - - - REDO PRV SEL INST - INST + (F1 is MODE since OS-INSTUI S4).
 document
 tap sampleplay
 press shift
@@ -85,6 +85,15 @@ snap qa_wav_019
 tap f5
 wait 300
 snap qa_wav_020
+
+# QA-WAV-029 (OS-UXF-SMP item 3c): Shift + F4 TO PAT writes the 16 slices as notes on consecutive steps of the Pattern cursor's track; the strip says so; F8 undoes the lot.
+press shift
+tap f4
+release shift
+wait 3000
+snap qa_wav_029
+tap f8
+wait 3000
 
 # QA-WAV-025 (OS-AUDIT E-PLAY-03): in ONE SHOT the WAVE page dims the LOOP START / LOOP END values and draws no loop marks (F3 picks LOOP END); LOOP FWD lights them again and draws the marks.
 tap sampleplay

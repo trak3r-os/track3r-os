@@ -4,9 +4,7 @@
  "steps": [
   {"say": "OS-DENSE: Heavy12 is the STRESS test (cpu-budget.md section 4): 12 tracks (6 Modern + 4 Amiga sampler voices, TB-303, FM). It is over the CPU budget on the unit (mean about 113 %, worst about 147 % on v1.0.0-fqa.8, 477d5d9, unit run of 2026-10-23), so this scenario asserts that the unit stays controllable (the main-loop guard of OS-MAINGUARD) and REPORTS underruns, shed blocks and the mean. BEFORE the run: build the song (`o3pj_tool gen heavy <dir>/Heavy/project.o3pj`, with the folder <dir>/Heavy/samples made first) and copy the folder Heavy into Projects/ on the card (card reader or the unit's USB Disk mode). Use the release image, then the bench image (-DO3OS_BENCH=ON) of the same build id: cpu-budget.md section 5."},
   {"keys": ["-shift"], "gap": 0.2, "note": "(Shift released, in case a former run left it down)"},
-  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "NAVIGATOR"}, "note": "(a leftover Navigator is closed: F7 is CLOSE, F8 would GO since OS-NAV2)"},
-  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
-  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "TEXT_ENTRY"}, "note": "(the on-screen keyboard is cancelled with F7, never accepted)"},
+  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|NAVIGATOR|TEXT_ENTRY)$"}, "note": "(a leftover overlay is put away: F8 is BACK on the Navigator, the keyboard (cancel, never accept: F1 accepts) and the choosers, OS-UXF-KEYS item 5)"},
   {"keys": ["file"], "gap": 0.5},
   {"state": {"screen": "FILE"}, "within": 3},
   {"keys": ["f2"], "gap": 0.5, "note": "RESCAN"},
@@ -91,9 +89,7 @@
  ],
  "finally": [
   {"keys": ["-shift"], "gap": 0.2},
-  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "NAVIGATOR"}, "note": "(a leftover Navigator is closed: F7 is CLOSE, F8 would GO since OS-NAV2)"},
-  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
-  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "TEXT_ENTRY"}, "note": "(the on-screen keyboard is cancelled with F7, never accepted)"},
+  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|NAVIGATOR|TEXT_ENTRY)$"}, "note": "(a leftover overlay is put away: F8 is BACK on the Navigator, the keyboard (cancel, never accept: F1 accepts) and the choosers, OS-UXF-KEYS item 5)"},
   {"keys": ["pattern"], "gap": 0.4},
   {"run": "_stop"}
  ]

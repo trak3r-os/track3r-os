@@ -4,8 +4,7 @@
  "steps": [
   {"run": "_load_tv16"},
   {"keys": ["-shift"], "gap": 0.2},
-  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "NAVIGATOR"}, "note": "(a leftover Navigator is closed: F7 is CLOSE, F8 would GO since OS-NAV2)"},
-  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|FILL)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
+  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|FILL|NAVIGATOR|TEXT_ENTRY)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
   {"keys": ["pattern"], "gap": 0.4},
   {"state": {"screen": "PATTERN"}, "within": 3},
   {"run": "_stop"},
@@ -62,8 +61,7 @@
  ],
  "finally": [
   {"run": "_stop"},
-  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "NAVIGATOR"}, "note": "(a leftover Navigator is closed: F7 is CLOSE, F8 would GO since OS-NAV2)"},
-  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
+  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|NAVIGATOR|TEXT_ENTRY)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
   {"keys": ["pattern"], "gap": 0.4}
  ]
 }

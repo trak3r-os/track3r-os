@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// OS-ENCLEARN (docs/specs/OS-ENCLEARN.md) on the app rig: Instr + FX2 makes the Learn row under the cursor the encoder's one target (no clear gesture: the same row again keeps it, another row replaces
+// OS-ENCLEARN (docs/specs/OS-ENCLEARN.md) on the app rig: F7 ENC in the Learn overlay (OS-UXF-KEYS item 17; it was Instr + FX2) makes the Learn row under the cursor the encoder's one target (no clear gesture: the same row again keeps it, another row replaces
 // it); the encoder moves it while Instr + FX1 are held, one fine step a detent, a coarse one with Shift, through the write of a relative Learn binding; letting go of either key ends it; the turn
 // leaves no tap, popup or column jump behind and wins over a held Vol; a LIVE take and a STEP gesture record the move as the step FX of "Record knob moves as FX", a parameter with no FX says so.
 // Host only (the app, the host fakes and the play position stub).
@@ -115,12 +115,14 @@ struct Rig {
     }
     return app::kParamsScreen.focus_param(app->model(), app->state()) == want;
   }
-  // Instr + FX2 on the row under the cursor.
+  // F7 ENC of the Learn overlay on the row under the cursor (OS-UXF-KEYS item 17: it was the chord Instr + FX2); the overlay closes again.
   void assign() {
-    press(Button::Instr);
+    press(Button::Vol);
     press(Button::Fx);
     release(Button::Fx);
-    release(Button::Instr);
+    release(Button::Vol);
+    tap(Button::F7);
+    tap(Button::F8);
   }
   void hold() {
     press(Button::Instr);
@@ -165,7 +167,7 @@ void target_cutoff(Rig& rig) {
 
 }  // namespace
 
-TEST_CASE("OS-ENCLEARN Instr + FX2 on a Learn row makes it the target; another row replaces it; the same row again keeps it and says it again; a refused row says so and keeps the target") {
+TEST_CASE("OS-ENCLEARN F7 ENC in the Learn overlay on a Learn row makes it the target; another row replaces it; the same row again keeps it and says it again; a refused row says so and keeps the target") {
   Rig rig;
   CHECK(rig.state().enc_target == ParamId::None);
   NEED(rig.focus(Button::F3, inst(0, ip::Cutoff)));
@@ -195,7 +197,7 @@ TEST_CASE("OS-ENCLEARN with no target the turn says NO ENCODER TARGET and moves 
   Rig rig;
   rig.hold();
   rig.turn(1);
-  CHECK(rig.noted("NO ENCODER TARGET (INSTR + FX2)"));
+  CHECK(rig.noted("NO ENCODER TARGET (SET IT IN LEARN)"));
   CHECK(rig.value(inst(0, ip::Cutoff)) == 0.30f);
   CHECK(rig.state().screen == ScreenId::Pattern);
 }
@@ -275,19 +277,7 @@ TEST_CASE("OS-ENCLEARN a plain Instr + Vol press does nothing; a turn leaves no 
   CHECK(rig.state().pattern.column() == col);
 }
 
-TEST_CASE("OS-ENCLEARN a held Fx does not take the turn from the target") {
-  Rig rig;
-  target_cutoff(rig);
-  rig.press(Button::Fx);
-  rig.press(Button::Instr);
-  rig.press(Button::Vol);
-  rig.turn(1);
-  CHECK(rig.value(inst(0, ip::Cutoff)) > 0.30f);
-  CHECK(rig.no_fx_anywhere());
-  rig.release(Button::Fx);
-  rig.release(Button::Vol);
-  rig.release(Button::Instr);
-}
+// (There was a case "a held Fx does not take the turn": Vol + Fx is Learn's chord, so with the Instr + Fx chord gone (OS-UXF-KEYS item 17) Fx cannot be held beside the Instr + Vol pair; the pair is for Vol alone.)
 
 TEST_CASE("OS-ENCLEARN LIVE records the move as the cutoff FX at the play line of the cursor's track, one value per step; WATCH records nothing") {
   {

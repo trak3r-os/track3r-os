@@ -5,11 +5,10 @@
   {"say": "OS-NAMES, rows QA-MIX-010..012, QA-SNG-010/011, QA-FIL-060..062 and QA-PAT-200 of docs/qa/catalogue. Needs the t-v16 project open, the transport stopped and a writable card (SAVE AS opens its keyboard only on a writable card)"},
   {"run": "_load_tv16"},
   {"keys": ["-shift"], "gap": 0.2, "note": "(Shift released, in case a former run left it down)"},
-  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "TEXT_ENTRY"}, "note": "(a leftover keyboard is cancelled with F7, never accepted)"},
-  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|NAVIGATOR|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
+  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|NAVIGATOR|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|TEXT_ENTRY)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
   {"run": "_stop"},
 
-  {"say": "QA-MIX-010 / 011: Mixer, MIXER page, the cursor on T1. Shift + F1 opens the keyboard titled TRACK NAME over T1's name, selected; typing over the selection (pads l e a d) and F8 name the track"},
+  {"say": "QA-MIX-010 / 011: Mixer, MIXER page, the cursor on T1. Shift + F1 opens the keyboard titled TRACK NAME over T1's name, selected; typing over the selection (pads l e a d) and F1 (OK) name the track"},
   {"keys": ["master"], "gap": 0.5},
   {"state": {"screen": "MIXER"}, "within": 3},
   {"keys": ["f1"], "gap": 0.3},
@@ -21,7 +20,7 @@
   {"pad": 14},
   {"pad": 24},
   {"pad": 26},
-  {"keys": ["f8"], "gap": 0.4},
+  {"keys": ["f1"], "gap": 0.4, "note": "F1 is OK: it accepts the name"},
   {"state": {"overlay": "NONE", "msg": "~^TRACK_01_NAMED$"}, "within": 2},
   {"shot": "qa_mix_011", "compare": {"sim_scenario": "sim/scenarios/qa/qa_mixer.txt", "snap": "qa_mix_011", "regions": ["0,0,800,440"], "tol": 24, "aa": 1, "max_bad": 0.005}, "non_blank": true, "soft": true, "note": "QA-MIX-011: T1 is named lead"},
 
@@ -31,7 +30,7 @@
   {"state": {"overlay": "NONE", "msg": "~^TRACKS_ONLY$"}, "within": 2},
   {"shot": "qa_mix_012", "non_blank": true, "soft": true, "note": "QA-MIX-012: the strip says TRACKS ONLY"},
 
-  {"say": "QA-SNG-010 / 011: Song. Shift + F6 opens PATTERN NAME over the pattern of the slot under the cursor; pads i n t r o and F8 name it; the order row carries the name"},
+  {"say": "QA-SNG-010 / 011: Song. Shift + F6 opens PATTERN NAME over the pattern of the slot under the cursor; pads i n t r o and F1 (OK) name it; the order row carries the name"},
   {"keys": ["song"], "gap": 0.5},
   {"state": {"screen": "SONG"}, "within": 3},
   {"keys": ["+shift", "f6", "-shift"], "gap": 0.4},
@@ -42,7 +41,7 @@
   {"pad": 16},
   {"pad": 15},
   {"pad": 20},
-  {"keys": ["f8"], "gap": 0.4},
+  {"keys": ["f1"], "gap": 0.4, "note": "F1 is OK: it accepts the name"},
   {"state": {"overlay": "NONE", "msg": "~^PATTERN_\\d+_NAMED$"}, "within": 2},
   {"shot": "qa_sng_011", "compare": {"sim_scenario": "sim/scenarios/qa/qa_song.txt", "snap": "qa_sng_011", "regions": ["0,0,800,440"], "tol": 24, "aa": 1, "max_bad": 0.005}, "non_blank": true, "soft": true, "note": "QA-SNG-011: the order row and the PAT field of the strip say intro"},
 
@@ -51,7 +50,7 @@
   {"state": {"screen": "PATTERN"}, "within": 3},
   {"shot": "qa_pat_200", "compare": {"sim_scenario": "sim/scenarios/qa/qa_pattern.txt", "snap": "qa_pat_200", "regions": ["0,0,800,440"], "tol": 24, "aa": 1, "max_bad": 0.005}, "non_blank": true, "soft": true, "note": "QA-PAT-200: 01 lead in the first header; the info line reads track 1 P.. intro"},
 
-  {"say": "QA-FIL-060 / 062: File, PROJECTS page. Shift + F6 opens PROJECT NAME over the project's title; pads d e m o and F8 set it (the folder on the card is not renamed); the header names the project"},
+  {"say": "QA-FIL-060 / 062: File, PROJECTS page. Shift + F6 opens PROJECT NAME over the project's title; pads d e m o and F1 (OK) set it (the folder on the card is not renamed); the header names the project"},
   {"keys": ["file"], "gap": 0.6},
   {"state": {"screen": "FILE"}, "within": 3},
   {"keys": ["+shift", "f6", "-shift"], "gap": 0.4},
@@ -61,7 +60,7 @@
   {"pad": 14},
   {"pad": 42},
   {"pad": 20},
-  {"keys": ["f8"], "gap": 0.4},
+  {"keys": ["f1"], "gap": 0.4, "note": "F1 is OK: it accepts the name"},
   {"state": {"overlay": "NONE", "msg": "~^PROJECT_NAMED$"}, "within": 2},
   {"shot": "qa_fil_062", "compare": {"sim_scenario": "sim/scenarios/qa/qa_file.txt", "snap": "qa_fil_062", "regions": ["0,0,800,440"], "tol": 24, "aa": 1, "max_bad": 0.005}, "non_blank": true, "soft": true, "note": "QA-FIL-062: the header reads PROJECT demo at the right, before OPEN"},
 
@@ -69,7 +68,7 @@
   {"keys": ["f5"], "gap": 0.5},
   {"state": {"overlay": "TEXT_ENTRY"}, "within": 3},
   {"shot": "qa_fil_061", "non_blank": true, "soft": true, "note": "QA-FIL-061: SAVE AS over a project with a folder: Track nn (a project with no folder and the title demo reads demo)"},
-  {"keys": ["f7"], "gap": 0.4, "note": "cancel"},
+  {"keys": ["f8"], "gap": 0.4, "note": "cancel (F8 is BACK)"},
 
   {"say": "Undo takes the three names back: on Pattern, F8 undoes the project title, the pattern's name and the track's name, one unit each"},
   {"keys": ["pattern"], "gap": 0.5},

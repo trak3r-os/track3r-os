@@ -13,9 +13,11 @@ inline constexpr const char* kChopSoftKeys[8] = {"AUTO", "EVEN", "ZC", "ADD", "D
 // instrument, docs/ui/official-manual-map.md, not verified; the play mode is the Shift + F1 MODE key here). PREVIEW stays on F6 as on the other pages.
 inline constexpr const char* kWtSoftKeys[8] = {"POSITION", "WINDOW", "-", "-", "-", "PREVIEW", "ZOOM-", "UNDO"};
 inline constexpr const char* kGranSoftKeys[8] = {"POSITION", "LENGTH", "SHAPE", "LOOP", "-", "PREVIEW", "ZOOM-", "UNDO"};
-// While Shift is held, on every page (OS-SHIFTROW, OS-INSTUI S4): F1 MODE (the list of the eight play modes), F6 PREVIEW from the selected point or slice (the window's edge when it is out of view), F8 REDO; the
-// rest does nothing.
-inline constexpr const char* kWaveShiftKeys[8] = {"MODE", "-", "-", "-", "-", "PRV SEL", "-", "REDO"};
+// While Shift is held, on every page (OS-SHIFTROW, OS-INSTUI S4): F1 MODE (the list of the eight play modes), F5 REDO (OS-UXF-SMP item 11: F7 / F8 are INST - / INST + as on Sample load; REDO was F8), F6 PREVIEW from the selected point or slice
+// (the window's edge when it is out of view), F7 / F8 INST - / INST + (the instrument in view, round); the rest does nothing.
+inline constexpr const char* kWaveShiftKeys[8] = {"MODE", "-", "-", "-", "REDO", "PRV SEL", "INST -", "INST +"};
+// The CHOP page's own Shift row (OS-UXF-SMP item 3c): F4 TO PAT writes the slices into the Pattern.
+inline constexpr const char* kChopShiftKeys[8] = {"MODE", "-", "-", "TO PAT", "REDO", "PRV SEL", "INST -", "INST +"};
 
 // The screen shows one of four views of the instrument in view (OS-INSTUI S4): a WAVETABLE instrument (play mode 6) and a GRANULAR one (7) have their own; the others show the WAVE page (the points) or the
 // CHOP page (the slices), whichever the page says (the slice modes, 4 and 5, are put on CHOP when the mode is chosen).
@@ -51,6 +53,7 @@ class WaveScreen final : public Screen {
   core::ParamId focus_param(const Model& model, const ViewState& view) const noexcept override;
   const char* const* soft_keys() const noexcept override { return kWaveSoftKeys; }
   const char* const* soft_keys_shifted() const noexcept override { return kWaveShiftKeys; }
+  const char* const* shift_row(const ViewState& view) const noexcept override;  // the CHOP view has TO PAT on F4
   bool pad_roles(const Model& model, const ViewState& view, PadRole (&roles)[48]) const noexcept override;
   // The cursor: the four points (WAVE) or the slices (CHOP); Left / Right move it, Up / Down zoom.
   int count(const Model& model, const ViewState& view) const noexcept override;

@@ -81,7 +81,7 @@ Start on any screen.
 
 1. Press `Song` and `Pattern` together. The Navigator opens. <!-- QA-MOD-002, QA-GLB-233 -->
 2. Turn the encoder until **MODULES** is shown. <!-- QA-MOD-002 -->
-3. Press `F8` (**GO**). <!-- QA-MOD-002 -->
+3. Press `F1` (**GO**). <!-- QA-MOD-002 -->
 
 You should see the list of apps on the card. <!-- QA-MOD-001 -->
 
@@ -91,7 +91,7 @@ Start on any screen. This is new in track3r-os.
 
 1. Press `Shift` + `Pattern`. A list titled **APPS** opens with the apps that are not tools: the scope, the tuner, the loudness meter, the MIDI monitor and the like. The tools (Chords, Humanize and the other pattern tools) stay on their own page, `F7` on Pattern. <!-- QA-MOD-252 -->
 2. Turn the encoder to the app.
-3. Press `F1` or `F8` (**LAUNCH**). The app starts as it does from `F1` on the Modules screen, and asks you to press `F1` again when it writes files. <!-- QA-MOD-253 -->
+3. Press `F1` (**LAUNCH**). The app starts as it does from `F1` on the Modules screen, and asks you to press `F1` again when it writes files. <!-- QA-MOD-253 -->
 
 You should see the app's page. `Pattern` or `Shift` + `Pattern` again closes the list without starting anything. With no such app the list says so. When you leave the app with `F8` you land on the Modules screen.
 
@@ -127,7 +127,7 @@ A module has presets: named sets of values for its parameters. Two kinds show in
 
 You should see the list close and the strip say, for example, **PRESET SHORT LOADED** (a card preset that names a parameter the module does not have says **PRESET <NAME> LOADED, <n> SKIPPED**; a damaged file says **PRESET DAMAGED**, a file of another module **PRESET OF <MODULE>**). A preset sets every parameter of the module: a parameter the preset does not name goes back to the module's default, not what it was before. On an instrument the whole load is one undo step, so one `F8` (**UNDO**) on the page puts every value back. A module instrument that is not loaded has a blank `F5`, and a blank key does nothing. A sample instrument's `F5` is still its **SENDS** page. New in track3r-os. <!-- QA-INS-290 QA-INS-291 QA-MOD-245 -->
 
-To save the values in force as a card preset, press `Shift` + `F5` (**SAVE**) on the module's page, or in the list. The on-screen keyboard opens (**PRESET NAME**) with the instrument's name — or the effect's name, on an insert's page — suggested; type a name and press `F8`. The strip says **PRESET SAVED: <NAME>** and the file `modules/presets/<module>/<name>.o3mp` is on the card. Nothing is ever replaced: a name that is taken gets **<name> 2**, and the strip says the name the file got. The folder holds one folder per module, so you can copy a module's presets to or from a computer as one folder (the files are the same `.o3mp` the [preset tool](computer_tools.md) reads); renaming or deleting them on the unit is not offered — do it on the computer. <!-- QA-INS-293 QA-MOD-251 QA-MIX-107 -->
+To save the values in force as a card preset, press `Shift` + `F5` (**SAVE**) on the module's page, or in the list. The on-screen keyboard opens (**PRESET NAME**) with the instrument's name — or the effect's name, on an insert's page — suggested; type a name and press `F1`. The strip says **PRESET SAVED: <NAME>** and the file `modules/presets/<module>/<name>.o3mp` is on the card. Nothing is ever replaced: a name that is taken gets **<name> 2**, and the strip says the name the file got. The folder holds one folder per module, so you can copy a module's presets to or from a computer as one folder (the files are the same `.o3mp` the [preset tool](computer_tools.md) reads); renaming or deleting them on the unit is not offered — do it on the computer. <!-- QA-INS-293 QA-MOD-251 QA-MIX-107 -->
 
 ### Launch an app on the pattern you are editing
 <!-- sync: src=app/src/module_ui.cpp qa=QA-MOD-091,QA-MOD-132,QA-MOD-133 -->
@@ -187,8 +187,8 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 
 | Key | What it does | Ref |
 |---|---|---|
-| `Song` + `Pattern` (Navigator), then the encoder to **MODULES**, then `F8` (**GO**) | opens the Modules screen | QA-MOD-002 |
-| `Shift` + `Pattern`, then `F1` or `F8` (**LAUNCH**) | lists the apps that are not tools and starts the one you chose | QA-MOD-252, QA-MOD-253 |
+| `Song` + `Pattern` (Navigator), then the encoder to **MODULES**, then `F1` (**GO**) | opens the Modules screen | QA-MOD-002 |
+| `Shift` + `Pattern`, then `F1` (**LAUNCH**) | lists the apps that are not tools and starts the one you chose | QA-MOD-252, QA-MOD-253 |
 | `F1` (**LAUNCH**) | starts the app under the cursor | QA-MOD-002 |
 | `F2` (**RESCAN**) | looks at the card again. The strip says how many apps it found: **READ AGAIN: 3 APPS** | QA-MOD-001, QA-MOD-157 |
 | `Up`, `Down` | move one row | QA-MOD-060 |

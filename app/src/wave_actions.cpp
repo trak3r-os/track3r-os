@@ -5,6 +5,7 @@
 #include "action_handlers.h"
 
 #include "param_access.h"
+#include "pattern_edit_util.h"
 
 #include <o3os/app/og_samples.h>
 #include <o3os/app/play_mode.h>
@@ -313,6 +314,51 @@ bool wave_auto_apply(ActionContext& ctx, core::ActionArg) noexcept {
   (void)set_beat_slice(ctx, in);
   ws.slice = 0;
   (void)commit(ctx, t, in);
+  return true;
+}
+
+// Shift + F4 TO PAT (OS-UXF-SMP item 3c, new Community OS behaviour): slice 1..n goes into the Pattern as notes 24 + 0..n-1 (the note that names a slice of a beat slice instrument, OS-SLICEFIX), one
+// per step on consecutive rows of the track the Pattern cursor is on, from the cursor's row; the instrument in view is the step's. It stops at the track's end (the pattern's, or a shorter track's).
+// One undo unit; the cursor stays. Refused with a word when the instrument has no slices, or is not in the beat slice mode (a note would pitch it, not pick a slice).
+bool wave_to_pat(ActionContext& ctx, core::ActionArg) noexcept {
+  if (!chop_page(ctx)) {
+    return false;
+  }
+  Target t;
+  if (!target(ctx, t)) {
+    return false;
+  }
+  const unsigned n = t.in->sampler.slice_count;
+  if (n == 0u) {
+    return say(ctx, core::Severity::Info, "NO SLICES TO WRITE");
+  }
+  if (t.in->sampler.play_mode != kBeatSlice) {
+    return say(ctx, core::Severity::Info, "SET BEAT SLICE MODE FIRST");
+  }
+  ViewState& v = ctx.view;
+  const PatternSource src(ctx.model, v.edit.pattern);
+  const int track = v.pattern.track();
+  const int row = v.pattern.row();
+  if (track >= src.tracks() || row >= src.track_length(track)) {
+    return say(ctx, core::Severity::Info, "PAST TRACK END");
+  }
+  const unsigned room = static_cast<unsigned>(src.track_length(track) - row);
+  const unsigned count = n < room ? n : room;
+  bool exists = src.exists();
+  if (!pe::create_if_missing(ctx, exists, static_cast<unsigned>(src.length()))) {
+    return false;
+  }
+  model::Step buf[kMaxSliceCount];
+  model::edit::Last last{static_cast<std::uint8_t>(t.slot + 1u), v.edit.last_fx};
+  const model::edit::Rule rule{true, true};
+  for (unsigned k = 0; k < count; ++k) {
+    buf[k] = src.step(track, row + static_cast<int>(k));
+    pe::write_note(buf[k], audio::kSliceRootNote + k, rule, last);
+  }
+  if (ctx.edit->set_steps(v.edit.pattern, static_cast<std::uint32_t>(track), static_cast<std::uint32_t>(row), buf, count) != model::Status::Ok) {
+    return say(ctx, core::Severity::Warn, "THE PATTERN REFUSED THE STEPS");
+  }
+  (void)say(ctx, core::Severity::Info, count < n ? "SLICES TO PAT: PATTERN END" : "SLICES TO PAT");
   return true;
 }
 

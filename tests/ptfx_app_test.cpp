@@ -782,7 +782,7 @@ TEST_CASE("ptfx app: a WAVETABLE run is one undo unit with the play mode: F8 res
   CHECK(sp().wavetable_window_size == 0u);
   CHECK(sp().wavetable_window == 7u);
   rig.press(Button::Shift);
-  rig.tap(Button::F8);
+  rig.tap(Button::F5);  // REDO: Shift + F5 since OS-UXF-SMP item 11 (Shift + F8 is INST +)
   rig.release(Button::Shift);
   CHECK(sp().play_mode == app::kPlayModeWavetable);
   CHECK(sp().wavetable_window_size == size_after);

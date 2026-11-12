@@ -646,3 +646,234 @@ TEST_CASE("playcur seq: a jump with a note still sounding keeps its note-off: th
     CHECK(g_col.count(EventKind::NoteOff) == 1u);
   }
 }
+
+// OS-UXF Focus Loop (docs/specs/OS-UXF.md, row 2), the sequencer's side: the rows of the pattern playing that loop, Sequencer::set_row_loop / Command::SetRowLoop.
+namespace {
+// The row (the NoteOn `a` of notes_by_row) of the n-th note played.
+std::uint32_t note_row(std::uint32_t n) {
+  const Rec* on = g_col.nth(EventKind::NoteOn, n);
+  return on != nullptr ? on->ev.a : 0xFFFFu;
+}
+}  // namespace
+
+TEST_CASE("focus loop seq: a start at the first row plays the block and wraps at its last row on the exact sample, again and again; the position says so") {
+  notes_by_row(32);
+  for (std::uint32_t via_ring = 0; via_ring < 2; ++via_ring) {
+    seq::Sequencer& s = make();
+    s.play_pattern(1, 4, 0);
+    if (via_ring != 0u) {
+      CHECK(s.commands().push(seq::Command{seq::Command::Kind::SetRowLoop, 4, 7, 0}));
+    } else {
+      s.set_row_loop(4, 7);
+    }
+    g_col.run(s, 0, exact_sample(48u * 14u, 12000), 64);
+    CHECK(s.looping_rows());
+    const audio::PlayPosition::Value v = s.play_position().read();
+    CHECK(v.row_looping());
+    CHECK(v.row_first == 4);
+    CHECK(v.row_last == 7);
+    const std::uint32_t want[] = {4, 5, 6, 7, 4, 5, 6, 7, 4, 5, 6, 7, 4, 5};
+    for (std::uint32_t n = 0; n < 14; ++n) {
+      CHECK_MESSAGE(note_row(n) == want[n], "ring " << via_ring << " n " << n);
+      const Rec* on = g_col.nth(EventKind::NoteOn, n);
+      NEED(on != nullptr);
+      CHECK_MESSAGE(on->t == exact_sample(48u * n, 12000), "ring " << via_ring << " n " << n);  // the wrap costs no time: the grid goes on
+    }
+    CHECK(g_col.count(EventKind::Pattern) >= 3u);  // one at the start, one a wrap
+  }
+}
+
+TEST_CASE("focus loop seq: a block that ends on the pattern's last row wraps with the pattern's end, and one row loops on itself") {
+  notes_by_row(8);
+  seq::Sequencer& s = make();
+  s.play_pattern(1, 5, 0);
+  s.set_row_loop(5, 7);
+  g_col.run(s, 0, exact_sample(48u * 7u, 12000), 64);
+  const std::uint32_t want[] = {5, 6, 7, 5, 6, 7, 5};
+  for (std::uint32_t n = 0; n < 7; ++n) {
+    CHECK_MESSAGE(note_row(n) == want[n], n);
+  }
+  seq::Sequencer& one = make();
+  one.play_pattern(1, 3, 0);
+  one.set_row_loop(3, 3);
+  g_col.run(one, 0, exact_sample(48u * 4u, 12000), 64);
+  for (std::uint32_t n = 0; n < 4; ++n) {
+    CHECK_MESSAGE(note_row(n) == 3u, n);
+  }
+}
+
+TEST_CASE("focus loop seq: a range set while the line is before it runs up to the block, then loops; the rows before are not looped") {
+  notes_by_row(32);
+  seq::Sequencer& s = make();
+  s.play_pattern(1, 0, 0);
+  s.set_row_loop(4, 6);
+  g_col.run(s, 0, exact_sample(48u * 11u, 12000), 64);
+  const std::uint32_t want[] = {0, 1, 2, 3, 4, 5, 6, 4, 5, 6, 4};
+  for (std::uint32_t n = 0; n < 11; ++n) {
+    CHECK_MESSAGE(note_row(n) == want[n], n);
+  }
+}
+
+TEST_CASE("focus loop seq: a block on a track shorter than the pattern wraps with the pattern's rows, the short track plays on at its own length") {
+  notes_by_row(16);
+  CHECK(seq_project().set_track_length(1, 0, 6) == model::Status::Ok);  // track 0 loops its rows 0..5 inside the 16-row pattern
+  seq::Sequencer& s = make();
+  s.play_pattern(1, 8, 0);
+  s.set_row_loop(8, 11);
+  g_col.run(s, 0, exact_sample(48u * 10u, 12000), 64);
+  // Pattern rows 8..11 on a 6-step track: its steps 2, 3, 4, 5, then back to 2 (the landing seats every track at the block's first row, mod its length).
+  const std::uint32_t want[] = {2, 3, 4, 5, 2, 3, 4, 5, 2, 3};
+  for (std::uint32_t n = 0; n < 10; ++n) {
+    CHECK_MESSAGE(note_row(n) == want[n], n);
+  }
+}
+
+TEST_CASE("focus loop seq: a pattern change or a stop takes the range away; a queued pattern is what the wrap lets play") {
+  notes_by_row(32);
+  CHECK(seq_project().create_pattern(2, 32) == model::Status::Ok);
+  for (std::uint32_t r = 0; r < 32; ++r) {
+    CHECK(seq_project().set_step(2, 0, r, make_step(static_cast<std::uint8_t>(100 + r), 1)) == model::Status::Ok);
+  }
+  {  // switch_pattern while looping: pattern 2 from its row 0, no loop
+    seq::Sequencer& s = make();
+    s.play_pattern(1, 4, 0);
+    s.set_row_loop(4, 7);
+    g_col.run(s, 0, exact_sample(48u * 5u + 10u, 12000), 64);
+    s.switch_pattern(2);
+    g_col.run(s, exact_sample(48u * 5u + 10u, 12000), exact_sample(48u * 14u, 12000), 64);
+    CHECK_FALSE(s.looping_rows());
+    CHECK_FALSE(s.play_position().read().row_looping());
+    std::uint32_t first2 = 0xFFFFu;
+    for (std::uint32_t n = 0; n < g_col.count(EventKind::NoteOn) && first2 == 0xFFFFu; ++n) {
+      if (note_row(n) >= 100u) {
+        first2 = note_row(n);
+      }
+    }
+    CHECK(first2 == 106u);  // OS-PATSWITCH: the switch goes on at the next row of the old pattern (the line was in row 5, so row 6), the loop's wrap does not act on it
+    CHECK(note_row(g_col.count(EventKind::NoteOn) - 1u) >= 107u);  // and goes on past the old block's end
+  }
+  {  // a pattern queued for the pattern's end: the wrap lets it play, the loop is over
+    seq::Sequencer& s = make();
+    s.play_pattern(1, 4, 0);
+    s.set_row_loop(4, 7);
+    g_col.run(s, 0, exact_sample(48u + 10u, 12000), 64);
+    s.queue_pattern(2);  // (after the start has landed: the start clears what was queued before it)
+    g_col.run(s, exact_sample(48u + 10u, 12000), exact_sample(48u * 12u, 12000), 64);
+    CHECK_FALSE(s.looping_rows());
+    CHECK(note_row(4) == 8u);  // the line ran on past the block's last row
+  }
+  {  // a stop clears it, a new start does not bring it back
+    seq::Sequencer& s = make();
+    s.play_pattern(1, 4, 0);
+    s.set_row_loop(4, 7);
+    g_col.run(s, 0, exact_sample(48u * 2u, 12000), 64);
+    s.stop();
+    g_col.run(s, exact_sample(48u * 2u, 12000), exact_sample(48u * 3u, 12000), 64);
+    CHECK_FALSE(s.looping_rows());
+    CHECK_FALSE(s.play_position().read().row_looping());
+    s.play_pattern(1, 4, 0);
+    g_col.run(s, exact_sample(48u * 3u, 12000), exact_sample(48u * 12u, 12000), 64);
+    CHECK_FALSE(s.looping_rows());
+    CHECK(note_row(g_col.count(EventKind::NoteOn) - 1u) >= 8u);  // no wrap: it ran past row 7
+  }
+}
+
+TEST_CASE("focus loop seq: a Break pattern inside the block is a wrap, a range past a shortened pattern is dormant, a bad range is no loop") {
+  notes_by_row(16);
+  CHECK(seq_project().set_step(1, 0, 5, make_step(5, 1, seq::fx::kBreakPattern, 1)) == model::Status::Ok);
+  {
+    seq::Sequencer& s = make();
+    s.play_pattern(1, 4, 0);
+    s.set_row_loop(4, 8);  // row 5 breaks: the line wraps there, not at 8
+    g_col.run(s, 0, exact_sample(48u * 6u, 12000), 64);
+    const std::uint32_t want[] = {4, 5, 4, 5, 4, 5};
+    for (std::uint32_t n = 0; n < 6; ++n) {
+      CHECK_MESSAGE(note_row(n) == want[n], n);
+    }
+  }
+  CHECK(seq_project().set_step(1, 0, 5, make_step(5, 1)) == model::Status::Ok);  // (the break goes: this one is about the pattern's own wrap)
+  {
+    seq::Sequencer& s = make();
+    s.play_pattern(1, 0, 0);
+    s.set_row_loop(20, 25);  // past the 16 rows: dormant, the pattern plays and wraps as it always did
+    g_col.run(s, 0, exact_sample(48u * 18u, 12000), 64);
+    CHECK(note_row(16) == 0u);
+    CHECK(note_row(17) == 1u);
+  }
+  {
+    seq::Sequencer& s = make();
+    s.play_pattern(1, 0, 0);
+    s.set_row_loop(6, 3);
+    CHECK_FALSE(s.looping_rows());
+    s.set_row_loop(2, model::kMaxPatternLength);
+    CHECK_FALSE(s.looping_rows());
+    s.set_row_loop(2, 5);
+    CHECK(s.looping_rows());
+    s.set_row_loop(0, seq::kNoJump);
+    CHECK_FALSE(s.looping_rows());
+  }
+}
+
+TEST_CASE("focus loop seq: a range asked while nothing runs is ignored, and no later resume brings it back") {
+  notes_by_row(32);
+  seq::Sequencer& s = make();
+  s.set_row_loop(4, 7);  // stopped, no start waiting
+  CHECK_FALSE(s.looping_rows());
+  CHECK(s.commands().push(seq::Command{seq::Command::Kind::SetRowLoop, 4, 7, 0}));  // the same through the ring, drained by a block that plays nothing
+  g_col.run(s, 0, exact_sample(48u, 12000), 64);
+  CHECK_FALSE(s.looping_rows());
+  s.play_pattern(1, 0, 0);
+  g_col.run(s, exact_sample(48u, 12000), exact_sample(48u * 3u, 12000), 64);
+  s.stop();
+  g_col.run(s, exact_sample(48u * 3u, 12000), exact_sample(48u * 4u, 12000), 64);
+  s.resume();
+  g_col.run(s, exact_sample(48u * 4u, 12000), exact_sample(48u * 16u, 12000), 64);
+  CHECK_FALSE(s.looping_rows());
+  CHECK(note_row(g_col.count(EventKind::NoteOn) - 1u) >= 8u);  // ran on past row 7: no wrap
+}
+
+TEST_CASE("focus loop seq: a locate by position (an SPP, locate()) takes the range away; locate_row keeps it") {
+  notes_by_row(32);
+  for (std::uint32_t in_place = 0; in_place < 2; ++in_place) {
+    seq::Sequencer& s = make();
+    s.play_pattern(1, 4, 0);
+    s.set_row_loop(4, 7);
+    g_col.run(s, 0, exact_sample(48u + 10u, 12000), 64);
+    if (in_place != 0u) {
+      s.locate_row(5);
+    } else {
+      s.locate(5);
+    }
+    g_col.run(s, exact_sample(48u + 10u, 12000), exact_sample(48u * 14u, 12000), 64);
+    CHECK(s.looping_rows() == (in_place != 0u));
+    CHECK(s.play_position().read().row_looping() == (in_place != 0u));
+    const std::uint32_t last = note_row(g_col.count(EventKind::NoteOn) - 1u);
+    if (in_place != 0u) {
+      CHECK(last <= 7u);  // still wrapping inside the block
+    } else {
+      CHECK(last >= 8u);  // ran on past row 7
+    }
+  }
+}
+
+TEST_CASE("focus loop seq: in Song mode the block wraps and the song does not advance to the next slot") {
+  notes_by_row(16);
+  CHECK(seq_project().create_pattern(2, 16) == model::Status::Ok);
+  for (std::uint32_t r = 0; r < 16; ++r) {
+    CHECK(seq_project().set_step(2, 0, r, make_step(static_cast<std::uint8_t>(100 + r), 1)) == model::Status::Ok);
+  }
+  CHECK(seq_project().append_order(1) == model::Status::Ok);
+  CHECK(seq_project().append_order(2) == model::Status::Ok);
+  seq::Sequencer& s = make();
+  s.play_song(0, 4);
+  s.set_row_loop(4, 7);
+  g_col.run(s, 0, exact_sample(48u * 20u, 12000), 64);  // past the slot's 16 rows
+  CHECK(s.looping_rows());
+  for (std::uint32_t n = 0; n < g_col.count(EventKind::NoteOn); ++n) {
+    CHECK_MESSAGE(note_row(n) == 4u + (n % 4u), n);  // slot 2 (rows 100 and up) never plays
+  }
+  CHECK(g_col.count(EventKind::NoteOn) >= 19u);
+  s.stop();
+  g_col.run(s, exact_sample(48u * 20u, 12000), exact_sample(48u * 21u, 12000), 64);
+  CHECK_FALSE(s.looping_rows());
+}

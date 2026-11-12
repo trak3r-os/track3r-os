@@ -468,6 +468,9 @@ class SaveService {
   // document was known to be on the card or fresh. A save that ended well makes it the one the save was started from (a project that changes while it is written does not
   // save: the writer checks); a load or a new project makes it the generation after the load. Undoing back to the saved state still counts as changed, which errs on the safe side.
   bool dirty(const model::Project& project) noexcept;
+  // OS-UXF-KEYS 1a: whether a plain SAVE of the project loaded from `loaded_folder` has a folder to replace: the one the user saved last (while still in it) or the one it was loaded from.
+  // False for a new or imported project no folder holds yet; Shift + File then asks for a name instead of taking "Track NN".
+  bool has_folder(const char* loaded_folder) const noexcept;
   // The App has a document: the first one seen is the baseline (the platform's own at boot, which no one has edited; a rebuilt App does not forget what was edited).
   void watch(const model::Project& project) noexcept;
   // The document was replaced (a project loaded, or a new one made): its generation is the baseline, and the project the user is in is no project of Projects/ yet, so SAVE will not

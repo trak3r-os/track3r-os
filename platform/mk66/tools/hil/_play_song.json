@@ -1,7 +1,7 @@
 {
  "steps": [
   {
-   "note": "play the whole song (Song screen, F2 PLAY SNG) so that several tracks sound, then back to Pattern",
+   "note": "play the whole song (Song screen, the Play button) so that several tracks sound, then back to Pattern",
    "keys": [
     "song"
    ],
@@ -15,7 +15,7 @@
   },
   {
    "keys": [
-    "f2"
+    "play"
    ],
    "gap": 0.2
   },

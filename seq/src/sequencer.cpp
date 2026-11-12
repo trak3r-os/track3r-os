@@ -445,6 +445,22 @@ void Sequencer::queue_jump(std::uint32_t order_pos, std::uint32_t stamp) noexcep
   remap_queue(store_->cur, queued_from_);
 }
 
+// OS-UXF Focus Loop. No stamp: the rows belong to the pattern now playing, which the pattern edits do not renumber under the run (a shortened pattern leaves the range dormant, row_loop_wrap).
+void Sequencer::set_row_loop(std::uint32_t first, std::uint32_t last) noexcept {
+  if (!playing_ && !pending_start_) {  // nothing runs and no start waits: a range set now would survive into a later resume or Continue
+    row_first_ = 0xFF;
+    row_last_ = 0;
+    return;
+  }
+  if (first > last || last >= model::kMaxPatternLength) {
+    row_first_ = 0xFF;
+    row_last_ = 0;
+    return;
+  }
+  row_first_ = static_cast<std::uint8_t>(first);
+  row_last_ = static_cast<std::uint8_t>(last);
+}
+
 // OS-SONG3 S7. The range is authored against the list of `stamp` like a queued jump's position: carried over the edits made since, refused when the copy does not have that list yet, when the journal no longer
 // holds the ops in between (or a Reset is among them), or when an edit took the range away.
 void Sequencer::set_loop(std::uint32_t first, std::uint32_t last, std::uint32_t stamp) noexcept {
@@ -567,6 +583,7 @@ void Sequencer::drain_commands() noexcept {
         case Command::Kind::QueueJump:
         case Command::Kind::SetMode:
         case Command::Kind::SwitchPattern:
+        case Command::Kind::SetRowLoop:
           ++stats_.chase_dropped;
           continue;
         default:
@@ -606,6 +623,9 @@ void Sequencer::drain_commands() noexcept {
         break;
       case Command::Kind::SetLoop:
         set_loop(c.a, c.b, c.c);
+        break;
+      case Command::Kind::SetRowLoop:
+        set_row_loop(c.a, c.b);
         break;
       case Command::Kind::SetMode:
         request_mode(c.a == 0u ? PlayMode::Pattern : PlayMode::Song);
@@ -676,6 +696,8 @@ void Sequencer::drain_commands() noexcept {
 void Sequencer::play_pattern(std::uint32_t pattern_id, std::uint32_t from_step, std::uint32_t count_in_bars) noexcept {
   loop_first_ = 0xFF;  // OS-SONG3 S7: a start that is not the loop's ends the loop (the loop's own play_song is followed by its SetLoop)
   loop_last_ = 0;
+  row_first_ = 0xFF;  // OS-UXF Focus Loop: the same (its own start is followed by its SetRowLoop)
+  row_last_ = 0;
   pending_start_ = true;
   pending_resume_ = false;
   pending_mode_ = PlayMode::Pattern;
@@ -691,6 +713,8 @@ void Sequencer::play_pattern(std::uint32_t pattern_id, std::uint32_t from_step, 
 void Sequencer::play_song(std::uint32_t order_pos, std::uint32_t from_step) noexcept {
   loop_first_ = 0xFF;  // OS-SONG3 S7: as play_pattern
   loop_last_ = 0;
+  row_first_ = 0xFF;
+  row_last_ = 0;
   pending_start_ = true;
   pending_resume_ = false;
   pending_mode_ = PlayMode::Song;
@@ -705,6 +729,8 @@ void Sequencer::play_song(std::uint32_t order_pos, std::uint32_t from_step) noex
 void Sequencer::stop() noexcept {
   loop_first_ = 0xFF;  // OS-SONG3 S7
   loop_last_ = 0;
+  row_first_ = 0xFF;  // OS-UXF Focus Loop: a stop clears the range
+  row_last_ = 0;
   pending_stop_ = true;
   pending_start_ = false;
   pending_resume_ = false;
@@ -1327,6 +1353,8 @@ void Sequencer::end_run(bool emit_stop, std::uint64_t at) noexcept {
   queued_jump_ = kNoJump;  // a stopped transport has nothing queued (a resume starts a run of its own)
   loop_first_ = 0xFF;      // OS-SONG3 S7: nor a loop (every end of a run: a stop, the song's end, an export's range)
   loop_last_ = 0;
+  row_first_ = 0xFF;       // OS-UXF Focus Loop: nor a row loop
+  row_last_ = 0;
   after_gone_ = false;
   switch_pending_ = false;  // OS-PATSWITCH: a switch that had not landed is given up with the run (a stop, a restart and a resume alike)
   switch_release_ = false;
@@ -1496,6 +1524,7 @@ std::uint32_t Sequencer::step(std::uint64_t block_start, std::uint32_t n, audio:
   published_.publish(at.playing, at.pattern_id, at.step, at.tempo_x100, at.order_pos, at.ustep);
   published_.publish_count_in(at.count_in);
   published_.publish_loop(loop_first_, loop_last_);  // OS-SONG3 S7: one relaxed halfword store
+  published_.publish_row_loop(row_first_, row_last_);  // OS-UXF Focus Loop: the same
   published_.publish_queued(queued_jump_);  // the live jump that waits (the Song screen blinks its slot)  // for the screen and the log: two relaxed word stores, once a block
   static_assert(kPerfTracks == audio::PlayPosition::kTrackWords && kPerfTracks <= kMaxTracks, "one published word per track the Perform layer reaches");
   for (std::uint32_t t = 0; t < kPerfTracks; ++t) {  // E-PERF-07: the track queue for the Perform boxes (relaxed stores, 2 a track, once a block)
@@ -1703,6 +1732,10 @@ void Sequencer::land_locate() noexcept {
   // E-SONG-07: a locate to a slot (an SPP) plays that slot once, whatever slot was deleted before. A locate_row() keeps the mark: it names the slot that slid into the deleted one's place and the
   // deleted one's pattern, which plays on and is followed by that slot. (Not told apart by the indices: a song that repeats a pattern has the same ones for both.)
   after_gone_ = after_gone_ && locate_in_place_;
+  if (!locate_in_place_) {  // OS-UXF Focus Loop: a locate by position (an SPP, locate()) may leave the pattern the range belongs to, and nothing on screen would show it: the range goes (locate_row keeps it)
+    row_first_ = 0xFF;
+    row_last_ = 0;
+  }
   order_pos_ = located_order_;
   pattern_id_ = located_pattern_;
   pattern_len_ = song_pattern_len(pattern_id_);
@@ -1719,6 +1752,39 @@ void Sequencer::land_locate() noexcept {
   emit(at, EventKind::Pattern, audio::kNoTrack, static_cast<std::uint8_t>(pattern_id_), static_cast<std::uint8_t>((mode_ == PlayMode::Song ? order_pos_ : kNoOrder) & 0xFFu),
        static_cast<std::uint8_t>((mode_ == PlayMode::Song ? order_pos_ : kNoOrder) >> 8), 0, static_cast<std::int32_t>(pattern_len_));
   mtc_land(at, 0);  // OS-MTC A3 (Q6b): a locate is a relocation of the time code
+}
+
+// OS-UXF Focus Loop. Called from end_step with song_step_ already the next row. The line wraps when the row that has just run was the loop's last (clamped to the running length), or when a Break pattern or an
+// Order jump FX ended a row inside the range (the cut is the loop's pass end, not the pattern's). A range wholly past the running length is dormant, and so is a line that is not in it. A queued pattern, a queued
+// jump or a mode request ends the loop at the wrap instead: they play next, at the pattern's own end. The wrap is a relocation like land_locate's: tracks from the first row (`load_tracks`: each at row % its
+// length, so a track shorter than the pattern follows its own cycle), a Pattern event, the time code relocated (as the slot loop's wrap, OS-SONG3 S7). Nothing here runs per sample or per block.
+bool Sequencer::row_loop_wrap() noexcept {
+  const std::uint32_t len = effective_len();
+  const std::uint32_t first = row_first_;
+  if (first >= len || song_step_ == 0u) {
+    return false;
+  }
+  const std::uint32_t last = std::min<std::uint32_t>(row_last_, len - 1u);
+  const std::uint32_t ran = song_step_ - 1u;  // the row that has just run
+  const bool cut = break_pending_ || jump_pending_;
+  if (ran < first || ran > last || (ran != last && !cut)) {
+    return false;
+  }
+  if (queued_pattern_ != 0u || queued_jump_ != kNoJump || mode_request_) {
+    row_first_ = 0xFF;  // what waits plays next: the loop is over
+    row_last_ = 0;
+    return false;
+  }
+  break_pending_ = false;
+  jump_pending_ = false;
+  song_step_ = first;
+  load_tracks(song_step_);
+  const std::uint64_t at = step_boundary_time();
+  const std::uint32_t op = mode_ == PlayMode::Song ? order_pos_ : kNoOrder;
+  emit(at, EventKind::Pattern, audio::kNoTrack, static_cast<std::uint8_t>(pattern_id_), static_cast<std::uint8_t>(op & 0xFFu), static_cast<std::uint8_t>(op >> 8), 0,
+       static_cast<std::int32_t>(pattern_len_));
+  mtc_land(at, 0);
+  return true;
 }
 
 void Sequencer::end_step() noexcept {
@@ -1742,6 +1808,8 @@ void Sequencer::end_step() noexcept {
     // (its last step has run, or a Break pattern / Order jump ends it: those belong to the pattern left and go with it), then modulo the running length of the new one (the Perform length when it is set).
     // `song_step_` is already the next row here. The grid, the swing pair and the metronome count (the Step events) are not touched: only the row changes.
     switch_pending_ = false;
+    row_first_ = 0xFF;  // OS-UXF Focus Loop: the rows belong to the pattern that is left
+    row_last_ = 0;
     const bool old_ends = song_step_ >= effective_len() || break_pending_ || jump_pending_;
     const std::uint32_t next = old_ends ? 0u : song_step_;
     break_pending_ = false;
@@ -1758,6 +1826,9 @@ void Sequencer::end_step() noexcept {
     emit(at, EventKind::Pattern, audio::kNoTrack, static_cast<std::uint8_t>(pattern_id_), static_cast<std::uint8_t>(kNoOrder & 0xFFu), static_cast<std::uint8_t>(kNoOrder >> 8), 0,
          static_cast<std::int32_t>(pattern_len_));
     return;
+  }
+  if (row_first_ <= row_last_ && row_loop_wrap()) {
+    return;  // OS-UXF Focus Loop: the line went back to the loop's first row
   }
   if (song_step_ >= effective_len() || break_pending_ || jump_pending_ || (cfg_.pattern_once && cfg_.pattern_stop != 0u && song_step_ >= cfg_.pattern_stop)) {
     pattern_end();  // (pattern_stop is the export of a selection's: pattern_end() then stops the run, as at the end of the pattern)

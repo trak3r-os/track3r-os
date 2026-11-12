@@ -27,7 +27,7 @@ Use Sample load to put a sound file from the card into an instrument. Browse the
 | Info line | How many entries the folder has, and the keys that work in the list, starting with **pad: target**. |
 | Strip | Messages, for example **IMPORT <NAME> FAILED**. |
 | Key row | `F1` to `F8`, with the labels in the table under "Keys on this screen". |
-| Shift row | The jumps through the list and **INST -** / **INST +**, drawn while `Shift` is held. |
+| Shift row | The jumps through the list, **MARK** and **INST -** / **INST +**, drawn while `Shift` is held. |
 
 > **Try this**:
 > 1. Start on Sample load. Press `F3` (**ENTER**) on the `/AIFF` folder, then put the cursor on `afsp_16bit_stereo.aif`.
@@ -101,7 +101,7 @@ If every slot is used, the strip says **NO FREE INSTRUMENT**. With files marked,
 
 Start on Sample load, in a folder with the files you want. New: the official firmware loads one file at a time here, or marks files with `Shift` and the arrows; this firmware marks with `Shift` + `Right`, because `Shift` + `Up` and `Down` are the page keys.
 
-1. Put the cursor on the first file and press `Shift` + `Right`. A solid square marks the file and the cursor steps down, so pressing it again marks the next file. The info line counts them (**3 marked**) and `F1` and `F4` read **LOAD 3** and **ADD 3**. <!-- QA-SLD-032 -->
+1. Put the cursor on the first file and press `Shift` + `Right` (or `Shift` + `F6`, which reads **MARK**). A solid square marks the file and the cursor steps down, so pressing it again marks the next file. The info line counts them (**3 marked**) and `F1` and `F4` read **LOAD 3** and **ADD 3**. <!-- QA-SLD-032 -->
 2. To take a mark back, put the cursor on the file and press `Shift` + `Right` again. `Shift` + `Left` clears every mark.
 3. Choose the target instrument if you want to start somewhere else (a pad, or `Shift` + `F7` and `F8`).
 4. Press `F1` to load from the target on, or `F4` to load from the first free instrument.
@@ -166,7 +166,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 | `F3` | **ENTER** | **2/4** |
 | `F4` | **ADD** | **3/4** |
 | `F5` | **PLAY** | **END** |
-| `F6` | **RESCAN** | - |
+| `F6` | **RESCAN** | **MARK** |
 | `F7` | **WT AUTO** | **INST -** |
 | `F8` | **CH MIX** | **INST +** |
 
@@ -190,7 +190,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 | `Shift` + `F2` (**1/4**), `F3` (**2/4**), `F4` (**3/4**) | Jump the cursor to that quarter of the list. | QA-SLD-015 |
 | `Shift` + `F5` (**END**) | Jump the cursor to the last entry. | QA-SLD-001, QA-SLD-015 |
 | `Shift` + `F7` (**INST -**), `Shift` + `F8` (**INST +**) | Step the target instrument down or up over 1 to 64. After 64 it goes round to 1, and before 1 to 64. | QA-SLD-021 |
-| `Shift` + `F6` | Does nothing. The key shows `-`. | QA-SLD-001 |
+| `Shift` + `F6` (**MARK**) | The same as `Shift` + `Right`: mark the file under the cursor (or take its mark back) and step down one row. | QA-SLD-036 |
 | `Shift` + `Right` | Mark the file under the cursor (or take its mark back) and step down one row. `F1` and `F4` then load the marked files. | QA-SLD-032, QA-SLD-033, QA-SLD-034 |
 | `Shift` + `Left` | Clear every mark. | QA-SLD-032 |
 

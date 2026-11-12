@@ -91,7 +91,7 @@ Start on the **SOURCES** page.
 4. Press `F1`. With the transport running, the take waits for that point, and the strip counts down: **RECORDING IN 4.. 3.. 2.. 1..**. <!-- QA-REC-010 -->
 5. A Stop of the transport before the take starts gives the take up. <!-- QA-REC-010 -->
 6. Press `F1` again to end the take. With **STOP AT** on **STEP**, **BAR** or **PATTERN** it ends at that point, and a second `F1` ends it at once. With **STOP AT** on a number of bars, it ends by itself.
-7. The screen says **TAKE: TRIM, THEN SAVE**. Set **TRIM START** and **TRIM END**. Press `F3` to save the window into an instrument (the keyboard opens at once over its name, **RECORDING**: type a name and press `F8`, or press `F7` to keep **RECORDING**; the take is saved either way), or `Shift` + `F3` (**CROP**) to cut the take down to the window and keep working on it, or `F4` to throw it away (with nothing recorded, `F4` says **NOTHING RECORDED**). `F4`, a new take with `F1` and **CROP** each ask first (**TAKE NOT SAVED: F4 AGAIN**, **CROP KEEPS THE WINDOW ONLY: SHIFT+F3 AGAIN**): press the same key again within four seconds. A take you have written with `F7` (**SAVE WAV**) is saved, so it needs no question until you move a marker. <!-- QA-REC-040 QA-REC-041 QA-REC-042 QA-REC-044 -->
+7. The screen says **TAKE: TRIM, THEN SAVE**. Set **TRIM START** and **TRIM END**. Press `F3` to save the window into an instrument (the keyboard opens at once over its name, **RECORDING**: type a name and press `F1`, or press `F8` to keep **RECORDING**; the take is saved either way), or `Shift` + `F3` (**CROP**) to cut the take down to the window and keep working on it, or `F4` to throw it away (with nothing recorded, `F4` says **NOTHING RECORDED**). `F4`, a new take with `F1` and **CROP** each ask first (**TAKE NOT SAVED: F4 AGAIN**, **CROP KEEPS THE WINDOW ONLY: SHIFT+F3 AGAIN**): press the same key again within four seconds. A take you have written with `F7` (**SAVE WAV**) is saved, so it needs no question until you move a marker. <!-- QA-REC-040 QA-REC-041 QA-REC-042 QA-REC-044 -->
 
 `F7` (**SAVE WAV**) writes the trimmed window as a 16-bit mono WAV at 44,100 Hz into the `Samples` folder of the card, as `REC_001.wav`, `REC_002.wav` and so on. The strip says **SAVE REC_001 DONE** and the take stays in review, so `F3` can still make an instrument of it. With no take it says **NO TAKE TO SAVE: F1 RECORDS ONE**, with no card write layer **NO CARD WRITE LAYER**, and on a write-protected card **CARD IS WRITE PROTECTED**. <!-- QA-REC-039 -->
 
@@ -211,7 +211,7 @@ Start on the review of a loop.
 Start on the review of a loop.
 
 1. Press `F3` (**SAVE**). <!-- QA-REC-025 -->
-2. The loop, with its layers, goes into the first free instrument slot, named for example **LOOP 4B**, in LOOP FWD over the whole sample. The keyboard opens over that name: type a new one and press `F8`, or press `F7` to keep it. The looper is then free. <!-- QA-REC-025 QA-REC-030 -->
+2. The loop, with its layers, goes into the first free instrument slot, named for example **LOOP 4B**, in LOOP FWD over the whole sample. The keyboard opens over that name: type a new one and press `F1`, or press `F8` to keep it. The looper is then free. <!-- QA-REC-025 QA-REC-030 -->
 
 If no instrument slot is free, nothing is saved and the strip says **NO FREE INSTRUMENT SLOT**.
 

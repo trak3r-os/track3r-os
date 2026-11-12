@@ -12,8 +12,9 @@ snap qa_pat_001
 tap rec
 snap qa_pat_002
 
-# WATCH, playing -> Shift + Rec: LIVE (the red chip, the red frame).
+# WATCH, playing -> Rec: STEP, then Shift + Rec: LIVE (the red chip, the red frame). LIVE entered from STEP goes back to STEP on Shift + Rec (OS-UXF-PAT item 8).
 playhead 11
+tap rec
 press shift
 tap rec
 release shift
@@ -23,7 +24,7 @@ snap qa_pat_003
 playhead 12
 snap qa_pat_004
 
-# Shift + Rec in LIVE: STEP (OS-LIVEEXIT), recording ends. The playhead moves on to step 14, the cursor and the view stay on 12.
+# Shift + Rec in LIVE (entered from STEP): STEP again (OS-LIVEEXIT, OS-UXF-PAT item 8), recording ends. The playhead moves on to step 14, the cursor and the view stay on 12.
 press shift
 tap rec
 release shift
@@ -589,6 +590,27 @@ tap rec
 playhead 14
 snap qa_pat_130
 
+# OS-UXF-PAT item 8 (QA-PAT-528): LIVE entered from WATCH, then Shift + Rec: back to WATCH, where LIVE began (the same picture as QA-PAT-130, which gets there by Rec); the view follows on.
+playhead 11
+action view.mode 3
+press shift
+tap rec
+release shift
+playhead 12
+press shift
+tap rec
+release shift
+playhead 14
+snap qa_pat_528
+
+# OS-UXF-PAT item 7 (QA-PAT-529): Shift+F2 opens the PADS picker over Pattern; F3 picks ISO.
+press shift
+tap f2
+release shift
+snap qa_pat_529_open
+tap f3
+snap qa_pat_529
+
 # OS-ZOOM and OS-QJUMP (QA-PAT-236..244): a fresh document at the default zoom. Note + Instr: 5 -> 8 tracks (Note, Instr, Vol); the cursor stays on Vol (neither Note's tap nor Instr's ran).
 playhead stop
 document
@@ -675,13 +697,14 @@ action pattern.zoom
 action pattern.zoom
 action cursor.jump_fraction 0
 
-# OS-PATSWITCH (docs/specs/OS-PATSWITCH.md): the PATTERN chooser is the hold of F1. A tap opens nothing (QA-PAT-260); held and stopped the strip says +-1 and the pick is the view's (QA-PAT-261); held while the sequencer
+# OS-PATSWITCH (docs/specs/OS-PATSWITCH.md): the PATTERN chooser is the hold of F1; since OS-UXF-PAT item 6 a tap opens it too and a second tap closes it (QA-PAT-260); held and stopped the strip says +-1 and the pick is the view's (QA-PAT-261); held while the sequencer
 # plays it says `switch now` (QA-PAT-255: the simulator has no transport, so the pick itself is a view pick; the switch is the host tests'); a pattern the project lacks says EMPTY (QA-PAT-264). The pad lights are LEDs and
 # are not in the picture.
 document
 wait 3000
 tap f1
 snap qa_pat_260
+tap f1
 press f1
 wait 450
 snap qa_pat_261
@@ -753,7 +776,7 @@ wait 3500
 snap qa_pat_287
 wait 3000
 
-# OS-PADOCT: QA-PAT-313 / 314. Shift held shows the picker: F1 reads the octave (C3), F2..F7 the modes. Shift + F1 moves the octave up (C4, the key reads it, the mode stays); Shift + F5 is TRACKS.
+# OS-PADOCT: QA-PAT-313 / 314. Shift held shows the key row: F1 reads the octave (C3), F2 PADS. Shift + F1 moves the octave up (C4, the key reads it, the mode stays); Shift + F2 opens the PADS picker (OS-UXF-PAT item 7) and F4 in it is TRACKS.
 document
 wait 3000
 action view.mode 0
@@ -761,10 +784,12 @@ press shift
 tap f1
 wait 20
 snap qa_pat_313
-tap f5
+tap f2
+release shift
+wait 20
+tap f4
 wait 20
 snap qa_pat_314
-release shift
 wait 3000
 
 # OS-CECHANCE C2 (docs/specs/OS-CECHANCE.md section 3.5): QA-PAT-330..334, the Chance conditions beyond 0..100 in the editor. The demo document; Edit for STEP (view.mode 0; the block above left it on Edit, so Rec would toggle it off), the cursor to step 1, the Fx key on the FX1 column,

@@ -19,16 +19,6 @@
   },
   {
    "keys": [
-    "f7"
-   ],
-   "gap": 0.3,
-   "if_state": {
-    "overlay": "TEXT_ENTRY"
-   },
-   "note": "(an on-screen keyboard left open is cancelled with F7, never accepted)"
-  },
-  {
-   "keys": [
     "file"
    ],
    "gap": 0.5
@@ -54,10 +44,10 @@
   },
   {
    "keys": [
-    "f8"
+    "f1"
    ],
    "gap": 0.5,
-   "note": "accept the automatic name: the scratch project (it is the open project from now on)"
+   "note": "accept the automatic name (F1 is OK; F8 would cancel): the scratch project (it is the open project from now on)"
   },
   {
    "state": {

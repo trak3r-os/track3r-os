@@ -57,7 +57,7 @@ bool instrument_select(ActionContext& ctx, core::ActionArg arg) noexcept {
 namespace {
 
 // OS-METRO, OS-RECMODE2: the bars the transport counts in (the device setting COUNT-IN, 0 = off) when Shift + REC starts it from stop (transport_start_live). Play never counts in, and Shift + Play never does
-// either (OS-PLAYCUR: it plays from the cursor's row; it is also the designed Focus Loop's key, a loop restarts, it does not record).
+// either (OS-PLAYCUR: it plays from the cursor's row; it is also the Focus Loop's key, a loop restarts, it does not record).
 unsigned count_in_bars(const ActionContext& ctx) noexcept {
   if (ctx.model.project == nullptr || ctx.model.device.kind() != core::ParamKind::Device) {
     return 0;
@@ -80,8 +80,8 @@ bool transport_start_live(ActionContext& ctx) noexcept {
   return true;
 }
 
-// REC or Shift + REC while LIVE is counting in (OS-COUNTIN; the orchestrator's default, to be confirmed by the maintainer): the count-in is cancelled and the transport stops, back to WATCH stopped, with
-// nothing recorded or played. True: it was a count-in and is cancelled (or the transport refused to stop and nothing changed: then false).
+// REC or Shift + REC while LIVE is counting in (OS-COUNTIN; the orchestrator's default, to be confirmed by the maintainer): the count-in is cancelled and the transport stops, back to the mode the Shift + REC began
+// in (OS-UXF-PAT item 8, PatternEdit::live_from_step: STEP stopped, or WATCH stopped), with nothing recorded or played. True: it was a count-in and is cancelled (or the transport refused to stop and nothing changed: then false).
 bool cancel_live_count_in(ActionContext& ctx) noexcept {
   ViewState& v = ctx.view;
   const bool live = pattern_mode_edits(v.mode[screen_index(ScreenId::Pattern)]) && !v.edit.rec_free;
@@ -89,7 +89,12 @@ bool cancel_live_count_in(ActionContext& ctx) noexcept {
     return false;
   }
   v.playing = false;
-  (void)pattern_set_mode(v, PatternMode::Browse);
+  if (v.edit.live_from_step) {
+    v.edit.rec_free = true;  // LIVE -> STEP: the same Edit mode
+    v.edit.live_from_step = false;
+  } else {
+    (void)pattern_set_mode(v, PatternMode::Browse);
+  }
   return true;
 }
 
@@ -114,8 +119,9 @@ bool pattern_edit_toggle(ActionContext& ctx, core::ActionArg) noexcept {
   return true;
 }
 
-// SHIFT + REC (OS-RECMODE2): live recording, on and off. Playing, WATCH or STEP become LIVE (Edit following: the cursor rides the playhead, notes are written at the play line) and LIVE becomes STEP
-// (OS-LIVEEXIT: recording ends, the cursor stays on the row the play line is on). Stopped, it starts the transport: the count-in (COUNT-IN, OS-METRO) and LIVE together; with COUNT-IN off, LIVE at once. A transport that does not start leaves the state as it was.
+// SHIFT + REC (OS-RECMODE2; OS-UXF-PAT item 8): live recording, on and off, from any mode. Playing, WATCH or STEP become LIVE (Edit following: the cursor rides the playhead, notes are written at the play line);
+// LIVE goes back to the mode it was entered from (PatternEdit::live_from_step): STEP (the cursor stays on the row the play line is on, OS-LIVEEXIT) or WATCH (the view keeps following). Recording ends either way and
+// the playing goes on. REC in LIVE is the other exit, always WATCH (Browse), as REC always toggles Browse and Edit. Stopped, it starts the transport: the count-in (COUNT-IN, OS-METRO) and LIVE together; with COUNT-IN off, LIVE at once. A transport that does not start leaves the state as it was.
 // The action keeps its OS-LIVEREC name (`pattern.rec_free`, a keymap may name it).
 bool pattern_rec_free(ActionContext& ctx, core::ActionArg) noexcept {
   ViewState& v = ctx.view;
@@ -125,10 +131,14 @@ bool pattern_rec_free(ActionContext& ctx, core::ActionArg) noexcept {
   if (cancel_live_count_in(ctx)) {
     return true;
   }
-  const bool live = pattern_mode_edits(v.mode[screen_index(ScreenId::Pattern)]) && !v.edit.rec_free;
-  if (live) {
+  const bool edits = pattern_mode_edits(v.mode[screen_index(ScreenId::Pattern)]);
+  if (edits && !v.edit.rec_free) {  // LIVE
     (void)pattern_follow_play(ctx.model, v);  // OS-LIVEEXIT: the cursor is on the play line's row now, not a pass behind
-    v.edit.rec_free = true;                   // LIVE -> STEP: the same Edit mode, the view stops following
+    if (v.edit.live_from_step) {
+      v.edit.rec_free = true;  // LIVE -> STEP: the same Edit mode, the view stops following
+    } else {
+      (void)pattern_set_mode(v, PatternMode::Browse);  // LIVE -> WATCH: the view keeps following the play line
+    }
     return true;
   }
   if (!v.playing) {
@@ -138,6 +148,7 @@ bool pattern_rec_free(ActionContext& ctx, core::ActionArg) noexcept {
   }
   (void)pattern_set_mode(v, PatternMode::Edit);
   v.edit.rec_free = false;
+  v.edit.live_from_step = edits;  // not LIVE here, so Edit means STEP (after the mode: leaving Edit clears it)
   (void)pattern_follow_play(ctx.model, v);  // on the playhead at once (a no-op until the position is published)
   return true;
 }
@@ -195,6 +206,25 @@ bool pads_mode(ActionContext& ctx, core::ActionArg arg) noexcept {
   return ctx.view.screen == ScreenId::Pattern && arg >= 0 && ctx.view.padmode.pick(static_cast<unsigned>(arg));
 }
 
+// Shift + F2 PADS (OS-UXF-PAT 7): the list of the pads' modes opens over the Pattern screen. The mode stays what it is until a key picks one.
+bool pads_picker_open(ActionContext& ctx, core::ActionArg) noexcept {
+  if (ctx.view.screen != ScreenId::Pattern || ctx.view.overlay != OverlayId::None) {
+    return false;
+  }
+  ctx.view.overlay = OverlayId::PadsPicker;
+  return true;
+}
+
+// The list's F1..F6: the mode of arg (0..6, pad_layer.h) and the list closes, whether or not the mode changed (VU again toggles VU and FADERS, as it did on its Shift key).
+bool pads_picker_pick(ActionContext& ctx, core::ActionArg arg) noexcept {
+  if (ctx.view.overlay != OverlayId::PadsPicker || arg < 0) {
+    return false;
+  }
+  ctx.view.overlay = OverlayId::None;
+  (void)ctx.view.padmode.pick(static_cast<unsigned>(arg));
+  return true;
+}
+
 // A pad in Browse: it plays the pad's note on the last used instrument, in every column (OS-PADHOLD, new Community OS behaviour, replaces the per-column pad: the Instr column no longer turns a
 // pad into the instrument, the instrument is chosen with the Instr hold popup or the encoder on the Instr column). The sound is the engine's (OS-005g): the note is held until the pad is
 // released (App::run_once hands the release to PreviewSink::pad_up); until a PreviewSink is attached nothing sounds.
@@ -250,8 +280,9 @@ bool transport_play(ActionContext& ctx, core::ActionArg) noexcept {
 }
 
 // Shift + Play on Pattern (OS-PLAYCUR, new Community OS behaviour): stopped, the pattern being edited starts at the cursor's row; playing, the play line jumps to the cursor's row at the next step
-// boundary and goes on from there (the transport, the take and the view's mode are untouched). Never a count-in, as Play. The key is also the designed Focus Loop's (ui-map): with no block selected it is
-// this; with a block selected it is reserved for the loop, and until that exists it does this too (the cursor is the block's moving end; the block stays). Another pattern than the playing one: refused.
+// boundary and goes on from there (the transport, the take and the view's mode are untouched). Never a count-in, as Play. Another pattern than the playing one: refused.
+// With a block selected it is the Focus Loop (OS-UXF row 2, new Community OS behaviour): the pattern plays from the block's first row and loops at its last (the sequencer's row loop, TransportSink::loop_rows; the
+// strip says LOOP nn-nn). While the loop runs, Shift + Play again stops, as Play does (the sequencer clears the range with the run). Playing but not looping, the line jumps to the block's first row and the loop begins there.
 bool transport_play_cursor(ActionContext& ctx, core::ActionArg arg) noexcept {
   ViewState& v = ctx.view;
   if (ctx.transport == nullptr) {
@@ -260,17 +291,36 @@ bool transport_play_cursor(ActionContext& ctx, core::ActionArg arg) noexcept {
   if (v.screen != ScreenId::Pattern) {
     return transport_play(ctx, arg);  // (bound on Pattern only; a keymap that names it elsewhere gets Play)
   }
-  const unsigned row = static_cast<unsigned>(v.pattern.row() < 0 ? 0 : v.pattern.row());
+  const bool block = v.edit.selection.active;
+  if (v.playing && v.play.row_looping() && v.play.pattern == v.edit.pattern) {
+    return transport_play(ctx, arg);  // the loop runs: the key that began it ends it
+  }
+  unsigned row = static_cast<unsigned>(v.pattern.row() < 0 ? 0 : v.pattern.row());
+  unsigned last = row;
+  if (block) {
+    const Selection::Block b = v.edit.selection.block(v.pattern.row(), v.pattern.track());
+    row = static_cast<unsigned>(b.row0 < 0 ? 0 : b.row0);
+    last = static_cast<unsigned>(b.row1 < b.row0 ? b.row0 : b.row1);
+  }
   if (v.playing) {
     if (v.play.pattern != v.edit.pattern) {  // the line is in another pattern (a free cursor in STEP, a queued pattern): its row is not this pattern's
       return pe::say(ctx, core::Severity::Info, "THE PLAYHEAD IS IN ANOTHER PATTERN");
     }
-    return ctx.transport->locate_row(row);
+    if (!ctx.transport->locate_row(row)) {
+      return false;
+    }
+    // The range is set at once and the jump lands at the next step boundary, before the loop's own wrap can act on the row the line is on now (Sequencer::end_step).
+    return !block || ctx.transport->loop_rows(row, last);
   }
   if (!ctx.transport->play_from(v.edit.pattern, row)) {
     return false;
   }
   v.playing = true;
+  if (block) {
+    if (!ctx.transport->loop_rows(row, last)) {  // behind the start on the one ring, so it follows the start's own clearing of a range
+      return pe::say(ctx, core::Severity::Info, "LOOP NOT SET (BUSY)");  // (ring full: the pattern plays on without the loop)
+    }
+  }
   return true;
 }
 

@@ -125,6 +125,7 @@ bool pattern_set_mode(ViewState& view, PatternMode mode) noexcept {
     return false;
   }
   if (current == static_cast<std::uint8_t>(PatternMode::Edit)) {
+    view.edit.live_from_step = false;
     view.edit.rec_free = false;  // free is a state of Edit (Rec enters it, Shift + Rec toggles it); the next Edit is entered afresh
   }
   current = next;
@@ -154,11 +155,6 @@ void PatternScreen::render(const Model& model, const ViewState& view, ui::Render
   status.pattern_name = src.strip_name();
   status.selection = view.edit.selection;
   status.shift = shift;
-  if (shift) {  // the Shift picker: the reserved modes dim, the mode that stays inverted
-    status.soft_dim = kPatternPickerDim;
-    const int key = kPadModeKey[static_cast<unsigned>(view.padmode.fixed())];  // (STEP has no key)
-    status.soft_hot = key >= 0 ? 1u << static_cast<unsigned>(key) : 0u;
-  }
   status.pads = view.padmode.name();  // OS-INFOLINE: every mode is named on the info line, NOTES too
   status.playing = view.playing;
   // OS-RECSIGN (new Community OS behaviour): the REC signs (the strip badge and the Rec frame) show whenever the pattern can be edited (pattern_editable, the edit actions' predicate), STEP included, with a
@@ -194,6 +190,23 @@ void PatternScreen::render(const Model& model, const ViewState& view, ui::Render
       case Column::Fx2: hint.append("FX VALUE"); break;
     }
     hint.append("  F7: TOOLS  PAD: SET  DEL: CLEAR");
+    status.hint = hint.c_str();
+  }
+  // OS-UXF Focus Loop: while the sequencer loops rows of the pattern on screen the line says which ("LOOP 04-11", the rows as the row column numbers them: NUMBERING) and what ends it;
+  // it takes the BLOCK hint's place (the block is what is looping).
+  if (!src.is_demo() && view.overlay == OverlayId::None && view.playing && view.play.row_looping() && view.play.pattern == view.edit.pattern) {
+    hint.assign("LOOP ");
+    for (unsigned i = 0; i < 2u; ++i) {
+      const unsigned tile = row_number_tile(static_cast<int>(i == 0u ? view.play.row_first : view.play.row_last), status.numbering);  // two nibbles: BCD or hex, as the column
+      const unsigned hi = (tile >> 4) & 0xFu;
+      const unsigned lo = tile & 0xFu;
+      const char digits[3] = {static_cast<char>(hi < 10u ? '0' + hi : 'A' + hi - 10u), static_cast<char>(lo < 10u ? '0' + lo : 'A' + lo - 10u), '\0'};
+      hint.append(digits);
+      if (i == 0u) {
+        hint.append("-");
+      }
+    }
+    hint.append("  PLAY: STOP");
     status.hint = hint.c_str();
   }
   // OS-PFX: the FX under the cursor in words (Chord, Arp, Tune, Slide), on the info line.

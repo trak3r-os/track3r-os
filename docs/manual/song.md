@@ -18,7 +18,7 @@ Use Song to arrange patterns in time. Press `Song`. The list holds the slots, an
 A pattern holds the notes. A slot is a place in the song that points at a pattern, like a playlist entry points at a track. Slots 1, 2, 1, 3 play verse, chorus, verse, bridge: pattern 1 is in the song twice.
 
 - **Stored:** the order list is saved with the project.
-- **Live:** `Play` or `F2` (**PLAY SNG**) plays from the selected slot. While it plays, a thin line under the **PAT** tile of the row that plays runs through the pattern with the playhead. <!-- QA-SNG-210 --> `F1` (**PLAY PAT**) loops only that slot's pattern. At the end of the list the song goes round to the first slot. In a lane of the TIMELINE page `F1` (**PREVIEW**) instead loops that slot's pattern with only the selected tracks (the rectangle) sounding; `F1` again, `Stop` or leaving the screen restores the solo set as it was. New in the Community OS. <!-- QA-SNG-202, QA-SNG-203, QA-SNG-204, QA-SNG-205, QA-SNG-206 --> <!-- seq/sequencer.h --> Not checked against the original firmware. <!-- og: open -->
+- **Live:** `Play` plays the song from the selected slot. While it plays, a thin line under the **PAT** tile of the row that plays runs through the pattern with the playhead. <!-- QA-SNG-210 --> `F1` (**PLAY PAT**) loops only that slot's pattern. `F2` (**DUP PAT**) adds a slot after the cursor with a copy of its pattern, as `Shift` + `Insert` does; it replaces the old `F2` PLAY SNG, which `Play` already did (new Community OS behaviour). <!-- QA-SNG-212 --> At the end of the list the song goes round to the first slot. In a lane of the TIMELINE page `F1` (**PREVIEW**) instead loops that slot's pattern with only the selected tracks (the rectangle) sounding; `F1` again, `Stop` or leaving the screen restores the solo set as it was. New in the Community OS. <!-- QA-SNG-202, QA-SNG-203, QA-SNG-204, QA-SNG-205, QA-SNG-206 --> <!-- seq/sequencer.h --> Not checked against the original firmware. <!-- og: open -->
 - **Jump:** while the song plays, `Rec` queues the cursor's slot. It starts after the pattern now playing, and the slot blinks until then. `Rec` on it again cancels. <!-- QA-SNG-043 -->
 - **Loop:** select the slots with `Shift` + `Up` / `Down` (the cursor's slot alone is enough) and hold `F2`. The song starts at the first of them, and after the last it goes back to the first. The info line says **LOOP 03-06**. Edit the patterns and the list meanwhile: a slot you delete inside the loop shortens it, a slot you add inside it lengthens it. `Rec` on a slot outside the loop leaves it, so does `Stop`; hold `F2` on the same slots again to leave it and keep playing. A tap of `F2` still plays the song, now at the release of the key. New Community OS behaviour. <!-- QA-SNG-200, QA-SNG-201 -->
 
@@ -127,7 +127,7 @@ Cutting every slot is refused: **SONG NEEDS A SLOT**. <!-- QA-SNG-055 -->
 Start on Song, with the cursor on the slot.
 
 1. Press `Shift` + `F6` (**NAME**). The keyboard opens, titled **PATTERN NAME**. <!-- QA-SNG-010 -->
-2. Type with the pads, up to 30 characters, and press `F8` (**OK**). `F7` (**CANCEL**) keeps the old name.
+2. Type with the pads, up to 30 characters, and press `F1` (**OK**). `F8` (**CANCEL**) keeps the old name.
 
 You should see **PATTERN nn NAMED** in the strip. The NAME column shows it for every slot that holds the pattern. <!-- QA-SNG-011 -->
 
@@ -183,7 +183,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 | Key | Label | With `Shift` |
 |---|---|---|
 | `F1` | **PLAY PAT** | **0/4** |
-| `F2` | **PLAY SNG** | **1/4** |
+| `F2` | **DUP PAT** | **1/4** |
 | `F3` | **ADD SLOT** | **2/4** |
 | `F4` | **DEL SLOT** | **3/4** |
 | `F5` | **UNIQUE** | **END** |
@@ -195,7 +195,8 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 
 | Key | What it does | Ref |
 |---|---|---|
-| `F1` (**PLAY PAT**), `F2` (**PLAY SNG**) | play the slot's pattern in a loop, or the song from the selected slot | QA-SNG-043 |
+| `F1` (**PLAY PAT**) | play the slot's pattern in a loop; `Play` plays the song from the selected slot | QA-SNG-043 |
+| `F2` (**DUP PAT**) | a slot after the cursor with a copy of the pattern, the same as `Shift` + `Insert` | QA-SNG-212 |
 | `F1` (**PREVIEW**) in a lane of TIMELINE | loop the slot's pattern with only the rectangle's tracks sounding; `F1` again, `Stop` or leaving the screen ends the audition and restores the solo set; not an undo unit | QA-SNG-203, QA-SNG-204, QA-SNG-205, QA-SNG-206 |
 | hold `F2` | loop the selected slots; the same slots again take the loop back | QA-SNG-200, QA-SNG-201 |
 | `F3` (**ADD SLOT**), `Insert` | add a slot with the same pattern | QA-SNG-050 |

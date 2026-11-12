@@ -1,7 +1,7 @@
 # OS-FINALQA (docs/specs/OS-FINALQA.md): the Sample edit screen's QA rows, docs/qa/catalogue/sample_edit.md. One `snap qa_sed_NNN` per row with a visible result; the goldens are keyed qa_sample_edit/qa_sed_NNN.
 # OS-SHIFTROW: with Shift held the key row shows the Shift layer: a label only on a key that does something, "-" elsewhere; Shift + F never falls through to the plain key.
 
-# QA-SED-001: Sample edit with Shift held: AMG 8K AMG 16K Q8 - - SAVE WAV PRV EDGE REDO.
+# QA-SED-001: Sample edit with Shift held: AMG 8K AMG 16K Q8 DC REM REDO SAVE WAV INST - INST +.
 document
 tap sampleedit
 press shift
@@ -91,11 +91,11 @@ release shift
 wait 500
 snap qa_sed_012
 
-# QA-SED-017 (OS-QAFIX-27): the header names the instrument being edited; Shift + F5 (NEXT INS) moves to the next one (INSTRUMENT 01 -> 02, the window and the selection reset).
+# QA-SED-017 (OS-QAFIX-27): the header names the instrument being edited; Shift + F8 (INST +, OS-UXF-SMP item 11; it was Shift + F5 NEXT INS) moves to the next one (INSTRUMENT 01 -> 02, the window and the selection reset).
 tap f8
 wait 300
 press shift
-tap f5
+tap f8
 release shift
 snap qa_sed_017
 

@@ -1,0 +1,43 @@
+# OS-UXF row 2, the Focus Loop (docs/specs/OS-UXF.md): QA-PAT-540 to 543 on the real engine (`audio on`: the sequencer behind the app, so the order of the start and the loop on the command ring is the one
+# the unit runs). The sound document is an empty 16-step pattern at 120 BPM (125 ms a step, a 2 s pass). A block of rows 5 to 12 (NUMBERING counts from 1; model rows 4..11), Shift + Play from stop:
+# the info line says LOOP 05-12 and goes on saying it after more than one pass of the pattern, because the line wraps at the block's end; Shift + Play again stops and the line is bare.
+document sound
+audio on
+wait 30
+tap rec
+assert state mode=0 playing=0
+action cursor.track 0
+action cursor.jump_fraction 0
+action cursor.home
+tap down
+tap down
+tap down
+tap down
+action select.extend 1
+action select.extend 1
+action select.extend 1
+action select.extend 1
+action select.extend 1
+action select.extend 1
+action select.extend 1
+wait 10
+assert state screen=PATTERN playing=0
+
+# QA-PAT-540: Shift + Play with the block selected starts the pattern at the block's first row and loops its last; the strip says the rows. Two and a half passes of the 16-step pattern later it still loops.
+press shift
+tap play
+release shift
+wait 100
+assert state playing=1
+snap qa_pat_540_start
+wait 4900
+assert state playing=1
+snap qa_pat_540_later
+
+# QA-PAT-541: Shift + Play again stops (no jump, no new loop); the transport is stopped and the loop line is gone.
+press shift
+tap play
+release shift
+wait 100
+assert state playing=0
+snap qa_pat_541_stopped

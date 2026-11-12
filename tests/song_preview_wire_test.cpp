@@ -257,7 +257,7 @@ TEST_CASE("song preview: the solo set after the audition is the one before it, a
 TEST_CASE("song preview: while the song plays, F1 in a lane becomes PLAY PAT of that slot (the audition rides on the running transport)") {
   Rig rig({1, 2, 3});
   rig.timeline();
-  rig.tap(Button::F2);  // PLAY SNG
+  rig.tap(Button::Play);  // PLAY SNG (the Play button)
   CHECK(rig.state().playing);
   NEED(rig.sink.plays.size() == 1u);
   CHECK(rig.sink.plays.back() == 0xFFFFu);  // the song

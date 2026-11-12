@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The on-screen keyboard's actions (OS-FU2; app/text_entry.h has the machine, screens/text_entry_overlay.cpp the picture): they only edit the overlay's text and focus (view state, no
-// undo unit). F8's text.accept is the maintainer's: for Save As it is in save_actions.cpp.
+// undo unit). F1's text.accept (OS-UXF-KEYS item 5; it was F8) is the maintainer's: for Save As it is in save_actions.cpp.
 #include "action_handlers.h"
 
 #include <o3os/app/save_service.h>

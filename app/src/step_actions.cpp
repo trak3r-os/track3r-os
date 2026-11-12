@@ -321,9 +321,21 @@ bool step_clear(ActionContext& ctx, core::ActionArg arg) noexcept {
   if (elements == 0) {
     return false;
   }
+  // OS-MIDIREC-P1 S7c (A16, new Community OS behaviour): deleting a block of whole steps also deletes the MIDI lane events of its tracks and rows (same undo unit). Done first: a refusal (the undo
+  // ring) changes nothing. A cursor step with no block, and a column block, leave the lanes alone.
+  bool lane_changed = false;
+  if (arg == 0 && sel.active && ctx.edit != nullptr) {
+    const Selection::Block lb = sel.block(ctx.view.pattern.row(), ctx.view.pattern.track());
+    const PatternSource lsrc(ctx.model, ctx.view.edit.pattern);
+    const int lane_result = pe::lanes_clear_block(ctx, ctx.view.edit.pattern, lb, lsrc, pe::step_bytes(lb.track1 - lb.track0 + 1, lb.row1 - lb.row0 + 1));
+    if (lane_result < 0) {
+      return true;  // (said)
+    }
+    lane_changed = lane_result > 0;
+  }
   const pe::Edited e = pe::edit_selection(
       ctx, [](model::Step& s, const Rule&, Last&, void* p) { model::edit::clear(s, *static_cast<const unsigned*>(p)); }, &elements);
-  if (e.refused > 0 && !e.changed && !e.failed) {
+  if (e.refused > 0 && !e.changed && !lane_changed && !e.failed) {
     return pe::say(ctx, core::Severity::Info, "PAST TRACK END");
   }
   pe::move_cursor_by_step(ctx, 0, false);  // always, with a range too: it also ends the selection; a clear never wraps (a hold may start on the last row: OS-DELREPEAT)
@@ -340,7 +352,11 @@ bool step_insert(ActionContext& ctx, core::ActionArg) noexcept {
   const PatternSource src(ctx.model, v.edit.pattern);
   const Selection::Block b = v.edit.selection.block(v.pattern.row(), v.pattern.track());
   bool exists = src.exists();
-  bool changed = false;
+  const int lane_result = pe::lanes_rows(ctx, v.edit.pattern, b, src, true);  // OS-MIDIREC-P1 S7c (A16): the lane ticks move with the rows, first (a refusal changes nothing)
+  if (lane_result < 0) {
+    return true;  // (said)
+  }
+  bool changed = lane_result > 0;
   int refused = 0;
   for (int t = b.track0; t <= b.track1 && t < src.tracks(); ++t) {
     const int first = b.row0;
@@ -383,7 +399,11 @@ bool step_pull(ActionContext& ctx, core::ActionArg) noexcept {
   const PatternSource src(ctx.model, v.edit.pattern);
   const Selection::Block b = v.edit.selection.block(v.pattern.row(), v.pattern.track());
   bool exists = src.exists();
-  bool changed = false;
+  const int lane_result = pe::lanes_rows(ctx, v.edit.pattern, b, src, false);  // OS-MIDIREC-P1 S7c (A16): the lane events of the row go, the later ones move up, first (a refusal changes nothing)
+  if (lane_result < 0) {
+    return true;  // (said)
+  }
+  bool changed = lane_result > 0;
   int refused = 0;
   for (int t = b.track0; t <= b.track1 && t < src.tracks(); ++t) {
     const int first = b.row0;
@@ -440,11 +460,16 @@ bool block_copy(ActionContext& ctx, core::ActionArg) noexcept {
       col[r] = src.step(b.track0 + i, b.row0 + r);
     }
   }
+  // OS-MIDIREC-P1 S7c (A16): a block of whole steps carries its MIDI lane events (the clip's 1,024-event buffer); more than that and the clip carries none, which the strip says.
+  const pe::LaneCopy lanes = pe::lanes_to_clip(*ctx.clip, ctx.model.lanes, v.edit.pattern, b.track0, b.row0);
   core::FixedString<core::kNotifyTextChars> text;
   text.assign("COPIED ");
   append_uint(text, static_cast<unsigned>(ctx.clip->tracks() * ctx.clip->rows()));
   text.append(ctx.clip->tracks() * ctx.clip->rows() == 1 ? " STEP" : " STEPS");
-  return pe::say(ctx, core::Severity::Info, text.c_str());
+  if (lanes == pe::LaneCopy::TooMany) {
+    text.append(" - NO LANES: TOO MANY");
+  }
+  return pe::say(ctx, lanes == pe::LaneCopy::TooMany ? core::Severity::Warn : core::Severity::Info, text.c_str());
 }
 
 // Shift + Copy (NEW COMMUNITY OS BEHAVIOUR): the clip is written with its top-left step on the cursor (the cursor's track and row, whatever the selection), whole steps over whatever is there
@@ -464,6 +489,23 @@ bool block_paste(ActionContext& ctx, core::ActionArg) noexcept {
   bool exists = src.exists();
   bool changed = false;
   int refused = 0;
+  // OS-MIDIREC-P1 S7c (A16): the clip's MIDI lane events replace the target lanes over the same rows (as the steps do). A paste the pool or the undo ring would not take is refused whole,
+  // before anything is written. Whole-step clips that carry lanes only (LanePaste::active).
+  int take[model::kMaxTracks] = {};  // the steps each clip track writes (0: none, past the last track or a row past that track's end)
+  for (int i = 0; i < ctx.clip->tracks() && i < static_cast<int>(model::kMaxTracks) && v.pattern.track() + i < src.tracks(); ++i) {
+    const int len = src.track_length(v.pattern.track() + i);
+    take[i] = row < len ? (ctx.clip->rows() < len - row ? ctx.clip->rows() : len - row) : 0;
+  }
+  pe::LanePaste lanes(ctx, v.edit.pattern, v.pattern.track(), row, take, false);
+  if (!lanes.fits(pe::step_bytes(ctx.clip->tracks(), ctx.clip->rows()))) {
+    return pe::say(ctx, core::Severity::Warn, "LANES DO NOT FIT: NOTHING CHANGED");
+  }
+  if (lanes.differs()) {
+    if (!pe::create_if_missing(ctx, exists, static_cast<unsigned>(src.length()))) {
+      return false;  // (said: no room)
+    }
+    changed = lanes.apply();
+  }
   for (int i = 0; i < ctx.clip->tracks(); ++i) {
     const int t = v.pattern.track() + i;
     if (t >= src.tracks()) {

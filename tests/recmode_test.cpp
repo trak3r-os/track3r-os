@@ -246,9 +246,24 @@ TEST_CASE("recmode: LIVE") {
     CHECK(rig.step(0, 11).note == 0u);
     CHECK(test::arena(0).project.get_param(volume_id) == vol - 5.0f);  // (the volume is not an undo step)
   }
-  {  // Shift + REC (OS-LIVEEXIT): STEP, the cursor on the current row; recording ends; playing goes on
+  {  // Shift + REC (OS-UXF-PAT item 8): LIVE entered from WATCH goes back to WATCH; recording ends, the view keeps following; playing goes on
     Rig rig;
     enter(rig, St::Live, true);
+    rig.play(7);
+    rig.pad(12);
+    CHECK(rig.state().edit.take_open);
+    rig.shift_tap(Button::Rec);
+    CHECK(rig.st() == St::Watch);
+    CHECK_FALSE(rig.state().edit.take_open);
+    CHECK(rig.state().playing);
+    rig.play(11);
+    CHECK(rig.row() == 11);
+  }
+  {  // Shift + REC (OS-LIVEEXIT, OS-UXF-PAT item 8): LIVE entered from STEP goes back to STEP, the cursor on the current row; recording ends; playing goes on
+    Rig rig;
+    enter(rig, St::Step, true);
+    rig.shift_tap(Button::Rec);
+    NEED(rig.st() == St::Live);
     rig.play(7);
     rig.pad(12);
     CHECK(rig.state().edit.take_open);
@@ -259,10 +274,20 @@ TEST_CASE("recmode: LIVE") {
     CHECK(rig.state().playing);
     rig.play(11);
     CHECK(rig.row() == 7);
+    rig.shift_tap(Button::Rec);  // on again from STEP; REC in LIVE is WATCH; and LIVE entered from WATCH leaves for WATCH
+    CHECK(rig.st() == St::Live);
+    rig.tap(Button::Rec);
+    CHECK(rig.st() == St::Watch);
+    rig.shift_tap(Button::Rec);
+    CHECK(rig.st() == St::Live);
+    rig.shift_tap(Button::Rec);
+    CHECK(rig.st() == St::Watch);
   }
   {  // the cursor is on the row the play line is on even when the published position moved since the last pass
     Rig rig;
-    enter(rig, St::Live, true);
+    enter(rig, St::Step, true);
+    rig.shift_tap(Button::Rec);
+    NEED(rig.st() == St::Live);
     rig.pos.publish(true, 1, 9, 12000, audio::PlayPosition::kNoOrder, 0);  // published, not yet read by a pass
     rig.shift_tap(Button::Rec);
     CHECK(rig.st() == St::Step);
@@ -331,6 +356,29 @@ TEST_CASE("recmode: WATCH, stopped") {
       CHECK(rig.st() == St::Watch);
       CHECK_FALSE(rig.state().edit.take_open);
       CHECK(rig.journal.depth() == d0);
+    }
+  }
+  {  // The same from STEP (OS-UXF-PAT item 8): Shift + REC began LIVE from STEP, so the cancel goes back to STEP stopped
+    for (int shifted = 0; shifted < 2; ++shifted) {
+      Rig rig;
+      CHECK(rig.app->device_settings().set(ds::CountIn, 1.0f) == model::Status::Ok);
+      rig.tap(Button::Rec);  // WATCH -> STEP
+      CHECK(rig.st() == St::Step);
+      rig.shift_tap(Button::Rec);
+      CHECK(rig.st() == St::Live);
+      rig.pos.publish(true, 1, 0, 12000, audio::PlayPosition::kNoOrder, 0);
+      rig.pos.publish_count_in(3);
+      rig.pass();
+      if (shifted != 0) {
+        rig.shift_tap(Button::Rec);
+      } else {
+        rig.tap(Button::Rec);
+      }
+      CHECK(rig.sink.stops == 1u);
+      CHECK_FALSE(rig.state().playing);
+      CHECK(rig.st() == St::Step);
+      CHECK_FALSE(rig.state().edit.live_from_step);
+      CHECK_FALSE(rig.state().edit.take_open);
     }
   }
   {  // PLAY: play, WATCH, playing; never a count-in
@@ -412,7 +460,8 @@ TEST_CASE("recmode: Shift + REC refused by the transport returns false and chang
 TEST_CASE("recmode: a LIVE take is one undo unit; the notes go to the play line in LIVE and to the cursor in STEP") {
   Rig rig;
   rig.play(3);
-  rig.shift_tap(Button::Rec);  // LIVE
+  rig.tap(Button::Rec);        // STEP
+  rig.shift_tap(Button::Rec);  // LIVE, entered from STEP
   const unsigned d0 = rig.journal.depth();
   rig.pad(12);
   rig.play(8);
@@ -573,7 +622,7 @@ TEST_CASE("recmode: REC then PLAY inside the chord window is LIVE only, with no 
       CHECK(rig.sink.stops == 0u);
       CHECK(rig.st() == St::Live);
     }
-    {  // LIVE: the chord ends it (STEP), the transport keeps going
+    {  // LIVE: the chord ends it (back to WATCH, where it was entered from), the transport keeps going
       Rig rig;
       enter(rig, St::Live, true);
       press(rig, first, true);
@@ -581,7 +630,7 @@ TEST_CASE("recmode: REC then PLAY inside the chord window is LIVE only, with no 
       press(rig, Button::Rec, false);
       press(rig, Button::Play, false);
       rig.pass(100);
-      CHECK(rig.st() == St::Step);
+      CHECK(rig.st() == St::Watch);
       CHECK(rig.sink.stops == 0u);
     }
   }

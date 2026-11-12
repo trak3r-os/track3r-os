@@ -64,7 +64,7 @@ tap file
 tap f5
 wait 50
 assert state overlay=TEXT_ENTRY
-tap f8
+tap f1
 wait 1700
 assert state msg=SAVE_TRACK_01_DONE
 assert file "Projects/Track 01/project.o3pj" exists
@@ -146,7 +146,7 @@ mark model reimported
 tap file
 tap f5
 wait 50
-tap f8
+tap f1
 wait 1700
 assert state msg=SAVE_TRACK_02_DONE
 assert file "Projects/Track 02/project.o3pj" exists

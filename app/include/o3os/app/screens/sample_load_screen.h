@@ -8,8 +8,8 @@ namespace o3os::app {
 // F1..F8 of the Sample load screen: at most 8 characters. F3 ENTER (enters a
 // folder), F4 ADD (adds the file as the next instrument) and F5 PLAY (previews) are this screen's keys.
 inline constexpr const char* kSampleLoadSoftKeys[8] = {"LOAD", "UP", "ENTER", "ADD", "PLAY", "RESCAN", "WT AUTO", "CH MIX"};  // F7: OS-GRAN, how a WAV becomes a wavetable (the label follows the mode: wavetable_key_label); F8: OS-LOADCH, the channel of a stereo file (CH MIX / CH LEFT / CH RIGHT / STEREO, channel_key_label; "CH MONO" while the file under the cursor is mono, "--" with no file)
-// While Shift is held (OS-SHIFTROW): the quarter jumps and the end, then the target instrument one back / on (OS-SLDTARGET), bound in this screen's context; F6 does nothing.
-inline constexpr const char* kSampleLoadShiftKeys[8] = {"0/4", "1/4", "2/4", "3/4", "END", "-", "INST -", "INST +"};
+// While Shift is held (OS-SHIFTROW): the quarter jumps and the end, then MARK (OS-UXF-SMP item 18: the Shift + Right toggle) and the target instrument one back / on (OS-SLDTARGET), bound in this screen's context.
+inline constexpr const char* kSampleLoadShiftKeys[8] = {"0/4", "1/4", "2/4", "3/4", "END", "MARK", "INST -", "INST +"};
 
 // "Sample load" (docs/design/product-ux.md section 4: "SD browser, preview, import, .pti library"; OS-011a, new Community OS behaviour after PAR-016, PAR-033 and
 // BASE-17): the WAV files of the card, in folders. The listing is the File screen's browser (dir_index.h, dir_scan.h) with the .wav filter (kWavFilter), over the

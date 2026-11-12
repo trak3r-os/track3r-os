@@ -238,7 +238,8 @@ TEST_CASE("play position: the sequencer publishes the microstep the playhead is 
 TEST_CASE("play position: the screen redraws when the bar moves, and not when nothing it shows changed") {
   Rig rig;
   rig.mode(app::PatternMode::Edit);  // Browse would follow the song to the pattern that plays (OS-009c), and so does Edit (OS-LIVEREC) unless the recording is free: the free one shows the bar and stays
-  (void)rig.app->invoke(core::action_id("pattern.rec_free"));  // (OS-RECMODE2, OS-LIVEEXIT: Shift + REC, LIVE -> STEP)
+  rig.mode(app::PatternMode::Browse);
+  (void)rig.app->invoke(core::action_id("pattern.edit_toggle"));  // REC: STEP (OS-RECMODE2; Shift + REC in a LIVE that view.mode made goes to WATCH, OS-UXF-PAT item 8)
   rig.pass();
   rig.position.publish(true, 1, 3, 12000);
   const std::size_t f0 = rig.frames();
@@ -288,7 +289,8 @@ TEST_CASE("play position: Browse (the default) and Edit take the cursor to the s
   rig.position.publish(true, 1, 24, 12000);
   rig.pass();
   CHECK(rig.app->view().row() == 24);  // Edit through view.mode follows (from the keys: Shift + Rec): the cursor rides the playhead
-  (void)rig.app->invoke(core::action_id("pattern.rec_free"));  // Shift + REC in LIVE: STEP, the cursor stays (OS-RECMODE2, OS-LIVEEXIT)
+  rig.mode(app::PatternMode::Browse);
+  (void)rig.app->invoke(core::action_id("pattern.edit_toggle"));  // REC: STEP, the cursor stays (OS-RECMODE2, OS-LIVEEXIT)
   rig.position.publish(true, 1, 25, 12000);
   rig.pass();
   CHECK(rig.app->view().row() == 24);  // the cursor stays and only the play bar moves
@@ -403,8 +405,8 @@ TEST_CASE("play position: Browse goes with the song to the next pattern, and to 
   rig.pass();
   CHECK(rig.app->state().edit.pattern == 1);
   // Edit follows the song too (it records into the pattern that plays, OS-LIVEREC), the free recording does not
-  rig.mode(app::PatternMode::Edit);
-  (void)rig.app->invoke(core::action_id("pattern.rec_free"));
+  rig.mode(app::PatternMode::Browse);
+  (void)rig.app->invoke(core::action_id("pattern.edit_toggle"));  // REC: STEP
   rig.position.publish(true, 2, 0, 12000, 1);
   rig.pass();
   CHECK(rig.app->state().edit.pattern == 1);

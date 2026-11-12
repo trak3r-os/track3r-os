@@ -334,7 +334,7 @@ TEST_CASE("record screen: F1 arms a take after the source has settled, F1 stops 
   CHECK(project.instrument(want)->sampler.volume == 50);  // OS-BUG-PASTE24: born at 0 dB under the document's law (the 1.2+ law here: level 50)
   CHECK(rig.bank.pending(want));  // the voices get it when playback is stopped and the live notes are idle
   CHECK(rig.state().instrument == static_cast<int>(want) + 1);
-  rig.tap(Button::F7);  // keep the name RECORDING
+  rig.tap(Button::F8);  // keep the name RECORDING
   CHECK(rig.message().find("SAVED AS INSTRUMENT") == 0u);
   // F3 again: nothing to save.
   rig.tap(Button::F3);
@@ -895,7 +895,7 @@ TEST_CASE("record screen: a question left over from an earlier take does not let
   CHECK(rig.message() == "TAKE NOT SAVED: F4 AGAIN");
   CHECK(rig.state().take_ask.kind == app::TakeAsk::Kind::Discard);
   rig.tap(Button::F3);  // SAVE: the review ends, the question is stale
-  rig.tap(Button::F7);  // (the name keyboard, OS-AUDIT-71)
+  rig.tap(Button::F8);  // (the name keyboard, OS-AUDIT-71)
   rig.pass();
   NEED(rig.rec->state() == app::Recorder::State::Idle);
   take();
@@ -1608,7 +1608,7 @@ TEST_CASE("loop screen: F1 records the loop on the bars, it ends by itself and p
   }
   rig.tap(Button::F3);
   CHECK(rig.rec->state() == app::Recorder::State::Idle);
-  rig.tap(Button::F7);  // the name keyboard (OS-AUDIT-71) hides the strip; F7 keeps the name
+  rig.tap(Button::F8);  // the name keyboard (OS-AUDIT-71) hides the strip; F8 keeps the name
   CHECK(rig.message().find("SAVED AS INSTRUMENT") == 0u);
   const model::Instrument* inst = project.instrument(want);
   NEED(inst != nullptr);
@@ -2114,7 +2114,7 @@ TEST_CASE("loop screen: SAVE with a session on is two steps: the keys are ignore
   CHECK(rig.rec->state() != app::Recorder::State::Idle);
   NEED(rig.until([&] { return rig.rec->state() == app::Recorder::State::Idle; }, 30));
   CHECK(rig.state().overlay == app::OverlayId::TextEntry);  // the second step of the save opens the name keyboard too (OS-AUDIT-71)
-  rig.tap(Button::F7);
+  rig.tap(Button::F8);
   CHECK(rig.message().find("SAVED AS INSTRUMENT") == 0u);
   CHECK(test::arena(1).project.instrument(slot_free) != nullptr);
   CHECK_FALSE(rig.rec->save_waiting());
@@ -2385,7 +2385,7 @@ TEST_CASE("record screen: after F3 the keyboard opens on the new instrument's na
   const std::string typed = rig.state().text.entry.text();
   CHECK(typed != "RECORDING");
   CHECK_FALSE(typed.empty());
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   CHECK(rig.state().overlay == app::OverlayId::None);
   CHECK(std::string(project.instrument(slot)->name) == typed);
   // A second take: F7 leaves the saved name.
@@ -2393,7 +2393,7 @@ TEST_CASE("record screen: after F3 the keyboard opens on the new instrument's na
   NEED(rig.rec->state() == app::Recorder::State::Review);
   rig.tap(Button::F3);
   CHECK(rig.state().overlay == app::OverlayId::TextEntry);
-  rig.tap(Button::F7);
+  rig.tap(Button::F8);
   CHECK(rig.state().overlay == app::OverlayId::None);
   NEED(project.instrument(slot + 1u) != nullptr);
   CHECK(std::string(project.instrument(slot + 1u)->name) == "RECORDING");

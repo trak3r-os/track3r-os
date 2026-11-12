@@ -12,45 +12,27 @@
 # The two lines `audio_probe | auto | pad:fresh:silent` and `audio_probe | load | pad:fresh:onset` left the baseline because the walk's random stream changed (B4b: Shift + arrows and the 100 ms before a key): they no longer occur in seeds 1..200 of this stream. They were NOT fixed; a stream that reaches the state again can bring them back as new findings. `audio_probe | add | pad:fresh:onset` (31@150) left the same way at the 44,100 Hz clock (OS-RATE): the walk's stream is unchanged, so the clock moved the probe's onset measure of that state; it is not fixed. It came back as a new finding (19@150, the first seed of the key) when the walk's stream moved again with dev c21328bf (OS-BUG-R3SEL), and is a line again.
 audio_probe | add | pad:fresh:onset | 19@150 | onset -3.3 ms | new (still there after the OS-BUG-SLICEPITCH fix)
 audio_probe | add | pad:fresh:shape | 19@150 | shape 0.06 | new (still there after the OS-BUG-SLICEPITCH fix)
-audio_probe | add | pad:fresh:silent | 13@150 | the path sounds, the step is silent | new
-audio_probe | auto | pad:fresh:onset | 38@150 | onset -3.2 ms | new (still there after the OS-BUG-SLICEPITCH fix)
 audio_probe | auto | pad:fresh:shape | 8@150 | shape 0.05 | new (still there after the OS-BUG-SLICEPITCH fix)
 audio_probe | even | pad:fresh:onset | 3@150 | onset -3.3 ms | new (still there after the OS-BUG-SLICEPITCH fix)
 audio_probe | even | pad:fresh:shape | 3@150 | shape 0.07 | new (still there after the OS-BUG-SLICEPITCH fix)
-audio_probe | even | pad:fresh:silent | 17@150 | the path sounds, the step is silent | new
 audio_probe | load | pad:fresh:shape | 143@150 | shape 0.37 | new
-audio_probe | load | pad:fresh:silent | 8@150 | the path is silent, the step sounds | new
 audio_probe | load | pad:settled:shape | 143@150 | shape 0.37 | new
-audio_probe | load | pad:settled:silent | 8@150 | the path is silent, the step sounds | new
 audio_probe | mode | pad:fresh:onset | 123@150 | onset +4.9 ms | new
-audio_probe | mode | pad:fresh:shape | 13@150 | shape 0.85 | new
-audio_probe | mode | pad:settled:shape | 13@150 | shape 0.85 | new
-audio_probe | undo | pad:fresh:shape | 28@150 | shape 0.75 | new
-audio_probe | undo | pad:settled:shape | 28@150 | shape 0.75 | new
 R2 | CONFIG | config.f8 0 | 11@81 | bound key changes nothing and says nothing (config.f8) [27x in the run] | OS-FWCONFIG
 R2 | CONFIG | param.apply 0 | 100@18 | bound key changes nothing and says nothing (param.apply) [5x in the run] | OS-BUG-APPLYSILENT: seed 100 step 18 replayed 2026-10-23: CONFIG page 2 (SD, F3 then F7), no parameter row, F7 unlabelled: by design, OS-QAFIX-7
-R2 | CONFIG | shift+param.coarse -1 | 18@272 | bound key changes nothing and says nothing (param.coarse -1) [1x in the run] | new
 R2 | FILE | file.engine 0 | 162@103 | bound key changes nothing and says nothing (file.engine) [2x in the run] | new
 R2 | FILE | file.new 0 | 88@279 | bound key changes nothing and says nothing (file.new) [1x in the run] | new
 R2 | FILE | file.page 0 | 100@237 | bound key changes nothing and says nothing (file.page) [4x in the run] | new
 R2 | FILE | file.report 0 | 1@220 | bound key changes nothing and says nothing (file.report) [184x in the run] | OS-FILES-B
-R2 | FILE | file.rescan 0 | 11@51 | bound key changes nothing and says nothing (file.rescan) [11x in the run] | new
 R2 | FILE | shift+cursor.jump_end 0 | 15@293 | bound key changes nothing and says nothing (cursor.jump_end) [21x in the run] | new
 R2 | FILE | shift+cursor.page -1 | 2@199 | bound key changes nothing and says nothing (cursor.page) [46x in the run] | new
-R2 | FILE | shift+cursor.page 1 | 9@117 | bound key changes nothing and says nothing (cursor.page) [10x in the run] | new
 R2 | FILE | shift+file.purge 0 | 3@148 | bound key changes nothing and says nothing (file.purge) [28x in the run] | new
-R2 | FILE | shift+text.accept 0 | 8@102 | bound key changes nothing and says nothing (text.accept) [10x in the run] | new
-R2 | FILE | shift+text.auto 0 | 9@244 | bound key changes nothing and says nothing (text.auto) [45x in the run] | OS-QAFIX-16
-R2 | FILE | shift+text.caps 0 | 11@130 | bound key changes nothing and says nothing (text.caps) [22x in the run] | new
-R2 | FILE | shift+text.key 0 | 4@60 | bound key changes nothing and says nothing (text.key) [22x in the run] | new
 R2 | FILE | text.auto 0 | 4@57 | bound key changes nothing and says nothing (text.auto) [185x in the run] | OS-QAFIX-16
 R2 | FILE | text.caps 0 | 2@123 | bound key changes nothing and says nothing (text.caps) [85x in the run] | new
 R2 | FILE | text.key 0 | 3@41 | bound key changes nothing and says nothing (text.key) [127x in the run] | new
 R2 | MIXER | mixer.cue 0 | 14@218 | bound key changes nothing and says nothing (mixer.cue) [10x in the run] | new
 R2 | MIXER | shift+mixer.mute_none 0 | 8@73 | bound key changes nothing and says nothing (mixer.mute_none) [5x in the run] | new
 R2 | MIXER | shift+mixer.solo_none 0 | 162@111 | bound key changes nothing and says nothing (mixer.solo_none) [2x in the run] | new
-R2 | MIXER | text.auto 0 | 69@296 | bound key changes nothing and says nothing (text.auto) [2x in the run] | new
-R2 | MIXER | text.key 0 | 69@295 | bound key changes nothing and says nothing (text.key) [1x in the run] | new
 # The line `R2 | PATTERN | pattern.invert 0` left the baseline after OS-AUDIT-56 (column blocks: Shift + Left/Right grow a column block, which changed the walk and what Invert acts on); it no longer occurs in the LONG run (shard 2, seeds 10..18).
 # The line `R1 | FILE | tap f1` (the residuals of the verify of OS-QAFIX-4) left the baseline on 2026-10-31: the walk's random stream moved with the dev merges after OS-AUDIT-56 (OS-SID, OS-IMPORT-ANY, the Config APPLY? arm, OS-STEREO slice (b), OS-SONG-VIEW2 slice 3), and it no longer occurs in the LONG run (shards 1 and 2); in the same move `file.rescan` and `shift+cursor.jump_end` took new repros and `shift+param.coarse -1` on Config came in.
 # Known issue, OS-MIDIREC (decided, spec 3.4 F5 / A14 / 3.7 Q5 a): F5 PREVIEW held in the EVENTS list sounds the row's step
@@ -70,12 +52,10 @@ R2 | PATTERN | fill.vary 0 | 1@133 | bound key changes nothing and says nothing 
 R2 | PATTERN | shift+cursor.page -1 | 33@8 | bound key changes nothing and says nothing (cursor.page) [5x in the run] | new
 R2 | PATTERN | shift+cursor.page 1 | 104@204 | bound key changes nothing and says nothing (cursor.page) [1x in the run] | new
 R2 | PERFORM | dj.key 0 | 143@237 | bound key changes nothing and says nothing (dj.key) [1x in the run] | OS-DJ
-R2 | PERFORM | perform.key 0 | 11@271 | bound key changes nothing and says nothing (perform.key) [3x in the run] | new
 R2 | PERFORM | perform.key 3 | 6@64 | bound key changes nothing and says nothing (perform.key) [30x in the run] | new
 R2 | PERFORM | perform.key 4 | 4@291 | bound key changes nothing and says nothing (perform.key) [34x in the run] | new
 R2 | PERFORM | perform.key 7 | 5@250 | bound key changes nothing and says nothing (perform.key) [34x in the run] | new
 R2 | PERFORM | shift+perform.swap -1 | 119@35 | bound key changes nothing and says nothing (perform.swap) [2x in the run] | new
-R2 | PERFORM | shift+perform.swap 1 | 5@249 | bound key changes nothing and says nothing (perform.swap) [2x in the run] | new
 R2 | RECORD | record.discard 0 | 25@32 | bound key changes nothing and says nothing (record.discard) [37x in the run] | new
 R2 | RECORD | record.monitor 0 | 13@286 | bound key changes nothing and says nothing (record.monitor) [33x in the run] | new
 R2 | RECORD | record.preview 7 | 2@143 | bound key changes nothing and says nothing (record.preview) [31x in the run] | new
@@ -83,7 +63,6 @@ R2 | RECORD | record.save 0 | 2@140 | bound key changes nothing and says nothing
 R2 | RECORD | record.toggle 0 | 8@5 | bound key changes nothing and says nothing (record.toggle) [31x in the run] | new
 R2 | RECORD | shift+record.crop 0 | 62@71 | bound key changes nothing and says nothing (record.crop) [3x in the run] | new
 R2 | SAMPLE_EDIT | shift+sedit.amp -1 | 1@70 | bound key changes nothing and says nothing (sedit.amp) [3x in the run] | new
-R2 | SAMPLE_EDIT | shift+sedit.amp 1 | 12@76 | bound key changes nothing and says nothing (sedit.amp) [4x in the run] | new
 R2 | SAMPLE_LOAD | sample.play 0 | 1@62 | bound key changes nothing and says nothing (sample.play) [111x in the run] | new
 R2 | SAMPLE_LOAD | sample.rescan 0 | 4@193 | bound key changes nothing and says nothing (sample.rescan) [61x in the run] | new
 R2 | SAMPLE_LOAD | sample.up 0 | 81@111 | bound key changes nothing and says nothing (sample.up) [3x in the run] | new
@@ -93,8 +72,6 @@ R2 | SONG | shift+song.select -1 | 24@3 | bound key changes nothing and says not
 R2 | SONG | shift+song.select 1 | 94@145 | bound key changes nothing and says nothing (song.select) [1x in the run] | new
 R2 | SONG | shift+song.select_tracks -1 | 47@284 | bound key changes nothing and says nothing (song.select_tracks) [3x in the run] | OS-SONGMAP
 R2 | WAVE | preview.hold 5 | 180@201 | bound key changes nothing and says nothing (preview.hold) [1x in the run] | new
-R2 | WAVE | shift+preview.hold 261 | 10@139 | bound key changes nothing and says nothing (preview.hold) [1x in the run] | new
-R2 | WAVE | wave.zc 0 | 7@164 | bound key changes nothing and says nothing (wave.zc) [14x in the run] | new
 R2 | WAVE | wave.zoom -1 | 7@272 | bound key changes nothing and says nothing (wave.zoom) [30x in the run] | new
 # OS-LEARNMAP (2026-11-10): the new keys (Learn F6 MAP, Config MIDI F8 MAP) moved the walk's random stream. The line SONG shift+cursor.jump_end left the baseline (it no longer occurs),
 # three took new repro seeds (FILE text.accept, SAMPLE_LOAD shift+cursor.jump_end, SONG song.tempo; their old seeds no longer reach them) and six came in: the same silent-by-design or page-edge keys as the lines above
@@ -102,9 +79,30 @@ R2 | WAVE | wave.zoom -1 | 7@272 | bound key changes nothing and says nothing (w
 R2 | PATTERN | pattern.preview 0 | 4@113 | bound key changes nothing and says nothing (pattern.preview) while the transport plays | new
 R2 | PATTERN | shift+fill.vary 0 | 31@273 | bound key changes nothing and says nothing (fill.vary) | OS-PTOOLS2 S1
 R2 | PATTERN | verb.run 0 | 50@36 | bound key changes nothing and says nothing (verb.run) while the transport plays | new
-R2 | PATTERN | shift+events.page -1 | 70@53 | bound key changes nothing and says nothing (events.page -1) | new
-R2 | PATTERN | shift+events.page 1 | 52@93 | bound key changes nothing and says nothing (events.page 1) while the transport plays | new
 R2 | CONFIG | shift+cursor.page -1 | 16@298 | bound key changes nothing and says nothing (cursor.page -1) | new
 R2 | FILE | text.accept 0 | 10@71 | bound key changes nothing and says nothing (text.accept) while the transport plays | new
 R2 | SONG | song.tempo 0 | 14@163 | bound key changes nothing and says nothing (song.tempo) while the transport plays | new
 R2 | SAMPLE_LOAD | shift+cursor.jump_end 0 | 65@198 | bound key changes nothing and says nothing (cursor.jump_end) while the transport plays | new
+R2 | SONG | shift+cursor.jump_end 0 | 36@282 | bound key changes nothing and says nothing (cursor.jump_end) while the transport plays | new
+# OS-UXF-KEYS (2026-11-11): F1 = OK and F8 = BACK on every overlay and the text entry moved the walk's random stream; these keys occur again in other seeds (same keys as before, new repro seeds).
+R2 | FILE | shift+cursor.page 1 | 14@175 | bound key changes nothing and says nothing (cursor.page 1) while the transport plays | new
+R2 | FILE | shift+text.accept 0 | 51@67 | bound key changes nothing and says nothing (text.accept) while the transport plays | new
+R2 | FILE | shift+text.auto 0 | 18@111 | bound key changes nothing and says nothing (text.auto) | OS-QAFIX-16
+R2 | FILE | shift+text.caps 0 | 23@22 | bound key changes nothing and says nothing (text.caps) while the transport plays | new
+R2 | FILE | shift+text.key 0 | 15@128 | bound key changes nothing and says nothing (text.key) while the transport plays | new
+R2 | PERFORM | shift+perform.swap 1 | 34@16 | bound key changes nothing and says nothing (perform.swap 1) | new
+R2 | PATTERN | events.quant 0 | 21@286 | bound key changes nothing and says nothing (events.quant) while the transport plays | new
+audio_probe | auto | pad:fresh:onset | 8@150 | onset -3.2 ms | new
+# OS-UXF-SMP item 18 (2026-11-11): Shift + F6 MARK (the Shift + Right toggle with a label) is a bound F key now; every path of sample.mark says something, the strip is hidden behind the playing transport, as for the other R2 lines.
+R2 | SAMPLE_LOAD | shift+sample.mark 0 | 53@99 | bound key changes nothing and says nothing (sample.mark) while the transport plays | new
+# OS-UXF-PAT merge of dev 927964e7 (2026-11-11): the walk's random stream moved again (Shift + F2 opens the PADS picker; Focus Loop); keys already known by kind (audio_probe after a sample load, a bound key silent while the transport plays) reached new states. None of them is in the pad layer or the picker; not fixed here.
+audio_probe | load | pad:fresh:silent | 39@116 | the path is silent, the step sounds | new
+audio_probe | load | pad:settled:silent | 39@116 | the path is silent, the step sounds | new
+R2 | FILE | file.rescan 0 | 59@222 | bound key changes nothing and says nothing (file.rescan) while the transport plays | new
+R2 | WAVE | wave.zc 0 | 61@224 | bound key changes nothing and says nothing (wave.zc) while the transport plays | new
+audio_probe | mode | pad:fresh:shape | 62@150 | shape 0.86 (the first 150 ms of the sound do not line up with the step's) | new
+audio_probe | mode | pad:settled:shape | 62@150 | shape 0.86 (the first 150 ms of the sound do not line up with the step's) | new
+audio_probe | undo | pad:fresh:shape | 62@150 | shape 0.86 (the first 150 ms of the sound do not line up with the step's) | new
+audio_probe | undo | pad:settled:shape | 62@150 | shape 0.86 (the first 150 ms of the sound do not line up with the step's) | new
+R2 | SAMPLE_EDIT | shift+sedit.amp 1 | 29@222 | bound key changes nothing and says nothing (sedit.amp 1) | new
+R2 | PATTERN | shift+events.page 1 | 33@263 | bound key changes nothing and says nothing (events.page 1) while the transport plays | new

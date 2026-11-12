@@ -2,6 +2,36 @@
 
 User-visible changes of the Community OS, newest first, one entry per change, in English. The next release notes link here. A change that touches a saved file or the level of what you hear says so in plain words.
 
+## v1.3.1 (2026-11-12)
+
+A key-layout release: fewer chords, one accept/back grammar, and faster ways to save, loop, chop and pick pads. No saved file changes; the module ABI is 1.13, as in v1.3.0. Use the v1.3.0 modules zip or the v1.3.1 one (same modules).
+
+Everything below is merged and tested on the host and in the emulator. Where a line says "checked on the unit" a Tracker ran it. The unit results are in the [release notes](release/v1.3.1.md).
+
+### New
+
+- **`Shift`+`File` saves from any screen**, the same save as File `F4`. A project with no name yet opens the save-as text entry. Checked on the unit.
+- **Focus Loop.** On Pattern with a block selected, `Shift`+`Play` plays the block and loops it; the strip shows the range (`LOOP 04-11`). Play, or `Shift`+`Play` again, stops. With no block `Shift`+`Play` plays from the cursor as before. Checked on the unit.
+- **One PADS picker.** `Shift`+`F2` on Pattern opens a picker with every pad mode; one press picks, `F8` goes back. `Shift`+`F1` (octave) stays. Checked on the unit.
+- **CHOP `Shift`+`F4` TO PAT** writes the slices into the pattern, and CHOP AUTO and EVEN set the instrument to BEAT SLICE in the same undo step. TO PAT checked on the unit.
+- **Sample load `Shift`+`F6` MARK** marks the file under the cursor (the same as `Shift`+`Right`). Checked on the unit.
+- **Sample edit PLUGINS `F4` NEW INS** runs the selected generator plugin into the first free instrument and jumps to it.
+- **Lanes follow pattern edits.** MIDI lanes follow block copy, paste and cut, row insert and delete, and pattern copy; CLEAR ALL clears the lane; lane recording is forward-only.
+- **Note pads show the scale**: notes in the scale light HIGH, the others LOW; PIANO octave pads show the shift.
+
+### Changed
+
+- **`F1` = OK and `F8` = BACK on every overlay, dialog and text entry.** Text entry was `F8` OK / `F7` CANCEL; the Navigator was `F8` GO. Checked on the unit.
+- **The encoder assign moves into the Learn dialog: `F7` ENC.** The `Instr`+`Fx` chord is gone; `Vol`+`Fx` still opens Learn. Checked on the unit.
+- **Pattern `F1` tap opens the pattern chooser**, as the hold does. Checked on the unit.
+- **`Shift`+`Rec` toggles LIVE on and off** from any mode; `Rec` toggles Browse and Edit. Checked on the unit.
+- **Song `F2` = DUP PAT** (the same as `Shift`+`Insert`); the Play button plays the song as before. Checked on the unit.
+- **`Shift`+`F7`/`F8` = INST -/+ on every sample screen.** Checked on the unit.
+
+### Fixed
+
+- **The Learn dialog is wider**, so all eight key labels sit inside it in every theme. Checked on the unit.
+
 ## v1.3.0 (2026-11-11)
 
 **Copy the new modules zip to the card.** TB-303, Chip, FM and SID now load from the card (`/modules/instruments/`); without them those instruments are muted and say `MODULE ... NOT LOADED`.
@@ -57,7 +87,7 @@ Everything below is merged and tested on the host and in the emulator. Where a l
 - **MIDI clock follow, tighter.** The clock DLL settles a tempo jump in about 0.1 s in simulation, an SPP that arrives with a Stop is honoured on Continue, an SPP received while playing relocates at the next step boundary, a step waits for a real clock, and the master's priority and lateness are handled. The loop wrap of a Song loop relocates MTC. A battery with the computer as master passed 14 of 17 tests on the unit before these fixes; the rerun is pending.
 - **MIDI event list (EVENTS) on Pattern.** An edit-through list of the steps of a MIDI track: notes, CC A..F and micro-moves, with FILTER, a play marker, PREVIEW, QUANT, and the FX1 and FX2 columns on NOTE rows (type and value, editable, one undo per edit). No format change.
 - **Official MIDI CC map.** A CC MAP device setting gives the 32 CCs the official manual documents for the mixer, Perform and levels, and the CC row of a Perform slot. Documented behaviour of the official firmware.
-- **MIDI Learn: follow and encoder.** In the MIDI synth mode Learn follows the selected instrument (F5 FOLLOW); the chord Instr+Fx on a row puts that parameter on the encoder (one target), and a recorded Learn move or encoder move is written into the FX columns of a LIVE or STEP take. Checked on the unit: ENCLEARN in LIVE and STEP recording.
+- **MIDI Learn: follow and encoder.** In the MIDI synth mode Learn follows the selected instrument (F5 FOLLOW); the chord Instr+Fx on a row put that parameter on the encoder (since OS-UXF-KEYS it is F7 ENC in the Learn overlay) (one target), and a recorded Learn move or encoder move is written into the FX columns of a LIVE or STEP take. Checked on the unit: ENCLEARN in LIVE and STEP recording.
 - **Pattern tools in one grammar.** Select, then `F7`, then a verb. A right-hand panel holds the verb menu and the TOOLS dialog; TRANSPOSE and INSTRUMENT dialogs; Fill works on the selection; `F6` repeats the last FILL or TOOLS apply; CLEAR is refused on a partial column; the APPS page lists only the tool apps. Checked on the unit: the TRANSPOSE and INSTRUMENT dialogs, refusals and `F6` repeat.
 - **Apps list and Navigator.** Shift+Pattern opens one list of the module apps that are not tools (`F1` launches one, `F8` is BACK on an empty list); the Navigator opens with Master+Song or Song+Pattern.
 - **Pattern selection.** Shift+Up at step 0 selects the cursor's column first, then the track, then every track; Shift+Note, Instr, Vol and Fx in edit mode also select the rows they jump over; Shift+Delete follows JUMP; a selection across tracks is drawn dimmer outside the cursor's track.

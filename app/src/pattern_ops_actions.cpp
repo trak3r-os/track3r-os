@@ -148,9 +148,14 @@ bool pattern_clip_copy(ActionContext& ctx, core::ActionArg) noexcept {
     std::memcpy(ctx.clip->column(static_cast<int>(t)), pat->steps[t], kColumnBytes);
   }
   ctx.clip->set_whole(pat->track_length, pat->name, static_cast<std::uint8_t>(v.edit.pattern));
+  // OS-MIDIREC-P1 S7c (A16): the pattern's MIDI lane events travel with it (the clip's 1,024-event buffer; more than that and the clip carries none, which the strip says).
+  const pe::LaneCopy lanes = pe::lanes_to_clip(*ctx.clip, ctx.model.lanes, v.edit.pattern, 0, 0);
   core::FixedString<core::kNotifyTextChars> text;
   append_pattern(text, v.edit.pattern);
   text.append(" COPIED");
+  if (lanes == pe::LaneCopy::TooMany) {
+    text.append(" - NO LANES: TOO MANY");
+  }
   return clip_say(ctx, text.c_str());
 }
 
@@ -168,6 +173,16 @@ bool pattern_clip_paste(ActionContext& ctx, core::ActionArg) noexcept {
     return clip_say(ctx, "NO PATTERN COPIED");
   }
   const unsigned id = v.edit.pattern;
+  // OS-MIDIREC-P1 S7c (A16): the clip's MIDI lane events replace the pattern's over each track's new length. A paste the pool or the undo ring would not take is refused whole, first (before
+  // the pattern is made); the dry run counts each old lane whole (the lengths change around the replace) and the step images at their largest.
+  int take[model::kMaxTracks];
+  for (unsigned t = 0; t < model::kMaxTracks; ++t) {
+    take[t] = ctx.clip->lengths()[t];
+  }
+  pe::LanePaste lanes(ctx, id, 0, 0, take, true);
+  if (!lanes.fits(pe::step_bytes(static_cast<int>(model::kMaxTracks), static_cast<int>(model::kMaxPatternLength)) + model::kMaxTracks * 16u)) {
+    return clip_say(ctx, "LANES DO NOT FIT: NOTHING CHANGED");
+  }
   const bool existed = ctx.edit->project().pattern(id) != nullptr;
   bool exists = existed;
   if (!pe::create_if_missing(ctx, exists, static_cast<unsigned>(PatternSource(ctx.model, id).length()))) {
@@ -189,7 +204,7 @@ bool pattern_clip_paste(ActionContext& ctx, core::ActionArg) noexcept {
       too_big = too_big || st == model::Status::Full;
     }
   }
-  changed = changed || grid;
+  changed = lanes.apply() || changed || grid;  // (the lengths are set: each lane is replaced over its track's new length)
   if (std::strcmp(pat->name, ctx.clip->name()) != 0 && ctx.edit->set_pattern_name(id, ctx.clip->name(), std::strlen(ctx.clip->name())) == model::Status::Ok) {
     changed = true;
   }

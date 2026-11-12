@@ -4,7 +4,7 @@
  "steps": [
   {"say": "OS-SAMPFMT. The card holds the maintainer's test folders at its root (/AIFF, /8SVX). The first load is a 16-bit stereo AIFF (mixed (L+R)/2), the second an 8SVX at its own rate (the rate is kept, nothing is resampled, and the Modern engine plays it at the pitch of that rate (OS-RATEPITCH; qa_ratepitch.json measures it)). The audible rows are by ear: the 8SVX should sound at its Amiga pitch."},
   {"keys": ["-shift"], "gap": 0.2},
-  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|NAVIGATOR|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP)$"}},
+  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|NAVIGATOR|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|TEXT_ENTRY)$"}},
   {"keys": ["instr"], "gap": 0.4},
   {"pad": 1, "note": "(instrument 2 is the load target: a pad on the Instrument screen picks it)"},
   {"keys": ["sampleload"], "gap": 0.5},

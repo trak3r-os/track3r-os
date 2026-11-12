@@ -1609,8 +1609,8 @@ TEST_CASE("apps list: Shift + Pattern lists the apps that are not tools, the sam
   CHECK(r.app->failed_frames() == 0u);
 }
 
-TEST_CASE("apps list: F1 and F8 launch the app under the cursor through the MODULES launch path, and the page is that app's") {
-  for (const Button key : {Button::F1, Button::F8}) {
+TEST_CASE("apps list: F1 launches the app under the cursor through the MODULES launch path, and the page is that app's (F8 is BACK, OS-UXF-KEYS item 5)") {
+  for (const Button key : {Button::F1}) {
     Rig r;
     shift_pattern(r);
     NEED(r.state().overlay == app::OverlayId::ModulePicker);
@@ -1644,7 +1644,7 @@ TEST_CASE("apps list: an app that edits the project or writes files is a tool ap
   for (unsigned k = 0; k < row; ++k) {
     r.press(Button::Down);
   }
-  r.press(Button::F8);
+  r.press(Button::F1);
   CHECK(r.state().overlay == app::OverlayId::None);
   CHECK(r.state().screen == app::ScreenId::ModuleApp);
   CHECK(r.mods->ui.app_running());

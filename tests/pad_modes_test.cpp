@@ -104,12 +104,19 @@ struct Rig {
   }
   // OS-STEPPADOFF: Shift + F5 no longer picks STEP (the mode is kept, with no key until OS-STEPPAD); the tests of its code pick it through the action.
   void steps_on() { (void)app->invoke(core::action_id("pads.mode"), static_cast<core::ActionArg>(app::PadMode::Steps)); }
+  // OS-UXF-PAT 7: the pads' modes are the PADS picker's (Shift + F2, then F1..F6 = NOTES PIANO ISO TRACKS PATS VU); the old Shift + F2..F7 of a test still name the mode, so this opens the picker and
+  // presses the key that is one lower. Shift + F1 (the octave) and the other Shift keys are what they say.
   void shift_tap(Button b) {
+    const unsigned n = static_cast<unsigned>(b);
+    const bool mode = n >= static_cast<unsigned>(Button::F2) && n <= static_cast<unsigned>(Button::F7);
     press(Button::Shift);
     pass(1);
-    tap(b);
+    tap(mode ? Button::F2 : b);
     release(Button::Shift);
     pass(1);
+    if (mode) {
+      tap(static_cast<Button>(n - 1u));
+    }
   }
   // The note-entry settings through the panel (held Note, then its pads): root 0..11, a scale pad of row 2 (0..11), lock 0 / 1.
   void set_entry(unsigned root, unsigned scale, unsigned lock) {
@@ -255,13 +262,7 @@ TEST_CASE("pad modes in the App: Shift + F1..F3 choose, the picker is on the key
     rig.release(b);
     rig.pass(1);
   };
-  const auto shift_tap = [&](Button b) {
-    rig.press(Button::Shift);
-    rig.pass(1);
-    tap(b);
-    rig.release(Button::Shift);
-    rig.pass(1);
-  };
+  const auto shift_tap = [&](Button b) { rig.shift_tap(b); };  // (the mode keys go through the PADS picker: Rig::shift_tap)
   CHECK(rig.state().padmode.fixed() == app::PadMode::Notes);
   shift_tap(Button::F5);
   CHECK(rig.state().padmode.fixed() == app::PadMode::Tracks);
@@ -417,11 +418,7 @@ TEST_CASE("TRACKS pads: the momentary layer yields to any chord (an arrow, Delet
 
 TEST_CASE("TRACKS pads: Shift + F5 leaves TRACKS fixed (no Shift needed), Shift + F2 puts NOTES back; PIANO behaves as NOTES until part B") {
   TracksRig rig;
-  rig.press(Button::Shift);
-  rig.pass(1);
-  rig.tap(Button::F5);
-  rig.release(Button::Shift);
-  rig.pass(1);
+  rig.shift_tap(Button::F5);  // the PADS picker's TRACKS
   CHECK(rig.state().padmode.fixed() == app::PadMode::Tracks);
   rig.pad(kRowSolo + 8);
   CHECK(rig.flags(8) == model::kTrackSolo);
@@ -435,19 +432,11 @@ TEST_CASE("TRACKS pads: Shift + F5 leaves TRACKS fixed (no Shift needed), Shift 
   rig.pad(kRowSolo + 9);
   CHECK(rig.flags(9) == model::kTrackSolo);
   // a chooser is an overlay: the pads are the chooser's
-  rig.press(Button::Shift);
-  rig.pass(1);
-  rig.tap(Button::F3);  // Shift + F3: PIANO
-  rig.release(Button::Shift);
-  rig.pass(1);
+  rig.shift_tap(Button::F3);  // the PADS picker's PIANO
   CHECK(rig.state().padmode.fixed() == app::PadMode::Piano);
   rig.pad(kRowSolo + 10);
   CHECK(rig.flags(10) == 0);
-  rig.press(Button::Shift);
-  rig.pass(1);
-  rig.tap(Button::F2);
-  rig.release(Button::Shift);
-  rig.pass(1);
+  rig.shift_tap(Button::F2);  // NOTES
   CHECK(rig.state().padmode.fixed() == app::PadMode::Notes);
   rig.pad(kRowSolo + 10);
   CHECK(rig.flags(10) == 0);
@@ -1109,23 +1098,53 @@ TEST_CASE("FADERS: a tap on row n sets the track's volume in four steps through 
   CHECK(level() == 25.0f);  // one undo unit a tap
 }
 
-TEST_CASE("STEP has no key: no Shift + F key reaches it, F1 is the octave and F2..F7 pick the other modes (OS-STEPPADOFF, OS-PADOCT)") {
+TEST_CASE("STEP has no key: the PADS picker's F1..F6 pick the other modes, Shift + F1 is the octave (OS-STEPPADOFF, OS-PADOCT, OS-UXF-PAT 7)") {
   Rig rig;
-  const Button keys[7] = {Button::F1, Button::F2, Button::F3, Button::F4, Button::F5, Button::F6, Button::F7};
-  const app::PadMode expect[7] = {app::PadMode::Notes, app::PadMode::Notes, app::PadMode::Piano, app::PadMode::Iso, app::PadMode::Tracks, app::PadMode::Patterns, app::PadMode::Vu};
-  for (unsigned n = 0; n < 7; ++n) {
-    rig.shift_tap(keys[n]);
-    CHECK_MESSAGE(rig.state().padmode.fixed() == expect[n], "Shift + F" << n + 1);  // (F1 leaves the mode as it is: Notes)
+  rig.shift_tap(Button::F1);  // the octave leaves the mode as it is: Notes
+  CHECK(rig.state().padmode.fixed() == app::PadMode::Notes);
+  const app::PadMode expect[6] = {app::PadMode::Notes, app::PadMode::Piano, app::PadMode::Iso, app::PadMode::Tracks, app::PadMode::Patterns, app::PadMode::Vu};
+  for (unsigned n = 0; n < 6; ++n) {
+    rig.shift_tap(static_cast<Button>(static_cast<unsigned>(Button::F2) + n));  // Shift + F2, then the picker's F(n+1)
+    CHECK_MESSAGE(rig.state().padmode.fixed() == expect[n], "picker F" << n + 1);
     CHECK(rig.state().padmode.fixed() != app::PadMode::Steps);
+    CHECK(rig.state().overlay == app::OverlayId::None);  // a pick closes the picker
     CHECK(rig.state().notify.empty());
   }
-  // the key row says so: F1 the octave, F2..F7 the modes, no blank
+}
+
+TEST_CASE("PADS picker: Shift + F2 opens it over Pattern and changes nothing; F8 closes it with the mode kept; F7 is no key of it; a pick closes it (OS-UXF-PAT 7)") {
+  Rig rig;
+  rig.shift_tap(Button::F4);  // ISO (through the picker)
+  NEED(rig.state().padmode.fixed() == app::PadMode::Iso);
+  rig.press(Button::Shift);
+  rig.pass(1);
+  rig.tap(Button::F2);
+  rig.release(Button::Shift);
+  rig.pass(1);
+  CHECK(rig.state().overlay == app::OverlayId::PadsPicker);
+  CHECK(rig.state().padmode.fixed() == app::PadMode::Iso);
+  rig.tap(Button::F8);  // BACK
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  CHECK(rig.state().padmode.fixed() == app::PadMode::Iso);
+  // F7 is not a key of the picker: it stays open and the mode is unchanged
+  rig.press(Button::Shift);
+  rig.pass(1);
+  rig.tap(Button::F2);
+  rig.release(Button::Shift);
+  rig.pass(1);
+  rig.tap(Button::F7);
+  CHECK(rig.state().overlay == app::OverlayId::PadsPicker);
+  CHECK(rig.state().padmode.fixed() == app::PadMode::Iso);
+  rig.tap(Button::F6);  // VU
+  CHECK(rig.state().padmode.fixed() == app::PadMode::Vu);
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  // the key row of the picker names the keys; the Shift row of Pattern says PADS on F2 and is blank on F3..F7
   CHECK(std::strcmp(app::kPatternShiftKeys[0], "OCTAVE") == 0);
-  CHECK(std::strcmp(app::kPatternShiftKeys[1], "NOTES") == 0);
-  CHECK(std::strcmp(app::kPatternShiftKeys[4], "TRACKS") == 0);
-  for (unsigned n = 0; n < 8; ++n) {
-    CHECK(std::strcmp(app::kPatternShiftKeys[n], "-") != 0);
+  CHECK(std::strcmp(app::kPatternShiftKeys[1], "PADS") == 0);
+  for (unsigned n = 2; n < 7; ++n) {
+    CHECK(std::strcmp(app::kPatternShiftKeys[n], "-") == 0);
   }
+  CHECK(std::strcmp(app::kPatternShiftKeys[7], "REDO") == 0);
 }
 
 TEST_CASE("OCTAVE: Shift + F1 cycles the pads' base C through the octaves and wraps, the label says it, the mode stays (OS-PADOCT)") {
@@ -1149,7 +1168,7 @@ TEST_CASE("OCTAVE: Shift + F1 cycles the pads' base C through the octaves and wr
   CHECK(rig.state().notify.empty());
   // the other rows of the Shift picker are unchanged by the octave
   CHECK(std::strcmp(app::kPatternScreen.shift_row(rig.state())[7], "REDO") == 0);
-  CHECK(std::strcmp(app::kPatternScreen.shift_row(rig.state())[2], "PIANO") == 0);
+  CHECK(std::strcmp(app::kPatternScreen.shift_row(rig.state())[1], "PADS") == 0);
 }
 
 TEST_CASE("OCTAVE: it moves the PIANO and ISO pads too, and the octave keys of PIANO and the held-Note panel are the same number (OS-PADOCT)") {

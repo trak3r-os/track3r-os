@@ -215,7 +215,7 @@ Start on a used instrument.
 
 1. Press `Shift` + `F1` (**NAME**). The on-screen keyboard opens with the title **INSTRUMENT NAME**. <!-- QA-INS-050 -->
 2. Type the name with the pads, up to 32 characters. <!-- QA-INS-051 -->
-3. Press `F8` (**OK**) to keep it. `F7` (**CANCEL**) keeps the old name.
+3. Press `F1` (**OK**) to keep it. `F8` (**CANCEL**) keeps the old name.
 
 You should see `INS 05 RENAMED - F8 UNDO` in the strip. <!-- QA-INS-051 -->
 
@@ -294,7 +294,7 @@ Three labels in the table are the ones the screen starts with, and they change a
 - An empty slot has no parameter rows. It shows the type chooser: `F1` **SAMPLE**, `F2` **MIDI**, `F3` **PASTE** (dim until you copy an instrument), `F4` **MODULE** (opens the engine picker: `F1` **SELECT**, `F8` **BACK**) and `F5` **LOAD**. A load makes the instrument anew. `F1` opens Sample load aimed at this slot, and the Instrument screen comes back on it after the load. <!-- QA-INS-025, QA-INS-047, QA-INS-026, QA-INS-214 -->
 - On an empty slot `Shift` shows `<10`, the nearest instrument in use, and `USED>` is dim when none follows. **NAME** to **SAVE** are dim, and so is **PASTE** while nothing is copied. <!-- QA-INS-008 -->
 - Change instrument with `F7` or `Stop` and a held note ends on the instrument that started it. A pad released later is silent. <!-- QA-INS-014 -->
-- Any row with a value can sit on the encoder: put the cursor on it and press `Instr` and `Fx` together, then hold `Instr` and `Vol` and turn the encoder from any screen. See [Put one parameter on the encoder](panel.md#put-one-parameter-on-the-encoder). <!-- QA-GLB-228, QA-GLB-229 -->
+- Any row with a value can sit on the encoder: put the cursor on it and open Learn with `Vol` and `Fx` and press `F7` (**ENC**), then hold `Instr` and `Vol` and turn the encoder from any screen. See [Put one parameter on the encoder](panel.md#put-one-parameter-on-the-encoder). <!-- QA-GLB-228, QA-GLB-229 -->
 - A MIDI CC learned on a parameter, such as the cutoff, is one undo step for the whole sweep. `F8` on the Instrument screen brings the value back. <!-- QA-INS-086 -->
 - A project saved with MIDI fields opens in an older build with the instrument whole and the twelve MIDI fields at their defaults. <!-- QA-INS-084, QA-INS-083 -->
 - A row that does not apply is dimmed, and the info line says why. <!-- QA-INS-020 -->

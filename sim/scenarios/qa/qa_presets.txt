@@ -80,7 +80,7 @@ snap qa_pre_010
 assert state msg=PRESET_OF_WIDEN
 wait 2500
 
-# QA-MIX-106: Shift+F5 in the list opens the keyboard (PRESET NAME) with the effect's name "reverb" suggested; the pads type "demo" over it; F8 saves the values in force as modules/presets/reverb/demo.o3mp.
+# QA-MIX-106: Shift+F5 in the list opens the keyboard (PRESET NAME) with the effect's name "reverb" suggested; the pads type "demo" over it; F1 saves the values in force as modules/presets/reverb/demo.o3mp.
 tap f5
 press shift
 tap f5
@@ -93,7 +93,7 @@ pad 14
 pad 42
 pad 20
 wait 20
-tap f8
+tap f1
 wait 300
 snap qa_pre_012
 assert file "modules/presets/reverb/demo.o3mp" exists
@@ -109,7 +109,7 @@ pad 26
 pad 14
 pad 42
 pad 20
-tap f8
+tap f1
 wait 300
 snap qa_pre_013
 assert file "modules/presets/reverb/demo 2.o3mp" exists

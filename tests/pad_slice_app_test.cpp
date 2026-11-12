@@ -97,6 +97,11 @@ struct Rig {
     input.push(core::make_button_event(clock.now(), static_cast<std::uint8_t>(Button::Shift), false));
     pass();
   }
+  // OS-UXF-PAT 7: the pads' modes are the PADS picker's (Shift + F2, then F1..F6 = NOTES PIANO ISO TRACKS PATS VU); `old` is the former Shift key of the mode (F2 NOTES .. F7 VU).
+  void pad_mode(Button old) {
+    shift_tap(Button::F2);
+    tap(static_cast<Button>(static_cast<unsigned>(old) - 1u));
+  }
   void edit_mode() { (void)app->invoke(core::action_id("view.mode"), static_cast<core::ActionArg>(app::PatternMode::Edit)); }
   model::Step step(unsigned row, unsigned track = 0) { return project().pattern(1)->steps[track][row]; }
 };
@@ -165,7 +170,7 @@ TEST_CASE("beat slice pads: PIANO and ISO have no layout on a beat slice instrum
   for (const bool iso : {false, true}) {
     Rig rig;
     CAPTURE(iso);
-    rig.shift_tap(iso ? Button::F4 : Button::F3);
+    rig.pad_mode(iso ? Button::F4 : Button::F3);
     CHECK(rig.app->state().padmode.fixed() == (iso ? app::PadMode::Iso : app::PadMode::Piano));
     // the first pad of the layout that plays a note, and its note on a one-shot instrument
     unsigned pad = 0;

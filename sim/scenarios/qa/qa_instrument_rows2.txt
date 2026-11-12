@@ -157,14 +157,14 @@ pad 26
 pad 14
 pad 42
 pad 20
-tap f8
+tap f1
 assert state overlay=~^(NONE|NOTIFY)$ msg=INS_03_RENAMED_-_F8_UNDO
 assert model inst.3.name=demo
 press shift
 tap f1
 release shift
 assert state overlay=TEXT_ENTRY
-tap f8
+tap f1
 tap f8
 assert model inst.3.name=PLUCK
 assert model digest=@q051

@@ -170,12 +170,6 @@ bool apps_close(ActionContext& ctx, core::ActionArg) noexcept {
   return true;
 }
 
-// F8 of the picker: the apps list launches (F1 does too) while it has an app; an empty apps list, the engine and the insert pickers close.
-bool module_picker_f8(ActionContext& ctx, core::ActionArg arg) noexcept {
-  const bool apps = ctx.view.modules.insert_where == ModulesView::kApps && ctx.model.modules != nullptr && apps_count(ctx.model) != 0u;
-  return apps ? module_pick(ctx, arg) : ui_back(ctx, arg);
-}
-
 // Where the exit chord of an app's page goes (OS-H3A): back to Pattern when the app was opened from its F7 TOOLS list (the cursor and the block are the view state's, untouched), to MODULES when it
 // was opened from there. One level of return. Clears the mark.
 ScreenId app_exit_screen(ViewState& view) noexcept {

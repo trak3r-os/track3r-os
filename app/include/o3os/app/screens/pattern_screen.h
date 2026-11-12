@@ -73,10 +73,9 @@ inline bool pattern_counting_in(const Model& model, const ViewState& view) noexc
 // (OS-PADS-A: FILL and EXPORT moved to Shift + Fx; OS-CFGWIRE: Shift + Fx is pattern.fill, Shift + Copy pattern.export, F6 was INVERT; OS-PTOOLS: F4 is FILL, the dialog (Shift + Fx repeated the last fill until OS-QJUMP took the key for the 3/4 jump: pattern.fill has no key now); F7 is TOOLS (OS-H3A: the list of the tool apps; OS-WAVEXP: EXPORT PATTERN is its first entry); OS-PTOOLS2 S3 (Q1) made F6 the REPEAT of the last parameterised apply (RE FILL, REPEAT after a TOOLS APPLY); OS-F6EVENTS (new Community OS behaviour): F6 is EVENTS, the list opens directly, and RE FILL / REPEAT (tools.repeat) moved to F6 of the verb menu (F7 then F6), whose key row reads the label of the last verb (key_prompt.cpp); INVERT took the menu's pad 9.)
 inline constexpr const char* kPatternSoftKeys[8] = {"PATTERN", "LENGTH", "JUMP", "FILL", "PREVIEW", "EVENTS", "TOOLS", "UNDO"};
 // What the key row shows while Shift is held (OS-PADS-A, OS-PADOCT): Shift + F1 the pads' octave (the label is the octave in force, "C3": PatternScreen::shift_row swaps it in; this table
-// is the row's shape), the picker of the pads' mode, Shift + F2..F7 (pad_layer.h), and Shift + F8 redo. A key without a mode would be drawn dim (kPatternPickerDim, none now); the mode that stays is
-// drawn inverted (PatternView::Status::soft_hot). The STEP pads have no key: the mode is off until OS-STEPPAD (OS-STEPPADOFF). The mute labels and the quarter jumps this row had are gone.
-inline constexpr const char* kPatternShiftKeys[8] = {"OCTAVE", "NOTES", "PIANO", "ISO", "TRACKS", "PATS", "VU", "REDO"};
-inline constexpr std::uint32_t kPatternPickerDim = 0u;  // none: every key of the picker has a mode
+// is the row's shape), Shift + F2 the PADS picker (OS-UXF-PAT 7: an overlay whose F1..F6 pick the pads' mode, pads_picker_overlay.cpp; the modes had Shift + F2..F7), and Shift + F8 redo.
+// Shift + F3..F7 are free and blank. The STEP pads have no key: the mode is off until OS-STEPPAD (OS-STEPPADOFF). The mute labels and the quarter jumps this row had are gone.
+inline constexpr const char* kPatternShiftKeys[8] = {"OCTAVE", "PADS", "-", "-", "-", "-", "-", "REDO"};
 
 // The first registered screen: PatternView (pattern_view.h) behind the Screen interface.
 class PatternScreen final : public Screen {

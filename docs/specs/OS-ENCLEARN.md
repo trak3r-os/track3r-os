@@ -10,9 +10,9 @@ Move any parameter that MIDI Learn can bind from the front panel, without a MIDI
 
 | Part | Rule |
 |---|---|
-| Assign | Chord `Instr` + `Fx` (FX2), global context, wherever Learn works (not under a modal overlay). Takes the row under the cursor, resolved as Learn does (`focus_param`, `kParamLearnable`). Refused row: toast `NO TARGET FOR ENCODER`. |
+| Assign | `F7` ENC in the Learn overlay (open with `Vol` + `Fx`; context `learn`, OS-UXF-KEYS item 17: the chord `Instr` + `Fx` was removed, new Community OS behaviour). Takes the row under the cursor, resolved as Learn does (`focus_param`, `kParamLearnable`); F7 is always labelled; it closes the confirm state. Refused row: toast `NO TARGET FOR ENCODER`. |
 | Target | One in all (`ViewState::enc_target`, 4 B, session only). A different row replaces it. There is no clear gesture: the same row again keeps the target and shows `ENCODER: <PARAM> INS <n>` again. Fixed to that row and instrument. |
-| Use | Hold `Instr` + `Vol` and turn the encoder, no dialog open. One step per detent, `Shift` gives the coarse step. Same apply, ranges and undo as a Learn relative binding (`write_moved`). Toast `<PARAM> <value>`; with no target `NO ENCODER TARGET (INSTR + FX2)`. |
+| Use | Hold `Instr` + `Vol` and turn the encoder, no dialog open. One step per detent, `Shift` gives the coarse step. Same apply, ranges and undo as a Learn relative binding (`write_moved`). Toast `<PARAM> <value>`; with no target `NO ENCODER TARGET (SET IT IN LEARN)`. |
 | Priority | While both keys are held the encoder does nothing else (it overrides Vol-held and Fx-held). A turn cancels the Instr hold popup and the Vol tap/hold. A plain press without a turn does nothing. |
 | OS-ZOOM | The `Note` + `Instr` tap is untouched. |
 | Gesture | No binding and no modifier: `App::run_once` consumes `Instr` and `Vol` (`gestures_.consume`) when the second of the pair goes down, and again on every turn. The turn is read before the gesture recogniser, so the Learn chord (`Vol` + `Fx`) and the rollover taps are unchanged. App keeps its own `enc_keys_` bits from the raw button events, because a context change (Shift pressed) makes the gesture layer forget a consumed key. |

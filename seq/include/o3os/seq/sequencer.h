@@ -181,6 +181,7 @@ struct Command {
     SetTrackPattern,  // b pattern id 0..255 (0: back to the song's), c mask of tracks (bit t: track t) (OS-PERFREMIX R1): see Sequencer::set_track_pattern
     ChaseState,     // OS-MTC B3, the main loop's answer to a chase request, first half: a bit 0 the swing pair's parity (1: the step is the second of its pair), b swing 25..75, c tempo x100 before the step's own FX
     ChaseStart,     // OS-MTC B3, second half: a the stamp of the request it answers (Sequencer::ChaseAnswer), b order << 7 | step (0xFFFF: the time is past the song's end), c the song time of that step, whole samples
+    SetRowLoop,     // a first row, b last row (kNoJump: no loop): the pattern now playing loops those rows (OS-UXF Focus Loop, Sequencer::set_row_loop)
   };
   Kind kind;
   std::uint8_t a;
@@ -383,6 +384,13 @@ class Sequencer {
   // a position authored against a list this copy does not have yet, or older than the journal, is refused (no loop). The main loop reads what holds through play_position().read().loop_first / loop_last.
   void set_loop(std::uint32_t first, std::uint32_t last, std::uint32_t stamp = 0) noexcept;
   bool looping() const noexcept { return loop_first_ <= loop_last_; }
+  // OS-UXF Focus Loop (new Community OS behaviour): the rows `first`..`last` of the pattern now playing loop: at the step boundary after `last` the line goes back to `first` (a Pattern event and a time-code
+  // relocation, as the slot loop's wrap). It is a Command (SetRowLoop), not tied to a start: a play and the loop asked in one block both land. Render context, a few compares once a step. The range is clamped to the running
+  // length (a range wholly past it waits, dormant); a Break pattern or an Order jump FX inside it ends the loop's pass, not the pattern. A queued pattern, a queued jump or a mode request at the wrap ends the loop (they play
+  // next); a live pattern switch, a start, a stop and the end of a run end it too; a locate leaves it (the line goes on to the range from where it landed). `last` kNoJump, or first > last or past 127: no loop.
+  // The main loop reads what holds through play_position().read().row_first / row_last.
+  void set_row_loop(std::uint32_t first, std::uint32_t last) noexcept;
+  bool looping_rows() const noexcept { return row_first_ <= row_last_; }
   bool playing() const noexcept { return playing_; }
   PlayMode mode() const noexcept { return mode_; }
 
@@ -599,6 +607,7 @@ class Sequencer {
   void finish_step() noexcept;
   void end_step() noexcept;
   void land_locate() noexcept;  // a pending locate (an SPP or a locate_row while playing) lands: the song cursor goes to the located position
+  bool row_loop_wrap() noexcept;  // OS-UXF Focus Loop: at a step boundary (song_step_ is the next row) the line goes back to the loop's first row; false: nothing done, the pattern end test goes on
   std::uint64_t micro_time_raw(std::uint64_t m) const noexcept;
   core::Q32 played_spt() const noexcept;            // samples per tick at the nominal tempo and the step rate
   core::Q32 trimmed(core::Q32 spt) const noexcept;  // OS-MTC B3: the same at the chase's rate trim (spt / rate); the identity at 1.0
@@ -792,6 +801,8 @@ class Sequencer {
   std::uint8_t mtc_wait_stamp_ = 0;        // the stamp the generator waits for (0: none)
   std::uint8_t loop_first_ = 0xFF;         // OS-SONG3 S7: the looped slots of the order list (the render's copy); loop_first_ > loop_last_ is no loop. The two bytes sit in the padding before mtc_wait_at_
   std::uint8_t loop_last_ = 0;
+  std::uint8_t row_first_ = 0xFF;          // OS-UXF Focus Loop: the looped rows of the pattern playing (the render's copy); row_first_ > row_last_ is no loop
+  std::uint8_t row_last_ = 0;
   std::uint64_t mtc_wait_at_ = 0;          // the timeline sample the awaited position starts at
   std::int64_t mtc_wait_pre_ = 0;          // the song time before it, samples (<= 0)
 

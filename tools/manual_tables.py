@@ -59,7 +59,7 @@ SCREENS = {
                        keys=[("Instrument", "kParamsSoftKeys")], shift=[("Instrument", "kParamsShiftKeys")]),
     "wave": dict(title="Wave and Chop", chapter="wave.md", sid="Wave", button="SamplePlay",
                  keys=[("WAVE", "kWaveSoftKeys"), ("CHOP", "kChopSoftKeys"), ("WAVETABLE", "kWtSoftKeys"), ("GRANULAR", "kGranSoftKeys")],
-                 shift=[("All views", "kWaveShiftKeys")]),
+                 shift=[("WAVE, WAVETABLE, GRANULAR", "kWaveShiftKeys"), ("CHOP", "kChopShiftKeys")]),
     "sample_edit": dict(title="Sample edit", chapter="sample_edit.md", sid="SampleEdit", button="SampleEdit",
                         keys=[("Sample edit", "kSampleEditSoftKeys"), ("FX page", "kSampleEditFxSoftKeys"), ("PLUGINS page", "kSampleEditPlugSoftKeys")], shift=[("Sample edit", "kSampleEditShiftKeys")]),
     "sample_load": dict(title="Sample load", chapter="sample_load.md", sid="SampleLoad", button="SampleLoad",
@@ -536,8 +536,8 @@ def self_test(root):
         perform = get(d, MANUAL + "/perform.md")
         assert "| `F1` | **SCENE 1** | **STORE 1** |" in perform and "| `F8` | **RESET** | - |" in perform and "By hand." in perform, perform
         wave = get(d, MANUAL + "/wave.md")
-        assert "| Key | WAVE | CHOP | WAVETABLE | GRANULAR | With `Shift` |" in wave, wave
-        assert "| `F1` | **WaveSoft1** | **ChopSoft1** | **WtSoft1** | **GranSoft1** | **WaveShift1** |" in wave, wave
+        assert "| Key | WAVE | CHOP | WAVETABLE | GRANULAR | `Shift`, WAVE, WAVETABLE, GRANULAR | `Shift`, CHOP |" in wave, wave
+        assert "| `F1` | **WaveSoft1** | **ChopSoft1** | **WtSoft1** | **GranSoft1** | **WaveShift1** | **ChopShift1** |" in wave, wave
         record = get(d, MANUAL + "/record.md")
         assert "`Shift`, RADIO |" in record and "| `F5` | **RecordSoft5** | **RecordLoop5** | **UNDO LYR** | **RecordShift5** | **RecordRadioShift5** |" in record, record
         assert "| `F8` | **RecordSoft8** | **RecordLoop8** | - |" in record, record  # "--" is a dash

@@ -32,6 +32,9 @@ class PlayPosition {
     std::uint16_t loop_first = kNoOrder;  // OS-SONG3 S7: the slots the song loops (Sequencer::set_loop), both kNoOrder for none; loop_first <= loop_last
     std::uint16_t loop_last = kNoOrder;
     bool looping() const noexcept { return loop_first != kNoOrder; }
+    std::uint16_t row_first = kNoOrder;  // OS-UXF Focus Loop: the rows of the pattern playing that loop (Sequencer::set_row_loop), both kNoOrder for none; row_first <= row_last
+    std::uint16_t row_last = kNoOrder;
+    bool row_looping() const noexcept { return row_first != kNoOrder; }
   };
 
   // Render context only (the one writer). `order` >= 255 is "none" (the order list has at most 255 positions, 0..254). `ustep` is held at 47.
@@ -49,6 +52,11 @@ class PlayPosition {
   // OS-SONG3 S7: the looped range of slots, one halfword (first | last << 8; 0xFFFF none, which no range is: a position is 0..254). Render context only (the one writer); it fills the padding of the class.
   void publish_loop(std::uint32_t first, std::uint32_t last) noexcept {
     loop_.store(first < 0xFFu && last < 0xFFu ? static_cast<std::uint16_t>(first | (last << 8)) : std::uint16_t{0xFFFFu}, std::memory_order_relaxed);
+  }
+
+  // OS-UXF Focus Loop: the looped rows of the pattern playing (Sequencer::set_row_loop), one halfword like publish_loop's (first | last << 8; rows are 0..127, 0xFFFF none). Render context only (the one writer).
+  void publish_row_loop(std::uint32_t first, std::uint32_t last) noexcept {
+    row_loop_.store(first < 0xFFu && last < 0xFFu ? static_cast<std::uint16_t>(first | (last << 8)) : std::uint16_t{0xFFFFu}, std::memory_order_relaxed);
   }
 
   // The count-in (OS-METRO), one word of its own like the live jump: the steps left, the running one included, 0 when the transport is not counting in. Render context only.
@@ -92,6 +100,11 @@ class PlayPosition {
       v.loop_first = lp & 0xFFu;
       v.loop_last = lp >> 8;
     }
+    const std::uint16_t rp = row_loop_.load(std::memory_order_relaxed);
+    if (rp != 0xFFFFu) {
+      v.row_first = rp & 0xFFu;
+      v.row_last = rp >> 8;
+    }
     return v;
   }
 
@@ -109,6 +122,7 @@ class PlayPosition {
   std::atomic<std::uint16_t> tracks_[kTrackWords] = {};  // E-PERF-07: override | pending << 8 (render context writes, main loop reads)
   std::atomic<std::uint16_t> track_wait_{0};             // bit t: track t waits for its loop end
   std::atomic<std::uint16_t> loop_{0xFFFFu};             // OS-SONG3 S7: first | last << 8, 0xFFFF none
+  std::atomic<std::uint16_t> row_loop_{0xFFFFu};         // OS-UXF Focus Loop: first | last << 8, 0xFFFF none
 };
 
 }  // namespace o3os::audio

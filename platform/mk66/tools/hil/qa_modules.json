@@ -53,7 +53,7 @@
    "gap": 0.3,
    "note": "(a leftover overlay is put away: F8 is Back)",
    "if_state": {
-    "overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP)$"
+    "overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|NAVIGATOR|TEXT_ENTRY)$"
    }
   },
   {

@@ -199,6 +199,23 @@ class Editor {
   // the pool, the lane count and the ring (the open unit's bytes included) take them all. Changes nothing.
   Status lane_copy(std::uint32_t from, std::uint32_t to, std::uint32_t track) noexcept;
   bool lanes_copy_fit(std::uint32_t from, std::uint16_t tracks, std::size_t other_bytes) noexcept;
+  // OS-MIDIREC-P1 S7c, A16: block paste, block delete and the whole-pattern paste. One span of a dry run: the new content `n` of the lane of `track` over [t0, t1).
+  struct LaneSpan {
+    std::uint8_t track;
+    std::uint32_t t0;
+    std::uint32_t t1;
+    std::uint32_t n;
+  };
+  // lanes_replace_fit is the dry run of a series of lane_replace calls (one per span, distinct tracks, in order) that follows other edits of the same unit taking `other_bytes` of
+  // ring: true when no lane changes (the old rule), else whether every lane, the pool, the lane count and the undo ring (the open unit's bytes included, the equal head and tail
+  // of a replace counted as changed: conservative) take them all, so the caller changes nothing when it is false. Changes nothing.
+  bool lanes_replace_fit(std::uint32_t pattern, const LaneSpan* spans, std::uint32_t count, std::size_t other_bytes) noexcept;
+  // Row ops (A16): lane_rows moves the lane ticks of (pattern, track) with a row insert (`insert`: from the step on every event moves one step down, and what the move pushes
+  // to the track's length or past it is deleted, as A17) or a row pull (the events of that step are deleted, the later ones move one step up), as one pair of undo records in
+  // the open unit. Ok (also with nothing to move); NotFound: no store or pattern; BadIndex: track; BadValue: step at or past the track's length; Full: the undo ring would
+  // not take it, nothing changes. lanes_rows_fit is its dry run over the tracks in the mask (after `other_bytes` of other records of the unit).
+  Status lane_rows(std::uint32_t pattern, std::uint32_t track, std::uint32_t step, bool insert) noexcept;
+  bool lanes_rows_fit(std::uint32_t pattern, std::uint16_t tracks, std::uint32_t step, bool insert, std::size_t other_bytes) noexcept;
   // OS-MIDIREC-P1 S3, A10 / A11 / A15: merges a finished take (lane_take.h) into the lane of its (pattern, track) in one pass and one pair of undo records
   // (the changed span before, after). Overdub: the lane's events stay and the take's are merged by tick (a take event goes after the lane's events at its
   // tick); a CC controller the take moved REPLACES the lane's old points of that controller (the take's channel and port) inside the take's intervals.
@@ -268,6 +285,14 @@ class Editor {
   bool lane_insert(std::uint32_t pattern, std::uint32_t track, std::uint32_t index, const LaneEvent* events, std::uint32_t count) noexcept;
   void lane_cut(std::uint32_t pattern, std::uint32_t track, std::uint32_t from_tick) noexcept;  // A17: the events at or past the tick
   std::uint32_t lane_copy_count(std::uint32_t from, std::uint32_t track) noexcept;                // the events lane_copy takes from the source lane
+  // The events a row op moves: the lane's events [lo, lo + tail) change, of which [from, from + kept) stay (shifted by one step); false when the row op touches nothing.
+  struct RowsPlan {
+    std::uint32_t lo;
+    std::uint32_t tail;
+    std::uint32_t from;
+    std::uint32_t kept;
+  };
+  bool lane_rows_plan(std::uint32_t pattern, std::uint32_t track, std::uint32_t step, bool insert, RowsPlan& plan) noexcept;
   void lanes_free(std::uint32_t pattern) noexcept;                                               // every lane of the pattern
   Status lane_replace_in(std::uint32_t pattern, std::uint32_t track, std::uint32_t t0, std::uint32_t t1, const LaneEvent* events, std::uint32_t n,
                          bool inside_track) noexcept;

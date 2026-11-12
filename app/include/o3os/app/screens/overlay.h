@@ -93,9 +93,9 @@ class LearnMapOverlay final : public Overlay {
 };
 extern const LearnMapOverlay kLearnMapOverlay;
 
-// The Navigator's own F-key row (OS-NAV2, OS-KEYROWDLG). While the grid is up its F8 is GO, not the screen's own F8 (UNDO, ...; Back in the other overlays), so the row is the dialog's prompt
-// (key_prompt.cpp, painted by render_scene; the screen under it draws none: ViewState::overlay_keys): F1 GO, F7 CLOSE, F8 GO, the rest blank. While Shift is held the row shows its layer, the one Shift layer a
-// dialog declares (OS-SHIFTROW: no quarter jumps; Shift + F7 and F8 are CLOSE and GO, bound, as Shift may still be down from the chord that opened it; Shift + F1..F6 are bound to nothing and read "-").
+// The Navigator's own F-key row (OS-NAV2, OS-KEYROWDLG). While the grid is up its F1 is GO and its F8 is BACK, not the screen's own F8 (UNDO, ...), so the row is the dialog's prompt
+// (key_prompt.cpp, painted by render_scene; the screen under it draws none: ViewState::overlay_keys): F1 GO, F8 BACK, the rest blank (OS-UXF-KEYS item 5: the one grammar of the overlays; it was F8 GO, F7 CLOSE). While Shift is held the row shows its layer, the one Shift layer a
+// dialog declares (OS-SHIFTROW: no quarter jumps; Shift + F1 and F8 are GO and BACK, bound, as Shift may still be down from the chord that opened it; Shift + F2..F7 are bound to nothing and read "-").
 
 class NavigatorOverlay final : public Overlay {
  public:
@@ -226,6 +226,18 @@ class PlayModeOverlay final : public Overlay {
   bool set_position(const Model& model, ViewState& view, int position) const noexcept override;
 };
 extern const PlayModeOverlay kPlayModeOverlay;
+
+// The pads' mode list of the Pattern screen (OS-UXF-PAT 7, Shift + F2 PADS): the six modes with the one in force marked. F1..F6 pick one (padmode.pick) and close the list, F8 closes. No cursor: the keys
+// are the choice. Modal, context `padspicker`.
+class PadsPickerOverlay final : public Overlay {
+ public:
+  constexpr PadsPickerOverlay() noexcept = default;
+  ui::Rect rect(const ui::Theme& theme) const noexcept override;
+  void render(const Model& model, const ViewState& view, ui::Renderer& r) const noexcept override;
+  bool modal() const noexcept override { return true; }
+  Context context() const noexcept override { return Context::PadsPicker; }
+};
+extern const PadsPickerOverlay kPadsPickerOverlay;
 
 // The on-screen keyboard (OS-FU2): the name being typed, the four rows of keys with the focus on one, the keys the actions bind. Modal, context `textentry`.
 class TextEntryOverlay final : public Overlay {

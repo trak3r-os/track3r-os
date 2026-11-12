@@ -10,6 +10,7 @@ tap rec
 
 # Playing, Shift + Rec is LIVE (OS-RECMODE2; a plain Rec is STEP): the cursor rides the playhead and the view keeps the playing row centred (OS-CENTER). Right / Left change the recording track
 playhead 3
+tap rec
 press shift
 tap rec
 release shift
@@ -26,7 +27,7 @@ playhead 9 30
 pad 17
 snap nearest_next_step
 
-# Shift + Rec in LIVE is STEP (OS-LIVEEXIT): the take ends (one undo unit), the cursor and the view stay, the user moves on their own; the note goes to the cursor, not to the playhead.
+# Shift + Rec in LIVE goes back to where LIVE began, here STEP (OS-LIVEEXIT, OS-UXF-PAT item 8; from WATCH it goes back to WATCH): the take ends (one undo unit), the cursor and the view stay, the user moves on their own; the note goes to the cursor, not to the playhead.
 press shift
 tap rec
 release shift

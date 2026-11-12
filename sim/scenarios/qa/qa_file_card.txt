@@ -39,23 +39,23 @@ wait 500
 assert state screen=PATTERN msg=NEW_PROJECT
 
 # QA-FIL-113 (OS-SILENTMSG): SAVE AS with an empty name. The project has no title, so F5 opens the keyboard with the automatic Track 01, all of it selected; Delete (the keyboard's backspace)
-# clears the selection, F8 on the empty name says TYPE A NAME in the keyboard's message line and stays open, and nothing is written.
+# clears the selection, F1 on the empty name says TYPE A NAME in the keyboard's message line and stays open, and nothing is written.
 tap file
 wait 200
 tap f5
 wait 50
 assert state overlay=TEXT_ENTRY
 tap delete
-tap f8
+tap f1
 wait 50
 assert state overlay=TEXT_ENTRY
 snap qa_fil_113
 assert file "Projects/Track 01" absent
-tap f7
+tap f8
 wait 50
 
-# QA-FIL-061 (OS-NAMES): SAVE AS is prefilled from the title. Shift + F6 opens the keyboard over the project's (empty) title, the pads type "demo" and F8 keeps it (PROJECT NAMED); F5 then opens
-# the SAVE AS keyboard with "demo" — the title reduced to the characters a folder name takes — selected. F7 leaves without saving.
+# QA-FIL-061 (OS-NAMES): SAVE AS is prefilled from the title. Shift + F6 opens the keyboard over the project's (empty) title, the pads type "demo" and F1 keeps it (PROJECT NAMED); F5 then opens
+# the SAVE AS keyboard with "demo" — the title reduced to the characters a folder name takes — selected. F8 leaves without saving.
 press shift
 tap f6
 release shift
@@ -65,13 +65,13 @@ pad 26
 pad 14
 pad 42
 pad 20
-tap f8
+tap f1
 wait 50
 assert state msg=PROJECT_NAMED
 tap f5
 wait 50
 assert state overlay=TEXT_ENTRY
 snap qa_fil_061
-tap f7
+tap f8
 wait 50
 assert file "Projects/demo" absent

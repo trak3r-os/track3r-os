@@ -151,12 +151,11 @@ TEST_CASE("song loop key: no range is the cursor's slot alone") {
   CHECK(rig.message() == "LOOP 02-02");
 }
 
-TEST_CASE("song loop key: a tap of F2 is still Play song, at the release") {
+TEST_CASE("song loop key: a tap of F2 is DUP PAT (OS-UXF-PAT 12), not the loop and not a play") {
   Rig rig;
   rig.select_slots(1, 1);
   rig.tap(Button::F2);
-  CHECK(rig.log.plays == 1u);
-  CHECK(rig.log.play_row == 1u);
+  CHECK(rig.log.plays == 0u);
   CHECK(rig.log.loops == 0u);  // (the loop is only the held key's)
 }
 

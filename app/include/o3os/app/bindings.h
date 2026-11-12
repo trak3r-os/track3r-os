@@ -73,6 +73,7 @@ enum class Context : std::uint8_t {
   Preset = 52,         // OS-INSFX-ABI2 A9: the F5 PRESET list over a module's parameter page (captures; 50 is OS-PTOOLS2 S3's VerbMenu, 51 was OS-PERFREMIX R3's PerformRemix, removed by OS-NOREMIX: the number is not reused)
   PatternTools = 53,   // OS-PTOOLS2 S2: the Pattern screen's TOOLS dialog over the block (pattern_tools_view.h; captures; F1 APPLY, F8 BACK)
   LearnMap = 57,       // OS-LEARNMAP: the LEARN MAP overlay (captures: Left / Right the column, the encoder sets it, F1 NEW, F2 MODE, F3 DELETE, F4 CLEAR ALL, F5 FOLLOW, F7 RELEARN, F8 BACK)
+  PadsPicker = 58,     // OS-UXF-PAT 7: the pads' mode list over the Pattern screen (captures: F1..F6 pick a mode, F8 BACK)
   Help = 47,           // OS-HELP: the help overlay (captures: the arrows and the encoder scroll, F8 and every other key close it)
   None = 0xFF,         // no context: a screen without a field level
 };

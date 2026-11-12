@@ -26,12 +26,12 @@ assert model "inst.49.name=Synth A"
 assert model pat.1.0.1.note=0
 mark model opened
 
-# SAVE AS names a new folder: the first free "Track 01"; F8 saves it. A native file that is loaded and saved is the same bytes (the format is lossless), and nothing of the old folder moved.
+# SAVE AS names a new folder: the first free "Track 01"; F1 saves it. A native file that is loaded and saved is the same bytes (the format is lossless), and nothing of the old folder moved.
 tap file
 tap f5
 wait 50
-assert state overlay=TEXT_ENTRY keys=~F8:SAVE
-tap f8
+assert state overlay=TEXT_ENTRY keys=~F1:SAVE
+tap f1
 wait 400
 assert state overlay=NOTIFY msg=SAVE_TRACK_01_DONE
 assert file "Projects/Track 01/project.o3pj" sha=fe075d31e2849cf6cb81a0bb157e1d748d13ed9c7c9141d98119b51370dc74df

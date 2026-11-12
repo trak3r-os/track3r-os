@@ -904,7 +904,7 @@ TEST_CASE("qanet select self-test: the inside of insert, ADD SLICE and the song'
 }
 
 // OS-BUG-R3SEL: the two walk findings that were the net's, not the code's. A single step stepped below C-0 goes on into Fade, Cut and Off (model::edit::note_delta clamps at -4); the net judged it as a
-// clamp at C-0, which the OS-009 table gives to several steps only. And the FADERS page of the VU pads (Shift + F7 twice) was not in the chain the walk rebuilds, so a pad there (pads.play: a track volume)
+// clamp at C-0, which the OS-009 table gives to several steps only. And the FADERS page of the VU pads (the picker's VU twice) was not in the chain the walk rebuilds, so a pad there (pads.play: a track volume)
 // was judged as step.note_pad.
 TEST_CASE("qanet select: a single step stepped below C-0 leaves the notes, a note at the top still clamps at 127") {
   Card card;
@@ -957,7 +957,7 @@ TEST_CASE("qanet select: the FADERS page of the VU pads is the PadsMode context 
   }
   const std::vector<Case> cases = make_cases();
   Case c = case_named(cases, "Pattern, no selection (cursor row 6, track 2), Note column");
-  const std::string pick_vu = "press shift\ntap f7\nrelease shift\n";
+  const std::string pick_vu = "press shift\ntap f2\nrelease shift\ntap f6\n";  // the PADS picker (Shift + F2), then its F6 VU
   c.steps += pick_vu;
   std::unique_ptr<sim::Simulator> s;
   SelImage im;
@@ -970,7 +970,7 @@ TEST_CASE("qanet select: the FADERS page of the VU pads is the PadsMode context 
   CHECK(s->app().state().padmode.fixed() == app::PadMode::Vu);
   CHECK(!s->app().state().padmode.faders());
   CHECK(context_live(*s, app::Context::PadsMode));
-  c.steps += pick_vu;  // Shift + F7 again: the second page
+  c.steps += pick_vu;  // VU again: the second page
   CHECK(image_of_case(c, card.dir.path(), s, im, clip, copied));
   if (s == nullptr) {
     return;

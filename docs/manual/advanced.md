@@ -76,7 +76,7 @@ The advanced and slightly complex keys of track3r-os up to version 1.3.0, one ar
 | `F5` (**UNIQUE**) | Gives a shared slot its own copy of the pattern. |
 | Hold `Copy` + `F3` (**ADD EMPTY**) | Adds a slot on the first free, empty pattern. |
 | `Rec` while the song plays | Queues a jump to the cursor's slot. Press `Rec` again to cancel. |
-| Hold `F2` (**PLAY SNG**) with slots selected | Loops the selected slots. The info line reads LOOP. |
+| Hold `F2` (**DUP PAT**) with slots selected | Loops the selected slots. The info line reads LOOP. |
 | `F6` (**TOOLS**) | Block dialog: TRANSPOSE, INSTRUMENT, CLEAR, EXPORT WAV, FORM and BRIDGE. FORM builds a song shape from one to three patterns. BRIDGE puts new slots between two slots. |
 | `Shift` + `F7` (**PADS**), `F7` (**TEMPO**) | PADS switches the 48 pads between SLOTS and TRACKS. `F7` puts the encoder on the tempo. Two taps under 1.5 s apart set it. |
 
@@ -127,8 +127,8 @@ The advanced and slightly complex keys of track3r-os up to version 1.3.0, one ar
 | `Sample Editor` again | Opens the FX page (`F1` FILTER, `F2` COMPRESS), then the PLUGINS page. |
 | PLUGINS, `F1` (**APPLY**) | Runs a `.ptfx` plugin from `Effects/` on the selection or the sample, with undo. A plugin that faults is contained. |
 | Sample edit, `F1` to `F6` | CROP, NORM, REVERSE, FADE IN, FADE OUT and AMP. Each acts on the selection, or on the whole sample when none is marked. |
-| `Shift` + `Right` or `Left` (Sample load) | Marks a file and steps down, or clears the marks. `F1` (**LOAD**) and `F4` (**ADD**) load every marked file. `Shift` + `F7` / `F8` moves the target instrument. |
-| Wave and Chop, `Shift` + `F1` (**MODE**) | Opens the list of play modes. `Shift` + `F6` (**PRV SEL**) previews from the selected point. |
+| `Shift` + `Right` or `Left` (Sample load) | Marks a file and steps down (`Shift` + `F6`, **MARK**, does the same), or clears the marks. `F1` (**LOAD**) and `F4` (**ADD**) load every marked file. `Shift` + `F7` / `F8` moves the target instrument. |
+| Wave and Chop, `Shift` + `F1` (**MODE**) | Opens the list of play modes. `Shift` + `F4` (**TO PAT**, CHOP page) writes the slices into the Pattern from its cursor, `Shift` + `F6` (**PRV SEL**) previews from the selected point, `Shift` + `F7` / `F8` (**INST -** / **INST +**) pick the instrument, as on Sample load and Sample edit. |
 | `Sample Recorder` again | Turns the pages SOURCES, RESAMPLE and RADIO. |
 | `F1` (**OVERDUB**) under a loop review | Records a layer. `F5` (**UNDO LYR**) takes the last layer back. |
 | `F8` (**LOOP ON** or **MUTED**) | Mutes or unmutes the loop. |

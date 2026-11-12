@@ -3,9 +3,7 @@
  "title": "OS-POWER P2: the real off (VLPR, a polled wake): `power off` with no button held; the unit stays dark, a press boots it. The draw and the press are by hand",
  "steps": [
   {"say": "OS-POWER P2, rows QA-GLB-117 and QA-GLB-103. Run qa_power (`power off dry` ends in a restart) FIRST. The unit is idle, NO BUTTON held. Have an inline USB power meter ready (M3) and, for the wake rows, a gate-checked build under test as a .ptf in Firmware/ (then run the wake again with no card). The register facts of the VLPR entry are confirmed on NXP's documents (spec 4.7) but this is their first run on a unit: if the unit restarts instead of staying dark, `power` after the boot names the step (`power: last off RESTARTED at step: ...`): send that line"},
-  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "NAVIGATOR"}, "note": "(a leftover Navigator is closed: F7 is CLOSE, F8 would GO since OS-NAV2)"},
-  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
-  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "TEXT_ENTRY"}, "note": "(the on-screen keyboard is cancelled with F7, never accepted)"},
+  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|NAVIGATOR|TEXT_ENTRY)$"}, "note": "(a leftover overlay is put away: F8 is BACK on the Navigator, the keyboard (cancel, never accept: F1 accepts) and the choosers, OS-UXF-KEYS item 5)"},
   {"keys": ["pattern"], "gap": 0.4},
   {"state": {"screen": "PATTERN"}, "within": 3},
   {"run": "_stop"},

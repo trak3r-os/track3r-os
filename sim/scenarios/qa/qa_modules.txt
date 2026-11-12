@@ -236,7 +236,7 @@ wait 50
 assert state screen=PATTERN
 
 # OS-APPSNAV (QA-MOD-252..254): Shift + Pattern lists the module apps that are not tools (the TOOLS APPS page keeps the others): loudness, midimon, scope, tuner (smfexport and tapcalc are tools).
-# F7 and Pattern close the list with no view change; F1 starts the chosen app the way Modules F1 LAUNCH does (QA-MOD-253), and leaving the app lands on MODULES.
+# F8 and Pattern close the list with no view change; F1 starts the chosen app the way Modules F1 LAUNCH does (QA-MOD-253), and leaving the app lands on MODULES.
 assert state screen=PATTERN overlay=NONE
 press shift
 tap pattern

@@ -633,7 +633,7 @@ TEST_CASE("name: Shift + F1 opens the keyboard on the name, F8 keeps what was ty
   CHECK(rig.app->state().text.target == app::TextEntryView::Target::Instrument);
   CHECK(std::string(rig.app->state().text.entry.text()) == "KICK");
   CHECK(rig.app->state().text.entry.selected());
-  rig.tap(Button::F7);  // cancel
+  rig.tap(Button::F8);  // cancel
   CHECK(rig.app->state().overlay == app::OverlayId::None);
   CHECK(std::string(rig.inst(kA)->name) == "KICK");
   CHECK(rig.depth() == depth);
@@ -641,7 +641,7 @@ TEST_CASE("name: Shift + F1 opens the keyboard on the name, F8 keeps what was ty
   rig.shift_tap(Button::F1);
   rig.type("big hat");
   CHECK(std::string(rig.app->state().text.entry.text()) == "big hat");
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   CHECK(rig.app->state().overlay == app::OverlayId::None);
   CHECK(std::string(rig.inst(kA)->name) == "big hat");
   CHECK(rig.depth() == depth + 1);
@@ -655,7 +655,7 @@ TEST_CASE("name: Shift + F1 opens the keyboard on the name, F8 keeps what was ty
   rig.paste(kFree);
   rig.shift_tap(Button::F1);
   rig.type("x");
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   CHECK(std::string(rig.inst(kFree)->name) == "x");
   CHECK(std::string(rig.inst(kA)->name) == "big hat");
 }
@@ -665,11 +665,11 @@ TEST_CASE("name: the stored field decides: 32 characters, the same name records 
   rig.shift_tap(Button::F1);
   rig.type("abcdefghijklmnopqrstuvwxyzabcdefghij");  // 36 typed
   CHECK(rig.app->state().text.entry.length() == model::kInstrumentNameMax);
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   CHECK(std::string(rig.inst(kA)->name) == "abcdefghijklmnopqrstuvwxyzabcdef");
   const std::size_t depth = rig.depth();
   rig.shift_tap(Button::F1);
-  rig.tap(Button::F8);  // accepted as it was
+  rig.tap(Button::F1);  // accepted as it was
   CHECK(rig.depth() == depth);
   rig.select(kFree);
   rig.clear_notes();

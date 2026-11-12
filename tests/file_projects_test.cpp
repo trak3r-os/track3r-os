@@ -691,7 +691,7 @@ TEST_CASE("recent: a project opened is the newest, a project saved too; both are
   // a Save As of a new project
   rig.tap(Button::F5);
   rig.typed("Mine");
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   rig.settle();
   CHECK(rig.app->state().screen == ScreenId::File);  // OS-OPENTOPAT: a save does not switch (only an open and NEW do)
   CHECK(rig.file_text("Settings/recent.o3rc") == "O3RC 1\nMine\nalpha\nbeta\n");
@@ -822,7 +822,7 @@ void purge_setup(Rig& rig, bool expire_news = true) {
   rig.go(ScreenId::File);
   rig.tap(Button::F5);
   rig.typed("Mine");
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   rig.settle();
   if (expire_news) {
     rig.expire();
@@ -1049,7 +1049,7 @@ TEST_CASE("purge, undo, SAVE: the instruments are back and the project names the
   rig.expire();
   rig.tap(Button::F5);
   rig.typed("Copy");
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   rig.settle();
   CHECK(rig.card.has("Projects/Copy/samples/instr01.wav"));
   CHECK(rig.card.has("Projects/Copy/samples/instr03.wav"));

@@ -70,6 +70,11 @@ struct Rig {
     release(Button::Shift);
     pass(1);
   }
+  // OS-UXF-PAT 7: the pads' modes are the PADS picker's (Shift + F2, then F1..F6 = NOTES PIANO ISO TRACKS PATS VU); `old` is the former Shift key of the mode (F2 NOTES .. F7 VU).
+  void pad_mode(Button old) {
+    shift_tap(Button::F2);
+    tap(static_cast<Button>(static_cast<unsigned>(old) - 1u));
+  }
   // OS-APPSNAV: the Navigator opens with the chord Song + Pattern (the other order and Master + Song are tested apart), and it stays open after both keys are let go.
   void open_navigator() {
     press(Button::Song);
@@ -518,7 +523,7 @@ TEST_CASE("navigator: the chord Song + Pattern opens it on the current screen an
   CHECK(rig.state().navigator == 1);   // Song
   CHECK(rig.screen() == ScreenId::Pattern);
   CHECK(rig.state().overlay == OverlayId::Navigator);
-  rig.tap(Button::F8);                 // GO
+  rig.tap(Button::F1);                 // GO
   CHECK(rig.screen() == ScreenId::Song);
   CHECK(rig.state().overlay == OverlayId::None);
   CHECK(rig.app->failed_frames() == 0u);
@@ -527,7 +532,7 @@ TEST_CASE("navigator: the chord Song + Pattern opens it on the current screen an
   rig.open_navigator();
   CHECK(rig.state().overlay == OverlayId::Navigator);
   CHECK(rig.state().navigator == 1);
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   CHECK(rig.screen() == ScreenId::Song);
   CHECK(rig.state().overlay == OverlayId::None);
 }
@@ -552,7 +557,7 @@ TEST_CASE("navigator: the chord Song + Pattern held opens it too, and letting go
   CHECK(rig.app->failed_frames() == 0u);
 
   // The other release order, after a long hold.
-  rig.tap(Button::F7);  // CLOSE
+  rig.tap(Button::F8);  // CLOSE
   CHECK(rig.state().overlay == OverlayId::None);
   rig.open_navigator_held();
   rig.tap(Button::Right);
@@ -734,7 +739,7 @@ TEST_CASE("navigator: F7 and Pattern CLOSE it without changing the view, whateve
   rig.open_navigator();
   rig.tap(Button::Down);  // Sample load (a row of four below)
   CHECK(rig.state().navigator == 5);
-  rig.tap(Button::F7);
+  rig.tap(Button::F8);
   CHECK(rig.state().overlay == OverlayId::None);
   CHECK(rig.screen() == ScreenId::Song);  // not the chosen cell, not Pattern
 
@@ -759,7 +764,7 @@ TEST_CASE("navigator: F7 and Pattern CLOSE it without changing the view, whateve
   CHECK(rig.app->failed_frames() == 0u);
 }
 
-TEST_CASE("navigator: the arrows and the encoder choose, F8 and F1 GO, F7 CLOSE, every cell can be opened") {
+TEST_CASE("navigator: the arrows and the encoder choose, F1 GO, F8 CLOSE, every cell can be opened") {
   Rig rig;
   rig.open_navigator();
   const auto sel = [&] { return rig.state().navigator; };
@@ -778,7 +783,7 @@ TEST_CASE("navigator: the arrows and the encoder choose, F8 and F1 GO, F7 CLOSE,
   rig.pass(1);
   CHECK(sel() == 0);      // clamped
   CHECK(rig.state().overlay == OverlayId::Navigator);
-  rig.tap(Button::F8);    // GO on Pattern's own cell: it simply closes
+  rig.tap(Button::F1);    // GO on Pattern's own cell: it simply closes
   CHECK(rig.state().overlay == OverlayId::None);
   CHECK(rig.screen() == ScreenId::Pattern);
 
@@ -794,7 +799,7 @@ TEST_CASE("navigator: the arrows and the encoder choose, F8 and F1 GO, F7 CLOSE,
   rig.open_navigator();
   rig.tap(Button::Left);
   CHECK(sel() == 0);
-  rig.tap(Button::F7);
+  rig.tap(Button::F8);
   CHECK(rig.state().overlay == OverlayId::None);
   CHECK(rig.screen() == ScreenId::Song);
 
@@ -803,7 +808,7 @@ TEST_CASE("navigator: the arrows and the encoder choose, F8 and F1 GO, F7 CLOSE,
   rig.tap(Button::Down);   // a row of four cells below Song: Sample load
   rig.tap(Button::Right);  // Record
   CHECK(sel() == 6);
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   CHECK(rig.state().overlay == OverlayId::None);
   CHECK(rig.screen() == ScreenId::Record);
 }
@@ -820,7 +825,7 @@ TEST_CASE("navigator: Shift going down or up while it is up redraws its key row 
   rig.pass(1);
   CHECK(rig.app->frames() > held);    // and gives it back
   const std::uint32_t before_close = rig.app->frames();
-  rig.tap(Button::F7);
+  rig.tap(Button::F8);
   CHECK(rig.state().overlay == OverlayId::None);
   CHECK(rig.app->frames() > before_close);  // closing redraws the screen, whose own key row is drawn again
   CHECK(rig.app->failed_frames() == 0u);
@@ -830,15 +835,15 @@ TEST_CASE("navigator: no quarter jumps inside it (OS-SHIFTROW): Shift + F1..F5 d
   Rig rig;
   rig.open_navigator();
   const int at = rig.state().navigator;
-  const Button keys[5] = {Button::F1, Button::F2, Button::F3, Button::F4, Button::F5};
+  const Button keys[5] = {Button::F2, Button::F3, Button::F4, Button::F5, Button::F6};  // (Shift + F1 is GO since OS-UXF-KEYS item 5)
   for (int n = 0; n < 5; ++n) {
     rig.shift_tap(keys[n]);
-    CHECK_MESSAGE(rig.state().navigator == at, "Shift+F" << n + 1);
+    CHECK_MESSAGE(rig.state().navigator == at, "Shift+F" << n + 2);
     CHECK(rig.state().overlay == OverlayId::Navigator);
     CHECK(rig.screen() == ScreenId::Pattern);
   }
   // The same with Shift held over the chord's keys (Song + Pattern still down, the jump with the other hand).
-  rig.tap(Button::F7);
+  rig.tap(Button::F8);
   rig.open_navigator_held();
   rig.press(Button::Shift);
   rig.pass(1);
@@ -881,7 +886,7 @@ TEST_CASE("navigator: while it is up everything else is swallowed, and CLOSE wit
   CHECK_FALSE(rig.app->learn());
   CHECK(rig.state().overlay == OverlayId::Navigator);
 
-  rig.tap(Button::F7);  // CLOSE, with Pattern still down
+  rig.tap(Button::F8);  // CLOSE, with Pattern still down
   CHECK(rig.state().overlay == OverlayId::None);
   rig.release(Button::Pattern);  // the release of the opening button now belongs to the screen: nobody binds it
   rig.pass(1);
@@ -930,20 +935,20 @@ TEST_CASE("pads mode keys: Shift + F2..F7 choose the pads' mode on Pattern (F2 N
   Rig rig;
   const auto fixed = [&] { return rig.app->state().padmode.fixed(); };
   CHECK(fixed() == app::PadMode::Notes);
-  rig.shift_tap(Button::F5);
+  rig.pad_mode(Button::F5);
   CHECK(fixed() == app::PadMode::Tracks);
-  rig.shift_tap(Button::F3);
+  rig.pad_mode(Button::F3);
   CHECK(fixed() == app::PadMode::Piano);
-  rig.shift_tap(Button::F2);
+  rig.pad_mode(Button::F2);
   CHECK(fixed() == app::PadMode::Notes);
-  rig.shift_tap(Button::F4);
+  rig.pad_mode(Button::F4);
   CHECK(fixed() == app::PadMode::Iso);
   rig.shift_tap(Button::F1);
   CHECK(fixed() == app::PadMode::Iso);  // OS-PADOCT: Shift + F1 is the octave, the mode stays
-  rig.shift_tap(Button::F6);
+  rig.pad_mode(Button::F6);
   CHECK(fixed() == app::PadMode::Patterns);
-  rig.shift_tap(Button::F5);
-  rig.shift_tap(Button::F7);
+  rig.pad_mode(Button::F5);
+  rig.pad_mode(Button::F7);
   CHECK(fixed() == app::PadMode::Vu);
   CHECK(rig.app->view().row() == 0);  // (the quarter jumps of Shift + F1..F5 are the Song list's, File's and Sample load's own now)
   CHECK(rig.state().notify.empty());  // a Shift + F-key is not the F-key's label
@@ -967,7 +972,7 @@ TEST_CASE("jumps: the same keys do the same on the song list and in the Navigato
   const int song_pos = rig.state().song.pos();
   rig.open_navigator();
   const int at = rig.state().navigator;
-  for (int n = 0; n < 5; ++n) {
+  for (int n = 1; n < 5; ++n) {  // (Shift + F1 is GO since OS-UXF-KEYS item 5)
     rig.shift_tap(keys[n]);
     CHECK_MESSAGE(rig.state().navigator == at, "navigator Shift+F" << n + 1);  // OS-SHIFTROW: the Navigator has no jumps
   }
@@ -1117,7 +1122,9 @@ TEST_CASE("shift: a Shift held down survives a mode change, a screen change and 
   CHECK(rig.app->invoke(core::action_id("view.mode"), 0) == app::DispatchResult::Changed);
   CHECK(rig.state().mode[pattern] == static_cast<unsigned>(app::PatternMode::Edit));
   CHECK_FALSE(rig.state().edit.rec_free);
-  CHECK(rig.app->invoke(core::action_id("pattern.rec_free")) == app::DispatchResult::Changed);
+  CHECK(rig.app->invoke(core::action_id("pattern.rec_free")) == app::DispatchResult::Changed);  // OS-UXF-PAT item 8: LIVE off goes back to where it began (WATCH here: view.mode entered it)
+  CHECK(rig.state().mode[pattern] == static_cast<unsigned>(app::PatternMode::Browse));
+  CHECK(rig.app->invoke(core::action_id("pattern.edit_toggle")) == app::DispatchResult::Changed);  // REC: STEP
   CHECK(rig.state().mode[pattern] == static_cast<unsigned>(app::PatternMode::Edit));
   CHECK(rig.state().edit.rec_free);
 
@@ -1138,7 +1145,13 @@ TEST_CASE("shift: a Shift held down survives a mode change, a screen change and 
   rig.press(Button::Shift);
   rig.pass(1);
   CHECK(rig.screen() == ScreenId::Pattern);
-  rig.tap(Button::F5);  // on Pattern Shift + F5 is the TRACKS pads' mode key (OS-PADS-A, OS-PADOCT)
+  rig.tap(Button::F2);  // on Pattern Shift + F2 opens the PADS picker (OS-UXF-PAT 7); its F4 is TRACKS (the plain key: Shift is let go for it and taken again)
+  CHECK(rig.state().overlay == OverlayId::PadsPicker);
+  rig.release(Button::Shift);
+  rig.pass(1);
+  rig.tap(Button::F4);
+  rig.press(Button::Shift);
+  rig.pass(1);
   CHECK(rig.state().padmode.fixed() == app::PadMode::Tracks);
   CHECK(rig.state().notify.empty());
 
@@ -1159,8 +1172,13 @@ TEST_CASE("shift: a Shift held down survives a mode change, a screen change and 
   rig.release(Button::Vol);
   rig.pass(1);
   CHECK_FALSE(rig.app->learn());
-  rig.tap(Button::F3);
-  CHECK(rig.state().padmode.fixed() == app::PadMode::Piano);  // Shift is still held after Learn came and went
+  rig.tap(Button::F2);  // the PADS picker (Shift is still held after Learn came and went), its F2 is PIANO
+  rig.release(Button::Shift);
+  rig.pass(1);
+  rig.tap(Button::F2);
+  rig.press(Button::Shift);
+  rig.pass(1);
+  CHECK(rig.state().padmode.fixed() == app::PadMode::Piano);
 
   // The apps list: the tap of Pattern opens it, Shift + F2 inside it is nothing, Pattern closes it, and Shift still modifies afterwards.
   rig.tap(Button::Pattern);
@@ -1170,7 +1188,12 @@ TEST_CASE("shift: a Shift held down survives a mode change, a screen change and 
   rig.tap(Button::Pattern);
   CHECK(rig.state().overlay == OverlayId::None);
   CHECK(rig.screen() == ScreenId::Pattern);
-  rig.tap(Button::F2);  // (OS-PADOCT: Shift + F2 is NOTES; Shift + F1 is the octave)
+  rig.tap(Button::F2);  // (OS-UXF-PAT 7: Shift + F2 opens the PADS picker, its F1 is NOTES; Shift + F1 is the octave)
+  rig.release(Button::Shift);
+  rig.pass(1);
+  rig.tap(Button::F1);
+  rig.press(Button::Shift);
+  rig.pass(1);
   CHECK(rig.state().padmode.fixed() == app::PadMode::Notes);
   CHECK(rig.state().notify.empty());
 
@@ -1424,7 +1447,7 @@ struct Walk {
 // overlay or the queue outside what they can hold (the sanitisers watch the rest: the display lists, the tables).
 void check_invariants(const app::App& a) {
   const app::ViewState& v = a.state();
-  CHECK((v.overlay == OverlayId::None || v.overlay == OverlayId::Learn || v.overlay == OverlayId::Navigator || v.overlay == OverlayId::StepPopup || v.overlay == OverlayId::Help || v.overlay == OverlayId::ModulePicker || v.overlay == OverlayId::LearnMap));  // (LEARN MAP: OS-LEARNMAP; a held Instr, Fx or Note: OS-FU3; Shift + Config: OS-HELP; Shift + Pattern: the apps list, OS-APPSNAV)
+  CHECK((v.overlay == OverlayId::None || v.overlay == OverlayId::Learn || v.overlay == OverlayId::Navigator || v.overlay == OverlayId::StepPopup || v.overlay == OverlayId::Help || v.overlay == OverlayId::ModulePicker || v.overlay == OverlayId::LearnMap || v.overlay == OverlayId::PadsPicker));  // (LEARN MAP: OS-LEARNMAP; a held Instr, Fx or Note: OS-FU3; Shift + Config: OS-HELP; Shift + Pattern: the apps list, OS-APPSNAV; Shift + F2: the PADS picker, OS-UXF-PAT)
   CHECK(v.help.page < app::kHelpPages);
   for (unsigned p = 0; p < app::kHelpPages; ++p) {  // a scroll never leaves its page: the last line stays in the body
     CHECK((v.help.scroll[p] == 0 || v.help.scroll[p] + app::kHelpRows <= app::help_page(p).count));

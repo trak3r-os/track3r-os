@@ -4,8 +4,7 @@
  "steps": [
   {"say": "OS-USBAUDIO, rows QA-CFG-001..003 of docs/qa/catalogue/config.md. The unit must be presenting AUDIO (USB AUDIO On, the default). Nothing here is applied: a turn and the first F7 write no setting, so the card is not touched. The second F7 re-enumerates the port and the console goes with it (o3hil keeps one open port and cannot cross that): rows 004, 007, 011, 013 and 014 are the host-side checks AUD-12..AUD-14 of platform/mk66/README.md"},
   {"keys": ["-shift"], "gap": 0.2, "note": "(Shift released, in case a former run left it down)"},
-  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|NAVIGATOR|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
-  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "TEXT_ENTRY"}, "note": "(the on-screen keyboard is cancelled with F7, never accepted)"},
+  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|NAVIGATOR|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|TEXT_ENTRY)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
   {"keys": ["pattern"], "gap": 0.4},
   {"state": {"screen": "PATTERN"}, "within": 3},
   {"cmd": "usb mode", "expect": ["usb mode: AUDIO, profile \\d+"], "note": "precondition: the unit presents AUDIO (USB AUDIO On)"},
@@ -134,8 +133,7 @@
   {"say": "QA-CFG-265 FIRMWARE LIST PAGING BY HAND (OS-BUG-FWLIST). Precondition: 19 copies of any .ptf (the build under test is fine: nothing is installed) in Firmware/ on the card, named so that the last in directory order is recognisable; the project saved. (a) Config > INFO (F4), F8 UPDATE: the list shows 12 files and, bottom right, FILE 1 / 19. (b) Down past the twelfth file: the next 7 files appear, the cursor on the first of them, the line reads FILE 13 / 19; the list took a moment to read the card, no more. (c) Down to the last file: FILE 19 / 19; Down again changes nothing. (d) F1: the question names the last file; F8. (e) Up to the thirteenth file, Up once more: the first 12 files are back, the cursor on the twelfth, FILE 12 / 19. (f) F8 BACK: the dialog closes. Install nothing. Record the position line at each step."}
  ],
  "finally": [
-  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|NAVIGATOR|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
-  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "TEXT_ENTRY"}, "note": "(the on-screen keyboard is cancelled with F7, never accepted)"},
+  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|NAVIGATOR|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|TEXT_ENTRY)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
   {"keys": ["pattern"], "gap": 0.4, "note": "(another screen: a pending USB value and an armed APPLY are discarded)"}
  ]
 }

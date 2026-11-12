@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // OS-NAMES: NAME for the track (Mixer, Shift + F1), the pattern (Song, Shift + F6) and the project (File, Shift + F6), on the on-screen keyboard of OS-INSTUI S7.
-//   * each key opens the keyboard on the current name; F8 sets the stored field as one undo unit, F7 changes nothing, an empty accept clears it, and the field's own limit holds;
+//   * each key opens the keyboard on the current name; F1 sets the stored field as one undo unit, F8 changes nothing, an empty accept clears it, and the field's own limit holds;
 //   * the Mixer refuses a bus, the master and a page with no track under the cursor (TRACKS ONLY; NO TRACK on a STEMS column of a track the project does not have);
 //   * SAVE AS is prefilled with the title when no folder holds the project;
 //   * the names are drawn cut: the pattern's on the Pattern info line, the project's in the File header.
@@ -168,7 +168,7 @@ TEST_CASE("names: the labels of the three Shift keys are NAME, and they are the 
   CHECK(std::string(app::kFileShiftKeys[4]) == "END");  // the quarter jumps stay
 }
 
-TEST_CASE("names: Mixer Shift + F1 names the track under the cursor: current name, F8 one undo unit, F7 nothing, empty clears, the field's limit") {
+TEST_CASE("names: Mixer Shift + F1 names the track under the cursor: current name, F1 one undo unit, F8 nothing, empty clears, the field's limit") {
   Rig rig;
   rig.on_mixer(2);
   const std::size_t depth = rig.depth();
@@ -179,14 +179,14 @@ TEST_CASE("names: Mixer Shift + F1 names the track under the cursor: current nam
   CHECK(rig.text() == "BASS");
   CHECK(rig.app->state().text.entry.selected());
   CHECK(rig.app->state().text.entry.capacity() == model::kTrackNameMax);
-  rig.tap(Button::F7);  // cancel
+  rig.tap(Button::F8);  // cancel
   CHECK_FALSE(rig.open());
   CHECK(std::string(rig.project().track(2)->name) == "BASS");
   CHECK(rig.depth() == depth);
 
   rig.shift_tap(Button::F1);
   rig.type("lead");
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   CHECK_FALSE(rig.open());
   CHECK(std::string(rig.project().track(2)->name) == "lead");
   CHECK(rig.depth() == depth);  // OS-UNDOGRP D10: the Mixer has no undo, a track's name is final (no unit in any area)
@@ -196,14 +196,14 @@ TEST_CASE("names: Mixer Shift + F1 names the track under the cursor: current nam
   // The same name records nothing.
   const std::size_t now = rig.depth();
   rig.shift_tap(Button::F1);
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   CHECK(rig.depth() == now);
 
   // An empty accept clears the name.
   rig.shift_tap(Button::F1);
   (void)rig.app->invoke(core::action_id("text.backspace"), 0);  // the whole name is selected: one key deletes all
   CHECK(rig.text().empty());
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   CHECK(std::string(rig.project().track(2)->name).empty());
   CHECK(rig.depth() == now);
   CHECK(rig.note() == "TRACK 03 NAME CLEARED");
@@ -212,7 +212,7 @@ TEST_CASE("names: Mixer Shift + F1 names the track under the cursor: current nam
   rig.shift_tap(Button::F1);
   rig.type("abcdefghijklmnopqrstuvwxyz");
   CHECK(rig.app->state().text.entry.length() == model::kTrackNameMax);
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   CHECK(std::string(rig.project().track(2)->name) == "abcdefghijklmnopqrst");
 }
 
@@ -222,7 +222,7 @@ TEST_CASE("names: Mixer Shift + F1 takes any key (a name is not a file name) and
   rig.shift_tap(Button::F1);
   rig.type("a@b+c");  // '@' and '+' are refused in a file name, not here
   CHECK(rig.text() == "a@b+c");
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   CHECK(std::string(rig.project().track(0)->name) == "a@b+c");
 
   rig.view().page[app::screen_index(app::ScreenId::Mixer)] = static_cast<std::uint8_t>(app::MixerPage::Routing);
@@ -232,7 +232,7 @@ TEST_CASE("names: Mixer Shift + F1 takes any key (a name is not a file name) and
   rig.shift_tap(Button::F1);
   CHECK(rig.open());
   CHECK(rig.app->state().text.subject == 1);
-  rig.tap(Button::F7);
+  rig.tap(Button::F8);
 
   rig.view().page[app::screen_index(app::ScreenId::Mixer)] = static_cast<std::uint8_t>(app::MixerPage::Stems);
   rig.view().mixer.col = 3;
@@ -240,7 +240,7 @@ TEST_CASE("names: Mixer Shift + F1 takes any key (a name is not a file name) and
   rig.shift_tap(Button::F1);
   CHECK(rig.open());
   CHECK(rig.app->state().text.subject == 3);
-  rig.tap(Button::F7);
+  rig.tap(Button::F8);
 }
 
 TEST_CASE("names: the Mixer refuses a bus, the master and a page with no track under the cursor: TRACKS ONLY") {
@@ -294,7 +294,7 @@ TEST_CASE("names: on STEMS a column of a track the project does not have says NO
   CHECK(rig.depth() == depth);
 }
 
-TEST_CASE("names: Song Shift + F6 names the pattern of the slot: current name, F8 one undo unit, F7 nothing, empty clears, 30 characters") {
+TEST_CASE("names: Song Shift + F6 names the pattern of the slot: current name, F1 one undo unit, F8 nothing, empty clears, 30 characters") {
   Rig rig;
   rig.on_song(1);  // the slot of pattern 2, VERSE
   const std::size_t depth = rig.depth();
@@ -304,13 +304,13 @@ TEST_CASE("names: Song Shift + F6 names the pattern of the slot: current name, F
   CHECK(rig.app->state().text.subject == 2);
   CHECK(rig.text() == "VERSE");
   CHECK(rig.app->state().text.entry.capacity() == model::kPatternNameMax);
-  rig.tap(Button::F7);
+  rig.tap(Button::F8);
   CHECK(std::string(rig.project().pattern(2)->name) == "VERSE");
   CHECK(rig.depth() == depth);
 
   rig.shift_tap(Button::F6);
   rig.type("chorus 1");
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   CHECK(std::string(rig.project().pattern(2)->name) == "chorus 1");
   CHECK(rig.depth() == depth + 1);
   CHECK(rig.note() == "PATTERN 02 NAMED");
@@ -322,13 +322,13 @@ TEST_CASE("names: Song Shift + F6 names the pattern of the slot: current name, F
 
   rig.shift_tap(Button::F6);
   (void)rig.app->invoke(core::action_id("text.backspace"), 0);
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   CHECK(std::string(rig.project().pattern(2)->name).empty());
 
   rig.shift_tap(Button::F6);
   rig.type("abcdefghijklmnopqrstuvwxyzabcdefgh");
   CHECK(rig.app->state().text.entry.length() == model::kPatternNameMax);
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   CHECK(std::string(rig.project().pattern(2)->name) == "abcdefghijklmnopqrstuvwxyzabcd");
 }
 
@@ -354,13 +354,13 @@ TEST_CASE("names: File Shift + F6 sets the project title, not the folder: curren
   CHECK(rig.app->state().text.target == Target::Project);
   CHECK(rig.text() == "My Song");
   CHECK(rig.app->state().text.entry.capacity() == model::kProjectNameMax);
-  rig.tap(Button::F7);
+  rig.tap(Button::F8);
   CHECK(std::string(rig.project().name()) == "My Song");
   CHECK(rig.depth() == depth);
 
   rig.shift_tap(Button::F6);
   rig.type("night drive");
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   CHECK(std::string(rig.project().name()) == "night drive");
   CHECK(rig.depth() == depth + 1);
   CHECK(rig.note() == "PROJECT NAMED");
@@ -374,14 +374,14 @@ TEST_CASE("names: File Shift + F6 sets the project title, not the folder: curren
 
   rig.shift_tap(Button::F6);
   (void)rig.app->invoke(core::action_id("text.backspace"), 0);
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   CHECK(std::string(rig.project().name()).empty());
   CHECK(rig.note() == "PROJECT NAME CLEARED");
 
   rig.shift_tap(Button::F6);
   rig.type("abcdefghijklmnopqrstuvwxyzabcdefghij");
   CHECK(rig.app->state().text.entry.length() == model::kProjectNameMax);
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   CHECK(std::string(rig.project().name()) == "abcdefghijklmnopqrstuvwxyzabcdef");
 }
 
@@ -395,7 +395,7 @@ TEST_CASE("names: File Shift + F6 names the project on the IMPORT and EXPORT pag
   CHECK(rig.app->state().text.target == Target::Project);
   CHECK(rig.text() == "My Song");
   rig.type("x");
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   CHECK(std::string(rig.project().name()) == "x");  // (the field was all selected: typing replaced it)
   CHECK(rig.app->state().import.page);
   rig.tap(Button::F6);  // PROJECTS
@@ -406,7 +406,7 @@ TEST_CASE("names: File Shift + F6 names the project on the IMPORT and EXPORT pag
   CHECK(rig.open());
   CHECK(rig.app->state().text.target == Target::Project);
   CHECK(rig.text() == "x");
-  rig.tap(Button::F7);  // cancel
+  rig.tap(Button::F8);  // cancel
   CHECK_FALSE(rig.open());
   CHECK(std::string(rig.project().name()) == "x");
   CHECK(rig.app->state().xport.page);
@@ -418,15 +418,15 @@ TEST_CASE("names: the keyboard's heading says what is being named") {
   rig.shift_tap(Button::F1);
   CHECK(rig.open());  // the heading is drawn by the overlay from the target (title_of)
   CHECK(rig.app->state().text.target == Target::Track);
-  rig.tap(Button::F7);
+  rig.tap(Button::F8);
   rig.on_song(0);
   rig.shift_tap(Button::F6);
   CHECK(rig.app->state().text.target == Target::Pattern);
-  rig.tap(Button::F7);
+  rig.tap(Button::F8);
   rig.tap(Button::File);
   rig.shift_tap(Button::F6);
   CHECK(rig.app->state().text.target == Target::Project);
-  rig.tap(Button::F7);
+  rig.tap(Button::F8);
 }
 
 TEST_CASE("names: without a document there is nothing to name") {
@@ -473,29 +473,29 @@ TEST_CASE("names: SAVE AS is prefilled from the title when no folder holds the p
   CHECK(rig.app->state().text.entry.selected());
   (void)rig.app->invoke(core::action_id("text.auto"), 0);  // F6 still gives the automatic name
   CHECK(rig.text().compare(0, 6, "Track ") == 0);
-  rig.tap(Button::F7);
+  rig.tap(Button::F8);
 
   NEED(rig.editor->set_name("Mix/Down: v2", 12) == model::Status::Ok);
   rig.tap(Button::F5);
   CHECK(rig.text() == "MixDown v2");
-  rig.tap(Button::F7);
+  rig.tap(Button::F8);
 
   // A title that makes no valid name, or none: the automatic name, as before.
   NEED(rig.editor->set_name("CON", 3) == model::Status::Ok);
   rig.tap(Button::F5);
   CHECK(rig.text().compare(0, 6, "Track ") == 0);
-  rig.tap(Button::F7);
+  rig.tap(Button::F8);
   NEED(rig.editor->set_name("", 0) == model::Status::Ok);
   rig.tap(Button::F5);
   CHECK(rig.text().compare(0, 6, "Track ") == 0);
-  rig.tap(Button::F7);
+  rig.tap(Button::F8);
 
   // The project came from a folder: the automatic name, whatever the title.
   NEED(rig.editor->set_name("My Song", 7) == model::Status::Ok);
   rig.sink.last_folder = "Projects/Old Folder";
   rig.tap(Button::F5);
   CHECK(rig.text().compare(0, 6, "Track ") == 0);
-  rig.tap(Button::F7);
+  rig.tap(Button::F8);
 }
 
 // ---- the names drawn --------------------------------------------------------------------------------------------------------------------------------

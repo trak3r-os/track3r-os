@@ -174,26 +174,30 @@ TEST_CASE("sample edit: it is a screen of the registry, reached by its button, w
   CHECK(rig.app->frames() >= 1u);
 }
 
-TEST_CASE("sample edit: Shift + F5 (NEXT INS) steps to the next instrument over 1..64 and goes round from 64 to 1 (OS-QAFIX-27, OS-SLD-RANGE-ALL)") {
+TEST_CASE("sample edit: Shift + F8 (INST +) steps to the next instrument over 1..64 and goes round from 64 to 1, Shift + F7 (INST -) back (OS-QAFIX-27, OS-SLD-RANGE-ALL, OS-UXF-SMP item 11)") {
   Rig rig;
   rig.invoke("instrument.select", 47);
   CHECK(rig.app->state().instrument == 47);
-  rig.shift_tap(Button::F5);
+  rig.shift_tap(Button::F8);
   CHECK(rig.app->state().instrument == 48);
-  rig.shift_tap(Button::F5);  // the pads reach 1..48 only, the step goes on to the slots 49..64 (empty here: any slot can be any type)
+  rig.shift_tap(Button::F8);  // the pads reach 1..48 only, the step goes on to the slots 49..64 (empty here: any slot can be any type)
   CHECK(rig.app->state().instrument == 49);
   rig.tap(Button::F2);  // an empty slot: stepped onto, and the effects say why they do nothing
   CHECK(rig.message() == "NO SAMPLE IN THIS INSTRUMENT");
   for (int i = 0; i < 14; ++i) {  // 50..63 (a pad cannot give these: instrument.select refuses above 48)
-    rig.shift_tap(Button::F5);
+    rig.shift_tap(Button::F8);
   }
   CHECK(rig.app->state().instrument == 63);
-  rig.shift_tap(Button::F5);
+  rig.shift_tap(Button::F8);
   CHECK(rig.app->state().instrument == 64);
-  rig.shift_tap(Button::F5);
+  rig.shift_tap(Button::F8);
   CHECK(rig.app->state().instrument == 1);
-  rig.shift_tap(Button::F5);
+  rig.shift_tap(Button::F8);
   CHECK(rig.app->state().instrument == 2);
+  rig.shift_tap(Button::F7);
+  CHECK(rig.app->state().instrument == 1);
+  rig.shift_tap(Button::F7);  // INST - goes round from 1 to 64
+  CHECK(rig.app->state().instrument == 64);
 }
 
 TEST_CASE("sample edit: the encoder moves the edge Left / Right picked, the selection starts as all of it and stays ordered, ALL clears it") {
@@ -236,7 +240,7 @@ TEST_CASE("sample edit: reverse of a selection is one effect, a job into another
   rig.tap(Button::F8);
   CHECK(rig.pcm().data == original_ptr);
   CHECK(rig.bank.redo_depth(kSlot) == 1u);
-  rig.shift_tap(Button::F8);
+  rig.shift_tap(Button::F5);  // REDO (OS-UXF-SMP item 11: Shift + F8 is INST +)
   CHECK(rig.pcm().data != original_ptr);
   CHECK(rig.bank.redo_depth(kSlot) == 0u);
   // The peak cache follows the audio in view.
@@ -448,7 +452,7 @@ TEST_CASE("sample edit: a random walk over the keys keeps the selection and wind
   }
 }
 
-TEST_CASE("sample edit: F7 PREVIEW plays the instrument while it is down, Shift + F7 from the edge being moved") {
+TEST_CASE("sample edit: F7 PREVIEW plays the instrument while it is down, Shift + Play from the edge being moved") {
   struct FakePreview final : app::PreviewSink {
     std::vector<int> holds;
     std::vector<bool> auditions;
@@ -470,15 +474,16 @@ TEST_CASE("sample edit: F7 PREVIEW plays the instrument while it is down, Shift 
   NEED(preview.holds.size() == 2u);
   CHECK(preview.holds[1] == -static_cast<int>(kSlot + 1));
   // Shift + F7 with no selection: from the left edge of the window (the whole sample here), a one shot on the audition's descriptor.
+  // (OS-UXF-SMP item 11: the key is Shift + Play; Shift + F7 is INST -.)
   rig.press(Button::Shift);
   rig.pass(1);
-  rig.press(Button::F7);
+  rig.press(Button::Play);
   rig.pass();
   rig.pass();
   NEED(preview.auditions.size() == 1u);
   CHECK(preview.auditions[0]);
   CHECK(rig.voices->sample(audio::kPreviewSlot).length == kFrames);
-  rig.release(Button::F7);
+  rig.release(Button::Play);
   rig.pass();
   CHECK(preview.auditions.size() == 2u);
   rig.release(Button::Shift);
@@ -548,7 +553,7 @@ TEST_CASE("sample edit: AMIGA 8287 resamples the whole sample as one job and one
   CHECK(std::vector<std::int16_t>(rig.pcm().data, rig.pcm().data + kFrames) == rig.original);
   CHECK(std::memcmp(&rig.inst(), &before, sizeof before) == 0);
   CHECK(rig.voices->sample(kSlot).engine == audio::kEngineModern);
-  rig.shift_tap(Button::F8);  // redo
+  rig.shift_tap(Button::F5);  // redo
   rig.passes(8);
   CHECK(rig.pcm().frames == want);
   CHECK(rig.inst().engine == model::kInstEngineAmiga);
@@ -573,7 +578,7 @@ TEST_CASE("sample edit: the Amiga conversion of a 22,050 Hz sample converts from
   CHECK(rig.voices->sample(kSlot).engine == audio::kEngineModern);
   CHECK(rig.voices->sample(kSlot).length == kFrames);
   CHECK(rig.voices->sample(kSlot).rate_q28 == (1u << 27));
-  rig.shift_tap(Button::F8);  // redo
+  rig.shift_tap(Button::F5);  // redo
   rig.passes(8);
   CHECK(rig.voices->sample(kSlot).rate_q28 == audio::rate_factor_q28(8287u));
   CHECK(rig.voices->sample(kSlot).engine == audio::kEngineAmiga);

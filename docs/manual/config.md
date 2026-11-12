@@ -164,7 +164,7 @@ Start on the PATTERN page.
 2. Turn the encoder until the row reads **5**. The hint reads: Less: rows overlap by 12 - N. <!-- QA-CFG-035 -->
 3. Press `Delete`. The row reads **12**, the default. <!-- QA-CFG-036 -->
 
-You should see the new number on the row. The pads follow at the next press, with no restart: on the Pattern screen, in the pad mode **NOTES** (`Shift` + `F2`), the pads of the upper rows play the notes the new number gives. The root, the scale and the octave are not here. They are in the held Note panel and belong to the project. PAD OFFSET belongs to the unit: it is kept with the other settings on the card, and a settings file from an older build reads **12**. <!-- QA-CFG-037 --> <!-- QA-CFG-038 -->
+You should see the new number on the row. The pads follow at the next press, with no restart: on the Pattern screen, in the pad mode **NOTES** (`Shift` + `F2`, then `F1`), the pads of the upper rows play the notes the new number gives. The root, the scale and the octave are not here. They are in the held Note panel and belong to the project. PAD OFFSET belongs to the unit: it is kept with the other settings on the card, and a settings file from an older build reads **12**. <!-- QA-CFG-037 --> <!-- QA-CFG-038 -->
 
 ### Choose when a picked pattern starts
 <!-- sync: src=model/include/o3os/model/params.h,app/src/chooser_actions.cpp qa=QA-CFG-229,QA-PAT-318 -->

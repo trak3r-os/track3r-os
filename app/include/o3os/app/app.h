@@ -530,7 +530,7 @@ class App {
   SaveService* saves_ = nullptr;
   MetroSync* metro_sync_ = nullptr;  // OS-RECCOUNT RC2: the platform's MetroSync (attach_metro_sync): the count-in override is set and cleared here
   hal::firmware::FirmwareSink* firmware_ = nullptr;  // OS-FWCONFIG
-  PatternClip clip_;  // OS-PATCOPY: the pattern clipboard (14 KB: the App is built in SDRAM on the device)
+  PatternClip clip_;  // OS-PATCOPY: the pattern clipboard (about 30 KB with the S7c lane buffer: the App is built in SDRAM on the device)
   SongClip song_clip_;  // OS-SONGMAP: the song clip, the Song map's cells (28 KB, SDRAM as the pattern clipboard)
   hal::storage::Storage* storage_ = nullptr;
   const audio::PlayPosition* play_position_ = nullptr;

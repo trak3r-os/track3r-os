@@ -458,7 +458,7 @@ void SampleEditScreen::render(const Model& model, const ViewState& view, Rendere
       head.append(" ");
       append_clipped(head, inst->name, 12);
     }
-    const char* hint = "pad / Shift+F5: change";
+    const char* hint = "pad / Shift+F7/F8: change";
     const int hint_x = ui::kScreenW - 2 * m.pad - r.text_width(hint, Face::Label);
     r.text(hint_x, cap_y, hint, Color::ChromeDim, Face::Label);
     r.text(hint_x - 3 * m.gap - r.text_width(head.c_str(), Face::Label), cap_y, head.c_str(), Color::ChromeText, Face::Label);

@@ -52,7 +52,7 @@ Example: load a file of many single-cycle windows, choose WAVETABLE, hold a pad 
 | Info line | The length in frames and the rate in Hz, or a hint. |
 | Strip | Messages, for example **NO SAMPLE INSTRUMENT HERE**. |
 | Key row | `F1` to `F8`, labelled for the view you are on. |
-| Shift row | **MODE** on `F1`, **PRV SEL** on `F6`, **REDO** on `F8`. |
+| Shift row | **MODE** on `F1`, **REDO** on `F5`, **PRV SEL** on `F6`, **INST -** and **INST +** on `F7` and `F8`. On the CHOP page `F4` is **TO PAT**. |
 
 ## More tasks
 
@@ -124,6 +124,14 @@ Start on the CHOP page of a sample instrument.
 
 You should see the slices as lines on the sample. The strip says **PLAY MODE: BEAT SLICE**, and pad n plays slice n. A sample holds up to 48 slices. Each change is one undo step: `F8` (**UNDO**).
 
+### Write the slices into the Pattern
+
+1. Open Pattern and put the cursor on the track and the row where the first slice should sound.
+2. Press `Sample Play` for the CHOP page of a BEAT SLICE instrument that has slices.
+3. Press `Shift` + `F4` (**TO PAT**). <!-- QA-WAV-029 -->
+
+You should see **SLICES TO PAT** in the strip. Slice 1 is written on the cursor's row, slice 2 on the next row, and so on down the track, one slice a step, each as the note that plays that slice. If the track ends first, the strip says **SLICES TO PAT: PATTERN END** and the rest are left out. The Pattern cursor does not move. All the steps are one undo step: `F8` (**UNDO**). With no slices the unit says **NO SLICES TO WRITE**, and in another play mode **SET BEAT SLICE MODE FIRST**. New in track3r-os.
+
 ## Keys on this screen
 
 <!-- sync: src=app/src/bindings.cpp qa=QA-WAV-001,QA-WAV-003,QA-WAV-007 -->
@@ -131,16 +139,16 @@ You should see the slices as lines on the sample. The strip says **PLAY MODE: BE
 <!-- manual-tables: keys screen=wave -->
 The key row, and the row drawn while `Shift` is held. `-` means the key does nothing.
 
-| Key | WAVE | CHOP | WAVETABLE | GRANULAR | With `Shift` |
-|---|---|---|---|---|---|
-| `F1` | **START** | **AUTO** | **POSITION** | **POSITION** | **MODE** |
-| `F2` | **LOOP S** | **EVEN** | **WINDOW** | **LENGTH** | - |
-| `F3` | **LOOP E** | **ZC** | - | **SHAPE** | - |
-| `F4` | **END** | **ADD** | - | **LOOP** | - |
-| `F5` | **ZC** | **DEL** | - | - | - |
-| `F6` | **PREVIEW** | **PREVIEW** | **PREVIEW** | **PREVIEW** | **PRV SEL** |
-| `F7` | **ZOOM-** | **ZOOM-** | **ZOOM-** | **ZOOM-** | - |
-| `F8` | **UNDO** | **UNDO** | **UNDO** | **UNDO** | **REDO** |
+| Key | WAVE | CHOP | WAVETABLE | GRANULAR | `Shift`, WAVE, WAVETABLE, GRANULAR | `Shift`, CHOP |
+|---|---|---|---|---|---|---|
+| `F1` | **START** | **AUTO** | **POSITION** | **POSITION** | **MODE** | **MODE** |
+| `F2` | **LOOP S** | **EVEN** | **WINDOW** | **LENGTH** | - | - |
+| `F3` | **LOOP E** | **ZC** | - | **SHAPE** | - | - |
+| `F4` | **END** | **ADD** | - | **LOOP** | - | **TO PAT** |
+| `F5` | **ZC** | **DEL** | - | - | **REDO** | **REDO** |
+| `F6` | **PREVIEW** | **PREVIEW** | **PREVIEW** | **PREVIEW** | **PRV SEL** | **PRV SEL** |
+| `F7` | **ZOOM-** | **ZOOM-** | **ZOOM-** | **ZOOM-** | **INST -** | **INST -** |
+| `F8` | **UNDO** | **UNDO** | **UNDO** | **UNDO** | **INST +** | **INST +** |
 
 <!-- /manual-tables -->
 
@@ -148,8 +156,10 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 |---|---|---|
 | `Shift` + `F1` (**MODE**) | opens the list of play modes | QA-WAV-001, QA-WAV-003 |
 | `Shift` + `F6` (**PRV SEL**) | previews from the selected point. If that point is out of view, from the left edge of the window | QA-WAV-001 |
-| `Shift` + `F8` (**REDO**) | does the last undone Wave edit again | QA-WAV-001 |
-| `Shift` + `F2` to `F5`, `Shift` + `F7` | nothing | QA-WAV-001 |
+| `Shift` + `F4` (**TO PAT**, CHOP page) | writes the slices into the Pattern, see "Write the slices into the Pattern" | QA-WAV-002, QA-WAV-029 |
+| `Shift` + `F5` (**REDO**) | does the last undone Wave edit again (it was on `Shift` + `F8`) | QA-WAV-001 |
+| `Shift` + `F7` (**INST -**), `Shift` + `F8` (**INST +**) | edit the previous or the next instrument, 1 to 64 round, as on Sample load | QA-WAV-001, QA-WAV-028 |
+| `Shift` + `F2` to `F4` | nothing | QA-WAV-001 |
 | `F1`, `F2`, `Left`, `Right` (WAVETABLE and GRANULAR) | pick the row. `F2` is **WINDOW** on WAVETABLE | QA-WAV-007 |
 | the encoder (WAVETABLE and GRANULAR) | changes the selected row. `Shift` turns in bigger steps | QA-WAV-007 |
 | `Up`, `Down` (play mode list) | move the cursor | QA-WAV-003 |

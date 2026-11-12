@@ -1277,7 +1277,8 @@ TEST_CASE("select: Shift + the arrows make a block while the cursor rides the pl
   rig.play(11);  // the playhead moves on: the block stays where the arrows put it
   CHECK(rig.state().edit.selection.active);
   CHECK(rig.state().edit.selection.follow);  // (the playhead did not move or drop it)
-  rig.shift_tap(Button::Rec);  // LIVE -> STEP (OS-LIVEEXIT): it selects, and says nothing
+  rig.tap(Button::Rec);  // LIVE -> WATCH, then WATCH -> STEP: it selects, and says nothing
+  rig.tap(Button::Rec);
   CHECK(rig.invoke("select.extend", 1) == DispatchResult::Changed);
   say_nothing();
   CHECK(rig.state().edit.selection.active);
@@ -1905,9 +1906,10 @@ TEST_CASE("rec lane cc: an external controller on the track's channel goes throu
 
 namespace {
 
-// STEP mode on a LaneRig: Shift + REC takes LIVE to STEP (Edit with the cursor free; the transport goes on).
+// STEP mode on a LaneRig: the rig is in LIVE, REC takes it to WATCH and REC again to STEP (Edit with the cursor free; the transport goes on; OS-UXF-PAT item 8).
 void to_step(LaneRig& rig) {
-  rig.shift_tap(Button::Rec);
+  rig.tap(Button::Rec);
+  rig.tap(Button::Rec);
   CHECK(rig.state().edit.rec_free);
 }
 

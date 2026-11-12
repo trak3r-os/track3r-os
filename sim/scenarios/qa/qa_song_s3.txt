@@ -32,3 +32,11 @@ assert model order.len=2  # the demo song has one slot; ADD EMPTY made the secon
 snap qa_sng_211
 tap f8
 assert model order.len=1  # F8 took the empty slot back
+
+# QA-SNG-212 (OS-UXF-PAT 12): F2 (DUP PAT) does what Shift + Insert does: a slot after the cursor's with a copy of the pattern, one undo unit. The key row reads F2 DUP PAT.
+tap f2
+wait 20
+assert model order.len=2  # the demo song had one slot; DUP PAT made the second
+snap qa_sng_212
+tap f8
+assert model order.len=1  # F8 took the slot (and its pattern) back

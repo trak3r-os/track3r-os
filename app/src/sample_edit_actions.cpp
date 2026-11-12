@@ -276,7 +276,7 @@ bool sedit_q8(ActionContext& ctx, core::ActionArg) noexcept {
   return true;
 }
 
-// Shift + F5 (OS-QAFIX-27, new Community OS behaviour): the next instrument to edit, 1..64 and round to 1 (OS-SLD-RANGE-ALL: any slot can be any type, as Sample load's target); a pad picks one of 1..48
+// Shift + F7 / F8 (OS-QAFIX-27, OS-UXF-SMP item 11, new Community OS behaviour; arg -1 / +1): the previous / next instrument to edit, 1..64 and round to 1 (OS-SLD-RANGE-ALL: any slot can be any type, as Sample load's target); a pad picks one of 1..48
 // directly (instrument_select, which also resets the window and the selection). A slot that is not a sample instrument is stepped onto like any other: the effects say NO SAMPLE IN THIS INSTRUMENT.
 bool sedit_instrument(ActionContext& ctx, core::ActionArg arg) noexcept {
   if (arg == 0) {
@@ -285,17 +285,22 @@ bool sedit_instrument(ActionContext& ctx, core::ActionArg arg) noexcept {
   constexpr int kSlots = static_cast<int>(model::kMaxInstruments);
   const int next = ctx.view.instrument + (arg < 0 ? -1 : 1);
   const int to = next < 1 ? kSlots : (next > kSlots ? 1 : next);
+  bool ok = true;
   if (to <= static_cast<int>(kInstruments)) {
-    return instrument_select(ctx, to);
+    ok = instrument_select(ctx, to);
+  } else {
+    release_live_pads(ctx);  // as instrument_select (which refuses what a pad cannot give): the same step for 49..64
+    ctx.view.instrument = to;
+    wave_view_reset(ctx.view);
   }
-  release_live_pads(ctx);  // as instrument_select (which refuses what a pad cannot give): the same step for 49..64
-  ctx.view.instrument = to;
-  wave_view_reset(ctx.view);
-  return true;
+  if (ok && ctx.view.screen == ScreenId::Wave) {
+    kWaveScreen.enter(ctx.model, ctx.view);  // the new instrument's play mode picks CHOP or WAVE (and so the Shift row's TO PAT), as on arriving
+  }
+  return ok;
 }
 
 // OS-GENNEW: arg = the instrument number 1..64 to show (the App invokes it when F4 NEW INS has made an instrument and the view was still on the one it started from): the same step as a pad
-// (1..48, which also resets the window and the selection) or Shift + F5 (49..64).
+// (1..48, which also resets the window and the selection) or Shift + F7 / F8 (49..64).
 bool sedit_show(ActionContext& ctx, core::ActionArg arg) noexcept {
   if (arg < 1 || arg > static_cast<core::ActionArg>(model::kMaxInstruments)) {
     return false;

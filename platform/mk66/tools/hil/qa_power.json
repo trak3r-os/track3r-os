@@ -3,9 +3,7 @@
  "title": "OS-POWER P1: the Power switch: the pin in the three pulls (M4), an injected hold (the line, the hint), and the shutdown's stages up to USB off, ending in a restart. No button held",
  "steps": [
   {"say": "OS-POWER P1, rows QA-GLB-100..116 of docs/qa/catalogue/global.md. The unit is idle, the Pattern screen, a card in the slot if QA-GLB-106/107 are to be run by hand. NO BUTTON is held for the console steps. The scenario injects the switch (`power press|release`: the debounced hold, the line, the hint) and ends with `power off dry`, which restarts the unit"},
-  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "NAVIGATOR"}, "note": "(a leftover Navigator is closed: F7 is CLOSE, F8 would GO since OS-NAV2)"},
-  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
-  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "TEXT_ENTRY"}, "note": "(the on-screen keyboard is cancelled with F7, never accepted)"},
+  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|NAVIGATOR|TEXT_ENTRY)$"}, "note": "(a leftover overlay is put away: F8 is BACK on the Navigator, the keyboard (cancel, never accept: F1 accepts) and the choosers, OS-UXF-KEYS item 5)"},
   {"keys": ["pattern"], "gap": 0.4},
   {"state": {"screen": "PATTERN"}, "within": 3},
   {"run": "_stop"},

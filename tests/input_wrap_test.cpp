@@ -174,8 +174,8 @@ struct Rig {
   OverlayId overlay() const { return app->state().overlay; }
 };
 
-// One timeline: a first tap of F1 and F1 again at `start_us` (two taps: each is a Tap and leaves nothing open, OS-PATSWITCH: the pattern chooser is the hold only), `gap_us` of nothing, then a hold of F1 (the
-// pattern chooser is open while it is down, closed by the release) and a tap (a Tap again, delivered at the release: nothing opens).
+// One timeline: a first tap of F1 and F1 again at `start_us` (two taps: the first opens the PATTERN chooser, the second closes it; OS-UXF-PAT item 6), `gap_us` of nothing, then a hold of F1 (the
+// pattern chooser is open while it is down, closed by the release) and a tap (a Tap again, delivered at the release: it opens, a second closes).
 void run_timeline(std::uint64_t start_us, std::uint64_t gap_us, Door door) {
   const std::string door_name = door == Door::Scan ? "scan" : "console";
   INFO("start " << start_us << " us (wrap " << (start_us >> 32) << ", tick " << static_cast<std::uint32_t>(start_us) << "), gap " << gap_us / kMinute << " min, door "
@@ -183,7 +183,7 @@ void run_timeline(std::uint64_t start_us, std::uint64_t gap_us, Door door) {
   Rig rig(start_us, door);
   CHECK(rig.overlay() == OverlayId::None);
   rig.tap(Button::F1);
-  CHECK(rig.overlay() == OverlayId::None);  // a tap opens nothing (it used to toggle the chooser)
+  CHECK(rig.overlay() == OverlayId::PatternChooser);  // a tap opens the chooser as the hold does
   rig.tap(Button::F1);
   CHECK(rig.overlay() == OverlayId::None);
 
@@ -197,8 +197,8 @@ void run_timeline(std::uint64_t start_us, std::uint64_t gap_us, Door door) {
   CHECK(held);
   CHECK(rig.overlay() == OverlayId::None);          // its release closed it (HoldEnd), it was no tap
 
-  rig.tap(Button::F1);  // a tap, after the hold: it still is one (it would have toggled the chooser; now it must not leave one open)
-  CHECK(rig.overlay() == OverlayId::None);
+  rig.tap(Button::F1);  // a tap, after the hold: it still is one (it opens the chooser, a second tap closes it)
+  CHECK(rig.overlay() == OverlayId::PatternChooser);
   rig.tap(Button::F1);
   CHECK(rig.overlay() == OverlayId::None);
 

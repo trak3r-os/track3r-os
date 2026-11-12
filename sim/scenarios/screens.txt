@@ -41,24 +41,26 @@ snap pattern_rec_live
 assert state playing=1 seq=1 play_step=3
 playhead stop
 
-# The pads' mode keys (OS-PADS-A, OS-PADOCT): Shift held shows the picker on the key row (F1 says the octave, "C3"; the mode that stays inverted); Shift + F5 leaves TRACKS fixed
-# (the info line says it), Shift + F2 puts NOTES back. They do not jump: the quarter jumps (Shift + F1..F5) are the Song list's and the Navigator's now.
+# The pads' mode keys (OS-PADS-A, OS-PADOCT, OS-UXF-PAT 7): Shift held shows the Shift row (F1 says the octave, "C3"; F2 says PADS); Shift + F2 opens the PADS picker and its F4 leaves TRACKS fixed
+# (the info line says it), Shift + F2 and its F1 put NOTES back. They do not jump: the quarter jumps (Shift + F1..F5) are the Song list's and the Navigator's now.
 # (Shift + F1 moves the octave up: the last block of this file, so that the octave stays C3 for the shots between.)
 press shift
 wait 20
 snap pattern_picker
-tap f5
-snap pattern_picker_tracks
+tap f2
 release shift
+tap f4
+snap pattern_picker_tracks
 snap pattern_pads_tracks
 press shift
 tap f2
 release shift
+tap f1
 snap pattern_pads_notes
 
 # The Navigator (OS-APPSNAV, OS-NAV2): the chord Song + Pattern (either order; Master + Song too) opens the view grid and it STAYS open after the keys are let go (a long wait
-# changes nothing); neither screen's tap fires. The arrow chooses Song, F8 is GO (the footer says F7 CLOSE / F8 GO, and the screen's F-key row under it is the Navigator's: F1 GO,
-# F7 CLOSE, F8 GO, and the quarter jumps while Shift is held).
+# changes nothing); neither screen's tap fires. The arrow chooses Song, F1 is GO (the footer says F1 GO / F8 BACK, and the screen's F-key row under it is the Navigator's: F1 GO,
+# F8 BACK, and the quarter jumps while Shift is held).
 press song
 press pattern
 release pattern
@@ -68,15 +70,15 @@ snap navigator_open_shift
 release shift
 wait 450
 snap navigator_open
-assert state screen=PATTERN overlay=NAVIGATOR keys=~F8:GO
+assert state screen=PATTERN overlay=NAVIGATOR keys=~F1:GO
 tap right
 snap navigator_song
-tap f8
+tap f1
 snap navigator_opened_song
 assert state screen=SONG overlay=NONE
 
 # Held works the same: hold Master + Song past the hold time, let go of both, the grid is still up; the encoder moves the choice (one cell, the encoder is a cell per
-# detent) and so does an arrow (a row down); F7 is CLOSE and the view stays where it was (no Song peek, no master volume).
+# detent) and so does an arrow (a row down); F8 is BACK and the view stays where it was (no Song peek, no master volume).
 tap pattern
 press master
 press song
@@ -87,7 +89,7 @@ snap navigator_held_open
 encoder 1
 tap down
 snap navigator_down
-tap f7
+tap f8
 snap navigator_closed
 assert state screen=PATTERN overlay=NONE
 

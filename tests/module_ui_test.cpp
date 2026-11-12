@@ -2514,8 +2514,8 @@ TEST_CASE("OS-MODPRESET P4: Shift + F5 on a module instrument's page opens the P
   CHECK(v.text.target == app::TextEntryView::Target::Preset);
   CHECK(std::string(v.text.entry.text()) == "PRESETTER");
   CHECK(v.text.entry.selected());
-  // F8 accepts: the save starts and the strip names the file.
-  rig.tap(Button::F8);
+  // F1 accepts: the save starts and the strip names the file.
+  rig.tap(Button::F1);
   CHECK(v.overlay == app::OverlayId::None);
   CHECK(v.text.target == app::TextEntryView::Target::None);
   CHECK(rig.head_note() == "PRESET SAVED: PRESETTER");
@@ -2535,7 +2535,7 @@ TEST_CASE("OS-MODPRESET P4: Shift + F5 on a module instrument's page opens the P
   // The same name again: the next free one, said on the strip.
   shift_tap(rig, Button::F5);
   NEED(v.overlay == app::OverlayId::TextEntry);
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   CHECK(rig.head_note() == "PRESET SAVED: PRESETTER 2");
   for (unsigned i = 0; i < 400u && !mem.has("modules/presets/Presetter/PRESETTER 2.o3mp"); ++i) {
     rig.pass(20);
@@ -2546,10 +2546,10 @@ TEST_CASE("OS-MODPRESET P4: Shift + F5 on a module instrument's page opens the P
   shift_tap(rig, Button::F5);
   NEED(v.overlay == app::OverlayId::TextEntry);
   rig.tap(Button::Delete);  // the keyboard's backspace clears the selected name
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   CHECK(v.overlay == app::OverlayId::TextEntry);
   CHECK(std::string(v.text.message) == "TYPE A NAME");
-  rig.tap(Button::F7);  // cancel
+  rig.tap(Button::F8);  // cancel
   CHECK(v.overlay == app::OverlayId::None);
   // A sample instrument's Shift + F5 is still the .pti save (the keyboard does not open; this rig has no sample bank, so it says so).
   rig.goto_instrument(0);

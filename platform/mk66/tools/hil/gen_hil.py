@@ -91,13 +91,12 @@ def CMP(scenario, snap):
     return {"sim_scenario": "sim/scenarios/%s.txt" % scenario, "snap": snap, "regions": KEYROW, "tol": 24, "aa": 1, "max_bad": 0.005}
 
 
-OVERLAY_CAPTURING = "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP)$"
+OVERLAY_CAPTURING = "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|NAVIGATOR|TEXT_ENTRY)$"
 
 
 def clear_overlays():
-    return [K("f7", gap=0.3, if_state={"overlay": "NAVIGATOR"}, note="(a leftover Navigator is closed: F7 is CLOSE, F8 would GO since OS-NAV2)"),
-            K("f8", gap=0.3, if_state={"overlay": OVERLAY_CAPTURING}, note="(a leftover overlay is put away: F8 is Back)"),
-            K("f7", gap=0.3, if_state={"overlay": "TEXT_ENTRY"}, note="(the on-screen keyboard is cancelled with F7, never accepted)")]
+    return [K("f8", gap=0.3, if_state={"overlay": OVERLAY_CAPTURING},
+              note="(a leftover overlay is put away: F8 is BACK on the Navigator, the keyboard (cancel, never accept: F1 accepts) and the choosers, OS-UXF-KEYS item 5)")]
 
 
 def to_pattern():
@@ -114,8 +113,13 @@ def start_on_pattern(load=True):
     return steps
 
 
+def pad_pick(fkey):
+    # OS-UXF-PAT item 7: Shift + F2 opens the PADS picker, then its key picks the mode and closes it (F1 NOTES, F2 PIANO, F3 ISO, F4 TRACKS, F5 PATS, F6 VU)
+    return K("+shift", "f2", "-shift", fkey, gap=0.3)
+
+
 def pad_mode_notes():
-    return K("+shift", "f2", "-shift", gap=0.3)  # OS-PADOCT: Shift + F2 is NOTES (F1 is the octave)
+    return pad_pick("f1")
 
 
 def undo_many(n, gap=0.25):
@@ -254,17 +258,17 @@ nav += [
     K("f3", gap=0.4), ST({"screen": "CONFIG", "page": "2"}, within=2), SHOT("config_sd"),
     K("f4", gap=0.4), ST({"screen": "CONFIG", "page": "3"}, within=2), SHOT("config_info"),
     K("f1", gap=0.4), ST({"screen": "CONFIG", "page": "0"}, within=2),
-    # NAVIGATOR and MODULES (OS-NAV2, 0.4.9; OS-APPSNAV: the Master + Song or Song + Pattern chord opens the grid and it STAYS open; F7 or Pattern closes with no view change; F8 or F1 = GO; Shift + F5 = the last cell, MODULES)
+    # NAVIGATOR and MODULES (OS-NAV2, 0.4.9; OS-APPSNAV: the Master + Song or Song + Pattern chord opens the grid and it STAYS open; F8 or Pattern closes with no view change (OS-UXF-KEYS item 5); F1 = GO; Shift + F5 = the last cell, MODULES)
     K("pattern", gap=0.5), ST({"screen": "PATTERN"}, within=3),
     K("+song", "+pattern", "-pattern", "-song", gap=0.5, note="(Song + Pattern chord, either order: the grid opens and stays open after both are released)"),
     ST({"overlay": "NAVIGATOR"}, within=3),
     SHOT("navigator"),
-    K("f7", gap=0.4), ST({"screen": "PATTERN", "overlay": "NONE"}, within=3, note="F7 = CLOSE: no view change"),
+    K("f8", gap=0.4), ST({"screen": "PATTERN", "overlay": "NONE"}, within=3, note="F8 = BACK: no view change"),
     K("+song", "+pattern", "-pattern", "-song", gap=0.5), ST({"overlay": "NAVIGATOR"}, within=3),
     K("pattern", gap=0.4), ST({"screen": "PATTERN", "overlay": "NONE"}, within=3, note="Pattern again closes it"),
     K("+song", "+pattern", "-pattern", "-song", gap=0.5), ST({"overlay": "NAVIGATOR"}, within=3),
     ENC(32, gap=0.4, note="(the encoder moves one cell a detent and clamps at the last cell, MODULES; Shift + F5 is unbound in the Navigator since OS-SHIFTROW)"),
-    K("f8", gap=0.5, note="F8 = GO"),
+    K("f1", gap=0.5, note="F1 = GO"),
     ST({"screen": "MODULES", "overlay": "NONE"}, within=3),
     SHOT("modules"),
     K("pattern", gap=0.5), ST({"screen": "PATTERN"}, within=3),
@@ -333,20 +337,20 @@ def shift_pick(fkey):
 pm = start_on_pattern() + [
     pad_mode_notes(), ST({"pads": "NOTES", "shift": "0"}, within=2),
     LEDS({"online": True, "within": 3, "snap": "notes"}),
-    shift_pick("f3"), ST({"pads": "PIANO"}, within=2), LEDS({"differs_from": "notes", "within": 3, "snap": "piano"}),
+    pad_pick("f2"), ST({"pads": "PIANO"}, within=2), LEDS({"differs_from": "notes", "within": 3, "snap": "piano"}),
     PAD(12, "down", note="PIANO: a pad plays the instrument"), VOX({"min_in_use": 1}, soft=True), PAD(12, "up"),
-    shift_pick("f5"), ST({"pads": "TRACKS"}, within=2), LEDS({"differs_from": "piano", "within": 3, "snap": "tracks"}),
-    shift_pick("f4"), ST({"pads": "ISO"}, within=2), LEDS({"differs_from": "tracks", "within": 3, "snap": "iso"}),
+    pad_pick("f4"), ST({"pads": "TRACKS"}, within=2), LEDS({"differs_from": "piano", "within": 3, "snap": "tracks"}),
+    pad_pick("f3"), ST({"pads": "ISO"}, within=2), LEDS({"differs_from": "tracks", "within": 3, "snap": "iso"}),
     PAD(20, "down", note="ISO: a pad plays"), VOX({"min_in_use": 1}, soft=True), PAD(20, "up"),
     shift_pick("f1"), ST({"pads": "ISO"}, within=2, note="QA-PAT-313 (OS-PADOCT): Shift + F1 is the octave, not a mode: the pads stay ISO (the STEP mode has no key, QA-PAT-250)"),
-    shift_pick("f6"), ST({"pads": "PATS"}, within=2), LEDS({"differs_from": "iso", "within": 3, "snap": "pats"}),
+    pad_pick("f5"), ST({"pads": "PATS"}, within=2), LEDS({"differs_from": "iso", "within": 3, "snap": "pats"}),
     PAD(2, note="PATS, stopped: a pad selects pattern n+1 for editing"), ST({"pattern": "3"}, within=2),
     PAD(0), ST({"pattern": "1"}, within=2),
     RUN("_play"), W(2.0),
-    shift_pick("f7"), ST({"pads": "VU"}, within=2),
+    pad_pick("f6"), ST({"pads": "VU"}, within=2),
     LEDS({"min_lit": 1, "within": 4, "snap": "vu"}, note="VU lights while the pattern plays"),
     MIX({"channels": {"MST L": {"min_rms_db": -60}}, "within": 4, "snap": "base"}),
-    shift_pick("f7"), ST({"pads": "FADERS"}, within=2),
+    pad_pick("f6"), ST({"pads": "FADERS"}, within=2),
     LEDS({"differs_from": "vu", "within": 3}, soft=True, note="(faders show the volumes, VU the meters: soft because both may coincide for an instant)"),
 ]
 for t in range(12):
@@ -458,7 +462,7 @@ def filter_on_16():
 
 
 def loop_pattern_9():
-    return [shift_pick("f6"), ST({"pads": "PATS"}, within=2), PAD(8, note="PATS: pad n selects pattern n+1, 9 is the dense one"), ST({"pattern": "9"}, within=2),
+    return [pad_pick("f5"), ST({"pads": "PATS"}, within=2), PAD(8, note="PATS: pad n selects pattern n+1, 9 is the dense one"), ST({"pattern": "9"}, within=2),
             pad_mode_notes(), ST({"pads": "NOTES"}, within=2)]
 
 
@@ -938,7 +942,7 @@ add("record_screen", "Record screen: three pages, the input meter / master follo
 # ======================================================================================================================================
 # 13. persistence (OS-PERSIST2)
 # ======================================================================================================================================
-# The saved folder is the OS's own proposal: SAVE AS opens the keyboard on the first free "Track NN" and F8 accepts it (as qa_files_b does), so there is no fixed name to run out of. The old
+# The saved folder is the OS's own proposal: SAVE AS opens the keyboard on the first free "Track NN" and F1 accepts it (as qa_files_b does), so there is no fixed name to run out of. The old
 # "0hilp<digit>" names did run out (--var RUN, ten folders): the OS has no erase, and DELETE only hides a folder (its name stays taken). The project just saved is the newest of the RECENT group, the
 # first rows of the File list, so it is reopened from the first row, and the first row is checked to be that very "Track NN" ({{SAVED}}) before F1 (`sel`). At the end it is hidden by DELETE (an empty .deleted in its folder;
 # the folder, about 8 MB, stays: remove the Projects/Track NN folders that hold a .deleted from a computer now and then); the DELETE presses are guarded by the NN of the save-done message (o3hil `keep`, {{SAVED}}),
@@ -959,14 +963,14 @@ persist = [
     PAD(12), LEDS({"differs_from": "pf0", "within": 3, "snap": "pf1"}, soft=True),
     K("f1:1300", gap=0.3), ST({"msg": "~^SCENE_1_STORED$"}, within=3),
     K("pattern", gap=0.5), ST({"screen": "PATTERN"}, within=3),
-    SAY("3. SAVE AS: File F5 opens the keyboard on the first free 'Track NN'; F8 accepts that name (nothing to run out of)"),
+    SAY("3. SAVE AS: File F5 opens the keyboard on the first free 'Track NN'; F1 accepts that name (nothing to run out of)"),
     K("+shift", "fx", "-shift", gap=0.4, note="(Shift + Fx says FILL / EXPORT: NOT YET: the last message is a known one, not an old SAVE ... DONE)"),
     ST({"msg": "~^FILL:"}, within=2, soft=True),
     K("file", gap=0.5), ST({"screen": "FILE"}, within=3),
     K("f6", "f6", gap=0.4, note="(the File screen keeps its page when it is left, EXPORT after qa_wavexp: F6 twice ends on PROJECTS from EXPORT or PROJECTS; steps 5 and 7 below find the page as it is left here)"),
     K("f5", gap=0.5), ST({"overlay": "TEXT_ENTRY"}, within=3),
     SHOT("save_as_keyboard"),
-    K("f8", gap=0.5, note="F8 accepts the proposed name (F7 would cancel)"),
+    K("f1", gap=0.5, note="F1 accepts the proposed name (F8 would cancel; OS-UXF-KEYS item 5)"),
     ST({"overlay": "~^(NONE|NOTIFY)$"}, within=3),
     ST({"msg": "~^SAVE_TRACK_[0-9]+_DONE$"}, within=240, poll=1.0, keep={"as": "SAVED", "field": "msg", "re": "^SAVE_TRACK_([0-9]+)_DONE$"},
        note="the project's own save job is through (the SAVE_INSTRnn_DONE messages are the samples', one each, and come first; an Open before the end aborts the save); its NN is kept as {{SAVED}} for the DELETE guard of step 7"),
@@ -1390,10 +1394,10 @@ def perform_page(n):
 
 
 def play_song_stay():
-    """The whole song (F2 PLAY SNG) from the Song screen, and the scenario stays on Song: the _play_song macro ends on Pattern,
+    """The whole song (the Play button) from the Song screen, and the scenario stays on Song: the _play_song macro ends on Pattern,
     and leaving Perform for Pattern ends the Perform FX (only Master and Song keep them; measured on the unit)."""
     return [K("song", gap=0.5, note="Song, not Pattern: Perform keeps its FX on Song only"), ST({"screen": "SONG"}, within=3),
-            K("f2", gap=0.2), ST({"playing": "1", "seq": "1"}, within=8, poll=0.3)]
+            K("play", gap=0.2), ST({"playing": "1", "seq": "1"}, within=8, poll=0.3)]
 
 
 def sounding(snap):
@@ -1509,7 +1513,7 @@ prf = start_on_pattern() + [
     PAD(31, "down"), W(1.5), silent_vs("centre", "tape", "QA-PRF-136: the mix is stopped while TAPE STOP is held"), SHOT("qa_prf_136", soft=True, note="QA-PRF-136"),
     PAD(31, "up"), back_vs("tape", "QA-PRF-136: live again at the release"),
     SAY("QA-PRF-106: the Song restarts at order 14 (patterns 8, 9, 9, 2: at least 4 tracks sound for 40 s) so that the check below does not fall on pattern 5, which holds T01 only"),
-    RUN("_stop"), K("song", gap=0.5), ST({"screen": "SONG"}, within=3), K("down", repeat=14, gap=0.2, note="the cursor on order 14"), K("f2", gap=0.2),
+    RUN("_stop"), K("song", gap=0.5), ST({"screen": "SONG"}, within=3), K("down", repeat=14, gap=0.2, note="the cursor on order 14"), K("play", gap=0.2),
     ST({"playing": "1", "seq": "1", "order": "14"}, within=8, poll=0.3),
 ] + perform_page(1) + [
     SAY("QA-PRF-106 / 114 / 117 / 127: leaving the page ends every DJ effect: fader all B, LATCH on, CUT A latched, then the slots page: the master is back, and the DJ page finds no LATCH"),
@@ -1620,6 +1624,9 @@ wv = start_on_pattern() + sample_pick_1() + wave_page(0) + [
     K("f2", gap=0.5), W(0.5), SHOT("qa_wav_017", soft=True, note="QA-WAV-017: MODE BEAT SLICE, SLICES 16, 16 lit pads"),
     K("f4", gap=0.4), SHOT("qa_wav_019", soft=True, note="QA-WAV-019: SLICES 17, the new slice selected"),
     K("f5", gap=0.4), SHOT("qa_wav_020", soft=True, note="QA-WAV-020: SLICES 16 again"),
+    SAY("QA-WAV-029 (OS-UXF-SMP item 3c): Shift + F4 TO PAT writes slice 1..16 as notes 24..39 on consecutive steps of the Pattern cursor's track, from its row; F8 UNDO takes them all back in one"),
+    K("+shift", "f4", "-shift", gap=0.5), SHOT("qa_wav_029", soft=True, note="QA-WAV-029: the strip says SLICES TO PAT"),
+    K("f8", gap=0.5, note="QA-WAV-029: one undo unit (the Pattern is as before)"),
     K("f3", gap=0.4), SHOT("qa_wav_021", soft=True, note="QA-WAV-021: the header's ZC switch (the same as the WAVE page's F5)"),
     K("f3", gap=0.4, note="(ZC back)"),
     SAY("QA-WAV-018: F1 AUTO runs the slicer as a job: the strip shows the slicing, then one slice per hit (the simulator has no hits; a real sample has them); one F8 UNDO takes it back"),
@@ -1670,9 +1677,9 @@ sed = start_on_pattern() + sample_pick_1() + [
     SAY("QA-SED-011: Shift + Up twice reads AMP 220 %; the sample is not touched; Shift + Down twice puts it back to 200 %"),
     K("+shift", "up", "-shift", repeat=2, gap=0.3), SHOT("qa_sed_011", soft=True, note="QA-SED-011: AMP 220 % on the line under the sample"),
     K("+shift", "down", "-shift", repeat=2, gap=0.3, note="(AMP back to 200 %)"),
-    SAY("QA-SED-017: the header reads INSTRUMENT nn NAME with the hint pad / Shift+F5: change; Shift + F5 (NEXT INS) moves to the next instrument and the header and the strip's INS follow"),
-    K("+shift", "f5", "-shift", gap=0.3), SHOT("qa_sed_017", soft=True, note="QA-SED-017: INSTRUMENT 02 in the header"),
-    K("+shift", "f5", "-shift", gap=0.3, repeat=47, note="(48 presses in all: 48 goes round to 1)"), ST({"instrument": "1"}, within=2, note="QA-SED-017: the step wrapped from 48 to 1"),
+    SAY("QA-SED-017: the header reads INSTRUMENT nn NAME with the hint pad / Shift+F7/F8: change; Shift + F8 (INST +) moves to the next instrument and the header and the strip's INS follow"),
+    K("+shift", "f8", "-shift", gap=0.3), SHOT("qa_sed_017", soft=True, note="QA-SED-017: INSTRUMENT 02 in the header"),
+    K("+shift", "f8", "-shift", gap=0.3, repeat=47, note="(48 presses in all: 48 goes round to 1)"), ST({"instrument": "1"}, within=2, note="QA-SED-017: the step wrapped from 48 to 1"),
     SAY("QA-SED-012: Shift + F1 converts the whole sample to 8287 Hz as one job (200 frames become 37), one undo unit; the strip names the Amiga engine"),
     shift_pick("f1"), W(4.0), CMD("inst 1", expect=r"@@never@@", soft=True, note="(after AMIGA 8287: the len is the converted one)"),
     ST({"msg": "~^AMIGA_8287_HZ,_ENGINE_AMIGA$"}, within=3, soft=True),
@@ -1683,12 +1690,12 @@ sed = start_on_pattern() + sample_pick_1() + [
     shift_pick("f3"), ST({"msg": "~^AMIGA:_8-BIT_OFF$"}, within=2, soft=True, note="(off again)"),
     SAY("QA-SED-014: Shift + F6 writes the sample as a WAV into Samples/ on the card (one file, prefix SMP); the strip names the result. The file itself is checked on the card by hand"),
     shift_pick("f6"), W(3.0), SHOT("qa_sed_014", soft=True, note="QA-SED-014: the strip's result (NO CARD WRITE LAYER when no card is written to)"),
-    SAY("QA-SED-010 / 015: F7 PREVIEW and Shift + F7 PRV EDGE sound while the key is down (the voice is checked here; the sound by ear)"),
+    SAY("QA-SED-010 / 015: F7 PREVIEW and Shift + Play (PRV EDGE, unlabelled) sound while the key is down (the voice is checked here; the sound by ear)"),
     K("+f7", gap=0.2), VOX({"min_in_use": 1}, soft=True, note="QA-SED-010: a voice while F7 is down (by ear: the sound)"), K("-f7", gap=0.4),
-    K("+shift", gap=0.2), K("+f7", gap=0.2), VOX({"min_in_use": 1}, soft=True, note="QA-SED-015: a voice while Shift + F7 is down (by ear: from the edge)"), K("-f7", gap=0.2), K("-shift", gap=0.4),
+    K("+shift", gap=0.2), K("+play", gap=0.2), VOX({"min_in_use": 1}, soft=True, note="QA-SED-015: a voice while Shift + Play is down (by ear: from the edge)"), K("-play", gap=0.2), K("-shift", gap=0.4),
 ]
 add("qa_sample_edit", "OS-FINALQA FQA-5b: Sample edit, the unit-pending rows QA-SED-002, 004..016: the selection's edge, CROP, NORMALISE / UNDO, REVERSE, FADE IN / OUT, AMPLIFY, AMP %, AMIGA 8287 and its 8-bit option, SAVE WAV (writes Samples/SMP*.wav), the held previews; instrument 1 of t-v16, undone; the finally run reloads t-v16", sed,
-    finally_=[K("-shift", gap=0.2), K("-f7", gap=0.2)] + clear_overlays() + [K("pattern", gap=0.4), RUN("_load_tv16"), K("pattern", gap=0.4), RUN("_stop")])
+    finally_=[K("-shift", gap=0.2), K("-f7", gap=0.2), K("-play", gap=0.2)] + clear_overlays() + [K("pattern", gap=0.4), RUN("_load_tv16"), K("pattern", gap=0.4), RUN("_stop")])
 
 # ======================================================================================================================================
 # qa_lfostep (OS-PERF-LFO-STEP, Level C, unit-gated; QA-PRF-180..189): the step FX Volume LFO 23, Panning LFO 24, Finetune LFO 33 and Position LFO 36 on twelve sampler tracks (one-shot, wavetable and granular), the CPU of each against

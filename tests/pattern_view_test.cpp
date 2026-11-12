@@ -761,7 +761,7 @@ TEST_CASE("theme contrast: the table lists exactly the token pairs that touch in
   // its rectangle cuts through the grid under it: where a glyph of the grid or the cursor block ends at the outline, that
   // ink lies beside the line (it is read against the pane, which the table covers, not against the outline).
   const Pair overlay_frame[] = {
-      pair_of(Color::ChromeDim, Color::Instr),  pair_of(Color::ChromeDim, Color::Vol),        pair_of(Color::ChromeDim, Color::Fx),
+      pair_of(Color::ChromeDim, Color::Instr),  pair_of(Color::ChromeDim, Color::Vol),
       pair_of(Color::ChromeDim, Color::TextDim), pair_of(Color::ChromeDim, Color::SelText),    pair_of(Color::ChromeDim, Color::Accent),
       pair_of(Color::ChromeDim, Color::AccentText),
   };

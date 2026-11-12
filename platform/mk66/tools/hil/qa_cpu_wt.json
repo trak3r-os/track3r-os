@@ -5,9 +5,7 @@
  "steps": [
   {"say": "OS-CEWTENV W3a (3.10): the CPU of the cutoff WT Env on the unit, three arms, one per run: `--var PROJ=Dense8` (no WT, the baseline), `PROJ=Dense8wt6` (6 voices, cutoff WT Env, no warps) or `PROJ=Dense8wt12` (12 voices, cutoff WT Env, both warps +7/+7). BEFORE the run: make the arms (`python3 -I platform/mk66/tools/hil/gen_wt_arms.py <Dense8 folder> <out>`, the folders land in build-sdtest/) and copy ONE arm folder into Projects/ on the card (card reader or the unit's USB Disk mode). Use the release image for `cpu`, then the bench image (-DO3OS_BENCH=ON, mk66-bench) of the same build id for `bench worst` and `bench wt` (cpu-budget.md section 5)."},
   {"keys": ["-shift"], "gap": 0.2, "note": "(Shift released, in case a former run left it down)"},
-  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "NAVIGATOR"}, "note": "(a leftover Navigator is closed: F7 is CLOSE, F8 would GO since OS-NAV2)"},
-  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
-  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "TEXT_ENTRY"}, "note": "(the on-screen keyboard is cancelled with F7, never accepted)"},
+  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|NAVIGATOR|TEXT_ENTRY)$"}, "note": "(a leftover overlay is put away: F8 is BACK on the Navigator, the keyboard (cancel, never accept: F1 accepts) and the choosers, OS-UXF-KEYS item 5)"},
   {"keys": ["file"], "gap": 0.5},
   {"state": {"screen": "FILE"}, "within": 3},
   {"keys": ["f2"], "gap": 0.5, "note": "RESCAN"},
@@ -90,9 +88,7 @@
  ],
  "finally": [
   {"keys": ["-shift"], "gap": 0.2},
-  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "NAVIGATOR"}, "note": "(a leftover Navigator is closed: F7 is CLOSE, F8 would GO since OS-NAV2)"},
-  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
-  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "TEXT_ENTRY"}, "note": "(the on-screen keyboard is cancelled with F7, never accepted)"},
+  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|NAVIGATOR|TEXT_ENTRY)$"}, "note": "(a leftover overlay is put away: F8 is BACK on the Navigator, the keyboard (cancel, never accept: F1 accepts) and the choosers, OS-UXF-KEYS item 5)"},
   {"keys": ["pattern"], "gap": 0.4},
   {"run": "_stop"}
  ]

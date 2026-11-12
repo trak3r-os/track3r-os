@@ -455,6 +455,13 @@ class SeqTransport final : public app::TransportSink {
     }
     return push_command(seq::Command::Kind::SetLoop, static_cast<std::uint8_t>(first), static_cast<std::uint16_t>(last < seq::kNoJump ? last : seq::kNoJump), g_seq->jump_stamp());
   }
+  // OS-UXF Focus Loop: the rows of the pattern playing that loop, a command on the same ring (only while the outputs are open and the render drains it).
+  bool loop_rows(unsigned first, unsigned last) noexcept override {
+    if (g_seq == nullptr || !g_outputs_open || !audio_running() || first >= seq::kNoJump) {
+      return false;
+    }
+    return push_command(seq::Command::Kind::SetRowLoop, static_cast<std::uint8_t>(first), static_cast<std::uint16_t>(last < seq::kNoJump ? last : seq::kNoJump));
+  }
   // The PATS pads (OS-PADS-B): the sequencer's existing QueuePattern command (the pattern id, 0 cancels), on the same ring.
   bool queue_pattern(unsigned id) noexcept override {
     if (g_seq == nullptr || !g_outputs_open || !audio_running() || id > 255u) {

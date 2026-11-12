@@ -290,6 +290,23 @@ TEST_CASE("song edit: Shift + Insert adds a slot with a COPY of the pattern at t
   CHECK(p.check_invariants());
 }
 
+TEST_CASE("song edit: F2 DUP PAT does what Shift + Insert does (OS-UXF-PAT 12); one undo unit") {
+  Rig rig;
+  model::Project& p = rig.project();
+  CHECK(p.set_pattern_name(2, "VERSE", 5) == model::Status::Ok);
+  rig.tap(Button::Down);
+  rig.editor->history_reset();
+  rig.tap(Button::F2);
+  CHECK(rig.order() == Order{1, 2, 4, 3});
+  CHECK(rig.song().pos() == 2);
+  NEED(p.pattern(4) != nullptr);
+  CHECK(std::strcmp(p.pattern(4)->name, "VERSE") == 0);
+  rig.tap(Button::F8);  // the slot and the copy are one unit
+  CHECK(rig.order() == Order{1, 2, 3});
+  CHECK(p.pattern(4) == nullptr);
+  CHECK(p.check_invariants());
+}
+
 TEST_CASE("song edit: Shift + Insert on a slot whose pattern does not exist yet makes an empty pattern; a full pool refuses and records nothing") {
   Rig rig(std::vector<std::uint8_t>{9});
   rig.shift_tap(Button::Insert);
@@ -456,7 +473,7 @@ TEST_CASE("song edit: F1 PLAY PAT plays the cursor slot's pattern, again it stop
   rig.tap(Button::F1);
   CHECK(t.stops == 1u);
   CHECK_FALSE(rig.app->state().playing);
-  rig.tap(Button::F2);  // PLAY SNG is still the Play button's action
+  rig.tap(Button::Play);  // PLAY SNG is the Play button's action (F2 is DUP PAT, OS-UXF-PAT 12)
   CHECK(t.songs == 1u);
 }
 
@@ -490,7 +507,7 @@ TEST_CASE("song live jump: Rec while playing queues the cursor's slot, Rec on th
   CHECK(rig.message() == "NOT PLAYING");
   CHECK(t.jumps == 0u);
   rig.flush();
-  rig.tap(Button::F2);  // PLAY SNG
+  rig.tap(Button::Play);  // PLAY SNG (the Play button)
   position.publish(true, 1, 0, 13000, 0);
   rig.pass(1);
   CHECK(rig.app->state().play.queued == audio::PlayPosition::kNoOrder);
@@ -1016,7 +1033,7 @@ TEST_CASE("song move: it works while the song plays, the play position and the q
   audio::PlayPosition position;
   rig.app->attach_transport(&t);
   rig.app->attach_play_position(&position);
-  rig.tap(Button::F2);  // PLAY SNG
+  rig.tap(Button::Play);  // PLAY SNG (the Play button)
   CHECK(rig.app->state().playing);
   position.publish(true, 2, 0, 12000, 1);  // the song plays slot 1 (pattern 2) ...
   position.publish_queued(3);              // ... and a live jump waits for slot 3
@@ -1337,7 +1354,7 @@ TEST_CASE("navigator chords: Master + Song and Song + Pattern, in either press o
     CHECK_FALSE(rig.app->state().peeking);
     CHECK(rig.project().tempo_x100() == tempo);
     CHECK(rig.journal.depth() == depth);
-    rig.tap(Button::F7);  // CLOSE
+    rig.tap(Button::F8);  // BACK
     CHECK(rig.app->state().overlay == app::OverlayId::None);
     CHECK(rig.app->state().screen == before);
   }

@@ -8,9 +8,9 @@ SCREEN BUTTONS	Open that screen: Pattern, Song, Params, Sample Play, Sample Edit
 	Sample Load, Sample Rec, Master, Performance, File, Config. Press the
 	same button again for the next page of that screen.
 MASTER + SONG	Open the Navigator, a map of every screen (Song + Pattern does
-	the same). Arrows or the encoder choose, F8 goes there, F7 closes it.
-SHIFT + PATTERN	List the module apps that are not tools. F1 or F8 starts the one
-	chosen, Pattern closes the list.
+	the same). Arrows or the encoder choose, F1 goes there, F8 closes it.
+SHIFT + PATTERN	List the module apps that are not tools. F1 starts the one chosen,
+	F8 or Pattern closes the list.
 PATTERN + ENCODER	Hold Pattern and turn the encoder: the tempo, 1 BPM a click.
 	Shift first: 0.1 BPM. A pad tapped under Pattern taps the tempo.
 	Pattern and Shift + Pattern act when you let go, not when you press.
@@ -18,6 +18,8 @@ SONG, HELD	Look at Song while you hold it (0.4 s), then go back to the screen yo
 	came from.
 MASTER + ENCODER	Hold Master and turn the encoder: the master volume, from any screen.
 SHIFT + MASTER	Next colour theme: Amiga, Black, White.
+SHIFT + FILE	Save the project from any screen (a project that has no folder yet
+	asks for a name first: F1 accepts it, F8 cancels).
 FX1 + FX2	Both FX column keys together open Learn: move a control or send a MIDI
 	CC to bind it. F8 closes it.
 PLAY	Start or stop the playback. It works from every screen.
@@ -86,18 +88,19 @@ SHIFT + ENCODER	WATCH: a page of steps. NOTE: an octave. INSTR: 8. VOL: 10. FX: 
 	nibble.
 
 PADS	
-| Chosen with Shift + F2 to F7; the mode stays until you choose another. A lone Shift hold
-| shows TRACKS while held.
+| Chosen with Shift + F2 PADS, which opens a list; the mode stays until you choose another. A
+| lone Shift hold shows TRACKS while held.
 WATCH	Pads sound the instrument, nothing is written.
 STEP	A pad writes the note at the cursor and moves it by JUMP. In VOL and
 	FX a pad writes that value.
 SHIFT + F1 OCTAVE	The pads' base C goes up an octave; after C9 comes C0.
-SHIFT + F2 NOTES	The usual note pads.
-SHIFT + F3 PIANO	Two octaves laid out like a piano.
-SHIFT + F4 ISO	A column is a semitone, a row is a fourth higher.
-SHIFT + F5 TRACKS	Columns are tracks. Rows: the track, mute, mute mode, solo.
-SHIFT + F6 PATS	48 pads are 48 patterns. A tap queues one.
-SHIFT + F7 VU	Columns are tracks with a level meter; again: faders.
+SHIFT + F2 PADS	Open the list of modes: F1 NOTES ... F6 VU, F8 BACK.
+F1 NOTES	The usual note pads.
+F2 PIANO	Two octaves laid out like a piano.
+F3 ISO	A column is a semitone, a row is a fourth higher.
+F4 TRACKS	Columns are tracks. Rows: the track, mute, mute mode, solo.
+F5 PATS	48 pads are 48 patterns. A tap queues one.
+F6 VU	Columns are tracks with a level meter; again: faders.
 == HELP: SONG
 | The Song screen builds a song from patterns. The order list holds the slots; each slot holds
 | one pattern, and the slots play in order from the top. BAR and BARS: where a slot starts
@@ -110,7 +113,7 @@ SHIFT + F7 VU	Columns are tracks with a level meter; again: faders.
 KEYS	
 F1 PLAY PAT	Play the pattern of the cursor's slot in a loop. Press it again to
 	stop.
-F2 PLAY SNG	Play the song from the selected slot, as Play does.
+F2 DUP PAT	Add a slot with a copy of the pattern, as Shift + Insert does.
 F3 ADD SLOT, INSERT	Add a slot after the cursor, with the same pattern number.
 SHIFT + INSERT	DUP PAT: add a slot after the cursor that holds a copy of the pattern.
 F4 DEL SLOT	Remove the cursor's slot.

@@ -333,3 +333,67 @@ TEST_CASE("lane copy: FORM plans the lane pool of its copies and refuses before 
   CHECK(plan.info.refusal == o3os::app::SongBuildRefusal::None);
   CHECK(plan.info.copies != 0u);
 }
+
+// ---- OS-MIDIREC-P1 S7c: row insert and remove, and the dry runs (A16, A17) ----------------------------------------------------------------------------------------------------------
+
+TEST_CASE("lane rows S7c: a row insert moves the lane ticks one step down, what passes the track length is deleted, undo and redo restore the lane") {
+  Rig r;
+  NEED(r.ok);
+  Editor& ed = *r.ed;
+  // 16 steps: tick 768 is the end. Events at steps 0, 2 and 15 (the last one is pushed out by an insert).
+  const LaneEvent lane[] = {cc(5, 1, 1), cc(100, 1, 2), cc(15 * 48 + 7, 1, 3)};
+  NEED(ed.lane_replace(1, 0, 0, 768, lane, 3) == Status::Ok);
+  ed.history_reset();
+  CHECK(ed.lane_rows(1, 0, 2, true) == Status::Ok);  // insert at step 2: ticks from 96 on move 48
+  const LaneEvent after[] = {cc(5, 1, 1), cc(148, 1, 2)};
+  CHECK(lane_is(g_store, 1, 0, after, 2));
+  CHECK(ed.undo() == UndoResult::Ok);
+  CHECK(lane_is(g_store, 1, 0, lane, 3));
+  CHECK_FALSE(ed.can_undo());  // one unit
+  CHECK(ed.redo() == UndoResult::Ok);
+  CHECK(lane_is(g_store, 1, 0, after, 2));
+}
+
+TEST_CASE("lane rows S7c: a row pull deletes the events of the step and moves the later ones one step up, undo restores them") {
+  Rig r;
+  NEED(r.ok);
+  Editor& ed = *r.ed;
+  const LaneEvent lane[] = {cc(5, 1, 1), cc(2 * 48 + 3, 1, 2), cc(2 * 48 + 40, 1, 3), cc(5 * 48, 1, 4)};
+  NEED(ed.lane_replace(1, 0, 0, 768, lane, 4) == Status::Ok);
+  ed.history_reset();
+  CHECK(ed.lane_rows(1, 0, 2, false) == Status::Ok);
+  const LaneEvent after[] = {cc(5, 1, 1), cc(4 * 48, 1, 4)};
+  CHECK(lane_is(g_store, 1, 0, after, 2));
+  CHECK(ed.undo() == UndoResult::Ok);
+  CHECK(lane_is(g_store, 1, 0, lane, 4));
+  CHECK(ed.redo() == UndoResult::Ok);
+  CHECK(lane_is(g_store, 1, 0, after, 2));
+}
+
+TEST_CASE("lane rows S7c: a step at or past the track length is refused and a lane before the step stays") {
+  Rig r;
+  NEED(r.ok);
+  Editor& ed = *r.ed;
+  NEED(seed(ed));
+  CHECK(ed.lane_rows(1, 0, 16, true) == Status::BadValue);
+  CHECK(ed.lane_rows(1, 0, 40, false) == Status::BadValue);
+  CHECK(lane_is(g_store, 1, 0, kLane0, 3));
+  CHECK(ed.lane_rows(1, 0, 15, true) == Status::Ok);  // nothing at or after step 15 (tick 720) on track 0
+  CHECK(lane_is(g_store, 1, 0, kLane0, 3));
+}
+
+TEST_CASE("lane rows S7c: lanes_replace_fit and lanes_rows_fit change nothing and say no when the ring cannot take the unit") {
+  Rig r(8 * 1024);
+  NEED(r.ok);
+  Editor& ed = *r.ed;
+  const LaneEvent lane[] = {cc(5, 1, 1), cc(100, 1, 2)};
+  NEED(ed.lane_replace(1, 0, 0, 768, lane, 2) == Status::Ok);
+  ed.history_reset();
+  const Editor::LaneSpan span{0, 0, 768, 0};
+  CHECK(ed.lanes_replace_fit(1, &span, 1, 0));
+  CHECK_FALSE(ed.lanes_replace_fit(1, &span, 1, 1024 * 1024));  // other records that would not fit
+  CHECK(ed.lanes_rows_fit(1, 1, 0, true, 0));
+  CHECK_FALSE(ed.lanes_rows_fit(1, 1, 0, true, 1024 * 1024));
+  CHECK(lane_is(g_store, 1, 0, lane, 2));
+  CHECK_FALSE(ed.can_undo());
+}

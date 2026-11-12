@@ -3311,7 +3311,7 @@ bool App::pad_lights(PadRole (&roles)[48]) const noexcept {
     popup_roles(model_, state_, roles);
     return true;
   }
-  if (state_.overlay == OverlayId::PatternChooser && state_.edit.chooser_held) {  // OS-PATSWITCH: F1 held, the pads are the patterns, as PATS lights them (a tap-opened chooser does not exist; LENGTH and JUMP stay dark)
+  if (state_.overlay == OverlayId::PatternChooser && state_.edit.chooser_held) {  // OS-PATSWITCH: F1 held, the pads are the patterns, as PATS lights them (a tap of F1 opens it the same way, OS-UXF-PAT; LENGTH and JUMP stay dark)
     patterns_roles(state_, content_, blink_on(clock_.uptime_ms()), roles);
     return true;
   }

@@ -27,11 +27,9 @@ namespace o3os::app {
 
 enum class PadMode : std::uint8_t { Notes = 0, Piano = 1, Tracks = 2, Iso = 3, Steps = 4, Patterns = 5, Vu = 6 };
 inline constexpr unsigned kPadModes = 7;
-inline constexpr unsigned kPadPickerKeys = 7;  // Shift + F1..F7 (the key row's eighth, F8, stays redo; F1 is the octave, F2..F7 the modes)
+inline constexpr unsigned kPadPickerKeys = 7;  // an upper bound of the keys of a pick (the PADS picker, OS-UXF-PAT 7, has F1..F6 and F8 BACK); the pad-modes test probes the keys past the modes with it
 
 inline constexpr const char* kPadModeNames[kPadModes] = {"NOTES", "PIANO", "TRACKS", "ISO", "STEP", "PATS", "VU"};
-// The key of the Shift picker (0 = F1) that chooses each mode (OS-PADOCT), -1 for a mode with no key (STEP): the key row inverts it. The binding's argument is the mode's number.
-inline constexpr int kPadModeKey[kPadModes] = {1, 2, 4, 3, -1, 5, 6};
 // The modes with a layer of their own over the NOTES pads, other than TRACKS (which has its own): the context PadsMode is in the chain for them (OS-PADS-B).
 constexpr bool pad_mode_has_layer(PadMode m) noexcept { return m == PadMode::Piano || m == PadMode::Iso || m == PadMode::Steps || m == PadMode::Patterns || m == PadMode::Vu; }
 // The modes whose pads are not notes: their releases are the layer's alone (no live note to end, no Perform slot, no Rec note-off), see PadLayer::pad_down.
@@ -79,7 +77,7 @@ class PadLayer {
     yielded_ = true;
     return effective() != before;
   }
-  // Shift + F2..F7 choose the mode (which stays), `key` being the mode's number 0..6 (see kPadModeKey); VU again toggles VU / FADERS. True when the fixed mode changed.
+  // The PADS picker's keys (Shift + F2, then F1..F6) choose the mode (which stays), `key` being the mode's number 0..6 (PadMode); VU again toggles VU / FADERS. True when the fixed mode changed.
   bool pick(unsigned key) noexcept {
     if (key >= kPadModes) {
       return false;

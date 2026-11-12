@@ -80,8 +80,10 @@ bool pads_track(ActionContext& ctx, core::ActionArg arg) noexcept;          // T
 bool pads_play(ActionContext& ctx, core::ActionArg arg) noexcept;           // a pad (0..47) of a fixed PIANO / ISO / STEP / PATS / VU mode, by the mode (OS-PADS-B)
 bool pads_step_up(ActionContext& ctx, core::ActionArg arg) noexcept;        // the release of a STEP pad (arg = pad): a lit step nothing changed is cleared
 bool pads_step_delta(ActionContext& ctx, core::ActionArg arg) noexcept;     // the encoder with a STEP pad held: that step's note
-bool pads_mode(ActionContext& ctx, core::ActionArg arg) noexcept;           // Shift + F2..F7, arg = the mode 0..6: the pads' mode that stays (OS-PADS-A, OS-PADOCT)
-bool pads_octave(ActionContext& ctx, core::ActionArg arg) noexcept;         // Shift + F1 (OS-PADOCT): the pads' base C goes up an octave, 9 wraps to 0
+bool pads_mode(ActionContext& ctx, core::ActionArg arg) noexcept;           // arg = the mode 0..6: the pads' mode that stays (OS-PADS-A; STEP's key, not a key of the PADS picker)
+bool pads_picker_open(ActionContext& ctx, core::ActionArg arg) noexcept;   // Shift + F2 PADS (OS-UXF-PAT 7): the list of the pads' modes over the Pattern screen
+bool pads_picker_pick(ActionContext& ctx, core::ActionArg arg) noexcept;   // the list's F1..F6, arg = the mode 0..6: pick it and close the list
+bool pads_octave(ActionContext& ctx, core::ActionArg arg) noexcept;        // Shift + F1 (OS-PADOCT): the pads' base C goes up an octave, 9 wraps to 0
 bool pad_preview(ActionContext& ctx, core::ActionArg arg) noexcept;         // arg = pad 0..47: Browse (the engine hook is OS-005)
 bool pad_audition(ActionContext& ctx, core::ActionArg arg) noexcept;        // arg = pad 0..47: Sample load (also the target instrument), Mixer, Config, File: the current instrument sounds (OS-AUDIT-40, OS-AUDIT-26)
 bool transport_play(ActionContext& ctx, core::ActionArg arg) noexcept;      // Play: stopped, play the pattern being edited; playing, stop (OS-005d)
@@ -277,7 +279,7 @@ bool learn_map_capture(ActionContext& ctx, unsigned channel, unsigned cc) noexce
 // A control change message: arg = (channel << 16) | (cc << 8) | value, channel 1..16 (0: unknown), cc and value 0..127. With the Learn
 // overlay up it binds the controller to the target; otherwise it moves what it is bound to. MIDI input enqueues it, it never runs in an ISR.
 bool midi_cc(ActionContext& ctx, core::ActionArg arg) noexcept;
-// OS-ENCLEARN (param_actions.cpp): Instr + FX2 picks the encoder's target (the Learn row); enc.turn moves it (arg = detents, App::run_once).
+// OS-ENCLEARN (param_actions.cpp): the Learn overlay's F7 ENC picks the encoder's target (the Learn row); enc.turn moves it (arg = detents, App::run_once).
 bool enc_assign(ActionContext& ctx, core::ActionArg arg) noexcept;
 bool enc_turn(ActionContext& ctx, core::ActionArg arg) noexcept;
 // OS-PARAMAUTO S2 (param_actions.cpp): the sequencer played CC A..F on a step of a Sample or Module instrument whose letter is mapped to a parameter (App::poll_param_auto): arg = (letter 0..5 << 8) | value 0..127.
@@ -301,7 +303,8 @@ bool file_delete(ActionContext& ctx, core::ActionArg arg) noexcept;            /
 bool file_purge(ActionContext& ctx, core::ActionArg arg) noexcept;             // Shift + F7: the unused instruments leave their slots (one undo unit); the card is not touched
 // save_actions.cpp: the saves (OS-007n), through the SaveService and the card's safety gate (hal/storage_write.h).
 bool file_save(ActionContext& ctx, core::ActionArg arg) noexcept;              // F4: the project into its folder, the old file kept as project.o3pj.bak
-bool file_save_as(ActionContext& ctx, core::ActionArg arg) noexcept;           // F5: the project into a new folder, Projects/Track NN
+bool file_save_any(ActionContext& ctx, core::ActionArg arg) noexcept;          // OS-UXF-KEYS 1a, Shift + File on every screen: F4 SAVE; a project with no folder yet opens the save-as keyboard
+bool file_save_as(ActionContext& ctx, core::ActionArg arg) noexcept;         // F5: the project into a new folder, Projects/Track NN
 bool sedit_save_wav(ActionContext& ctx, core::ActionArg arg) noexcept;         // Shift + F7 on Sample edit: the sample of the instrument as Samples/SMP_NNN.wav
 bool save_report(ActionContext& ctx, SaveService::Start start) noexcept;       // how a save's start went, on the strip (Started says nothing: the job's own line takes over); the export's actions use it too
 // export_actions.cpp: the WAV export (OS-WAVEXP), the File screen's EXPORT page and the progress overlay.
@@ -350,6 +353,7 @@ bool wave_del(ActionContext& ctx, core::ActionArg arg) noexcept;            // t
 bool wave_even(ActionContext& ctx, core::ActionArg arg) noexcept;           // n equal slices
 bool wave_auto(ActionContext& ctx, core::ActionArg arg) noexcept;           // starts the transient slicer (the App runs the job)
 bool wave_auto_apply(ActionContext& ctx, core::ActionArg arg) noexcept;     // the slicer's answer, from the App
+bool wave_to_pat(ActionContext& ctx, core::ActionArg arg) noexcept;         // OS-UXF-SMP 3c, Shift + F4 TO PAT: slice 1..n as notes on consecutive steps of the Pattern cursor's track
 bool wave_mode_open(ActionContext& ctx, core::ActionArg arg) noexcept;      // OS-INSTUI S4, Shift + F1 MODE: the list of the eight play modes, on the instrument's own
 bool wave_mode_pick(ActionContext& ctx, core::ActionArg arg) noexcept;      // the list's F1: play_mode_set for the chosen mode (one undo unit), then the view that mode has
 bool wave_pad(ActionContext& ctx, core::ActionArg arg) noexcept;            // arg = pad 0..47: plays slice n and selects it (CHOP)
@@ -369,7 +373,7 @@ bool sedit_plug_coarse(ActionContext& ctx, core::ActionArg arg) noexcept;  // th
 bool sedit_plug_do(ActionContext& ctx, core::ActionArg arg) noexcept;      // arg 0 the row's default (Delete), 1 APPLY (S4b), 2 RESCAN, 3 DEFAULTS (every value)
 bool sedit_amiga(ActionContext& ctx, core::ActionArg arg) noexcept;     // Shift + F1 / F2: the AMIGA conversion, arg 0: 8,287 Hz, 1: 16,574 Hz (OS-AMG1)
 bool sedit_q8(ActionContext& ctx, core::ActionArg arg) noexcept;          // Shift + F3: its 8-bit option
-bool sedit_instrument(ActionContext& ctx, core::ActionArg arg) noexcept;  // Shift + F5: the next instrument, 1..64 round (OS-QAFIX-27, OS-SLD-RANGE-ALL; a pad picks one of 1..48 too)
+bool sedit_instrument(ActionContext& ctx, core::ActionArg arg) noexcept;  // Shift + F7 / F8: the previous / next instrument, 1..64 round (OS-QAFIX-27, OS-SLD-RANGE-ALL; a pad picks one of 1..48 too)
 bool sedit_show(ActionContext& ctx, core::ActionArg arg) noexcept;        // OS-GENNEW: the instrument arg (1..64) in view, as a pad or Shift + F5 would pick it (the App invokes it when NEW INS has made one)
 int first_free_slot(const model::Project& project) noexcept;              // the first instrument slot (0-based) with nothing in it, -1 when all are used
 bool sample_commit(ActionContext& ctx, core::ActionArg arg) noexcept;      // the finished effect's result becomes the slot's audio (the App invokes it)
@@ -388,7 +392,6 @@ bool module_engine(ActionContext& ctx, core::ActionArg arg) noexcept;    // F1 o
 bool module_pick(ActionContext& ctx, core::ActionArg arg) noexcept;      // F1 in the picker: binds the chosen module to the instrument (undoable); in the apps list (OS-APPSNAV) it launches the app
 bool apps_open(ActionContext& ctx, core::ActionArg arg) noexcept;        // OS-APPSNAV: Shift + Pattern, the list of the installed apps that are not tools
 bool apps_close(ActionContext& ctx, core::ActionArg arg) noexcept;       // OS-APPSNAV: Pattern in that list closes it (false in the other pickers)
-bool module_picker_f8(ActionContext& ctx, core::ActionArg arg) noexcept; // OS-APPSNAV: F8 of the picker: launch in the apps list, ui.back in the others
 bool module_rescan(ActionContext& ctx, core::ActionArg arg) noexcept;    // MODULES F2: reads modules/apps again
 bool module_launch(ActionContext& ctx, core::ActionArg arg) noexcept;    // MODULES F1: launches the app under the cursor
 bool module_exit(ActionContext& ctx, core::ActionArg arg) noexcept;      // an app page's exit chord (F7 + F8)

@@ -41,7 +41,11 @@ struct Sink final : app::TransportSink {
   unsigned pattern = 0;
   unsigned row = 0;
   unsigned located = 0;
+  unsigned loops = 0;
+  unsigned loop_first = 0;
+  unsigned loop_last = 0;
   bool ok = true;
+  bool loop_ok = true;  // loop_rows alone refuses (the command ring is full)
   bool play(unsigned) noexcept override {
     ++plays;
     return ok;
@@ -60,6 +64,12 @@ struct Sink final : app::TransportSink {
     ++locates;
     located = r;
     return ok;
+  }
+  bool loop_rows(unsigned first, unsigned last) noexcept override {
+    ++loops;
+    loop_first = first;
+    loop_last = last;
+    return ok && loop_ok;
   }
   bool play_song(unsigned) noexcept override { return true; }
   bool stop() noexcept override {
@@ -102,16 +112,23 @@ struct Rig {
     pos.publish_count_in(0);
     pass();
   }
+  // The engine's view of a running row loop (what Sequencer::set_row_loop publishes) at the line's `step`.
+  void play_looping(unsigned step, unsigned first, unsigned last, unsigned pattern = 1) {
+    pos.publish_row_loop(first, last);
+    play(step, pattern);
+  }
   void tap(Button b) {
     input.push(core::make_button_event(clock.now(), static_cast<std::uint8_t>(b), true));
     pass();
     input.push(core::make_button_event(clock.now(), static_cast<std::uint8_t>(b), false));
     pass();
   }
-  void shift_tap(Button b) {
+  void shift_tap(Button b, unsigned n = 1) {  // (Shift held across the n taps: letting it go ends the block's extension, the next one starts afresh)
     input.push(core::make_button_event(clock.now(), static_cast<std::uint8_t>(Button::Shift), true));
     pass();
-    tap(b);
+    for (unsigned i = 0; i < n; ++i) {
+      tap(b);
+    }
     input.push(core::make_button_event(clock.now(), static_cast<std::uint8_t>(Button::Shift), false));
     pass();
   }
@@ -194,22 +211,102 @@ TEST_CASE("play cursor: playing, Shift + Play moves the play line to the cursor'
   CHECK(live.state().mode[app::screen_index(app::ScreenId::Pattern)] == static_cast<unsigned>(PatternMode::Edit));
 }
 
-TEST_CASE("play cursor: with a block selected it does the same (the Focus Loop's key until the loop exists), and the block stays") {
+TEST_CASE("focus loop: stopped with a block selected, Shift + Play starts at the block's first row and loops its last, the block stays, no count-in") {
   Rig rig;
   rig.tap(Button::Rec);
   rig.down(4);
-  rig.shift_tap(Button::Down);
-  rig.shift_tap(Button::Down);
-  rig.shift_tap(Button::Down);
+  rig.shift_tap(Button::Down, 3);
   CHECK(rig.state().edit.selection.active);
-  const int row = rig.row();
-  CHECK(row == 7);
+  CHECK(rig.row() == 7);  // the block is rows 4..7, the cursor its moving end
   rig.shift_tap(Button::Play);
   CHECK(rig.sink.from_calls == 1u);
-  CHECK(rig.sink.row == static_cast<unsigned>(row));
+  CHECK(rig.sink.pattern == 1u);
+  CHECK(rig.sink.row == 4u);
+  CHECK(rig.sink.loops == 1u);
+  CHECK(rig.sink.loop_first == 4u);
+  CHECK(rig.sink.loop_last == 7u);
   CHECK(rig.sink.counted == 0u);
+  CHECK(rig.sink.plays == 0u);
   CHECK(rig.state().edit.selection.active);
   CHECK(rig.state().playing);
+}
+
+TEST_CASE("focus loop: a loop command the transport refuses after the start still plays, and says so") {
+  Rig rig;
+  rig.sink.loop_ok = false;
+  rig.tap(Button::Rec);
+  rig.down(2);
+  rig.shift_tap(Button::Down, 2);
+  rig.shift_tap(Button::Play);
+  CHECK(rig.sink.from_calls == 1u);
+  CHECK(rig.sink.loops == 1u);
+  CHECK(rig.state().playing);
+  CHECK(std::string(rig.app->message()) == "LOOP NOT SET (BUSY)");
+}
+
+TEST_CASE("focus loop: the block's anchor below the cursor gives the same rows; a refusing transport starts nothing") {
+  Rig rig;
+  rig.tap(Button::Rec);
+  rig.down(9);
+  rig.shift_tap(Button::Up, 2);
+  CHECK(rig.state().edit.selection.active);
+  CHECK(rig.row() == 7);  // anchor 9, cursor 7
+  rig.shift_tap(Button::Play);
+  CHECK(rig.sink.row == 7u);
+  CHECK(rig.sink.loop_first == 7u);
+  CHECK(rig.sink.loop_last == 9u);
+  Rig no;
+  no.sink.ok = false;
+  no.tap(Button::Rec);
+  no.shift_tap(Button::Down);
+  no.shift_tap(Button::Play);
+  CHECK_FALSE(no.state().playing);
+}
+
+TEST_CASE("focus loop: playing, Shift + Play jumps to the block's first row and sets the loop; while it loops, Shift + Play and Play stop it") {
+  Rig rig;
+  rig.tap(Button::Rec);
+  rig.play(30);
+  rig.down(4);
+  rig.shift_tap(Button::Down, 2);
+  CHECK(rig.state().edit.selection.active);
+  rig.shift_tap(Button::Play);
+  CHECK(rig.sink.locates == 1u);
+  CHECK(rig.sink.located == 4u);
+  CHECK(rig.sink.from_calls == 0u);
+  CHECK(rig.sink.loops == 1u);
+  CHECK(rig.sink.loop_first == 4u);
+  CHECK(rig.sink.loop_last == 6u);
+  CHECK(rig.sink.stops == 0u);
+  rig.play_looping(5, 4, 6);  // the engine reports the loop
+  CHECK(rig.state().play.row_looping());
+  rig.shift_tap(Button::Play);  // again: stop, no new jump or loop
+  CHECK(rig.sink.stops == 1u);
+  CHECK(rig.sink.locates == 1u);
+  CHECK(rig.sink.loops == 1u);
+  Rig plain;
+  plain.tap(Button::Rec);
+  plain.shift_tap(Button::Down);
+  plain.play_looping(1, 0, 1);
+  plain.tap(Button::Play);
+  CHECK(plain.sink.stops == 1u);
+}
+
+TEST_CASE("focus loop: with no block Shift + Play is the play-from-cursor of OS-PLAYCUR and sets no loop") {
+  Rig rig;
+  rig.down(6);
+  rig.shift_tap(Button::Play);
+  CHECK(rig.sink.from_calls == 1u);
+  CHECK(rig.sink.row == 6u);
+  CHECK(rig.sink.loops == 0u);
+  Rig playing;
+  playing.tap(Button::Rec);  // STEP: the cursor is free of the playhead
+  playing.play(2);
+  playing.down(8);
+  playing.shift_tap(Button::Play);
+  CHECK(playing.sink.locates == 1u);
+  CHECK(playing.sink.located == 8u);
+  CHECK(playing.sink.loops == 0u);
 }
 
 TEST_CASE("play cursor: a playing pattern that is not the one being edited is refused with a message; a transport that refuses changes nothing; the plain Play is untouched") {

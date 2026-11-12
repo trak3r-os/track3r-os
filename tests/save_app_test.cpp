@@ -240,11 +240,11 @@ TEST_CASE("save: SAVE writes the native project into a new folder, byte for byte
   CHECK(rig.card.same("Projects/Track 01/project.o3pj.bak", first));
   CHECK_FALSE(rig.card.has("Projects/Track 02/project.o3pj"));
 
-  // SAVE AS: the keyboard opens with the next free name, F8 saves under it: a new folder, nothing replaced.
+  // SAVE AS: the keyboard opens with the next free name, F1 saves under it: a new folder, nothing replaced.
   rig.tap(Button::F5);
   CHECK(rig.app->state().overlay == app::OverlayId::TextEntry);
   CHECK(std::string(rig.app->state().text.entry.text()) == "Track 02");
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   CHECK(rig.app->state().overlay == app::OverlayId::None);
   rig.settle();
   CHECK(rig.message() == "SAVE TRACK 02 DONE");
@@ -327,6 +327,79 @@ TEST_CASE("save: after a load that failed (the project is reset) SAVE never repl
   CHECK(rig.card.same("Projects/Track 01/project.o3pj", rig.native_bytes()));
 }
 
+TEST_CASE("save: Shift + File on a nameless project whose first save runs says so and opens no keyboard (OS-UXF-KEYS 1a)") {
+  Rig rig;
+  rig.go(ScreenId::File);
+  rig.tap(Button::F4);  // the first save, under the automatic name: running, the project still has no folder
+  NEED(rig.app->session().jobs.occupied() != 0u);
+  rig.expire();
+  rig.tap(Button::File, true);
+  CHECK(rig.app->state().overlay == app::OverlayId::None);  // not the save-as keyboard
+  bool said = false;  // the progress strip may overwrite the notice at once: look for it for a while, as the test below does
+  for (unsigned i = 0; i < 400 && !said; ++i) {
+    said = rig.message() == "A SAVE IS ALREADY RUNNING";
+    if (!said) {
+      rig.pass();
+    }
+  }
+  CHECK(said);
+  CHECK(rig.app->state().overlay == app::OverlayId::None);
+  rig.settle();
+  CHECK(rig.card.same("Projects/Track 01/project.o3pj", rig.native_bytes()));
+}
+
+TEST_CASE("save: Shift + File saves from any screen as F4 does; a project no folder holds yet asks for a name first (OS-UXF-KEYS 1a)") {
+  Rig rig;
+  rig.go(ScreenId::Pattern);
+  // No folder yet: the save-as keyboard opens (the automatic name selected) and nothing is written until it is accepted.
+  rig.tap(Button::File, true);
+  CHECK(rig.app->state().screen == ScreenId::Pattern);
+  NEED(rig.app->state().overlay == app::OverlayId::TextEntry);
+  CHECK(std::string(rig.app->state().text.entry.text()) == "Track 01");
+  CHECK(rig.app->session().jobs.occupied() == 0u);
+  rig.tap(Button::F1);
+  rig.settle();
+  CHECK(rig.message() == "SAVE TRACK 01 DONE");
+  CHECK(rig.card.same("Projects/Track 01/project.o3pj", rig.native_bytes()));
+  const Bytes first = *rig.card.get("Projects/Track 01/project.o3pj");
+  // Now it has a folder: Shift + File from another screen is F4, the old file kept as the backup, no keyboard.
+  rig.go(ScreenId::Song);
+  rig.tap(Button::File, true);
+  CHECK(rig.app->state().overlay == app::OverlayId::None);
+  CHECK(rig.app->state().screen == ScreenId::Song);
+  rig.settle();
+  CHECK(rig.message() == "SAVE TRACK 01 DONE");
+  CHECK(rig.card.same("Projects/Track 01/project.o3pj.bak", first));
+  CHECK_FALSE(rig.card.has("Projects/Track 02/project.o3pj"));
+  // A save running refuses with the existing notice.
+  rig.tap(Button::File, true);
+  rig.expire();
+  rig.tap(Button::File, true);
+  bool said = false;
+  for (unsigned i = 0; i < 400 && !said; ++i) {
+    said = rig.message() == "A SAVE IS ALREADY RUNNING";
+    if (!said) {
+      rig.pass();
+    }
+  }
+  CHECK(said);
+  rig.settle();
+  // A load running refuses too; a project loaded from Projects/<name> saves into it without asking.
+  rig.card.make_dir_now("Projects/Song");
+  rig.project.last_folder = "Projects/Song";
+  rig.project.is_busy = true;
+  rig.expire();
+  rig.tap(Button::File, true);
+  CHECK(rig.message() == "A LOAD IS RUNNING");
+  rig.project.is_busy = false;
+  rig.expire();
+  rig.tap(Button::File, true);
+  CHECK(rig.app->state().overlay == app::OverlayId::None);
+  rig.settle();
+  CHECK(rig.message() == "SAVE SONG DONE");
+  CHECK(rig.card.violations == 0);
+}
+
 TEST_CASE("save: the refusals say why: a load running, a save already running, the card that goes read-only, no name left") {
   Rig rig;
   rig.go(ScreenId::File);
@@ -337,8 +410,8 @@ TEST_CASE("save: the refusals say why: a load running, a save already running, t
   rig.project.is_busy = false;
   rig.tap(Button::F4);
   rig.expire();
-  rig.tap(Button::F5);  // the first is still running: the keyboard opens, its F8 is refused (after the job's own strip line, which was first in the queue)
-  rig.tap(Button::F8);
+  rig.tap(Button::F5);  // the first is still running: the keyboard opens, its F1 is refused (after the job's own strip line, which was first in the queue)
+  rig.tap(Button::F1);
   bool said = false;
   for (unsigned i = 0; i < 400 && !said; ++i) {
     said = rig.message() == "A SAVE IS ALREADY RUNNING";
@@ -368,10 +441,10 @@ TEST_CASE("save: the refusals say why: a load running, a save already running, t
   rig.tap(Button::F5);
   CHECK(rig.app->state().overlay == app::OverlayId::TextEntry);
   CHECK(std::string(rig.app->state().text.entry.text()) == "");
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   CHECK(rig.app->state().overlay == app::OverlayId::TextEntry);
   CHECK(std::string(rig.app->state().text.message) == "TYPE A NAME");  // OS-SILENTMSG
-  rig.tap(Button::F7);
+  rig.tap(Button::F8);
   CHECK(rig.app->state().overlay == app::OverlayId::None);
   CHECK(rig.card.files.size() == files);
 }
@@ -559,7 +632,7 @@ TEST_CASE("save: a save is refused while the firmware update path has the card, 
   CHECK(rig.message() == "FIRMWARE UPDATE HAS THE CARD: TRY AGAIN");
   rig.expire();
   rig.tap(Button::F5);
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   CHECK(rig.message() == "FIRMWARE UPDATE HAS THE CARD: TRY AGAIN");
   rig.passes(5);
   CHECK(rig.card.log.empty());
@@ -576,7 +649,7 @@ TEST_CASE("save: a save is refused while the firmware update path has the card, 
   CHECK(rig.card.has("Settings/device.o3st"));
   rig.expire();
   rig.tap(Button::F5);  // and a save goes through again
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   rig.settle();
   CHECK(rig.card.has("Projects/Track 01/project.o3pj"));
   CHECK(rig.card.violations == 0);
@@ -780,8 +853,8 @@ TEST_CASE("new: ALL and KEEP INSTRUMENTS show the Pattern view when they have en
 TEST_CASE("new: a message on the strip when F3 asks: the question takes the head at once, the second F3 answers ALL (OS-NEWKEEP, OS-BUG-PROMPTQ)") {
   Rig rig;
   rig.go(ScreenId::File);
-  rig.tap(Button::F6, true);  // Shift+F6 NAME, F8 OK: its line (another source than the File screen's own, which the question would replace) is on the strip
-  rig.tap(Button::F8);
+  rig.tap(Button::F6, true);  // Shift+F6 NAME, F1 OK: its line (another source than the File screen's own, which the question would replace) is on the strip
+  rig.tap(Button::F1);
   const std::string before = rig.message();
   CHECK_FALSE(before.empty());
   rig.tap(Button::F3);  // the question is the line on the strip now, not queued behind the older one
@@ -932,7 +1005,7 @@ std::string typed(const Rig& rig) { return rig.app->state().text.entry.text(); }
 
 }  // namespace
 
-TEST_CASE("save as: F5 opens the keyboard with the next free name selected; pads type over it and F8 saves a folder of that name") {
+TEST_CASE("save as: F5 opens the keyboard with the next free name selected; pads type over it and F1 saves a folder of that name") {
   Rig rig;
   rig.go(ScreenId::File);
   rig.tap(Button::F5);
@@ -948,7 +1021,7 @@ TEST_CASE("save as: F5 opens the keyboard with the next free name selected; pads
   rig.tap(Button::F2);  // caps
   pad(rig, 36);
   CHECK(typed(rig) == "paZ");
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   CHECK(rig.app->state().overlay == app::OverlayId::None);
   rig.settle();
   CHECK(rig.message() == "SAVE PAZ DONE");
@@ -957,7 +1030,7 @@ TEST_CASE("save as: F5 opens the keyboard with the next free name selected; pads
   CHECK(rig.card.violations == 0);
 }
 
-TEST_CASE("save as: a name that is taken, or that the card cannot take, is said inside the keyboard, which stays open; F6 puts the automatic name back, F7 cancels") {
+TEST_CASE("save as: a name that is taken, or that the card cannot take, is said inside the keyboard, which stays open; F6 puts the automatic name back, F8 cancels") {
   Rig rig;
   rig.card.make_dir_now("Projects");
   rig.card.make_dir_now("Projects/Mine");
@@ -982,7 +1055,7 @@ TEST_CASE("save as: a name that is taken, or that the card cannot take, is said 
   (void)entry.type(39);
   (void)entry.type(13);
   CHECK(typed(rig) == "Mine");
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   CHECK(rig.app->state().overlay == app::OverlayId::TextEntry);
   CHECK(std::string(rig.app->state().text.message).find("A PROJECT OF THAT NAME EXISTS") == 0u);
   CHECK(rig.card.files.empty());
@@ -994,10 +1067,10 @@ TEST_CASE("save as: a name that is taken, or that the card cannot take, is said 
   CHECK(std::string(rig.app->state().text.message) == "NOT IN A FILE NAME");
   // a name that starts with a space is refused as a whole
   entry.set(" x");
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   CHECK(std::string(rig.app->state().text.message).find("NOT A NAME") == 0u);
   CHECK(rig.app->state().overlay == app::OverlayId::TextEntry);
-  rig.tap(Button::F7);
+  rig.tap(Button::F8);
   CHECK(rig.app->state().overlay == app::OverlayId::None);
   CHECK(rig.card.files.empty());
   CHECK(rig.card.violations == 0);
@@ -1018,7 +1091,7 @@ TEST_CASE("save as: the keyboard's focus is moved by the arrows and the encoder,
   rig.input.push(core::make_encoder_event(rig.clock.now(), 0, 2));
   rig.pass();
   CHECK(rig.app->state().text.entry.key() == 13u);
-  rig.tap(Button::F1);
+  rig.tap(Button::F7);  // TYPE (OS-UXF-KEYS item 5: F1 is OK)
   CHECK(typed(rig) == "qe");
   CHECK(rig.app->state().screen == ScreenId::File);  // the File screen did not see any of it
   CHECK(rig.app->session().jobs.occupied() == 0u);
@@ -1086,7 +1159,7 @@ void save_as(Rig& rig, const char* name) {
   rig.tap(Button::F5);
   auto& entry = const_cast<app::TextEntry&>(rig.app->state().text.entry);
   entry.set(name);
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   rig.settle();
 }
 
@@ -1842,7 +1915,7 @@ TEST_CASE("save samples: a path outside samples/ or a name the card refuses is s
   rig2.tap(Button::F5);
   auto& entry = const_cast<app::TextEntry&>(rig2.app->state().text.entry);
   entry.set("Cut");
-  rig2.tap(Button::F8);
+  rig2.tap(Button::F1);
   rig2.pass();
   put_sample(rig2, 0, 3000, 999);  // the first sample's audio is replaced under the job
   rig2.settle();
@@ -1859,7 +1932,7 @@ TEST_CASE("save samples: no other save starts between the jobs of one, and a car
   put_sample(rig, 1, 3000, 200);
   rig.go(ScreenId::File);
   rig.tap(Button::F5);
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   CHECK(rig.saves.busy());
   rig.expire();
   rig.tap(Button::F4);  // a second save while the first runs
@@ -2206,7 +2279,7 @@ TEST_CASE("save: Open and New are refused while a save runs, the save completes 
   rig.tap(Button::F5);  // SAVE AS of a new project: three samples, then the project file
   auto& entry = const_cast<app::TextEntry&>(rig.app->state().text.entry);
   entry.set("Fresh");
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   NEED(rig.saves.busy());
   unsigned asked = 0;
   for (unsigned i = 0; i < 4000 && rig.saves.busy(); ++i) {
@@ -2937,7 +3010,7 @@ TEST_CASE("save stereo: the flag is written only where the plan wrote or found t
   rig.tap(Button::F5);
   auto& entry = const_cast<app::TextEntry&>(rig.app->state().text.entry);
   entry.set("Undone");
-  rig.tap(Button::F8);
+  rig.tap(Button::F1);
   bool restored = false;
   for (unsigned i = 0; i < 400 && !rig.card.has("Projects/Undone/project.o3pj"); ++i) {
     rig.pass();

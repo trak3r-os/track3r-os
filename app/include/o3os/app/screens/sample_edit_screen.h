@@ -16,16 +16,17 @@ inline constexpr const char* kSampleEditFxBusySoftKeys[8] = {"FILTER", "COMPRESS
 // every parameter back to its default. The Shift row is the edit page's.
 inline constexpr const char* kSampleEditPlugSoftKeys[8] = {"APPLY", "RESCAN", "DEFAULTS", "NEW INS", "-", "-", "PREVIEW", "UNDO"};
 inline constexpr const char* kSampleEditPlugBusySoftKeys[8] = {"APPLY", "RESCAN", "DEFAULTS", "NEW INS", "-", "-", "PREVIEW", "CANCEL"};
-// While Shift is held (OS-SHIFTROW): F1 / F2 the AMIGA conversion at 8,287 / 16,574 Hz, F3 its 8-bit option (OS-AMG1), F4 DC REMOVE (OS-SEDFX), F6 the sample as a WAV, F7 PREVIEW from the selection's edge, F8 REDO.
-inline constexpr const char* kSampleEditShiftKeys[8] = {"AMG 8K", "AMG 16K", "Q8", "DC REM", "NEXT INS", "SAVE WAV", "PRV EDGE", "REDO"};
+// While Shift is held (OS-SHIFTROW): F1 / F2 the AMIGA conversion at 8,287 / 16,574 Hz, F3 its 8-bit option (OS-AMG1), F4 DC REMOVE (OS-SEDFX), F5 REDO, F6 the sample as a WAV, F7 / F8 INST - / INST + (OS-UXF-SMP item 11, as on Sample load: they replace NEXT INS on F5 and REDO on F8).
+// PREVIEW from the selection's edge is Shift + Play (unlabelled: the row is full).
+inline constexpr const char* kSampleEditShiftKeys[8] = {"AMG 8K", "AMG 16K", "Q8", "DC REM", "REDO", "SAVE WAV", "INST -", "INST +"};
 
 // "Sample edit" (docs/design/product-ux.md section 4: "Offline crop, EQ, overdrive, Amiga prep, undo"; OS-011a, new Community OS behaviour after BASE-16, which lists
 // normalise, cut, reverse, amplify and the fades among 13 effects, and undo snapshots): the instrument in view's sample, a selection
 // and seven offline effects. Crop, normalise, reverse, fade in, fade out, amplify and (Shift + F4, OS-SEDFX) DC removal (sample_dsp.h) act on the selection, or on the whole sample when there is none.
 //
-//   Left / Right pick the edge of the selection (start or end), the encoder moves it (Shift: 16 columns a click), Up / Down zoom, Delete (ALL) clears the selection; F7 PREVIEW plays the sample while it is down (Shift: from the edge being moved) with a playhead (OS-FU3).
+//   Left / Right pick the edge of the selection (start or end), the encoder moves it (Shift: 16 columns a click), Up / Down zoom, Delete (ALL) clears the selection; F7 PREVIEW plays the sample while it is down (Shift + Play: from the edge being moved) with a playhead (OS-FU3).
 //   F1 CROP (needs a selection) F2 NORM F3 REVERSE F4 FADE IN F5 FADE OUT F6 AMP (the factor is the percentage on the screen, Shift + Up / Down sets it, 10..800)
-//   F8 UNDO / Shift + F8 REDO: the sample's own history (three steps), which also puts back the instrument's points and slices a crop changed.
+//   F8 UNDO / Shift + F5 REDO (OS-UXF-SMP item 11): the sample's own history (three steps), which also puts back the instrument's points and slices a crop changed.
 //   The Sample edit button again opens the FX page (OS-AUDIT-15): FILTER (one biquad: low, high or band pass, cutoff, resonance) and COMPRESSOR (threshold, ratio, attack, release, makeup, peak or RMS), F1 / F2, over the
 //   selection like the others; Up / Down / Left / Right pick the row, the encoder (Shift: coarse) changes its value. The values stay while the OS runs.
 //   Once more the PLUGINS page (OS-CEPTFX S4a): the plugins of /Effects on the left, the selected one's parameters on the right (Left / Right move the focus and the column; the values are kept for the last eight plugins).

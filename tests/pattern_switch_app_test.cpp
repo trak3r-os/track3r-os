@@ -116,6 +116,11 @@ struct Rig {
     release(Button::Shift);
     pass(1);
   }
+  // OS-UXF-PAT 7: the pads' modes are the PADS picker's (Shift + F2, then F1..F6 = NOTES PIANO ISO TRACKS PATS VU); `old` is the former Shift key of the mode (F2 NOTES .. F7 VU).
+  void pad_mode(Button old) {
+    shift_tap(Button::F2);
+    tap(static_cast<Button>(static_cast<unsigned>(old) - 1u));
+  }
   void hold_f1() {
     press(Button::F1);
     pass(core::kGestureTimings.hold_ms + 1);
@@ -153,20 +158,25 @@ struct Rig {
   bool lights(PadRole (&roles)[48]) const { return app->pad_lights(roles); }
   // STEP: Edit with the free cursor (REC); the view then stays where the user put it while the sequencer plays.
   void step_mode() {
-    (void)app->invoke(core::action_id("view.mode"), static_cast<core::ActionArg>(app::PatternMode::Edit));
-    (void)app->invoke(core::action_id("pattern.rec_free"));
+    (void)app->invoke(core::action_id("view.mode"), static_cast<core::ActionArg>(app::PatternMode::Browse));
+    (void)app->invoke(core::action_id("pattern.edit_toggle"));
   }
   unsigned depth() const { return journal.depth() - base_depth; }
 };
 
 }  // namespace
 
-TEST_CASE("patswitch app: a tap of F1 opens nothing; the hold opens the PATTERN chooser and the release closes it, in every state") {
+TEST_CASE("patswitch app: a tap of F1 opens the PATTERN chooser (OS-UXF-PAT item 6) and F1 or F8 closes it; the hold opens it and the release closes it, in every state") {
   Rig rig;
   rig.tap(Button::F1);
-  CHECK(rig.state().overlay == app::OverlayId::None);
+  CHECK(rig.state().overlay == app::OverlayId::PatternChooser);
+  CHECK(rig.edit().chooser_held);  // the live PATTERN chooser: pads, Copy and Paste work as under the hold
   rig.tap(Button::F1);
   CHECK(rig.state().overlay == app::OverlayId::None);
+  rig.tap(Button::F1);
+  rig.tap(Button::F8);
+  CHECK(rig.state().overlay == app::OverlayId::None);
+  CHECK_FALSE(rig.edit().chooser_held);  // F8 clears the "live PATTERN chooser" flag with the overlay
   CHECK(rig.sink.picks.empty());
   rig.hold_f1();
   CHECK(rig.state().overlay == app::OverlayId::PatternChooser);
@@ -177,7 +187,13 @@ TEST_CASE("patswitch app: a tap of F1 opens nothing; the hold opens the PATTERN 
   // playing: the same
   rig.play(1, 4);
   rig.tap(Button::F1);
+  CHECK(rig.state().overlay == app::OverlayId::PatternChooser);
+  rig.tap_pad(2);  // a tap-opened chooser switches the playing pattern like the hold's
+  NEED(rig.sink.picks.size() == 1u);
+  CHECK(rig.sink.last() == 3);
+  rig.tap(Button::F1);
   CHECK(rig.state().overlay == app::OverlayId::None);
+  rig.sink.picks.clear();
   rig.hold_f1();
   CHECK(rig.state().overlay == app::OverlayId::PatternChooser);
   rig.release_f1();
@@ -389,7 +405,7 @@ TEST_CASE("patswitch app: the pads light with the patterns while F1 is held, as 
 TEST_CASE("patswitch app: the PATS blink ends when a live jump beat the queue, not when a switch lands and the queue was made after it") {
   Rig rig;
   rig.play(1, 4);
-  rig.shift_tap(Button::F6);
+  rig.pad_mode(Button::F6);
   NEED(rig.state().padmode.fixed() == app::PadMode::Patterns);
   rig.tap_pad(5);  // queues pattern 6
   CHECK(rig.edit().queued_pattern == 6);
@@ -397,12 +413,12 @@ TEST_CASE("patswitch app: the PATS blink ends when a live jump beat the queue, n
   rig.play(2, 0, 1);
   CHECK(rig.edit().queued_pattern == 0);
   // The queue made after a switch is the newer intent: the landing (pattern 3 shows, the target) does not end its blink, the start of the queued pattern does.
-  rig.shift_tap(Button::F2);  // back to NOTES
+  rig.pad_mode(Button::F2);  // back to NOTES
   rig.hold_f1();
   rig.tap_pad(2);  // switch to 3 (pending)
   NEED(rig.edit().switch_to == 3);
   rig.release_f1();
-  rig.shift_tap(Button::F6);
+  rig.pad_mode(Button::F6);
   rig.tap_pad(7);  // queues pattern 8
   NEED(rig.edit().queued_pattern == 8);
   rig.play(3, 5);  // the landing of the switch
@@ -413,7 +429,7 @@ TEST_CASE("patswitch app: the PATS blink ends when a live jump beat the queue, n
   // The held pick takes the PATS queue (the sequencer drops it): the blink ends with the pick
   rig.tap_pad(9);  // queues 10
   NEED(rig.edit().queued_pattern == 10);
-  rig.shift_tap(Button::F2);
+  rig.pad_mode(Button::F2);
   rig.hold_f1();
   rig.tap_pad(1);
   CHECK(rig.edit().queued_pattern == 0);
@@ -426,7 +442,7 @@ TEST_CASE("patswitch app: an empty or unused pattern is gone to, in PATS (queued
   const unsigned patterns_before = rig.project().pattern_count();
   // PATS: the pad of an unused pattern queues it (it is not refused)
   rig.play(1, 4);
-  rig.shift_tap(Button::F6);
+  rig.pad_mode(Button::F6);
   rig.tap_pad(8);
   CHECK(rig.sink.queued == 9);
   CHECK(rig.edit().queued_pattern == 9);
@@ -439,7 +455,7 @@ TEST_CASE("patswitch app: an empty or unused pattern is gone to, in PATS (queued
   rig.play(9, 31);
   CHECK(rig.app->view().row() == 31);
   // F1 held: the same at once
-  rig.shift_tap(Button::F2);
+  rig.pad_mode(Button::F2);
   rig.hold_f1();
   rig.tap_pad(10);  // pattern 11, unused
   CHECK(rig.sink.last() == 11);

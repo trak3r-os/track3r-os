@@ -47,7 +47,7 @@ bool preset_open(ActionContext& ctx) noexcept {
   return true;
 }
 
-// Shift + F5 in the list (OS-MODPRESET P4): SAVE opens the on-screen keyboard for a preset's name over the page (preset_name_open in save_actions.cpp; its F8 accept saves the values in force
+// Shift + F5 in the list (OS-MODPRESET P4): SAVE opens the on-screen keyboard for a preset's name over the page (preset_name_open in save_actions.cpp; its F1 accept saves the values in force
 // as a card preset and says PRESET SAVED: <NAME>).
 bool preset_save(ActionContext& ctx, core::ActionArg) noexcept {
   if (ctx.view.overlay != OverlayId::Preset) {

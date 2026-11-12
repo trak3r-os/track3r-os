@@ -122,7 +122,7 @@ RECENT: the first rows of the PROJECTS list. They are the last five projects you
 
 MIDI Learn: binding a MIDI control to the parameter under the cursor. Press `Vol` and `Fx` together, then move the control. A knob that sends a CC (a control change, the message a knob or fader sends) is the usual control. See [Learn a MIDI control](panel.md#learn-a-midi-control).
 
-Encoder target: the one parameter that the encoder moves while you hold `Instr` and `Vol`. Press `Instr` and `Fx` together on a row to make it the target. It acts like a Learn knob but is not saved. See [Put one parameter on the encoder](panel.md#put-one-parameter-on-the-encoder).
+Encoder target: the one parameter that the encoder moves while you hold `Instr` and `Vol`. Open Learn on a row (`Vol` and `Fx`) and press `F7` (**ENC**) to make it the target. It acts like a Learn knob but is not saved. See [Put one parameter on the encoder](panel.md#put-one-parameter-on-the-encoder).
 
 Purge: removing the instruments that no step, FX or Learn binding uses. Press `Shift` + `F7` (**PURGE**) on the PROJECTS page, twice.
 
@@ -162,7 +162,7 @@ Detune: a small shift of an FM operator's pitch from its ratio, in cents.
 
 App: a module you run from the Modules screen, for example MIDI Monitor or Tuner. Apps are experimental.
 
-Navigator: the list of screens that opens when you press `Song` and `Pattern` together (or `Master` and `Song`). Turn the encoder to a screen and press `F8` (**GO**).
+Navigator: the list of screens that opens when you press `Song` and `Pattern` together (or `Master` and `Song`). Turn the encoder to a screen and press `F1` (**GO**).
 
 TOOLS: the `F7` key on Pattern. It opens a list of tools, among them EXPORT PATTERN and the apps that edit the project or write files.
 

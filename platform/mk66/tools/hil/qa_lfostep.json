@@ -5,9 +5,7 @@
  "steps": [
   {"say": "OS-PERF-LFO-STEP (QA-PRF-180..189): the step FX Volume LFO 23, Panning LFO 24, Finetune LFO 33 and Position LFO 36 on twelve sampler tracks (four one-shot, four wavetable, four granular; the FX is on every note step at rate 8). BEFORE the run: build the songs (`o3pj_tool gen lfostep23 <dir>/LfoStep23/project.o3pj`, and `lfostep24`, `lfostep33`, `lfostep36` the same, and the control `lfostepoff` into `<dir>/LfoStepOff/project.o3pj`; each writes its samples/ folder beside it) and copy ONE folder into Projects/ per run: the four with the FX, then the control. Run with `--var PROJ=<folder name>`. Use the release image. By ear: the FX of the song at its rate (the FX 36 acts on the wavetable and granular tracks only); the Perform VOL LFO row over the FX 23 and its release (QA-PRF-185). The exports of the control and of a song are compared on the PC with `cmp` (QA-PRF-187). QA-PRF-188: the mean `render last` of each song against the control (no more than the same Perform rows, 1.2 pp, paired noise)."},
   {"keys": ["-shift"], "gap": 0.2, "note": "(Shift released, in case a former run left it down)"},
-  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "NAVIGATOR"}, "note": "(a leftover Navigator is closed: F7 is CLOSE, F8 would GO since OS-NAV2)"},
-  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
-  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "TEXT_ENTRY"}, "note": "(the on-screen keyboard is cancelled with F7, never accepted)"},
+  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|NAVIGATOR|TEXT_ENTRY)$"}, "note": "(a leftover overlay is put away: F8 is BACK on the Navigator, the keyboard (cancel, never accept: F1 accepts) and the choosers, OS-UXF-KEYS item 5)"},
   {"keys": ["file"], "gap": 0.5},
   {"state": {"screen": "FILE"}, "within": 3},
   {"keys": ["f2"], "gap": 0.5, "note": "RESCAN"},

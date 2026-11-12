@@ -89,6 +89,8 @@ struct PatternEdit {
   // OS-LIVEREC (rec_place.h; track arming, P1d / PAR-047, is dropped: nothing here, nothing in any file: it was session state and never saved). OS-RECSWAP: Rec enters Edit free, Shift + Rec follows: the cursor and the view do
   // not ride the playhead while it records (free); false is follow. Cleared when Edit is left.
   bool rec_free = false;
+  // OS-UXF-PAT item 8: LIVE was entered from STEP, so Shift + Rec leaves it for STEP (else for WATCH). Meaningful in LIVE only; cleared when Edit is left. Main loop only.
+  bool live_from_step = false;
   // The take (OS-LIVEREC, rec_actions.cpp): the undo group that holds everything recorded since recording began is open on the editor. Main loop only.
   bool take_open = false;
   bool take_wrote = false;  // ... and holds at least one record: the info line counts it as an undo level (it is one the moment Undo is pressed)

@@ -20,7 +20,7 @@ This is **new Community OS behaviour**: Level B, size S. **No format change**: e
 - `Filter::Any`;
 - prefilled with the current name;
 - the limit is the field's;
-- F8 accepts and F7 cancels.
+- F1 accepts and F8 cancels (OS-UXF-KEYS item 5; F7 types the key in focus).
 
 On accept, the matching setter runs as **one undo unit**. An empty accept clears the name.
 

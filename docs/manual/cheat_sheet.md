@@ -11,17 +11,18 @@ The keys on one page. Each table names the chapter it comes from.
 | `Play` | starts or stops the pattern, from any screen |
 | `Rec` | on Pattern, turns STEP on or off; on Record, starts or stops the take |
 | `Shift` + `Rec` | on Pattern, turns LIVE on or off |
-| `Song` + `Pattern`, or `Master` + `Song` | opens the Navigator. `F8` (**GO**) opens the chosen screen; `Pattern` leaves it |
+| `Song` + `Pattern`, or `Master` + `Song` | opens the Navigator. `F1` (**GO**) opens the chosen screen; `Pattern` leaves it |
 | `Master` + `Insert` | opens the Mixer on its INSERTS page, from any screen (hold `Master`, then tap `Insert` at any time) |
 | `Shift` + `Pattern` | lists the module apps that are not tools. `F1` (**LAUNCH**) starts one; `Pattern` leaves it |
 | `Shift` + `Config` | opens the help page of the screen you are on. `Left` and `Right` turn the pages, `Up`, `Down` and the encoder scroll, any other key closes it |
+| `Shift` + `File` | saves the project from any screen, as `F4` (**SAVE**) does on File. A project with no folder yet opens the save-as keyboard. <!-- QA-GLB-243 --> |
 | `Shift` + `Master` | steps to the next colour theme: Amiga, Black, White. <!-- QA-GLB-157 --> |
 | `Shift` + `Power` | saves a screenshot to the card. `Power` held 2 seconds turns the unit off. <!-- QA-GLB-130 --> |
 | `Master` held, then the encoder | changes the master volume, from any screen |
 | `Pattern` held, then the encoder or a pad | the encoder changes the tempo, from any screen (a BPM a click, a tenth with `Shift` held first); pad taps tap the tempo. Letting go of `Pattern` after that opens nothing. <!-- QA-GLB-153, QA-GLB-154 --> |
 | `Song` held | shows Song until you let go, then goes back to the screen you came from |
 | `Vol` and `Fx` together | opens Learn |
-| `Instr` and `Fx` together | makes the row under the cursor the encoder's target, like a Learn binding with no MIDI controller; `Instr` and `Vol` held, then the encoder, moves it (see [Put one parameter on the encoder](panel.md#put-one-parameter-on-the-encoder)) |
+| `F7` in Learn (`Vol` and `Fx`) | makes the row under the cursor the encoder's target, like a Learn binding with no MIDI controller; `Instr` and `Vol` held, then the encoder, moves it (see [Put one parameter on the encoder](panel.md#put-one-parameter-on-the-encoder)) |
 | a screen button again | opens the next page of that screen: the FX and PLUGINS pages of Sample edit, the DJ page of Perform |
 | a soft key again | steps that key's windows, such as the six MOD destinations on Instrument |
 
@@ -74,7 +75,7 @@ Held at power-on, until the strip shows the mode:
 | `Note`, `Instr`, `Vol`, `Fx` | select the column; hold to open its popup |
 | `Note` + `Instr` | cycles the zoom: 5, 8 or 12 tracks |
 | `Note` + `Left` or `Right` | moves one whole track |
-| `F1` (**PATTERN**) | hold: the pattern chooser, and while the transport plays a pick switches the playing pattern at once; a tap does nothing. With it held, `Copy` copies the whole pattern and `Shift` + `Copy` writes it over the one shown |
+| `F1` (**PATTERN**) | tap or hold: the pattern chooser (a tap opens it until `F1` or `F8`, a hold until you let go), and while the transport plays a pick switches the playing pattern at once. With it open, `Copy` copies the whole pattern and `Shift` + `Copy` writes it over the one shown |
 | `F2` (**LENGTH**), `F3` (**JUMP**) | tap toggles the chooser; hold opens it |
 
 ## Shift combinations
@@ -86,12 +87,12 @@ The soft keys with `Shift` held. `-` means the key does nothing. On Pattern, `Sh
 | Key | Pattern | Instrument | Sample load | Mixer | File |
 |---|---|---|---|---|---|
 | `Shift` + `F1` | **OCTAVE** | **NAME** | **0/4** | **NAME** | **0/4** |
-| `Shift` + `F2` | **NOTES** | **COPY** | **1/4** | - | **1/4** |
-| `Shift` + `F3` | **PIANO** | **PASTE** | **2/4** | - | **2/4** |
-| `Shift` + `F4` | **ISO** | **DELETE** | **3/4** | - | **3/4** |
-| `Shift` + `F5` | **TRACKS** | **SAVE** | **END** | - | **END** |
-| `Shift` + `F6` | **PATS** | **<USED** | - | - | **NAME** |
-| `Shift` + `F7` | **VU** | **USED>** | **INST -** | **UNMUTE** | **PURGE** |
+| `Shift` + `F2` | **PADS** | **COPY** | **1/4** | - | **1/4** |
+| `Shift` + `F3` | - | **PASTE** | **2/4** | - | **2/4** |
+| `Shift` + `F4` | - | **DELETE** | **3/4** | - | **3/4** |
+| `Shift` + `F5` | - | **SAVE** | **END** | - | **END** |
+| `Shift` + `F6` | - | **<USED** | **MARK** | - | **NAME** |
+| `Shift` + `F7` | - | **USED>** | **INST -** | **UNMUTE** | **PURGE** |
 | `Shift` + `F8` | **REDO** | **REDO** | **INST +** | **UNSOLO** | - |
 
 <!-- /manual-tables -->

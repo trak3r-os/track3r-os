@@ -6,7 +6,6 @@
   {"say": "qa_fil_111: a card is in the unit with at least one project in Projects/, the unit has been up long enough to be at its Pattern screen. The scenario opens the project on the first row of File (the newest of RECENT) and then waits for YOU to power-cycle the unit (hold Power, switch on again: a reset from the console would do too); the runner needs the console to come back"},
   {"card": {}},
   {"keys": ["-shift"], "gap": 0.2, "note": "(Shift released, in case a former run left it down)"},
-  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "TEXT_ENTRY"}, "note": "(the on-screen keyboard is cancelled with F7, never accepted)"},
   {"keys": ["file"], "gap": 0.5},
   {"state": {"screen": "FILE"}, "within": 3},
   {"keys": ["f2"], "gap": 0.5, "note": "RESCAN"},

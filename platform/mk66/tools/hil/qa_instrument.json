@@ -863,10 +863,10 @@
    "say": "QA-INS-049: PASTE into a free slot, F8 (UNDO): the slot is empty again and silent; Shift+F8 (REDO): the copy is back and plays. PASTE over a used slot, F8: the old instrument sounds again, not the pasted audio (the sound follows at the next quiet handover: stopped, no pad held)"
   },
   {
-   "say": "QA-INS-050: Shift+F1 (NAME) on a used instrument: the on-screen keyboard titled INSTRUMENT NAME opens with the name selected; the pads type, F2 CAPS, Delete deletes, F7 CANCEL leaves the name as it was, F8 OK keeps it (the F6 AUTO key is not there)"
+   "say": "QA-INS-050: Shift+F1 (NAME) on a used instrument: the on-screen keyboard titled INSTRUMENT NAME opens with the name selected; the pads type, F2 CAPS, Delete deletes, F8 CANCEL leaves the name as it was, F1 OK keeps it (the F6 AUTO key is not there)"
   },
   {
-   "say": "QA-INS-051: NAME: type more than 32 characters: it stops at 32; every key of the keyboard is allowed (including @ and +); F8: INS nn RENAMED - F8 UNDO and the header shows the new name; F8 (UNDO) gives the old name back, Shift+F8 the new one. Accepting the name unchanged does nothing"
+   "say": "QA-INS-051: NAME: type more than 32 characters: it stops at 32; every key of the keyboard is allowed (including @ and +); F1 (OK): INS nn RENAMED - F8 UNDO and the header shows the new name; F8 (UNDO) gives the old name back, Shift+F8 the new one. Accepting the name unchanged does nothing"
   },
   {
    "say": "QA-INS-052: Shift+F5 (SAVE) on a sample instrument (any SD card; a write-protected card answers CARD IS WRITE PROTECTED and writes nothing): the strip runs SAVE <name> to 100% and DONE; read the card on a computer: instruments/<NAME>.pti exists, its size is 392 bytes plus twice the frames (the OG's instrument format), there is no _o3save.tmp (OS-FILES-C C1b: a sample that plays at another rate, or on the Amiga engine, is written resampled to 44,100 Hz and the strip says RESAMPLED <rate> -> 44100 HZ; a 12/8 bit engine, an Amiga mode other than one shot or forward loop, or a level under 40 of a 1.1.14-law project is refused on the strip; QA-FIL-090)"

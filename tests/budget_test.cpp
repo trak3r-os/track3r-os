@@ -120,7 +120,8 @@ TEST_CASE("budget: no state has an exception: every worst case is held to the st
       for (const sim::BudgetRow& row : rows) {
         if (std::string(row.screen) == "pattern" && std::string(row.theme) == theme && row.translate == translate) {
           CHECK(row.complete);
-          if (std::string(row.state).rfind("zoom", 0) != 0 && std::string(row.state) != "lane_marks") {
+          if (std::string(row.state).rfind("zoom", 0) != 0 && std::string(row.state) != "lane_marks" && std::string(row.state) != "selection_worst") {
+            // (OS-UXF-PAT 7: the Shift layer's dimmed keys left the worst case with the picker's keys, 1504 / 1745 now, so the block rows' own worst case, 1505 / 1758, no longer sits below it; it has its own limits above and the standard.)
             CHECK(row.words <= pattern->words);  // the pattern's own states (typical, cursor_end) are below its worst
           }
         }

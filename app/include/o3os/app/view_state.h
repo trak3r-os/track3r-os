@@ -202,7 +202,7 @@ struct ViewState {
   ParamView params;     // the generated parameter page's row and envelope (OS-002d)
   LearnView learn;      // the Learn overlay's list cursor (OS-013a)
   LearnMapView learn_map;  // the LEARN MAP overlay (OS-LEARNMAP)
-  core::ParamId enc_target = core::ParamId::None;  // OS-ENCLEARN: the one parameter that Instr + FX1 and the encoder move (set by Instr + FX2 on a Learn row; session only, never saved; main loop only)
+  core::ParamId enc_target = core::ParamId::None;  // OS-ENCLEARN: the one parameter that Instr + FX1 and the encoder move (set by the Learn overlay's F7 ENC on a Learn row; session only, never saved; main loop only)
   MixerView mixer;      // the Mixer screen's cursor (OS-011b)
   ModulesView modules;  // the MODULES screen, the engine picker and the app page (OS-012b)
   TextEntryView text;   // the on-screen keyboard overlay (OS-FU2)

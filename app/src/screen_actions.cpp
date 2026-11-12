@@ -144,6 +144,9 @@ bool ui_back(ActionContext& ctx, core::ActionArg) noexcept {
   if (ctx.view.overlay == OverlayId::StepPopup) {
     (void)ctx.view.pattern.snap_column();  // OS-ZOOM: the popup of a field the zoom level hides moved the cursor's column there; back in sight
   }
+  if (ctx.view.overlay == OverlayId::PatternChooser || ctx.view.overlay == OverlayId::LengthChooser || ctx.view.overlay == OverlayId::JumpChooser) {
+    ctx.view.edit.chooser_held = false;  // OS-UXF-PAT 6: F8 closes a tap-opened chooser; the flag ("the live PATTERN chooser") must not outlive it
+  }
   ctx.view.overlay = OverlayId::None;
   return true;
 }

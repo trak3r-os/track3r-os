@@ -123,7 +123,7 @@ You should see the picker close, the strip say **INSERT SET** and the cell show 
 Start on the INSERTS page, with the cursor on a cell that holds an effect that has presets.
 
 1. Press `Params` to open the insert's page, then `F5` (**PRESET**). A list opens, titled **PRESET** and the module's name: the factory presets, then a **CARD** heading with the card's presets of the effect (`modules/presets/<module>/` on the card; `+ MORE ON CARD` past 128). <!-- QA-MIX-094 QA-MIX-095 QA-MIX-105 -->
-2. Choose a preset with `Up`, `Down` or the encoder, and press `F1` (**LOAD**). `F8` (**BACK**) closes the list and loads nothing. <!-- QA-MIX-096 QA-MIX-098 --> To save the values in force as a card preset instead, press `Shift` + `F5` (**SAVE**) on the page or in the list, type a name in the keyboard (**PRESET NAME**, the effect's name suggested) and press `F8`: the strip says **PRESET SAVED: <NAME>**, and a taken name gets **<name> 2**. <!-- QA-MIX-107 QA-MIX-106 -->
+2. Choose a preset with `Up`, `Down` or the encoder, and press `F1` (**LOAD**). `F8` (**BACK**) closes the list and loads nothing. <!-- QA-MIX-096 QA-MIX-098 --> To save the values in force as a card preset instead, press `Shift` + `F5` (**SAVE**) on the page or in the list, type a name in the keyboard (**PRESET NAME**, the effect's name suggested) and press `F1`: the strip says **PRESET SAVED: <NAME>**, and a taken name gets **<name> 2**. <!-- QA-MIX-107 QA-MIX-106 -->
 
 You should see the strip say, for example, **PRESET DARK HALL LOADED**, and every row of the page show the preset's value. A preset sets every parameter: one that names only some leaves the others at the module's defaults. <!-- QA-MIX-096 QA-MIX-097 --> The values are saved with the project and the insert sounds so at once. Like every change to an insert, a preset load is not an undo step. A card preset that names an unknown parameter says **PRESET <NAME> LOADED, <n> SKIPPED**; a damaged file says **PRESET DAMAGED**; a file of another module **PRESET OF <MODULE>**. An effect with no presets at all opens the list and it says **NO PRESETS, SHIFT+F5 SAVES**. <!-- QA-MIX-099 QA-MIX-106 --> New in track3r-os.
 
@@ -159,7 +159,7 @@ On an empty cell `F6` and `Params` say **NO INSERT HERE** and open nothing. On t
 Start on the MIXER page, with the cursor on a track.
 
 1. Press `Shift` + `F1`. The keyboard opens, titled **TRACK NAME**. <!-- QA-MIX-010 -->
-2. Type with the pads, up to 20 characters. `F8` (**OK**) keeps it. `F7` (**CANCEL**) leaves the old name.
+2. Type with the pads, up to 20 characters. `F1` (**OK**) keeps it. `F8` (**CANCEL**) leaves the old name.
 
 You should see **TRACK 03 NAMED**. The name shows on the Mixer, ROUTING and the Pattern header, and is saved. On IN, SND A, SND B, CUE, MASTER or the MASTER FX page the strip says **TRACKS ONLY**. <!-- QA-MIX-011, QA-MIX-012 -->
 
@@ -239,8 +239,8 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 | the pads, on the MIXER, ROUTING, STEMS and MASTER FX pages | play the current instrument while held | QA-MIX-040 |
 | `Shift` + the track's pad in the second row (Pattern or Perform) | mutes the track while it plays; again to unmute | QA-MIX-020 |
 | the pads, on the on-screen keyboard | type the name | QA-MIX-010 |
-| `F7` (**CANCEL**), on the on-screen keyboard | keeps the old name | QA-MIX-010 |
-| `F8` (**OK**), on the on-screen keyboard | keeps the new name | QA-MIX-011 |
+| `F8` (**CANCEL**), on the on-screen keyboard | keeps the old name | QA-MIX-010 |
+| `F1` (**OK**), on the on-screen keyboard | keeps the new name | QA-MIX-011 |
 
 ## Good to know
 

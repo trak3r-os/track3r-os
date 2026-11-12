@@ -4,7 +4,7 @@
  "steps": [
   {"say": "OS-SHIFTROW, rows QA-SNG-002/003, QA-SLD-015, QA-FIL-002, QA-REC-011/012, QA-MIX-003/004, QA-PRF-002/003, QA-CFG-031..033 and QA-GLB-013 of docs/qa/catalogue. Needs a project open with a song of at least two slots (the demo or the t-v16 project) and the transport stopped"},
   {"keys": ["-shift"], "gap": 0.2, "note": "(Shift released, in case a former run left it down)"},
-  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|NAVIGATOR|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
+  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|NAVIGATOR|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|TEXT_ENTRY)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
   {"keys": ["pattern"], "gap": 0.4},
   {"state": {"screen": "PATTERN"}, "within": 3},
 

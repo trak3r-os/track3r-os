@@ -167,6 +167,10 @@ bool wave_sync(const Model& model, ViewState& view) noexcept {
   return ws.point != before.point || ws.slice != before.slice || ws.first != before.first || ws.span != before.span;
 }
 
+const char* const* WaveScreen::shift_row(const ViewState& view) const noexcept {
+  return view.page[screen_index(ScreenId::Wave)] == 1u ? kChopShiftKeys : kWaveShiftKeys;  // page 1 is the CHOP view (the WAVETABLE and GRANULAR ones reset to page 0)
+}
+
 WaveView wave_view_of(const Model& model, const ViewState& view) noexcept {
   const model::Instrument* in = model.project != nullptr ? model.project->instrument(wave_slot(view)) : nullptr;
   if (in != nullptr && in->kind == model::InstrumentKind::Sample) {

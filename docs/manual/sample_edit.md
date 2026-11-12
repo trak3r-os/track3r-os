@@ -18,7 +18,7 @@ Use Sample edit to change a loaded sample: crop, normalize, reverse, fade, chang
 
 | Area | What it shows |
 |---|---|
-| Header | **SELECTION**, and at the right the instrument you are editing (**INSTRUMENT 05 BREAK_A**) with the reminder `pad / Shift+F5: change`. |
+| Header | **SELECTION**, and at the right the instrument you are editing (**INSTRUMENT 05 BREAK_A**) with the reminder `pad / Shift+F7/F8: change`. |
 | Main area | The sample, the selection, the **AMP** percentage, the length selected, the undo and redo steps left and how much sample memory is free (for example **4908 KB FREE**, rounded down: the same sample memory as the Sample load card and Config show; new in the Community OS). An effect needs a work buffer as big as the sample. When no buffer set aside earlier is free and big enough, the effect sets a new one aside (at most four), and the figure drops by that much, also when you cancel the effect; a cancelled effect's buffer is used again by the next effect. The buffers are given back when a project loads, on New project with **ALL** and at power-on; New project with **KEEP INSTRUMENTS** keeps them. <!-- QA-SED-018 --> |
 | Info line | The selection in frames, or "no selection". |
 | Strip | Messages, for example **EDIT DC REMOVE** or **NOTHING TO NORMALISE**. |
@@ -40,7 +40,7 @@ You should see the selection in frames on the info line. `Delete` clears it.
 <!-- sync: src=app/src/sample_edit_actions.cpp qa=QA-SED-002,QA-SED-004 -->
 
 1. Press `F2` (**NORM**). The loudest point of the range goes to full scale. <!-- QA-SED-002 -->
-2. Press `F8` (**UNDO**) to get the sample back exactly. `Shift` + `F8` (**REDO**) does it again. <!-- QA-SED-004 -->
+2. Press `F8` (**UNDO**) to get the sample back exactly. `Shift` + `F5` (**REDO**) does it again. <!-- QA-SED-004 -->
 
 If the sample is already at full scale or silent, the strip says **NOTHING TO NORMALISE**.
 
@@ -50,7 +50,7 @@ If the sample is already at full scale or silent, the strip says **NOTHING TO NO
 1. Select the part. Press `F1` (**CROP**) to keep it. <!-- QA-SED-005 --> Press `F3` (**REVERSE**), `F4` (**FADE IN**) or `F5` (**FADE OUT**). <!-- QA-SED-006, QA-SED-007, QA-SED-008 --> The strip says, for example, **EDIT REVERSE DONE**.
 2. Press `F6` (**AMP**) to multiply the range by the **AMP** percentage, which starts at 200 %. Loud peaks are clipped, not wrapped. <!-- QA-SED-009 -->
 3. `Shift` + `Up` or `Down` sets **AMP**, from 10 to 800 in steps of 10. It only sets the factor for the next `F6`: the sample is not touched. <!-- QA-SED-011 -->
-4. Hold `F7` (**PREVIEW**) to hear it. `Shift` + `F7` (**PRV EDGE**) plays from the edge. <!-- QA-SED-010, QA-SED-015 -->
+4. Hold `F7` (**PREVIEW**) to hear it. `Shift` + `Play` plays from the edge (this key has no label). <!-- QA-SED-010, QA-SED-015 -->
 
 **CROP** needs a selection that is smaller than the sample, or it refuses and makes no step. A crop moves the instrument's points and slices to the new length.
 
@@ -135,14 +135,14 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 | `F2` | **NORM** | **COMPRESS** | **RESCAN** | **AMG 16K** |
 | `F3` | **REVERSE** | - | **DEFAULTS** | **Q8** |
 | `F4` | **FADE IN** | - | **NEW INS** | **DC REM** |
-| `F5` | **FADE OUT** | - | - | **NEXT INS** |
+| `F5` | **FADE OUT** | - | - | **REDO** |
 | `F6` | **AMP** | - | - | **SAVE WAV** |
-| `F7` | **PREVIEW** | **PREVIEW** | **PREVIEW** | **PRV EDGE** |
-| `F8` | **UNDO** | **UNDO** | **UNDO** | **REDO** |
+| `F7` | **PREVIEW** | **PREVIEW** | **PREVIEW** | **INST -** |
+| `F8` | **UNDO** | **UNDO** | **UNDO** | **INST +** |
 
 <!-- /manual-tables -->
 
-![Sample edit, Shift row: AMG 8K, AMG 16K, Q8, DC REM, NEXT INS, SAVE WAV, PRV EDGE, REDO.](img/sample_edit_qa_sed_001.png)
+![Sample edit, Shift row: AMG 8K, AMG 16K, Q8, DC REM, REDO, SAVE WAV, INST -, INST +.](img/sample_edit_qa_sed_001.png)
 
 | Key | What it does | Ref |
 |---|---|---|
@@ -159,17 +159,18 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 | `Shift` + `F2` (**AMG 16K**) | Convert to the Amiga rate of 16,574 Hz. | QA-SED-001 |
 | `Shift` + `F3` (**Q8**) | The 8-bit option of the Amiga conversion. | QA-SED-001 |
 | `Shift` + `F4` (**DC REM**) | Remove the DC offset of the selection, or of the whole sample. | QA-SED-001, QA-SED-003 |
-| `Shift` + `F5` (**NEXT INS**) | Edit the next instrument, 64 round to 1 (a slot that holds no sample says **NO SAMPLE IN THIS INSTRUMENT** to an effect). A pad picks one of 1 to 48 directly. | QA-SED-001, QA-SED-017 |
+| `Shift` + `F5` (**REDO**) | Do the process again after an undo. It was on `Shift` + `F8`. | QA-SED-001, QA-SED-004 |
 | `Shift` + `F6` (**SAVE WAV**) | Save the sample, as it is now, as a mono WAV file in the `Samples` folder of the card, named `SMP_001.wav`, `SMP_002.wav` and so on, at the instrument's rate. | QA-SED-001 |
-| `Shift` + `F7` (**PRV EDGE**) | Preview from the edge of the selection. | QA-SED-001 |
-| `Shift` + `F8` (**REDO**) | Do the process again after an undo. | QA-SED-001, QA-SED-004 |
+| `Shift` + `F7` (**INST -**) | Edit the previous instrument, 1 round to 64 (a slot that holds no sample says **NO SAMPLE IN THIS INSTRUMENT** to an effect). It replaces **NEXT INS**, as on Sample load. A pad picks one of 1 to 48 directly. | QA-SED-001, QA-SED-017 |
+| `Shift` + `F8` (**INST +**) | Edit the next instrument, 64 round to 1. | QA-SED-001, QA-SED-017 |
+| `Shift` + `Play` | Preview from the edge of the selection (it was **PRV EDGE** on `Shift` + `F7`; the row is full, so the key has no label). | QA-SED-015 |
 
 ## Good to know
 <!-- sync: src=app/src/sample_edit_actions.cpp qa=QA-SED-002,QA-SED-003,QA-SED-004,QA-SED-014,QA-SLD-010 -->
 
 - Each process is one undo step, up to three. <!-- QA-SED-004 -->
 - `Left` and `Right` pick the start or the end of the selection. The encoder moves the picked edge one column of the view a click (one frame only at full zoom), and `Shift` + encoder moves it 16 columns at a time. `Delete` clears the selection. `Up` and `Down` zoom the view. <!-- QA-SED-016 -->
-- `F7` (**PREVIEW**) plays the instrument while you hold it. `Shift` + `F7` (**PRV EDGE**) plays from the picked edge while you hold it. <!-- QA-SED-010, QA-SED-015 -->
+- `F7` (**PREVIEW**) plays the instrument while you hold it. `Shift` + `Play` plays from the picked edge while you hold it. <!-- QA-SED-010, QA-SED-015 -->
 - The Amiga conversion refuses a wavetable: **A WAVETABLE CANNOT BE CONVERTED**. A sample converted with **AMG 8K** reloads at 8,287 Hz on the Amiga engine. <!-- QA-SLD-010 -->
 - **SAVE WAV** with no card write layer says **NO CARD WRITE LAYER**, and with no sample **NO SAMPLE IN THIS INSTRUMENT**. It writes nothing then. <!-- QA-SED-014 -->
 - Not checked against the original firmware: the keys on this screen. <!-- og: open -->

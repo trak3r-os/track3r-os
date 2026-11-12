@@ -91,7 +91,7 @@ TEST_CASE("sim card: the card commands parse, and a fixture named pull or insert
 TEST_CASE("sim card: the fixture is copied, a save goes to the copy, and a second simulator finds the card as it was") {
   const fs::path fixture = e2e_card_fixture();
   NEED(fs::is_directory(fixture));
-  const std::string saved = card_line() + kOpenFirst + "tap file\ntap f5\nwait 50\ntap f8\nwait 400\n";
+  const std::string saved = card_line() + kOpenFirst + "tap file\ntap f5\nwait 50\ntap f1\nwait 400\n";
   CHECK(holds(saved + "assert state msg=SAVE_TRACK_01_DONE\nassert file \"Projects/Track 01/project.o3pj\" sha=" + kSmallSha + "\n"));  // (when the run ends, its scratch copy goes)
   CHECK(holds(card_line() + "assert file \"Projects/Track 01\" absent\nassert file \"Projects/Small Song/project.o3pj\" sha=" + kSmallSha + "\n"));  // a fresh simulator: a fresh copy
   CHECK_FALSE(fs::exists(fixture / "Projects" / "Track 01"));  // and the fixture itself is never written to

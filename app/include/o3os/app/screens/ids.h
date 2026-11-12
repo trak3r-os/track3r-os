@@ -59,6 +59,7 @@ enum class OverlayId : std::uint8_t {
   Help = 21,            // OS-HELP: the help page of the screen in view, Shift + Config (help_text.h); modal, any key but the arrows, the encoder and Shift closes it
   ExportProgress = 20,  // OS-WAVEXP: the modal progress of a running WAV export, F8 CANCEL (export_view.h); 20 leaves the numbers between to the branches that add overlays
   PatternTools = 22,    // OS-PTOOLS2 S2: the Pattern screen's TOOLS dialog over the block (pattern_tools_view.h), opened from the verb menu's TRANSPOSE / INSTRUMENT rows
+  PadsPicker = 24,      // OS-UXF-PAT 7: the pads' mode list of Pattern's Shift + F2 PADS (F1..F6 pick, F8 BACK; pads_picker_overlay.cpp)
   LearnMap = 23,        // OS-LEARNMAP: every MIDI Learn binding and the encoder's target on one cover (learn_map.h), opened by F6 MAP in the Learn dialog and F8 on Config's MIDI page
 };
 

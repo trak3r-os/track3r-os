@@ -1052,26 +1052,22 @@ TEST_CASE("qanet keys self-test: the walk excuses a key by its sibling, flags ev
   };
   KeyState pattern;
   pattern.name = "Pattern WATCH";
-  // Nothing happens on any key: every argument of pads.mode is silent, which is a finding for each of them.
+  // Nothing happens on any key: the PADS picker's key is silent, which is a finding.
   Report none;
   // (A planted press runs the control: the same time, the same Shift, and no key. A timer must not be taken for the key's doing.)
   walk_state(pattern, card.dir.path(), [](sim::Simulator& s, const Probe& p) { quiet(s, p); }, none);
   CHECK(none.setup_errors.empty());
-  CHECK(names(none).count("Shift+F2 (pads.mode 0)") == 1u);  // (OS-PADOCT: Shift + F1 is the octave, the modes begin at F2)
-  CHECK(names(none).count("Shift+F3 (pads.mode 1)") == 1u);
-  // One of them acts: the others select what is already selected.
+  CHECK(names(none).count("Shift+F2 (pads.picker 0)") == 1u);  // (OS-UXF-PAT 7: Shift + F2 opens the picker; the modes are picked inside it)
+  // It acts: the finding goes away.
   Report one;
   walk_state(pattern, card.dir.path(), [](sim::Simulator& s, const Probe& p) {
     quiet(s, p);
-    if (p.action == "pads.mode 1") {
-      s.action(core::action_id("pads.mode"), 1);
+    if (p.action == "pads.picker 0") {
+      s.action(core::action_id("pads.picker"), 0);
     }
   }, one);
-  CHECK(names(one).count("Shift+F2 (pads.mode 0)") == 0u);
-  CHECK(names(one).count("Shift+F3 (pads.mode 1)") == 0u);
-  CHECK(names(one).count("Shift+F5 (pads.mode 2)") == 0u);
+  CHECK(names(one).count("Shift+F2 (pads.picker 0)") == 0u);
   CHECK(names(one).count("F6 (events.open 0)") == 1u);  // a key with no sibling is still silent (OS-F6EVENTS: Pattern F6 EVENTS; it was tools.repeat)
-  CHECK(one.excused_sibling >= 3u);
   // An action whose argument names a function is no peer of the others: LATCH acts and RESET, which has nothing to turn off, is still silent.
   KeyState perform;
   perform.name = "Perform";

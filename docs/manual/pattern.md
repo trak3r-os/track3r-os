@@ -19,7 +19,7 @@ The notes are stored: they live in the pattern, and they are saved with the proj
 
 - **WATCH** is the browse mode. Pads only preview the sound, and nothing is written.
 - **STEP** writes each pad you press on the cursor's step, then moves the cursor on by **JUMP**. The playhead does not move the cursor. `Rec` turns it on and off. <!-- QA-PAT-006 -->
-- **LIVE** writes the pads you play at the playhead while the pattern plays, and the view follows the playhead. `Shift` + `Rec` turns it on and off, and so do `Rec` and then `Play`, tapped within a few hundredths of a second. <!-- QA-PAT-003, QA-PAT-005, QA-PAT-317 -->
+- **LIVE** writes the pads you play at the playhead while the pattern plays, and the view follows the playhead. `Shift` + `Rec` turns it on and off, from any mode, and so do `Rec` and then `Play`, tapped within a few hundredths of a second. Turning LIVE off takes you back to the mode you turned it on from, STEP or WATCH. <!-- QA-PAT-003, QA-PAT-005, QA-PAT-317, QA-PAT-528 -->
 
 Only a key press ends a mode, with one exception: when the song ends in LIVE, the chip goes back to WATCH and the take ends. STEP stays. <!-- QA-PAT-126, QA-PAT-150 --> In STEP and LIVE a red frame shows that the pattern can be edited. The buttons have no lights, so the chip and the red frame are the signs.
 
@@ -66,7 +66,7 @@ Start on the Pattern screen, in WATCH. The pattern can be stopped or playing.
 
 1. Press `Shift` + `Rec`. The chip reads **LIVE**, in red. A stopped transport starts now, after the count-in when COUNT-IN is on. <!-- QA-PAT-003, QA-PAT-134 -->
 2. Play the pads. The notes are written at the playhead. The cursor follows it, and the view keeps the playing row in the middle. <!-- QA-PAT-004, QA-PAT-272, QA-PAT-273 -->
-3. Press `Shift` + `Rec` for STEP, or `Rec` for WATCH. `Play` stops the transport and ends the take. <!-- QA-PAT-005, QA-PAT-130, QA-PAT-132 -->
+3. Press `Shift` + `Rec` to turn LIVE off: the chip goes back to STEP if you came from STEP, and to WATCH if you came from WATCH. `Rec` always goes to WATCH. `Play` stops the transport and ends the take. <!-- QA-PAT-005, QA-PAT-130, QA-PAT-132, QA-PAT-528 -->
 
 You should see the new notes in the grid.
 
@@ -93,6 +93,17 @@ Start in STEP, WATCH (stopped or playing) or LIVE. A block is the steps and trac
 
 You should see the block over the steps and tracks you chose, and over just the columns you chose while it stays in one track. Over several tracks the cursor's track keeps the bright blue and the other tracks of the block are a slightly duller blue, so you can see which track the cursor is in. <!-- QA-PAT-465 --> `Shift` + `Right` past the last column takes the next track whole; from there `Shift` + `Left` or `Right` add or drop a whole track at a time. <!-- QA-PAT-319 --> The playhead does not move it. While the view follows the playhead (WATCH playing, LIVE) the block starts at the step the playhead is on at your first arrow press, and the cursor stays on the playhead. <!-- QA-PAT-009, QA-PAT-010 --> `Delete` clears the highlighted columns and closes the block: every column for whole steps, only the note and instrument for a block in the Note column. `Shift` + `Insert` or a plain arrow also closes it. With a block on the `Instr`, `Vol`, `FX1` or `FX2` column, the encoder (and `Shift` + encoder) changes that column's values inside the block and nothing outside it. <!-- QA-PAT-482 --> The one-column block stays when you let go of `Shift`; `Shift` + `Down` from it makes a block of whole steps again.
 
+### Loop a block (Focus Loop)
+<!-- sync: src=app/src/pattern_actions.cpp,app/src/bindings.cpp qa=QA-PAT-540,QA-PAT-541,QA-PAT-542 -->
+
+New in track3r-os. Start in STEP, WATCH or LIVE, with a block selected (see "Select a block").
+
+1. Press `Shift` + `Play`. The pattern starts on the first step of the block and plays to its last step, then goes back to the first step, again and again. It never counts in. <!-- QA-PAT-540 -->
+2. If the pattern is already playing, `Shift` + `Play` does the same: the play line jumps to the first step of the block and the loop begins. <!-- QA-PAT-542 -->
+3. To stop, press `Play`, or `Shift` + `Play` again. <!-- QA-PAT-541 -->
+
+You should see **LOOP 05-12  PLAY: STOP** on the info line while it loops (the step numbers follow the **NUMBERING** setting). The block stays selected. With no block, `Shift` + `Play` plays from the step under the cursor and does not loop. A track shorter than the pattern plays its own steps inside the loop, and changing the pattern or stopping ends the loop.
+
 ### Copy and paste steps
 
 Start in STEP, with a block selected or with only the cursor on a step.
@@ -101,7 +112,7 @@ Start in STEP, with a block selected or with only the cursor on a step.
 2. Move the cursor to the new place.
 3. Press `Shift` + `Copy`. The copy is written with its top-left step on the cursor. <!-- QA-PAT-227 -->
 
-You should see the copied steps. A block of columns copies and pastes those columns only, in the same columns; the other columns under it stay. <!-- QA-PAT-320 --> The clip stays, so you can paste it again. Pasting past the last step or track cuts the rest. There is no cut key: copy, then delete. <!-- QA-PAT-228 --> In WATCH the copy works, but the paste writes nothing and the strip says **TURN EDIT ON**. A whole-pattern clip (the `F1` row of the keys table) pastes as steps only; the lengths and name stay the target's. <!-- QA-PAT-288 --> Fill, the TOOLS list (DUPLICATE, EXPAND, SHRINK), the tool apps and EXPORT SELECTION always take whole steps. With a block of columns, Fill and DUPLICATE say **WHOLE STEPS** in the strip. <!-- QA-PAT-321, QA-PAT-092 -->
+You should see the copied steps. A block of columns copies and pastes those columns only, in the same columns; the other columns under it stay. <!-- QA-PAT-320 --> The clip stays, so you can paste it again. Pasting past the last step or track cuts the rest. There is no cut key: copy, then delete. <!-- QA-PAT-228 --> New in track3r-os: a block of whole steps (two or more tracks, or all the columns) also carries the MIDI lane events of its tracks and rows, and the whole-pattern clip carries every track's; a paste replaces the lane events under it in the same undo, and Delete on a selected block takes them too. A paste the lane memory cannot take is refused whole (**LANES DO NOT FIT: NOTHING CHANGED**), and a block of more than 2,048 lane events copies its steps only (**NO LANES: TOO MANY**). Insert and Shift + Delete of rows move the lane events with the rows. <!-- QA-PAT-523, QA-PAT-524, QA-PAT-525, QA-PAT-526 --> In WATCH the copy works, but the paste writes nothing and the strip says **TURN EDIT ON**. A whole-pattern clip (the `F1` row of the keys table) pastes the steps, the lane events and the track lengths; the name stays the target's. <!-- QA-PAT-288 --> Fill, the TOOLS list (DUPLICATE, EXPAND, SHRINK), the tool apps and EXPORT SELECTION always take whole steps. With a block of columns, Fill and DUPLICATE say **WHOLE STEPS** in the strip. <!-- QA-PAT-321, QA-PAT-092 -->
 
 > **Careful**: Paste writes over the steps under it. One `F8` (**UNDO**) takes it back. <!-- QA-PAT-227 -->
 
@@ -169,9 +180,9 @@ The Navigator is the list of screens. <!-- QA-MOD-002 -->
 
 1. Press `Song` and `Pattern` together, or `Master` and `Song`, and let both go. The Navigator opens on any screen (keys: [The panel](panel.md#screen-buttons)).
 2. Turn the encoder to the screen you want. `Shift` + turn moves a page.
-3. Press `F8` (**GO**). The screen opens. <!-- QA-MOD-002 QA-GLB-018 -->
+3. Press `F1` (**GO**). The screen opens. <!-- QA-MOD-002 QA-GLB-018 -->
 
-`F1` also opens it. `F7` (**CLOSE**) or `Pattern` leaves without a change. `Shift` + `Pattern` is not the Navigator any more: it lists your module apps (see [Modules](modules.md#start-an-app-from-anywhere)). <!-- QA-GLB-233 -->
+`F1` also opens it. `F8` (**BACK**) or `Pattern` leaves without a change. `Shift` + `Pattern` is not the Navigator any more: it lists your module apps (see [Modules](modules.md#start-an-app-from-anywhere)). <!-- QA-GLB-233 -->
 
 ## Keys on this screen
 <!-- sync: src=app/src/pattern_actions.cpp,app/src/step_actions.cpp,app/src/bindings.cpp,app/include/o3os/app/pad_layer.h qa=QA-PAT-001,QA-PAT-002,QA-PAT-130,QA-PAT-003,QA-PAT-005,QA-PAT-131,QA-PAT-004,QA-PAT-132,QA-PAT-231,QA-PAT-234,QA-PAT-219,QA-PAT-220,QA-PAT-221,QA-PAT-007,QA-PAT-006,QA-PAT-222,QA-PAT-224,QA-PAT-240,QA-PAT-236,QA-PAT-239,QA-PAT-244,QA-PAT-251,QA-PAT-252,QA-PAT-253,QA-PAT-216,QA-PAT-217,QA-PAT-229,QA-PAT-226,QA-PAT-227,QA-PAT-254,QA-PAT-255,QA-PAT-260,QA-PAT-086,QA-PAT-160,QA-PAT-161,QA-PAT-246,QA-PAT-315 -->
@@ -182,12 +193,12 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 | Key | Label | With `Shift` |
 |---|---|---|
 | `F1` | **PATTERN** | **OCTAVE** |
-| `F2` | **LENGTH** | **NOTES** |
-| `F3` | **JUMP** | **PIANO** |
-| `F4` | **FILL** | **ISO** |
-| `F5` | **PREVIEW** | **TRACKS** |
-| `F6` | **EVENTS** | **PATS** |
-| `F7` | **TOOLS** | **VU** |
+| `F2` | **LENGTH** | **PADS** |
+| `F3` | **JUMP** | - |
+| `F4` | **FILL** | - |
+| `F5` | **PREVIEW** | - |
+| `F6` | **EVENTS** | - |
+| `F7` | **TOOLS** | - |
 | `F8` | **UNDO** | **REDO** |
 
 <!-- /manual-tables -->
@@ -195,7 +206,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 | Key | What it does | Ref |
 |---|---|---|
 | `Rec` | Turns STEP on and off (from WATCH). In LIVE it goes to WATCH. | QA-PAT-001, QA-PAT-002, QA-PAT-130 |
-| `Shift` + `Rec` | Turns LIVE on and off. In LIVE it goes to STEP. | QA-PAT-003, QA-PAT-005, QA-PAT-131 |
+| `Shift` + `Rec` | Turns LIVE on and off, from any mode. In LIVE it goes back to STEP or WATCH, whichever you came from. | QA-PAT-003, QA-PAT-005, QA-PAT-131, QA-PAT-528 |
 | `Rec`, then `Play` at once | The same as `Shift` + `Rec`. | QA-PAT-317 |
 | `Play` | Starts and stops the pattern. In LIVE the cursor follows the playhead. | QA-PAT-004, QA-PAT-132 |
 | `Shift` + `Play` | Starts the pattern at the cursor's row. It never counts in. | QA-PAT-231, QA-PAT-234 |
@@ -214,7 +225,7 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 | `Insert` | In STEP. With `Shift` + `Delete` after it, leaves the pattern as it was. | QA-PAT-229 |
 | `Copy` | Copies the block, or the step. | QA-PAT-226 |
 | `Shift` + `Copy` | Pastes the clip at the cursor, in STEP. | QA-PAT-227, QA-PAT-288 |
-| `F1` (**PATTERN**) | Hold: the chooser. Playing, a pick switches the pattern. A tap does nothing. With `F1` held, `Copy` copies the whole pattern and `Shift` + `Copy` writes it over the one shown. | QA-PAT-254, QA-PAT-255, QA-PAT-260, QA-PAT-285, QA-PAT-286 |
+| `F1` (**PATTERN**) | Tap or hold: the chooser (a tap keeps it open until `F1` or `F8`, a hold closes it when you let go). Playing, a pick switches the pattern. With the chooser open, `Copy` copies the whole pattern and `Shift` + `Copy` writes it over the one shown. | QA-PAT-254, QA-PAT-255, QA-PAT-260, QA-PAT-285, QA-PAT-286, QA-PAT-527 |
 | `F2` (**LENGTH**), `F3` (**JUMP**) | Hold to open a chooser. | QA-PAT-253 |
 | `F4` (**FILL**) | Opens the Fill dialog in Edit. | QA-PAT-086 |
 | `F7` (**TOOLS**) | Opens the verb menu: pads 1-16 pick a verb directly (**INVERT** is pad 9), `F1` (**RUN**) runs the verb under the cursor, `F8` (**BACK**) closes. The menu's `F6` is **RE FILL** (**REPEAT** after a TOOLS apply), which closes the menu and repeats the last apply (see below). The last row, **APPS >** (pad 16), opens the APPS page with the tool apps only; DUPLICATE x2, EXPAND x2, SHRINK /2 and the exports are pads of the menu itself. It opens in STEP and WATCH while playing; only in LIVE the strip says THE PLAYHEAD HOLDS THE CURSOR IN LIVE. | QA-PAT-436, QA-PAT-437, QA-PAT-438, QA-PAT-439, QA-PAT-447, QA-PAT-160, QA-PAT-161, QA-PAT-448, QA-PAT-449, QA-PAT-280 |
@@ -222,24 +233,30 @@ The key row, and the row drawn while `Shift` is held. `-` means the key does not
 
 `F5` (**PREVIEW**) sounds the note under the cursor while you hold it. `F7`, then `F6` (**RE FILL**) repeats the last apply with its settings (the `F6` of the Pattern key row itself opens the event list, **EVENTS**): the last fill of the `F4` dialog (a random fill draws again), or the last `F1` (**APPLY**) of the TOOLS dialog (TRANSPOSE, INSTRUMENT, CLEAR) with the same amount, whichever you ran later; the menu key reads **REPEAT** after a TOOLS apply. A verb of the `F7` menu that has no dialog (ROTATE, INVERT, an export) is never repeated. Before any in the session, and after a new or opened project, the strip says **NOTHING TO REPEAT**; one undo unit, and outside STEP and LIVE with a fill done the strip says **FILL: TURN EDIT ON**. <!-- QA-PAT-435 --> INVERT is the verb menu's pad 9 (`F7`, then pad 9, or `F7` held + pad 9): with no block the strip says **SELECT A BLOCK TO INVERT**, and outside STEP and LIVE **TURN EDIT ON**. <!-- QA-PAT-312, QA-PAT-437, QA-PAT-456 --> A tap of `F2` or `F3` opens its chooser, and a second tap closes it. A chooser shows its own name on `F1` to `F3` with the open one inverted and **BACK** on `F8`; in the **PATTERN** chooser `F1` reads **PATTERN**, and in TOOLS `F1` reads **RUN**. The step popup shows **CANCEL** on `F8` alone. <!-- QA-PAT-276 -->
 
-The Shift row sets the pads' octave and chooses what the pads do. The octave is the note-entry octave (saved with the project); the pad mode stays until you change it and is not saved. No key picks the STEP pad layout. New in track3r-os. <!-- QA-PAT-250 -->
+The Shift row sets the pads' octave and opens the PADS picker. The octave is the note-entry octave (saved with the project); the pad mode stays until you change it and is not saved. No key picks the STEP pad layout. New in track3r-os. <!-- QA-PAT-250 -->
+
+`Shift` + `F2` (**PADS**) opens the PADS picker, a small dialog over the Pattern screen that changes nothing until you pick. Its keys:
 
 | Key | Pads |
 |---|---|
-| `Shift` + `F1` (**OCTAVE**) | moves the pads' lowest C up one octave; after C9 it goes back to C0. The key shows the octave, for example **C3**. It applies to NOTES, PIANO and ISO |
-| `Shift` + `F2` (**NOTES**) | the usual note pads. The LEDs show the scale: a note of the scale is bright (the root too), a note outside the scale is dim. With no scale, or with SCALE LOCK on, every note pad is bright |
-| `Shift` + `F3` (**PIANO**) | two octaves laid out like a piano. The LEDs light the notes the same way as in NOTES: scale notes bright, others dim. The two octave pads are dim at C3 and bright on the side the octave has moved to |
-| `Shift` + `F4` (**ISO**) | each column a semitone, each row up a fourth. The LEDs light the notes the same way as in NOTES |
-| `Shift` + `F5` (**TRACKS**) | each column is a track; rows for track, mute, mute mode and solo |
-| `Shift` + `F6` (**PATS**) | each pad is a pattern, 1 to 48. A tap queues it |
-| `Shift` + `F7` (**VU**) | each column is a track with a level meter. Again: faders |
+| `F1` (**NOTES**) | the usual note pads. The LEDs show the scale: a note of the scale is bright (the root too), a note outside the scale is dim. With no scale, or with SCALE LOCK on, every note pad is bright |
+| `F2` (**PIANO**) | two octaves laid out like a piano. The LEDs light the notes the same way as in NOTES: scale notes bright, others dim. The two octave pads are dim at C3 and bright on the side the octave has moved to |
+| `F3` (**ISO**) | each column a semitone, each row up a fourth. The LEDs light the notes the same way as in NOTES |
+| `F4` (**TRACKS**) | each column is a track; rows for track, mute, mute mode and solo |
+| `F5` (**PATS**) | each pad is a pattern, 1 to 48. A tap queues it |
+| `F6` (**VU**) | each column is a track with a level meter. Again: faders |
+| `F8` (**BACK**) | closes the picker; the pad mode stays |
+
+A pick closes the picker. The picker marks the mode now in use. <!-- QA-PAT-529 -->
+
+`Shift` + `F1` (**OCTAVE**) moves the pads' lowest C up one octave; after C9 it goes back to C0. The key shows the octave, for example **C3**. It applies to NOTES, PIANO and ISO.
 
 The octave is also the OCTAVE row of the note panel (hold `Note`) and the octave pads of PIANO: all three agree. <!-- QA-PAT-313, QA-PAT-314, QA-PAT-467 --> A lone `Shift` held down shows the TRACKS layout until you let go.
 
 ## Good to know
 <!-- sync: src=app/src/pattern_actions.cpp,app/src/pattern_view.cpp qa=QA-PAT-500,QA-PAT-501,QA-PAT-491,QA-PAT-502,QA-PAT-250,QA-PAT-251,QA-PAT-252,QA-PAT-253,QA-PAT-243,QA-PAT-246,QA-PAT-247,QA-PAT-052,QA-PAT-235,QA-PAT-057,QA-PAT-219,QA-PAT-221,QA-PAT-244,QA-PAT-254 -->
 
-- `F1` **PATTERN** works only while you hold it, so a tap opens nothing. **JUMP** is the step value. The tempo is set with `Pattern` held and the encoder, on any screen. <!-- QA-PAT-086, QA-PAT-089 -->
+- `F1` **PATTERN** opens the pattern chooser on a tap (`F1` or `F8` closes it) or while you hold it. **JUMP** is the step value. The tempo is set with `Pattern` held and the encoder, on any screen. <!-- QA-PAT-086, QA-PAT-089 -->
 - After `Play` stops in WATCH, the cursor stays on the last row it followed; it does not jump back or to the top. New in track3r-os. <!-- QA-PAT-322 -->
 - In LIVE, the encoder and `Delete` edit the step under the playhead: the encoder moves its note by a semitone and `Delete` clears it. A plain arrow only moves the cursor one row off the playhead, changes no step, and the next step pulls the cursor back. The red **LIVE** chip is the only sign. New in track3r-os. <!-- QA-PAT-323 -->
 - In the Instr column the encoder counts 1 to 48 and stops. One detent down from instrument 1 goes to 49, then on to 64 (MIDI channels 1 to 16); one detent up from 49 goes back to 1. <!-- QA-PAT-120 -->

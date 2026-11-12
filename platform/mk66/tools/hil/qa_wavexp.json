@@ -23,21 +23,11 @@
   },
   {
    "keys": [
-    "f7"
-   ],
-   "gap": 0.3,
-   "if_state": {
-    "overlay": "NAVIGATOR"
-   },
-   "note": "(a leftover Navigator is closed)"
-  },
-  {
-   "keys": [
     "f8"
    ],
    "gap": 0.3,
    "if_state": {
-    "overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|FILL|PLAY_MODE|TOOLS|EXPORT_PROGRESS)$"
+    "overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|FILL|PLAY_MODE|TOOLS|EXPORT_PROGRESS|NAVIGATOR|TEXT_ENTRY)$"
    },
    "note": "(a leftover overlay is put away: F8 is Back, or CANCEL on an export)"
   },

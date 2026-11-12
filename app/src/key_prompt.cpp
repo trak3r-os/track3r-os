@@ -27,6 +27,7 @@ constexpr std::uint8_t kF5 = 4;
 constexpr std::uint8_t kF6 = 5;
 constexpr std::uint8_t kF7 = 6;
 constexpr std::uint8_t kF8 = 7;
+constexpr std::uint8_t kShiftF1 = 8 + 0;
 constexpr std::uint8_t kShiftF2 = 8 + 1;
 constexpr std::uint8_t kShiftF3 = 8 + 2;
 constexpr std::uint8_t kShiftF5 = 8 + 4;  // OS-MODPRESET P4: SAVE in the F5 PRESET list
@@ -78,21 +79,23 @@ constexpr KeyPrompt every_key(const KeyOption (&options)[N]) noexcept {
 
 // ---- The dialogs (every modal overlay owns the row). The option order is the order of the dialog line. A key with two options has one live at a time. -------------------------------------------------
 // Learn (A1): F1 UNBIND and F2 MODE with a target, F3 DELETE and F4 CLEAR ALL with bindings (F4 asks, then reads CLR ALL? inverted), F5 FOLLOW on an instrument
-// parameter with a binding (OS-LEARNFOLLOW S2), F8 BACK.
+// parameter with a binding (OS-LEARNFOLLOW S2), F6 MAP, F7 ENC (OS-UXF-KEYS item 17: the target becomes the encoder's; always labelled, with no target it says so), F8 BACK.
 constexpr KeyOption kLearnOptions[] = {{kF1, "UNBIND", "UNBIND"}, {kF2, "MODE", "MODE"},           {kF3, "DELETE", "DELETE"},
-                                       {kF4, "CLR ALL", "CLEAR ALL"}, {kF4, "CLR ALL?", "CLEAR ALL?"}, {kF5, "FOLLOW", "FOLLOW"}, {kF6, "MAP", "MAP"}, {kF8, "BACK", "BACK"}};  // (OS-LEARNMAP: F6 MAP is always live)
+                                       {kF4, "CLR ALL", "CLEAR ALL"}, {kF4, "CLR ALL?", "CLEAR ALL?"}, {kF5, "FOLLOW", "FOLLOW"}, {kF6, "MAP", "MAP"}, {kF7, "ENC", "ENC"}, {kF8, "BACK", "BACK"}};  // (OS-LEARNMAP: F6 MAP is always live)
 // LEARN MAP (OS-LEARNMAP): F1 NEW, F2 MODE, F3 DELETE, F4 CLEAR ALL (asks, then CLR ALL? inverted), F5 FOLLOW, F7 RELEARN, F8 BACK. The ENC row has no MODE, FOLLOW or RELEARN: those keys read blank there.
 constexpr KeyOption kLearnMapOptions[] = {{kF1, "NEW", "NEW"},       {kF2, "MODE", "MODE"},     {kF3, "DELETE", "DELETE"},    {kF4, "CLR ALL", "CLEAR ALL"},
                                           {kF4, "CLR ALL?", "CLEAR ALL?"}, {kF5, "FOLLOW", "FOLLOW"}, {kF7, "RELEARN", "RELEARN"}, {kF8, "BACK", "BACK"}};
-// The Navigator (A2): F1 and F8 GO (F1 has no words: a second GO), F7 CLOSE; its Shift layer is declared: Shift+F7 CLOSE and Shift+F8 GO are bound. Shift+F1..F6 are bound to ui.none and read "-": owner_row makes
-// that of a Shift key with no option, so the table does not hold them.
-constexpr KeyOption kNavigatorOptions[] = {{kF1, "GO", ""}, {kF7, "CLOSE", "CLOSE"}, {kF8, "GO", "GO"}, {kShiftF7, "CLOSE", ""}, {kShiftF8, "GO", ""}};
+// The Navigator (A2; OS-UXF-KEYS item 5: the one grammar, F1 GO and F8 BACK; F7 is nothing now): its Shift layer is declared: Shift+F1 GO and Shift+F8 BACK are bound (a Shift held across the chord that opened it). Shift+F2..F7
+// are bound to ui.none and read "-": owner_row makes that of a Shift key with no option, so the table does not hold them.
+constexpr KeyOption kNavigatorOptions[] = {{kF1, "GO", "GO"}, {kF8, "BACK", "BACK"}, {kShiftF1, "GO", ""}, {kShiftF8, "BACK", ""}};
 // The pattern's choosers (A3): F2 and F3 switch between LENGTH and JUMP (a tap), F1 is the PATTERN chooser's held key (OS-PATSWITCH: its tap opens nothing), the open one is inverted, F8 closes. The strip has room for BACK only: the names are on the row.
 constexpr KeyOption kChooserOptions[] = {{kF1, "PATTERN", ""}, {kF2, "LENGTH", ""}, {kF3, "JUMP", ""}, {kF8, "BACK", "BACK"}};
 // The engine picker (A4) and the play mode list (A6): F1 chooses, F8 closes.
 constexpr KeyOption kSelectOptions[] = {{kF1, "SELECT", "SELECT"}, {kF8, "BACK", "BACK"}};
+// The pads' mode list (OS-UXF-PAT 7): F1..F6 pick a mode (the order of the old Shift + F2..F7 keys), F8 closes.
+constexpr KeyOption kPadsPickerOptions[] = {{kF1, "NOTES", "NOTES"}, {kF2, "PIANO", "PIANO"}, {kF3, "ISO", "ISO"}, {kF4, "TRACKS", "TRACKS"}, {kF5, "PATS", "PATS"}, {kF6, "VU", "VU"}, {kF8, "BACK", "BACK"}};
 // OS-APPSNAV: the same list as Shift + Pattern's apps list: F1 and F8 launch (Pattern or Shift + Pattern close it, the keys of every list).
-constexpr KeyOption kAppsOptions[] = {{kF1, "LAUNCH", "LAUNCH"}, {kF8, "LAUNCH", "LAUNCH"}};
+constexpr KeyOption kAppsOptions[] = {{kF1, "LAUNCH", "LAUNCH"}, {kF8, "BACK", "BACK"}};  // OS-UXF-KEYS item 5: F8 closes the list, as in every picker
 // The F5 PRESET list of a module's parameter page (OS-INSFX-ABI2 A9): F1 loads the chosen preset (live only while the list has one), F8 closes, and Shift + F5 saves the values in force as a card preset (OS-MODPRESET P4).
 constexpr KeyOption kPresetOptions[] = {{kF1, "LOAD", "LOAD"}, {kShiftF5, "SAVE", "SAVE"}, {kF8, "BACK", "BACK"}};
 // The verb menu (OS-PTOOLS2 S3): F1 runs the verb under the cursor (the pads 1-16 pick one directly, so no key cap says them), F8 closes. On its APPS page (S6b, the list of A5) F1 runs the entry
@@ -109,8 +112,8 @@ constexpr KeyOption kEventsOptionsNotes[] = {{kF1, "NOTE 2/3", "NOTE 2/3"}, {kF2
 constexpr KeyOption kEventsOptionsCc[] = {{kF1, "CC 3/3", "CC 3/3"}, {kF2, "QUANT", "QUANT"}, {kF5, "PREVIEW", "PREVIEW"}, {kF7, "UNDO", "UNDO"}, {kF8, "BACK", "BACK"},
                                           {kShiftF2, "ALL", "ALL"}, {kShiftF7, "REDO", "REDO"}};
 constexpr KeyPrompt kEventsPrompts[] = {owner(kEventsOptionsAll), owner(kEventsOptionsNotes), owner(kEventsOptionsCc)};
-// The on-screen keyboard (A7): F1 types the key in focus, F2 is CAPS, F6 AUTO is the Save As's automatic name, F7 cancels, F8 saves (SAVE for Save As, OK for the names).
-constexpr KeyOption kTextOptions[] = {{kF1, "TYPE", "TYPE"}, {kF2, "CAPS", "CAPS"}, {kF6, "AUTO", "AUTO"}, {kF7, "CANCEL", "CANCEL"}, {kF8, "SAVE", "SAVE"}, {kF8, "OK", "OK"}};
+// The on-screen keyboard (A7; OS-UXF-KEYS item 5: the one grammar): F1 saves (SAVE for Save As and a preset, OK for the names), F2 is CAPS, F6 AUTO is the Save As's automatic name, F7 types the key in focus, F8 cancels.
+constexpr KeyOption kTextOptions[] = {{kF1, "SAVE", "SAVE"}, {kF1, "OK", "OK"}, {kF2, "CAPS", "CAPS"}, {kF6, "AUTO", "AUTO"}, {kF7, "TYPE", "TYPE"}, {kF8, "CANCEL", "CANCEL"}};
 // The step popup of a held Instr / Fx / Note / Vol (A8): F8 cancels.
 constexpr KeyOption kPopupOptions[] = {{kF8, "CANCEL", "CANCEL"}};
 // The Fill dialog (A9).
@@ -143,6 +146,7 @@ constexpr KeyPrompt kNavigatorPrompt = owner(kNavigatorOptions);
 constexpr KeyPrompt kChooserPrompt = owner(kChooserOptions);
 constexpr KeyPrompt kSelectPrompt = owner(kSelectOptions);
 constexpr KeyPrompt kAppsPrompt = owner(kAppsOptions);
+constexpr KeyPrompt kPadsPickerPrompt = owner(kPadsPickerOptions);
 constexpr KeyPrompt kPresetPrompt = owner(kPresetOptions);
 constexpr KeyPrompt kVerbMenuPrompt = owner(kVerbMenuOptions);  // OS-PTOOLS2 S3
 constexpr KeyPrompt kTextPrompt = owner(kTextOptions);
@@ -236,7 +240,8 @@ PromptState owner_state(const Model& model, const ViewState& view) noexcept {
       const bool has_list = learn_entry_count(model) != 0;
       // OS-LEARNFOLLOW S2: FOLLOW on F5 when the target is an instrument parameter with a binding (the A1 rule of the dialogs), blank otherwise.
       const bool can_follow = has_target && core::param_kind(target) == core::ParamKind::Instrument && bound_binding(model, target) != nullptr;
-      std::uint16_t live = (1u << 6) | (1u << 7);  // MAP, BACK
+      // MAP, ENC (always: with no target it says NO TARGET FOR ENCODER, so a bound key never acts under a blank label), BACK
+      std::uint16_t live = (1u << 6) | (1u << 7) | (1u << 8);
       live = static_cast<std::uint16_t>(live | (has_target ? 0x03u : 0u) | (has_list ? (view.learn.confirm ? 0x14u : 0x0Cu) : 0u) | (can_follow ? 1u << 5 : 0u));
       return owned(kLearnPrompt, live, view.learn.confirm ? 1u << 4 : 0u);
     }
@@ -250,8 +255,8 @@ PromptState owner_state(const Model& model, const ViewState& view) noexcept {
     case OverlayId::Navigator: {
       const ScreenEntry* chosen = screen_at(navigator_screens(), view.navigator);
       const bool built = chosen != nullptr && chosen->screen != nullptr;  // GO does nothing on a cell that is not built: its keys read blank
-      std::uint16_t live = (1u << 1) | (1u << 3);  // F7 CLOSE, Shift+F7 CLOSE
-      live = static_cast<std::uint16_t>(live | (built ? ((1u << 0) | (1u << 2) | (1u << 4)) : 0u));  // F1 GO, F8 GO, Shift+F8 GO
+      std::uint16_t live = (1u << 1) | (1u << 3);  // F8 BACK, Shift+F8 BACK
+      live = static_cast<std::uint16_t>(live | (built ? ((1u << 0) | (1u << 2)) : 0u));  // F1 GO, Shift+F1 GO
       return owned(kNavigatorPrompt, live);
     }
     // OS-PATSWITCH: the PATTERN chooser is the hold of F1 only (a tap of F1 does nothing), so F1 is live in it, as the held key, and blank in the LENGTH and JUMP choosers, where a tap of it does nothing; F2 and F3 switch.
@@ -264,6 +269,7 @@ PromptState owner_state(const Model& model, const ViewState& view) noexcept {
       }
       return owned(kSelectPrompt, all_of(kSelectPrompt));
     case OverlayId::PlayMode: return owned(kSelectPrompt, all_of(kSelectPrompt));
+    case OverlayId::PadsPicker: return owned(kPadsPickerPrompt, all_of(kPadsPickerPrompt));  // OS-UXF-PAT 7
     // OS-MODPRESET P4: the list's F1 LOAD is live only while it has an entry; Shift + F5 SAVE always is (the list is only ever open over a bound module's page).
     case OverlayId::Preset: return owned(kPresetPrompt, (preset_list_count(model, view) != 0u ? 1u << 0 : 0u) | (1u << 1) | (1u << 2));
     case OverlayId::VerbMenu: {  // OS-PTOOLS2 S3: F1 RUN, F8 BACK; OS-TOOLSDEDUP: F6 RE FILL or REPEAT (OS-F6EVENTS); the APPS page (S6b) says RUN? when the last F1 asked for a second press
@@ -283,10 +289,10 @@ PromptState owner_state(const Model& model, const ViewState& view) noexcept {
       return owned(p, all_of(p));
     }
     case OverlayId::TextEntry: {
-      // OS-MODPRESET P4: a preset's name is a save like Save As: F8 reads SAVE and there is no AUTO.
+      // OS-MODPRESET P4: a preset's name is a save like Save As: F1 reads SAVE and there is no AUTO.
       const bool save_as = view.text.target == TextEntryView::Target::SaveAs;
       const bool save = save_as || view.text.target == TextEntryView::Target::Preset;
-      std::uint16_t live = (1u << 0) | (1u << 1) | (1u << 3) | (save_as ? (1u << 2) | (1u << 4) : (save ? (1u << 4) : (1u << 5)));  // TYPE, CAPS, CANCEL; AUTO and SAVE for Save As, SAVE for a preset, OK for the names
+      std::uint16_t live = (1u << 2) | (1u << 4) | (1u << 5) | (save_as ? (1u << 3) | (1u << 0) : (save ? (1u << 0) : (1u << 1)));  // CAPS, TYPE, CANCEL; AUTO and SAVE for Save As, SAVE for a preset, OK for the names
       return owned(kTextPrompt, live);
     }
     case OverlayId::StepPopup: return owned(kPopupPrompt, all_of(kPopupPrompt));
@@ -347,6 +353,7 @@ const KeyPrompt* owner_prompt(OverlayId id) noexcept {
     case OverlayId::JumpChooser: return &kChooserPrompt;
     case OverlayId::ModulePicker:
     case OverlayId::PlayMode: return &kSelectPrompt;
+    case OverlayId::PadsPicker: return &kPadsPickerPrompt;  // OS-UXF-PAT 7
     case OverlayId::Preset: return &kPresetPrompt;
     case OverlayId::VerbMenu: return &kVerbMenuPrompt;  // OS-PTOOLS2 S3
     case OverlayId::Events: return &kEventsPrompts[0];

@@ -344,7 +344,7 @@ TEST_CASE("key prompt: every key a dialog labels is bound in its own context, an
       }
     }
     if (id == app::OverlayId::Navigator) {  // the Shift keys it declares no option for read "-" (owner_row): they must be bound to nothing
-      for (std::uint8_t key = 8; key < 14; ++key) {
+      for (std::uint8_t key = 9; key < 15; ++key) {  // Shift + F2..F7 (Shift + F1 is GO and Shift + F8 is BACK: options of the table)
         CHECK_MESSAGE(!resolve_in_overlay(id, key).bound, name << " Shift F" << key - 7 << " is bound to something");
       }
     }
@@ -377,18 +377,18 @@ TEST_CASE("key prompt: a dialog's row is its own keys, every other key blank, th
       CHECK(shifted.label[i] == row.label[i]);
     }
   }
-  // The Navigator declares the layer: Shift + F1..F6 read "-", F7 CLOSE and F8 GO stay.
+  // The Navigator declares the layer: Shift + F2..F7 read "-", F1 GO and F8 BACK stay (OS-UXF-KEYS item 5).
   view.overlay = app::OverlayId::Navigator;
   view.navigator = 0;
   {
     const test::RowRead row = test::read_owner_row(model, view);
-    const char* const want[8] = {"GO", "", "", "", "", "", "CLOSE", "GO"};
+    const char* const want[8] = {"GO", "", "", "", "", "", "", "BACK"};
     for (unsigned i = 0; i < 8; ++i) {
       CHECK_MESSAGE(row.label[i] == want[i], "Navigator F" << i + 1);
     }
     const test::RowRead shifted = test::read_owner_row(model, view, true);
     for (unsigned i = 0; i < 8; ++i) {
-      CHECK_MESSAGE(shifted.label[i] == (i < 6 ? std::string("-") : std::string(want[i])), "Navigator Shift F" << i + 1);
+      CHECK_MESSAGE(shifted.label[i] == ((i == 0 || i == 7) ? std::string(want[i]) : std::string("-")), "Navigator Shift F" << i + 1);
     }
   }
   // The choosers: PATTERN LENGTH JUMP, the open one inverted, BACK on F8.
@@ -413,17 +413,17 @@ TEST_CASE("key prompt: a dialog's row is its own keys, every other key blank, th
   view.overlay = app::OverlayId::TextEntry;
   view.text.target = app::TextEntryView::Target::SaveAs;
   CHECK(test::read_owner_row(model, view).label[5] == "AUTO");
-  CHECK(test::read_owner_row(model, view).label[7] == "SAVE");
+  CHECK(test::read_owner_row(model, view).label[0] == "SAVE");
   view.text.target = app::TextEntryView::Target::Instrument;
   CHECK(test::read_owner_row(model, view).label[5].empty());
-  CHECK(test::read_owner_row(model, view).label[7] == "OK");
-  CHECK(test::read_owner_row(model, view).label[0] == "TYPE");
+  CHECK(test::read_owner_row(model, view).label[0] == "OK");
+  CHECK(test::read_owner_row(model, view).label[6] == "TYPE");
   CHECK(test::read_owner_row(model, view).label[1] == "CAPS");
-  CHECK(test::read_owner_row(model, view).label[6] == "CANCEL");
-  // OS-MODPRESET P4: a preset's name is a save like Save As: F8 reads SAVE and there is no AUTO.
+  CHECK(test::read_owner_row(model, view).label[7] == "CANCEL");
+  // OS-MODPRESET P4: a preset's name is a save like Save As: F1 reads SAVE and there is no AUTO.
   view.text.target = app::TextEntryView::Target::Preset;
   CHECK(test::read_owner_row(model, view).label[5].empty());
-  CHECK(test::read_owner_row(model, view).label[7] == "SAVE");
+  CHECK(test::read_owner_row(model, view).label[0] == "SAVE");
   // The step popup and the export progress: F8 CANCEL alone.
   for (const app::OverlayId id : {app::OverlayId::StepPopup, app::OverlayId::ExportProgress}) {
     view.overlay = id;
@@ -456,8 +456,9 @@ TEST_CASE("key prompt: a dialog's row is its own keys, every other key blank, th
     const test::RowRead row = test::read_owner_row(model, view);
     CHECK(row.label[7] == "BACK");
     CHECK(row.label[5] == "MAP");
+    CHECK(row.label[6] == "ENC");  // OS-UXF-KEYS item 17: always labelled; with no target F7 says `NO TARGET FOR ENCODER`
     for (unsigned i = 0; i < 7; ++i) {
-      if (i != 5) {
+      if (i != 5 && i != 6) {
         CHECK_MESSAGE(row.label[i].empty(), "Learn F" << i + 1 << " with nothing to act on");
       }
     }

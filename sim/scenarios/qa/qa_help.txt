@@ -67,7 +67,7 @@ wait 50
 assert state screen=SONG overlay=NONE
 snap qa_glb_146
 
-# QA-GLB-147: under the Navigator Shift + Config does nothing (the Navigator stays up); after F7 CLOSE it opens help again.
+# QA-GLB-147: under the Navigator Shift + Config does nothing (the Navigator stays up); after F8 BACK it opens help again.
 press song
 press pattern
 release pattern
@@ -79,7 +79,7 @@ release shift
 wait 50
 assert state overlay=NAVIGATOR
 snap qa_glb_147
-tap f7
+tap f8
 wait 50
 assert state overlay=NONE
 

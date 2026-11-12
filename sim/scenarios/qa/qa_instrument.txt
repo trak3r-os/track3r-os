@@ -139,8 +139,8 @@ press shift
 tap f1
 release shift
 snap qa_ins_050
-# F7 CANCEL leaves the name as it was.
-tap f7
+# F8 CANCEL leaves the name as it was.
+tap f8
 # QA-INS-054: a MIDI instrument (made on the free slot 12 by the chooser's F2) says SAMPLE INSTRUMENTS ONLY to Shift + F5; the Shift row shows SAVE dim there (and COPY, NAME, DELETE lit, PASTE dim: nothing is copied).
 action instrument.select 12
 wait 8000

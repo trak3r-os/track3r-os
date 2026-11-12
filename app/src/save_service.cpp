@@ -1685,6 +1685,12 @@ bool SaveService::dirty(const model::Project& project) noexcept {
   return unsaved_ || !clean_valid_ || project.generation() != clean_generation_;
 }
 
+bool SaveService::has_folder(const char* loaded_folder) const noexcept {
+  const char* const loaded = loaded_folder != nullptr ? loaded_folder : "";
+  char name[guard::kNameMax + 1] = {};
+  return (current_[0] != '\0' && std::strcmp(anchor_, loaded) == 0) || project_name_of(loaded, name);
+}
+
 void SaveService::watch(const model::Project& project) noexcept {
   if (!clean_valid_) {
     clean_generation_ = project.generation();

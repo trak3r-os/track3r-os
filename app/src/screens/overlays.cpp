@@ -50,6 +50,8 @@ const Overlay* overlay_of(OverlayId id) noexcept {
       return &kSongToolsOverlay;
     case OverlayId::PlayMode:
       return &kPlayModeOverlay;
+    case OverlayId::PadsPicker:
+      return &kPadsPickerOverlay;  // OS-UXF-PAT 7: the pads' mode list
     case OverlayId::Preset:
       return &kPresetOverlay;
     case OverlayId::VerbMenu:
@@ -76,7 +78,7 @@ const Overlay* overlay_of(OverlayId id) noexcept {
 
 namespace {
 
-constexpr int kLearnW = 480;
+constexpr int kLearnW = 632;  // the key line of eight chips (F7 ENC, OS-UXF-KEYS) is 608 px wide in the Amiga theme's Label face; 480 left the last chips on the pane. Still narrower than the Navigator (640)
 constexpr int kLearnListRows = 5;                // bindings in view
 constexpr int kLearnRows = 3 + kLearnListRows;   // the instruction, the target, the list, the keys
 
@@ -383,7 +385,7 @@ void NavigatorOverlay::render(const Model& model, const ViewState& view, ui::Ren
     }
   }
 
-  // The footer (OS-NAV2): how to leave and what the chosen cell does. F8 is GO here and not Back as in the other overlays, so the keys say so; F1 is a second GO and has no hint.
+  // The footer (OS-NAV2): how to leave and what the chosen cell does. OS-UXF-KEYS item 5: F1 GO and F8 BACK, as in the other overlays.
   const int foot = g.dialog.body.y + g.dialog.body.h - m.row_pitch;
   const int x = g.dialog.body.x + 2 * m.pad;
   const ScreenEntry* chosen = screen_at(table, view.navigator);
@@ -429,7 +431,7 @@ void ChooserOverlay::render(const Model& model, const ViewState& view, ui::Rende
       }
       AskText held;  // "F1": the hold that opened it
       append_key_name(held, owner_prompt(OverlayId::PatternChooser)->options[0].key);
-      clip_hint.assign("COPY: COPY   SHIFT+COPY: PASTE   release ");  // PAT-OPS-B: the whole pattern into the clipboard and over this one
+      clip_hint.assign("COPY: COPY   SHIFT+COPY: PASTE   ");  // PAT-OPS-B: the whole pattern into the clipboard and over this one
       clip_hint.append(held.c_str());
       clip_hint.append(": close");
       pattern_hint.assign(live ? "pads, encoder: switch now   " : "pads, encoder: +-1   ");

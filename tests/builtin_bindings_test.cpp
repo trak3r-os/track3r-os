@@ -77,6 +77,7 @@ constexpr ContextWord kContextWords[] = {
     {"steppopup", Context::StepPopup},
     {"pads.tracks", Context::PadsTracks},
     {"pads.mode", Context::PadsMode},
+    {"padspicker", Context::PadsPicker},  // OS-UXF-PAT 7
     {"fill", Context::FillDialog},
     {"song.ask", Context::SongAsk},      // OS-SONGMAP
     {"song.tools", Context::SongTools},
@@ -316,6 +317,7 @@ TEST_CASE("builtin bindings: every Shift binding is one of these, and none of th
   expected.push_back(line("global", "tap", "master", "ui.theme.next", 0));
   expected.push_back(line("global", "tap", "rec", "pattern.rec_free", 0));  // OS-RECSWAP: Edit following / free (the plain Rec enters Edit free); it was the mode cycle until the Select mode went
   expected.push_back(line("global", "tap", "pattern", "apps.open", 0));  // OS-APPSNAV: the list of the apps that are not tools (the Navigator is the chords Master + Song and Song + Pattern; OS-NAV2 had it here)
+  expected.push_back(line("global", "tap", "file", "file.save_any", 0));  // OS-UXF-KEYS 1a: SAVE from any screen (File's F4; no folder yet: the save-as keyboard)
   expected.push_back(line("global", "tap", "config", "help.open", 0));  // OS-HELP: the help page of the screen in view; the plain Config is the Config screen
   expected.push_back(line("moduleapp", "tap", "config", "help.open", 0));  // (the app page captures, so Global's chord does not reach it)
   expected.push_back(line("pattern", "tap", "f8", "edit.redo", 0));  // OS-002c: F8 is UNDO on Pattern and Song, Shift + F8 REDO
@@ -376,13 +378,10 @@ TEST_CASE("builtin bindings: every Shift binding is one of these, and none of th
   expected.push_back("chooser tap shift+enc0 chooser.coarse @value\n");
   expected.push_back("chooser tap shift+copy pattern.clip_paste 0\n");  // PAT-OPS-B: with F1 held, Shift + Copy writes the whole clipboard pattern over the chooser's pattern (Copy alone is pattern.clip_copy)
   expected.push_back("fill tap shift+enc0 fill.coarse @value\n");
-  // OS-PADS-A / OS-PADOCT: Shift + F1 cycles the pads' octave, Shift + F2..F7 choose the pads' mode on Pattern (the argument is the mode: F2 NOTES 0, F3 PIANO 1, F4 ISO 3, F5 TRACKS 2, F6 PATS 5, F7 VU 6);
+  // OS-PADS-A / OS-PADOCT: Shift + F1 cycles the pads' octave; OS-UXF-PAT 7: Shift + F2 opens the PADS picker (its F1..F6 pick the mode: NOTES 0, PIANO 1, ISO 3, TRACKS 2, PATS 5, VU 6; F3..F7 of the Shift row are free);
   // Shift + pad mute and solo are gone (the TRACKS layer has the pads). STEP (4) has no key (OS-STEPPADOFF).
   expected.push_back(line("pattern", "tap", "f1", "pads.octave", 0));
-  const int pad_modes[6] = {0, 1, 3, 2, 5, 6};
-  for (int n = 0; n < 6; ++n) {
-    expected.push_back(line("pattern", "tap", (std::string("f") + std::to_string(n + 2)).c_str(), "pads.mode", pad_modes[n]));
-  }
+  expected.push_back(line("pattern", "tap", "f2", "pads.picker", 0));
   // OS-QJUMP: Shift + Note, Instr, Vol (FX1) and Fx (FX2) are the quarter jumps (Shift + Fx was FILL again; pattern.fill has no key now, the F4 dialog is the Fill key).
   expected.push_back(line("pattern", "tap", "note", "select.jump", 0));  // OS-SELSHIFT: in Edit they also select the rows they cross
   expected.push_back(line("pattern", "tap", "instr", "select.jump", 1));
@@ -393,9 +392,12 @@ TEST_CASE("builtin bindings: every Shift binding is one of these, and none of th
   // Shift + Up / Down set how many slices EVEN makes.
   expected.push_back("wave tap shift+enc0 wave.nudge_coarse @value\n");
   expected.push_back("wave tap shift+pad* wave.pad_select @id\n");
-  expected.push_back(line("wave", "tap", "f8", "edit.redo", 0));
+  expected.push_back(line("wave", "tap", "f5", "edit.redo", 0));  // OS-UXF-SMP item 11: REDO moved from F8 to F5; F7 / F8 are INST - / INST + on every sample screen
+  expected.push_back(line("wave", "tap", "f7", "sedit.instrument", -1));
+  expected.push_back(line("wave", "tap", "f8", "sedit.instrument", 1));
   expected.push_back(line("wave", "tap", "f1", "wave.mode", 0));  // OS-INSTUI S4: MODE, the list of the eight play modes
   expected.push_back(line("wave", "tap", "f6", "preview.hold", static_cast<int>(app::Button::F6) | 0x100));  // OS-FU3: Shift + PREVIEW plays from where the screen is
+  expected.push_back("wave.chop tap shift+f4 wave.to_pat 0\n");  // OS-UXF-SMP 3c: TO PAT, the slices as notes on consecutive steps
   expected.push_back("wave.chop tap shift+up wave.even_n 1\n");
   expected.push_back("wave.chop tap shift+down wave.even_n -1\n");
   // The Sample edit screen: the coarse encoder, Shift + F6 saves the sample as a WAV (OS-007n: the key row is full), REDO on F8, Shift + Up / Down set Amplify's percentage.
@@ -404,10 +406,11 @@ TEST_CASE("builtin bindings: every Shift binding is one of these, and none of th
   expected.push_back(line("sampleedit", "tap", "f2", "sedit.amiga", 1));
   expected.push_back(line("sampleedit", "tap", "f3", "sedit.q8", 0));
   expected.push_back(line("sampleedit", "tap", "f4", "sedit.run", 7));  // OS-SEDFX: DC REMOVE (EditOp::DcRemove)
-  expected.push_back(line("sampleedit", "tap", "f5", "sedit.instrument", 1));  // OS-QAFIX-27: the next instrument, round
+  expected.push_back(line("sampleedit", "tap", "f7", "sedit.instrument", -1));  // OS-QAFIX-27 (NEXT INS on F5), OS-UXF-SMP item 11: INST - / INST +, round
+  expected.push_back(line("sampleedit", "tap", "f8", "sedit.instrument", 1));
   expected.push_back(line("sampleedit", "tap", "f6", "sedit.save_wav", 0));  // (OS-FU3: from Shift + F7, which plays from the selection's edge)
-  expected.push_back(line("sampleedit", "tap", "f7", "preview.hold", static_cast<int>(app::Button::F7) | 0x100));
-  expected.push_back(line("sampleedit", "tap", "f8", "sedit.redo", 0));
+  expected.push_back(line("sampleedit", "tap", "play", "preview.hold", static_cast<int>(app::Button::Play) | 0x100));  // OS-UXF-SMP item 11: PRV EDGE moved from Shift + F7 to Shift + Play
+  expected.push_back(line("sampleedit", "tap", "f5", "sedit.redo", 0));  // moved from Shift + F8
   expected.push_back("sampleedit.fx tap shift+enc0 sedit.fx_coarse @value\n");  // OS-AUDIT-15: the FX page's coarse step (its plain encoder is sedit.fx)
   expected.push_back("sampleedit.fx tap shift+up ui.none 0\n");  // OS-AUDIT-15: the edit page's AMP is not on the FX page
   expected.push_back("sampleedit.fx tap shift+down ui.none 0\n");
@@ -448,6 +451,7 @@ TEST_CASE("builtin bindings: every Shift binding is one of these, and none of th
     }
     expected.push_back(line(context, "tap", "f5", "cursor.jump_end", 0));
   }
+  expected.push_back("sampleload tap shift+f6 sample.mark 0\n");  // OS-UXF-SMP item 18: MARK
   expected.push_back("sampleload tap shift+f7 sample.target -1\n");  // OS-SLDTARGET: INST - / INST + on Sample load
   expected.push_back("sampleload tap shift+f8 sample.target 1\n");
   expected.push_back("sampleload tap shift+right sample.mark 0\n");  // OS-AUDIT-A7 (SLD-MULTI): mark the file and step down / clear the marks
@@ -474,12 +478,11 @@ TEST_CASE("builtin bindings: every Shift binding is one of these, and none of th
   expected.push_back("learnmap tap shift+up cursor.page -1\n");
   expected.push_back("learnmap tap shift+down cursor.page 1\n");
   expected.push_back("learnmap tap shift+enc0 lmap.coarse @value\n");
-  // The Navigator captures, so it has its own: no jumps; Shift + F7 / F8 stay CLOSE / GO (a Shift press falls back to the plain tap), the rest nothing.
-  for (int n = 0; n < 6; ++n) {
-    expected.push_back(line("navigator", "tap", (std::string("f") + std::to_string(n + 1)).c_str(), "ui.none", 0));
+  // The Navigator captures, so it has its own: no jumps; Shift + F1 / F8 stay GO / BACK (a Shift press falls back to the plain tap; OS-UXF-KEYS item 5), the rest nothing.
+  for (int n = 0; n < 7; ++n) {
+    expected.push_back(line("navigator", "tap", (std::string("f") + std::to_string(n + 1)).c_str(), n == 0 ? "navigator.accept" : "ui.none", 0));
   }
-  expected.push_back(line("navigator", "tap", "f7", "ui.back", 0));
-  expected.push_back(line("navigator", "tap", "f8", "navigator.accept", 0));
+  expected.push_back(line("navigator", "tap", "f8", "ui.back", 0));
   expected.push_back(line("mixer", "tap", "f7", "mixer.mute_none", 0));  // OS-SHIFTROW: UNMUTE / UNSOLO every strip
   expected.push_back(line("mixer", "tap", "f8", "mixer.solo_none", 0));
   expected.push_back(line("mixer", "tap", "f1", "mixer.name", 0));  // OS-NAMES: NAME, the track under the cursor
@@ -516,11 +519,12 @@ TEST_CASE("builtin bindings: every Shift binding is one of these, and none of th
       const bool pads = c == &pattern || c == &select;
       if (pads && n == 0) {  // OS-PADOCT: Shift + F1 is the octave
         CHECK_MESSAGE((with.status == core::Resolution::Status::Bound && with.action == core::action_id("pads.octave")), c->what << " Shift+F1");
-      } else if (pads) {  // Shift + F2..F5: NOTES 0, PIANO 1, ISO 3, TRACKS 2
-        const int mode[5] = {-1, 0, 1, 3, 2};
-        CHECK_MESSAGE((with.status == core::Resolution::Status::Bound && with.action == core::action_id("pads.mode") && with.arg == mode[n]), c->what << " Shift+F" << n + 1);
-      } else if (c == &navigator) {  // OS-SHIFTROW: no jumps in the Navigator; Shift + F1..F5 are nothing (bound to the null action, not the plain GO)
-        CHECK_MESSAGE((with.status == core::Resolution::Status::Bound && with.action == core::action_id("ui.none")), "navigator Shift+F" << n + 1);
+      } else if (pads && n == 1) {  // OS-UXF-PAT 7: Shift + F2 is the PADS picker
+        CHECK_MESSAGE((with.status == core::Resolution::Status::Bound && with.action == core::action_id("pads.picker")), c->what << " Shift+F2");
+      } else if (pads) {  // Shift + F3..F5 are free on Pattern: Global's null action
+        CHECK_MESSAGE((with.status == core::Resolution::Status::Bound && with.action == core::action_id("ui.none")), c->what << " Shift+F" << n + 1);
+      } else if (c == &navigator) {  // OS-SHIFTROW: no jumps in the Navigator; Shift + F2..F5 are nothing (bound to the null action); Shift + F1 is GO as the plain F1 (OS-UXF-KEYS item 5)
+        CHECK_MESSAGE((with.status == core::Resolution::Status::Bound && with.action == core::action_id(n == 0 ? "navigator.accept" : "ui.none")), "navigator Shift+F" << n + 1);
       } else {
         CHECK_MESSAGE((with.status == core::Resolution::Status::Bound &&
                        with.action == core::action_id(n < 4 ? "cursor.jump_fraction" : "cursor.jump_end") && (n >= 4 || with.arg == n)),
@@ -532,13 +536,13 @@ TEST_CASE("builtin bindings: every Shift binding is one of these, and none of th
       } else {
         // OS-009: on the pattern F1..F3 are the choosers and F5 is PREVIEW (reserved); F4 is FILL (OS-PTOOLS).
         const bool on_pattern = c == &pattern || c == &select;
-        // OS-005e: on the song F2 is PLAY SNG, the Play button's action (it plays the song from the selected row there).
+        // OS-005e: on the song F2 is DUP PAT (OS-UXF-PAT 12), the action of Shift + Insert; the Play button plays the song from the selected row there.
         const char* name = c == &navigator ? "navigator.accept"
                            : on_pattern && n < 3 ? "chooser.toggle"
                            : on_pattern && n == 3 ? "fill.open"  // OS-PTOOLS: F4 FILL
                            : on_pattern && n == 4 ? "pattern.preview"
                            : on_pattern && n == 5 ? "events.open"    // OS-F6EVENTS: F6 EVENTS (RE FILL / REPEAT moved to the verb menu)
-                           : c == &song ? (n == 0 ? "song.play_pattern" : n == 1 ? "transport.play" : n == 2 ? "song.add_slot" : n == 3 ? "song.delete_slot" : n == 4 ? "song.unique" : "song.tools")  // OS-SONG1; OS-SONGMAP: F5 UNIQUE, F6 TOOLS (they were the slot's pattern - / +)
+                           : c == &song ? (n == 0 ? "song.play_pattern" : n == 1 ? "song.add_slot" : n == 2 ? "song.add_slot" : n == 3 ? "song.delete_slot" : n == 4 ? "song.unique" : "song.tools")  // OS-SONG1; OS-SONGMAP: F5 UNIQUE, F6 TOOLS (they were the slot's pattern - / +)
                                                   : "ui.softkey";
         const core::ActionId want = core::action_id(name);
         CHECK_MESSAGE((plain.status == core::Resolution::Status::Bound && plain.action == want), c->what << " F" << n + 1);
@@ -587,8 +591,11 @@ TEST_CASE("builtin bindings: every Shift binding is one of these, and none of th
     CHECK(resolve_in(*c, core::GestureKind::Tap, Button::Master, false).action == core::action_id("nav.screen"));
     CHECK(resolve_in(*c, core::GestureKind::Tap, Button::Pattern, true).action == core::action_id("apps.open"));  // OS-APPSNAV
     CHECK(resolve_in(*c, core::GestureKind::Tap, Button::Pattern, false).action == core::action_id("nav.screen"));  // the plain Pattern button is untouched
+    CHECK(resolve_in(*c, core::GestureKind::Tap, Button::File, true).action == core::action_id("file.save_any"));  // OS-UXF-KEYS 1a
+    CHECK(resolve_in(*c, core::GestureKind::Tap, Button::File, false).action == core::action_id("nav.screen"));
   }
   const Chain learn{"learn", {Context::Learn, Context::Global}, true};
+  CHECK(resolve_in(learn, core::GestureKind::Tap, Button::File, true).status == core::Resolution::Status::Captured);  // OS-UXF-KEYS 1a: an overlay captures it
   CHECK(resolve_in(learn, core::GestureKind::Tap, Button::Master, true).status == core::Resolution::Status::Captured);
   CHECK(resolve_in(navigator, core::GestureKind::Tap, Button::Master, true).status == core::Resolution::Status::Captured);
   // OS-MASTERVOL and OS-SONGPEEK: Master held + the encoder is the master volume, a held Song is the peek and its release the way back; from every screen, and in no capturing overlay.
@@ -771,12 +778,12 @@ TEST_CASE("builtin bindings: Master + Song and Song + Pattern open the Navigator
   }
   CHECK_FALSE(core::chord_bound(set, chain_of(pattern), app::button_ref(Button::Master), app::button_ref(Button::Pattern)));  // the third pair is not one
   CHECK_FALSE(core::chord_bound(set, chain_of(navigator), app::button_ref(Button::Master), app::button_ref(Button::Song)));   // a capturing context hides Global's chords
-  // The list of the apps: Pattern and Shift + Pattern (which falls back to the plain tap) close it, F8 launches, F1 launches.
+  // The list of the apps: Pattern and Shift + Pattern (which falls back to the plain tap) close it, F8 is BACK (it launched before OS-UXF-KEYS item 5), F1 launches.
   for (const bool shift : {false, true}) {
     const core::Resolution r = resolve_in(picker, core::GestureKind::Tap, Button::Pattern, shift);
     CHECK_MESSAGE((r.status == core::Resolution::Status::Bound && r.action == core::action_id("apps.close")), "picker Pattern shift " << shift);
   }
-  CHECK(resolve_in(picker, core::GestureKind::Tap, Button::F8, false).action == core::action_id("module.picker_f8"));
+  CHECK(resolve_in(picker, core::GestureKind::Tap, Button::F8, false).action == core::action_id("ui.back"));
   CHECK(resolve_in(picker, core::GestureKind::Tap, Button::F1, false).action == core::action_id("module.pick"));
 }
 
@@ -845,19 +852,19 @@ TEST_CASE("builtin bindings: F8 is UNDO and Shift + F8 REDO on Pattern (every mo
     CHECK_MESSAGE((f7.status == core::Resolution::Status::Bound && f7.action == core::action_id(c == &song ? "song.tempo" : (c == &instrument ? "instrument.step" : (c == &edit || c == &select ? "verb.open" : "ui.softkey")))),
                   c->what);  // (OS-INSTUI: F7 is INS> on the Instrument screen; OS-H3A: TOOLS on Pattern)  // OS-SONG1: F7 is TEMPO on the song (OS-PADS-A: EXPORT moved to Shift + Fx)
   }
-  // The overlays capture and bind F8 as Back; a held Shift falls through to it (they have no Shift + F8 of their own). The Navigator is the exception (OS-NAV2): its F8 is GO, its Back is F7 and Pattern.
+  // The overlays capture and bind F8 as Back; a held Shift falls through to it (they have no Shift + F8 of their own). OS-UXF-KEYS item 5: the Navigator follows the same grammar, F1 is GO, F8 is BACK (F7 is nothing; Pattern also closes it).
   const Chain learn{"learn", {Context::Learn, Context::Global}, true};
   const Chain navigator{"navigator", {Context::Navigator, Context::Global}, true};
   for (const bool shift : {false, true}) {
     const core::Resolution back = resolve_in(learn, core::GestureKind::Tap, Button::F8, shift);
     CHECK_MESSAGE((back.status == core::Resolution::Status::Bound && back.action == core::action_id("ui.back")), "learn");
-    const core::Resolution go = resolve_in(navigator, core::GestureKind::Tap, Button::F8, shift);
-    CHECK_MESSAGE((go.status == core::Resolution::Status::Bound && go.action == core::action_id("navigator.accept")), "navigator F8 is GO");
-    const core::Resolution f1 = resolve_in(navigator, core::GestureKind::Tap, Button::F1, false);
-    CHECK((f1.status == core::Resolution::Status::Bound && f1.action == core::action_id("navigator.accept")));  // a second GO
-    for (const Button close : {Button::F7, Button::Pattern}) {
+    const core::Resolution go = resolve_in(navigator, core::GestureKind::Tap, Button::F1, shift);
+    CHECK_MESSAGE((go.status == core::Resolution::Status::Bound && go.action == core::action_id("navigator.accept")), "navigator F1 is GO");
+    const core::Resolution f7 = resolve_in(navigator, core::GestureKind::Tap, Button::F7, shift);
+    CHECK_MESSAGE((f7.status == core::Resolution::Status::Bound && f7.action == core::action_id("ui.none")), "navigator F7 is nothing");
+    for (const Button close : {Button::F8, Button::Pattern}) {
       const core::Resolution r = resolve_in(navigator, core::GestureKind::Tap, close, shift);
-      CHECK_MESSAGE((r.status == core::Resolution::Status::Bound && r.action == core::action_id("ui.back")), "navigator CLOSE " << static_cast<int>(close));
+      CHECK_MESSAGE((r.status == core::Resolution::Status::Bound && r.action == core::action_id("ui.back")), "navigator BACK " << static_cast<int>(close));
     }
   }
   // Nothing in the Navigator answers a release: no HoldEnd of any button, and the end of a hold of Pattern is not an accept.
@@ -1037,7 +1044,7 @@ TEST_CASE("builtin bindings: the Note rows (OS-ZOOM) are Pattern's and the step 
   CHECK(resolved(pattern, core::GestureKind::Tap, Button::Instr, Button::Shift).action == core::action_id("select.jump"));  // OS-SELSHIFT
 }
 
-TEST_CASE("builtin bindings: Instr + FX2 assigns the encoder target from every screen but not in a capturing overlay (OS-ENCLEARN)") {
+TEST_CASE("builtin bindings: F7 in the Learn overlay assigns the encoder target; the chord Instr + FX2 is gone (OS-ENCLEARN, OS-UXF-KEYS item 17)") {
   const core::BindingSet set{{core::BindingView{nullptr, 0}, core::BindingView{nullptr, 0}, app::builtin_bindings()}};
   const Chain pattern{"pattern", {Context::PatternNote, Context::Pattern, Context::Global}, false};
   const Chain instrument{"instrument", {Context::Instrument, Context::Global}, false};
@@ -1053,10 +1060,14 @@ TEST_CASE("builtin bindings: Instr + FX2 assigns the encoder target from every s
     }
     return false;
   };
-  CHECK(assigns(pattern));
-  CHECK(assigns(instrument));
+  CHECK_FALSE(assigns(pattern));
+  CHECK_FALSE(assigns(instrument));
   CHECK_FALSE(assigns(learn));
-  CHECK(core::chord_bound(set, chain_of(pattern), app::button_ref(Button::Fx), app::button_ref(Button::Instr)));  // either order
+  CHECK_FALSE(core::chord_bound(set, chain_of(pattern), app::button_ref(Button::Fx), app::button_ref(Button::Instr)));
+  const core::Resolution f7 = resolve_in(learn, core::GestureKind::Tap, Button::F7, false);
+  CHECK(f7.status == core::Resolution::Status::Bound);
+  CHECK(f7.action == core::action_id("enc.assign"));
+  CHECK(resolve_in(pattern, core::GestureKind::Tap, Button::F7, false).action != core::action_id("enc.assign"));
   // the turn itself is not a binding: App::run_once takes it ahead of the gesture layer
   CHECK(core::resolve(set, chain_of(pattern), core::Gesture{0, core::GestureKind::HoldEncoder, app::encoder_ref(0), app::button_ref(Button::Instr), 1}).action != core::action_id("enc.turn"));
 }

@@ -4,8 +4,7 @@
  "steps": [
   {"say": "OS-SDSWAP, rows QA-GLB-008..010 of docs/qa/catalogue/global.md. The unit must hold the maintainer's test card (folders AIFF/, 8SVX/ ... at its root) and be idle (not playing, no save running). THIS SCENARIO NEEDS A PERSON: after the line 'PULL THE CARD' take the card OUT of the slot (all the way, not loosened), after 'PUT THE CARD BACK' push it in again. Each step waits up to 90 s for it. Nothing is written to the card"},
   {"keys": ["-shift"], "gap": 0.2, "note": "(Shift released, in case a former run left it down)"},
-  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "NAVIGATOR"}, "note": "(a leftover Navigator is closed: F7 is CLOSE, F8 would GO since OS-NAV2)"},
-  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
+  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|NAVIGATOR|TEXT_ENTRY)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
   {"run": "_stop"},
   {"cmd": "sd", "expect": ["slot:\\s+a card is in", "mount:\\s+mounted", "owner:\\s+tracker, \\d+ removed, \\d+ inserted since boot"], "show": true, "note": "the starting point: the card is mounted and the Tracker has it"},
   {"keys": ["sampleload"], "gap": 0.5},

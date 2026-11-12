@@ -149,7 +149,7 @@ TEST_CASE("state line: keys= is present only while a prompt is live, and names t
   r.app->run_once();
   std::string l = r.line();
   CHECK(value_of(l, "overlay") == "LEARN");
-  CHECK(value_of(l, "keys") == "F6:MAP,F8:BACK");  // (F6 MAP is always live: OS-LEARNMAP)
+  CHECK(value_of(l, "keys") == "F6:MAP,F7:ENC,F8:BACK");  // (F6 MAP is always live: OS-LEARNMAP; F7 ENC too, OS-UXF-KEYS item 17)
   CHECK(l.compare(l.rfind(' ') + 1, 5, "keys=") == 0);  // the last pair
   (void)r.app->invoke(core::action_id("learn.toggle"));
   r.app->run_once();
@@ -159,8 +159,8 @@ TEST_CASE("state line: keys= is present only while a prompt is live, and names t
   r.app->run_once();
   l = r.line();
   NEED(value_of(l, "overlay") == "NAVIGATOR");
-  CHECK(value_of(l, "keys") == "F1:GO,F7:CLOSE,F8:GO,SF7:CLOSE,SF8:GO");
-  r.tap(Button::F7);  // CLOSE
+  CHECK(value_of(l, "keys") == "F1:GO,F8:BACK,SF1:GO,SF8:BACK");  // OS-UXF-KEYS item 5: F1 GO, F8 BACK, F7 nothing
+  r.tap(Button::F8);  // BACK
   CHECK(value_of(r.line(), "keys") == "<missing>");
   // A question: the Config page's armed APPLY marks F7.
   (void)r.app->invoke(core::action_id("nav.screen"), static_cast<core::ActionArg>(app::ScreenId::Config));
@@ -182,7 +182,12 @@ TEST_CASE("state line: the keys of any prompt fit the room keys= has, so the con
   constexpr std::size_t kScreenKeys = 68;  // (was Learn with both its CLEAR ALL options and F5 FOLLOW live at once: 68, OS-LEARNFOLLOW S1; one live per key, and F6 MAP of OS-LEARNMAP, it is 63)
   static_assert(310u + 6u + kScreenKeys <= 384u, "keys= over the longest line must fit the console's state buffer");
   static_assert(310u - 39u + 6u + app::kKeysLineChars <= 384u, "the boot disk's keys= must fit the console's state buffer next to its line");
+  // Learn's eight keys all live (UNBIND MODE DELETE CLR ALL? FOLLOW MAP ENC BACK, OS-UXF-KEYS item 17 made ENC always live) are 71 characters. Learn opens over a screen whose sel is "-" (the same 39 characters shorter line as
+  // the boot disk's), so it has more room than kScreenKeys.
+  constexpr std::size_t kLearnKeys = 71;
+  static_assert(310u - 39u + 6u + kLearnKeys <= 384u, "Learn's keys= must fit the console's state buffer next to its line");
   std::size_t longest = 0;
+  std::size_t longest_learn = 0;
   char buf[256];
   for (unsigned id = 0; id < 64; ++id) {
     const app::KeyPrompt* prompt = app::owner_prompt(static_cast<app::OverlayId>(id));
@@ -199,7 +204,12 @@ TEST_CASE("state line: the keys of any prompt fit the room keys= has, so the con
           }
         }
       }
-      longest = std::max(longest, app::describe_prompt_keys(all, buf, sizeof buf));
+      const std::size_t n = app::describe_prompt_keys(all, buf, sizeof buf);
+      if (static_cast<app::OverlayId>(id) == app::OverlayId::Learn) {
+        longest_learn = std::max(longest_learn, n);
+      } else {
+        longest = std::max(longest, n);
+      }
     }
   }
   for (unsigned q = static_cast<unsigned>(app::Ask::New); q <= static_cast<unsigned>(app::Ask::Launch); ++q) {
@@ -211,6 +221,8 @@ TEST_CASE("state line: the keys of any prompt fit the room keys= has, so the con
   }
   CHECK(longest > 0u);
   CHECK(longest <= kScreenKeys);
+  CHECK(longest_learn > 0u);
+  CHECK(longest_learn <= kLearnKeys);
   // The boot disk: eight keys with one word, the longest of all.
   app::Model model;
   app::ViewState view;

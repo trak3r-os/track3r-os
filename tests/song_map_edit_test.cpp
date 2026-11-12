@@ -475,8 +475,8 @@ TEST_CASE("song map: Delete over 2 or more patterns asks first (F1 YES, one undo
   CHECK(rig.step(1, 0).note == note_of(1, 0));
   CHECK(rig.step(2, 0).note == note_of(2, 0));
   CHECK(rig.song_depth() == depth);
-  // F2 and every other key withdraw
-  rig.tap(Button::F2);
+  // Play and every other key withdraw (F2 is DUP PAT now, which would write: Play is what F2 was)
+  rig.tap(Button::Play);
   CHECK_FALSE(rig.state().song.ask.live);
   CHECK(rig.step(1, 0).note == note_of(1, 0));
   CHECK(rig.step(2, 0).note == note_of(2, 0));

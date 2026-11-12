@@ -4,8 +4,7 @@
  "steps": [
   {"say": "OS-NAV3, row QA-FIL-013 (docs/qa/catalogue/file.md). The card holds the maintainer's test set at its root; /MOD has 16 module files, exactly one page of the 16-row list. Watch the highlighted row: Shift + Down is a page down, so it goes to the last file, a second one stays there (no wrap), Shift + Up goes back to the first file. The plain Up / Down still move one row."},
   {"keys": ["-shift"], "gap": 0.2, "note": "(Shift released, in case a former run left it down)"},
-  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "NAVIGATOR"}, "note": "(a leftover Navigator is closed: F7 is CLOSE, F8 would GO since OS-NAV2)"},
-  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|FILL|PLAY_MODE)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
+  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|FILL|PLAY_MODE|NAVIGATOR|TEXT_ENTRY)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
   {"keys": ["file"], "gap": 0.5},
   {"state": {"screen": "FILE"}, "within": 4},
   {"keys": ["f6"], "gap": 0.5, "note": "the IMPORT page, at the root of the card"},

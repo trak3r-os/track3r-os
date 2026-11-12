@@ -32,6 +32,8 @@ KEY = re.compile(r"\bF[1-8]\b|\b[Ss][Hh][Ii][Ff][Tt]\s*\+\s*[Ff][1-8]\b")
 
 # (file, the literal as written between the quotes, the reason). Grouped by reason; the reason of a group is repeated on each of its entries.
 ALLOW = (
+    # ---- OS-UXF-PAT item 7
+    ('app/src/screens/pads_picker_overlay.cpp', 'What the 48 pads do. Shift + F1 is the octave.', "OS-UXF-PAT: the PADS picker's heading points at the plain Shift+F1 octave key of the pad layer (pads.octave in the built-in bindings), a pointer in the picker's own info line"),
     # ---- OS-MODPRESET P4: the F5 PRESET list's empty line names its own SAVE key (Shift+F5)
     ('app/src/screens/preset_overlay.cpp', 'NO PRESETS, SHIFT+F5 SAVES', "OS-MODPRESET P4: the empty PRESET list's help line points at the list's own Shift+F5 SAVE key (bound in the preset context, key_prompt.cpp)"),
     # ---- OS-PTOOLS2 S1
@@ -109,7 +111,7 @@ ALLOW = (
     ('app/src/screens/record_screen.cpp', 'recording: ends by itself; F1 stops now', 'the info line of a screen names a key of its own plain row'),
     ('app/src/screens/record_screen.cpp', 'waiting for the STOP AT boundary; F1 again stops now', 'the info line of a screen names a key of its own plain row'),
     ('app/src/screens/sample_edit_screen.cpp', 'AMIGA   Shift+F1: 8287 HZ   Shift+F2: 16574 HZ   Shift+F3: 8-BIT ', 'the info line of a screen names a key of its own plain row'),
-    ('app/src/screens/sample_edit_screen.cpp', 'pad / Shift+F5: change', 'the header hint of a screen names a key of its own Shift row (OS-QAFIX-27)'),
+    ('app/src/screens/sample_edit_screen.cpp', 'pad / Shift+F7/F8: change', 'info-line pointer: the header hint of a screen names the keys of its own Shift row (OS-QAFIX-27, OS-UXF-SMP)'),
     ('app/src/screens/sample_load_screen.cpp', 'pad: target   left / right: letter   F3 enter   F1 load','the info line of a screen names a key of its own plain row'),
     ('app/src/screens/sample_load_screen.cpp', 'pad: target   left / right: letter   F3 enter   F4 add', 'the info line of a screen names a key of its own plain row'),
     ('app/src/screens/song_screen.cpp', 'tempo   encoder: 1 BPM, Shift: 0.1   F7 again: tap', 'the info line of a screen names a key of its own plain row'),

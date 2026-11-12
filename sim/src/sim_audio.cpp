@@ -79,6 +79,7 @@ class SimAudio::Transport final : public app::TransportSink {
   bool stop() noexcept override { return push(seq::Command::Kind::Stop, 0); }
   bool queue_jump(unsigned row) noexcept override { return push(seq::Command::Kind::QueueJump, 0, static_cast<std::uint16_t>(row < seq::kNoJump ? row : seq::kNoJump), sequencer_.jump_stamp()); }  // E-SONG-07: the stamp of the list the position was authored against
   bool loop_range(unsigned first, unsigned last) noexcept override { return first < seq::kNoJump && push(seq::Command::Kind::SetLoop, first, static_cast<std::uint16_t>(last < seq::kNoJump ? last : seq::kNoJump), sequencer_.jump_stamp()); }  // OS-SONG3 S7: the range as of the list now
+  bool loop_rows(unsigned first, unsigned last) noexcept override { return first < seq::kNoJump && push(seq::Command::Kind::SetRowLoop, first, static_cast<std::uint16_t>(last < seq::kNoJump ? last : seq::kNoJump)); }  // OS-UXF Focus Loop
   bool queue_pattern(unsigned id) noexcept override { return id <= 255u && push(seq::Command::Kind::QueuePattern, id); }
   bool switch_pattern(unsigned id) noexcept override { return id >= 1u && id <= 255u && push(seq::Command::Kind::SwitchPattern, id); }
   bool release_pattern(unsigned id) noexcept override { return id >= 1u && id <= 255u && push(seq::Command::Kind::ReleasePattern, id); }

@@ -25,6 +25,7 @@ const char* overlay_name(OverlayId id) noexcept {
     case OverlayId::StepPopup: return "STEP_POPUP";
     case OverlayId::Fill: return "FILL";
     case OverlayId::PlayMode: return "PLAY_MODE";
+    case OverlayId::PadsPicker: return "PADS_PICKER";  // OS-UXF-PAT 7
     case OverlayId::Preset: return "PRESET";
     case OverlayId::VerbMenu: return "VERB_MENU";  // OS-PTOOLS2 S3
     case OverlayId::Events: return "EVENTS";

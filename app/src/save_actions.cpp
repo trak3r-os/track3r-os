@@ -88,8 +88,21 @@ bool save_report(ActionContext& ctx, SaveService::Start start) noexcept {
 // F4 SAVE: the project the user is in, into its own folder (the previous file becomes project.o3pj.bak); a project that came from outside Projects/ is saved as a new one.
 bool file_save(ActionContext& ctx, core::ActionArg) noexcept { return save_project(ctx, false); }
 
-// F5 SAVE AS (OS-FU2): the on-screen keyboard opens with the first free "Track NN" for a name, all of it selected; F8 saves a new
-// folder of that name (text.accept), F6 puts the automatic name back, F7 cancels. Nothing is ever replaced. The refusals that need no name (no card write layer, no writable
+// OS-UXF-KEYS 1a (new Community OS behaviour): Shift + File on every screen is File's F4 SAVE (the same job, the same refusals, the same strip). A project no folder holds yet (new or imported) has no name to
+// save under, so the save-as keyboard opens instead of an automatic "Track NN". file_save_as makes the refusals that need no name first.
+bool file_save_any(ActionContext& ctx, core::ActionArg arg) noexcept {
+  const char* folder = ctx.project != nullptr && ctx.project->loaded() ? ctx.project->folder() : "";
+  if (ctx.saves != nullptr && ctx.saves->attached() && !ctx.saves->has_folder(folder)) {
+    if (ctx.saves->busy()) {  // the first save of a nameless project is running: no keyboard for a save that cannot start
+      return say(ctx, core::Severity::Info, "A SAVE IS ALREADY RUNNING");
+    }
+    return file_save_as(ctx, arg);
+  }
+  return save_project(ctx, false);
+}
+
+// F5 SAVE AS (OS-FU2): the on-screen keyboard opens with the first free "Track NN" for a name, all of it selected; F1 saves a new
+// folder of that name (text.accept), F6 puts the automatic name back, F8 cancels. Nothing is ever replaced. The refusals that need no name (no card write layer, no writable
 // card, a load running) come first, so that nobody types a name for a save that cannot go.
 bool file_save_as(ActionContext& ctx, core::ActionArg) noexcept {
   bool said = false;

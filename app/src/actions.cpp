@@ -87,7 +87,6 @@ constexpr ActionDef kActions[] = {
     make_action("module.pick", module_pick, core::kActionUndoableIfOpen),  // (OS-APPSNAV: the apps list's F1 launches and needs no project; the pickers' own path says NO PROJECT when `edit` is null)
     make_action("apps.open", apps_open, kFocus),                            // OS-APPSNAV: Shift + Pattern, the list of the apps that are not tools
     make_action("apps.close", apps_close),                                  // Pattern in that list
-    make_action("module.picker_f8", module_picker_f8),                      // F8 of the picker: launch in the apps list, close in the others
     make_action("preset.load", preset_load, core::kActionUndoable | core::kActionSaysNoProject),  // OS-INSFX-ABI2 A9: the F5 PRESET list's F1, one undo unit on an instrument
     make_action("preset.save", preset_save, 0),  // OS-MODPRESET P4: the list's Shift + F5 SAVE: the keyboard for a preset's name (a modal overlay: no focus)
     make_action("module.rescan", module_rescan, kFocus),
@@ -158,6 +157,7 @@ constexpr ActionDef kActions[] = {
     // OS-007n: the saves. They run while the screen is in view; each says why when it cannot (no card write layer, no writable card, ...).
     make_action("file.save", file_save, kFocus),
     make_action("file.save_as", file_save_as, kFocus),
+    make_action("file.save_any", file_save_any, kFocus),  // OS-UXF-KEYS 1a: Shift + File
     make_action("sedit.save_wav", sedit_save_wav, kFocus),
     // OS-011a: the Sample load screen.
     make_action("sample.load", sample_load, kFocus),
@@ -179,6 +179,7 @@ constexpr ActionDef kActions[] = {
     make_action("wave.add", wave_add, kStep, wave_enabled),
     make_action("wave.del", wave_del, kStep, wave_enabled),
     make_action("wave.even", wave_even, kStep, wave_enabled),
+    make_action("wave.to_pat", wave_to_pat, kStep, wave_enabled),  // OS-UXF-SMP 3c: Shift + F4 TO PAT
     make_action("wave.mode", wave_mode_open, kFocus),  // OS-INSTUI S4: Shift + F1 MODE
     make_action("wave.mode_pick", wave_mode_pick, core::kActionUndoable | core::kActionSaysNoProject),  // the list's F1: play_mode_set, one undo unit
     make_action("wave.auto", wave_auto, kFocus, wave_enabled),
@@ -225,7 +226,7 @@ constexpr ActionDef kActions[] = {
     make_action("config.f8", config_f8, kFocus),
     make_action("learn.clear_all", learn_clear_all, core::kActionUndoableIfOpen),
     make_action("midi.cc", midi_cc, core::kActionUndoableIfOpen | core::kActionRecords),  // OS-FXREC 3.4: a CC never closes a take; in one its parameter write is final (apply_cc) and only the recorded FX join it
-    make_action("enc.assign", enc_assign),  // OS-ENCLEARN: Instr + FX2, the Learn row becomes the encoder's target
+    make_action("enc.assign", enc_assign),  // OS-ENCLEARN: Learn F7 ENC, the Learn row becomes the encoder's target
     make_action("enc.turn", enc_turn, core::kActionUndoableIfOpen | core::kActionRecords),  // OS-ENCLEARN: Instr + FX1 and the encoder; as midi.cc it never closes a take and its parameter write is final in one
     make_action("param.auto", param_auto, core::kActionUndoableIfOpen | core::kActionRecords),  // OS-PARAMAUTO S2: a played CC letter moves its parameter; like midi.cc it never closes a take, its write is final and no macro keeps it
     // OS-009 P1a.1: the pattern's edit core. Modes, the selection and the pad preview are view state; the step actions are undo units.
@@ -244,6 +245,8 @@ constexpr ActionDef kActions[] = {
     make_action("pattern.invert", pattern_invert, kStep, pattern_screen_in_view),  // no key since OS-PTOOLS2 S3 (F6 is REPEAT; the verb menu's pad 9 takes it); outside Edit the handler says TURN EDIT ON (OS-QAFIX-12)
     make_action("pads.mode", pads_mode, kFocus),
     make_action("pads.octave", pads_octave, kFocus),  // OS-PADOCT
+    make_action("pads.picker", pads_picker_open, kFocus),  // OS-UXF-PAT 7: Shift + F2 PADS
+    make_action("pads.pick", pads_picker_pick),            // the list's F1..F6 (no focus: the list owns the input)
     make_action("pads.track", pads_track, kFocus),
     make_action("pads.play", pads_play, kEditOnceRec),  // OS-LIVEREC: a PIANO / ISO pad records into the take (the other modes do not: dispatch)
     make_action("pads.step_up", pads_step_up, kEditOnce),

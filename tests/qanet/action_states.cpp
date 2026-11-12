@@ -117,11 +117,12 @@ const State kSongTimelineLane = {"TIMELINE, cursor in a lane, audio on", Doc::De
 const State kSongSlotsPads = {"two slots, pads on SLOTS", Doc::Demo, "action song.add_slot\npress shift\ntap f7\nrelease shift\n"};
 const State kSongTempoTap = {"F7 tapped once, 400 ms ago", Doc::Demo, "tap f7\nwait 400\n"};
 // The Save As keyboard (the TextEntry reach opens the instrument's name: closed, then SAVE AS).
-const State kSaveAsName = {"Save As name entry", Doc::Demo, "tap f7\naction file.save_as\nwait 50\n"};
+const State kSaveAsName = {"Save As name entry", Doc::Demo, "tap f8\naction file.save_as\nwait 50\n"};
 // Sample screens: the Wave view zoomed in, a slice picked on the CHOP page, the play-mode list moved, the Sample edit selection moved, a sample edit done (and undone).
 const char* const kLoadedPre = "tap sampleload\nwait 120\ntap down 2\ntap f1\nwait 50\ntap f1\nwait 300\ntap pattern\n";
 const State kZoomedIn = {"sample loaded, zoomed in", Doc::Sound, "tap up\n", kLoadedPre};
 const State kSliceOn = {"sample loaded, two slices, the second picked", Doc::Sound, "tap sampleplay\naction wave.add\ntap right\n", kLoadedPre};
+const State kBeatSliced = {"sample loaded, EVEN made 16 slices (beat slice) on the CHOP page", Doc::Sound, "action wave.even\n", kLoadedPre};  // OS-UXF-SMP 3c: wave.to_pat writes them into the Pattern
 const State kModeMoved = {"sample loaded, play-mode list moved", Doc::Sound, "tap down\n", kLoadedPre};
 const State kSeditMoved = {"sample loaded, selection edge moved", Doc::Sound, "action sedit.move 1\n", kLoadedPre};
 const State kSeditDone = {"sample loaded, an AMIGA edit made", Doc::Sound, "action sedit.amiga\nwait 600\n", kLoadedPre};
@@ -160,7 +161,7 @@ const std::vector<ActionEntry>& action_states() {
       A("dj.turn"),
       A("edit.redo"),
       A("edit.undo"),
-      A("enc.assign", {kEncRow}),  // OS-ENCLEARN: Instr + Fx on a learnable row (the turn half, enc.turn, has no key of its own)
+      A("enc.assign", {kEncRow}),  // OS-ENCLEARN: Learn F7 ENC on a learnable row (the turn half, enc.turn, has no key of its own)
       A("events.back"),     // OS-MIDIREC S1b: the EVENTS overlay's actions (the walk opens it with Pattern F6, events.open)
       A("events.coarse", {kEventsStep}),  // S2b: the field edits write in STEP (the demo state says TURN EDIT ON in WATCH)
       A("events.delete", {kEventsStep}),  // S2c: Delete, A10
@@ -190,6 +191,7 @@ const std::vector<ActionEntry>& action_states() {
       A("file.report", {kDemo, kImportPage}),
       A("file.rescan"),
       A("file.save"),
+      A("file.save_any"),  // OS-UXF-KEYS item 1a: Shift + File, the same save as file.save
       A("file.save_as"),
       A("fill.apply"),
       A("fill.coarse"),
@@ -247,7 +249,6 @@ const std::vector<ActionEntry>& action_states() {
       A("module.exit"),
       A("module.launch"),
       A("module.pick"),
-      A("module.picker_f8"),
       A("module.rescan"),
       A("nav.down"),
       A("nav.left"),
@@ -261,8 +262,9 @@ const std::vector<ActionEntry>& action_states() {
       A("navigator.open"),
       A("pad.audition", {kDemo, kInstrument5}),
       A("pad.preview"),
-      A("pads.mode"),
       A("pads.octave"),
+      A("pads.pick", {kDemo}),
+      A("pads.picker"),
       A("pads.play", {kEdit, kStepPads}),
       A("pads.track"),
       A("param.apply"),
@@ -418,6 +420,7 @@ const std::vector<ActionEntry>& action_states() {
       A("wave.pad", {kLoaded, kSliceOn}),
       A("wave.pad_select", {kLoaded, kSliceOn}),
       A("wave.point", {kLoaded}),
+      A("wave.to_pat", {kBeatSliced}),
       A("wave.zc", {kLoaded}),
       A("wave.zoom", {kLoaded, kZoomedIn}),
   };
@@ -439,7 +442,8 @@ const std::vector<ContextReach>& context_reach() {
       {Context::VerbMenu, "VerbMenu", "tap f7\n", nullptr},  // OS-PTOOLS2 S3: F7 opens the verb menu
       {Context::PatternTools, "PatternTools", "tap rec\npress shift\ntap down 3\nrelease shift\ntap f7\npad 0\n", nullptr},  // OS-PTOOLS2 S2: the menu's pad 1 opens the TOOLS dialog over the block
       {Context::StepPopup, "StepPopup", "press note\nwait 500\n", nullptr},
-      {Context::PadsMode, "PadsMode", "press shift\ntap f3\nrelease shift\n", nullptr},  // (PIANO: OS-PADOCT moved the mode keys one along)
+      {Context::PadsMode, "PadsMode", "press shift\ntap f2\nrelease shift\ntap f2\n", nullptr},  // (PIANO, through the PADS picker: Shift + F2, then its F2; OS-UXF-PAT 7)
+      {Context::PadsPicker, "PadsPicker", "press shift\ntap f2\nrelease shift\n", nullptr},  // OS-UXF-PAT 7
       {Context::PadsTracks, "PadsTracks", "tap song\n", nullptr},
       {Context::Song, "Song", "tap song\n", nullptr},
       {Context::SongAsk, "SongAsk", "tap song\ntap right\ntap delete\nwait 20\n", nullptr},

@@ -7,6 +7,7 @@
 
 #include "action_handlers.h"
 
+#include <o3os/app/pattern_clip.h>
 #include <o3os/app/pattern_source.h>
 #include <o3os/app/screens/pattern_screen.h>
 #include <o3os/model/editor.h>
@@ -138,6 +139,61 @@ inline bool finish_entry(ActionContext& ctx, const Edited& e, bool advance) noex
   }
   return changed;
 }
+
+// ---- MIDI lanes with the pattern edits (OS-MIDIREC-P1 S7c, A16; new Community OS behaviour) ----------------------------------------------------------------------------------------------
+// Whole-step blocks only: a column block, and a clip that carries no lanes, leave the lanes alone. Every lane edit of an action is made BEFORE its step writes and after a dry run over
+// the pool and the undo ring, so a refusal changes nothing (the lane edits are records of the same undo unit).
+
+// What a write of `tracks` tracks x `rows` steps may add to the open unit (an upper bound: both images and a record header per track).
+constexpr std::size_t step_bytes(int tracks, int rows) noexcept {
+  return static_cast<std::size_t>(tracks) * (32u + 2u * static_cast<std::size_t>(rows) * sizeof(model::Step));
+}
+
+enum class LaneCopy : std::uint8_t { None, Carried, TooMany };
+// Copy: the lane events of pattern `pattern`, tracks track0.., rows row0.. (the clip's size) into the clip; None when there is no lane store or the clip is a column block (the clip then carries
+// no lanes), TooMany when they do not fit the clip's buffer (the clip carries none).
+LaneCopy lanes_to_clip(PatternClip& clip, const model::LaneStore* store, unsigned pattern, int track0, int row0) noexcept;
+
+// Paste: the clip's lane events over the lanes of the target. Built from the steps each clip track writes (`steps[i]`, 0: none, as past the last track or a row past the track's end); the clip's
+// ticks are moved to the target rows for the object's life. `whole` (the whole-pattern paste): the dry run counts the whole of each old lane, since the track lengths change around it.
+class LanePaste {
+ public:
+  LanePaste(ActionContext& ctx, unsigned pattern, int track0, int row0, const int* steps, bool whole) noexcept;
+  ~LanePaste();
+  LanePaste(const LanePaste&) = delete;
+  LanePaste& operator=(const LanePaste&) = delete;
+  bool active() const noexcept { return active_; }       // the clip carries lanes and a store is attached
+  bool differs() const noexcept { return differs_; }     // some target lane would change
+  bool fits(std::size_t other_bytes) noexcept;           // the dry run (true when nothing changes)
+  bool apply() noexcept;                                 // the lane edits; true when a lane changed
+
+ private:
+  struct Slot {
+    std::uint8_t track;
+    std::uint8_t clip_track;
+    std::uint32_t t0;
+    std::uint32_t t1;
+    std::uint32_t dry_t1;
+    std::uint32_t n;
+  };
+  PatternClip* clip_;
+  model::Editor* edit_;
+  const model::LaneStore* store_ = nullptr;
+  unsigned pattern_;
+  int shift_;
+  bool active_ = false;
+  bool differs_ = false;
+  std::uint32_t events_ = 0;
+  std::uint32_t count_ = 0;
+  Slot slot_[model::kMaxTracks] = {};
+};
+
+// Block delete: the lane events of the block's tracks and rows (clamped to each track's length) are deleted. 1: something went; 0: nothing to delete; -1: the undo ring would not take it (said,
+// nothing changed). Whole-step blocks only (0 otherwise).
+int lanes_clear_block(ActionContext& ctx, unsigned pattern, const Selection::Block& b, const PatternSource& src, std::size_t other_bytes) noexcept;
+
+// Row insert / remove at block row b.row0 over the block's tracks (those whose length reaches the row): the lane ticks move one step with the rows (Editor::lane_rows). Same result codes as above.
+int lanes_rows(ActionContext& ctx, unsigned pattern, const Selection::Block& b, const PatternSource& src, bool insert) noexcept;
 
 // 0 for the FX1 column, 1 for FX2, -1 when the cursor is on another column.
 inline int fx_column(const ViewState& view) noexcept {

@@ -270,13 +270,25 @@ TEST_CASE("wave: F1..F4 pick the point, the encoder moves it, the loop is pushed
   CHECK(rig.inst().sampler.loop_end == rig.inst().sampler.end);
   const app::Points p{rig.inst().sampler.start, rig.inst().sampler.loop_start, rig.inst().sampler.loop_end, rig.inst().sampler.end};
   CHECK(app::points_valid(p));
-  // F8: undo, one unit at a time (the last nudge first), Shift + F8 redoes.
+  // F8: undo, one unit at a time (the last nudge first), Shift + F5 redoes (OS-UXF-SMP item 11: Shift + F8 is INST +).
   const std::uint16_t end_now = rig.inst().sampler.end;
   rig.tap(Button::F8);
   CHECK(rig.inst().sampler.end == 65535u);
   CHECK(rig.inst().sampler.loop_end == 65535u);
-  rig.shift_tap(Button::F8);
+  rig.shift_tap(Button::F5);
   CHECK(rig.inst().sampler.end == end_now);
+}
+
+TEST_CASE("wave: Shift + F8 / Shift + F7 are INST + / INST - (OS-UXF-SMP item 11): the instrument in view steps on and back, round") {
+  Rig rig;
+  const int here = rig.app->state().instrument;
+  CHECK(here == static_cast<int>(kSlot) + 1);
+  rig.shift_tap(Button::F8);
+  CHECK(rig.app->state().instrument == here + 1);
+  CHECK(rig.app->state().screen == ScreenId::Wave);
+  rig.shift_tap(Button::F7);
+  CHECK(rig.app->state().instrument == here);
+  CHECK(rig.app->state().screen == ScreenId::Wave);
 }
 
 TEST_CASE("wave: with ZC on the encoder moves to a zero crossing in the direction it turns, and can always leave one") {
@@ -363,6 +375,134 @@ TEST_CASE("chop: EVEN makes n equal slices, puts the instrument in beat slice mo
   rig.settle_engine();
   CHECK(rig.voices->sample(kSlot).beat_slice);
   CHECK(rig.voices->sample(kSlot).slice_count == 17u);
+}
+
+TEST_CASE("chop: Shift + F4 TO PAT writes slice 1..n as notes 24 + k on consecutive steps of the Pattern cursor's track, one undo unit; the cursor stays (OS-UXF-SMP item 3c)") {
+  Rig rig;
+  rig.chop();
+  rig.invoke("wave.even", 0);  // 16 slices, beat slice mode
+  NEED(rig.inst().sampler.slice_count == 16u);
+  rig.go(ScreenId::Pattern);
+  rig.invoke("cursor.track", 1);
+  rig.invoke("cursor.jump_fraction", 1);
+  const int row = rig.app->state().pattern.row();
+  const int track = rig.app->state().pattern.track();
+  NEED(row > 0);
+  NEED(track == 1);
+  rig.go(ScreenId::Wave);
+  NEED(rig.app->state().page[app::screen_index(ScreenId::Wave)] == 1u);
+  rig.expire();  // the notice queue shows the oldest news first
+  rig.shift_tap(Button::F4);
+  const unsigned id = rig.app->state().edit.pattern;
+  const model::Pattern* pat = rig.arena->project.pattern(id);
+  NEED(pat != nullptr);
+  CHECK(pat->steps[track][row - 1].note == 0u);
+  for (unsigned k = 0; k < 16u; ++k) {
+    CHECK(pat->steps[track][row + static_cast<int>(k)].note == 24u + k);
+    CHECK(pat->steps[track][row + static_cast<int>(k)].instr == kSlot + 1u);
+  }
+  CHECK(pat->steps[track][row + 16].note == 0u);
+  CHECK(pat->steps[0][row].note == 0u);
+  CHECK(rig.app->state().pattern.row() == row);
+  CHECK(rig.app->state().pattern.track() == track);
+  CHECK(rig.message() == "SLICES TO PAT");
+  rig.tap(Button::F8);  // UNDO: the pattern the write made and all its steps go in one
+  pat = rig.arena->project.pattern(id);
+  CHECK((pat == nullptr || pat->steps[track][row].note == 0u));
+}
+
+TEST_CASE("chop: TO PAT stops at the end of the pattern, is refused with no slices or outside beat slice mode, and writes nothing then (OS-UXF-SMP item 3c)") {
+  Rig rig;
+  rig.chop();
+  rig.expire();  // the notice queue shows the oldest news first
+  rig.shift_tap(Button::F4);
+  CHECK(rig.message() == "NO SLICES TO WRITE");
+  CHECK(rig.arena->project.pattern(rig.app->state().edit.pattern) == nullptr);
+  rig.invoke("wave.even", 0);
+  {  // slices, but the play mode is not beat slice: a note would pitch the sample
+    model::Instrument in = rig.inst();
+    in.sampler.play_mode = 0;
+    NEED(rig.arena->project.set_instrument(kSlot, in) == model::Status::Ok);
+    rig.expire();  // the notice queue shows the oldest news first
+    rig.shift_tap(Button::F4);
+    CHECK(rig.message() == "SET BEAT SLICE MODE FIRST");
+    CHECK(rig.arena->project.pattern(rig.app->state().edit.pattern) == nullptr);
+    in.sampler.play_mode = 5;
+    NEED(rig.arena->project.set_instrument(kSlot, in) == model::Status::Ok);
+  }
+  rig.go(ScreenId::Pattern);
+  rig.invoke("cursor.jump_end", 0);
+  const int row = rig.app->state().pattern.row();
+  rig.go(ScreenId::Wave);
+  rig.expire();  // the notice queue shows the oldest news first
+  rig.shift_tap(Button::F4);
+  const model::Pattern* pat = rig.arena->project.pattern(rig.app->state().edit.pattern);
+  NEED(pat != nullptr);
+  const int track = rig.app->state().pattern.track();
+  CHECK(pat->steps[track][row].note == 24u);
+  CHECK(rig.message() == "SLICES TO PAT: PATTERN END");
+  CHECK(pat->steps[track][row - 1].note == 0u);
+}
+
+TEST_CASE("chop: TO PAT on a track shorter than the pattern clips the write at the track's end, and is refused from a row at or past it (OS-UXF-SMP item 3c, review)") {
+  Rig rig;
+  rig.chop();
+  rig.invoke("wave.even", 0);  // 16 slices, beat slice mode
+  NEED(rig.inst().sampler.slice_count == 16u);
+  const unsigned id = rig.app->state().edit.pattern;
+  NEED(rig.arena->project.create_pattern(id, 64) == model::Status::Ok);
+  NEED(rig.arena->project.set_track_length(id, 1, 8) == model::Status::Ok);
+  rig.go(ScreenId::Pattern);
+  rig.invoke("cursor.track", 1);
+  rig.invoke("cursor.jump_fraction", 1);
+  const int far_row = rig.app->state().pattern.row();
+  NEED(rig.app->state().pattern.track() == 1);
+  NEED(far_row >= 8);
+  rig.go(ScreenId::Wave);
+  rig.expire();  // the notice queue shows the oldest news first
+  rig.shift_tap(Button::F4);  // past the short track's end: nothing is written
+  CHECK(rig.message() == "PAST TRACK END");
+  const model::Pattern* pat = rig.arena->project.pattern(id);
+  NEED(pat != nullptr);
+  CHECK(pat->steps[1][far_row].note == 0u);
+  rig.go(ScreenId::Pattern);
+  rig.invoke("cursor.jump_fraction", 0);
+  NEED(rig.app->state().pattern.row() == 0);
+  NEED(rig.app->state().pattern.track() == 1);
+  rig.go(ScreenId::Wave);
+  rig.expire();  // the notice queue shows the oldest news first
+  rig.shift_tap(Button::F4);  // row 0: 8 slices fit, the other 8 are dropped
+  CHECK(rig.message() == "SLICES TO PAT: PATTERN END");
+  pat = rig.arena->project.pattern(id);
+  NEED(pat != nullptr);
+  for (unsigned k = 0; k < 8u; ++k) {
+    CHECK(pat->steps[1][k].note == 24u + k);
+  }
+  CHECK(pat->steps[1][8].note == 0u);
+  CHECK(pat->steps[0][0].note == 0u);
+}
+
+TEST_CASE("wave: Shift + F7 / F8 re-pick the page from the new instrument's play mode, so the Shift row shows TO PAT only on a slice instrument (OS-UXF-SMP review)") {
+  Rig rig;
+  rig.chop();
+  rig.invoke("wave.even", 0);  // the slot is in beat slice mode
+  {  // the next slot: a sample instrument in the one-shot mode
+    model::Instrument in = rig.inst();
+    in.sampler.play_mode = 0;
+    in.sampler.slice_count = 0;
+    NEED(rig.arena->project.set_instrument(kSlot + 1, in) == model::Status::Ok);
+  }
+  const auto to_pat_shown = [&rig]() {
+    const app::ViewState& v = rig.app->state();
+    return std::string(app::kWaveScreen.shift_row(v)[3]) == "TO PAT";
+  };
+  NEED(to_pat_shown());
+  rig.shift_tap(Button::F8);  // CHOP page onto a one-shot instrument: the WAVE page, no TO PAT
+  CHECK(rig.app->state().page[app::screen_index(ScreenId::Wave)] == 0u);
+  CHECK_FALSE(to_pat_shown());
+  rig.shift_tap(Button::F7);  // and back onto the slice instrument: CHOP again
+  CHECK(rig.app->state().page[app::screen_index(ScreenId::Wave)] == 1u);
+  CHECK(to_pat_shown());
 }
 
 TEST_CASE("chop: ADD splits the selected slice at the middle of its start and end (and puts one at 0 first), DEL removes the selected one, Left / Right select, the encoder moves its start") {

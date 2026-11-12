@@ -149,6 +149,13 @@ class TransportSink {
     (void)last;
     return false;
   }
+  // OS-UXF Focus Loop (seq::Command::SetRowLoop): the pattern now playing loops the rows `first`..`last` (0-based, in the pattern's own rows): the line wraps from `last` back to `first`; `last` 0xFFFF takes the
+  // loop back. A stop, a start and a pattern change end it too. Refuses (false) by default and when the command did not go. What holds is read back from view.play.row_first / row_last.
+  virtual bool loop_rows(unsigned first, unsigned last) noexcept {
+    (void)first;
+    (void)last;
+    return false;
+  }
   // The sequencer's own queue (seq::Command::QueuePattern, the sequential switch; OS-PADS-B's PATS pads): while playing, pattern `id` (1..255) plays next, at the end of the pattern now
   // playing, and the transport then loops it (Pattern mode); id 0 cancels the one waiting. Refuses (false) by default: a sink with no sequencer behind it. What waits is not published:
   // the caller remembers it (PatternEdit::queued_pattern) until the sequencer's position shows that pattern.

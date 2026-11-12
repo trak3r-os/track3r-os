@@ -104,7 +104,7 @@ snap marks
 # (The Select mode of OS-009, the block mark whose arrows extend the block, went with OS-LIVEREC: the block above is Shift + the arrows, in every mode.)
 action select.clear
 
-# The choosers: F1 the pattern (OS-PATSWITCH: the hold only, a tap opens nothing), F2 the length, F3 the step jump. Up, Down, the encoder, Left and Right (the defined values) and the pads.
+# The choosers: F1 the pattern (OS-PATSWITCH: the hold; OS-UXF-PAT item 6: a tap opens it too), F2 the length, F3 the step jump. Up, Down, the encoder, Left and Right (the defined values) and the pads.
 press f1
 wait 450
 encoder 2

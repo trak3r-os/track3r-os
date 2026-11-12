@@ -1365,8 +1365,9 @@ bool apply_cc(ActionContext& ctx, core::LearnScope scope, unsigned channel, unsi
 
 }  // namespace
 
-// OS-ENCLEARN: Instr + FX2 (the chord): the Learn row under the cursor (focus_param, kParamLearnable: Learn's own resolution) becomes the encoder's one target, replacing the old one.
+// OS-ENCLEARN: the Learn overlay's F7 ENC (OS-UXF-KEYS item 17; it was the chord Instr + FX2): the Learn row under the cursor (focus_param, kParamLearnable: Learn's own resolution) becomes the encoder's one target, replacing the old one.
 bool enc_assign(ActionContext& ctx, core::ActionArg) noexcept {
+  ctx.view.learn.confirm = false;
   const core::ParamId id = focus_param(ctx);
   ParamScratch scratch;
   const core::ParamDesc* d = describe_param(ctx.model, id, scratch);
@@ -1428,7 +1429,7 @@ bool param_auto(ActionContext& ctx, core::ActionArg arg) noexcept {
 bool enc_turn(ActionContext& ctx, core::ActionArg arg) noexcept {
   const core::ParamId id = ctx.view.enc_target;
   if (id == core::ParamId::None) {
-    return say_tag(ctx, core::Severity::Info, "NO ENCODER TARGET (INSTR + FX2)", "enc");
+    return say_tag(ctx, core::Severity::Info, "NO ENCODER TARGET (SET IT IN LEARN)", "enc");
   }
   ParamScratch scratch;
   const core::ParamDesc* d = describe_param(ctx.model, id, scratch);

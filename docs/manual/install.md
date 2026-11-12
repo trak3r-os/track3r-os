@@ -7,18 +7,18 @@ The release file is an Intel HEX image under a `.ptf` name, which is what the Tr
 
 > **Unofficial, at your own risk.** track3r-os is community firmware. It is not affiliated with or endorsed by Polyend. Installing it replaces the firmware in your unit. The bootloader that flashes it is separate from the firmware and is not touched by an update (`docs/hw/tracker-hardware-notes.md`, section 3), but nothing here is a guarantee. Read the whole page first.
 
-**Current release: v1.3.0** ([release notes](../release/v1.3.0.md)). The install steps below are the ones that worked for earlier releases.
+**Current release: v1.3.1** ([release notes](../release/v1.3.1.md)). The install steps below are the ones that worked for earlier releases.
 
 This page says what is established by observation on the maintainer's unit and by the repository's own tests. Where a step has had little testing, do it only if you accept that risk and have a way back (see [Going back](#going-back-to-the-official-firmware)).
 
 ## What a release contains
 <!-- sync: src=tools/release/make_starter.py,tools/release/starter_manifest.json -->
 
-A release (GitHub, "Releases") has four files (v1.3.0):
+A release (GitHub, "Releases") has four files (v1.3.1):
 
-- `track3r-os-v1.3.0.ptf`: the update file. It is the device image in Intel HEX form under a `.ptf` name, which is what the Tracker's bootloader flashes. Its name never starts with `Polyend`, so it cannot be mistaken for an official file. For a first install through the reset button you rename your copy on the card (section 1).
-- `track3r-os-v1.3.0-modules.zip`: every external module: the apps, the effects, the instruments (`tb303`, `chip`, `fm`, `sid`, `sine`; they are not inside the firmware) with their licence texts, the `tracker` importer for MOD, S3M and MED, the factory presets, and the thirteen Sample Editor plugins (`.ptfx`, which go in `Effects/`).
-- `track3r-os-v1.3.0-examples.zip`: demo projects, a drum kit, wavetables, an OctaMED module and the licences of the files.
+- `track3r-os-v1.3.1.ptf`: the update file. It is the device image in Intel HEX form under a `.ptf` name, which is what the Tracker's bootloader flashes. Its name never starts with `Polyend`, so it cannot be mistaken for an official file. For a first install through the reset button you rename your copy on the card (section 1).
+- `track3r-os-v1.3.1-modules.zip`: every external module: the apps, the effects, the instruments (`tb303`, `chip`, `fm`, `sid`, `sine`; they are not inside the firmware) with their licence texts, the `tracker` importer for MOD, S3M and MED, the factory presets, and the thirteen Sample Editor plugins (`.ptfx`, which go in `Effects/`).
+- `track3r-os-v1.3.1-examples.zip`: demo projects, a drum kit, wavetables, an OctaMED module and the licences of the files.
 - `SHA256SUMS`: the checksums of the three files. Check your download before using it: `sha256sum -c SHA256SUMS`. The release notes also give the CRC-32 that `o3console.py --update --crc` asks for.
 
 **Unzip both zips at the root of the card.** The zips are optional for the firmware to run, but two kinds of file in them matter: the instrument modules (a project that uses the TB-303, Chip, FM or SID says **MODULE NOT ON THE CARD** without its file in `modules/instruments/`) and the importer: module import runs from `modules/importers/tracker.tmod`, and without it IMPORT of a MOD, S3M or OctaMED file says **NO IMPORTER** and changes nothing (your open project stays loaded). Keep these files on the card. Each zip's `README.txt` says what goes where.
@@ -32,7 +32,7 @@ The same image shows its version in Config, INFO (BUILD ID, for example `v1.2.0 
 2. **Have the official firmware file at hand.** Official images are named `PolyendTracker_<version>.ptf`. Get one from Polyend; their pages are linked from `docs/hw/tracker-hardware-notes.md` ([how to update](https://polyend.ladesk.com/220365-How-do-I-update-Trackers-firmware), [emergency flashing](https://polyend.ladesk.com/929798-How-do-I-perform-the-emergency-flashing-procedure)). The vendor's emergency-flashing page is also where the hidden reset button used below is described.
 3. **Use a normal card.** The Tracker needs a single FAT32 partition with an MBR. The track3r-os writer refuses exFAT volumes and cards with a write-protected CSD, and it never creates the `Firmware/` folder: it must already exist.
 4. **Settings.** The vendor tells users to create a new project after an update so that Config is initialised (the vendor's statement, not verified here). Config may start from defaults after a change of firmware in either direction. How the settings of track3r-os and the official firmware interact needs more testing.
-5. **Image end (v1.2.0).** An image must end at or below 0xFF000: an image that reached the last 4 KiB flash sector (end 0x100000) hung a unit after the update, which handed over to the bootloader and did not come back. The update checker of the unit and the image check of the build now refuse such an image, and the v1.2.0 and v1.3.0 `.ptf` files end below the limit. If you build your own image, build it as a release build.
+5. **Image end (v1.2.0).** An image must end at or below 0xFF000: an image that reached the last 4 KiB flash sector (end 0x100000) hung a unit after the update, which handed over to the bootloader and did not come back. The update checker of the unit and the image check of the build now refuse such an image, and the v1.2.0, v1.3.0 and v1.3.1 `.ptf` files end below the limit. If you build your own image, build it as a release build.
 6. **Power.** Use a stable USB power source and do not remove power or the card while the unit is updating. This is a precaution; how long the flashing takes and what the screen shows while it runs has not been recorded.
 
 ## 1. From the official firmware
@@ -91,7 +91,7 @@ A unit that already runs a track3r-os with the update dialog can also install a 
 
 The bootloader is separate from the application, so a broken or unwanted application does not remove the recovery path. The way back that has been proven on the unit is the hidden reset button with a single good `.ptf` in `Firmware/`.
 
-**Going back from v1.3.0, v1.2.0 or v1.1.0 to v1.0.1 or v1.0.0** works through the on-device Update screen too. Those files are not padded to a 4 KiB sector, so the screen offers to pad a copy first (**PAD**), then installs the copy (see [Update](config.md)). The reset button as below, with the older file alone in `Firmware/`, works as well. <!-- QA-CFG-269 -->
+**Going back from v1.3.1, v1.3.0, v1.2.0 or v1.1.0 to v1.0.1 or v1.0.0** works through the on-device Update screen too. Those files are not padded to a 4 KiB sector, so the screen offers to pad a copy first (**PAD**), then installs the copy (see [Update](config.md)). The reset button as below, with the older file alone in `Firmware/`, works as well. <!-- QA-CFG-269 -->
 
 **Projects when you go back from v1.3.0 to v1.2.0.** A project with MIDI lanes has an `MEVT` chunk, which v1.2.0 keeps as an unknown chunk and does not play. An instrument with CC letters is saved as INST 1.9; v1.2.0 says "newer fields skipped" and opens the rest.
 

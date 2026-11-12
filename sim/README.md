@@ -78,7 +78,7 @@ to hold, double-tap or chord is delivered late (at the release, or when the wind
 presses such a button and snaps at once sees nothing yet: `tap` it, or `wait` first. `scenarios/actions.txt` shows
 actions by name and the Learn chord, `scenarios/themes.txt` the theme switch (by key and by name), `scenarios/params.txt` the OS-002d parameter page (no project, the demo document, the four pages, edits, undo, pickup, Learn, a jump binding), `scenarios/screens.txt` the
 OS-002b screens: Pattern, Song and its pages, the quarter jumps (Shift + F1..F5) on the Song list, the pads' mode picker (Shift + F1..F3: OS-PADS-A), free Edit (Rec) and following Edit (Shift + Rec, OS-RECSWAP), the
-Navigator (the Master + Song or Song + Pattern chord, it stays open with its own F-key row, choose Song, F8 GO; F7 CLOSE, Pattern CLOSE, F1 GO), Learn (open, captured keys, close), a
+Navigator (the Master + Song or Song + Pattern chord, it stays open with its own F-key row, choose Song, F1 GO; F8 BACK, Pattern BACK), Learn (open, captured keys, close), a
 notification shown and expired after its 2 s (snaps before and after), a queue overflow (eight F-keys) and the button
 of a screen that does not exist yet. A hold on the simulated clock needs the time to run: `press f1`, `wait 450`
 is a hold of F1 (the Navigator needs no hold: OS-APPSNAV opens it with the Master + Song or Song + Pattern chord; Shift + Pattern lists the module apps).

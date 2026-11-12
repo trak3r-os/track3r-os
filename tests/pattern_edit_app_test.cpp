@@ -130,6 +130,11 @@ struct Rig {
     release(Button::Shift);
     pass(1);
   }
+  // OS-UXF-PAT 7: the pads' modes are the PADS picker's (Shift + F2, then F1..F6 = NOTES PIANO ISO TRACKS PATS VU); `old` is the former Shift key of the mode (F2 NOTES .. F7 VU).
+  void pad_mode(Button old) {
+    shift_tap(Button::F2);
+    tap(static_cast<Button>(static_cast<unsigned>(old) - 1u));
+  }
   void pad(unsigned index) {
     input.push(core::make_pad_event(clock.now(), static_cast<std::uint8_t>(index), 100));
     pass(1);
@@ -1263,20 +1268,25 @@ TEST_CASE("pattern edit: mute and solo are undoable flags of the track slot (the
 
 // ---- the choosers ------------------------------------------------------------------------------------------------------------------------
 
-TEST_CASE("pattern edit: F1, F2, F3: a tap of F2 or F3 toggles a chooser, a hold opens any of them until the release, a tap of F1 opens nothing (OS-PATSWITCH), F8 closes") {
+TEST_CASE("pattern edit: F1, F2, F3: a tap of any toggles its chooser (OS-UXF-PAT item 6: F1 too), a hold opens any of them until the release, F8 closes") {
   Rig rig;
   using app::OverlayId;
   CHECK(rig.state().overlay == OverlayId::None);
-  rig.tap(Button::F1);  // OS-PATSWITCH (maintainer, 2026-10-17): the PATTERN chooser is the hold only; a tap leaves nothing open
-  CHECK(rig.state().overlay == OverlayId::None);
+  rig.tap(Button::F1);  // OS-UXF-PAT item 6: a tap of F1 opens the PATTERN chooser, as its hold does
+  CHECK(rig.state().overlay == OverlayId::PatternChooser);
   rig.tap(Button::F1);
   CHECK(rig.state().overlay == OverlayId::None);
-  CHECK(rig.invoke("chooser.toggle", 0) == DispatchResult::Unchanged);
+  CHECK(rig.invoke("chooser.toggle", 0) == DispatchResult::Changed);
+  CHECK(rig.state().overlay == OverlayId::PatternChooser);
+  rig.tap(Button::F8);
+  CHECK(rig.state().overlay == OverlayId::None);
   rig.tap(Button::F2);
   CHECK(rig.state().overlay == OverlayId::LengthChooser);
   rig.tap(Button::F3);  // another F-key: switched to it
   CHECK(rig.state().overlay == OverlayId::JumpChooser);
-  rig.tap(Button::F1);  // F1 is not a toggle: the open chooser stays
+  rig.tap(Button::F1);  // another F-key: switched to it
+  CHECK(rig.state().overlay == OverlayId::PatternChooser);
+  rig.tap(Button::F3);
   CHECK(rig.state().overlay == OverlayId::JumpChooser);
   rig.tap(Button::F8);  // F8 is Back
   CHECK(rig.state().overlay == OverlayId::None);
@@ -1297,7 +1307,7 @@ TEST_CASE("pattern edit: F1, F2, F3: a tap of F2 or F3 toggles a chooser, a hold
   rig.tap(Button::F8);
   // Shift + F3 is the pads' mode key now (OS-PADS-A, OS-PADOCT), and a held Shift does not open a chooser.
   rig.go(0);
-  rig.shift_tap(Button::F3);
+  rig.pad_mode(Button::F3);
   CHECK(rig.state().overlay == OverlayId::None);
   CHECK(rig.state().padmode.fixed() == app::PadMode::Piano);
   // Learn and the Navigator do not get a chooser over them.
@@ -2078,7 +2088,7 @@ TEST_CASE("pattern edit: Play plays the pattern being edited and stops it, from 
   CHECK_FALSE(rig.app->state().playing);
 }
 
-TEST_CASE("pattern edit: on the Song screen Play (and F2) plays the song from the selected row, on the Pattern screen it stays the pattern (OS-005e)") {
+TEST_CASE("pattern edit: on the Song screen Play plays the song from the selected row, on the Pattern screen it stays the pattern (OS-005e)") {
   Rig rig(false);  // no project: the Song screen is the demo's 24 positions (the project's list is the next test)
   TransportLog t;
   rig.app->attach_transport(&t);
@@ -2097,15 +2107,15 @@ TEST_CASE("pattern edit: on the Song screen Play (and F2) plays the song from th
   CHECK(t.row == 3u);
   CHECK(t.plays == 1u);
   CHECK(rig.app->state().playing);
-  rig.tap(Button::F2);  // PLAY SNG while it plays: stops
+  rig.tap(Button::Play);  // PLAY SNG while it plays: stops
   CHECK(t.stops == 2u);
   CHECK_FALSE(rig.app->state().playing);
   rig.tap(Button::Down);
-  rig.tap(Button::F2);
+  rig.tap(Button::Play);
   CHECK(t.songs == 2u);
   CHECK(t.row == 4u);
   t.accept = false;  // a refusal changes nothing
-  rig.tap(Button::F2);
+  rig.tap(Button::Play);
   CHECK(rig.app->state().playing);
 }
 
@@ -6186,5 +6196,349 @@ TEST_CASE("OS-MIDIREC-P1: SHRINK and a whole-pattern paste whose lane cut does n
   CHECK(std::string(rig.project().pattern(1)->name).empty());
   CHECK(store.lane(1, 0).count == 4096u);
   CHECK(store.lane(1, 1).count == 3584u);
+  rig.app->attach_document(nullptr);
+}
+
+// ---- OS-MIDIREC-P1 S7c: the lane events follow block Copy / Paste / Delete, row Insert / Pull and the whole-pattern clip (A16, A17; QA-PAT-497..) ---------------------------------------------
+
+namespace {
+
+model::LaneStore g_s7c;  // static: the store is large
+
+model::LaneEvent lane_cc(unsigned tick, unsigned value) {
+  model::LaneEvent e{};
+  e.tick = static_cast<std::uint16_t>(tick);
+  e.kind_channel = static_cast<std::uint8_t>(1u << 4);
+  e.a = 1;
+  e.b = static_cast<std::uint8_t>(value);
+  return e;
+}
+
+// `n` events spread over the first `span` ticks.
+std::vector<model::LaneEvent> lane_spread(unsigned n, unsigned span) {
+  std::vector<model::LaneEvent> v;
+  for (unsigned i = 0; i < n; ++i) {
+    v.push_back(lane_cc(i * span / n, i & 0x7Fu));
+  }
+  return v;
+}
+
+// "tick:value tick:value ..." of one lane of pattern 1 (or `pattern`).
+std::string lane_text(unsigned track, unsigned pattern = 1) {
+  std::string s;
+  const model::LaneStore::View v = g_s7c.lane(pattern, track);
+  for (std::uint32_t i = 0; i < v.count; ++i) {
+    s += (i != 0 ? " " : "") + std::to_string(v.events[i].tick) + ":" + std::to_string(v.events[i].b);
+  }
+  return s;
+}
+
+// The lanes of tracks 0..3 of pattern 1 in one string, to compare before and after.
+std::string lanes_now() {
+  std::string s;
+  for (unsigned t = 0; t < 4; ++t) {
+    s += "[" + lane_text(t) + "]";
+  }
+  return s;
+}
+
+void lanes_on(Rig& rig) {
+  g_s7c.clear();
+  g_s7c.adopt(rig.project().load_epoch());
+  rig.editor->attach_lanes(&g_s7c);
+  rig.app->attach_document(rig.editor.get());  // (the model's lane pointer: render() refreshes it, a Copy before the first frame needs it)
+}
+
+// The lane of (pattern, track) over its whole length (`t1` ticks).
+bool lane_set(Rig& rig, unsigned track, const std::vector<model::LaneEvent>& ev, unsigned t1 = 768, unsigned pattern = 1) {
+  return rig.editor->lane_replace(pattern, track, 0, t1, ev.data(), static_cast<std::uint32_t>(ev.size())) == model::Status::Ok;
+}
+
+// A block of `rows` rows from `row` over `tracks` tracks from `track`: whole steps once it spans two tracks.
+void select_block(Rig& rig, int row, int track, int rows, int tracks) {
+  rig.go(row, track);
+  for (int i = 1; i < rows; ++i) {
+    (void)rig.invoke("select.extend", 1);
+  }
+  if (tracks > 1) {
+    rig.extend_tracks(tracks - 1);
+  }
+}
+
+}  // namespace
+
+TEST_CASE("OS-MIDIREC-P1 S7c: block Copy and Paste carry the lane events of the block's tracks and rows, the paste replaces the target's lane range, one undo unit, undo and redo restore it") {
+  Rig rig(true, 16);
+  lanes_on(rig);
+  NEED(lane_set(rig, 0, {lane_cc(5, 1), lane_cc(60, 2), lane_cc(150, 3)}));  // step 3 is outside the block
+  NEED(lane_set(rig, 1, {lane_cc(90, 4)}));
+  NEED(lane_set(rig, 2, {lane_cc(8 * 48 + 20, 9), lane_cc(12 * 48, 10)}));  // the first is in the paste range, the second after it
+  put_note(rig, 0, 0, 50);
+  put_note(rig, 1, 1, 52);
+  rig.edit_mode();
+  rig.editor->history_reset();
+  select_block(rig, 0, 0, 2, 2);
+  rig.tap(Button::Copy);
+  CHECK(rig.message().find("COPIED") == 0);
+  CHECK(rig.depth() == 0u);  // a copy changes nothing
+  rig.flush();
+  (void)rig.invoke("select.clear");
+  rig.go(8, 2);
+  CHECK(rig.invoke("block.paste") == DispatchResult::Changed);
+  CHECK(rig.depth() == 1u);
+  CHECK(lane_text(2) == "389:1 444:2 576:10");  // rows 8..9 of track 2: the clip's, the old event at tick 404 gone, the one at 576 kept
+  CHECK(lane_text(3) == "474:4");
+  CHECK(lane_text(0) == "5:1 60:2 150:3");  // the source stays
+  CHECK(lane_text(1) == "90:4");
+  CHECK(rig.step(2, 8).note == 50);
+  CHECK(rig.step(3, 9).note == 52);
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);  // one unit: steps and lanes
+  CHECK(lane_text(2) == "404:9 576:10");
+  CHECK(lane_text(3) == "");
+  CHECK(model::is_empty(rig.step(2, 8)));
+  CHECK(rig.invoke("edit.redo") == DispatchResult::Changed);
+  CHECK(lane_text(2) == "389:1 444:2 576:10");
+  CHECK(lane_text(3) == "474:4");
+  CHECK(rig.step(2, 8).note == 50);
+  rig.app->attach_document(nullptr);
+}
+
+TEST_CASE("OS-MIDIREC-P1 S7c: a paste that would not fit the lane pool is refused whole with a strip notice, steps and lanes unchanged; with room it goes") {
+  Rig rig(true, 128);
+  lanes_on(rig);
+  NEED(lane_set(rig, 0, lane_spread(50, 96), 6144));
+  NEED(lane_set(rig, 1, lane_spread(50, 96), 6144));
+  NEED(lane_set(rig, 8, lane_spread(3750, 6144), 6144));
+  NEED(lane_set(rig, 9, lane_spread(3750, 6144), 6144));  // 7,600 of 7,680 events: 80 free
+  put_note(rig, 0, 0, 50);
+  rig.edit_mode();
+  rig.editor->history_reset();
+  select_block(rig, 0, 0, 2, 2);
+  rig.tap(Button::Copy);  // 100 lane events in the clip
+  rig.flush();
+  (void)rig.invoke("select.clear");
+  rig.go(8, 2);
+  const std::uint32_t total = g_s7c.total_events();
+  CHECK(total == 7600u);
+  (void)rig.invoke("block.paste");
+  CHECK(rig.message() == "LANES DO NOT FIT: NOTHING CHANGED");
+  CHECK(rig.depth() == 0u);
+  CHECK(model::is_empty(rig.step(2, 8)));
+  CHECK(g_s7c.total_events() == total);
+  CHECK(g_s7c.lane(1, 2).count == 0u);
+  CHECK(g_s7c.lane(1, 3).count == 0u);
+  rig.flush();
+  NEED(rig.editor->lane_clear(1, 9) == model::Status::Ok);  // room for them
+  rig.editor->history_reset();
+  CHECK(rig.invoke("block.paste") == DispatchResult::Changed);
+  CHECK(g_s7c.lane(1, 2).count == 50u);
+  CHECK(g_s7c.lane(1, 3).count == 50u);
+  CHECK(rig.step(2, 8).note == 50);
+  CHECK(rig.depth() == 1u);
+  rig.app->attach_document(nullptr);
+}
+
+TEST_CASE("OS-MIDIREC-P1 S7c: cut (Copy then Delete) takes the lane events of the block's rows with the steps, one undo unit; the cut events paste back") {
+  Rig rig(true, 16);
+  lanes_on(rig);
+  NEED(lane_set(rig, 0, {lane_cc(5, 1), lane_cc(60, 2), lane_cc(150, 3)}));
+  NEED(lane_set(rig, 1, {lane_cc(90, 4)}));
+  NEED(lane_set(rig, 2, {lane_cc(60, 5)}));  // a track outside the block
+  put_note(rig, 0, 0, 50);
+  rig.edit_mode();
+  rig.editor->history_reset();
+  select_block(rig, 0, 0, 2, 2);
+  rig.tap(Button::Copy);
+  rig.flush();
+  CHECK(rig.invoke("step.clear") == DispatchResult::Changed);
+  CHECK(rig.depth() == 1u);
+  CHECK(lane_text(0) == "150:3");  // rows 0..1 are ticks 0..95
+  CHECK(lane_text(1) == "");
+  CHECK(lane_text(2) == "60:5");
+  CHECK(model::is_empty(rig.step(0, 0)));
+  rig.flush();
+  (void)rig.invoke("select.clear");
+  rig.go(8, 4);
+  CHECK(rig.invoke("block.paste") == DispatchResult::Changed);
+  CHECK(lane_text(4) == "389:1 444:2");
+  CHECK(lane_text(5) == "474:4");
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);  // the paste
+  CHECK(lane_text(4) == "");
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);  // the cut
+  CHECK(lane_text(0) == "5:1 60:2 150:3");
+  CHECK(lane_text(1) == "90:4");
+  CHECK(rig.step(0, 0).note == 50);
+  rig.app->attach_document(nullptr);
+}
+
+TEST_CASE("OS-MIDIREC-P1 S7c: a column block carries no lanes, a block of more than kLaneCapacity (1,024) lane events gives them up with the strip saying so; the paste leaves the target's lanes alone") {
+  Rig rig(true, 16);
+  lanes_on(rig);
+  NEED(lane_set(rig, 0, {lane_cc(5, 1), lane_cc(60, 2)}));
+  NEED(lane_set(rig, 1, {lane_cc(400, 7)}));
+  put_note(rig, 0, 0, 50);
+  rig.edit_mode();
+  rig.editor->history_reset();
+  // A Note-column block of one track: not whole steps.
+  rig.go(0, 0);
+  (void)rig.invoke("select.extend", 1);
+  NEED(!rig.state().edit.selection.block(rig.view().row(), rig.view().track()).whole_steps());
+  rig.tap(Button::Copy);
+  rig.flush();
+  (void)rig.invoke("select.clear");
+  rig.go(8, 1);
+  CHECK(rig.invoke("block.paste") == DispatchResult::Changed);
+  CHECK(lane_text(1) == "400:7");  // untouched
+  CHECK(lane_text(0) == "5:1 60:2");
+  rig.flush();
+  CHECK(rig.invoke("step.clear") == DispatchResult::Changed);  // the step under the cursor, a column block earlier: lanes stay
+  CHECK(lane_text(1) == "400:7");
+  // Too many: 2 x 1,500 events across the whole pattern.
+  NEED(lane_set(rig, 0, lane_spread(1500, 768)));
+  NEED(lane_set(rig, 1, lane_spread(1500, 768)));
+  NEED(lane_set(rig, 2, {lane_cc(100, 5)}));
+  select_block(rig, 0, 0, 16, 2);
+  rig.tap(Button::Copy);
+  CHECK(rig.message().find("NO LANES: TOO MANY") != std::string::npos);
+  rig.flush();
+  (void)rig.invoke("select.clear");
+  rig.go(0, 2);
+  const unsigned depth = rig.depth();
+  CHECK(rig.invoke("block.paste") == DispatchResult::Changed);
+  CHECK(rig.depth() == depth + 1u);
+  CHECK(lane_text(2) == "100:5");  // the clip has no lanes: the target's stay
+  CHECK(g_s7c.lane(1, 3).count == 0u);
+  rig.app->attach_document(nullptr);
+}
+
+TEST_CASE("OS-MIDIREC-P1 S7c: row Insert and Pull move the lane ticks with the rows in the steps' undo unit, what Insert pushes past the track length is deleted (A17)") {
+  Rig rig(true, 16);
+  lanes_on(rig);
+  const auto seed = [&] {
+    NEED(lane_set(rig, 0, {lane_cc(5, 1), lane_cc(99, 2), lane_cc(480, 3)}));
+    NEED(lane_set(rig, 1, {lane_cc(677, 4), lane_cc(721, 6)}));  // 721 is on step 15: an Insert pushes it out
+    NEED(lane_set(rig, 2, {lane_cc(100, 5)}));                    // a track outside the block
+    rig.editor->history_reset();
+  };
+  seed();
+  put_note(rig, 0, 2, 50);
+  rig.edit_mode();
+  rig.editor->history_reset();
+  const std::string before = lanes_now();
+  select_block(rig, 2, 0, 1, 2);
+  CHECK(rig.invoke("step.insert") == DispatchResult::Changed);
+  CHECK(rig.depth() == 1u);
+  CHECK(lane_text(0) == "5:1 147:2 528:3");
+  CHECK(lane_text(1) == "725:4");  // 721 + 48 = 769 is past the 16 steps
+  CHECK(lane_text(2) == "100:5");
+  CHECK(rig.step(0, 3).note == 50);
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  CHECK(lanes_now() == before);
+  CHECK(rig.step(0, 2).note == 50);
+  rig.flush();
+  select_block(rig, 2, 0, 1, 2);
+  CHECK(rig.invoke("step.pull") == DispatchResult::Changed);
+  CHECK(lane_text(0) == "5:1 432:3");  // the event on step 2 goes, the later ones move up
+  CHECK(lane_text(1) == "629:4 673:6");
+  CHECK(lane_text(2) == "100:5");
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  CHECK(lanes_now() == before);
+  CHECK(rig.invoke("edit.redo") == DispatchResult::Changed);
+  CHECK(lane_text(0) == "5:1 432:3");
+  rig.app->attach_document(nullptr);
+}
+
+TEST_CASE("OS-MIDIREC-P1 S7c: FILL (the action, the dialog's EUCLID and RANDOM) and the RANDOMISE verb change steps only, the lanes stay as they were") {
+  Rig rig(true, 16);
+  lanes_on(rig);
+  NEED(lane_set(rig, 0, {lane_cc(5, 1), lane_cc(99, 2), lane_cc(480, 3)}));
+  NEED(lane_set(rig, 1, {lane_cc(677, 4)}));
+  put(rig, 0, 0, note_at(61, 7));
+  for (int r = 0; r < 16; ++r) {
+    model::Step s = note_at(61, 1);
+    s.vol = static_cast<std::uint8_t>(r * 8);
+    put(rig, 1, r, s);
+  }
+  rig.edit_mode();
+  rig.editor->history_reset();
+  const std::string before = lanes_now();
+  const std::uint32_t total = g_s7c.total_events();
+  const auto lanes_stay = [&](const char* what) {
+    CHECK_MESSAGE(lanes_now() == before, what);
+    CHECK_MESSAGE(g_s7c.total_events() == total, what);
+  };
+
+  (void)rig.invoke("select.column_all");
+  std::uint64_t digest = pattern_digest(rig, false, false);
+  (void)rig.invoke("pattern.fill");
+  CHECK(pattern_digest(rig, false, false) != digest);
+  CHECK(rig.depth() == 1u);
+  lanes_stay("pattern.fill");
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  lanes_stay("undo of pattern.fill");
+  rig.flush();
+
+  rig.tap(Button::F4);
+  fill_row(rig, kRowType, 2);  // EUCLID
+  digest = pattern_digest(rig, false, false);
+  rig.tap(Button::F1);
+  CHECK(pattern_digest(rig, false, false) != digest);
+  lanes_stay("EUCLID");
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  rig.flush();
+
+  rig.tap(Button::F4);
+  fill_row(rig, kRowType, -1);  // EVERY N .. RANDOM (the type rolls: one left of EUCLID)
+  rig.tap(Button::F1);
+  lanes_stay("RANDOM");
+  (void)rig.invoke("edit.undo");
+  rig.flush();
+
+  (void)rig.invoke("select.clear");
+  rig.column(Column::Vol);
+  rig.go(0, 1);
+  rig.column(Column::Vol);
+  for (int i = 0; i < 15; ++i) {
+    (void)rig.invoke("select.extend", 1);
+  }
+  rig.tap(Button::F7);
+  rig.pad(4);  // RANDOMISE
+  lanes_stay("RANDOMISE");
+  rig.app->attach_document(nullptr);
+}
+
+TEST_CASE("OS-MIDIREC-P1 S7c: the whole-pattern clip (F1 held, Copy, Shift + Copy) carries every track's lanes, replaces the target's over each track's new length, one undo unit") {
+  Rig rig(true, 24);
+  make_pattern(rig, 5, 40, "intro", 60);  // track 2 is 20 steps, the rest 40
+  lanes_on(rig);
+  NEED(lane_set(rig, 0, {lane_cc(5, 1), lane_cc(39 * 48 + 1, 2)}, 40 * 48, 5));
+  NEED(lane_set(rig, 2, {lane_cc(5, 3), lane_cc(19 * 48, 4)}, 20 * 48, 5));
+  NEED(lane_set(rig, 0, {lane_cc(700, 8)}, 24 * 48, 1));
+  NEED(lane_set(rig, 3, {lane_cc(100, 9)}, 24 * 48, 1));
+  rig.edit_mode();
+  rig.editor->history_reset();
+  rig.hold_key(Button::F1);
+  rig.pad(4);  // pattern 5
+  rig.tap(Button::Copy);
+  rig.release_key(Button::F1);
+  CHECK(rig.message() == "PATTERN 05 COPIED");
+  rig.flush();
+  rig.hold_key(Button::F1);
+  rig.pad(0);  // pattern 1
+  rig.shift_tap(Button::Copy);
+  rig.release_key(Button::F1);
+  CHECK(rig.depth() == 1u);
+  CHECK(lane_text(0) == "5:1 1873:2");
+  CHECK(lane_text(2) == "5:3 912:4");
+  CHECK(lane_text(3) == "");  // pattern 5 has none on track 3: the old one is replaced by nothing
+  CHECK(lane_text(0, 5) == "5:1 1873:2");  // the source stays
+  CHECK(lane_text(2, 5) == "5:3 912:4");
+  CHECK(rig.invoke("edit.undo") == DispatchResult::Changed);
+  CHECK(lane_text(0) == "700:8");
+  CHECK(lane_text(2) == "");
+  CHECK(lane_text(3) == "100:9");
+  CHECK(rig.invoke("edit.redo") == DispatchResult::Changed);
+  CHECK(lane_text(0) == "5:1 1873:2");
+  CHECK(lane_text(3) == "");
   rig.app->attach_document(nullptr);
 }

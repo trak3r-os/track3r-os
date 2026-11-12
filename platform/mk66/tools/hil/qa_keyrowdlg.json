@@ -14,13 +14,13 @@
   },
   {
    "keys": [
-    "f7"
+    "f8"
    ],
    "gap": 0.3,
    "if_state": {
     "overlay": "~^(NAVIGATOR|TEXT_ENTRY)$"
    },
-   "note": "(a leftover Navigator or keyboard is closed: F7 is CLOSE / CANCEL)"
+   "note": "(a leftover Navigator or keyboard is closed: F8 is BACK / CANCEL)"
   },
   {
    "keys": [
@@ -28,7 +28,7 @@
    ],
    "gap": 0.3,
    "if_state": {
-    "overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|FILL|PLAY_MODE|TOOLS)$"
+    "overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|FILL|PLAY_MODE|TOOLS|NAVIGATOR|TEXT_ENTRY)$"
    },
    "note": "(a leftover overlay is put away: F8 is Back)"
   },
@@ -111,7 +111,7 @@
    "note": "QA-FIL-101: OPEN RESCAN NEW .., none inverted"
   },
   {
-   "say": "QA-GLB-118: the keyboard. F5 SAVE AS opens it with the next free name; it is cancelled with F7, never accepted."
+   "say": "QA-GLB-118: the keyboard. F5 SAVE AS opens it with the next free name; it is cancelled with F8, never accepted."
   },
   {
    "keys": [
@@ -122,14 +122,14 @@
   {
    "state": {
     "overlay": "TEXT_ENTRY",
-    "keys": "~F8:SAVE"
+    "keys": "~F1:SAVE"
    },
    "within": 3,
-   "note": "QA-GLB-118: TYPE CAPS AUTO CANCEL SAVE on F1 F2 F6 F7 F8"
+   "note": "QA-GLB-118: SAVE CAPS AUTO TYPE CANCEL on F1 F2 F6 F7 F8"
   },
   {
    "state": {
-    "keys": "~^F1:TYPE,F2:CAPS,F6:AUTO,F7:CANCEL,F8:SAVE$"
+    "keys": "~^F1:SAVE,F2:CAPS,F6:AUTO,F7:TYPE,F8:CANCEL$"
    },
    "within": 2
   },
@@ -141,7 +141,7 @@
   },
   {
    "keys": [
-    "f7"
+    "f8"
    ],
    "gap": 0.4,
    "note": "CANCEL"
@@ -176,7 +176,7 @@
    "shot": "qa_glb_118_learn",
    "non_blank": true,
    "soft": true,
-   "note": "QA-GLB-118: BACK on F8; UNBIND MODE with a target, DELETE CLR ALL with bindings"
+   "note": "QA-GLB-118: MAP and BACK; UNBIND MODE ENC (F7) with a target, DELETE CLR ALL with bindings"
   },
   {
    "keys": [
@@ -191,7 +191,7 @@
    "within": 3
   },
   {
-   "say": "QA-GLB-119: the Navigator (Song + Pattern chord): F1 GO, F7 CLOSE, F8 GO; GO and CLOSE only, F2..F6 read '-'."
+   "say": "QA-GLB-119: the Navigator (Song + Pattern chord): F1 GO, F8 BACK; GO and BACK only, F2..F7 read '-'."
   },
   {
    "keys": [
@@ -205,7 +205,7 @@
   {
    "state": {
     "overlay": "NAVIGATOR",
-    "keys": "~F7:CLOSE"
+    "keys": "~F8:BACK"
    },
    "within": 3
   },
@@ -213,14 +213,14 @@
    "shot": "qa_glb_119_navigator",
    "non_blank": true,
    "soft": true,
-   "note": "QA-GLB-119: GO . . . . . CLOSE GO"
+   "note": "QA-GLB-119: GO . . . . . . BACK"
   },
   {
    "keys": [
-    "f7"
+    "f8"
    ],
    "gap": 0.4,
-   "note": "CLOSE"
+   "note": "BACK"
   },
   {
    "state": {

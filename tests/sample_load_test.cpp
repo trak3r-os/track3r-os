@@ -1578,6 +1578,7 @@ TEST_CASE("sample load: Shift + Right marks the file and steps down, again takes
   rig.go(ScreenId::SampleLoad);
   rig.settle();
   const app::WavView& w = rig.app->state().wav;
+  CHECK(std::string(app::kSampleLoadShiftKeys[5]) == "MARK");  // OS-UXF-SMP item 18: Shift + F6 is the labelled toggle (binding in builtin_bindings_test)
   rig.select("drums");
   rig.invoke("sample.mark", 0);
   CHECK(w.mark_count() == 0u);

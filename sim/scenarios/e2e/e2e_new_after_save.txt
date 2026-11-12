@@ -24,7 +24,7 @@ tap file
 tap f5
 wait 50
 assert state overlay=TEXT_ENTRY
-tap f8
+tap f1
 wait 2500
 assert state msg=SAVE_TRACK_01_DONE
 
@@ -44,7 +44,7 @@ tap file
 tap f5
 wait 50
 assert state overlay=TEXT_ENTRY
-tap f8
+tap f1
 wait 2500
 assert state msg=~^SAVE_TRACK_[0-9]+_DONE$
 tap file

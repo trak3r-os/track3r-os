@@ -9,9 +9,7 @@
   {"cmd": "usb profile 8 duplex", "expect": "usb: (already presenting AUDIO with that layout|re-enumerating as \\w+)", "note": "profile 8 WITH the stereo return (\"8 OUT / 2 IN\"): the default profile 8 is \"8 OUT\" (capture only), so o3tone finds no playback device. Both answers are fine: `already presenting` when the layout is already set, `re-enumerating` when it changes; a re-enumeration drops the console and o3tone for a moment (the next step waits for the device)"},
   {"wait": 3.0, "note": "(the USB device is presented again with the new layout: the computer needs a moment before o3tone sees the playback device)"},
   {"keys": ["-shift"], "gap": 0.2},
-  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "NAVIGATOR"}, "note": "(a leftover Navigator is closed: F7 is CLOSE, F8 would GO since OS-NAV2)"},
-  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
-  {"keys": ["f7"], "gap": 0.3, "if_state": {"overlay": "TEXT_ENTRY"}, "note": "(the on-screen keyboard is cancelled with F7, never accepted)"},
+  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|NAVIGATOR|TEXT_ENTRY)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
   {"keys": ["pattern"], "gap": 0.4},
   {"state": {"screen": "PATTERN"}, "within": 3},
   {"run": "_stop"},
@@ -43,7 +41,7 @@
  "finally": [
   {"keys": ["f4"], "gap": 0.4, "if_state": {"screen": "RECORD"}, "note": "(a take left under review is thrown away; with none, F4 does nothing)"},
   {"keys": ["delete"], "gap": 0.3, "if_state": {"screen": "RECORD"}, "note": "(SOURCE back to its default, LINE: the cursor is still on the SOURCE row)"},
-  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|NAVIGATOR|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
+  {"keys": ["f8"], "gap": 0.3, "if_state": {"overlay": "~^(LEARN|NAVIGATOR|PATTERN_CHOOSER|LENGTH_CHOOSER|JUMP_CHOOSER|MODULE_PICKER|STEP_POPUP|TEXT_ENTRY)$"}, "note": "(a leftover overlay is put away: F8 is Back)"},
   {"keys": ["pattern"], "gap": 0.4},
   {"cmd": "usb profile 8 out", "note": "back to the default profile 8 (capture only)"}
  ]

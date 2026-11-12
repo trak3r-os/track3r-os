@@ -172,6 +172,10 @@ assert model tempo=40000
 press shift
 tap f1
 release shift
+# The song window must open at the engine's pacing phase of the stored fingerprint (44,100 Hz: 1000 ms is 689.06 blocks of 64 frames, the stem pairs trim it to 688 or 690, and only a phase of 60..64 million
+# micro-frames gives the 690 that the fingerprint's last frame, 900-1000 ms, was taken at). A key line that gains or loses a tick moves the phase by 19.9 million micro-frames: re-count this wait then
+# (OS-BUG-E2EPRO: the verb-menu keys of OS-PTOOLS2 in steps 3 and 5 moved it).
+wait 9
 render song 1000 stems
 tap play
 wait 100
@@ -314,7 +318,7 @@ mark model presave
 tap f5
 wait 50
 assert state overlay=TEXT_ENTRY
-tap f8
+tap f1
 wait 2500
 assert state msg=SAVE_TRACK_01_DONE
 assert file "Projects/Track 01/project.o3pj" exists

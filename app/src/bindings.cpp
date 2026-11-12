@@ -64,6 +64,7 @@ constexpr core::ContextId kStepPopupCtx = context_id(Context::StepPopup);
 constexpr core::ContextId kRecordCtx = context_id(Context::Record);
 constexpr core::ContextId kPadsTracksCtx = context_id(Context::PadsTracks);
 constexpr core::ContextId kPadsModeCtx = context_id(Context::PadsMode);
+constexpr core::ContextId kPadsPickerCtx = context_id(Context::PadsPicker);  // OS-UXF-PAT 7
 constexpr core::ContextId kFillCtx = context_id(Context::FillDialog);
 constexpr core::ContextId kSongAskCtx = context_id(Context::SongAsk);
 constexpr core::ContextId kSongToolsCtx = context_id(Context::SongTools);
@@ -139,7 +140,8 @@ constexpr core::ActionId kFillCoarse = core::action_id("fill.coarse");  // OS-SH
 constexpr core::ActionId kFillApply = core::action_id("fill.apply");
 constexpr core::ActionId kFillVary = core::action_id("fill.vary");  // OS-PTOOLS2 S1
 constexpr core::ActionId kEventsOpen = core::action_id("events.open");  // OS-F6EVENTS: Pattern F6 opens the EVENTS list (RE FILL / REPEAT moved to the verb menu's F6)
-constexpr core::ActionId kPadsMode = core::action_id("pads.mode");
+constexpr core::ActionId kPadsPicker = core::action_id("pads.picker");  // OS-UXF-PAT 7
+constexpr core::ActionId kPadsPick = core::action_id("pads.pick");
 constexpr core::ActionId kPadsOctave = core::action_id("pads.octave");  // OS-PADOCT
 constexpr core::ActionId kPadsTrack = core::action_id("pads.track");
 constexpr core::ActionId kPadsPlay = core::action_id("pads.play");
@@ -224,6 +226,7 @@ constexpr core::ActionId kFileDelete = core::action_id("file.delete");
 constexpr core::ActionId kFilePurge = core::action_id("file.purge");
 constexpr core::ActionId kFileSave = core::action_id("file.save");
 constexpr core::ActionId kFileSaveAs = core::action_id("file.save_as");
+constexpr core::ActionId kFileSaveAny = core::action_id("file.save_any");  // OS-UXF-KEYS 1a
 constexpr core::ActionId kSeditSaveWav = core::action_id("sedit.save_wav");
 constexpr core::ActionId kSampleLoad = core::action_id("sample.load");
 constexpr core::ActionId kSampleEnter = core::action_id("sample.enter");
@@ -256,6 +259,7 @@ constexpr core::ActionId kFileExport = core::action_id("file.export");          
 constexpr core::ActionId kExportValue = core::action_id("export.value");
 constexpr core::ActionId kExportCoarse = core::action_id("export.coarse");  // OS-SHIFTENC
 constexpr core::ActionId kExportCancel = core::action_id("export.cancel");
+constexpr core::ActionId kWaveToPat = core::action_id("wave.to_pat");          // OS-UXF-SMP 3c
 constexpr core::ActionId kWaveMode = core::action_id("wave.mode");            // OS-INSTUI S4
 constexpr core::ActionId kWaveModePick = core::action_id("wave.mode_pick");
 constexpr core::ActionId kWavePad = core::action_id("wave.pad");
@@ -306,7 +310,6 @@ constexpr core::ActionId kDjTempo = core::action_id("dj.tempo");
 constexpr core::ActionId kModulePick = core::action_id("module.pick");
 constexpr core::ActionId kAppsOpen = core::action_id("apps.open");            // OS-APPSNAV
 constexpr core::ActionId kAppsClose = core::action_id("apps.close");
-constexpr core::ActionId kModulePickerF8 = core::action_id("module.picker_f8");
 constexpr core::ActionId kPresetLoad = core::action_id("preset.load");  // OS-INSFX-ABI2 A9
 constexpr core::ActionId kPresetSave = core::action_id("preset.save");  // OS-MODPRESET P4: Shift + F5 in the F5 PRESET list
 // OS-PTOOLS2 S3: the F7 verb menu (Context::VerbMenu). The TOOLS list's own key is gone: the menu's APPS > row runs tools.open by name.
@@ -383,13 +386,14 @@ constexpr core::InputRef kMasterKey = button_ref(Button::Master);
 //   Shift + Master       ui.theme.next      Global     (OS-003b, provisional until Config exists)
 //   Shift + Rec          pattern.rec_free   Global     LIVE recording on / off (OS-RECMODE2: stopped it starts the transport, with the count-in; the plain Rec, pattern.edit_toggle, is STEP on / off); on a screen but Pattern it does nothing
 //   Shift + Pattern      apps.open          Global     (OS-APPSNAV: the list of the installed apps that are not tools, F1 / F8 launch; the Navigator is the chords Master + Song and Song + Pattern; the plain Pattern is the Pattern button)
-//   Shift + Config       help.open          Global and ModuleApp (OS-HELP: the help page of the screen in view; a modal overlay's context captures it, so under a dialog it does nothing; the app page binds it itself; the plain Config is the Config screen)
+//   Shift + File         file.save_any      Global     (OS-UXF-KEYS 1a: SAVE from any screen, as File's F4; a project with no folder yet opens the save-as keyboard; a modal overlay captures it)
+//   Shift + Config       help.open         Global and ModuleApp (OS-HELP: the help page of the screen in view; a modal overlay's context captures it, so under a dialog it does nothing; the app page binds it itself; the plain Config is the Config screen)
 //   Shift + F8           edit.redo          Pattern and Song (OS-002c; the plain F8 there is edit.undo)
 //   Shift + F1..F8       ui.none           Global     (OS-SHIFTROW: Shift + F belongs to the screen; the quarter jumps, cursor.jump_fraction 0..3 and cursor.jump_end, are bound in Song, File and Sample load;
 //                        on Pattern the pads' mode keys, below). Also: Shift + F1 in Mixer mixer.name, Shift + F6 in Song and File song.name / file.name (OS-NAMES), Shift + F7 / F8 in Mixer mixer.mute_none / solo_none, Shift + F1..F3 in Perform perform.key 0x100.. (STORE), Shift + F7 in Config
 //                        config.page_default, Shift + F5 / F6 in Record (RADIO page only) record.seek -10 / 10, Shift + F7 in Song song.pads (OS-SONGPADS: the pads' TRACKS / SLOTS), Shift + F1 in the firmware update dialog ui.none (OS-FWCONFIG: only F1 alone answers)
 //   Shift + F1         pads.octave        Pattern (OS-PADOCT: the pads' base C goes up an octave, 9 wraps to 0)
-//   Shift + F2..F7       pads.mode 0..6     Pattern (OS-PADS-A / B / PADOCT: F2 NOTES, F3 PIANO, F4 ISO, F5 TRACKS, F6 PATS, F7 VU; STEP has no key: OS-STEPPADOFF)
+//   Shift + F2         pads.picker        Pattern (OS-UXF-PAT 7: the PADS picker; its F1 NOTES, F2 PIANO, F3 ISO, F4 TRACKS, F5 PATS, F6 VU pick through pads.pick, F8 BACK; STEP has no key: OS-STEPPADOFF)
 //   Shift + Note / Instr / Vol / Fx   cursor.jump_fraction 0..3   Pattern (OS-QJUMP: the quarter jumps, 0, 1/4, 2/4, 3/4 of the pattern; Shift + Fx was pattern.fill, which has no key now: the Fill dialog is F4)
 //   Shift + encoder      param.coarse       Instrument (OS-002d; the plain encoder is param.edit there)
 //   Shift + F6 / F7      ui.none            InsertParams (OS-INSKEYS: an insert's parameter page, where the plain Instrument's instrument.used has no neighbour to go to)
@@ -408,7 +412,7 @@ constexpr core::InputRef kMasterKey = button_ref(Button::Master);
 //   Shift + Delete       step.pull          Pattern (OS-DELPULL: the inverse of Insert)
 //   Copy / Shift + Copy  block.copy / block.paste   Pattern (OS-PATCOPY: the block into the clipboard, the clipboard at the cursor)
 //   Shift + Copy         pattern.clip_paste  Chooser (PAT-OPS-B: with F1 held on Pattern, the whole pattern of the clipboard over the chooser's pattern; the plain Copy there is pattern.clip_copy)
-//   Shift + Play         transport.play_cursor   Pattern (OS-PLAYCUR: stopped, play from the cursor's row; playing, the line jumps to it; never a count-in; the Focus Loop's key, which it keeps until the loop exists); other screens: the plain Play
+//   Shift + Play         transport.play_cursor   Pattern (OS-PLAYCUR: stopped, play from the cursor's row; playing, the line jumps to it; never a count-in; with a block selected the Focus Loop, OS-UXF: play from the block's first row and loop at its last, again to stop); other screens: the plain Play
 //   Shift + Insert       song.add_slot 1    Song (OS-SONG1: the slot with a copy of the pattern; OS-SHIFTROW moved it from Shift + F3, which is the 2/4 jump again)
 //   Shift + Up / Down    cursor.page -1 / 1 File (PROJECTS and IMPORT), Sample load, Modules, the engine picker, Learn, the help page (OS-NAV3, OS-HELP: a screenful; a page being the rows the list shows; popup.page in the step popup's instrument and FX lists); never wraps
 //   Shift + Up / Down    song.select        Song (OS-SONG1: the range of slots), Shift + encoder song.turn_fine, Shift + Copy song.paste
@@ -449,8 +453,10 @@ constexpr core::Binding kBase[] = {
     bind(kGlobal, tap(button_ref(Button::Performance)), kNavScreen, ArgFrom::Fixed, screen_arg(ScreenId::Perform)),
     bind(kGlobal, tap(button_ref(Button::File)), kNavScreen, ArgFrom::Fixed, screen_arg(ScreenId::File)),
     bind(kGlobal, tap(button_ref(Button::Config)), kNavScreen, ArgFrom::Fixed, screen_arg(ScreenId::Config)),
-    // OS-APPSNAV (new Community OS behaviour): Shift + Pattern lists the installed apps that are not tools (F1 or F8 launches one; Pattern or Shift + Pattern closes the list). The Navigator (OS-NAV2: it stays
-    // open until F8 GO / F7 CLOSE) opens with the chords Master + Song and Song + Pattern, either press order: a chord gives one Chord and neither button's tap, hold or Shift+encoder gesture (the gesture layer).
+    // OS-UXF-KEYS 1a (new Community OS behaviour): Shift + File saves the project from any screen, as File's F4 does (a project with no folder yet opens the save-as keyboard). A modal overlay captures it.
+    bind(kGlobal, tap(button_ref(Button::File), kShift), kFileSaveAny),
+    // OS-APPSNAV (new Community OS behaviour): Shift + Pattern lists the installed apps that are not tools (F1 launches one, F8 closes the list; Pattern or Shift + Pattern closes the list). The Navigator (OS-NAV2: it stays
+    // open until F1 GO / F8 BACK) opens with the chords Master + Song and Song + Pattern, either press order: a chord gives one Chord and neither button's tap, hold or Shift+encoder gesture (the gesture layer).
     bind(kGlobal, tap(button_ref(Button::Pattern), kShift), kAppsOpen),
     bind(kGlobal, chord(button_ref(Button::Master), button_ref(Button::Song)), kNavigatorOpen),
     bind(kGlobal, chord(button_ref(Button::Song), button_ref(Button::Pattern)), kNavigatorOpen),
@@ -466,9 +472,8 @@ constexpr core::Binding kBase[] = {
     // FX1 + FX2 are the two FX column buttons: Vol (20) and Fx (21) in the numbering of buttons.h (docs/design/product-ux.md
     // section 3, maintainer answer Q8). The chord opens the Learn overlay (and, in its own context, closes it).
     bind(kGlobal, chord(button_ref(Button::Vol), button_ref(Button::Fx)), kLearn),
-    // OS-ENCLEARN (maintainer, 2026-11-08; new Community OS behaviour): Instr + FX2 puts the Learn row under the cursor on the encoder; Instr + FX1 held and the encoder turned moves it. The turn is not a
-    // binding: App::run_once takes it ahead of the gesture layer (enc.turn), and ends the own tap and hold of both keys there, as it does when the second of the pair is pressed.
-    bind(kGlobal, chord(button_ref(Button::Instr), button_ref(Button::Fx)), kEncAssign),
+    // OS-ENCLEARN (maintainer, 2026-11-08; new Community OS behaviour): the Learn overlay's F7 ENC puts the Learn row on the encoder (OS-UXF-KEYS item 17: it was the chord Instr + FX2); Instr + FX1 held and the
+    // encoder turned moves it. The turn is not a binding: App::run_once takes it ahead of the gesture layer (enc.turn), and ends the own tap and hold of both keys there, as it does when the second of the pair is pressed.
     // Shift + Master: the next colour theme. PROVISIONAL until Config exists (OS-003b).
     bind(kGlobal, tap(button_ref(Button::Master), kShift), kThemeNext),
     bind(kGlobal, tap(button_ref(Button::Rec), kShift), kRecFree),
@@ -503,7 +508,7 @@ constexpr core::Binding kBase[] = {
     bind(kGlobal, tap(button_ref(Button::F8), kShift), kUiNone),
 
     // ---- Pattern: the screen's own keys, in every mode and field (OS-009 D3: a mode row overrides these, a field row specialises
-    // them). The column buttons, Rec (tap: Browse and Edit), the choosers on F1..F3 (a tap toggles LENGTH and JUMP, a hold opens any until the release; F1 PATTERN is the hold only, OS-PATSWITCH: its tap opens nothing),
+    // them). The column buttons, Rec (tap: Browse and Edit), the choosers on F1..F3 (a tap toggles any of them, a hold opens any until the release; OS-UXF-PAT item 6: F1 PATTERN's tap opens its chooser too),
     // F5 and F7 (reserved: they say their label until their slice lands), F8 undo, the selection and the edit keys --------------------
     bind(kPattern, tap(button_ref(Button::Note)), kColumn, ArgFrom::Fixed, column_arg(Column::Note)),
     bind(kPattern, tap(button_ref(Button::Instr)), kColumn, ArgFrom::Fixed, column_arg(Column::Instr)),
@@ -536,15 +541,18 @@ constexpr core::Binding kBase[] = {
     bind(kPattern, tap(pad_ref(core::kAnyId), button_ref(Button::F7)), kVerbHoldPad, ArgFrom::InputId, 0),  // F7 held + pad 1-16: the verb of that pad (a pad of a verb with parameters opens what it opens today)
     bind(kPattern, tap(button_ref(Button::F8)), kUndo),
     bind(kPattern, tap(button_ref(Button::F8), kShift), kRedo),
-    // OS-PADS-A / OS-PADOCT: Shift + F1 cycles the pads' octave, Shift + F2..F7 choose the pads' mode (the argument is the mode's number, pad_layer.h kPadModeKey); these also shadow Global's quarter jumps on Pattern.
+    // OS-PADS-A / OS-PADOCT: Shift + F1 cycles the pads' octave, Shift + F2 opens the PADS picker (OS-UXF-PAT 7); these also shadow Global's quarter jumps on Pattern.
     // OS-STEPPADOFF: the STEP mode has no key: the mode is silent by design until OS-STEPPAD redesigns it.
     bind(kPattern, tap(button_ref(Button::F1), kShift), kPadsOctave),
-    bind(kPattern, tap(button_ref(Button::F2), kShift), kPadsMode, ArgFrom::Fixed, 0),
-    bind(kPattern, tap(button_ref(Button::F3), kShift), kPadsMode, ArgFrom::Fixed, 1),
-    bind(kPattern, tap(button_ref(Button::F4), kShift), kPadsMode, ArgFrom::Fixed, 3),
-    bind(kPattern, tap(button_ref(Button::F5), kShift), kPadsMode, ArgFrom::Fixed, 2),
-    bind(kPattern, tap(button_ref(Button::F6), kShift), kPadsMode, ArgFrom::Fixed, 5),
-    bind(kPattern, tap(button_ref(Button::F7), kShift), kPadsMode, ArgFrom::Fixed, 6),
+    bind(kPattern, tap(button_ref(Button::F2), kShift), kPadsPicker),  // OS-UXF-PAT 7: the PADS picker; Shift + F3..F7 are free (blank)
+    // The PADS picker (OS-UXF-PAT 7): one F key picks a mode (the argument is the mode's number, pad_layer.h), F8 goes back.
+    bind(kPadsPickerCtx, tap(button_ref(Button::F1)), kPadsPick, ArgFrom::Fixed, 0),  // NOTES
+    bind(kPadsPickerCtx, tap(button_ref(Button::F2)), kPadsPick, ArgFrom::Fixed, 1),  // PIANO
+    bind(kPadsPickerCtx, tap(button_ref(Button::F3)), kPadsPick, ArgFrom::Fixed, 3),  // ISO
+    bind(kPadsPickerCtx, tap(button_ref(Button::F4)), kPadsPick, ArgFrom::Fixed, 2),  // TRACKS
+    bind(kPadsPickerCtx, tap(button_ref(Button::F5)), kPadsPick, ArgFrom::Fixed, 5),  // PATS
+    bind(kPadsPickerCtx, tap(button_ref(Button::F6)), kPadsPick, ArgFrom::Fixed, 6),  // VU
+    bind(kPadsPickerCtx, tap(button_ref(Button::F8)), kBack),
     // OS-QJUMP: Shift + Note, Instr, Vol (FX1) and Fx (FX2) jump to 0, 1/4, 2/4, 3/4 of the pattern (Song and File have theirs on Shift + F1..F4). Shift + Fx was FILL again (OS-PTOOLS); the F4 dialog is the Fill key.
     // OS-SELSHIFT: in Edit they also select the rows they cross (select.jump).
     bind(kPattern, tap(button_ref(Button::Note), kShift), kSelectJump, ArgFrom::Fixed, 0),
@@ -555,7 +563,7 @@ constexpr core::Binding kBase[] = {
     bind(kPattern, tap(button_ref(Button::Instr), kNoteKey), kPatternZoom),
     bind(kPattern, tap(button_ref(Button::Left), kNoteKey), kTrack, ArgFrom::Fixed, -1),
     bind(kPattern, tap(button_ref(Button::Right), kNoteKey), kTrack, ArgFrom::Fixed, 1),
-    bind(kPattern, tap(button_ref(Button::Play), kShift), kTransportPlayCursor),  // OS-PLAYCUR: play from the cursor's row (a block selected: the Focus Loop's key, the same until it exists)
+    bind(kPattern, tap(button_ref(Button::Play), kShift), kTransportPlayCursor),  // OS-PLAYCUR: play from the cursor's row (a block selected: the Focus Loop, OS-UXF)
     // The block: Shift + the arrows extend it from where Shift was first pressed (Shift + Up at step 0: the column, then every track).
     // The argument is 10 * dx + dy.
     bind(kPattern, tap(button_ref(Button::Left), kShift), kSelectExtend, ArgFrom::Fixed, -10),
@@ -599,13 +607,13 @@ constexpr core::Binding kBase[] = {
     bind(kFx, tap(encoder_ref(0), kShift), kStepFxValueCoarse, ArgFrom::Value),  // OS-SHIFTENC: x16, one nibble
     bind(kFx, hold_encoder(encoder_ref(0), button_ref(Button::Fx)), kStepFxTypeDelta, ArgFrom::Value),
 
-    // ---- Song (OS-SONG1): the arrows (Global's) move its list and Shift + Up / Down select a range of slots. F1 PLAY PAT, F2 PLAY SNG (the Play button's own action, which on this screen
-    // plays the song from the selected row: OS-005e), F3 ADD SLOT (Shift + F3: with a copy of the pattern as a new pattern; Copy held + F3: ADD EMPTY, a slot on the first free pattern, OS-SONG3 S5),
+    // ---- Song (OS-SONG1): the arrows (Global's) move its list and Shift + Up / Down select a range of slots. F1 PLAY PAT, F2 DUP PAT (OS-UXF-PAT 12: Shift + Insert's action; the Play
+    // button plays the song from the selected row on this screen: OS-005e), F3 ADD SLOT (Shift + F3: with a copy of the pattern as a new pattern; Copy held + F3: ADD EMPTY, a slot on the first free pattern, OS-SONG3 S5),
     // F4 DELETE SLOT, F5 / F6 the
     // slot's pattern - / +, F7 TEMPO (the encoder on the tempo field; each press taps the tempo), F8 UNDO and Shift + F8 REDO as on Pattern. Insert and Delete are the slot keys too, the
     // encoder is the pattern of the slot (the tempo after F7; Shift: a tenth of a BPM), Copy copies the range (or the slot) and Shift + Copy inserts it at the cursor ----------------------
     bind(kSong, tap(button_ref(Button::F1)), kSongPlayPattern),
-    bind(kSong, tap(button_ref(Button::F2)), kTransportPlay),
+    bind(kSong, tap(button_ref(Button::F2)), kSongAdd, ArgFrom::Fixed, 1),  // OS-UXF-PAT 12: F2 = DUP PAT, the action of Shift + Insert (the Play button already plays the song here, so F2 PLAY SNG went)
     bind(kSong, hold(button_ref(Button::F2)), kSongLoop),  // OS-SONG3 S7: hold F2 with the slots selected: they loop (F2 now taps at the release, as the Pattern screen's F1..F3 do: a Hold binding makes the tap wait)
     bind(kSong, tap(button_ref(Button::F3)), kSongAdd, ArgFrom::Fixed, 0),
     bind(kSong, tap(button_ref(Button::F3), kCopyKey), kSongAddEmpty),  // OS-SONG3 S5 (Q6, new Community OS behaviour): Copy held + F3, ADD EMPTY — a slot on the first free pattern. Shift + F3 / F4 stay the 2/4 and 3/4 jumps (OS-QJUMP), so the gesture is Copy's, next to F3 ADD SLOT; it does not make F3's tap wait.
@@ -732,6 +740,7 @@ constexpr core::Binding kBase[] = {
     bind(kSampleLoadCtx, tap(button_ref(Button::F3), kShift), kJumpFraction, ArgFrom::Fixed, 2),
     bind(kSampleLoadCtx, tap(button_ref(Button::F4), kShift), kJumpFraction, ArgFrom::Fixed, 3),
     bind(kSampleLoadCtx, tap(button_ref(Button::F5), kShift), kJumpEnd),
+    bind(kSampleLoadCtx, tap(button_ref(Button::F6), kShift), kSampleMark, ArgFrom::Fixed, 0),  // OS-UXF-SMP item 18: MARK, the Shift + Right toggle with a label
     bind(kSampleLoadCtx, tap(button_ref(Button::F7), kShift), kSampleTarget, ArgFrom::Fixed, -1),  // OS-SLDTARGET: INST - / INST +, the target instrument (a pad picks it too)
     bind(kSampleLoadCtx, tap(button_ref(Button::F8), kShift), kSampleTarget, ArgFrom::Fixed, 1),
     // OS-AUDIT-A7 (SLD-MULTI, E-LOAD-14, new Community OS behaviour): Shift + Right marks the file (or takes its mark back) and steps down, Shift + Left clears the marks; F1 / F4 then load the marked files
@@ -758,7 +767,10 @@ constexpr core::Binding kBase[] = {
     bind(kWaveCtx, tap(button_ref(Button::F6), kShift), kPreviewHold, ArgFrom::Fixed, static_cast<int>(Button::F6) | 0x100),
     bind(kWaveCtx, tap(button_ref(Button::F7)), kWaveZoom, ArgFrom::Fixed, -1),
     bind(kWaveCtx, tap(button_ref(Button::F8)), kUndo),
-    bind(kWaveCtx, tap(button_ref(Button::F8), kShift), kRedo),
+    // OS-UXF-SMP item 11: Shift + F7 / F8 are INST - / INST + on every sample screen (the Sample load grammar), so REDO moved to Shift + F5 (a free key here)
+    bind(kWaveCtx, tap(button_ref(Button::F5), kShift), kRedo),
+    bind(kWaveCtx, tap(button_ref(Button::F7), kShift), kSeditInstrument, ArgFrom::Fixed, -1),
+    bind(kWaveCtx, tap(button_ref(Button::F8), kShift), kSeditInstrument, ArgFrom::Fixed, 1),
     // OS-INSTPICK: a held Instr shows the instrument list (Params' popup) and the choice is the instrument in view; only the samples can be chosen
     bind(kWaveCtx, hold(button_ref(Button::Instr)), kPopupOpen, ArgFrom::Fixed, 0),
     // CHOP page: F1 AUTO, F2 EVEN, F3 ZC, F4 ADD, F5 DEL, F6 PREVIEW, F7 zoom out; Shift + Up / Down: how many slices EVEN makes
@@ -767,6 +779,7 @@ constexpr core::Binding kBase[] = {
     bind(kChopCtx, tap(button_ref(Button::F3)), kWaveZc),
     bind(kChopCtx, tap(button_ref(Button::F4)), kWaveAdd),
     bind(kChopCtx, tap(button_ref(Button::F5)), kWaveDel),
+    bind(kChopCtx, tap(button_ref(Button::F4), kShift), kWaveToPat),  // OS-UXF-SMP 3c: slice 1..n as notes on consecutive steps of the Pattern cursor's track
     bind(kChopCtx, tap(button_ref(Button::Up), kShift), kWaveEvenN, ArgFrom::Fixed, 1),
     bind(kChopCtx, tap(button_ref(Button::Down), kShift), kWaveEvenN, ArgFrom::Fixed, -1),
     // OS-INSTUI S4: Shift + F1 MODE on every view: the list of the eight play modes; the pick is play_mode_set, as the source page's PLAY MODE row.
@@ -811,16 +824,18 @@ constexpr core::Binding kBase[] = {
     bind(kSeditCtx, tap(button_ref(Button::F6)), kSeditRun, ArgFrom::Fixed, 5),
     // OS-FU3: F7 is the held PREVIEW (Shift + F7 from the selection's edge); ALL moved to Delete, the save as a WAV to Shift + F6 (OS-007n: the key row is full)
     bind(kSeditCtx, tap(button_ref(Button::F7)), kPreviewHold, ArgFrom::Fixed, static_cast<int>(Button::F7)),
-    bind(kSeditCtx, tap(button_ref(Button::F7), kShift), kPreviewHold, ArgFrom::Fixed, static_cast<int>(Button::F7) | 0x100),
+    // OS-UXF-SMP item 11: Shift + F7 / F8 are INST - / INST + (as on Sample load), so PRV EDGE moved to Shift + Play (unlabelled: the row is full) and REDO to Shift + F5 (NEXT INS went to INST +)
+    bind(kSeditCtx, tap(button_ref(Button::Play), kShift), kPreviewHold, ArgFrom::Fixed, static_cast<int>(Button::Play) | 0x100),
     bind(kSeditCtx, tap(button_ref(Button::Delete)), kSeditAll),
     bind(kSeditCtx, tap(button_ref(Button::F6), kShift), kSeditSaveWav),
     bind(kSeditCtx, tap(button_ref(Button::F1), kShift), kSeditAmiga, ArgFrom::Fixed, 0),
     bind(kSeditCtx, tap(button_ref(Button::F2), kShift), kSeditAmiga, ArgFrom::Fixed, 1),
     bind(kSeditCtx, tap(button_ref(Button::F3), kShift), kSeditQ8),
     bind(kSeditCtx, tap(button_ref(Button::F4), kShift), kSeditRun, ArgFrom::Fixed, 7),  // OS-SEDFX: EditOp::DcRemove (sample_dsp.h)
-    bind(kSeditCtx, tap(button_ref(Button::F5), kShift), kSeditInstrument, ArgFrom::Fixed, 1),  // OS-QAFIX-27: NEXT INS, the instrument being edited (a pad or the held Instrument picks it too)
+    bind(kSeditCtx, tap(button_ref(Button::F7), kShift), kSeditInstrument, ArgFrom::Fixed, -1),  // OS-QAFIX-27 (was Shift + F5 NEXT INS), OS-UXF-SMP item 11: INST - / INST +, the instrument being edited (a pad or the held Instrument picks it too)
+    bind(kSeditCtx, tap(button_ref(Button::F8), kShift), kSeditInstrument, ArgFrom::Fixed, 1),
     bind(kSeditCtx, tap(button_ref(Button::F8)), kSeditUndo),
-    bind(kSeditCtx, tap(button_ref(Button::F8), kShift), kSeditRedo),
+    bind(kSeditCtx, tap(button_ref(Button::F5), kShift), kSeditRedo),
     // OS-AUDIT-15 (new Community OS behaviour): the FX page (the Sample edit button again), the screen's field level: F1 FILTER, F2 COMPRESSOR, the encoder changes the row; F3..F6 do nothing there
     // (the plain keys of the edit page, REVERSE .. AMP, must not act behind a blank label); F7 PREVIEW, F8 UNDO and every Shift key are the screen's.
     bind(kSeditFxCtx, tap(encoder_ref(0)), kSeditFx, ArgFrom::Value),
@@ -1040,7 +1055,7 @@ constexpr core::Binding kBase[] = {
     bind(kChooserCtx, tap(button_ref(Button::Copy), kShift), kPatternClipPaste),
 
     // ---- Learn overlay (captures): the chord again, or F8; F1 unbinds the target, F2 changes how its controller moves it, F5 makes the target's
-    // binding follow the selected instrument (or pins it back); the list of bindings: arrows or the encoder choose, F3 deletes the chosen one,
+    // binding follow the selected instrument (or pins it back), F7 puts it on the encoder (ENC); the list of bindings: arrows or the encoder choose, F3 deletes the chosen one,
     // F4 clears them all (pressed twice) -------------------------------------------------------------------------------------
     bind(kLearnCtx, chord(button_ref(Button::Vol), button_ref(Button::Fx)), kLearn),
     bind(kLearnCtx, tap(button_ref(Button::F1)), kLearnClear),
@@ -1049,6 +1064,7 @@ constexpr core::Binding kBase[] = {
     bind(kLearnCtx, tap(button_ref(Button::F6)), kLmapOpen),     // OS-LEARNMAP: MAP, the full-screen table of every binding
     bind(kLearnCtx, tap(button_ref(Button::F3)), kLearnDelete),
     bind(kLearnCtx, tap(button_ref(Button::F4)), kLearnClearAll),
+    bind(kLearnCtx, tap(button_ref(Button::F7)), kEncAssign),  // OS-UXF-KEYS item 17: ENC, the target becomes the encoder's (was the chord Instr + FX2)
     bind(kLearnCtx, tap(button_ref(Button::Up)), kNavUp),
     bind(kLearnCtx, tap(button_ref(Button::Down)), kNavDown),
     bind(kLearnCtx, tap(encoder_ref(0)), kNavScroll, ArgFrom::Value),
@@ -1075,8 +1091,8 @@ constexpr core::Binding kBase[] = {
     bind(kLearnMapCtx, tap(button_ref(Button::F7)), kLmapKey, ArgFrom::Fixed, 7),
     bind(kLearnMapCtx, tap(button_ref(Button::F8)), kBack),
 
-    // ---- Navigator overlay (captures; OS-NAV2: it stays open after the keys that opened it are let go): choose with the arrows or the encoder; F8 GO opens the chosen screen
-    // (F1 too); F7 or Pattern again CLOSE it without changing the view. F8 is Back in the other overlays, so its footer says F7 CLOSE / F8 GO. Shift + F1..F5 jump around the grid
+    // ---- Navigator overlay (captures; OS-NAV2: it stays open after the keys that opened it are let go): choose with the arrows or the encoder; F1 GO opens the chosen screen
+    // (OS-UXF-KEYS item 5: it was F8 too); F8 BACK or Pattern again close it without changing the view, as in every overlay. Shift + F1..F5 jump around the grid
     // like everywhere else. Nothing happens on a release: no HoldEnd, no Shift release ---------------------------------------
     bind(kNavigatorCtx, tap(button_ref(Button::Left)), kNavLeft),
     bind(kNavigatorCtx, tap(button_ref(Button::Right)), kNavRight),
@@ -1084,14 +1100,15 @@ constexpr core::Binding kBase[] = {
     bind(kNavigatorCtx, tap(button_ref(Button::Down)), kNavDown),
     bind(kNavigatorCtx, tap(encoder_ref(0)), kNavScroll, ArgFrom::Value),
     bind(kNavigatorCtx, tap(encoder_ref(0), kShift), kPage, ArgFrom::Value),  // OS-SHIFTENC
-    bind(kNavigatorCtx, tap(button_ref(Button::F8)), kNavigatorAccept),
+    // OS-UXF-KEYS item 5 (new Community OS behaviour): the one grammar of the overlays: F1 GO, F8 BACK (it was F8 GO, F7 CLOSE; F7 now does nothing).
+    bind(kNavigatorCtx, tap(button_ref(Button::F8)), kBack),
     bind(kNavigatorCtx, tap(button_ref(Button::F1)), kNavigatorAccept),
-    bind(kNavigatorCtx, tap(button_ref(Button::F7)), kBack),
+    bind(kNavigatorCtx, tap(button_ref(Button::F7)), kUiNone),
     bind(kNavigatorCtx, tap(button_ref(Button::Pattern)), kBack),  // (with Shift still down it falls back to this one; OS-ZOOM's tap of Pattern on Pattern will be Pattern's own binding, behind this context, which captures)
-    // OS-SHIFTROW: no quarter jumps here (the Navigator's grid is moved by the arrows). Shift can still be down (a held Shift across the chord that opened it), so Shift + F7 / F8 stay CLOSE / GO, bound.
-    bind(kNavigatorCtx, tap(button_ref(Button::F7), kShift), kBack),
-    bind(kNavigatorCtx, tap(button_ref(Button::F8), kShift), kNavigatorAccept),
-    bind(kNavigatorCtx, tap(button_ref(Button::F1), kShift), kUiNone),
+    // OS-SHIFTROW: no quarter jumps here (the Navigator's grid is moved by the arrows). Shift can still be down (a held Shift across the chord that opened it), so Shift + F1 / F8 stay GO / BACK, bound.
+    bind(kNavigatorCtx, tap(button_ref(Button::F7), kShift), kUiNone),
+    bind(kNavigatorCtx, tap(button_ref(Button::F8), kShift), kBack),
+    bind(kNavigatorCtx, tap(button_ref(Button::F1), kShift), kNavigatorAccept),
     bind(kNavigatorCtx, tap(button_ref(Button::F2), kShift), kUiNone),
     bind(kNavigatorCtx, tap(button_ref(Button::F3), kShift), kUiNone),
     bind(kNavigatorCtx, tap(button_ref(Button::F4), kShift), kUiNone),
@@ -1138,7 +1155,7 @@ constexpr core::Binding kBase[] = {
     bind(kModulePickerCtx, tap(button_ref(Button::Up), kShift), kPage, ArgFrom::Fixed, -1),  // OS-NAV3: a page of the list
     bind(kModulePickerCtx, tap(button_ref(Button::Down), kShift), kPage, ArgFrom::Fixed, 1),
     bind(kModulePickerCtx, tap(button_ref(Button::F1)), kModulePick),
-    bind(kModulePickerCtx, tap(button_ref(Button::F8)), kModulePickerF8),  // OS-APPSNAV: the apps list launches, the pickers close
+    bind(kModulePickerCtx, tap(button_ref(Button::F8)), kBack),  // OS-UXF-KEYS item 5: F8 is BACK in the apps list too (it launched there, OS-APPSNAV; F1 launches)
     bind(kModulePickerCtx, tap(button_ref(Button::Pattern)), kAppsClose),  // (Shift + Pattern falls back to it)
     // OS-INSFX-ABI2 A9: the F5 PRESET list of a module's page, the picker's grammar: the arrows and the encoder choose, F1 LOAD, F8 BACK. OS-MODPRESET P4: Shift + F5 SAVE opens the keyboard for a preset's name.
     bind(kPresetCtx, tap(button_ref(Button::Up)), kNavUp),
@@ -1212,8 +1229,8 @@ constexpr core::Binding kBase[] = {
     bind(kEventsCtx, tap(button_ref(Button::F7), kShift), kEventsRedo),
     bind(kEventsCtx, tap(button_ref(Button::F8)), kEventsBack),
 
-    // ---- The on-screen keyboard (OS-FU2; captures: the pads type their key, the arrows move the focus, Insert and F1 type the key in
-    // focus, Delete is the backspace, F6 the automatic name, F7 cancels, F8 saves; F2 is the caps key, the encoder moves the focus along the row) -------------------------------
+    // ---- The on-screen keyboard (OS-FU2; captures: the pads type their key, the arrows move the focus, Insert and F7 type the key in
+    // focus, Delete is the backspace, F6 the automatic name, F1 accepts (OK), F8 cancels (BACK); F2 is the caps key, the encoder moves the focus along the row) -------------------------------
     bind(kTextEntryCtx, tap(pad_ref(core::kAnyId)), kTextPad, ArgFrom::InputId, 0),
     bind(kTextEntryCtx, tap(button_ref(Button::Left)), kTextMove, ArgFrom::Fixed, 0),
     bind(kTextEntryCtx, tap(button_ref(Button::Right)), kTextMove, ArgFrom::Fixed, 1),
@@ -1221,12 +1238,13 @@ constexpr core::Binding kBase[] = {
     bind(kTextEntryCtx, tap(button_ref(Button::Down)), kTextMove, ArgFrom::Fixed, 3),
     bind(kTextEntryCtx, tap(encoder_ref(0)), kTextScroll, ArgFrom::Value),
     bind(kTextEntryCtx, tap(button_ref(Button::Insert)), kTextKey),
-    bind(kTextEntryCtx, tap(button_ref(Button::F1)), kTextKey),
+    // OS-UXF-KEYS item 5 (new Community OS behaviour): F1 OK / SAVE, F8 CANCEL, as every overlay. The key in focus moves to F7 (Insert keeps it too); it was F1, with F7 CANCEL and F8 OK.
+    bind(kTextEntryCtx, tap(button_ref(Button::F1)), kTextAccept),
     bind(kTextEntryCtx, tap(button_ref(Button::F2)), kTextCaps),
     bind(kTextEntryCtx, tap(button_ref(Button::Delete)), kTextBackspace),
     bind(kTextEntryCtx, tap(button_ref(Button::F6)), kTextAuto),
-    bind(kTextEntryCtx, tap(button_ref(Button::F7)), kBack),
-    bind(kTextEntryCtx, tap(button_ref(Button::F8)), kTextAccept),
+    bind(kTextEntryCtx, tap(button_ref(Button::F7)), kTextKey),
+    bind(kTextEntryCtx, tap(button_ref(Button::F8)), kBack),
 
     // ---- The step popup (OS-FU3): the arrows (dir codes 1 Up, 2 Right, 3 Down, 4 Left), the encoder and the pads choose, the release of the button that opened it closes ----
     bind(kStepPopupCtx, tap(button_ref(Button::Up)), kPopupMove, ArgFrom::Fixed, 1),
@@ -1400,6 +1418,7 @@ constexpr ContextName kContextNames[] = {
     {"steppopup", Context::StepPopup},
     {"pads.tracks", Context::PadsTracks},
     {"pads.mode", Context::PadsMode},
+    {"padspicker", Context::PadsPicker},  // OS-UXF-PAT 7
     {"fill", Context::FillDialog},
     {"song.ask", Context::SongAsk},
     {"song.tools", Context::SongTools},

@@ -939,6 +939,130 @@ bool Editor::lanes_copy_fit(std::uint32_t from, std::uint16_t tracks, std::size_
   return lanes_->total_events() + events <= kMaxLanePoolEvents && lanes_->lane_count() + lanes <= kMaxLanes && undo_fits(kLaneInsert, other_bytes + bytes);
 }
 
+// OS-MIDIREC-P1 S7c, A16: the dry run of a series of lane_replace calls. It walks the spans in order with the running pool and lane totals, as the calls would.
+bool Editor::lanes_replace_fit(std::uint32_t pattern, const LaneSpan* spans, std::uint32_t count, std::size_t other_bytes) noexcept {
+  if (lanes_ == nullptr) {
+    return true;  // no lane is touched (the callers then change none)
+  }
+  lanes_->sync(project_.load_epoch());  // (a pattern the project lacks has no lanes: the pool and the ring still decide)
+  std::uint32_t events = lanes_->total_events();
+  std::uint32_t lanes = lanes_->lane_count();
+  std::size_t bytes = 0;
+  bool touched = false;
+  for (std::uint32_t i = 0; i < count; ++i) {
+    const LaneSpan& s = spans[i];
+    if (s.track >= kMaxTracks) {
+      return false;
+    }
+    const LaneStore::View v = lanes_->lane(pattern, s.track);
+    const std::uint32_t old = LaneStore::lower_bound(v, s.t1) - LaneStore::lower_bound(v, s.t0);
+    if (old == 0 && s.n == 0) {
+      continue;
+    }
+    touched = true;
+    if (v.count - old + s.n > kMaxLaneEvents) {
+      return false;
+    }
+    events = events - old + s.n;
+    if (events > kMaxLanePoolEvents) {
+      return false;
+    }
+    if (v.count == 0) {
+      if (lanes >= kMaxLanes) {
+        return false;
+      }
+      ++lanes;
+    } else if (v.count == old && s.n == 0) {
+      --lanes;
+    }
+    bytes += lane_record_bytes(old) + lane_record_bytes(s.n);
+  }
+  return !touched || undo_fits(kLaneDelete, other_bytes + bytes);
+}
+
+// A16 row ops. Insert: the events from the step on move one step down; those that land at or past the track's length are deleted (A17). Pull: the events of the step
+// are deleted and the later ones move one step up.
+bool Editor::lane_rows_plan(std::uint32_t pattern, std::uint32_t track, std::uint32_t step, bool insert, RowsPlan& plan) noexcept {
+  const Pattern* pat = project_.pattern(pattern);
+  if (lanes_ == nullptr || pat == nullptr || track >= kMaxTracks || step >= pat->track_length[track]) {
+    return false;
+  }
+  lanes_->sync(project_.load_epoch());
+  const LaneStore::View v = lanes_->lane(pattern, track);
+  const std::uint32_t first = step * kLaneTicksPerStep;
+  plan.lo = LaneStore::lower_bound(v, first);
+  plan.tail = v.count - plan.lo;
+  if (plan.tail == 0) {
+    return false;
+  }
+  plan.from = plan.lo;
+  plan.kept = plan.tail;
+  if (insert) {
+    const std::uint32_t end = LaneStore::lower_bound(v, pat->track_length[track] * kLaneTicksPerStep - kLaneTicksPerStep);  // the first event that lands past the end
+    plan.kept = end > plan.lo ? end - plan.lo : 0;
+  } else {
+    plan.from = LaneStore::lower_bound(v, first + kLaneTicksPerStep);
+    plan.kept = v.count - plan.from;
+  }
+  return true;
+}
+
+bool Editor::lanes_rows_fit(std::uint32_t pattern, std::uint16_t tracks, std::uint32_t step, bool insert, std::size_t other_bytes) noexcept {
+  std::size_t bytes = 0;
+  for (std::uint32_t t = 0; t < kMaxTracks; ++t) {
+    RowsPlan plan{};
+    if (((tracks >> t) & 1u) != 0u && lane_rows_plan(pattern, t, step, insert, plan)) {
+      bytes += lane_record_bytes(plan.tail) + lane_record_bytes(plan.kept);
+    }
+  }
+  return bytes == 0 || undo_fits(kLaneDelete, other_bytes + bytes);
+}
+
+Status Editor::lane_rows(std::uint32_t pattern, std::uint32_t track, std::uint32_t step, bool insert) noexcept {
+  Scope scope(*this);
+  const Pattern* pat = project_.pattern(pattern);
+  if (lanes_ == nullptr || pat == nullptr) {
+    return Status::NotFound;
+  }
+  if (track >= kMaxTracks) {
+    return Status::BadIndex;
+  }
+  if (step >= pat->track_length[track]) {
+    return Status::BadValue;
+  }
+  RowsPlan plan{};
+  if (!lane_rows_plan(pattern, track, step, insert, plan)) {
+    return Status::Ok;  // no event at or after the step
+  }
+  if (!undo_fits(kLaneDelete, lane_record_bytes(plan.tail) + lane_record_bytes(plan.kept))) {
+    return Status::Full;
+  }
+  LaneStore::WriteWindow window(*lanes_);
+  LaneEvent* p = lanes_->lane_writable(pattern, track);
+  const std::uint16_t ix = static_cast<std::uint16_t>(plan.lo);
+  const std::uint16_t old_n = static_cast<std::uint16_t>(plan.tail);
+  const std::uint8_t id = static_cast<std::uint8_t>(pattern);
+  const std::uint8_t tr = static_cast<std::uint8_t>(track);
+  const Piece before[] = {{&id, 1}, {&tr, 1}, {&ix, 2}, {&old_n, 2}, {p + plan.lo, plan.tail * sizeof(LaneEvent)}};
+  (void)record(kLaneDelete, before, 5);  // the old tail, before it is touched (the journal copies it)
+  for (std::uint32_t i = 0; i < plan.kept; ++i) {  // in place, ascending: the source index is never below the target's
+    LaneEvent e = p[plan.from + i];
+    e.tick = static_cast<std::uint16_t>(insert ? e.tick + kLaneTicksPerStep : e.tick - kLaneTicksPerStep);
+    p[plan.lo + i] = e;
+  }
+  if (plan.tail > plan.kept) {
+    (void)lanes_->erase(pattern, track, plan.lo + plan.kept, plan.tail - plan.kept);
+  }
+  if (plan.kept != 0) {
+    p = lanes_->lane_writable(pattern, track);
+    const std::uint16_t new_n = static_cast<std::uint16_t>(plan.kept);
+    const Piece after[] = {{&id, 1}, {&tr, 1}, {&ix, 2}, {&new_n, 2}, {p + plan.lo, plan.kept * sizeof(LaneEvent)}};
+    (void)record(kLaneInsert, after, 5);
+  }
+  (void)project_.touch_lanes(pattern);
+  return Status::Ok;
+}
+
 Status Editor::lane_copy(std::uint32_t from, std::uint32_t to, std::uint32_t track) noexcept {
   Scope scope(*this);
   if (lanes_ == nullptr || project_.pattern(from) == nullptr || project_.pattern(to) == nullptr) {
