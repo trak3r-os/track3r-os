@@ -45,11 +45,12 @@ Order of chunks, as written:
 | `SNFX` | 0..1 | the send effects' controls of the MASTER FX page (OS-PERSIST2), only when the project has them |
 | `LAW ` | 0..1 | the instrument volume law (OS-BUG-PASTE24), only when it is the 1.1.14 table (law 1) |
 | `INSX` | 0..1 | the inserts: effect modules on the track strips and the master (OS-INSFX S3a), only when the project has one |
-| `MEVT` | 0..1 | the MIDI take lanes: recorded events per pattern track (OS-MIDIREC-P1 S1), only when the project has one; the last known chunk |
+| `MEVT` | 0..1 | the MIDI take lanes: recorded events per pattern track (OS-MIDIREC-P1 S1), only when the project has one |
+| `MEQ ` | 0..1 | the master output EQ (five bands) and bass boost (OS-MASTEREQ), only when a value is not 0; the last known chunk |
 | unknown | 0..16 | chunks this version does not know (the OG formats' `OGPM` and `OGPN` among them), in the order they were read |
 | `CRC ` | 1, last | CRC-32 of every byte before this chunk's header |
 
-Reading is stricter than writing only where it protects the model: `PHDR` must be the first chunk of all; known chunks must appear in the order above (only `PATT` and `INST` repeat; `SETS` comes after the last `INST`, `LRNB` after `SETS`, then `MIDI`, `USBS`, `MIXR`, `PERF`, `APPM`, `NOTE`, `MUTE`, `SCEN`, `SNFX`, `LAW `, `INSX`, `MEVT` in that order, each once); `CRC ` must be the last chunk and end exactly at the end of `FORM`. `TRAK`, `MODR` and `SONG` may be absent (defaults: default tracks, no modules, empty song; a module count in `PHDR` must still match). Unknown chunks may appear anywhere after `PHDR`; they are written back after the known chunks (their position among the known ones is not kept).
+Reading is stricter than writing only where it protects the model: `PHDR` must be the first chunk of all; known chunks must appear in the order above (only `PATT` and `INST` repeat; `SETS` comes after the last `INST`, `LRNB` after `SETS`, then `MIDI`, `USBS`, `MIXR`, `PERF`, `APPM`, `NOTE`, `MUTE`, `SCEN`, `SNFX`, `LAW `, `INSX`, `MEVT`, `MEQ ` in that order, each once); `CRC ` must be the last chunk and end exactly at the end of `FORM`. `TRAK`, `MODR` and `SONG` may be absent (defaults: default tracks, no modules, empty song; a module count in `PHDR` must still match). Unknown chunks may appear anywhere after `PHDR`; they are written back after the known chunks (their position among the known ones is not kept).
 
 The pad byte must be zero. Everything else a reader finds wrong is an error (section 7); it never guesses.
 
@@ -358,6 +359,25 @@ The size is `4 + sum(6 + 8n)`. The lane key is `(pattern - 1) * 16 + track` (408
 
 Caveat of the checker: `Verifier` (the Writer's self-check) shares the rank table with the Reader and always treats `MEVT` as a known chunk; a Reader without a store treats a misplaced `MEVT` as unknown instead of refusing it.
 
+### The `MEQ ` chunk (OS-MASTEREQ): the master EQ and bass boost
+
+The master output EQ (a five-band graphic EQ) and the bass boost run in the SGTL5000's DAP (`docs/specs/OS-MASTEREQ.md`); the project stores the six values. The chunk id is `MEQ ` (with the trailing space).
+
+```
+MEQ  payload (big-endian, like every chunk), 8 bytes
+u16 version = 0x0100
+i8  band[5]    -12..12 dB, in steps of 1; the bands are 115 Hz, 330 Hz, 990 Hz, 3 kHz, 9.9 kHz (the codec's fixed centres)
+u8  bass       0..100 (0 = off)
+(a later minor appends after the bass byte)
+```
+
+- **Written only when a value is not 0.** A project whose five bands and bass are all 0 (every project that never touched the Mixer page MST EQ) has no `MEQ ` chunk and is **the file it was**, byte for byte: no byte of any other chunk changes (`tests/native_format_test.cpp` and `tests/o3project_roundtrip.py` pin the default project and the earlier fixtures). The chunk is written after `MEVT` and before the unknown chunks and `CRC `, as its own writer unit.
+- **Reading, 1.0.** Version 0 is `Malformed`, a newer major is `NewerMajor`, a payload that is not exactly 8 bytes is `Malformed` (a newer minor: at least 8, the rest is skipped and `newer_minor` is set), a second `MEQ ` or one before a chunk of a lower rank is `Malformed`. **The values are read tolerantly (the `NOTE` rule: the project still opens):** a band outside -12..12 is clamped to it and a bass above 100 to 100 (counted in `settings_skipped`, as the other tolerant chunks do). The reader holds the values and applies them with `Project::set_master_eq` **at Done**, after the CRC matched, and clears them at the start of every load, so a failed load or a file without the chunk (the default, flat EQ) commits nothing of an earlier file.
+- **Model.** `model::MasterEq` (`model/project_state.h`: five `int8` and one `uint8`, 6 bytes), `Project::master_eq()` and `set_master_eq()` (clamps; marks the project dirty only on a change). **The six bytes are stored in the padding of `Project`**, in three gaps (2 + 1 + 3 bytes), so `sizeof(Project)`, `sizeof(ModelArena)` and `kImportLayoutTag` do not change (`static_assert`s in `Project::reset` pin the placement). Not undoable in the sense of the pattern editor: it is a Mixer-page setting like the master volume.
+- **Rank.** `CRC ` was rank 21 and is now rank 22; `MEQ ` is rank 21. The rank is internal to the reader and the Python reference (`RANKS` in `tools/o3project.py`), not a field.
+
+**Older builds.** An older build (any before this chunk) reads `MEQ ` as an unknown chunk, keeps it (8 bytes of the unknown pool) and writes it back byte for byte, in the order it read it (behind `MEVT`, which it knows or keeps in the same way). **The project plays with a flat output and no bass boost** (the sound differs; the file is not refused); a save in the older build keeps the chunk, so the settings return when the project is opened in this build again. `tests/o3project_roundtrip.py` emulates that reader (its chunk table without `MEQ `, the `CRC ` rank 21) and checks the byte-for-byte write back.
+
 ### CRC
 
 `u16 version`, `u32 crc` (section 2). Payload 6 bytes.
@@ -515,6 +535,7 @@ Samples are standard WAV files next to the project file; an instrument stores th
 
 - OS-INSFX S3a: one new chunk, `INSX` 1.0 (the inserts; no bump of any chunk, no field changed: decision D2 of the maintainer, 2026-11-01), written only when the project has an insert, after `LAW `, so every file that never had one is the bytes it always was. Compatibility, both ways: an older file in a new build has no inserts (and loading it clears the document's); a new file in an older build loads, keeps the chunk as unknown and writes it back byte for byte, and plays without the inserts (section 3). `MODR` is never pruned.
 - OS-MIDIREC-P1 S1 (2026-11-10): one new chunk, `MEVT` 1.0 (the MIDI take lanes; no bump of any chunk, no field changed), written only when the lane store has a lane, after `INSX`; `CRC ` moves from rank 20 to 21 in the reader (internal); a project with no lane is the file it was; an older build keeps a chunk of 16 KiB or less as unknown and drops a bigger one (section 3, "The `MEVT` chunk"). Lane key by pattern ID, not pool slot (a spec deviation recorded there).
+- OS-MASTEREQ (2026-11-12): one new chunk, `MEQ ` 1.0 (the master EQ bands and bass boost; no bump of any chunk, no field changed), written only when a value is not 0, after `MEVT`; `CRC ` moves from rank 21 to 22 in the reader (internal); the six bytes sit in `Project`'s padding, so no layout size or `kImportLayoutTag` moves; a project with a flat EQ is the file it was; an older build keeps the chunk as unknown (section 3, "The `MEQ ` chunk").
 - OS-APPUX S3: `APPM` 1.0 to 1.1, the same layout with a count of up to 12 apps (it was 6) and a payload of up to 1,015 bytes; written as 1.0 while six apps or fewer are stored (every file that never used more is the bytes it always was), as 1.1 beyond; a loader for 1.0 (at most 6) stays; the model arena grows by 984 B (six more 164-byte sets: 1,933,416 B). An older OS refuses a 1.1 `APPM` (`APPM: bad app count`) and with it the whole project (maintainer, 2026-10-19, option B: no appended tail); no other chunk changed.
 - OS-PRFDEFAULTS: no bytes change and no version moves. The defaults of the `PERF` values (what a project with no `PERF` chunk reads as, and what a new project holds) are the table of `docs/specs/OS-PERFFX.md` section 9 instead of 0 (maintainer decision 2026-10-23); a chunk that is present loads exactly as stored, and a project that never touched Perform is still written without the chunk.
 - OS-PERFFX P1 + OS-APPUX S3 together: the two version gates are independent. `PERF` and `SCEN` are 1.1 only with the Perform FX 20 or 21 in a slot (of a stored scene for `SCEN`); `APPM` is 1.1 only with more than six apps stored; every other chunk stays 1.0. A project that uses neither is the file it always was; one that uses one feature bumps only that feature's chunks; one that uses both writes all three as 1.1. Every combination is read (a 1.1 `PERF` with six apps, a 1.0 `PERF` with seven apps, and so on) and written back as the versions its content needs. An older OS opens the file when no `APPM` is 1.1 (it reads the two FX ids as none) and refuses it when `APPM` is 1.1. Tests: `tests/project_state_test.cpp` ("the version gates are independent"), ctest `project_python` ("PERF/SCEN 1.1 ... and APPM 1.1 in one project", C++ against `o3project.py`).

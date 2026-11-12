@@ -48,6 +48,7 @@ inline constexpr std::uint32_t kChunkSnfx = fourcc('S', 'N', 'F', 'X');  // the 
 inline constexpr std::uint32_t kChunkLaw = fourcc('L', 'A', 'W', ' ');   // the instrument volume law, written only when it is the 1.1.14 table (OS-BUG-PASTE24)
 inline constexpr std::uint32_t kChunkInsx = fourcc('I', 'N', 'S', 'X');  // the inserts, written only when the project has one (OS-INSFX S3a)
 inline constexpr std::uint32_t kChunkMevt = fourcc('M', 'E', 'V', 'T');  // the MIDI take lanes: recorded events per pattern track, written only when there is one (OS-MIDIREC-P1 S1, docs/formats/o3-project.md)
+inline constexpr std::uint32_t kChunkMeq = fourcc('M', 'E', 'Q', ' ');   // the master output EQ and bass boost, written only when a value is not its default (OS-MASTEREQ, docs/formats/o3-project.md)
 inline constexpr std::uint32_t kChunkCrc = fourcc('C', 'R', 'C', ' ');   // CRC-32 of everything before it
 
 // Chunk version, the first two payload bytes of every chunk: major in the high byte, minor in the low byte.
@@ -207,6 +208,7 @@ class Reader {
   bool parse_inst(std::size_t len) noexcept;
   bool parse_settings(std::size_t len, bool bindings) noexcept;
   bool parse_state(std::size_t len, unsigned part) noexcept;
+  bool parse_meq(std::size_t len) noexcept;
   bool parse_crc(std::size_t len) noexcept;
   void on_mevt_head() noexcept;
   void next_lane() noexcept;
@@ -239,6 +241,7 @@ class Reader {
   bool chunk_minor_newer_ = false;  // the chunk's minor version is newer than the one this reader knows for its kind
   std::uint8_t chunk_minor_ = 0;    // the minor version of the chunk being read
   std::uint8_t law_ = 0;            // the LAW chunk's value: held here, applied to the project at Done (cleared in begin())
+  model::MasterEq meq_{};           // the MEQ chunk's values (clamped): held here, applied at Done like law_ (cleared in begin())
   std::uint32_t mevt_lanes_left_ = 0;   // lanes the MEVT header announced and the reader has not read
   std::uint32_t mevt_next_key_ = 0;     // the lowest key the next lane may have (the last taken lane's key + 1)
   std::uint32_t mevt_events_left_ = 0;  // events of the lane being taken that are not read yet
@@ -288,7 +291,7 @@ class Writer {
   std::uint32_t total_bytes() const noexcept { return sized_ ? form_len_ + 8u : 0u; }
 
  private:
-  enum class Unit : std::uint8_t { Measure, Form, Phdr, Trak, Modr, Song, Patt, Inst, Sets, Lrnb, State, Lanes, Unknown, Crc, End };
+  enum class Unit : std::uint8_t { Measure, Form, Phdr, Trak, Modr, Song, Patt, Inst, Sets, Lrnb, State, Lanes, Meq, Unknown, Crc, End };
   enum class Phase : std::uint8_t { Fixed, Patterns, Instruments, UnknownChunks, Done };
 
   bool measure(std::size_t& budget) noexcept;

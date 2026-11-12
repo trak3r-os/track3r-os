@@ -142,7 +142,7 @@ SAMPLER_BYTES = SAMPLER_HEAD.size + 6 * ENVELOPE.size + 6 * LFO.size + SLICES.si
 assert SAMPLER_BYTES == 296
 
 RANKS = {b"PHDR": 1, b"TRAK": 2, b"MODR": 3, b"SONG": 4, b"PATT": 5, b"INST": 6, b"SETS": 7, b"LRNB": 8,
-         b"MIDI": 9, b"USBS": 10, b"MIXR": 11, b"PERF": 12, b"APPM": 13, b"NOTE": 14, b"MUTE": 15, b"SCEN": 16, b"SNFX": 17, b"LAW ": 18, b"INSX": 19, b"MEVT": 20, b"CRC ": 21}
+         b"MIDI": 9, b"USBS": 10, b"MIXR": 11, b"PERF": 12, b"APPM": 13, b"NOTE": 14, b"MUTE": 15, b"SCEN": 16, b"SNFX": 17, b"LAW ": 18, b"INSX": 19, b"MEVT": 20, b"MEQ ": 21, b"CRC ": 22}
 
 # The project-level state of OS-004d (docs/formats/o3-project.md section 3, model/project_state.h): the chunks MIDI, USBS, MIXR, PERF, APPM.
 USB_PROFILE_CHANNELS = [2, 8, 10, 11, 0, 4, 6]  # usb::Profile P2, P8, P10, P11, (P4S: not stored), P4, P6 (usb::profile_channels)
@@ -211,6 +211,7 @@ def new_project():
         "apps": [],         # (module name, abi major, abi minor, [value bits]) oldest first
         "lanes": {},        # OS-MIDIREC-P1 S1: (pattern id, track) -> [(tick, len, kind << 4 | channel, port, a, b)]; the MEVT chunk is written only when there is one
         "mevt_skipped": 0,  # lanes the reader skipped (Report::mevt_skipped)
+        "meq": [0, 0, 0, 0, 0, 0],  # OS-MASTEREQ: five band gains in dB (-12..12) and the bass boost (0..100); the MEQ chunk is written only when one is not 0
         "unknown": [],      # (fourcc bytes, payload)
         "unknown_dropped": 0,
         "unknown_dropped_bytes": 0,
@@ -380,6 +381,7 @@ LENGTH_RANGE = {
     b"LAW ": (3, 3),
     b"INSX": (3, 3 + INSERT_MAX * (5 + 4 * INSERT_PARAMS_MAX)),
     b"MEVT": (4, L["max_file_bytes"]),
+    b"MEQ ": (8, 8),
     b"CRC ": (6, 6),
 }
 
@@ -406,6 +408,7 @@ def parse(data):
     seen_patterns = seen_instruments = 0
     unknown_used = 0
     law = 0
+    meq = [0, 0, 0, 0, 0, 0]
     while True:
         if form_left == 0:
             malformed("the FORM ends without a CRC chunk")
@@ -494,6 +497,8 @@ def parse(data):
         elif cid == b"MEVT" and cid in RANKS:  # (a table without it emulates the build before this chunk: it is then an unknown chunk)
             check_version(be16(payload, 0), cid)
             parse_mevt(p, payload)
+        elif cid == b"MEQ " and cid in RANKS:  # (a table without it emulates the build before this chunk)
+            meq = parse_meq(payload, check_version(be16(payload, 0), cid))
         elif cid == b"CRC ":
             c = Cursor(payload)
             check_version(c.u16())
@@ -505,6 +510,7 @@ def parse(data):
             if (seen_patterns, seen_instruments, len(p["modules"])) != tuple(expected):
                 malformed("chunk counts differ from the header")
             p["law"] = law
+            p["meq"] = meq
             return p
         else:
             unknown_used = keep_unknown(p, cid, payload, unknown_used)
@@ -808,6 +814,16 @@ def parse_state(p, cid, payload, newer):
             apps.append((name, abi_major, abi_minor, values))
         shape()
         p["apps"] = apps
+
+
+def parse_meq(payload, newer):
+    """MEQ (OS-MASTEREQ, docs/formats/o3-project.md "The MEQ chunk"): u16 version, five i8 band gains, u8 bass. A value out of its range is clamped, not an error."""
+    c = Cursor(payload)
+    c.u16()
+    vals = [c.u8() for _ in range(6)]
+    finish_fields(c, newer)
+    bands = [min(12, max(-12, v - 256 if v > 127 else v)) for v in vals[:5]]
+    return bands + [min(100, vals[5])]
 
 
 def parse_law(payload, newer):
@@ -1181,8 +1197,12 @@ def build(p):
         chunks.append(chunk(b"MEVT", v + struct.pack(">H", len(p["lanes"])) + b"".join(
             struct.pack(">BBHBB", pattern, track, len(events), 8, 0) + b"".join(struct.pack(">HHBBBB", *e) for e in events)
             for (pattern, track), events in sorted(p["lanes"].items(), key=lambda kv: (kv[0][0] - 1) * L["tracks"] + kv[0][1]))))
+    if any(p["meq"]):  # MEQ: after MEVT, only when a value is not its default; it replaces a carried one
+        chunks.append(chunk(b"MEQ ", v + struct.pack(">5bB", *p["meq"])))
     for cid, payload in p["unknown"]:
         if cid == b"MEVT" and p["lanes"]:
+            continue
+        if cid == b"MEQ " and any(p["meq"]):
             continue
         chunks.append(chunk(cid, payload))
     body = b"".join(chunks)
@@ -1305,6 +1325,8 @@ def dump(p):
         out.append("law=%d" % p["law"])
     for n, (where, slot, module, flags, bits) in enumerate(p["inserts"]):
         out.append("insert %d where=%d slot=%d module=%d flags=%d values=%s" % (n, where, slot, module, flags, ",".join("%08x" % x for x in bits)))
+    if any(p["meq"]):  # OS-MASTEREQ: the same line as the pj tool's dump
+        out.append("meq bands=%s bass=%d" % (",".join("%d" % x for x in p["meq"][:5]), p["meq"][5]))
     for (pattern, track), events in sorted(p["lanes"].items()):
         out.append("lane %d %d events=%d crc=%08x" % (pattern, track, len(events), zlib.crc32(b"".join(struct.pack(">HHBBBB", *e) for e in events)) & 0xFFFFFFFF))
     if p["mevt_skipped"]:

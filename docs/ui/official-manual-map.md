@@ -354,15 +354,15 @@ Our home: Mixer (`docs/qa/catalogue/mixer.md`).
 
 | Feature | Official manual | What it does there | track3r-os | Our evidence | Notes |
 |---|---|---|---|---|---|
-| Master pages | §8.1 Master Pages - Audio Control, §10.2 Master Pages | The Master button steps through three views: the master strip, a per-track mixer and a global mixer. | different | `docs/manual/mixer.md` | Ours: four pages on F1 to F4 (MIXER, ROUTING, MASTER FX, STEMS). |
+| Master pages | §8.1 Master Pages - Audio Control, §10.2 Master Pages | The Master button steps through three views: the master strip, a per-track mixer and a global mixer. | different | `docs/manual/mixer.md` | Ours: four pages on F1 to F4 (MIXER, ROUTING, MASTER FX, STEMS), INSERTS on F6 and MST EQ (OS-MASTEREQ) reached by pressing Master again. |
 | Track levels with meters | §8.1 | One level per track with a live bar. | same | `docs/manual/mixer.md` | MIXER page; ours adds a pan per track. No QA row. |
 | Mute applied on release | §1.5, §8.1 | A mute on the mixer page only bites once the key comes back up. | open | QA-MIX-020 | Ours mutes with F7; the timing relative to key release was not compared. |
 | Solo | §8.1 | Shift plus the track key. | different | QA-MIX-004 | Ours: F8 SOLO; Shift+F8 clears all solos. |
 | Rename tracks on the mixer page | §8.1, §4.6 | Rec then a track key. | different | QA-MIX-010 | Shift+F1 NAME. |
 | Global mixer: line in, sends, delay, reverb, dry | §8.2 Audio Sources, §10.2 | Page 3 holds the line-in pass-through, the master delay and reverb mix, and the dry level. | different | `docs/manual/mixer.md` | Ours: buses IN, SNDA, SNDB, CUE, MST; ROUTING page with LINE IN and returns. |
 | Master saturation | §10.6 Saturation, Space & Bass Boost | Five distortion presets. | missing | QA-MIX-002 | Reserved stage, not listed. |
-| Master bass boost and space | §10.6 | Bass boost 0 to 100; stereo widener 0 to 8. | missing | QA-MIX-002 | Reserved. |
-| Master EQ, five bands | §10.7 EQ | Five fixed bands, +-12 dB. | missing | QA-MIX-002 | Reserved. |
+| Master bass boost and space | §10.6 | Bass boost 0 to 100; stereo widener 0 to 8. | different | QA-MIX-116 | Bass boost 0 to 100 built (OS-MASTEREQ, the codec's bass enhance, analogue outputs only; new Community OS behaviour). The stereo widener (space) is not built. |
+| Master EQ, five bands | §10.7 EQ | Five fixed bands, +-12 dB. | different | QA-MIX-113, QA-MIX-114 | Built (OS-MASTEREQ, new Community OS behaviour): MST EQ, the sixth Mixer page, five bands of +-12 dB in the codec's graphic EQ (115 Hz to 9.9 kHz), saved with the project; analogue outputs only, not in renders, USB audio or resampling. Band centres are the codec's, not claimed equal to the official firmware's. |
 | Master delay | §10.3 Master Delay | Ping-pong, sync, rate, time, feedback, filter. | different | `app/include/o3os/app/send_fx_rows.h` | Ours: DLY PINGPONG, SYNC, RATE, TIME, FEEDBACK (max 70), TONE, MODE. The manual's feedback goes to 99 and its filter is a cutoff in Hz; ours is a tone percentage. |
 | Master reverb | §10.4 Master Reverb | Size, damping, pre-delay, diffusion, 0 to 100. | same | `app/include/o3os/app/send_fx_rows.h` | RVB SIZE, DAMPING, PREDELAY, DIFFUSE (and QUALITY, new). No QA row. |
 | Master limiter | §10.5 Limiter | Attack, release, threshold, gain-reduction meter, sidechain. | different | QA-MIX-002, `app/include/o3os/app/limiter_rows.h` | Ours: THRESH in per cent, ATTACK and RELEASE 1 to 1000 ms; always on. No sidechain, no meter. The limiter mode and the sends mode are mapped under Config (6.9). |
@@ -551,8 +551,7 @@ Each row is something the official firmware has and track3r-os does not. This is
 | Sample load and the instrument pool | Import with start and end trim | §3.6 (Importing) | Trim after loading in Sample edit. |
 | Sample load and the instrument pool | Low-quality import | §3.6 | No such key. |
 | Mixer | Master saturation | §10.6 Saturation, Space & Bass Boost | Reserved stage, not listed. |
-| Mixer | Master bass boost and space | §10.6 | Reserved. |
-| Mixer | Master EQ, five bands | §10.7 EQ | Reserved. |
+| Mixer | Master space (stereo widener) | §10.6 | Reserved. |
 | Mixer | Limiter sidechain from a track or line in | §10.5 | Not present. |
 | Perform | Pattern play mode with C1 to C20 | §12.7 Remixing | Play mode has FWD, BACK, PING, RND and the custom orders C1 to C20 (OS-PERFMODES M4). |
 | Config | Anti-aliasing | §3.7 | Stored, no row. |

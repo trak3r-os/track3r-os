@@ -119,3 +119,45 @@ wait 3000
 tap master
 tap f1
 snap qa_mix_078
+
+# OS-MASTEREQ (docs/specs/OS-MASTEREQ.md): the sixth Mixer page, MST EQ, reached by the Master button pressed again (no F key). Five band rows in dB and the BASS BOOST row.
+# QA-MIX-113: a new document: from the MIXER page Master five times reaches MST EQ: five flat bands, BASS BOOST 0, the cursor on 115 HZ, the card ANALOGUE OUTPUTS ONLY.
+document
+tap pattern
+tap master
+tap f1
+tap master 5
+snap qa_mix_113
+
+# QA-MIX-114: the encoder moves the band under the cursor by 1 dB a detent: three detents up on 115 HZ read +3 DB and the strip line shows EQ ON (FLAT while every value is 0); Shift + encoder is coarse (3 dB a detent): one coarse detent down on 330 HZ reads -3 DB.
+encoder 3
+tap down
+press shift
+encoder -1
+release shift
+snap qa_mix_114
+
+# QA-MIX-115: the band stops at +12 and -12 dB: twenty detents up on 990 HZ read +12 DB.
+tap down
+encoder 20
+snap qa_mix_115
+
+# QA-MIX-116: BASS BOOST is 0 to 100: the encoder on the last row (35 detents) reads 35 and the bar fills a third.
+tap down 3
+encoder 35
+snap qa_mix_116
+
+# QA-MIX-117: Delete sets the row under the cursor to its default (0): BASS BOOST back to 0; the bands keep their values.
+tap delete
+snap qa_mix_117
+
+# QA-MIX-118: F7 and F8 on the MST EQ page change nothing and the strip says TRACKS ONLY (there is no track under the cursor).
+tap f8
+assert state msg=~TRACKS_ONLY
+tap f7
+assert state msg=~TRACKS_ONLY
+snap qa_mix_118
+
+# QA-MIX-119: Master again leaves MST EQ for the MIXER page; the cursor of the MIXER page is where it was.
+tap master
+snap qa_mix_119

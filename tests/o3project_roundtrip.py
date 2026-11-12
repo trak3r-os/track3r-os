@@ -100,7 +100,7 @@ def main():
     if cpp_limits != py_limits:
         sys.exit("FAILED: the limits tables differ\nC++:\n%s\nPython:\n%s" % (cpp_limits.decode(), py_limits.decode()))
 
-    for kind in ("empty", "small", "maximal", "settings", "state", "midi13", "persist2", "scales", "lfosine", "stereo", "wt", "playthru", "modrate", "autocc", "og", "og17", "law", "insx", "lanes-empty", "lanes-some", "lanes-one", "lanes-2048", "lanes-full"):
+    for kind in ("empty", "small", "maximal", "settings", "state", "midi13", "persist2", "scales", "lfosine", "stereo", "wt", "playthru", "modrate", "autocc", "og", "og17", "law", "insx", "meq", "lanes-empty", "lanes-some", "lanes-one", "lanes-2048", "lanes-full"):
         a, b, c = (os.path.join(work, "%s.%s.o3p" % (kind, tag)) for tag in ("cpp", "py", "cpp2"))
         run([tool, "gen", kind, a])
         if kind in PRE_LAW:  # OS-BUG-PASTE24: a project whose law is 0 writes no LAW chunk: the file is the one the build before it wrote (size and CRC-32 taken from that build's o3pj_tool)
@@ -1450,6 +1450,60 @@ def main():
     if b"MEVT" in [c for c, _ in dropped["unknown"]] or dropped["unknown_dropped"] != 1 or dropped["lanes"] != {}:
         sys.exit("FAILED: a reader that does not know MEVT does not drop a chunk above 16 KiB and count it")
     print("mevt: the MEVT chunk is read alike on both sides (shape errors, skipped lanes, tolerance, order, pool limit), a project without lanes is the file that never had a lane, a previous reader keeps a small one and drops a big one")
+    # OS-MASTEREQ: the MEQ chunk (master EQ and bass boost): u16 version, five i8 band gains, u8 bass; written only when a value is not 0, after MEVT and before the unknown chunks.
+    def with_meq(payload, at=None):
+        cs = list(sm)
+        cs.insert(first_unknown if at is None else at, (b"MEQ ", payload))
+        return cs
+
+    meq_file = read(os.path.join(work, "meq.cpp.o3p"))
+    want_meq = b"\x01\x00" + struct.pack(">5bB", -12, -1, 0, 6, 12, 100)
+    if meq_file != join_chunks(with_meq(want_meq)) or len(want_meq) != 8:
+        sys.exit("FAILED: the meq fixture is not the small project plus the 8-byte MEQ chunk")
+    dump_meq = run([tool, "dump", os.path.join(work, "meq.cpp.o3p")]).stdout.decode().splitlines()
+    if "meq bands=-12,-1,0,6,12 bass=100" not in dump_meq:
+        sys.exit("FAILED: the meq fixture's dump has no meq line")
+    rewrite_alike("MEQ fixture", with_meq(want_meq), expect=meq_file)
+    # Clamped, not an error: a band above 12 or below -12 and a bass above 100.
+    got = rewrite_alike("MEQ out of range", with_meq(b"\x01\x00" + struct.pack(">5bB", 127, -128, 13, -13, 1, 255)),
+                        expect=join_chunks(with_meq(b"\x01\x00" + struct.pack(">5bB", 12, -12, 12, -12, 1, 100))))
+    if "meq bands=12,-12,12,-12,1 bass=100" not in got:
+        sys.exit("FAILED: MEQ out of range: not clamped")
+    # All values 0: read, and not written back (the default project has no MEQ chunk).
+    rewrite_alike("MEQ all zero", with_meq(b"\x01\x00" + bytes(6)), expect=small)
+    # A newer minor with appended bytes is read as 1.0 knows it and written back as 1.0; a newer major is refused; a shape error is Malformed.
+    rewrite_alike("MEQ 1.1 with appended bytes", with_meq(b"\x01\x01" + want_meq[2:] + b"\xab" * 5), expect=meq_file)
+    refused_alike("MEQ 2.0", with_meq(b"\x02\x00" + want_meq[2:]), "newer major version")
+    refused_alike("MEQ version 0", with_meq(b"\x00\x00" + want_meq[2:]))
+    refused_alike("MEQ a byte short", with_meq(want_meq[:-1]))
+    refused_alike("MEQ a byte long", with_meq(want_meq + b"\0"))
+    refused_alike("MEQ 1.1 shorter than 1.0", with_meq(b"\x01\x01" + want_meq[2:-1]))
+    twice = with_meq(want_meq)
+    twice.insert(first_unknown, (b"MEQ ", want_meq))
+    refused_alike("MEQ twice", twice)
+    refused_alike("MEQ before INST", sm[:first_unknown - 1] + [(b"MEQ ", want_meq)] + sm[first_unknown - 1:])
+    mevt_cs = with_mevt(mevt([lane(1, 0, [ev(0, 5, 0, 0, 0, 60, 1)])]))
+    # MEVT then MEQ is the canonical order; MEQ then MEVT is out of order (MEVT is rank 20, MEQ 21).
+    rewrite_alike("MEVT then MEQ", mevt_cs[:first_unknown + 1] + [(b"MEQ ", want_meq)] + mevt_cs[first_unknown + 1:])
+    refused_alike("MEQ before MEVT", mevt_cs[:first_unknown] + [(b"MEQ ", want_meq)] + mevt_cs[first_unknown:])
+    # Behind the unknown chunks it is legal, and written back in its place.
+    rewrite_alike("MEQ after the unknown chunks", sm + [(b"MEQ ", want_meq)], expect=meq_file)
+    # The build before this slice (emulated: MEQ is unknown to it, the CRC chunk is rank 21): the file loads with the default master EQ, MEQ is kept as an unknown chunk behind MEVT and
+    # written back byte for byte, and a build that knows it picks the values up again.
+    spec_meq = importlib.util.spec_from_file_location("o3project_before_meq", ref)
+    before_meq = importlib.util.module_from_spec(spec_meq)
+    spec_meq.loader.exec_module(before_meq)
+    before_meq.RANKS.pop(b"MEQ ")
+    before_meq.LENGTH_RANGE.pop(b"MEQ ")
+    before_meq.RANKS[b"CRC "] = 21
+    older_meq = before_meq.parse(meq_file)
+    if b"MEQ " not in [c for c, _ in older_meq["unknown"]] or older_meq["meq"] != [0] * 6 or before_meq.build(older_meq) != meq_file:
+        sys.exit("FAILED: a reader that does not know MEQ does not keep it and write it back byte for byte")
+    mevt_meq = join_chunks(mevt_cs[:first_unknown + 1] + [(b"MEQ ", want_meq)] + mevt_cs[first_unknown + 1:])
+    older_both = before_meq.parse(mevt_meq)
+    if before_meq.build(older_both) != mevt_meq or now.parse(before_meq.build(older_both))["meq"] != [-12, -1, 0, 6, 12, 100]:
+        sys.exit("FAILED: MEQ behind MEVT does not survive a build that does not know it")
+    print("meq: the MEQ chunk is read alike on both sides (clamp, shape errors, newer minors, order), a default master EQ is the file that never had one, a previous reader keeps it byte for byte")
     print("versions: %d newer-major cases refused, %d newer-minor cases read, INST 1.0 read as rate 0, alike" % (len(refused) + 1, len(accepted) + 3))
     print("OK")
 

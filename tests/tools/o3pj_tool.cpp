@@ -2,13 +2,13 @@
 // Command-line helper for the C++ <-> Python round trip of the native project format (ctest project_python,
 // driven by tests/o3project_roundtrip.py). Not part of the OS.
 //
-//   o3pj_tool gen empty|small|maximal|settings|state|midi13|persist2|scales|lfosine|stereo|wt|playthru|modrate|autocc|og|og17|law|insx OUT  write a fixture project (empty = the default project; state = the project-level
+//   o3pj_tool gen empty|small|maximal|settings|state|midi13|persist2|scales|lfosine|stereo|wt|playthru|modrate|autocc|og|og17|law|insx|meq OUT  write a fixture project (empty = the default project; state = the project-level
 //                                       state of OS-004d: MIDI, USBS, MIXR, PERF, APPM and instruments with a playback engine; persist2 = the session
 //                                       state of OS-PERSIST2: NOTE, MUTE, SCEN, SNFX; scales = the persist2 fixture with a NOTE 1.1 chunk (OS-SCALES28: Hirajoshi, SCALE LOCK on); lfosine = the small project with a Sine LFO, so INST 1.4; stereo = the small project with the stereo flag, so INST 1.5;
 //                                       wt = the small project with WT slots, so INST 1.6 (OS-CEWTENV W1); playthru = the small project with the play-thru flag, so INST 1.7 (OS-CEPLAYTHRU P1); modrate = the small project with the module RATE 2 on instrument 50, so INST 1.8 (OS-MODRATE S3); og =what the OG
 //                                       readers make of a synthetic OG project, with its OGPM and OGPN chunks; og17 = the same
 //                                       from a project v17, whose OGPM chunk is 1.1: it carries the byte at 0x80C; law = the og fixture with the volume
-//                                       law 1, so with the LAW chunk of OS-BUG-PASTE24; insx = the persist2 fixture with three inserts, so with the INSX chunk of OS-INSFX S3a)
+//                                       law 1, so with the LAW chunk of OS-BUG-PASTE24; insx = the persist2 fixture with three inserts, so with the INSX chunk of OS-INSFX S3a; meq = the small project with a master EQ, so with the MEQ chunk of OS-MASTEREQ)
 //   o3pj_tool gen kit OUT               (OS-E2E-13) the instrument kit of the "pro session" journey: five instruments and no pattern work, and the four WAV files they name in a
 //                                       `samples/` folder beside OUT (integer arithmetic only, so the same bytes on every machine). Not a round-trip fixture
 //   o3pj_tool gen heavy OUT             (OS-FINALQA FQA-7) the heavy song of docs/architecture/cpu-budget.md section 4 for the unit's CPU run: 10 sustained sampler voices (6 modern, 4 Paula; looped, filtered, modulated, with sends and
@@ -278,6 +278,11 @@ void dump(const Project& p, const LaneStore& lanes, const formats::native::Repor
       std::printf("%s%08x", k == 0 ? "" : ",", bits(r.param[k]));
     }
     std::printf("\n");
+  }
+  const model::MasterEq meq = p.master_eq();
+  if (!model::master_eq_is_default(meq)) {  // OS-MASTEREQ: the MEQ chunk, the same line as o3project.py's dump
+    std::printf("meq bands=%d,%d,%d,%d,%d bass=%u\n", meq.band_db[0], meq.band_db[1], meq.band_db[2], meq.band_db[3], meq.band_db[4],
+                static_cast<unsigned>(meq.bass));
   }
   dump_lanes(lanes, report);
   for (std::uint32_t i = 0; i < p.unknown_count(); ++i) {
@@ -983,6 +988,9 @@ int main(int argc, char** argv) {
       test::fill_scales(a.project);  // OS-SCALES28: the persist2 fixture with Hirajoshi (26) as the scale, so a NOTE 1.1 chunk
     } else if (std::strcmp(argv[2], "insx") == 0) {
       test::fill_inserts(a.project);  // OS-INSFX S3a: the persist2 fixture and three inserts, so with the INSX chunk
+    } else if (std::strcmp(argv[2], "meq") == 0) {
+      test::fill_small(a.project);  // OS-MASTEREQ: the small project and a master EQ (-12 .. 12 dB, bass 100), so with the MEQ chunk
+      a.project.set_master_eq(model::MasterEq{{-12, -1, 0, 6, 12}, 100});
     } else if (std::strcmp(argv[2], "kit") == 0) {
       fill_kit(a.project);
     } else if (std::strcmp(argv[2], "heavy") == 0) {
@@ -1031,7 +1039,7 @@ int main(int argc, char** argv) {
       test::fill_maximal(a.project);
       fill_lanes(a.project, kMaxLanePoolEvents / 4u, 4u);  // 1,920 lanes of 4 events: exactly the pool
     } else {
-      return fail("gen: empty, small, lanes-empty|some|one|2048|full, maximal, settings, state, midi13, persist2, scales, lfosine, stereo, wt, playthru, modrate, autocc, kit, heavy, dense10, dense8, moddrive1|4|8[off], lfostep23|24|33|36|off, midisync, midisync-song, midisync-load, mtc-tempo, og, og17, law or insx");
+      return fail("gen: empty, small, lanes-empty|some|one|2048|full, maximal, settings, state, midi13, persist2, scales, lfosine, stereo, wt, playthru, modrate, autocc, kit, heavy, dense10, dense8, moddrive1|4|8[off], lfostep23|24|33|36|off, midisync, midisync-song, midisync-load, mtc-tempo, og, og17, law, insx or meq");
     }
     std::vector<std::uint8_t> out;
     if (test::save(a.project, out, formats::native::kDefaultStepBudget, &g_lanes) != formats::native::Progress::Done) {

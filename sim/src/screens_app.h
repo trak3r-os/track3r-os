@@ -86,7 +86,7 @@ extern const ScreenState kExtremeStates[5];
 
 // The Mixer screen (screens_mixer.cpp, OS-011b): the MIXER page with the cursor on a level, a pan and the master, with no project, and the worst case (sixteen tracks
 // with every mark and every meter hot, swept over both fields of every column); the ROUTING, MASTER FX and STEMS pages, each with its typical, edge and worst states.
-extern const ScreenState kMixerStates[18];
+extern const ScreenState kMixerStates[20];
 // The Perform screen (screens_mixer.cpp, OS-011b): slots with FX latched on three tracks and a pad down, the EDIT state, no board, and the worst case (every slot at its widest, EDIT on,
 // every track affected and muted, swept over the edit place).
 extern const ScreenState kPerformStates[5];

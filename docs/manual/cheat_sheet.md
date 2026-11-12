@@ -147,3 +147,4 @@ The soft keys `F1` to `F8`, left to right, as the key row shows them.
 | Record, loop review | `F1` **OVERDUB**, `F5` **UNDO LYR**, `F8` **LOOP ON** or **MUTED**; `F6` does nothing |
 | Perform, slot page, `Shift` held | `Shift` + `F4` **PICK -**, `F5` **PICK +**, `F6` **TRK PAT**, `F7` **TRK NEXT**, `F8` **TRK SONG**: another pattern on the tracks that are ON, at each track's loop end (see [Perform](perform.md)) |
 | Perform, DJ page | `F5` **SCR** (the encoder is the platter), `F6` **LATCH**, `F8` **RESET**; `Shift` + `F1` to `F8` do nothing |
+| Mixer, MST EQ (`Master` five times from **MIXER**, or once from **INSERTS**) | no `F` key; `Master` goes to the next page, `Up` and `Down` move between the bands, the encoder changes a band, `Delete` puts the row back to 0 (see [Mixer](mixer.md)) |

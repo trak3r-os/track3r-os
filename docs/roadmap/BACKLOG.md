@@ -56,7 +56,7 @@ Not a source: the unlicensed reverse-engineering repository polyend-tracker-re (
 | OS-CEPATW | Write tracker-ce pattern files (`.mtp` v6), so a project saved here opens with its v6 fields in tracker-ce | OG | M | From the OS-CEPAT spec (2026-11-05, Q5 a). After OS-CEWTENV. A product choice: a folder written as v6 stops opening on official 1.9. The maintainer decides. |
 | OS-BUG-EXPVOL | v5 Export rounds the step volume: 36 of the 101 values come back one lower after an export and a re-import | OG | S | Found by the OS-CEPAT spec (2026-11-05), recorded there, not fixed. The maintainer decides. |
 | OS-ODHARD | OVERDRIVE with hard clipping: the range 0x00..0x64 keeps today's sound, 0x65..0xC8 adds a hard-clip stage (DS-1 / Metal Zone style); maybe a fuzz insert later | N | S-M | Public issue #4. A DSP change: its CPU cost is measured on the unit before it merges. |
-| OS-MIXEQ | An 8 or 16 band EQ per channel on a mastering page | N | L | Public issue #6. CPU is the binding constraint; maybe as an insert effect module. |
+| OS-MIXEQ | An 8 or 16 band EQ per channel on a mastering page | N | L | Public issue #6. CPU is the binding constraint; maybe as an insert effect module. The master EQ part is done (a 5-band master EQ and Bass Boost, Mixer page MST EQ); this row stays for the per-channel EQ. |
 
 ## PARKED
 

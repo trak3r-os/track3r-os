@@ -1606,6 +1606,15 @@ Status Editor::set_app_params(const char* name, std::size_t len, std::uint32_t a
 }
 Status Editor::set_insert(const InsertRecord& value) noexcept { O3OS_EDITOR_STATE_SETTER(project_.set_insert(value)) }
 Status Editor::clear_insert(std::uint32_t where, std::uint32_t slot) noexcept { O3OS_EDITOR_STATE_SETTER(project_.clear_insert(where, slot)) }
+Status Editor::set_master_eq_state(const MasterEq& value) noexcept {
+  const bool was_in_sync = in_sync();
+  const std::uint32_t before = project_.generation();
+  project_.set_master_eq(value);  // (void: it has no Status, a value outside the ranges is clamped)
+  if (was_in_sync && project_.generation() != before) {
+    synced();
+  }
+  return Status::Ok;
+}
 #undef O3OS_EDITOR_STATE_SETTER
 
 // OS-PARAMAUTO: one byte of Instrument::midi_cc as a 4-byte record [slot][letter][new][old] (32 bytes of journal, not the instrument's 1,472): the take that gives a parameter its letter

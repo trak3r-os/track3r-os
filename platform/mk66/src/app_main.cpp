@@ -1183,6 +1183,26 @@ void sync_metro() noexcept {
   }
 }
 
+// OS-MASTEREQ: the project's master EQ and bass boost to the codec's DAP (docs/specs/OS-MASTEREQ.md). The values are handed over every pass with the load phase idle (so a project load needs no
+// hook, and the boot unmute, which waits for the load to end, finds them); the codec writes happen inside the audio path's own pass: at most 3 per pass, none with the outputs closed, the
+// power-off latch set or the firmware update path holding the card, and none while every value is at its default.
+bool firmware_has_card() noexcept;  // OS-007o: defined below
+void sync_master_eq(bool loading, std::uint32_t now_ms) noexcept {
+  if (g_seq == nullptr || loading) {
+    return;
+  }
+  const model::MasterEq eq = g_seq->project().master_eq();
+  hal::audio::OutputEq out{};
+  for (unsigned i = 0; i < model::kMasterEqBands; ++i) {
+    out.band_db[i] = eq.band_db[i];
+  }
+  out.bass = eq.bass;
+  audio_device().set_output_eq(out);
+  if (!g_power_latched && !firmware_has_card()) {
+    audio_eq_pass(now_ms);
+  }
+}
+
 // OS-MTC A3: answers the time code generator's question (the song time of the position a run or a relocation starts at) over the sequencer's command ring (app/mtc_sync.h). One relaxed read a pass.
 // OS-MTC B3: and the chase's (which step starts at or after the master's time), and the chase's status for the Config row. A few relaxed reads a pass.
 void sync_mtc() noexcept {
@@ -3908,6 +3928,7 @@ std::uint8_t pass() noexcept {
   sync_midi_settings();
   sync_usb_return();  // OS-USBRET
   sync_metro();       // OS-METRO
+  sync_master_eq(g_load_phase != LoadPhase::Idle, static_cast<std::uint32_t>(now));  // OS-MASTEREQ
   sync_mtc();         // OS-MTC A3
   sync_project_platform_state(g_load_phase != LoadPhase::Idle);  // OS-004d
   if (g_seq != nullptr) {  // (the sound, and with it the capture device, is built)

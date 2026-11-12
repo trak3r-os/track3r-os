@@ -27,6 +27,7 @@
 #include "data/wt_contour_golden.h"
 
 #include <cmath>
+#include <cstdlib>
 #include <cstdint>
 #include <cstring>
 #include <initializer_list>
@@ -395,4 +396,30 @@ TEST_CASE("wt bake: exhausted by a long sweep, then a project load (the reset) g
     CHECK(audio::wt_bake(i, 0x34u) == i + 1u);  // all 128 fit again
   }
   CHECK(audio::wt_bake_refused() == 0u);
+}
+
+// OS-FLASHDIET-LIBM: the target's contours use the in-house sin / cos / exp / pow (no libm in the image). Against the libm ones, every point
+// of every shape stays within a few LSB (a contour point is y * 32767), and a gate or stepper never flips: where the two differ by more than
+// the bound it is a step edge, which would show as one point off by a whole step.
+TEST_CASE("wt_contour: the fast maths policy against libm (all 256 shapes, all points)") {
+  int worst = 0;
+  unsigned worst_shape = 0;
+  unsigned worst_point = 0;
+  for (unsigned s = 0; s < audio::kWtContourCount; ++s) {
+    std::int16_t ref[audio::kWtContourLen];
+    std::int16_t fast[audio::kWtContourLen];
+    audio::wt_make_points_libm(ref, s);
+    audio::wt_make_points_fast(fast, s);
+    for (unsigned i = 0; i < audio::kWtContourLen; ++i) {
+      const int d = std::abs(static_cast<int>(ref[i]) - static_cast<int>(fast[i]));
+      if (d > worst) {
+        worst = d;
+        worst_shape = s;
+        worst_point = i;
+      }
+      CHECK_MESSAGE(d <= 2, "shape " << s << " point " << i << " libm " << ref[i] << " fast " << fast[i]);
+    }
+  }
+  MESSAGE("max difference " << worst << " LSB at shape " << worst_shape << " point " << worst_point);
+  CHECK(worst <= 2);  // measured: 1 LSB, 40 of 32768 points
 }

@@ -175,6 +175,31 @@ void draw_master_worst(ui::Renderer& r, unsigned variant) {
   draw(r, m, mixer_view(app::MixerPage::MasterFx, static_cast<int>(variant), 0));
 }
 
+// OS-MASTEREQ: the MST EQ page with a project that has an EQ curve and some bass boost (the cursor on a band, then on BASS BOOST), and the flat default.
+struct MasterEqWorld {
+  std::unique_ptr<model::ModelArena> arena = std::make_unique<model::ModelArena>();
+  MasterEqWorld() {
+    arena->project.reset();
+    model::MasterEq eq{};
+    eq.band_db[0] = 6;
+    eq.band_db[1] = 2;
+    eq.band_db[3] = -4;
+    eq.band_db[4] = -12;
+    eq.bass = 35;
+    arena->project.set_master_eq(eq);
+  }
+};
+
+void draw_mastereq(ui::Renderer& r, unsigned variant) {
+  static MasterEqWorld w;
+  Model m{};
+  m.project = &w.arena->project;
+  m.device.init(core::ParamKind::Device);
+  draw(r, m, mixer_view(app::MixerPage::MasterEq, static_cast<int>(variant == 0u ? 1u : (variant == 1u ? app::kMasterEqRows - 1u : 0u)), 0));
+}
+
+void draw_mastereq_flat(ui::Renderer& r, unsigned) { draw(r, world().model(), mixer_view(app::MixerPage::MasterEq, 0, 0)); }
+
 // The stem map: the factory P10 map (typical), every slot with every source (worst, P11: eleven slots), no map.
 struct StemWorld {
   std::unique_ptr<model::ModelArena> arena = std::make_unique<model::ModelArena>();
@@ -346,7 +371,7 @@ void draw_perform_worst(ui::Renderer& r, unsigned variant) {
 
 }  // namespace
 
-const ScreenState kMixerStates[18] = {
+const ScreenState kMixerStates[20] = {
     {"typical", true, 1, kBudgetWords, draw_mixer_typical},
     {"pan", true, 1, kBudgetWords, draw_mixer_pan},
     {"master", true, 1, kBudgetWords, draw_mixer_master},
@@ -365,6 +390,8 @@ const ScreenState kMixerStates[18] = {
     {"stems_none", true, 1, kBudgetWords, draw_stems_none},
     {"stems_outputs", true, 1, kBudgetWords, draw_stems_outputs},
     {"stems_worst", true, 12u *app::kStemSources, kBudgetWords, draw_stems_worst},
+    {"mastereq", true, 3, kBudgetWords, draw_mastereq},
+    {"mastereq_flat", true, 1, kBudgetWords, draw_mastereq_flat},
 };
 
 

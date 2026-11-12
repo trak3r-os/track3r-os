@@ -146,6 +146,13 @@ struct BlockCallback {
   void* user;
 };
 
+// OS-MASTEREQ: the master output EQ and bass boost as the project holds them (model::MasterEq, same ranges): five band gains in dB (-12..+12: 115 Hz, 330 Hz, 990 Hz, 3 kHz, 9.9 kHz)
+// and the bass boost 0..100. All zero is "off": the platform keeps its codec as it was before the feature.
+struct OutputEq {
+  std::int8_t band_db[5];
+  std::uint8_t bass;
+};
+
 // ---- The device -------------------------------------------------------------------------------------------------------
 // Implemented by a platform. All three calls are for the main thread, once the platform is up; none may be called from an
 // ISR or the render line (they block: the codec ramps in hundreds of milliseconds).
@@ -180,6 +187,10 @@ class Device {
 
   // True between a successful unmute() and the next mute().
   virtual bool outputs_enabled() const noexcept = 0;
+
+  // OS-MASTEREQ: the master output EQ and bass boost of the project (the codec's DAP; analogue outputs only). Records the wanted values: it writes nothing, the platform
+  // applies them from its main loop and inside unmute(). Called by the main loop only, with the project's values. The default does nothing (the simulator and QEMU).
+  virtual void set_output_eq(const OutputEq& eq) noexcept { static_cast<void>(eq); }
 
  protected:
   Device() = default;

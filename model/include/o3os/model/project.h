@@ -197,6 +197,11 @@ class Project {
   // bank reads it at every rebuild of a descriptor (app::project_law), so a rebuild cannot use a law other than the document's.
   std::uint8_t volume_law() const noexcept { return volume_law_; }
   void set_volume_law(std::uint8_t law) noexcept { volume_law_ = law == 0u ? std::uint8_t{0} : std::uint8_t{1}; }
+  // OS-MASTEREQ: the master output EQ (five bands, dB) and bass boost 0..100, state of the document. The native file stores them as the MEQ chunk, only when one is not its default (a missing chunk is
+  // flat, bass 0). set_master_eq clamps to the ranges (kMasterEqDbMax, kMasterBassMax) and counts as a change only when a value differs. reset() puts the defaults back, also with KEEP INSTRUMENTS. The six
+  // bytes live in the padding of the arena (eq_lo_, bass_, eq_hi_ below), so sizeof(Project) and the importer layout tag do not move (static_asserts in project.cpp).
+  MasterEq master_eq() const noexcept;
+  void set_master_eq(const MasterEq& value) noexcept;
   const MidiState& midi() const noexcept { return midi_; }
   const UsbState& usb() const noexcept { return usb_; }
   const MixState& mix() const noexcept { return mix_; }
@@ -383,6 +388,7 @@ class Project {
   std::uint8_t module_count_;
   std::uint8_t names_state_;  // kNamesNone, kNamesFresh, kNamesStale
   std::uint8_t unknown_filling_;  // index of the unknown chunk being filled, or kNoSlot
+  std::int8_t eq_lo_[2];  // OS-MASTEREQ: master EQ bands 0..1 (dB), in the two padding bytes before tempo_x100_ (bands 2..4: eq_hi_)
   std::uint32_t tempo_x100_;
   alignas(4) std::uint8_t song_[kMaxSongPositions];  // word-aligned (it follows a word): Project::snapshot_order reads it as relaxed words; placed here so the arena keeps its size
   MasterSettings master_;
@@ -393,6 +399,7 @@ class Project {
   std::uint8_t state_present_;      // kState* bits
   std::uint8_t volume_law_;         // OS-BUG-PASTE24: 0 the 1.2+ instrument law, 1 the 1.1.14 table (stored as the LAW chunk when 1; no chunk = 0)
   std::uint8_t app_params_count_;
+  std::uint8_t bass_;  // OS-MASTEREQ: the bass boost 0..100, in the padding byte before midi_
   MidiState midi_;
   UsbState usb_;
   MixState mix_;
@@ -419,6 +426,7 @@ class Project {
   std::uint32_t order_open_;  // order_ops_ when the outermost bracket opened: only ops after it may merge
   OrderOp order_journal_[kOrderJournal];
   std::uint8_t order_depth_;
+  std::int8_t eq_hi_[3];  // OS-MASTEREQ: master EQ bands 2..4 (dB), in the three padding bytes before pattern_generation_; saved (MEQ), unlike its runtime-only neighbours
   std::uint32_t pattern_generation_[kMaxPatterns];      // by pool slot
   std::uint32_t instrument_generation_[kMaxInstruments];
   std::uint32_t param_generation_[kProjectParamSlots];  // see param_generation(); the epoch is added to each

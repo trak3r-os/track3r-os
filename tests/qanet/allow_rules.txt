@@ -13,6 +13,8 @@ R2 | Left (nav.left 0) | FileExport | bound key changes nothing and says nothing
 R2 | Right (nav.right 0) | FileExport | bound key changes nothing and says nothing | rule:one-axis
 R2 | Left (nav.left 0) | MIXER_page_2 | bound key changes nothing and says nothing | rule:one-axis
 R2 | Right (nav.right 0) | MIXER_page_2 | bound key changes nothing and says nothing | rule:one-axis
+R2 | Left (nav.left 0) | MIXER_page_5 | bound key changes nothing and says nothing | rule:one-axis
+R2 | Right (nav.right 0) | MIXER_page_5 | bound key changes nothing and says nothing | rule:one-axis
 R2 | Left (nav.left 0) | Modules | bound key changes nothing and says nothing | rule:one-axis
 R2 | Right (nav.right 0) | Modules | bound key changes nothing and says nothing | rule:one-axis
 R2 | Shift+* (song.select_tracks *) | PadsTracks | bound key changes nothing and says nothing | OS-SONGMAP

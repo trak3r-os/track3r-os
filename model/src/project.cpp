@@ -89,6 +89,10 @@ static_assert(sizeof(Instrument) * kMaxInstruments == 46080, "instrument pool si
 static_assert(kModelArenaBytes == 1934344, "ModelArena size changed: update docs/formats/o3-project.md, docs/architecture/os-tree.md and the mirror in platform/mk66 mem_map.h");
 
 void Project::reset(bool keep_instruments) noexcept {
+  // OS-MASTEREQ: the six master EQ bytes sit in padding (the importer layout tag hashes sizeof(Project) and the offsets of the older members, so none of them may move)
+  static_assert(offsetof(Project, eq_lo_) + sizeof eq_lo_ == offsetof(Project, tempo_x100_) && offsetof(Project, bass_) + 1 == offsetof(Project, midi_) &&
+                    offsetof(Project, eq_hi_) + sizeof eq_hi_ == offsetof(Project, pattern_generation_),
+                "the master EQ bytes must fill padding exactly");
   order_depth_ = 0;  // E-SONG-07: a reset never runs inside a bracket, and at boot the arena is raw SDRAM; the epoch and the op count are never rewound (a stale value would look like "no change")
   OrderEdit order_scope(*this);
   std::memset(name_, 0, sizeof name_);
@@ -120,6 +124,9 @@ void Project::reset(bool keep_instruments) noexcept {
     volume_law_ = 0;  // OS-BUG-PASTE24: a new document plays at the 1.2+ law; KEEP INSTRUMENTS keeps the instruments and with them the law their levels were read through
   }
   app_params_count_ = 0;
+  std::memset(eq_lo_, 0, sizeof eq_lo_);  // OS-MASTEREQ: a new document is flat, also with KEEP INSTRUMENTS (the EQ is the document's, not an instrument's)
+  std::memset(eq_hi_, 0, sizeof eq_hi_);
+  bass_ = 0;
   init_midi_state(midi_);
   init_usb_state(usb_);
   init_mix_state(mix_);
@@ -678,6 +685,25 @@ Status Project::clear_instrument(std::uint32_t index) noexcept {
 }
 
 // ---- the project-level state (OS-004d) ---------------------------------------------------------------------------------------------
+
+MasterEq Project::master_eq() const noexcept {
+  return MasterEq{{eq_lo_[0], eq_lo_[1], eq_hi_[0], eq_hi_[1], eq_hi_[2]}, bass_};
+}
+
+void Project::set_master_eq(const MasterEq& value) noexcept {
+  const MasterEq v = clamp_master_eq(value);
+  const MasterEq cur = master_eq();
+  if (std::memcmp(&v, &cur, sizeof v) == 0) {
+    return;
+  }
+  eq_lo_[0] = v.band_db[0];
+  eq_lo_[1] = v.band_db[1];
+  eq_hi_[0] = v.band_db[2];
+  eq_hi_[1] = v.band_db[3];
+  eq_hi_[2] = v.band_db[4];
+  bass_ = v.bass;
+  touch();
+}
 
 namespace {
 

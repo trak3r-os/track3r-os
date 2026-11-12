@@ -627,7 +627,14 @@ TEST_CASE("help: the Mixer pages draw nothing inside the rectangle the page cove
     for (unsigned page = 0; page < app::kMixerPages; ++page) {
       for (unsigned row = 0; row < (page == 0u ? 2u : 1u); ++row) {  // the first page: the cursor on LEVEL, then on PAN
         rig.go(ScreenId::Mixer);
-        rig.tap(page < 4u ? static_cast<Button>(static_cast<unsigned>(Button::F1) + page) : Button::F6);  // (F5 is CUE LVL; the fifth page, INSERTS, is F6)
+        if (page == 5u) {  // OS-MASTEREQ: MST EQ has no F key: the Master button pressed again, five times from MIXER
+          rig.tap(Button::F1);
+          for (unsigned i = 0; i < 5u; ++i) {
+            rig.tap(Button::Master);
+          }
+        } else {
+          rig.tap(page < 4u ? static_cast<Button>(static_cast<unsigned>(Button::F1) + page) : Button::F6);  // (F5 is CUE LVL; the fifth page, INSERTS, is F6)
+        }
         NEED(static_cast<unsigned>(app::mixer::page_of(rig.state())) == page);
         if (row == 1u) {
           rig.tap(Button::Down);

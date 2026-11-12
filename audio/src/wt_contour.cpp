@@ -2,10 +2,14 @@
 #include <o3os/audio/wt_contour.h>
 
 // OS-CEWTENV W2: the port of tracker-ce@7fd6c2c's `core/source/mtWavetableEnvelopes.cpp` (MIT; THIRD_PARTY.md). Only the procedural
-// contours (initWavetableEnvelopes) and the warp law (evalWavetableEnvelopeFloat, unpackWarpX/Y, packWarpXY) are ported, with the maths
-// identical: every float expression below is the original's, in the same order, single precision throughout (the original is float
-// already; no double, no allocation, no exceptions). The `.wav` loader (loadUserWavetablesFromSD) and the Q30 fixed-point twin are not
+// contours (initWavetableEnvelopes) and the warp law (evalWavetableEnvelopeFloat, unpackWarpX/Y, packWarpXY) are ported: every float
+// expression below is the original's, in the same order, single precision throughout (the original is float already; no double, no
+// allocation, no exceptions). Only the maths calls go through the policy below: on the host (libm) the results are identical to the
+// original's, on the target (the in-house fast functions) a contour point is within 1 LSB of them. The `.wav` loader (loadUserWavetablesFromSD) and the Q30 fixed-point twin are not
 // ported (slices W8 and the amp path of W4).
+
+#include <o3os/core/fast_math.h>
+#include <o3os/core/ptfx_math.h>
 
 #include <math.h>
 
@@ -33,6 +37,187 @@ float clampf(float v, float lo, float hi) noexcept {
     return hi;
   }
   return v;
+}
+
+// OS-FLASHDIET-LIBM: the contour formulas below exist once and take their transcendental calls from a maths policy. The target image
+// uses FastMath (the in-house core::sin_fast / cos_fast and ptfx_math::expf_ / powf_, linked anyway): the toolchain's libm powf / expf / sinf /
+// cosf / rem_pio2 are about 7 KB of flash and this function was their only caller. The host product path and the golden test use LibmMath, so the
+// host results (sim goldens, the CRC-32 golden of tests/audio_wt_contour_test.cpp) stay bit-exact; the fast policy differs by at most a few
+// LSB of a contour point (tests/audio_wt_contour_test.cpp measures it). The arguments of floor are >= 0 (t, pulses and n are not negative).
+struct FastMath {
+  static float sin(float x) noexcept { return core::sin_fast(x); }
+  static float cos(float x) noexcept { return core::cos_fast(x); }
+  static float exp(float x) noexcept { return core::ptfx_math::expf_(x); }
+  static float pow(float x, float y) noexcept { return core::ptfx_math::powf_(x, y); }
+  static float floor(float x) noexcept { return static_cast<float>(static_cast<int>(x)); }
+};
+#if !defined(__arm__)
+struct LibmMath {
+  static float sin(float x) noexcept { return sinf(x); }
+  static float cos(float x) noexcept { return cosf(x); }
+  static float exp(float x) noexcept { return expf(x); }
+  static float pow(float x, float y) noexcept { return powf(x, y); }
+  static float floor(float x) noexcept { return floorf(x); }
+};
+#endif
+
+template <class M>
+void make_points(std::int16_t* dst, unsigned shape) noexcept {
+  if (shape >= kWtContourCount) {
+    shape = kWtContourCount - 1u;
+  }
+  const int group = static_cast<int>(shape) / 16;  // the original's `bank`: which family of 16 contours
+  const int sub = static_cast<int>(shape) % 16;
+  const float subf = static_cast<float>(sub);  // every int below enters float arithmetic exactly, as in the original
+
+  for (unsigned i = 0; i < kWtContourLen; ++i) {
+    const float t = static_cast<float>(i) / static_cast<float>(kWtContourLen - 1u);  // 0.0 to 1.0
+    float y = 0.0f;
+
+    switch (group) {
+      case 0: {  // Exponential & Logarithmic Decays / Percussive Plucks
+        const float p = 0.5f + subf * 0.45f;
+        y = M::pow(1.0f - t, p);
+        break;
+      }
+      case 1: {  // Swells, S-Curves & Smooth Bells
+        if (sub < 8) {
+          const float p = 0.5f + subf * 0.5f;
+          y = M::pow(M::sin(t * kPi), p);
+        } else {
+          const float center = 0.1f + (subf - 8.0f) * 0.1f;
+          const float sigma = 0.22f;
+          const float diff = (t - center) / sigma;
+          y = M::exp(-0.5f * diff * diff);
+        }
+        break;
+      }
+      case 2: {  // Double & Multi-Bounces
+        const int bounces = 2 + (sub % 5);
+        const float scaled_t = t * static_cast<float>(bounces);
+        int b_idx = static_cast<int>(scaled_t);
+        if (b_idx >= bounces) {
+          b_idx = bounces - 1;
+        }
+        const float local_t = scaled_t - static_cast<float>(b_idx);
+        const float arc = 4.0f * local_t * (1.0f - local_t);
+        const float damp = M::pow(0.55f, static_cast<float>(b_idx));
+        y = arc * damp;
+        break;
+      }
+      case 3: {  // Rhythmic Gates & Trance Steppers
+        static constexpr std::uint8_t kPulseCounts[16] = {2, 2, 3, 3, 4, 4, 6, 6, 8, 8, 12, 12, 16, 16, 8, 16};
+        const int pulses = kPulseCounts[sub];
+        const float duty = (sub % 2 == 0) ? 0.5f : 0.25f;
+        const float cycle = t * static_cast<float>(pulses);
+        const float frac = cycle - M::floor(cycle);
+        y = (frac < duty) ? 1.0f : 0.0f;
+        break;
+      }
+      case 4: {  // Sharks, Fins & Asymmetric Triangles
+        const float peak = 0.05f + subf * 0.06f;
+        if (t < peak) {
+          y = t / peak;
+        } else {
+          y = 1.0f - (t - peak) / (1.0f - peak);
+        }
+        break;
+      }
+      case 5: {  // Ripples & Damped Oscillations
+        const float freq = 2.0f + subf;
+        const float decay = M::exp(-3.5f * t);
+        y = decay * (0.5f + 0.5f * M::cos(kTwoPi * freq * t));
+        break;
+      }
+      case 6: {  // Accelerating & Decelerating Trills
+        const float chirp = (sub < 8) ? (t * t) : sqrtf(t);
+        const int n = 3 + (sub % 8);
+        const float mod_t = chirp * static_cast<float>(n);
+        const float frac = mod_t - M::floor(mod_t);
+        y = (1.0f - t * 0.6f) * ((frac < 0.4f) ? 1.0f : 0.0f);
+        break;
+      }
+      case 7: {  // Staircases Up, Down & Pyramids
+        const int steps = 2 + sub;
+        int cur_step = static_cast<int>(t * static_cast<float>(steps));
+        if (cur_step >= steps) {
+          cur_step = steps - 1;
+        }
+        if (sub < 8) {
+          y = static_cast<float>(cur_step) / static_cast<float>(steps - 1);
+        } else {
+          y = 1.0f - (static_cast<float>(cur_step) / static_cast<float>(steps - 1));
+        }
+        break;
+      }
+      // --- Groups 8-15: Default Factory Fallbacks for User Slots ---
+      case 8: {  // Wavefolded West-Coast
+        const float w = M::sin(t * kTwoPi * (1.0f + subf * 0.3f));
+        y = fabsf(w);
+        if (y > 0.6f) {
+          y = 1.2f - y;
+        }
+        y *= 1.4f;
+        break;
+      }
+      case 9: {  // Syncopated Pulses
+        const std::uint16_t pat = static_cast<std::uint16_t>(0xAA55 ^ (sub * 0x1111));  // int arithmetic, truncated, as in the original
+        int bit = static_cast<int>(t * 16.0f);
+        if (bit > 15) {
+          bit = 15;
+        }
+        y = ((pat >> bit) & 1u) ? 1.0f : 0.0f;
+        break;
+      }
+      case 10: {  // Reverse Swells with Snappy Cutoffs
+        const float p = 1.2f + subf * 0.3f;
+        if (t < 0.92f) {
+          y = M::pow(t / 0.92f, p);
+        } else {
+          y = (1.0f - t) / 0.08f;
+        }
+        break;
+      }
+      case 11: {  // Dual-Peak Camel / Formant Contours
+        const float p1 = 0.25f;
+        const float p2 = 0.75f;
+        const float d1 = (t - p1) / 0.15f;
+        const float d2 = (t - p2) / (0.15f + subf * 0.01f);
+        y = 0.7f * M::exp(-d1 * d1) + (0.5f + subf * 0.03f) * M::exp(-d2 * d2);
+        break;
+      }
+      case 12: {  // Growing Chaos / Rising Wobble
+        const float wobble = 0.5f + 0.5f * M::sin(kTwoPi * (1.0f + subf * 1.5f) * t * t);
+        y = t * wobble;
+        break;
+      }
+      case 13: {  // Karplus-Style Plucks
+        const float decay = M::exp(-5.0f * t);
+        const float ripple = 0.8f + 0.2f * M::sin(kTwoPi * (10.0f + subf * 2.0f) * t);
+        y = decay * ripple;
+        break;
+      }
+      case 14: {  // Deterministic Stepped S&H
+        std::uint32_t seed = static_cast<std::uint32_t>(static_cast<int>(shape) * 12345 + static_cast<int>(t * 16.0f) * 6789);
+        seed = (seed * 1103515245u + 12345u) & 0x7FFFFFFFu;
+        y = static_cast<float>(seed % 1000u) / 1000.0f;
+        break;
+      }
+      case 15:   // Cinematic Morphing Risers
+      default: {
+        const float s = M::sin(t * kPi * 0.5f);
+        const float ramp = M::pow(t, 2.0f + subf * 0.2f);
+        y = 0.5f * s + 0.5f * ramp;
+        break;
+      }
+    }
+
+    if (y != y) {  // NaN (group 1: powf of sinf(kPi), a hair below 0, with a non-integer exponent) is 0, as the target's float to int gave; never cast a NaN
+      y = 0.0f;
+    }
+    y = clampf(y, 0.0f, 1.0f);
+    dst[i] = static_cast<std::int16_t>(y * 32767.0f);
+  }
 }
 
 }  // namespace
@@ -75,159 +260,18 @@ std::uint8_t wt_pack_warp(std::int8_t warp_x, std::int8_t warp_y) noexcept {
   return static_cast<std::uint8_t>(((nx & 0x0Fu) << 4) | (ny & 0x0Fu));
 }
 
+void wt_make_points_fast(std::int16_t* dst, unsigned shape) noexcept { make_points<FastMath>(dst, shape); }
+
+#if !defined(__arm__)
+void wt_make_points_libm(std::int16_t* dst, unsigned shape) noexcept { make_points<LibmMath>(dst, shape); }
+#endif
+
 void wt_make_points(std::int16_t* dst, unsigned shape) noexcept {
-  if (shape >= kWtContourCount) {
-    shape = kWtContourCount - 1u;
-  }
-  const int group = static_cast<int>(shape) / 16;  // the original's `bank`: which family of 16 contours
-  const int sub = static_cast<int>(shape) % 16;
-  const float subf = static_cast<float>(sub);  // every int below enters float arithmetic exactly, as in the original
-
-  for (unsigned i = 0; i < kWtContourLen; ++i) {
-    const float t = static_cast<float>(i) / static_cast<float>(kWtContourLen - 1u);  // 0.0 to 1.0
-    float y = 0.0f;
-
-    switch (group) {
-      case 0: {  // Exponential & Logarithmic Decays / Percussive Plucks
-        const float p = 0.5f + subf * 0.45f;
-        y = powf(1.0f - t, p);
-        break;
-      }
-      case 1: {  // Swells, S-Curves & Smooth Bells
-        if (sub < 8) {
-          const float p = 0.5f + subf * 0.5f;
-          y = powf(sinf(t * kPi), p);
-        } else {
-          const float center = 0.1f + (subf - 8.0f) * 0.1f;
-          const float sigma = 0.22f;
-          const float diff = (t - center) / sigma;
-          y = expf(-0.5f * diff * diff);
-        }
-        break;
-      }
-      case 2: {  // Double & Multi-Bounces
-        const int bounces = 2 + (sub % 5);
-        const float scaled_t = t * static_cast<float>(bounces);
-        int b_idx = static_cast<int>(scaled_t);
-        if (b_idx >= bounces) {
-          b_idx = bounces - 1;
-        }
-        const float local_t = scaled_t - static_cast<float>(b_idx);
-        const float arc = 4.0f * local_t * (1.0f - local_t);
-        const float damp = powf(0.55f, static_cast<float>(b_idx));
-        y = arc * damp;
-        break;
-      }
-      case 3: {  // Rhythmic Gates & Trance Steppers
-        static constexpr std::uint8_t kPulseCounts[16] = {2, 2, 3, 3, 4, 4, 6, 6, 8, 8, 12, 12, 16, 16, 8, 16};
-        const int pulses = kPulseCounts[sub];
-        const float duty = (sub % 2 == 0) ? 0.5f : 0.25f;
-        const float cycle = t * static_cast<float>(pulses);
-        const float frac = cycle - floorf(cycle);
-        y = (frac < duty) ? 1.0f : 0.0f;
-        break;
-      }
-      case 4: {  // Sharks, Fins & Asymmetric Triangles
-        const float peak = 0.05f + subf * 0.06f;
-        if (t < peak) {
-          y = t / peak;
-        } else {
-          y = 1.0f - (t - peak) / (1.0f - peak);
-        }
-        break;
-      }
-      case 5: {  // Ripples & Damped Oscillations
-        const float freq = 2.0f + subf;
-        const float decay = expf(-3.5f * t);
-        y = decay * (0.5f + 0.5f * cosf(kTwoPi * freq * t));
-        break;
-      }
-      case 6: {  // Accelerating & Decelerating Trills
-        const float chirp = (sub < 8) ? (t * t) : sqrtf(t);
-        const int n = 3 + (sub % 8);
-        const float mod_t = chirp * static_cast<float>(n);
-        const float frac = mod_t - floorf(mod_t);
-        y = (1.0f - t * 0.6f) * ((frac < 0.4f) ? 1.0f : 0.0f);
-        break;
-      }
-      case 7: {  // Staircases Up, Down & Pyramids
-        const int steps = 2 + sub;
-        int cur_step = static_cast<int>(t * static_cast<float>(steps));
-        if (cur_step >= steps) {
-          cur_step = steps - 1;
-        }
-        if (sub < 8) {
-          y = static_cast<float>(cur_step) / static_cast<float>(steps - 1);
-        } else {
-          y = 1.0f - (static_cast<float>(cur_step) / static_cast<float>(steps - 1));
-        }
-        break;
-      }
-      // --- Groups 8-15: Default Factory Fallbacks for User Slots ---
-      case 8: {  // Wavefolded West-Coast
-        const float w = sinf(t * kTwoPi * (1.0f + subf * 0.3f));
-        y = fabsf(w);
-        if (y > 0.6f) {
-          y = 1.2f - y;
-        }
-        y *= 1.4f;
-        break;
-      }
-      case 9: {  // Syncopated Pulses
-        const std::uint16_t pat = static_cast<std::uint16_t>(0xAA55 ^ (sub * 0x1111));  // int arithmetic, truncated, as in the original
-        int bit = static_cast<int>(t * 16.0f);
-        if (bit > 15) {
-          bit = 15;
-        }
-        y = ((pat >> bit) & 1u) ? 1.0f : 0.0f;
-        break;
-      }
-      case 10: {  // Reverse Swells with Snappy Cutoffs
-        const float p = 1.2f + subf * 0.3f;
-        if (t < 0.92f) {
-          y = powf(t / 0.92f, p);
-        } else {
-          y = (1.0f - t) / 0.08f;
-        }
-        break;
-      }
-      case 11: {  // Dual-Peak Camel / Formant Contours
-        const float p1 = 0.25f;
-        const float p2 = 0.75f;
-        const float d1 = (t - p1) / 0.15f;
-        const float d2 = (t - p2) / (0.15f + subf * 0.01f);
-        y = 0.7f * expf(-d1 * d1) + (0.5f + subf * 0.03f) * expf(-d2 * d2);
-        break;
-      }
-      case 12: {  // Growing Chaos / Rising Wobble
-        const float wobble = 0.5f + 0.5f * sinf(kTwoPi * (1.0f + subf * 1.5f) * t * t);
-        y = t * wobble;
-        break;
-      }
-      case 13: {  // Karplus-Style Plucks
-        const float decay = expf(-5.0f * t);
-        const float ripple = 0.8f + 0.2f * sinf(kTwoPi * (10.0f + subf * 2.0f) * t);
-        y = decay * ripple;
-        break;
-      }
-      case 14: {  // Deterministic Stepped S&H
-        std::uint32_t seed = static_cast<std::uint32_t>(static_cast<int>(shape) * 12345 + static_cast<int>(t * 16.0f) * 6789);
-        seed = (seed * 1103515245u + 12345u) & 0x7FFFFFFFu;
-        y = static_cast<float>(seed % 1000u) / 1000.0f;
-        break;
-      }
-      case 15:   // Cinematic Morphing Risers
-      default: {
-        const float s = sinf(t * kPi * 0.5f);
-        const float ramp = powf(t, 2.0f + subf * 0.2f);
-        y = 0.5f * s + 0.5f * ramp;
-        break;
-      }
-    }
-
-    y = clampf(y, 0.0f, 1.0f);
-    dst[i] = static_cast<std::int16_t>(y * 32767.0f);
-  }
+#if defined(__arm__)
+  wt_make_points_fast(dst, shape);
+#else
+  wt_make_points_libm(dst, shape);
+#endif
 }
 
 void wt_make(WtBank& bank, unsigned shape, WtMadeMask& made) noexcept {

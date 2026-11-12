@@ -182,6 +182,9 @@ bool Writer::measure(std::size_t& budget) noexcept {
               measure_total_ += chunk_total(n);
             }
           }
+          if (!model::master_eq_is_default(p.master_eq())) {  // OS-MASTEREQ
+            measure_total_ += chunk_total(kMeqBytes);
+          }
           phase_ = Phase::UnknownChunks;
           measure_id_ = 0;
           break;
@@ -477,7 +480,7 @@ bool Writer::build_piece() noexcept {
 
       case Unit::Lanes: {  // OS-MIDIREC-P1: MEVT, only when the store holds a lane of this project (docs/formats/o3-project.md)
         if (!write_lanes_) {
-          unit_ = Unit::Unknown;
+          unit_ = Unit::Meq;
           cursor_ = 0;
           sub_ = 0;
           break;
@@ -495,7 +498,7 @@ bool Writer::build_piece() noexcept {
           break;
         }
         if (cursor_ >= model::LaneStore::kKeys) {  // the payload is even (4 + 6 n + 8 m): no pad byte
-          unit_ = Unit::Unknown;
+          unit_ = Unit::Meq;
           cursor_ = 0;
           sub_ = 0;
           break;
@@ -524,6 +527,25 @@ bool Writer::build_piece() noexcept {
           cursor_ = lanes_->next_key(cursor_ + 1);
           sub_ = 0;
         }
+        produced = true;
+        break;
+      }
+
+      case Unit::Meq: {  // OS-MASTEREQ: only when a value is not its default; its own unit after the lanes, so it follows MEVT and precedes the carried unknown chunks (docs/formats/o3-project.md)
+        unit_ = Unit::Unknown;
+        cursor_ = 0;
+        sub_ = 0;
+        const model::MasterEq eq = p.master_eq();
+        if (model::master_eq_is_default(eq)) {
+          break;
+        }
+        report_.chunk = kChunkMeq;
+        put_header(e, kChunkMeq, kMeqBytes);
+        e.u16(kChunkVersion);
+        for (std::int8_t b : eq.band_db) {
+          e.u8(static_cast<std::uint8_t>(b));
+        }
+        e.u8(eq.bass);  // 8 bytes: even, no pad
         produced = true;
         break;
       }

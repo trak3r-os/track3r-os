@@ -178,10 +178,21 @@ class Mk66Audio final : public haudio::Device {
   bool outputs_enabled() const noexcept override { return enabled_; }
   bool running() const noexcept { return started_; }
   bool apply_input(const sgtl5000::InputPlan& plan) noexcept;  // OS-011c
+  // OS-MASTEREQ: records the project's values only; eq_pass() writes them (main loop, outputs open) and unmute() applies them before the outputs come up.
+  void set_output_eq(const haudio::OutputEq& eq) noexcept override { eq_.set(eq); }
+  void eq_pass(std::uint32_t now_ms) noexcept {
+    if (started_ && enabled_) {
+      eq_.pump(now_ms, eq_writer());
+    }
+  }
 
  private:
   bool codec_write(std::uint16_t reg, std::uint16_t value) noexcept {
     return i2c::write_reg(board::kCodecI2cAddress, reg, value) == i2c::Result::Ok;
+  }
+  // The codec write handed to the EQ driver (function pointer and context, OS-MASTEREQ).
+  sgtl5000::Writer eq_writer() noexcept {
+    return sgtl5000::Writer{[](void* self, const sgtl5000::Step& step) noexcept { return static_cast<Mk66Audio*>(self)->codec_write(step.reg, step.value); }, this};
   }
   // A step of the unmute or mute plan: CHIP_ANA_CTRL keeps the ADC's input select the recorder chose (sgtl5000.h "The analogue input").
   bool plan_write(const sgtl5000::Step& step) noexcept {
@@ -194,6 +205,7 @@ class Mk66Audio final : public haudio::Device {
   // OS-011c: which input the codec's ADC listens to, the line in (the power-up default) or the microphone: CHIP_ANA_CTRL bit 2, which the unmute and mute plans also write, so
   // they keep it (the recorder's source switch, audio_input_apply). Main thread only, like every codec write. (It sits in the padding of this object: no bytes of SRAM.)
   bool adc_line_ = true;
+  sgtl5000::EqDriver eq_;  // OS-MASTEREQ: the master EQ and bass boost in the DAP (sgtl5000.h); main thread only, about 20 bytes of .bss
 };
 
 Mk66Audio::Result Mk66Audio::bring_up_codec() noexcept {
@@ -339,6 +351,7 @@ Mk66Audio::Result Mk66Audio::start(const haudio::BlockCallback& render) noexcept
     return Result::ClockFault;
   }
   started_ = true;
+  eq_.on_start();  // OS-MASTEREQ: the power-up plan left the DAP out of the path
   return Result::Ok;
 }
 
@@ -346,6 +359,9 @@ bool Mk66Audio::unmute() noexcept {
   if (!started_) {
     return false;
   }
+  // OS-MASTEREQ: the DAC and the outputs are muted here (power-up or mute plan): the codec is made to match the project's EQ first (all defaults: nothing at a fresh start, the way
+  // back to the idle state after a route in). A failed write there leaves the idle routing and never stops the outputs from opening.
+  eq_.apply_at_unmute(eq_writer());
   sgtl5000::Step step{};
   for (unsigned i = 0; sgtl5000::unmute_step(i, step); ++i) {
     if (!plan_write(step)) {
@@ -364,6 +380,7 @@ bool Mk66Audio::unmute() noexcept {
 void Mk66Audio::mute() noexcept {
   amplifier_muted();  // first: the amplifier, then the codec behind it
   enabled_ = false;
+  eq_.on_mute();  // OS-MASTEREQ: a live route in cut short is redone inside the next unmute
   if (started_) {
     for (const sgtl5000::Step& step : sgtl5000::kMute) {
       plan_write(step);
@@ -380,6 +397,7 @@ void Mk66Audio::mute() noexcept {
 // nothing may reopen the outputs (open_wanted).
 void Mk66Audio::stop() noexcept {
   enabled_ = false;
+  eq_.on_mute();
   if (!started_) {
     amplifier_muted();  // the path never started: nothing plays, the key is only made sure LOW
     return;
@@ -417,6 +435,7 @@ Mk66Audio g_device;
 hal::audio::Device& audio_device() noexcept { return g_device; }
 bool audio_input_apply(const sgtl5000::InputPlan& plan) noexcept { return g_device.apply_input(plan); }
 void audio_stop() noexcept { g_device.stop(); }
+void audio_eq_pass(std::uint32_t now_ms) noexcept { g_device.eq_pass(now_ms); }
 o3os::audio::Engine& audio_engine() noexcept { return g_engine; }
 o3os::audio::VoicePool& audio_voices() noexcept { return g_voices; }
 o3os::audio::AmigaVoices& audio_amiga() noexcept { return g_amiga; }

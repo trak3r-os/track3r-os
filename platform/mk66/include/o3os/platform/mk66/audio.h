@@ -34,6 +34,9 @@ bool audio_input_apply(const sgtl5000::InputPlan& plan) noexcept;
 // it blocks for about 70 ms (the caller keeps the display serviced). Plain when the path never started (the boot disk mode). The caller sets the power-off latch FIRST (appimg::power_off_latched):
 // the block counter stands still from here, which the audio poll would call a stall, and nothing may reopen the outputs. Called by the shutdown only.
 void audio_stop() noexcept;
+// OS-MASTEREQ: one main-loop pass of the master EQ and bass boost (sgtl5000.h EqDriver): at most 3 codec writes, none while the outputs are closed or every value is at its default. The
+// wanted values come from audio_device().set_output_eq(). Main thread only.
+void audio_eq_pass(std::uint32_t now_ms) noexcept;
 // The engine behind it: its ParamChange ring and the test tone switch.
 o3os::audio::Engine& audio_engine() noexcept;
 // The sampler voices (OS-005d lite): the pool the engine plays when the composition root attaches it (app_main.cpp), and the sample table the demo kit

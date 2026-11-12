@@ -29,6 +29,7 @@
 #include <o3os/hal/audio.h>
 
 #include <cstdint>
+#include <cstring>
 
 namespace o3os::platform::mk66::sgtl5000 {
 
@@ -298,5 +299,271 @@ constexpr InputPlan mic_gain_plan(bool high_range, unsigned gain_percent) noexce
   const MicSetting m = mic_setting(mic_gain_db(high_range, gain_percent));
   return InputPlan{{Step{kMicCtrl, static_cast<std::uint16_t>(kMicCtrlBase | m.preamp), 0}, Step{kAnaAdcCtrl, adc_ctrl_value(m.adc), 0}, Step{0, 0, 0}}, 2, false};
 }
+
+// ---- The master output EQ and the bass boost, in the DAP (OS-MASTEREQ, docs/specs/OS-MASTEREQ.md) ------------------------------------------------
+// Register facts: data sheet rev. 7 tables 17, 20, 40-53 (the spec's "Codec facts"). With every value at its default nothing is written and the codec is as the power-up plan leaves it
+// (DAP not routed, CHIP_SSS_CTRL 0x0010). The first non-default value routes the DAC through the DAP (route in); a live edit only moves register values in small steps; the way back (route out)
+// is taken only inside unmute, with the DAC muted. EqDriver is pure (it only calls `write(Step) -> bool`), so the host test runs it on the register model; Mk66Audio supplies the I2C write.
+namespace haudio = o3os::hal::audio;
+inline constexpr std::uint16_t kDapControl = 0x0100;           // bit 0: DAP enable
+inline constexpr std::uint16_t kDapBassEnhance = 0x0104;       // EN bit 0, CUTOFF bits 6:4 (0 = 80 Hz), BYPASS_HPF bit 8
+inline constexpr std::uint16_t kDapBassEnhanceCtrl = 0x0106;   // LR_LEVEL bits 13:8, BASS_LEVEL bits 6:0 (0x7F least, 0x00 most)
+inline constexpr std::uint16_t kDapAudioEq = 0x0108;           // bits 1:0: 3 = five-band graphic EQ
+inline constexpr std::uint16_t kDapGeqBand[5] = {0x0116, 0x0118, 0x011A, 0x011C, 0x011E};  // 115 Hz, 330 Hz, 990 Hz, 3 kHz, 9.9 kHz: bits 6:0, 0.25 dB per LSB
+inline constexpr std::uint16_t kSssIdle = 0x0010;              // the DAC from I2S in, the DAP not in the path (as the power-up plan)
+inline constexpr std::uint16_t kSssDap = 0x0070;               // the DAC from the DAP
+inline constexpr std::uint16_t kDapEnabled = 0x0001;
+inline constexpr std::uint16_t kDapGeq = 0x0003;
+inline constexpr std::uint16_t kBassEnhanceOn = 0x0101;        // EN, CUTOFF 0, BYPASS_HPF
+inline constexpr std::uint16_t kBassEnhanceOff = 0x0100;
+inline constexpr std::uint8_t kBassLevelOff = 0x7F;
+inline constexpr std::uint8_t kBassLrLevel = 0x0B;
+inline constexpr std::uint8_t kGeqZeroDb = 0x2F;
+inline constexpr int kEqDbMax = 12;
+inline constexpr unsigned kBassMax = 100;
+inline constexpr unsigned kEqBands = 5;
+
+// OutputEq is five int8 and one uint8: no padding, so the comparisons are byte compares.
+static_assert(sizeof(haudio::OutputEq) == kEqBands + 1u, "OutputEq has padding: compare field by field");
+inline bool eq_equal(const haudio::OutputEq& a, const haudio::OutputEq& b) noexcept { return std::memcmp(&a, &b, sizeof a) == 0; }
+inline bool eq_is_default(const haudio::OutputEq& e) noexcept { return eq_equal(e, haudio::OutputEq{}); }
+// 0x2F + 4 per dB, clamped to -12..+12 dB, the floor 0x00 (-12 dB gives -11.75 dB).
+constexpr std::uint8_t geq_code(int db) noexcept {
+  const int d = db < -kEqDbMax ? -kEqDbMax : (db > kEqDbMax ? kEqDbMax : db);
+  const int code = static_cast<int>(kGeqZeroDb) + 4 * d;
+  return static_cast<std::uint8_t>(code < 0 ? 0 : code);
+}
+// BASS_LEVEL of a bass boost 0..100: 0 is off (0x7F), 1..100 is 0x7F - round(v * 0.8 * 127 / 100) (100 gives 0x19).
+constexpr std::uint8_t bass_level_code(unsigned v) noexcept {
+  const unsigned c = v > kBassMax ? kBassMax : v;
+  return c == 0u ? kBassLevelOff : static_cast<std::uint8_t>(kBassLevelOff - (c * 1016u + 500u) / 1000u);
+}
+constexpr std::uint16_t bass_ctrl_value(std::uint8_t level) noexcept { return static_cast<std::uint16_t>((kBassLrLevel << 8) | level); }
+
+// The DAP's own writes of a route in, in this order: DAP enable, EQ select, the five bands, the bass level, the bass enable, and last the routing (CHIP_SSS_CTRL). The DAC is muted around them.
+// A table of registers and fixed values; the bands, the bass level and the bass enable take theirs from the wanted values.
+inline constexpr unsigned kEqDapSteps = 10;
+inline constexpr std::uint16_t kEqDapReg[kEqDapSteps] = {kDapControl,      kDapAudioEq,          kDapGeqBand[0], kDapGeqBand[1], kDapGeqBand[2],
+                                                         kDapGeqBand[3],   kDapGeqBand[4],       kDapBassEnhanceCtrl, kDapBassEnhance, kSssCtrl};
+inline constexpr std::uint16_t kEqDapFixed[kEqDapSteps] = {kDapEnabled, kDapGeq, 0, 0, 0, 0, 0, 0, 0, kSssDap};
+constexpr Step eq_dap_step(unsigned i, const haudio::OutputEq& w) noexcept {
+  std::uint16_t v = kEqDapFixed[i];
+  if (i >= 2u && i < 2u + kEqBands) {
+    v = geq_code(w.band_db[i - 2u]);
+  } else if (i == 7u) {
+    v = bass_ctrl_value(bass_level_code(w.bass));
+  } else if (i == 8u) {
+    v = w.bass != 0u ? kBassEnhanceOn : kBassEnhanceOff;
+  }
+  return Step{kEqDapReg[i], v, 0};
+}
+// One bounded move of a register code toward its target (a band, the bass level): at most `max` codes.
+constexpr std::uint8_t step_toward(std::uint8_t cur, std::uint8_t target, int max) noexcept {
+  const int d = static_cast<int>(target) - static_cast<int>(cur);
+  return static_cast<std::uint8_t>(static_cast<int>(cur) + (d > max ? max : (d < -max ? -max : d)));
+}
+
+// The I2C write the driver is given: a function pointer and its context (no template, so the driver is compiled once). Returns true when the write was acknowledged.
+struct Writer {
+  bool (*fn)(void*, const Step&) noexcept;
+  void* ctx;
+  bool operator()(const Step& s) const noexcept { return fn(ctx, s); }
+};
+
+// The driver. Main thread only (no ISR touches it). Phases: Idle (the DAP is not routed, or not known to be), RouteIn (a live route in, a few passes), Routed (live edits step the registers
+// toward the wanted values), Failed (an I2C write was not acknowledged: nothing more is tried until the wanted values change once; only the recovery below goes on).
+// Recovery of a failed live route in, one write per pass and never in the pass of the failure: the routing back to the idle value (sss_pending_, tried once), then the DAC unmute, which is
+// retried every pass until the chip acknowledges it (dac_muted_), so the DAC is not left soft muted.
+class EqDriver {
+ public:
+  enum class Phase : std::uint8_t { Idle, RouteIn, Routed, Failed };
+  static constexpr unsigned kWritesPerPass = 3;  // the main loop is never held for long
+  static constexpr int kBandStep = 2;            // LSB (0.5 dB) a band moves per write
+  static constexpr int kBassStep = 4;            // BASS_LEVEL codes per write
+
+  // The wanted values (the project's), recorded only. A change after a failure allows one more attempt: the live stepping if the DAP may be routed, else a new route in.
+  void set(const haudio::OutputEq& w) noexcept {
+    if (!eq_equal(w, want_)) {
+      want_ = w;
+      if (phase_ == Phase::Failed) {
+        phase_ = routed_ ? Phase::Routed : Phase::Idle;
+      }
+    }
+  }
+  // The codec was (re)started: the power-up plan leaves the DAP out of the path.
+  void on_start() noexcept {
+    phase_ = Phase::Idle;
+    routed_ = false;
+    dac_muted_ = false;
+    sss_pending_ = false;
+  }
+  // The outputs were muted or the path stopped: nothing is stepped until unmute applies the values (a route in cut short is redone there, the unmute plan unmutes the DAC).
+  void on_mute() noexcept {
+    phase_ = Phase::Idle;
+    dac_muted_ = false;
+    sss_pending_ = false;
+  }
+  Phase phase() const noexcept { return phase_; }
+  bool routed() const noexcept { return routed_; }
+  const haudio::OutputEq& want() const noexcept { return want_; }
+
+  // Inside unmute(), the DAC and the outputs muted: the codec is made to match the wanted values, blocking (like the rest of unmute). All defaults: back to the idle state if the DAP may be
+  // routed (route out: the routing first, the DAP off only after the routing write was acknowledged, so the DAC is never fed from a disabled DAP); otherwise the full route in, trusting no
+  // earlier state. A failed write restores the routing and the DAC is unmuted by the caller's plan anyway.
+  void apply_at_unmute(Writer write) noexcept {
+    phase_ = Phase::Idle;
+    dac_muted_ = false;
+    sss_pending_ = false;
+    if (eq_is_default(want_)) {
+      if (routed_) {
+        routed_ = !write(Step{kSssCtrl, kSssIdle, 0});
+        if (!routed_) {
+          (void)write(Step{kDapControl, 0, 0});
+        }
+      }
+      return;
+    }
+    for (unsigned i = 0; i < kEqDapSteps; ++i) {
+      const Step s = eq_dap_step(i, want_);
+      routed_ = routed_ || i == kEqDapSteps - 1u;  // the routing write is attempted: the chip may take it even if the acknowledge is lost
+      if (!write(s)) {
+        if (routed_ && write(Step{kSssCtrl, kSssIdle, 0})) {
+          routed_ = false;
+        }
+        phase_ = Phase::Failed;
+        return;
+      }
+      note(i, s);
+    }
+    phase_ = Phase::Routed;
+  }
+
+  // One main-loop pass while the outputs are open: the recovery of a failed route in, the live route in (the DAC's soft mute and its ramp waited by `now_ms`, never blocking), then the live
+  // stepping. At most kWritesPerPass writes.
+  void pump(std::uint32_t now_ms, Writer write) noexcept {
+    if (sss_pending_ || dac_muted_) {
+      if (sss_pending_) {
+        sss_pending_ = false;
+        if (write(Step{kSssCtrl, kSssIdle, 0})) {
+          routed_ = false;
+          if (phase_ == Phase::Routed) {
+            phase_ = Phase::Idle;  // a value change came before the recovery: the route in is redone
+          }
+        }
+      } else if (write(Step{kAdcDacCtrl, kAdcDacUnmuted, 0})) {
+        dac_muted_ = false;
+      }
+      return;
+    }
+    if (phase_ == Phase::Failed) {
+      return;
+    }
+    if (phase_ == Phase::Idle) {
+      if (eq_is_default(want_)) {
+        return;  // the idle state: no write at all
+      }
+      phase_ = Phase::RouteIn;
+      idx_ = 0;
+      ready_ = now_ms;
+    }
+    if (waiting_) {  // the compare is only valid inside the wait: after 2^31 ms it would read as "not yet"
+      if (static_cast<std::int32_t>(now_ms - ready_) < 0) {
+        return;
+      }
+      waiting_ = false;
+    }
+    unsigned budget = kWritesPerPass;
+    while (phase_ == Phase::RouteIn && budget != 0u) {
+      // idx_ 0: DAC soft mute (waits its ramp); 1..kEqDapSteps: the DAP steps; then the DAC unmute (waits its ramp); then done
+      const bool last = idx_ == kEqDapSteps + 1u;
+      const Step s = idx_ == 0u ? kSoftMute : (last ? Step{kAdcDacCtrl, kAdcDacUnmuted, kDacRampWaitMs} : eq_dap_step(idx_ - 1u, want_));
+      routed_ = routed_ || idx_ == kEqDapSteps;  // the routing write (DAP step 9) is attempted: as above
+      if (!write(s)) {
+        phase_ = Phase::Failed;  // the recovery writes follow in the next passes
+        sss_pending_ = routed_;
+        dac_muted_ = true;
+        return;
+      }
+      if (idx_ != 0u && !last) {
+        note(idx_ - 1u, s);
+      }
+      --budget;
+      if (last) {
+        phase_ = Phase::Routed;
+      } else {
+        ++idx_;
+      }
+      if (s.wait_ms != 0u) {
+        ready_ = now_ms + s.wait_ms;
+        waiting_ = true;
+        return;
+      }
+    }
+    if (phase_ != Phase::Routed || budget == 0u) {
+      return;
+    }
+    for (unsigned i = 0; i < kEqBands && budget != 0u; ++i) {
+      const std::uint8_t next = step_toward(cur_band_[i], geq_code(want_.band_db[i]), kBandStep);
+      if (next != cur_band_[i]) {
+        if (!write(Step{kDapGeqBand[i], next, 0})) {
+          phase_ = Phase::Failed;
+          return;
+        }
+        cur_band_[i] = next;
+        --budget;
+      }
+    }
+    // The bass: the enable only with the level at 0x7F (off), the level in bounded steps.
+    const bool want_on = want_.bass != 0u;
+    if (budget != 0u && !bass_on_ && want_on) {
+      if (!write(Step{kDapBassEnhance, kBassEnhanceOn, 0})) {
+        phase_ = Phase::Failed;
+        return;
+      }
+      bass_on_ = true;
+      --budget;
+    }
+    if (budget != 0u && bass_on_) {
+      const std::uint8_t next = step_toward(bass_level_, bass_level_code(want_.bass), kBassStep);
+      if (next != bass_level_) {
+        if (!write(Step{kDapBassEnhanceCtrl, bass_ctrl_value(next), 0})) {
+          phase_ = Phase::Failed;
+          return;
+        }
+        bass_level_ = next;
+      } else if (!want_on) {
+        if (!write(Step{kDapBassEnhance, kBassEnhanceOff, 0})) {
+          phase_ = Phase::Failed;
+          return;
+        }
+        bass_on_ = false;
+      }
+    }
+  }
+
+ private:
+  // What the codec now holds after DAP step i.
+  void note(unsigned i, const Step& s) noexcept {
+    if (i >= 2u && i < 2u + kEqBands) {
+      cur_band_[i - 2u] = static_cast<std::uint8_t>(s.value);
+    } else if (i == 7u) {
+      bass_level_ = static_cast<std::uint8_t>(s.value & 0x7Fu);
+    } else if (i == 8u) {
+      bass_on_ = s.value == kBassEnhanceOn;
+    }
+  }
+
+  haudio::OutputEq want_{};           // the project's values
+  std::uint32_t ready_ = 0;           // a live route in waits for this millisecond (wrap-safe compare, only while waiting_)
+  bool waiting_ = false;              // a ramp wait is pending until ready_
+  std::uint8_t cur_band_[kEqBands] = {kGeqZeroDb, kGeqZeroDb, kGeqZeroDb, kGeqZeroDb, kGeqZeroDb};  // the band registers as written (valid when routed)
+  std::uint8_t bass_level_ = kBassLevelOff;
+  std::uint8_t idx_ = 0;
+  Phase phase_ = Phase::Idle;
+  bool bass_on_ = false;
+  bool routed_ = false;               // CHIP_SSS_CTRL may be 0x0070: set when that write is made, cleared when 0x0010 is acknowledged
+  bool sss_pending_ = false;          // recovery: the routing back to 0x0010 is still to be written
+  bool dac_muted_ = false;            // recovery: the DAC may still be soft muted by a failed live route in; the unmute is retried until acknowledged
+};
 
 }  // namespace o3os::platform::mk66::sgtl5000

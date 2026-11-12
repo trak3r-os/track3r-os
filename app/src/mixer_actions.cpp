@@ -127,6 +127,28 @@ bool outputs_turn(ActionContext& ctx, int detents) noexcept {
   return true;
 }
 
+// OS-MASTEREQ, the MST EQ page: the cursor's row (a band 0..4, or 5 BASS BOOST) moved by `detents` (a coarse turn is 3 dB on a band, ten on the bass), or put back to its default (reset). The values are
+// the document's (Project::master_eq), written through the Editor's state setter (no undo: the Mixer keeps no history); the audio side follows through the platform's sync, not through a ParamChange.
+bool master_eq_edit(ActionContext& ctx, int detents, bool coarse, bool reset) noexcept {
+  if (ctx.model.project == nullptr || ctx.edit == nullptr) {
+    return false;
+  }
+  const unsigned row = mixer::cursor(ctx.model, ctx.view).row;
+  const model::MasterEq before = ctx.model.project->master_eq();
+  model::MasterEq eq = before;
+  if (row < model::kMasterEqBands) {
+    const int next = reset ? 0 : before.band_db[row] + (coarse ? detents * 3 : detents);
+    eq.band_db[row] = static_cast<std::int8_t>(next < -127 ? -127 : (next > 127 ? 127 : next));  // narrowed only; the ranges are the model's
+  } else {
+    eq.bass = static_cast<std::uint8_t>(reset ? 0u : clamp100(static_cast<int>(before.bass) + (coarse ? detents * kCoarseDetents : detents)));
+  }
+  eq = model::clamp_master_eq(eq);
+  if (std::memcmp(&before, &eq, sizeof eq) == 0) {
+    return false;
+  }
+  return ctx.edit->set_master_eq_state(eq) == model::Status::Ok;
+}
+
 // The turn of the encoder (or its coarse form) on whatever the cursor is on; the model's parameters go to the generic edit.
 bool edit_at_cursor(ActionContext& ctx, core::ActionArg detents, bool coarse) noexcept {
   if (ctx.view.screen != ScreenId::Mixer) {
@@ -135,6 +157,9 @@ bool edit_at_cursor(ActionContext& ctx, core::ActionArg detents, bool coarse) no
   const mixer::Cursor c = mixer::cursor(ctx.model, ctx.view);
   if (focus_param(ctx) != core::ParamId::None) {
     return coarse ? param_coarse(ctx, detents) : param_edit(ctx, detents);
+  }
+  if (mixer::page_of(ctx.view) == MixerPage::MasterEq) {
+    return master_eq_edit(ctx, detents, coarse, false);  // the document's, not the board's: no mix board needed
   }
   MixBoard* mix = ctx.mix;
   if (mix == nullptr) {
@@ -185,8 +210,9 @@ bool edit_at_cursor(ActionContext& ctx, core::ActionArg detents, bool coarse) no
         return outputs_turn(ctx, detents);
       }
       return detents != 0 && stem_cell(ctx, detents > 0);
-    case MixerPage::Inserts:
-      return false;  // (an insert's own parameters are the next slice's page)
+    case MixerPage::Inserts:  // (an insert's own parameters are the next slice's page)
+    case MixerPage::MasterEq:  // (handled above)
+      return false;
   }
   return false;
 }
@@ -315,6 +341,9 @@ bool mixer_reset(ActionContext& ctx, core::ActionArg arg) noexcept {
   if (mixer::page_of(ctx.view) == MixerPage::Inserts) {
     return insert_remove(ctx);  // Delete takes the insert out (the host and the record), final like the Mixer's other edits; the insert needs no mix board
   }
+  if (mixer::page_of(ctx.view) == MixerPage::MasterEq) {
+    return master_eq_edit(ctx, 0, false, true);  // Delete: the row's default (a band flat, the bass off)
+  }
   MixBoard* mix = ctx.mix;
   if (mix == nullptr) {
     return false;
@@ -392,6 +421,7 @@ bool mixer_reset(ActionContext& ctx, core::ActionArg arg) noexcept {
       return true;
     }
     case MixerPage::Inserts:
+    case MixerPage::MasterEq:
       return false;  // (handled above)
   }
   return false;
@@ -509,6 +539,8 @@ bool flag_at_cursor(ActionContext& ctx, bool solo) noexcept {
         return insert_toggle(ctx);  // the mute key is BYPASS here
       }
       return c.row < tracks ? toggle_param(ctx, core::param_id(core::ParamKind::Track, c.row, tp::Solo)) : flag_refused(ctx, "TRACKS ONLY");  // the solo key is the track's, as on ROUTING
+    case MixerPage::MasterEq:
+      return flag_refused(ctx, "TRACKS ONLY");
   }
   return false;
 }
@@ -553,7 +585,8 @@ bool mixer_name(ActionContext& ctx, core::ActionArg) noexcept {
     case MixerPage::Stems: track = c.col; break;
     case MixerPage::Routing:
     case MixerPage::Inserts: track = c.row; break;
-    case MixerPage::MasterFx: break;
+    case MixerPage::MasterFx:
+    case MixerPage::MasterEq: break;
   }
   const model::TrackSlot* slot = track < tracks && ctx.model.project != nullptr ? ctx.model.project->track(track) : nullptr;
   if (track >= tracks || (ctx.model.project != nullptr && slot == nullptr)) {

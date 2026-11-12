@@ -205,6 +205,41 @@ struct SendFxState {
   std::uint16_t value[kSendFxCount];
 };
 
+// ---- Master EQ and bass boost (OS-MASTEREQ, docs/specs/OS-MASTEREQ.md, docs/formats/o3-project.md "The MEQ chunk"): five graphic-EQ bands in dB and a bass boost 0..100, acting on the analogue
+// outputs through the codec's DAP. No "present" bit (like the inserts): the part is present when a value is not its default, so the chunk is written only then and a project that never used it is the
+// file it was. Not a `state_chunks::Part`: the chunk has its own writer unit after the lanes (an older OS re-emits it as an unknown chunk after MEVT).
+inline constexpr std::uint32_t kMasterEqBands = 5;    // 115 Hz, 330 Hz, 990 Hz, 3 kHz, 9.9 kHz
+inline constexpr std::int8_t kMasterEqDbMax = 12;     // a band is -12..+12 dB in 1 dB steps
+inline constexpr std::uint8_t kMasterBassMax = 100;   // BASS BOOST 0 (off)..100
+
+struct MasterEq {
+  std::int8_t band_db[kMasterEqBands];
+  std::uint8_t bass;
+};
+
+inline bool master_eq_is_default(const MasterEq& e) noexcept {
+  for (std::int8_t b : e.band_db) {
+    if (b != 0) {
+      return false;
+    }
+  }
+  return e.bass == 0;
+}
+
+// The values brought into range (the reader's tolerance: a value out of range is clamped, not refused).
+inline MasterEq clamp_master_eq(const MasterEq& e) noexcept {
+  MasterEq out = e;
+  for (std::int8_t& b : out.band_db) {
+    b = b < -kMasterEqDbMax ? static_cast<std::int8_t>(-kMasterEqDbMax) : (b > kMasterEqDbMax ? kMasterEqDbMax : b);
+  }
+  if (out.bass > kMasterBassMax) {
+    out.bass = kMasterBassMax;
+  }
+  return out;
+}
+
+static_assert(sizeof(MasterEq) == 6 && std::is_trivially_copyable<MasterEq>::value, "the master EQ is six plain bytes");
+
 // ---- Inserts (OS-INSFX S3a): the effect modules on the strips, the INSX chunk (docs/formats/o3-project.md, "The INSX chunk"; docs/specs/OS-INSFX.md section 7). At most kMaxInserts records
 // (audio::gov::kMaxInserts), each one (where, slot): a track 0..15 with slot 0 or 1 (INS A / INS B), or the master (where 16) with slot 0. `module` indexes the project's MODR table (the name and
 // the ABI are there), `param` is the module's parameter blob (n finite floats; the rest 0). Unlike the other parts there is no "present" bit (every bit of Project::state_present() is a part):

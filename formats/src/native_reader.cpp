@@ -23,7 +23,8 @@ constexpr std::uint8_t kRankSets = 7;  // OS-002d: after INST, before the unknow
 constexpr std::uint8_t kRankLrnb = 8;
 constexpr std::uint8_t kRankMidi = 9;  // OS-004d: the project-level state, after LRNB in this order (state_chunks::Part), before the unknown chunks and the CRC
 constexpr std::uint8_t kRankMevt = kRankMidi + 11;  // OS-MIDIREC-P1: the take lanes, after INSX (the last state part)
-constexpr std::uint8_t kRankCrc = 21;  // after the eleven state parts (OS-004d: MIDI..APPM, OS-PERSIST2: NOTE, MUTE, SCEN, SNFX, OS-BUG-PASTE24: LAW, OS-INSFX S3a: INSX) and MEVT
+constexpr std::uint8_t kRankMeq = kRankMevt + 1;  // OS-MASTEREQ: the master EQ, after MEVT (an older OS re-emits it as an unknown chunk after its own known ones)
+constexpr std::uint8_t kRankCrc = 22;  // after the eleven state parts (OS-004d: MIDI..APPM, OS-PERSIST2: NOTE, MUTE, SCEN, SNFX, OS-BUG-PASTE24: LAW, OS-INSFX S3a: INSX), MEVT and MEQ
 
 std::uint8_t rank_of(std::uint32_t id) noexcept {
   switch (id) {
@@ -47,6 +48,7 @@ std::uint8_t rank_of(std::uint32_t id) noexcept {
     case kChunkLaw: return kRankMidi + 9;
     case kChunkInsx: return kRankMidi + 10;
     case kChunkMevt: return kRankMevt;
+    case kChunkMeq: return kRankMeq;
     case kChunkCrc: return kRankCrc;
     default: return 0;
   }
@@ -91,6 +93,7 @@ void v1_bounds(std::uint32_t id, std::uint32_t minor, std::size_t& lo, std::size
     case kChunkSnfx: lo = state_chunks::kSendFxFixed; hi = state_chunks::kSendFxMax; break;
     case kChunkLaw: lo = hi = state_chunks::kLawBytes; break;
     case kChunkInsx: lo = state_chunks::kInsxFixed; hi = state_chunks::kInsxMax; break;
+    case kChunkMeq: lo = hi = kMeqBytes; break;
     case kChunkMevt: lo = kMevtHead; hi = kMaxFileBytes; break;  // the lanes are streamed; the file limit is the only bound a framing check can know
     default: lo = kCrcPayload; hi = kCrcPayload; break;  // CRC
   }
@@ -150,6 +153,7 @@ void Reader::begin(core::ByteSource& source, model::ModelArena& arena, model::La
   chunk_minor_newer_ = false;
   chunk_minor_ = 0;
   law_ = 0;
+  meq_ = model::MasterEq{};
 }
 
 void Reader::fail(Error e, const char* detail) noexcept {
@@ -496,6 +500,7 @@ void Reader::on_payload() noexcept {
     case kChunkSnfx: ok = parse_state(have, 8); break;
     case kChunkLaw: ok = parse_state(have, 9); break;
     case kChunkInsx: ok = parse_state(have, 10); break;
+    case kChunkMeq: ok = parse_meq(have); break;
     case kChunkCrc: ok = parse_crc(have); break;
     default: fail(Error::Internal, "payload state for an unknown chunk"); return;
   }
@@ -550,6 +555,7 @@ void Reader::finish() noexcept {
     return;
   }
   project_->set_volume_law(law_);
+  project_->set_master_eq(meq_);
   report_.unknown_kept = project_->unknown_count();
   report_.unknown_dropped = project_->unknown_dropped_chunks();
   state_ = State::Done;
@@ -1027,6 +1033,27 @@ bool Reader::parse_state(std::size_t len, unsigned part) noexcept {
   report_.settings_skipped += reset;
   if (part == static_cast<unsigned>(state_chunks::Part::Law)) {
     law_ = scratch_[2];  // validated (0 or 1) by decode; applied at Done, so a load that fails later commits nothing
+  }
+  return true;
+}
+
+// MEQ (OS-MASTEREQ): u16 version, five int8 bands (dB), u8 bass boost. Tolerant like NOTE: a value out of range is clamped (counted with the skipped settings entries), the chunk is
+// applied at Done so a load that fails later commits nothing.
+bool Reader::parse_meq(std::size_t len) noexcept {
+  Cursor c(scratch_, len);
+  (void)c.u16();  // the version: checked when the chunk header was read
+  model::MasterEq raw{};
+  for (std::int8_t& b : raw.band_db) {
+    b = static_cast<std::int8_t>(c.u8());
+  }
+  raw.bass = c.u8();
+  if (!fields_ok(c, chunk_minor_newer_)) {
+    fail(Error::Malformed, kBadFields);
+    return false;
+  }
+  meq_ = model::clamp_master_eq(raw);
+  if (std::memcmp(&meq_, &raw, sizeof raw) != 0) {
+    ++report_.settings_skipped;
   }
   return true;
 }

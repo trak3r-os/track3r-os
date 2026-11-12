@@ -26,7 +26,7 @@ namespace {
 namespace tp = model::track_param;
 namespace mp = model::master_param;
 
-constexpr const char* kPageNames[kMixerPages] = {"MIXER", "ROUTING", "MASTER FX", "STEMS", "INSERTS"};
+constexpr const char* kPageNames[kMixerPages] = {"MIXER", "ROUTING", "MASTER FX", "STEMS", "INSERTS", "MST EQ"};
 constexpr const char* kBusNames[kMixBuses] = {"IN", "SNDA", "SNDB", "CUE", "MST"};
 
 // The value of a model parameter as the project holds it, or the descriptor's default without one (the pages then say there is no project).
@@ -201,9 +201,10 @@ bool MixerScreen::step(const Model& model, ViewState& view, int dx, int dy) cons
   switch (mixer::page_of(view)) {
     case MixerPage::Mixer: col_max = static_cast<int>(mixer::columns(model)); break;
     case MixerPage::Routing: col_max = static_cast<int>(kRouteCols); break;
-    case MixerPage::MasterFx: col_max = 1; break;
     case MixerPage::Stems: col_max = static_cast<int>(kStemSources); break;
     case MixerPage::Inserts: col_max = static_cast<int>(kInsertSlots); break;
+    case MixerPage::MasterFx:
+    case MixerPage::MasterEq: break;  // one column
   }
   int row = static_cast<int>(now.row) + dy;
   int col = static_cast<int>(now.col) + dx;
@@ -531,20 +532,43 @@ void draw_routing_page(const Model& model, const ViewState& view, Renderer& r, R
 
 // ---- the MASTER FX page ------------------------------------------------------------------------------------------------------
 
+// The columns of the parameter-row pages (MASTER FX, MST EQ): name, value with its unit, then a bar.
+struct ValueCols {
+  int name_x, value_x, bar_x, bar_w;
+};
+ValueCols value_cols(const ui::Theme& t) noexcept {
+  const int cell_w = t.geometry(Face::Data).cell_w;
+  const int name_x = t.metrics.index_w + 2 * t.metrics.gap;
+  const int value_x = name_x + (static_cast<int>(core::kParamNameChars) + 2) * cell_w;
+  return {name_x, value_x, value_x + 8 * cell_w, 16 * cell_w};
+}
+
+// One row of those pages at `row_top`: the name, the value and its unit (when there is one). False when the row is covered; else `bar` is the track rect for the caller's bar.
+bool draw_value_row(Renderer& r, const MixLayout& l, const ValueCols& c, Rect covered, int row_top, bool sel, const char* name, const char* text, const char* unit, Rect& bar) noexcept {
+  const ui::Theme& t = r.theme();
+  const int cell_w = t.geometry(Face::Data).cell_w;
+  const int y = row_top + l.grid.cell_dy;
+  if (covers(covered, c.name_x, y, 40 * cell_w, t.geometry(Face::Data).cell_h)) {
+    return false;
+  }
+  r.text(c.name_x, y, name, sel ? Color::SelText : Color::TextDim);
+  r.text(c.value_x, y, text, sel ? Color::SelText : Color::Text);
+  if (unit[0] != '\0') {
+    r.text(c.value_x + static_cast<int>(std::strlen(text) + 1u) * cell_w, y, unit, sel ? Color::SelText : Color::TextDim);
+  }
+  bar = {c.bar_x, row_top + (l.frame.row_pitch - t.metrics.meter_h) / 2, c.bar_w, t.metrics.meter_h};
+  return true;
+}
+
 // The master section: its parameters in table order (not the LIMITER switch: OS-SMALL3), then the CUE level (the engine's, the board's), and beside them the limiter's card (the chain's reserved stages are not shown: OS-MIXHIDE).
 void draw_master_page(const Model& model, const ViewState& view, Renderer& r, Rect covered, const MixLayout& l) noexcept {
   const ui::Theme& t = r.theme();
   const ui::Metrics& m = t.metrics;
   const mixer::Cursor cur = mixer::cursor(model, view);
   const Frame& f = l.frame;
-  const int cell_h = t.geometry(Face::Data).cell_h;
-  const int cell_w = t.geometry(Face::Data).cell_w;
   const auto hidden = [&](const Rect& rect) { return covers(covered, rect.x, rect.y, rect.w, rect.h); };
-  const int name_x = m.index_w + 2 * m.gap;
-  const int value_x = name_x + (static_cast<int>(core::kParamNameChars) + 2) * cell_w;
-  const int bar_x = value_x + 8 * cell_w;
-  const int bar_w = 16 * cell_w;
-  const int card_x = bar_x + bar_w + 4 * m.gap;
+  const ValueCols c = value_cols(t);
+  const int card_x = c.bar_x + c.bar_w + 4 * m.gap;
   const auto row_y = [&](unsigned i) { return f.pane.y + static_cast<int>(i) * f.row_pitch; };
 
   // More rows than the pane has (OS-SENDFX): the window follows the cursor, which stays on its last row once it has gone past the pane.
@@ -557,7 +581,6 @@ void draw_master_page(const Model& model, const ViewState& view, Renderer& r, Re
   char text[core::kParamTextChars + 1];
   for (unsigned i = first; i < kMasterFxRows && i < first + visible; ++i) {
     const bool sel = i == cur.row;
-    const int y = row_y(i - first) + l.grid.cell_dy;
     const char* name = "CUE LEVEL";
     unsigned level = 0;
     bool bar = false;
@@ -586,16 +609,9 @@ void draw_master_page(const Model& model, const ViewState& view, Renderer& r, Re
       bar = row.kind == SendFxKind::Number || row.kind == SendFxKind::Time || row.kind == SendFxKind::Rate || row.kind == SendFxKind::Ms;
       level = row.max > row.min ? static_cast<unsigned>(((value - static_cast<int>(row.min)) * 100) / (static_cast<int>(row.max) - static_cast<int>(row.min))) : 0u;
     }
-    if (hidden({name_x, y, 40 * cell_w, cell_h})) {
-      continue;
-    }
-    r.text(name_x, y, name, sel ? Color::SelText : Color::TextDim);
-    r.text(value_x, y, text, sel ? Color::SelText : Color::Text);
-    if (unit[0] != '\0') {
-      r.text(value_x + static_cast<int>(std::strlen(text) + 1u) * cell_w, y, unit, sel ? Color::SelText : Color::TextDim);
-    }
-    if (bar) {
-      ui::bar(r, {bar_x, row_y(i - first) + (f.row_pitch - m.meter_h) / 2, bar_w, m.meter_h}, level, 100, sel ? Color::Sel : Color::Empty, sel ? Color::SelText : Color::Text);
+    Rect track;
+    if (draw_value_row(r, l, c, covered, row_y(i - first), sel, name, text, unit, track) && bar) {
+      ui::bar(r, track, level, 100, sel ? Color::Sel : Color::Empty, sel ? Color::SelText : Color::Text);
     }
   }
   // The limiter's card (OS-MIXHIDE): the chain's other stages are reserved slots with no DSP and no control, so the page does not show them (graph.h kMasterChain keeps them,
@@ -605,6 +621,65 @@ void draw_master_page(const Model& model, const ViewState& view, Renderer& r, Re
     r.text(card_x, y, "MASTER LIMITER", Color::Text, Face::Label);
     y += f.row_pitch;
     r.text(card_x, y, "ALWAYS ON", Color::TextDim, Face::Label);
+  }
+}
+
+// ---- the MST EQ page (OS-MASTEREQ) -------------------------------------------------------------------------------------------
+
+// The master output EQ and bass boost, run in the codec's DAP (the project's, saved in its MEQ chunk): five bands, -12..+12 dB with a bar centred on 0, then BASS BOOST 0..100.
+void draw_master_eq_page(const Model& model, const ViewState& view, Renderer& r, Rect covered, const MixLayout& l) noexcept {
+  static constexpr const char* kBandNames[model::kMasterEqBands] = {"115 HZ", "330 HZ", "990 HZ", "3 KHZ", "9.9 KHZ"};
+  const ui::Theme& t = r.theme();
+  const ui::Metrics& m = t.metrics;
+  const mixer::Cursor cur = mixer::cursor(model, view);
+  const Frame& f = l.frame;
+  const auto hidden = [&](const Rect& rect) { return covers(covered, rect.x, rect.y, rect.w, rect.h); };
+  const ValueCols c = value_cols(t);
+  const int name_x = c.name_x;
+  const auto row_y = [&](unsigned i) { return f.pane.y + static_cast<int>(i) * f.row_pitch; };
+  model::MasterEq eq{};
+  if (model.project != nullptr) {
+    eq = model.project->master_eq();
+  }
+  const Rect hl = {0, row_y(cur.row), c.bar_x + c.bar_w + 2 * m.gap, f.row_pitch};
+  if (!hidden(hl)) {
+    r.highlight_row(hl);
+  }
+  char text[core::kParamTextChars + 1];
+  for (unsigned i = 0; i < kMasterEqRows; ++i) {
+    const bool sel = i == cur.row;
+    const bool band = i < model::kMasterEqBands;
+    const int db = band ? static_cast<int>(eq.band_db[i]) : 0;
+    if (band) {
+      text[0] = db < 0 ? '-' : (db > 0 ? '+' : ' ');
+      text[1] = '\0';
+      append_dec_to(text + 1, sizeof text - 1u, static_cast<unsigned>(db < 0 ? -db : db));
+    } else {
+      text[0] = '\0';
+      append_dec_to(text, sizeof text, eq.bass);
+    }
+    Rect track;
+    if (!draw_value_row(r, l, c, covered, row_y(i), sel, band ? kBandNames[i] : "BASS BOOST", text, band ? "dB" : "%", track)) {
+      continue;
+    }
+    if (band) {
+      // a bar centred on 0: the fill runs from the middle to the value, the tick marks the middle
+      const int half = c.bar_w / 2;
+      const int len = (db < 0 ? -db : db) * half / model::kMasterEqDbMax;
+      r.panel(track, sel ? Color::Sel : Color::Empty);
+      r.panel({db < 0 ? c.bar_x + half - len : c.bar_x + half, track.y, len, track.h}, sel ? Color::SelText : Color::Text);
+      r.panel({c.bar_x + half - 1, track.y, 2, track.h}, sel ? Color::SelText : Color::TextDim);
+    } else {
+      ui::bar(r, track, eq.bass, 100, sel ? Color::Sel : Color::Empty, sel ? Color::SelText : Color::Text);
+    }
+  }
+  // What the EQ reaches: the codec's analogue outputs (headphones and line out), not the digital paths.
+  const Rect card = {name_x, row_y(kMasterEqRows + 1u), ui::kScreenW - name_x - m.pad, 2 * f.row_pitch};
+  if (!hidden(card)) {
+    int y = card.y + l.grid.cell_dy;
+    r.text(name_x, y, "ANALOGUE OUTPUTS ONLY", Color::Text, Face::Label);
+    y += f.row_pitch;
+    r.text(name_x, y, "NOT IN RENDERS, USB AUDIO OR RESAMPLING", Color::TextDim, Face::Label);
   }
 }
 
@@ -812,6 +887,12 @@ void MixerScreen::render(const Model& model, const ViewState& view, Renderer& r,
         break;
       case MixerPage::MasterFx:
         break;
+      case MixerPage::MasterEq:
+        if (model.project != nullptr) {  // OS-MASTEREQ: whether the codec's EQ and bass boost do anything
+          const model::MasterEq eq = model.project->master_eq();
+          strip.row().field("EQ", Face::Data, model::master_eq_is_default(eq) ? "FLAT" : "ON", Color::ChromeDim, Color::ChromeText);
+        }
+        break;
       case MixerPage::Inserts:
         if (model.project != nullptr) {  // how many of the four the project holds
           append_uint(text, model.project->inserts().count);
@@ -825,7 +906,7 @@ void MixerScreen::render(const Model& model, const ViewState& view, Renderer& r,
   }
   if (!hidden(f.header)) {
     const int cap_y = ui::caps_y(t, Face::Label, f.header.y, f.header.h);
-    if (page == MixerPage::Mixer || page == MixerPage::MasterFx) {
+    if (page == MixerPage::Mixer || page == MixerPage::MasterFx || page == MixerPage::MasterEq) {
       int x = m.index_w;
       for (unsigned p = 0; p < pages(); ++p) {
         r.text(x, cap_y, kPageNames[p], p == static_cast<unsigned>(page) ? Color::ChromeText : Color::ChromeDim, Face::Label);
@@ -872,6 +953,7 @@ void MixerScreen::render(const Model& model, const ViewState& view, Renderer& r,
     case MixerPage::MasterFx: draw_master_page(model, view, r, covered, l); break;
     case MixerPage::Stems: draw_stems_page(model, view, r, covered, l); break;
     case MixerPage::Inserts: draw_inserts_page(model, view, r, covered, l); break;
+    case MixerPage::MasterEq: draw_master_eq_page(model, view, r, covered, l); break;
   }
 
   if (!hidden(f.info)) {
@@ -904,6 +986,10 @@ void MixerScreen::render(const Model& model, const ViewState& view, Renderer& r,
       }
       case MixerPage::MasterFx:
         left.assign(cur.row == kMasterCueRow ? "CUE LEVEL: the cue bus's level" : (cur.row < kMasterCueRow ? "the master section" : (cur.row - kMasterFirstFxRow < kSendFxDelayRows ? "SND A: the delay (new sound, the OG's controls)" : (cur.row < kMasterFirstLimRow ? "SND B: the reverb (new sound, the OG's controls)" : "LIMITER: always on (new sound, not saved)"))));
+        right = "up / down: row  encoder: change  Delete: default";
+        break;
+      case MixerPage::MasterEq:
+        left.assign(cur.row < model::kMasterEqBands ? "EQ BAND: -12 to +12 dB" : "BASS BOOST: 0 to 100");
         right = "up / down: row  encoder: change  Delete: default";
         break;
       case MixerPage::Inserts: {

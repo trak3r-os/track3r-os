@@ -518,3 +518,543 @@ TEST_CASE("sgtl5000: the unmute and mute plans keep the ADC's input select the r
   CHECK(sg::ana_ctrl_value(true, true) == sg::kAnaCtrlOutputsMuted);
   CHECK(sg::ana_ctrl_value(false, true) == sg::kAnaCtrlOutputsUnmuted);
 }
+
+// ---- OS-MASTEREQ: the master EQ and bass boost in the DAP -------------------------------------------------------------------------------------
+namespace {
+
+// The DAP registers and the two the driver also writes (the routing and the DAC mute), with the log of every write and the checks the data sheet's click guidance asks for.
+struct DapModel {
+  std::uint16_t sss = sg::kSssIdle;
+  std::uint16_t adcdac = sg::kAdcDacUnmuted;  // the outputs are open when the live driver runs
+  std::uint16_t dap_ctrl = 0;
+  std::uint16_t dap_eq = 0;
+  std::uint16_t band[5] = {sg::kGeqZeroDb, sg::kGeqZeroDb, sg::kGeqZeroDb, sg::kGeqZeroDb, sg::kGeqZeroDb};
+  std::uint16_t bass_en = sg::kBassEnhanceOff;
+  std::uint16_t bass_ctrl = sg::bass_ctrl_value(sg::kBassLevelOff);
+  unsigned writes = 0;
+  unsigned fail_at = 0;   // 1-based write number that is not acknowledged (0: none)
+  unsigned fail_at2 = 0;  // a second one (0: none): a double failure
+  unsigned max_band_move = 0;
+  unsigned max_bass_move = 0;
+  bool en_toggled_off_zero = false;  // BASS_ENABLE changed while BASS_LEVEL was not 0x7F
+  bool unknown = false;
+  std::uint16_t log_reg[96] = {};
+  std::uint16_t log_val[96] = {};
+
+  bool write(const sg::Step& s) {
+    ++writes;
+    if (writes <= 96u) {
+      log_reg[writes - 1u] = s.reg;
+      log_val[writes - 1u] = s.value;
+    }
+    if ((fail_at != 0u && writes == fail_at) || (fail_at2 != 0u && writes == fail_at2)) {
+      return false;
+    }
+    switch (s.reg) {
+      case sg::kSssCtrl: sss = s.value; break;
+      case sg::kAdcDacCtrl: adcdac = s.value; break;
+      case sg::kDapControl: dap_ctrl = s.value; break;
+      case sg::kDapAudioEq: dap_eq = s.value; break;
+      case sg::kDapBassEnhance:
+        // Only while the DAP feeds the DAC: a route in sets the bass registers before the routing write, when nothing of the DAP is audible.
+        if (sss == sg::kSssDap && ((s.value ^ bass_en) & 1u) != 0u && (bass_ctrl & 0x7Fu) != sg::kBassLevelOff) {
+          en_toggled_off_zero = true;
+        }
+        bass_en = s.value;
+        break;
+      case sg::kDapBassEnhanceCtrl: {
+        const unsigned a = bass_ctrl & 0x7Fu;
+        const unsigned b = s.value & 0x7Fu;
+        const unsigned d = a > b ? a - b : b - a;
+        max_bass_move = d > max_bass_move ? d : max_bass_move;
+        bass_ctrl = s.value;
+        break;
+      }
+      default: {
+        bool known = false;
+        for (unsigned i = 0; i < 5; ++i) {
+          if (s.reg == sg::kDapGeqBand[i]) {
+            known = true;
+            const unsigned d = band[i] > s.value ? band[i] - s.value : s.value - band[i];
+            max_band_move = d > max_band_move ? d : max_band_move;
+            band[i] = s.value;
+          }
+        }
+        if (!known) {
+          unknown = true;
+        }
+        break;
+      }
+    }
+    return true;
+  }
+};
+
+haudio::OutputEq eq_of(int b0, int b1, int b2, int b3, int b4, unsigned bass) {
+  haudio::OutputEq e{};
+  e.band_db[0] = static_cast<std::int8_t>(b0);
+  e.band_db[1] = static_cast<std::int8_t>(b1);
+  e.band_db[2] = static_cast<std::int8_t>(b2);
+  e.band_db[3] = static_cast<std::int8_t>(b3);
+  e.band_db[4] = static_cast<std::int8_t>(b4);
+  e.bass = static_cast<std::uint8_t>(bass);
+  return e;
+}
+
+// The driver's write: the model behind a function pointer and a context.
+sg::Writer eq_writer(DapModel& m) {
+  return sg::Writer{[](void* ctx, const sg::Step& s) noexcept { return static_cast<DapModel*>(ctx)->write(s); }, &m};
+}
+
+// One pass at `now`; returns how many writes it made.
+unsigned eq_pass(sg::EqDriver& d, DapModel& m, std::uint32_t now) {
+  const unsigned before = m.writes;
+  d.pump(now, eq_writer(m));
+  return m.writes - before;
+}
+
+// Passes every millisecond until the driver is Routed (or Failed) and has nothing left to write; returns the last time used. No pass writes more than kWritesPerPass.
+std::uint32_t eq_settle(sg::EqDriver& d, DapModel& m, std::uint32_t now, unsigned max_passes = 4000) {
+  for (unsigned i = 0; i < max_passes; ++i, ++now) {
+    const unsigned n = eq_pass(d, m, now);
+    CHECK(n <= sg::EqDriver::kWritesPerPass);
+    if (n == 0u && d.phase() != sg::EqDriver::Phase::RouteIn) {
+      break;
+    }
+  }
+  return now;
+}
+
+}  // namespace
+
+TEST_CASE("master EQ: the register codes (0.25 dB per LSB around 0x2F, bass level 0x7F down to 0x19)") {
+  CHECK(sg::geq_code(0) == 0x2F);
+  CHECK(sg::geq_code(1) == 0x33);
+  CHECK(sg::geq_code(12) == 0x5F);
+  CHECK(sg::geq_code(-1) == 0x2B);
+  CHECK(sg::geq_code(-12) == 0x00);  // -11.75 dB: the floor
+  CHECK(sg::geq_code(-100) == 0x00);
+  CHECK(sg::geq_code(100) == 0x5F);
+  CHECK(sg::bass_level_code(0) == 0x7F);
+  CHECK(sg::bass_level_code(1) == 0x7E);
+  CHECK(sg::bass_level_code(100) == 0x19);
+  CHECK(sg::bass_level_code(255) == 0x19);
+  for (unsigned v = 1; v <= 100; ++v) {
+    CHECK(sg::bass_level_code(v) <= sg::bass_level_code(v - 1u));
+  }
+  CHECK(sg::bass_ctrl_value(0x19) == 0x0B19);
+  CHECK(sg::eq_is_default(eq_of(0, 0, 0, 0, 0, 0)));
+  CHECK_FALSE(sg::eq_is_default(eq_of(0, 0, 0, 0, 1, 0)));
+  CHECK_FALSE(sg::eq_is_default(eq_of(0, 0, 0, 0, 0, 1)));
+  CHECK(sg::eq_equal(eq_of(1, 2, 3, 4, 5, 6), eq_of(1, 2, 3, 4, 5, 6)));
+  CHECK_FALSE(sg::eq_equal(eq_of(1, 2, 3, 4, 5, 6), eq_of(1, 2, 3, 4, 5, 7)));
+}
+
+TEST_CASE("master EQ: every value at its default writes nothing, with the outputs open or at unmute") {
+  sg::EqDriver d;
+  DapModel m;
+  d.on_start();
+  d.set(eq_of(0, 0, 0, 0, 0, 0));
+  for (std::uint32_t t = 0; t < 500; ++t) {
+    CHECK(eq_pass(d, m, t) == 0u);
+  }
+  d.apply_at_unmute(eq_writer(m));
+  CHECK(m.writes == 0u);
+  CHECK(d.phase() == sg::EqDriver::Phase::Idle);
+  CHECK(m.sss == sg::kSssIdle);
+}
+
+TEST_CASE("master EQ: the first non-default value routes in: soft mute, DAP, EQ select, bands, bass, routing, unmute, waited by timestamp") {
+  sg::EqDriver d;
+  DapModel m;
+  d.on_start();
+  d.set(eq_of(3, -2, 0, 12, -12, 40));
+  // pass 1: the DAC soft mute alone, then its 50 ms ramp is waited (not blocked on)
+  CHECK(eq_pass(d, m, 1000) == 1u);
+  CHECK(m.log_reg[0] == sg::kAdcDacCtrl);
+  CHECK(m.log_val[0] == sg::kAdcDacMuted);
+  CHECK(eq_pass(d, m, 1001) == 0u);
+  CHECK(eq_pass(d, m, 1049) == 0u);
+  // from 1050: the DAP steps, at most 3 a pass
+  CHECK(eq_pass(d, m, 1050) == 3u);
+  CHECK(eq_pass(d, m, 1051) == 3u);
+  CHECK(eq_pass(d, m, 1052) == 3u);
+  CHECK(eq_pass(d, m, 1053) == 2u);  // the routing, then the DAC unmute (which waits its ramp)
+  CHECK(d.phase() == sg::EqDriver::Phase::Routed);
+  CHECK(m.writes == 12u);
+  const std::uint16_t expect_reg[12] = {sg::kAdcDacCtrl,    sg::kDapControl,    sg::kDapAudioEq,     sg::kDapGeqBand[0], sg::kDapGeqBand[1], sg::kDapGeqBand[2],
+                                        sg::kDapGeqBand[3], sg::kDapGeqBand[4], sg::kDapBassEnhanceCtrl, sg::kDapBassEnhance, sg::kSssCtrl,    sg::kAdcDacCtrl};
+  for (unsigned i = 0; i < 12; ++i) {
+    CHECK(m.log_reg[i] == expect_reg[i]);
+  }
+  CHECK(m.log_val[11] == sg::kAdcDacUnmuted);
+  CHECK(m.log_val[1] == 1u);
+  CHECK(m.log_val[2] == 3u);
+  CHECK(m.log_val[3] == sg::geq_code(3));
+  CHECK(m.log_val[7] == 0x00);
+  CHECK(m.log_val[8] == sg::bass_ctrl_value(sg::bass_level_code(40)));
+  CHECK(m.log_val[9] == sg::kBassEnhanceOn);
+  CHECK(m.log_val[10] == sg::kSssDap);
+  CHECK(m.sss == sg::kSssDap);
+  CHECK(m.adcdac == sg::kAdcDacUnmuted);
+  CHECK_FALSE(m.unknown);
+  CHECK(d.routed());
+  // settled: nothing more is written
+  for (std::uint32_t t = 2000; t < 2100; ++t) {
+    CHECK(eq_pass(d, m, t) == 0u);
+  }
+}
+
+TEST_CASE("master EQ: a route in with a flat EQ and bass only enables the bass, bands stay at 0 dB") {
+  sg::EqDriver d;
+  DapModel m;
+  d.on_start();
+  d.set(eq_of(0, 0, 0, 0, 0, 100));
+  eq_settle(d, m, 0);
+  CHECK(d.phase() == sg::EqDriver::Phase::Routed);
+  for (unsigned i = 0; i < 5; ++i) {
+    CHECK(m.band[i] == sg::kGeqZeroDb);
+  }
+  CHECK(m.bass_en == sg::kBassEnhanceOn);
+  CHECK((m.bass_ctrl & 0x7Fu) == 0x19u);
+  CHECK((m.bass_ctrl >> 8) == sg::kBassLrLevel);
+  CHECK_FALSE(m.en_toggled_off_zero);
+}
+
+TEST_CASE("master EQ: a live band change moves at most 2 LSB (0.5 dB) a write and at most 3 writes a pass") {
+  sg::EqDriver d;
+  DapModel m;
+  d.on_start();
+  d.set(eq_of(1, 0, 0, 0, 0, 0));
+  std::uint32_t t = eq_settle(d, m, 0);
+  m.max_band_move = 0;
+  d.set(eq_of(12, -12, 12, -12, 12, 0));
+  for (unsigned i = 0; i < 200; ++i, ++t) {
+    CHECK(eq_pass(d, m, t) <= 3u);
+  }
+  CHECK(m.max_band_move <= 2u);
+  CHECK(m.band[0] == sg::geq_code(12));
+  CHECK(m.band[1] == sg::geq_code(-12));
+  CHECK(m.band[2] == sg::geq_code(12));
+  CHECK(m.band[3] == sg::geq_code(-12));
+  CHECK(m.band[4] == sg::geq_code(12));
+  CHECK(m.sss == sg::kSssDap);          // an edit never routes out
+  CHECK(m.adcdac == sg::kAdcDacUnmuted);  // nor mutes the DAC
+  // a step of one dB (4 LSB) takes two writes
+  const unsigned before = m.writes;
+  d.set(eq_of(11, -12, 12, -12, 12, 0));
+  for (unsigned i = 0; i < 5; ++i, ++t) {
+    (void)eq_pass(d, m, t);
+  }
+  CHECK(m.writes - before == 2u);
+}
+
+TEST_CASE("master EQ: the bass enable changes only with BASS_LEVEL at 0x7F, the level in bounded steps") {
+  sg::EqDriver d;
+  DapModel m;
+  d.on_start();
+  d.set(eq_of(2, 0, 0, 0, 0, 0));
+  std::uint32_t t = eq_settle(d, m, 0);
+  CHECK(m.bass_en == sg::kBassEnhanceOff);
+  m.max_bass_move = 0;
+  d.set(eq_of(2, 0, 0, 0, 0, 100));
+  for (unsigned i = 0; i < 100; ++i, ++t) {
+    CHECK(eq_pass(d, m, t) <= 3u);
+  }
+  CHECK(m.bass_en == sg::kBassEnhanceOn);
+  CHECK((m.bass_ctrl & 0x7Fu) == 0x19u);
+  CHECK(m.max_bass_move <= static_cast<unsigned>(sg::EqDriver::kBassStep));
+  d.set(eq_of(2, 0, 0, 0, 0, 30));
+  for (unsigned i = 0; i < 100; ++i, ++t) {
+    (void)eq_pass(d, m, t);
+  }
+  CHECK(m.bass_en == sg::kBassEnhanceOn);
+  CHECK((m.bass_ctrl & 0x7Fu) == sg::bass_level_code(30));
+  d.set(eq_of(2, 0, 0, 0, 0, 0));
+  for (unsigned i = 0; i < 100; ++i, ++t) {
+    (void)eq_pass(d, m, t);
+  }
+  CHECK(m.bass_en == sg::kBassEnhanceOff);
+  CHECK((m.bass_ctrl & 0x7Fu) == sg::kBassLevelOff);
+  CHECK_FALSE(m.en_toggled_off_zero);
+  CHECK(m.sss == sg::kSssDap);
+}
+
+TEST_CASE("master EQ: values set while the outputs are muted are applied inside unmute, the DAC staying muted by the caller") {
+  sg::EqDriver d;
+  DapModel m;
+  m.adcdac = sg::kAdcDacMuted;
+  d.on_start();
+  d.set(eq_of(-3, 0, 5, 0, 0, 10));
+  CHECK(d.phase() == sg::EqDriver::Phase::Idle);  // recorded only
+  CHECK(m.writes == 0u);
+  d.apply_at_unmute(eq_writer(m));
+  CHECK(m.writes == sg::kEqDapSteps);
+  CHECK(m.log_reg[0] == sg::kDapControl);
+  CHECK(m.log_reg[9] == sg::kSssCtrl);  // the routing is the last write
+  CHECK(m.band[0] == sg::geq_code(-3));
+  CHECK(m.band[2] == sg::geq_code(5));
+  CHECK(m.adcdac == sg::kAdcDacMuted);  // the driver did not touch the DAC: the unmute plan does
+  CHECK(d.phase() == sg::EqDriver::Phase::Routed);
+  CHECK(d.routed());
+  CHECK_FALSE(m.unknown);
+}
+
+TEST_CASE("master EQ: route out happens only at unmute, never on a live edit; a project load with all defaults stays routed and flat") {
+  sg::EqDriver d;
+  DapModel m;
+  d.on_start();
+  d.set(eq_of(4, 0, 0, 0, 0, 20));
+  std::uint32_t t = eq_settle(d, m, 0);
+  d.set(eq_of(0, 0, 0, 0, 0, 0));  // a new project: flat
+  for (unsigned i = 0; i < 300; ++i, ++t) {
+    (void)eq_pass(d, m, t);
+  }
+  CHECK(m.sss == sg::kSssDap);
+  CHECK(m.dap_ctrl == 1u);
+  for (unsigned i = 0; i < 5; ++i) {
+    CHECK(m.band[i] == sg::kGeqZeroDb);
+  }
+  CHECK(m.bass_en == sg::kBassEnhanceOff);
+  CHECK(d.routed());
+  // the outputs close and open again: now it goes back to the idle state, the routing first
+  d.on_mute();
+  const unsigned before = m.writes;
+  m.adcdac = sg::kAdcDacMuted;
+  d.apply_at_unmute(eq_writer(m));
+  CHECK(m.writes - before == 2u);
+  CHECK(m.log_reg[before] == sg::kSssCtrl);
+  CHECK(m.log_val[before] == sg::kSssIdle);
+  CHECK(m.log_reg[before + 1u] == sg::kDapControl);
+  CHECK(m.log_val[before + 1u] == 0u);
+  CHECK_FALSE(d.routed());
+  // and a second unmute with all defaults writes nothing
+  const unsigned again = m.writes;
+  d.on_mute();
+  d.apply_at_unmute(eq_writer(m));
+  CHECK(m.writes == again);
+  // a restart forgets the routing: the power-up plan puts the idle value back
+  d.set(eq_of(1, 0, 0, 0, 0, 0));
+  d.apply_at_unmute(eq_writer(m));
+  CHECK(d.routed());
+  d.on_start();
+  CHECK_FALSE(d.routed());
+}
+
+TEST_CASE("master EQ: a cut short route in (mute) is redone from the start inside the next unmute") {
+  sg::EqDriver d;
+  DapModel m;
+  d.on_start();
+  d.set(eq_of(6, 0, 0, 0, 0, 0));
+  (void)eq_pass(d, m, 0);  // the soft mute
+  (void)eq_pass(d, m, 50);  // some DAP steps
+  CHECK(d.phase() == sg::EqDriver::Phase::RouteIn);
+  d.on_mute();
+  m.adcdac = sg::kAdcDacMuted;
+  const unsigned before = m.writes;
+  d.apply_at_unmute(eq_writer(m));
+  CHECK(m.writes - before == sg::kEqDapSteps);
+  CHECK(d.phase() == sg::EqDriver::Phase::Routed);
+  CHECK(m.band[0] == sg::geq_code(6));
+}
+
+TEST_CASE("master EQ: a write that is not acknowledged abandons the route in, restores the idle routing, ends with the DAC unmuted, and is retried only after a value change") {
+  for (unsigned fail = 1; fail <= 12; ++fail) {
+    sg::EqDriver d;
+    DapModel m;
+    d.on_start();
+    d.set(eq_of(5, 0, 0, 0, 0, 10));
+    m.fail_at = fail;
+    std::uint32_t t = eq_settle(d, m, 0);  // fail 4 is the third write of a pass: no pass goes over kWritesPerPass
+    CAPTURE(fail);
+    CHECK(d.phase() == sg::EqDriver::Phase::Failed);
+    CHECK(m.sss == sg::kSssIdle);
+    CHECK(m.adcdac == sg::kAdcDacUnmuted);
+    CHECK_FALSE(d.routed());
+    // never retried every pass
+    const unsigned stuck = m.writes;
+    m.fail_at = 0;
+    for (unsigned i = 0; i < 200; ++i, ++t) {
+      CHECK(eq_pass(d, m, t) == 0u);
+    }
+    CHECK(m.writes == stuck);
+    // one retry on the next value change
+    d.set(eq_of(6, 0, 0, 0, 0, 10));
+    t = eq_settle(d, m, t);
+    CHECK(d.phase() == sg::EqDriver::Phase::Routed);
+    CHECK(m.sss == sg::kSssDap);
+    CHECK(m.band[0] == sg::geq_code(6));
+    CHECK(m.adcdac == sg::kAdcDacUnmuted);
+  }
+}
+
+TEST_CASE("master EQ: a failed write inside unmute leaves the idle routing and the outputs can still open") {
+  for (unsigned fail = 1; fail <= sg::kEqDapSteps; ++fail) {
+    sg::EqDriver d;
+    DapModel m;
+    m.adcdac = sg::kAdcDacMuted;
+    d.on_start();
+    d.set(eq_of(0, 7, 0, 0, 0, 0));
+    m.fail_at = fail;
+    d.apply_at_unmute(eq_writer(m));
+    CAPTURE(fail);
+    CHECK(d.phase() == sg::EqDriver::Phase::Failed);
+    CHECK(m.sss == sg::kSssIdle);
+    CHECK(m.adcdac == sg::kAdcDacMuted);  // the caller's unmute plan unmutes
+  }
+}
+
+TEST_CASE("master EQ: the plans of power-up, unmute, mute and stop do not write a DAP register or the DAP routing") {
+  for (const sg::Step& s : sg::kMute) {
+    CHECK(s.reg < sg::kDapControl);
+    CHECK(s.reg != sg::kSssCtrl);
+  }
+  sg::Step step{};
+  for (unsigned i = 0; sg::unmute_step(i, step); ++i) {
+    CHECK(step.reg < sg::kDapControl);
+    CHECK(step.reg != sg::kSssCtrl);
+  }
+  for (const sg::Step& s : sg::kPowerDown) {
+    CHECK(s.reg < sg::kDapControl);
+    CHECK(s.reg != sg::kSssCtrl);
+  }
+  // the power-up plan leaves the routing at the idle value the driver assumes
+  std::uint16_t last_sss = 0xFFFF;
+  for (const sg::Step& s : sg::kPowerUp) {
+    if (s.reg == sg::kSssCtrl) {
+      last_sss = s.value;
+    }
+  }
+  CHECK(last_sss == sg::kSssIdle);
+}
+
+namespace {
+// FNV-1a over the bytes of reg, value and wait of each step: pins the whole content of a plan, not only its registers.
+std::uint32_t plan_hash(std::uint32_t h, const sg::Step& s) {
+  for (const unsigned v : {static_cast<unsigned>(s.reg), static_cast<unsigned>(s.value), static_cast<unsigned>(s.wait_ms)}) {
+    h = (h ^ (v & 0xFFu)) * 16777619u;
+    h = (h ^ (v >> 8)) * 16777619u;
+  }
+  return h;
+}
+}  // namespace
+
+TEST_CASE("master EQ: the existing plans are unchanged, register, value and wait of every step (hashes taken from the tree before OS-MASTEREQ, b9e29ad7)") {
+  constexpr std::uint32_t kBasis = 2166136261u;
+  std::uint32_t h = kBasis;
+  for (const sg::Step& s : sg::kPowerUp) {
+    h = plan_hash(h, s);
+  }
+  CHECK(h == 0x9D839639u);
+  h = kBasis;
+  for (const sg::Step& s : sg::kMute) {
+    h = plan_hash(h, s);
+  }
+  CHECK(h == 0xBC778500u);
+  h = kBasis;
+  sg::Step step{};
+  for (unsigned i = 0; sg::unmute_step(i, step); ++i) {
+    h = plan_hash(h, step);
+  }
+  CHECK(h == 0x4C523417u);
+  h = kBasis;
+  for (const sg::Step& s : sg::kPowerDown) {
+    h = plan_hash(h, s);
+  }
+  CHECK(h == 0x797EF421u);
+  CHECK(plan_hash(kBasis, sg::kSoftMute) == 0x15D79B57u);
+}
+
+TEST_CASE("master EQ: a route out whose routing write is not acknowledged does not switch the DAP off (the DAC is never fed from a disabled DAP)") {
+  sg::EqDriver d;
+  DapModel m;
+  m.adcdac = sg::kAdcDacMuted;
+  d.on_start();
+  d.set(eq_of(5, 0, 0, 0, 0, 10));
+  d.apply_at_unmute(eq_writer(m));
+  CHECK(d.phase() == sg::EqDriver::Phase::Routed);
+  CHECK(m.sss == sg::kSssDap);
+  CHECK(m.dap_ctrl == sg::kDapEnabled);
+  d.on_mute();
+  d.set(eq_of(0, 0, 0, 0, 0, 0));
+  m.fail_at = m.writes + 1u;  // the routing write
+  const unsigned before = m.writes;
+  d.apply_at_unmute(eq_writer(m));
+  CHECK(m.writes - before == 1u);  // no DAP-off write after the failed routing write
+  CHECK(m.sss == sg::kSssDap);
+  CHECK(m.dap_ctrl == sg::kDapEnabled);
+  CHECK(d.routed());
+  // the next unmute does the whole route out
+  m.fail_at = 0;
+  d.apply_at_unmute(eq_writer(m));
+  CHECK(m.sss == sg::kSssIdle);
+  CHECK(m.dap_ctrl == 0u);
+  CHECK_FALSE(d.routed());
+}
+
+TEST_CASE("master EQ: a failed live route in whose DAC unmute is also not acknowledged retries the unmute, one write a pass, until the DAC is open") {
+  sg::EqDriver d;
+  DapModel m;
+  d.on_start();
+  d.set(eq_of(5, 0, 0, 0, 0, 10));
+  m.fail_at = 5;   // a DAP step of the route in
+  m.fail_at2 = 6;  // the DAC unmute of the recovery
+  std::uint32_t t = 0;
+  while (d.phase() != sg::EqDriver::Phase::Failed && t < 1000u) {
+    (void)eq_pass(d, m, t++);
+  }
+  CHECK(d.phase() == sg::EqDriver::Phase::Failed);
+  CHECK(m.adcdac == sg::kAdcDacMuted);              // the soft mute of the route in is still there
+  CHECK(eq_pass(d, m, t++) == 1u);                  // the recovery unmute: not acknowledged
+  CHECK(m.adcdac == sg::kAdcDacMuted);
+  CHECK(eq_pass(d, m, t++) == 1u);                  // retried: acknowledged
+  CHECK(m.adcdac == sg::kAdcDacUnmuted);
+  CHECK(eq_pass(d, m, t++) == 0u);                  // and no more
+  CHECK(d.phase() == sg::EqDriver::Phase::Failed);
+  CHECK_FALSE(d.routed());
+}
+
+TEST_CASE("master EQ: a live edit after 2^31 ms of uptime without an edit is not held by the ramp wait compare") {
+  sg::EqDriver d;
+  DapModel m;
+  d.on_start();
+  d.set(eq_of(5, 0, 0, 0, 0, 0));
+  std::uint32_t t = eq_settle(d, m, 0) + 2 * sg::kDacRampWaitMs;
+  (void)eq_pass(d, m, t);  // a pass after the wait: the pending wait is over
+  CHECK(d.phase() == sg::EqDriver::Phase::Routed);
+  t += 0x80000001u;  // a signed compare against the old ready_ would now read as "not yet" for 24.9 days
+  d.set(eq_of(9, 0, 0, 0, 0, 0));
+  t = eq_settle(d, m, t);
+  CHECK(m.band[0] == sg::geq_code(9));
+}
+
+TEST_CASE("master EQ: a failure while stepping a live edit stops, and a value change steps on (a reset to flat steps the bands and the bass back)") {
+  sg::EqDriver d;
+  DapModel m;
+  d.on_start();
+  d.set(eq_of(5, 0, 0, 0, 0, 10));
+  std::uint32_t t = eq_settle(d, m, 0) + 2 * sg::kDacRampWaitMs;  // past the DAC unmute's ramp wait, which also holds the live stepping
+  CHECK(d.phase() == sg::EqDriver::Phase::Routed);
+  d.set(eq_of(9, 3, 0, 0, 0, 10));
+  m.fail_at = m.writes + 2u;
+  t = eq_settle(d, m, t);
+  CHECK(d.phase() == sg::EqDriver::Phase::Failed);
+  CHECK(d.routed());
+  const unsigned stuck = m.writes;
+  m.fail_at = 0;
+  for (unsigned i = 0; i < 200; ++i, ++t) {
+    CHECK(eq_pass(d, m, t) == 0u);
+  }
+  CHECK(m.writes == stuck);
+  d.set(eq_of(0, 0, 0, 0, 0, 0));
+  CHECK(d.phase() == sg::EqDriver::Phase::Routed);  // the DAP is still routed: the registers are stepped back, not a new route in
+  t = eq_settle(d, m, t);
+  CHECK(d.phase() == sg::EqDriver::Phase::Routed);
+  for (unsigned i = 0; i < 5; ++i) {
+    CHECK(m.band[i] == sg::kGeqZeroDb);
+  }
+  CHECK((m.bass_ctrl & 0x7Fu) == sg::kBassLevelOff);
+  CHECK(m.bass_en == sg::kBassEnhanceOff);
+  CHECK(m.sss == sg::kSssDap);
+  CHECK_FALSE(m.en_toggled_off_zero);
+}

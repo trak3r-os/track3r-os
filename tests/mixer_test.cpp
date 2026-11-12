@@ -460,19 +460,77 @@ TEST_CASE("mixer: F1..F4 pick the page, the Master button again goes to the next
   CHECK(rig.page() == MixerPage::Stems);
   rig.tap(Button::F1);
   CHECK(rig.page() == MixerPage::Mixer);
-  rig.tap(Button::Master);  // pressed again: the next page, wrapping after the fifth (OS-INSFX S4: INSERTS is the fifth, F6)
+  rig.tap(Button::Master);  // pressed again: the next page, wrapping after the sixth (OS-INSFX S4: INSERTS is the fifth, F6)
   CHECK(rig.page() == MixerPage::Routing);
   rig.tap(Button::Master);
   rig.tap(Button::Master);
   CHECK(rig.page() == MixerPage::Stems);
   rig.tap(Button::Master);
   CHECK(rig.page() == MixerPage::Inserts);
+  rig.tap(Button::Master);  // OS-MASTEREQ: MST EQ is the sixth, reached by the Master button only
+  CHECK(rig.page() == MixerPage::MasterEq);
   rig.tap(Button::Master);
   CHECK(rig.page() == MixerPage::Mixer);
   rig.tap(Button::F6);
   CHECK(rig.page() == MixerPage::Inserts);
   CHECK(rig.row() == 0);
   CHECK(rig.app->failed_frames() == 0);
+}
+
+TEST_CASE("mixer MST EQ: the encoder steps a band by 1 dB, a coarse turn by 3, both clamp at 12; BASS BOOST is 0..100; Delete is the row's default (OS-MASTEREQ)") {
+  Rig rig;
+  for (unsigned i = 0; i < 5; ++i) {
+    rig.tap(Button::Master);  // MIXER -> ROUTING -> MST FX -> STEMS -> INSERTS -> MST EQ
+  }
+  CHECK(rig.page() == MixerPage::MasterEq);
+  CHECK(rig.row() == 0);
+  CHECK(rig.project().master_eq().band_db[0] == 0);
+  rig.turn(2);
+  CHECK(rig.project().master_eq().band_db[0] == 2);
+  rig.turn(-5);
+  CHECK(rig.project().master_eq().band_db[0] == -3);
+  rig.shift_turn(2);
+  CHECK(rig.project().master_eq().band_db[0] == 3);  // 3 dB a detent
+  rig.turn(100);
+  CHECK(rig.project().master_eq().band_db[0] == 12);
+  rig.turn(-100);
+  CHECK(rig.project().master_eq().band_db[0] == -12);
+  rig.tap(Button::Delete);
+  CHECK(rig.project().master_eq().band_db[0] == 0);
+  rig.tap(Button::Down);
+  rig.turn(1);
+  CHECK(rig.project().master_eq().band_db[1] == 1);
+  CHECK(rig.project().master_eq().band_db[0] == 0);
+  for (unsigned i = 0; i < 4; ++i) {
+    rig.tap(Button::Down);
+  }
+  CHECK(rig.row() == 5);  // BASS BOOST
+  rig.turn(7);
+  CHECK(rig.project().master_eq().bass == 7);
+  rig.turn(500);
+  CHECK(rig.project().master_eq().bass == 100);
+  rig.turn(-500);
+  CHECK(rig.project().master_eq().bass == 0);
+  rig.turn(3);
+  rig.tap(Button::Delete);
+  CHECK(rig.project().master_eq().bass == 0);
+  CHECK(rig.app->failed_frames() == 0);
+}
+
+TEST_CASE("mixer MST EQ: F7 and F8 are refused with TRACKS ONLY; the values are the project's, with no undo unit (OS-MASTEREQ)") {
+  Rig rig;
+  for (unsigned i = 0; i < 5; ++i) {
+    rig.tap(Button::Master);
+  }
+  CHECK(rig.page() == MixerPage::MasterEq);
+  rig.tap(Button::F7);
+  CHECK(rig.app->state().notify.last_text() == std::string("TRACKS ONLY"));
+  rig.tap(Button::F8);
+  CHECK(rig.app->state().notify.last_text() == std::string("TRACKS ONLY"));
+  CHECK(rig.journal.depth() == 0u);
+  rig.turn(4);
+  CHECK(rig.project().master_eq().band_db[0] == 4);
+  CHECK(rig.journal.depth() == 0u);
 }
 
 TEST_CASE("mixer routing: a turn up sets the route bit and a turn down clears it, and the engine hears the byte") {

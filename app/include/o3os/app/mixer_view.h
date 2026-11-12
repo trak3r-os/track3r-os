@@ -2,7 +2,7 @@
 #pragma once
 
 // Where the cursor of the Mixer screen is and what it points at (OS-011b): pure functions of the model and the view, shared by the screen (which draws it), its actions (which
-// edit it) and the tests. The screen has five pages (Master pressed again goes to the next); the cursor is two numbers kept in the view's generated-page cursor (ParamView:
+// edit it) and the tests. The screen has six pages (Master pressed again goes to the next; the sixth, MST EQ, has no F key); the cursor is two numbers kept in the view's generated-page cursor (ParamView:
 // `row` and `env`), so the screen costs the main loop's SRAM nothing:
 //
 //   MIXER     env = the column: T1..Tn (the active tracks), then IN, SND A, SND B, CUE, MASTER (MixBus); row = the field of a track column: 0 LEVEL, 1 PAN (the buses have LEVEL only)
@@ -21,8 +21,10 @@
 
 namespace o3os::app {
 
-enum class MixerPage : std::uint8_t { Mixer = 0, Routing = 1, MasterFx = 2, Stems = 3, Inserts = 4 };
-inline constexpr unsigned kMixerPages = 5;
+// OS-MASTEREQ: MasterEq (MST EQ) is the sixth, appended (the page order is append-only): the master output EQ and bass boost; the Master button's page cycle reaches it after INSERTS.
+enum class MixerPage : std::uint8_t { Mixer = 0, Routing = 1, MasterFx = 2, Stems = 3, Inserts = 4, MasterEq = 5 };
+inline constexpr unsigned kMixerPages = 6;
+inline constexpr unsigned kMasterEqRows = model::kMasterEqBands + 1u;  // OS-MASTEREQ: the five bands, then BASS BOOST
 
 // Eight labels for F1..F8 (docs/design/product-ux.md section 4, "Mixer and routing"): F1..F4 are the pages, F5 the cue level, F6 the INSERTS page (OS-INSFX S4; it was the mock's PRESET,
 // which no preset ever filled), F7 mutes and F8 solos what the cursor is on.
@@ -104,6 +106,7 @@ inline unsigned rows(const Model& model, const ViewState& view) noexcept {
     case MixerPage::MasterFx: return kMasterFxRows;
     case MixerPage::Stems: return stem_rows(model) < 1u ? 1u : stem_rows(model) + 1u;  // the OUTPUTS row, then the slots (none without a map)
     case MixerPage::Inserts: return tracks(model) + 1u;   // T1..Tn, MASTER
+    case MixerPage::MasterEq: return kMasterEqRows;       // OS-MASTEREQ: the five bands, BASS BOOST
   }
   return 1;
 }
@@ -121,9 +124,10 @@ inline Cursor cursor(const Model& model, const ViewState& view) noexcept {
   switch (page) {
     case MixerPage::Mixer: col_max = columns(model); break;
     case MixerPage::Routing: col_max = kRouteCols; break;
-    case MixerPage::MasterFx: col_max = 1; break;
     case MixerPage::Stems: col_max = kStemSources; break;
     case MixerPage::Inserts: col_max = kInsertSlots; break;
+    case MixerPage::MasterFx:
+    case MixerPage::MasterEq: break;  // one column
   }
   const unsigned row = view.mixer.row;
   const unsigned col = view.mixer.col;
@@ -169,6 +173,7 @@ inline core::ParamId focus(const Model& model, const ViewState& view) noexcept {
     case MixerPage::Routing:
     case MixerPage::Stems:
     case MixerPage::Inserts:
+    case MixerPage::MasterEq:  // not a parameter: no MIDI learn, no automation (OS-MASTEREQ D7)
       break;
   }
   return core::ParamId::None;

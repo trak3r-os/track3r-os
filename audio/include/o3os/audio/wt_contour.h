@@ -114,6 +114,12 @@ inline constexpr unsigned kWtUserBytes = sizeof(WtUserBank);
 
 // Fills dst[0..127] with the procedural contour of `shape` (held to 0..255): what wt_make writes, without the bank. Main loop only.
 void wt_make_points(std::int16_t* dst, unsigned shape) noexcept;
+// OS-FLASHDIET-LIBM: the two maths policies of wt_make_points, for the host test. The target links only the fast one (no libm); the host's
+// wt_make_points is the libm one (the golden), the target's is the fast one.
+void wt_make_points_fast(std::int16_t* dst, unsigned shape) noexcept;
+#if !defined(__arm__)
+void wt_make_points_libm(std::int16_t* dst, unsigned shape) noexcept;
+#endif
 
 void wt_user_bind(WtUserBank& user) noexcept;  // main loop, once, after wt_bind: every slot names its bank row, no file held. Bind the bank again, bind this again.
 void wt_user_unbind(const WtUserBank& user) noexcept;  // when `user` is the bound one, unbinds it (see wt_unbind)

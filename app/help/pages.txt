@@ -288,7 +288,8 @@ A PAD	Plays the take under review.
 == HELP: MIXER
 | The Mixer has one column for each track. Use it to set levels, to route tracks, to set the
 | master effects and the stems, to mute and solo. Press Master to open it; F1 to F4 are its
-| four pages.
+| four pages. Pressing Master again steps on to INSERTS (F6) and to MST EQ, a five-band EQ
+| and a bass boost for the analogue outputs only: not in renders, USB audio or resampling.
 
 KEYS	
 F1 MIXER	The track columns: names, levels, meters.
@@ -296,6 +297,7 @@ F2 ROUTING	Where each track goes. A turn up sets the route, a turn down clears
 	it.
 F3 MST FX	The master effects.
 F4 STEMS	The sources of each stem. INSERT sets the source, DELETE clears it.
+MASTER	Press again on the Mixer: the next page. MST EQ has no F key.
 F5 CUE LVL	Go to the CUE row of the MASTER FX page, where the cue level is set.
 F7 MUTE, F8 SOLO	Mute or solo the track under the cursor.
 SHIFT + F7	UNMUTE: all tracks sound again. SHIFT + F8: UNSOLO.

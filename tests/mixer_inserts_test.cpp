@@ -380,7 +380,7 @@ TEST_CASE("mixer inserts: F6 opens the INSERTS page, the fifth of the Mixer, and
   Rig rig;
   rig.record(5, 0, "reverb");  // an INSX record of T6 INS A names reverb: the project needs it, the card lacks it
   rig.inserts_page();
-  CHECK(app::kMixerPages == 5u);
+  CHECK(app::kMixerPages == 6u);  // (OS-MASTEREQ: MST EQ is the sixth, after INSERTS)
   // Insert: the picker of modules/effects (the synth is an instrument on the effects folder: listed, refused at the pick; notes.txt is no module)
   rig.tap(Button::Insert);
   CHECK(rig.app->state().overlay == app::OverlayId::ModulePicker);

@@ -268,6 +268,9 @@ class Editor {
   // and an in-sync history stays in sync when the project's generation moves.
   Status set_insert(const InsertRecord& value) noexcept;
   Status clear_insert(std::uint32_t where, std::uint32_t slot) noexcept;
+  // OS-MASTEREQ: the master output EQ and bass boost (Project::set_master_eq: clamped; same Status), written the same way. NOT undoable (D7: the Mixer keeps no history): no record, and an in-sync
+  // history stays in sync when the project's generation moves.
+  Status set_master_eq_state(const MasterEq& value) noexcept;
 
   // Parameters (OS-002d): one value, or one slot of the project's Learn store; same checks and Status as the Project's.
   Status set_param(core::ParamId id, float value) noexcept;

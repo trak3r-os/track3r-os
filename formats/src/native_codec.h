@@ -52,6 +52,10 @@ inline constexpr std::size_t kMevtEvent = 8;
 static_assert(kMevtEvent == sizeof(model::LaneEvent), "the event in the file is the event in memory, byte-swapped");
 inline constexpr std::size_t kMevtMax = kMevtHead + model::kMaxLanes * kMevtLaneHead + model::kMaxLanePoolEvents * kMevtEvent;
 
+// MEQ (OS-MASTEREQ): version u16, five int8 band values in dB, one u8 bass boost: 8 bytes, written only when a value is not its default (docs/formats/o3-project.md "The MEQ chunk").
+inline constexpr std::size_t kMeqBytes = 8;
+static_assert(kMeqBytes == 2 + model::kMasterEqBands + 1, "the MEQ chunk size of docs/formats/o3-project.md");
+
 static_assert(kPhdrMax <= kScratchBytes && kTrakMax <= kScratchBytes && kModrMax <= kScratchBytes &&
                   kSongMax <= kScratchBytes && kInstMax <= kScratchBytes,
               "every chunk read whole must fit the scratch buffer");
