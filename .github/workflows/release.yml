@@ -1,12 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Release mechanism (OS-RELEASE-ptf): a pushed tag v* builds the MK66 device image twice from clean build directories, refuses to go on unless
-# the two images are byte-identical and pass the static image checks, and creates a DRAFT release with the update file
-# (track3r-os-<tag>.ptf, the image's Intel HEX under a .ptf name) and its SHA256SUMS. Nothing is published by this workflow: the maintainer
-# reads the draft and publishes it by hand. The image is never flashed; docs/manual/install.md says how a person installs it.
+# the two images are byte-identical and pass the static image checks, builds the content kit (tools/release/make_kit.sh: the modules and examples
+# zips) and PUBLISHES the release (marked Latest, maintainer decision 2026-11-18) with four files: track3r-os-<tag>.ptf (the image's Intel HEX under
+# a .ptf name), track3r-os-<tag>-modules.zip, track3r-os-<tag>-examples.zip and one SHA256SUMS over the three. The body is docs/release/<tag>.md
+# when it exists (else a generic text) followed by the SHA-256/CRC table. The image is never flashed; docs/manual/install.md says how a person installs it.
+# There is no GitHub CI: the gate of every change is tools/ci.sh run locally.
 #
 # A release can be redone without touching the tag: Actions, release, Run workflow, and type the tag (for example v1.0.0). The run builds
-# that tag whatever branch it was started from. `gh release create` refuses a tag that already has a release, so delete the earlier draft first.
+# that tag whatever branch it was started from. When the tag already has a release, its files are replaced (`gh release upload --clobber`) and
+# its notes are rewritten.
 name: release
 
 on:
@@ -15,7 +18,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "The existing tag to build and draft a release for, for example v1.0.0"
+        description: "The existing tag to build and publish a release for, for example v1.0.0 (a release that exists already gets its files replaced)"
         required: true
         type: string
 
@@ -29,17 +32,20 @@ jobs:
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }}   # by hand: the tag that was typed; on a tag push: the tag pushed
           fetch-depth: 0   # the image's version comes from `git describe`, which needs the tags
       - name: Install build tools
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake g++ python3 xz-utils curl
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake make g++ python3 xz-utils curl
+      - name: Key of the Arm GNU toolchain archive
+        id: tckey
+        run: echo "key=$(tools/ci.sh toolchain-key)" >> "$GITHUB_OUTPUT"
       - name: Cache the Arm GNU toolchain archive
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: arm-archive
-          key: ${{ runner.os }}-${{ hashFiles('tools/ci.sh') }}
+          key: ${{ runner.os }}-${{ steps.tckey.outputs.key }}
       - name: Unpack the pinned Arm GNU toolchain
         env:
           O3OS_CI_ARCHIVE_DIR: ${{ github.workspace }}/arm-archive
@@ -51,6 +57,7 @@ jobs:
           [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]] || { echo "tag $TAG is not v<major>.<minor>.<patch>[-suffix]"; exit 1; }
           name="track3r-os-${TAG}.ptf"
           [[ "$name" =~ ^[0-9A-Za-z][0-9A-Za-z._-]{0,25}\.ptf$ && "$name" != *..* ]] || { echo "$name (${#name} characters) is not a name the unit accepts: at most 30 characters with .ptf (stem of 26 at most), so the tag $TAG is too long"; exit 1; }
+          [ -f "docs/release/${TAG}.md" ] || { echo "docs/release/${TAG}.md is missing: the release is published at once, so its page must exist in the tag"; exit 1; }
           echo "PTF=$name" >> "$GITHUB_ENV"
       - name: Build the MK66 image twice in fresh directories
         run: |
@@ -73,38 +80,49 @@ jobs:
           ctest --test-dir build-release-a --output-on-failure --no-tests=error -j2
           python3 -I platform/mk66/tools/check_image.py check build-release-a/platform/mk66/o3os.hex --expect-sp 0x20030000 --ramfunc-l 0x1FFF0000:0xC000
           python3 -I platform/mk66/tools/check_image.py flashconfig build-release-a/platform/mk66/o3os.hex --expect ffffffffffffffffffffffffdef9ffff
-      - name: Make the update file, checksums and release notes
+      - name: Make the kit (modules zip, examples zip, checksums)
+        # One script for people and the workflow. It downloads the pinned third-party files and re-reads the Mod Archive licence pages: any failed
+        # fetch, hash mismatch or changed licence fails the run (set -e), nothing is skipped.
         run: |
           set -euo pipefail
-          mkdir release
-          cp build-release-a/platform/mk66/o3os.hex "release/$PTF"
-          cd release
-          sha256sum "$PTF" > SHA256SUMS
-          SHA=$(cut -d' ' -f1 SHA256SUMS)
+          export ARM_GNU_ROOT="$PWD/.toolchains/arm-gnu-toolchain-15.3.rel1-x86_64-arm-none-eabi"
+          mkdir build-release-kit
+          cp build-release-a/platform/mk66/o3os.hex "build-release-kit/$PTF"
+          tools/release/make_kit.sh "$TAG" build-release-kit
+          ls -l build-release-kit
+      - name: Make the release notes
+        run: |
+          set -euo pipefail
+          cd build-release-kit
+          SHA=$(sha256sum "$PTF" | cut -d' ' -f1)
           # The CRC-32 of the file's bytes: the value `o3console.py --update ... --crc` expects (the `ok` line of its --put prints the same).
           CRC=$(python3 -I -c 'import sys, zlib; print("%08X" % (zlib.crc32(open(sys.argv[1], "rb").read()) & 0xFFFFFFFF))' "$PTF")
-          cat > ../notes.md <<NOTES
-          track3r-os ${TAG}: a community operating system for the Polyend Tracker hardware, written from scratch. Update file: \`${PTF}\`.
-
-          > **At your own risk.** This is unofficial community firmware. It is not affiliated with or endorsed by Polyend. Back up your SD card first and keep the official firmware at hand to go back.
-
-          Install guide, including how to go back to the official firmware: [docs/manual/install.md](https://github.com/${GITHUB_REPOSITORY}/blob/${TAG}/docs/manual/install.md)
-
+          # The release is public at once, so a tag without its release page does not go out (checked first in "Check the tag").
+          [ -f "../docs/release/${TAG}.md" ] || { echo "docs/release/${TAG}.md is missing: write the release page before the tag"; exit 1; }
+          # The page's relative links become absolute links to the tag.
+          (cd .. && python3 -I tools/release/notes_links.py "docs/release/${TAG}.md" "$GITHUB_REPOSITORY" "$TAG" > notes.md)
+          echo >> ../notes.md
+          cat >> ../notes.md <<NOTES
           | | |
           |---|---|
-          | File | \`${PTF}\` |
+          | Update file | \`${PTF}\` |
           | SHA-256 | \`${SHA}\` |
           | CRC-32 (for \`o3console.py --update --crc\`) | \`${CRC}\` |
 
-          Check the download with \`sha256sum -c SHA256SUMS\`. Two clean builds of this tag gave byte-identical images, and the image passed the static checks (Intel HEX, address range, vectors, flash configuration field).
+          Files: \`${PTF}\` (the firmware), \`track3r-os-${TAG}-modules.zip\` (modules, presets and Sample Editor plugins) and \`track3r-os-${TAG}-examples.zip\` (samples, wavetables, songs, demo projects); unpack the zips into the root of the SD card. Check the downloads with \`sha256sum -c SHA256SUMS\`. Two clean builds of this tag gave byte-identical images, and the image passed the static checks (Intel HEX, address range, vectors, flash configuration field).
 
           Source: this tag (GPL-3.0-or-later).
           NOTES
           cat ../notes.md
-      - name: Create the draft release
+      - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release create "$TAG" "release/$PTF" release/SHA256SUMS \
-            --draft --verify-tag --title "track3r-os $TAG" --notes-file notes.md
+          files=("build-release-kit/$PTF" "build-release-kit/track3r-os-${TAG}-modules.zip" "build-release-kit/track3r-os-${TAG}-examples.zip" build-release-kit/SHA256SUMS)
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" "${files[@]}" --clobber
+            gh release edit "$TAG" --notes-file notes.md --draft=false --latest
+          else
+            gh release create "$TAG" "${files[@]}" --verify-tag --latest --title "track3r-os $TAG" --notes-file notes.md
+          fi

@@ -193,7 +193,7 @@ foreach(_i RANGE 1 ${O3SIM_GALLERY_SHARDS})
   set_tests_properties(gallery_${_i}of${O3SIM_GALLERY_SHARDS} PROPERTIES TIMEOUT 600)  # a shot costs ~0.65 s under the sanitizers (twice); more on a loaded machine
 endforeach()
 # OS-E2E-5: the legibility sweep (`o3sim --legibility`, sim/legibility.h) over the same shots, in the same shards. Label `e2e` (cmake/O3osLabels.cmake):
-# `tools/ci.sh e2e` runs it; `tools/ci.sh host` and the GitHub CI leave it out. A frame whose ink is cut by the scissor or the screen edge, two bitmaps on
+# `tools/ci.sh e2e` runs it; `tools/ci.sh host` leaves it out. A frame whose ink is cut by the scissor or the screen edge, two bitmaps on
 # one pixel, or a colour pair outside the theme's contrast table fails the shard and prints the frame's key.
 set(O3SIM_LEGIBILITY_SHARDS 6)
 foreach(_i RANGE 1 ${O3SIM_LEGIBILITY_SHARDS})

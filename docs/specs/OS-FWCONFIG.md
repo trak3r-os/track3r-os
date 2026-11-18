@@ -17,7 +17,7 @@ It adds no new way to write flash. The bootloader still does the flashing, from 
 
 ## What exists
 
-- **`HexValidator`** (`.../update/hex_validator.h`) is a streaming check fed in any chunking. Its rules are those of `tools/check_image.py`, plus ascending records. It checks the flash configuration field exactly, the SP, the reset vector and the vectors, and reports the image length and the file's CRC-32.
+- **`HexValidator`** (`.../update/hex_validator.h`) is a streaming check fed in any chunking. Its rules are those of `tools/check_image.py`, plus ascending records. It checks the flash configuration field exactly and the image's end (last sector, padding), not the SP, the reset vector or the vectors (OS-BUG-UPDFOREIGN: the device installs any well-formed image; the reset button is the way back), and reports the image length and the file's CRC-32.
 - **`FwService`** holds the console state machine.
   - `arm` re-reads and fully re-validates the file, checks its CRC, and issues a one-use token valid for 30 s.
   - `update <token>` re-validates once more, then does the hand-over:

@@ -2,6 +2,18 @@
 
 User-visible changes of the Community OS, newest first, one entry per change, in English. The next release notes link here. A change that touches a saved file or the level of what you hear says so in plain words.
 
+## v1.4.1 (2026-11-19)
+
+A fix for the on-device update. No saved file changes; the module ABI is 1.13, as in v1.4.0, and the v1.4.0 modules are the same.
+
+### Fixed
+
+- **The Update screen installs any well-formed `.ptf`, official firmware included.** Config, INFO, `F8` refused every official `PolyendTracker_*.ptf` with "bad reset vector". The check now keeps only what protects the unit: a valid Intel HEX file inside the flash, and the flash configuration field that could lock the chip. An official file is offered **PAD** first (it is not padded to a 4 KiB sector), then installs. The hidden reset button stays the way back from any image. Public report on the Tracker Discord.
+
+### Changed
+
+- The mixer's two send passes per channel run as one; what you hear is identical (bit for bit).
+
 ## v1.4.0 (2026-11-12)
 
 A master EQ on the Mixer, a bend strip and a vibrato pad on the PIANO pads, a key-layout clean-up (fewer chords, one accept/back grammar) and six Sample Editor plugins of our own. The module ABI is 1.13, as in v1.3.0. One saved-file change: a project with a master EQ gains an optional `MEQ ` chunk (see Changed). Use the v1.4.0 modules zip: it adds the six plugins.

@@ -657,18 +657,14 @@ TSan on this kernel (Linux 6.8) needs address randomisation off or GCC 13's runt
 "unexpected memory mapping". The TSan ctest entries already run under `setarch <arch> -R`; by hand:
 `setarch "$(uname -m)" -R build-os-tsan/tests/o3os_tests`.
 
-## CI (OS-CI, `.github/workflows/ci.yml`, `docs/specs/OS-CI.md`)
+## CI (OS-CI, `docs/specs/OS-CI.md`; no GitHub workflow since 2026-11-18, `.github/workflows/release.yml` only builds releases)
 
-`tools/ci.sh <host|qemu|mk66>` is the one place that holds the configure, build and test commands; the workflow only calls
-it (a matrix of the three), so a person runs exactly what CI runs: `tools/ci.sh host` (ASan + UBSan), `qemu` (needs
+`tools/ci.sh <host|qemu|mk66>` is the one place that holds the configure, build and test commands, so a person runs exactly what CI runs: `tools/ci.sh host` (ASan + UBSan), `qemu` (needs
 `qemu-system-arm`), `mk66`. Each starts from a fresh `build-os-ci-<mode>/` (`O3OS_CI_KEEP=1` reuses it; `O3OS_CI_JOBS` sets the
 parallelism) and exits non-zero on a configure or build failure, on **any warning** in the configure or build output, and on a
 failing or empty ctest. The cross modes use the pinned **Arm GNU Toolchain 15.3.Rel1** in `.toolchains/`; `tools/ci.sh
 toolchain` downloads it from Arm's package registry (docs/toolchain.md) and unpacks it only after its SHA-256 matches the one
-written in the script; the workflow caches the archive under a key that contains that hash (`toolchain-key`), and the hash is
-checked on every run, so a cache cannot change what is unpacked. The workflow runs on a pushed release tag `v*`, on a pull request into `dev` or `main`, and by hand (`workflow_dispatch`); day to day `tools/ci.sh` is run locally. It
-has read-only `contents` permission, uses no secret, uses each action at a major-version tag (`@v4`), not a commit SHA, and uploads nothing but the ctest log of a
-failed run (no `.elf`, `.hex` or `.bin`: CI never makes a flashable candidate).
+written in the script; `release.yml` caches the archive under a key that contains that hash, and the hash is checked on every run, so a cache cannot change what is unpacked.
 
 `fixtures/` (the maintainer's SD files) is never in the repository. The tests that read it skip when it is absent
 (`og_fixture_survey_test.cpp`), and `ci.sh` points `O3_FIXTURES_DIR` at a directory that does not exist so that a run does not

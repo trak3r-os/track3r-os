@@ -22,9 +22,9 @@ enum class Fault : std::uint8_t {
   HexOrder,      // a data byte not at the next address: a hole, a byte given twice, or records out of order
   HexRange,      // an address above 0x000FFFFF (the MK66FX1M0's 1 MiB of flash)
   HexShort,      // the image ends before 0x410: no vector table and flash configuration
-  BadSp,         // the initial stack pointer is not 0x20030000
-  BadReset,      // the reset vector is not a Thumb address inside the image past 0x410
-  BadVector,     // a vector table entry is not a Thumb address into the image or the SRAM_L code window, or a reserved slot is not 0
+  BadSp,         // no longer raised (OS-BUG-UPDFOREIGN): the initial SP is not checked; the value stays so that none moves
+  BadReset,      // no longer raised (OS-BUG-UPDFOREIGN)
+  BadVector,     // no longer raised (OS-BUG-UPDFOREIGN)
   BadConfig,     // the flash configuration field is not ffffffffffffffffffffffffdef9ffff: the MCU could be locked
   // the transfer (fw_service.h)
   Idle,          // nothing arrived for 5 s

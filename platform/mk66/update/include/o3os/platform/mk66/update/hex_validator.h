@@ -19,9 +19,8 @@
 //     filled it (end 0x100000) hung the unit after the update (OS-BUG-LASTSECTOR; cause open). No waiver on the device. Tested before `NotPadded`, so an
 //     unpadded image that already reaches that sector is not offered a pad that would only end there;
 //   * every address is <= 0x000FFFFF (1 MiB of flash), and the image reaches at least 0x410;
-//   * initial SP exactly 0x20030000; reset vector a Thumb address inside the image and past the flash configuration (>= 0x410);
-//   * the 116 vector entries (16 system, 100 device): the reserved slots 7-10 and 13 are 0, every other entry is a Thumb address inside the image past
-//     0x410, or inside the SRAM_L code window (0x1FFF0000, 0xC000: the audio ISRs run from there, copied from flash at reset) at an offset inside the image;
+//   * NO check of the initial SP, the reset vector or the vector table (OS-BUG-UPDFOREIGN, maintainer 2026-11-18: the device installs any well-formed
+//     image, the way back is the reset button; official images fail those rules by layout). check_image.py `check --profile device` mirrors this;
 //   * the flash configuration field, 0x400..0x40F, is exactly ffffffffffffffffffffffffdef9ffff and FSEC & 3 == 2. A wrong field can lock the MCU for
 //     good. The constant below is this file's own copy; static_asserts pin it to flash_config.h, and check_image.py, the mk66_flashconfig ctest and
 //     the flashing-safety rules hold the others.
@@ -42,9 +41,6 @@ inline constexpr std::uint32_t kHeadBytes = 0x410;  // the vector table, the fla
 inline constexpr std::uint32_t kConfigAddress = 0x400;
 inline constexpr unsigned kConfigBytes = 16;
 inline constexpr unsigned kVectorEntries = 116;
-inline constexpr std::uint32_t kRequiredSp = 0x20030000u;
-inline constexpr std::uint32_t kRamfuncBase = 0x1FFF0000u;  // the SRAM_L code window (pinned to mem_map.h by hex_validator.cpp's static_asserts)
-inline constexpr std::uint32_t kRamfuncSize = 0xC800u;  // 50 KiB since the module slab went to 14 KiB (OS-PERF3; 49 at 15 KiB); hot code sits in the first 27 KiB, so the validator accepts the images of the older sizes too
 inline constexpr std::uint32_t kMaxImageBytes = kFlashLastAddress + 1u;
 inline constexpr std::uint32_t kFlashSector = 4096u;  // the SD bootloader leaves a short final sector neither erased nor programmed (OS-BUG-COSMBOOT): the image must end on a boundary
 inline constexpr std::uint32_t kLastSectorStart = 0x000FF000u;  // an image ends (last address + 1) at or below this: the last flash sector stays empty (OS-BUG-LASTSECTOR)
@@ -79,7 +75,6 @@ class HexValidator {
   void data_byte(std::uint32_t index, std::uint8_t b) noexcept;
   void end_of_record() noexcept;
   void fail(Fault f) noexcept;
-  std::uint32_t head_word(unsigned index) const noexcept;
 
   State state_ = State::LineStart;
   bool cr_ = false;       // a CR was seen on this line: only LF or another CR may follow

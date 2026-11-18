@@ -38,6 +38,6 @@ This adds a `Signed-off-by: Your Name <you@example.com>` line. The address becom
 
 ## How pull requests are handled
 
-Every pull request gets an automated review (a `firmware-reviewer` pass), posted as the review. The project's maintainer agents may merge a Level A or B change (a typo, docs, a tool, a normal feature or fix) when the GitHub CI is green and the review approves it.
+Every pull request gets an automated review (a `firmware-reviewer` pass), posted as the review. The project's maintainer agents may merge a Level A or B change (a typo, docs, a tool, a normal feature or fix) when the review approves it and, after the reviewer found the diff safe, a local `tools/ci.sh` run is green. There is no GitHub CI: run `tools/ci.sh host` yourself before you open the pull request.
 
 Some changes wait for the human maintainer, whatever the review says: persistent formats, update, boot and storage code, interrupt handlers and the audio path, and published ABIs (the module SDK, the file formats). Expect those to take longer, and expect questions about hardware verification, because a host test is not a test on the unit.

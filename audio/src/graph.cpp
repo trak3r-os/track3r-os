@@ -22,6 +22,23 @@ O3OS_AUDIO_INLINE float send_level(float sum, std::int8_t offset) noexcept {
   return v < 0.0f ? 0.0f : (v > 100.0f ? 100.0f : v);
 }
 
+// The two sends' MACs of one block (strip or input), a send that is closed is not run: both open make one read of the block (kernel::mac2, OS-PERF-R1).
+// One copy for both callers, so the hot callers (run_tracks, run_input) grow by one call each.
+O3OS_AUDIO_HOT void send_macs(Smoother* g, const std::int16_t* block, std::int32_t (*acc)[Graph::kBlock], bool& dirty_a, bool& dirty_b) noexcept {
+  const bool open[2] = {!g[0].closed(), !g[1].closed()};
+  // each smoother moves on one block, as before (independent of the other); a closed one gives the (0, 0) the kernels skip (no array fill: that would be a memset call out of SRAM_L)
+  const Ramp r[2] = {open[0] ? g[0].next_block() : Ramp{0, 0}, open[1] ? g[1].next_block() : Ramp{0, 0}};
+  if (!(open[0] && open[1] && kernel::mac2(acc[0], acc[1], block, kBlk, r[0], r[1]))) {
+    for (unsigned a = 0; a < 2u; ++a) {
+      if (open[a]) {
+        kernel::mac(acc[a], block, kBlk, r[a].start, r[a].end);
+      }
+    }
+  }
+  dirty_a = dirty_a || open[0];
+  dirty_b = dirty_b || open[1];
+}
+
 // A block of kBlk samples, a word at a time (both 4-byte aligned): the feed into a scratch block, a track's block into the stem staging.
 O3OS_AUDIO_INLINE void copy_block(std::int16_t* dst, const std::int16_t* src) noexcept {
   for (std::uint32_t i = 0; i < kBlk; i += 2u) {
@@ -903,13 +920,7 @@ void Graph::run_tracks(bool silence) noexcept {
         s.insert[k].fn(s.insert[k].state, block, kBlk);
       }
     }
-    for (unsigned a = 0; a < 2u; ++a) {  // sends, PRE-fader: the block as the inserts left it
-      if (!s.send_gain[a].closed()) {
-        const Ramp r = s.send_gain[a].next_block();
-        kernel::mac(acc_snd_[a], block, kBlk, r.start, r.end);
-        b_snd_[a].dirty = true;
-      }
-    }
+    send_macs(s.send_gain, block, acc_snd_, b_snd_[0].dirty, b_snd_[1].dirty);  // sends, PRE-fader: the block as the inserts left it
     if (s.level.closed()) {  // the fader is shut: nothing downstream of it (and no tap); the routes carry nothing, so they stand at their targets
       for (unsigned d = 0; d < kDests; ++d) {
         s.dest_l[d].snap();
@@ -1112,13 +1123,7 @@ void Graph::run_input(bool silence) noexcept {
   Bus* const buses[3] = {&b_main_, &b_cue_, &b_rec_};
   if (!in.send_gain[0].closed() || !in.send_gain[1].closed()) {
     kernel::mono_mix(mono_, in_[0], in_[1], kBlk);
-    for (unsigned a = 0; a < 2u; ++a) {
-      if (!in.send_gain[a].closed()) {
-        const Ramp r = in.send_gain[a].next_block();
-        kernel::mac(acc_snd_[a], mono_, kBlk, r.start, r.end);
-        b_snd_[a].dirty = true;
-      }
-    }
+    send_macs(in.send_gain, mono_, acc_snd_, b_snd_[0].dirty, b_snd_[1].dirty);
   }
   if (in.level.closed()) {
     for (unsigned d = 0; d < kDests; ++d) {

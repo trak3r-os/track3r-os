@@ -17,6 +17,8 @@ usage: starter_test.py REPO_ROOT [O3PJ_TOOL]
     text and a CREDITS.txt entry, and a missing file, a file the 3.1 checks refuse, a source that is not MIT, a missing --ptfx-dir and an MIT
     entry in `files` (MIT is for the `ptfx` section only) are refused; so is a .ptfx file older than its source (a stale build) and a
     --ptfx-build directory that cannot be built.
+  - OS-RELGHA: `--split` gives the modules zip and the examples zip (named after the .ptf, byte-identical twice, licences in both, own README and
+    SHA256SUMS each, no Firmware/, together everything of the one zip), and tools/release/notes_links.py makes a release page's links absolute.
 Nothing here uses the network: http_get is replaced where a download is exercised.
 """
 import copy
@@ -321,6 +323,54 @@ def test_archive(ms, root):
             digest, path = line.split("  ", 1)
             check(sha(z.read(path)) == digest, "SHA256SUMS: " + path)
         check(z.read("Firmware/track3r-os-9.9.9.ptf.sha256").decode().split()[0] == sha(open(ptf, "rb").read()), "the .ptf checksum file")
+        # OS-RELGHA: --split writes the modules zip and the examples zip, named after the .ptf, byte-identical twice; together they hold the one zip's
+        # files but Firmware/ (the licences in both), each with its own README.txt and a SHA256SUMS that lists every other file of the zip
+        code3, out3 = run_build(ms, tmp, "s1", mpath, ptf, modules, cache, ("--split",))
+        code4, out4 = run_build(ms, tmp, "s2", mpath, ptf, modules, cache, ("--split",))
+        check(code3 == 0 and code4 == 0, "both offline --split builds succeed")
+        check(not os.path.exists(os.path.join(out3, "track3r-os-9.9.9.zip")), "--split does not write the one zip")
+        parts = {}
+        for kind in ("modules", "examples"):
+            name = "track3r-os-9.9.9-%s.zip" % kind
+            with open(os.path.join(out3, name), "rb") as a, open(os.path.join(out4, name), "rb") as b:
+                da, db = a.read(), b.read()
+            check(da == db and len(da) > 0, "two --split builds give byte-identical %s zips" % kind)
+            zz = zipfile.ZipFile(io.BytesIO(da))
+            nn = zz.namelist()
+            check(nn == sorted(nn) and len(nn) == len(set(nn)), kind + " zip: entries sorted and unique")
+            check({i.date_time for i in zz.infolist()} == {ms.ZIP_TIME}, kind + " zip: one fixed time stamp")
+            check(not any(n.startswith("Firmware/") for n in nn), kind + " zip: no Firmware/")
+            check("README.txt" in nn and "9.9.9" in zz.read("README.txt").decode() and "%" not in zz.read("README.txt").decode().replace("100%", ""),
+                  kind + " zip: its own README with the version")
+            lines = zz.read("SHA256SUMS").decode().splitlines()
+            check(sorted(l.split("  ", 1)[1] for l in lines) == [n for n in nn if n != "SHA256SUMS"], kind + " zip: SHA256SUMS lists every other file")
+            for line in lines:
+                digest, path = line.split("  ", 1)
+                check(sha(zz.read(path)) == digest, kind + " zip SHA256SUMS: " + path)
+            parts[kind] = (zz, set(nn))
+        mz, mn = parts["modules"]
+        ez, en = parts["examples"]
+        check(all(n.startswith(("modules/", "Effects/", "LICENSES/")) or n in ("README.txt", "SHA256SUMS") for n in mn), "modules zip: only modules/, Effects/, LICENSES/")
+        check(not any(n.startswith(("modules/", "Effects/")) for n in en), "examples zip: no modules/ or Effects/")
+        check({"Effects/delay.ptfx", "modules/apps/fakeapp.tmod", "modules/instruments/fakeinst.tmod"} <= mn, "modules zip: modules and plugins")
+        check({"Samples/Drums/kick.wav", "Songs/MOD/two.mod", "WTABLE/Surge/three.wt", "Projects/Starter-Samples/project.o3pj"} <= en, "examples zip: content")
+        check({n for n in names if n.startswith("LICENSES/")} == {n for n in mn if n.startswith("LICENSES/")} == {n for n in en if n.startswith("LICENSES/")},
+              "both zips carry every licence file")
+        check(sorted((mn | en) - {"README.txt", "SHA256SUMS"}) == sorted(n for n in names if not n.startswith("Firmware/") and n not in ("README.txt", "SHA256SUMS")),
+              "the two zips together hold everything of the one zip but Firmware/")
+        check(ms.split_prefix("/x/track3r-os-v1.4.0.ptf") == "track3r-os-v1.4.0", "the split zips are named after the .ptf")
+        refuses(ms, lambda: ms.split_entries({"README.txt": b"x"}, "1"), "without content", "a split with nothing to split")
+
+        # OS-RELGHA: the release page's relative links become absolute links to the tag
+        nl_spec = importlib.util.spec_from_file_location("notes_links", os.path.join(root, "tools", "release", "notes_links.py"))
+        nl = importlib.util.module_from_spec(nl_spec)
+        nl_spec.loader.exec_module(nl)
+        page = "See [the log](../CHANGELOG.md), [legal](../../THIRD_PARTY.md#x), [old](v1.2.0.md), [web](https://e.org/a), [here](#top), [abs](/x)\n[ref]: ../manual/install.md\n"
+        got = nl.rewrite(page, "docs/release/v1.4.0.md", "o/r", "v1.4.0")
+        b = "https://github.com/o/r/blob/v1.4.0/"
+        check(got == ("See [the log](%sdocs/CHANGELOG.md), [legal](%sTHIRD_PARTY.md#x), [old](%sdocs/release/v1.2.0.md), [web](https://e.org/a), [here](#top), [abs](/x)\n"
+                      "[ref]: %sdocs/manual/install.md\n") % (b, b, b, b), "release page links: " + got)
+
         credits = z.read("LICENSES/CREDITS.txt").decode()
         check("Author four" in credits and "Title four" in credits and "CC BY 4.0" in credits, "the CC-BY attribution is in CREDITS.txt")
         check("Surge Synth Team" in credits, "the GPL notice is in CREDITS.txt")

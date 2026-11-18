@@ -27,8 +27,6 @@ static_assert(kFlashSector == mem::kFlashSectorSize, "the padding rule is the fl
 static_assert(kLastSectorStart == kMaxImageBytes - kFlashSector, "the last flash sector is the one that stays empty");
 static_assert((kRequiredConfig[12] & 0x03u) == 0x02u, "FSEC & 3 == 2 (unsecured)");
 static_assert(kConfigAddress + kConfigBytes == 0x410u && kHeadBytes == 0x410u, "the head holds the whole flash configuration field");
-static_assert(kRamfuncBase == mem::kSramLBase && kRamfuncSize == mem::kRamfuncLSize, "the SRAM_L code window is mem_map.h's");
-static_assert(kVectorEntries * 4u <= kConfigAddress, "the vector table sits below the flash configuration field");
 
 int hex_value(std::uint8_t c) noexcept {
   if (c >= '0' && c <= '9') {
@@ -42,8 +40,6 @@ int hex_value(std::uint8_t c) noexcept {
   }
   return -1;
 }
-
-bool reserved_vector(unsigned index) noexcept { return index == 7u || index == 8u || index == 9u || index == 10u || index == 13u; }
 }  // namespace
 
 void HexValidator::reset() noexcept {
@@ -215,12 +211,6 @@ void HexValidator::end_of_record() noexcept {
   }
 }
 
-std::uint32_t HexValidator::head_word(unsigned index) const noexcept {
-  const unsigned at = index * 4u;
-  return static_cast<std::uint32_t>(head_[at]) | (static_cast<std::uint32_t>(head_[at + 1]) << 8) | (static_cast<std::uint32_t>(head_[at + 2]) << 16) |
-         (static_cast<std::uint32_t>(head_[at + 3]) << 24);
-}
-
 bool HexValidator::finish() noexcept {
   if (fault_ != Fault::Ok) {
     return false;
@@ -256,38 +246,8 @@ bool HexValidator::finish() noexcept {
     fail(Fault::BadConfig);
     return false;
   }
-  if (head_word(0) != kRequiredSp) {
-    fail(Fault::BadSp);
-    return false;
-  }
-  const std::uint32_t reset = head_word(1);
-  const std::uint32_t reset_target = reset & ~1u;
-  if ((reset & 1u) == 0u || reset_target < kHeadBytes || reset_target >= next_) {
-    fail(Fault::BadReset);
-    return false;
-  }
-  for (unsigned index = 2; index < kVectorEntries; ++index) {
-    const std::uint32_t entry = head_word(index);
-    if (reserved_vector(index)) {
-      if (entry != 0u) {
-        fail(Fault::BadVector);
-        return false;
-      }
-      continue;
-    }
-    const std::uint32_t target = entry & ~1u;
-    const bool in_window = target >= kRamfuncBase && target - kRamfuncBase < kRamfuncSize;
-    bool good = (entry & 1u) != 0u;
-    if (good && in_window) {
-      good = target - kRamfuncBase < next_;  // the hot code's load image is part of the image
-    } else if (good) {
-      good = target >= kHeadBytes && target < next_;
-    }
-    if (!good) {
-      fail(Fault::BadVector);
-      return false;
-    }
-  }
+  // OS-BUG-UPDFOREIGN: no check of the initial SP, the reset vector or the vector table here (an official image fails them by layout); the way back
+  // from any image is the reset button. Only what can lock the MCU (the configuration field) or hung the unit (the last sector) stays.
   if (next_ > kLastSectorStart) {  // check_image.py `last_sector_free`: the unit hung after an update with an image that filled the last sector (OS-BUG-LASTSECTOR)
     fail(Fault::LastSector);
     return false;

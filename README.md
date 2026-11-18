@@ -7,7 +7,6 @@
 <p align="center"><b>A new operating system for the Polyend Tracker, written from scratch by the community.</b></p>
 
 <p align="center">
-  <a href="https://github.com/trak3r-os/track3r-os/actions/workflows/ci.yml"><img src="https://github.com/trak3r-os/track3r-os/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg" alt="License: GPL-3.0-or-later"></a>
   <a href="module/sdk/LICENSE"><img src="https://img.shields.io/badge/module%20SDK-MIT-green.svg" alt="Module SDK: MIT"></a>
   <img src="https://img.shields.io/badge/C%2B%2B-17-00599C.svg" alt="C++17">
@@ -30,7 +29,7 @@ track3r-os replaces the software that runs on the Tracker. You keep the hardware
 - **It can follow a DAW.** MIDI Time Code out and in, next to the MIDI clock.
 - **It is open.** Anyone can read the code, build it and improve it.
 
-**v1.4.0** is the current release (v1.3.0, v1.2.0, v1.1.0, v1.0.1 and v1.0.0 came before). The changes are in the [release notes](docs/release/v1.4.0.md); what is open and what comes next is in [docs/roadmap/BACKLOG.md](docs/roadmap/BACKLOG.md).
+**v1.4.1** is the current release (v1.4.0, v1.3.0, v1.2.0, v1.1.0, v1.0.1 and v1.0.0 came before). The changes are in the [release notes](docs/release/v1.4.1.md); what is open and what comes next is in [docs/roadmap/BACKLOG.md](docs/roadmap/BACKLOG.md).
 
 ## Screens
 
@@ -136,7 +135,7 @@ track3r-os replaces the software that runs on the Tracker. You keep the hardware
 
 ## Get started
 
-- **Download:** the [latest release](https://github.com/trak3r-os/track3r-os/releases/latest) has the firmware file (`track3r-os-v1.4.0.ptf`), `track3r-os-v1.4.0-modules.zip` (the apps, effects, the instruments TB-303, Chip, FM, SID and sine, the importer for MOD, S3M and MED, presets and the `.ptfx` plugins), `track3r-os-v1.4.0-examples.zip` and `SHA256SUMS`. Unzip both zips at the card root: the four synths need their files in `modules/instruments/` and import needs `modules/importers/tracker.tmod`, both from the modules zip.
+- **Download:** the [latest release](https://github.com/trak3r-os/track3r-os/releases/latest) has the firmware file (`track3r-os-v1.4.1.ptf`), `track3r-os-v1.4.1-modules.zip` (the apps, effects, the instruments TB-303, Chip, FM, SID and sine, the importer for MOD, S3M and MED, presets and the `.ptfx` plugins), `track3r-os-v1.4.1-examples.zip` and `SHA256SUMS`. Unzip both zips at the card root: the four synths need their files in `modules/instruments/` and import needs `modules/importers/tracker.tmod`, both from the modules zip.
 - **Install:** read the [install guide](docs/manual/install.md) first. It covers installing from the official firmware, updating, and going back.
 - **Learn it:** the [user manual](docs/manual/index.md), one chapter per screen.
 

@@ -141,6 +141,26 @@ O3OS_AUDIO_INLINE void mac_simd(std::int32_t* acc, const std::int16_t* src, std:
   }
 }
 
+// OS-PERF-R1: the two sends of a strip from one read of its block. The fused loop takes only the case of every strip at rest, both gains steady and open, an aligned block of an even length; it
+// returns false (nothing touched) for any other, and the caller runs mac twice. In that case the two are the same sums as mac_pairs<Ops, true> makes, one pair at a time (integers: no order to keep).
+// acc_a and acc_b are distinct arrays.
+template <class Ops>
+O3OS_AUDIO_INLINE bool mac2_steady(std::int32_t* acc_a, std::int32_t* acc_b, const std::int16_t* src, std::uint32_t n, GainRamp ra, GainRamp rb) noexcept {
+  if (!aligned4(src) || (n & 1u) != 0u || ra.start != ra.end || rb.start != rb.end) {  // (a steady gain of 0 adds 0: the same sums as mac's early return)
+    return false;
+  }
+  const std::int32_t ga = 16 * ra.start;
+  const std::int32_t gb = 16 * rb.start;
+  for (std::uint32_t i = 0; i < n; i += 2u) {
+    const std::uint32_t w = load_pair(src + i);
+    acc_a[i] = Ops::smlawb(ga, w, acc_a[i]);
+    acc_a[i + 1u] = Ops::smlawt(ga, w, acc_a[i + 1u]);
+    acc_b[i] = Ops::smlawb(gb, w, acc_b[i]);
+    acc_b[i + 1u] = Ops::smlawt(gb, w, acc_b[i + 1u]);
+  }
+  return true;
+}
+
 // ---- the strip pass ---------------------------------------------------------------------------------------------------------
 // N lanes (1 or 2), the pan law as two accumulators (Stereo) or one (centre). The accumulators are loaded and stored once per pair of samples
 // whatever N. The lanes are written out, not looped over: at -Os the compiler leaves a loop over a constant two lanes as a loop that reloads the lane

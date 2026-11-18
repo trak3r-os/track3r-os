@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# The one CI entry point (OS-CI, docs/specs/OS-CI.md): the same script runs in .github/workflows/ci.yml and on a
-# developer's machine, so what CI checks is what a person can read and reproduce.
+# The one CI entry point (OS-CI, docs/specs/OS-CI.md): the same script runs on every developer's machine (there
+# is no GitHub CI, 2026-11-18), so what CI checks is what a person can read and reproduce.
 #
 #   tools/ci.sh host           configure with ASan + UBSan, build, ctest (the doctest units, the simulator goldens, the
 #                                 layer check, the Python reference tools)

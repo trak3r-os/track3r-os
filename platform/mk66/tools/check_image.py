@@ -142,8 +142,12 @@ def word(memory, address):
 
 
 def check_image(memory, expect_sp=None, vector_count=DEFAULT_VECTOR_COUNT, required_config=REQUIRED_CONFIG_HEX, ramfunc_l=None,
-                allow_last_sector=False):
-    """Runs the checks; returns [(name, ok, detail)]. `memory` comes from parse_ihex."""
+                allow_last_sector=False, profile="build"):
+    """Runs the checks; returns [(name, ok, detail)]. `memory` comes from parse_ihex.
+
+    profile "build" (the release gate for our own images) runs every check. profile "device" mirrors the on-device validator (OS-BUG-UPDFOREIGN,
+    maintainer 2026-11-18: the device installs any well-formed image, the way back is the reset button): no initial_sp, reset_vector and
+    vector_table checks; the lock-safety and layout checks stay."""
     results = []
 
     def add(name, ok, detail):
@@ -198,51 +202,52 @@ def check_image(memory, expect_sp=None, vector_count=DEFAULT_VECTOR_COUNT, requi
     def in_image(address):
         return address in memory
 
-    sp = word(memory, 0)
-    if sp is None:
-        add("initial_sp", False, "the word at 0 is not populated")
-    else:
-        ok = SRAM_FIRST <= sp <= SRAM_END and sp % 8 == 0
-        if expect_sp is not None:
-            ok = ok and sp == expect_sp
-        add("initial_sp", ok, "0x%08X (SRAM 0x%08X..0x%08X%s)" % (
-            sp, SRAM_FIRST, SRAM_END, ", expected 0x%08X" % expect_sp if expect_sp is not None else ""))
+    if profile == "build":
+        sp = word(memory, 0)
+        if sp is None:
+            add("initial_sp", False, "the word at 0 is not populated")
+        else:
+            ok = SRAM_FIRST <= sp <= SRAM_END and sp % 8 == 0
+            if expect_sp is not None:
+                ok = ok and sp == expect_sp
+            add("initial_sp", ok, "0x%08X (SRAM 0x%08X..0x%08X%s)" % (
+                sp, SRAM_FIRST, SRAM_END, ", expected 0x%08X" % expect_sp if expect_sp is not None else ""))
 
-    reset = word(memory, 4)
-    if reset is None:
-        add("reset_vector", False, "the word at 4 is not populated")
-    else:
-        target = reset & ~1
-        ok = (reset & 1) == 1 and target >= CONFIG_ADDRESS + CONFIG_SIZE and target <= FLASH_LAST and in_image(target)
-        add("reset_vector", ok, "0x%08X (%s, %s)" % (
-            reset, "Thumb" if reset & 1 else "NOT Thumb",
-            "in the image past the flash configuration" if ok or in_image(target) else "NOT inside the populated image"))
+        reset = word(memory, 4)
+        if reset is None:
+            add("reset_vector", False, "the word at 4 is not populated")
+        else:
+            target = reset & ~1
+            ok = (reset & 1) == 1 and target >= CONFIG_ADDRESS + CONFIG_SIZE and target <= FLASH_LAST and in_image(target)
+            add("reset_vector", ok, "0x%08X (%s, %s)" % (
+                reset, "Thumb" if reset & 1 else "NOT Thumb",
+                "in the image past the flash configuration" if ok or in_image(target) else "NOT inside the populated image"))
 
-    problems = []
-    ramfunc_vectors = 0
-    for index in range(2, vector_count):
-        entry = word(memory, index * 4)
-        if entry is None:
-            problems.append("vector %d is not populated" % index)
-            continue
-        if index in RESERVED_VECTORS:
-            if entry != 0:
-                problems.append("reserved vector %d is 0x%08X, not 0" % (index, entry))
-            continue
-        target = entry & ~1
-        in_ramfunc = ramfunc_l is not None and ramfunc_l[0] <= target < ramfunc_l[0] + ramfunc_l[1]
-        if (entry & 1) == 0:
-            problems.append("vector %d = 0x%08X is not a Thumb address" % (index, entry))
-        elif in_ramfunc:
-            ramfunc_vectors += 1
-            if target - ramfunc_l[0] > high:
-                problems.append("vector %d = 0x%08X is in the SRAM_L code region but beyond the image's own length" % (index, entry))
-        elif not (target >= CONFIG_ADDRESS + CONFIG_SIZE and in_image(target)):
-            problems.append("vector %d = 0x%08X does not point into the populated image" % (index, entry))
-    detail = "%d entries checked" % vector_count
-    if ramfunc_vectors:
-        detail += " (%d in the SRAM_L code region, copied from flash at reset)" % ramfunc_vectors
-    add("vector_table", not problems, detail if not problems else "; ".join(problems[:6]) + (" ..." if len(problems) > 6 else ""))
+        problems = []
+        ramfunc_vectors = 0
+        for index in range(2, vector_count):
+            entry = word(memory, index * 4)
+            if entry is None:
+                problems.append("vector %d is not populated" % index)
+                continue
+            if index in RESERVED_VECTORS:
+                if entry != 0:
+                    problems.append("reserved vector %d is 0x%08X, not 0" % (index, entry))
+                continue
+            target = entry & ~1
+            in_ramfunc = ramfunc_l is not None and ramfunc_l[0] <= target < ramfunc_l[0] + ramfunc_l[1]
+            if (entry & 1) == 0:
+                problems.append("vector %d = 0x%08X is not a Thumb address" % (index, entry))
+            elif in_ramfunc:
+                ramfunc_vectors += 1
+                if target - ramfunc_l[0] > high:
+                    problems.append("vector %d = 0x%08X is in the SRAM_L code region but beyond the image's own length" % (index, entry))
+            elif not (target >= CONFIG_ADDRESS + CONFIG_SIZE and in_image(target)):
+                problems.append("vector %d = 0x%08X does not point into the populated image" % (index, entry))
+        detail = "%d entries checked" % vector_count
+        if ramfunc_vectors:
+            detail += " (%d in the SRAM_L code region, copied from flash at reset)" % ramfunc_vectors
+        add("vector_table", not problems, detail if not problems else "; ".join(problems[:6]) + (" ..." if len(problems) > 6 else ""))
 
     config = [memory.get(CONFIG_ADDRESS + i) for i in range(CONFIG_SIZE)]
     if None in config:
@@ -265,7 +270,7 @@ def describe(memory):
     }
 
 
-def run_check(path, expect_sp, vectors, json_out, delete_on_fail, ramfunc_l=None, allow_last_sector=False):
+def run_check(path, expect_sp, vectors, json_out, delete_on_fail, ramfunc_l=None, allow_last_sector=False, profile="build"):
     text = Path(path).read_text(encoding="ascii", errors="strict")
     try:
         memory = parse_ihex(text)
@@ -273,7 +278,7 @@ def run_check(path, expect_sp, vectors, json_out, delete_on_fail, ramfunc_l=None
         results = [("hex_parse", False, str(exc))]
         memory = None
     else:
-        results = [("hex_parse", True, "%d bytes in %s" % (len(memory), path))] + check_image(memory, expect_sp, vectors, ramfunc_l=ramfunc_l, allow_last_sector=allow_last_sector)
+        results = [("hex_parse", True, "%d bytes in %s" % (len(memory), path))] + check_image(memory, expect_sp, vectors, ramfunc_l=ramfunc_l, allow_last_sector=allow_last_sector, profile=profile)
     failed = [r for r in results if not r[1]]
     for name, ok, detail in results:
         print("%s %-14s %s" % ("PASS" if ok else "FAIL", name, detail))
@@ -529,6 +534,23 @@ def self_test():
         return {a: bytes([b]) for a, b in flat.items()}
 
     expect_ok("good image", verdicts(expect_sp=0x20030000))
+
+    # The device profile (OS-BUG-UPDFOREIGN): an official-shaped head passes it, fails the build profile, and the lock-safety checks stay.
+    foreign = good_segments()
+    head = bytearray(foreign[0])
+    head[0:4] = (0x20020000).to_bytes(4, "little")
+    head[4:8] = (0x000001D1).to_bytes(4, "little")
+    head[7 * 4:7 * 4 + 4] = (0x211).to_bytes(4, "little")
+    head[20 * 4:20 * 4 + 4] = (0x1FFF0001).to_bytes(4, "little")
+    foreign[0] = bytes(head)
+    expect_ok("foreign head, device profile", verdicts(foreign, profile="device"))
+    expect_fail("foreign head, build profile (reset)", verdicts(foreign), "reset_vector")
+    expect_fail("foreign head, build profile (vectors)", verdicts(foreign), "vector_table")
+    cases[0] += 1
+    if any(n in ("initial_sp", "reset_vector", "vector_table") for n in verdicts(foreign, profile="device")):
+        failures.append("device profile still runs a vector check")
+    expect_fail("bad config, device profile", {n: ok for n, ok, _ in check_image(parse_ihex(make_hex(
+        {**good_segments(), CONFIG_ADDRESS: bytes(16)})), profile="device")}, "flash_config")
 
     # Parser.
     good = make_hex(good_segments())
@@ -805,6 +827,8 @@ def main(argv):
     check.add_argument("--delete-on-fail", action="store_true")
     check.add_argument("--allow-last-sector", action="store_true",
                        help="waive last_sector_free (OS-BUG-LASTSECTOR): only for the CI build of a bench image that is not meant for a unit")
+    check.add_argument("--profile", choices=("build", "device"), default="build",
+                       help="build (default): every check, the release gate; device: the rules of the on-device updater (no SP, reset vector or vector table check; OS-BUG-UPDFOREIGN)")
     fc = sub.add_parser("flashconfig")
     fc.add_argument("hex")
     fc.add_argument("--expect", required=True, help="the 16 bytes expected at 0x400, as 32 hex digits")
@@ -822,7 +846,7 @@ def main(argv):
             if args.ramfunc_l:
                 base, size = args.ramfunc_l.split(":")
                 ramfunc_l = (int(base, 0), int(size, 0))
-            return run_check(args.hex, args.expect_sp, args.vectors, args.json, args.delete_on_fail, ramfunc_l, args.allow_last_sector)
+            return run_check(args.hex, args.expect_sp, args.vectors, args.json, args.delete_on_fail, ramfunc_l, args.allow_last_sector, args.profile)
         except (OSError, UnicodeError, ValueError) as exc:
             print("FAIL hex_parse: cannot read %s: %s" % (args.hex, exc))
             return 1

@@ -1078,6 +1078,12 @@ void run_kernels(const Out& out, std::uint32_t blocks) noexcept {
   run("k_copy128B", [&] { std::memcpy(c, a, sizeof c); });
   run("k_gain", [&] { k::gain(c, a, kBlock, 40000, 41000); });
   run("k_mac", [&] { k::mac(acc_l, a, kBlock, 40000, 41000); });
+  // OS-PERF-R1: the two sends of a strip at rest (both steady): two macs against the fused kernel, same block, same sums.
+  run("k_mac_x2_steady", [&] {
+    k::mac(acc_l, a, kBlock, 40000, 40000);
+    k::mac(acc_r, a, kBlock, 20000, 20000);
+  });
+  run("k_mac2_steady", [&] { (void)k::mac2(acc_l, acc_r, a, kBlock, k::GainRamp{40000, 40000}, k::GainRamp{20000, 20000}); });
   run("k_gain_pan", [&] { k::gain_pan(lane, acc_l, acc_r, kBlock); });
   run("k_gain_mac", [&] { k::gain_mac(lane2, acc_c, kBlock); });
   run("k_gain_pan2", [&] { k::gain_pan2(lane, lane2, acc_l, acc_r, kBlock); });

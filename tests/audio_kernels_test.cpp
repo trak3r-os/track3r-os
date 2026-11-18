@@ -226,6 +226,60 @@ TEST_CASE("kernels: mac adds the Q19 product to the accumulators, bit for bit, a
   }
 }
 
+TEST_CASE("kernels: mac2 (OS-PERF-R1, the two sends from one read) is mac then mac, bit for bit, steady or ramping, any length and alignment") {
+  Rng rng(21);
+  unsigned fused = 0;
+  for (int iter = 0; iter < kIters; ++iter) {
+    const std::uint32_t n = rng.below(3) == 0 ? kN : rng.below(kN + 1u);
+    alignas(8) std::int32_t base_a[kN + 2], base_b[kN + 2];
+    alignas(8) std::int32_t got_a[kN + 2], got_b[kN + 2], emu_a[kN + 2], emu_b[kN + 2], want_a[kN + 2], want_b[kN + 2];
+    for (std::uint32_t i = 0; i < kN + 2u; ++i) {
+      base_a[i] = rng.below(4) == 0 ? static_cast<std::int32_t>(rng.next()) : static_cast<std::int32_t>(rng.below(1u << 21)) - (1 << 20);
+      base_b[i] = rng.below(4) == 0 ? static_cast<std::int32_t>(rng.next()) : static_cast<std::int32_t>(rng.below(1u << 21)) - (1 << 20);
+      got_a[i] = emu_a[i] = want_a[i] = base_a[i];
+      got_b[i] = emu_b[i] = want_b[i] = base_b[i];
+    }
+    Buf16 src;
+    src.off = rng.below(5) == 0 ? 1u : 0u;
+    for (std::int16_t& v : src.store) {
+      v = random_sample(rng, true);
+    }
+    const bool steady_case = rng.below(3) != 0;  // the usual block is steady on both sends
+    const std::int32_t sa = random_gain(rng);
+    const std::int32_t sb = random_gain(rng);
+    const k::GainRamp ra{sa, steady_case ? sa : random_gain(rng)};
+    const k::GainRamp rb{sb, steady_case ? sb : random_gain(rng)};
+    if (!k::mac2(got_a, got_b, src.data(), n, ra, rb)) {  // not the usual block: untouched, the strip runs mac twice
+      CHECK(std::memcmp(got_a, base_a, sizeof got_a) == 0);
+      CHECK(std::memcmp(got_b, base_b, sizeof got_b) == 0);
+      k::mac(got_a, src.data(), n, ra.start, ra.end);
+      k::mac(got_b, src.data(), n, rb.start, rb.end);
+    }
+    k::mac2_ref(want_a, want_b, src.data(), n, ra, rb);
+    if (k::detail::mac2_steady<sm::EmuOps>(emu_a, emu_b, src.data(), n, ra, rb)) {
+      ++fused;
+    } else {
+      k::detail::mac_simd<sm::EmuOps>(emu_a, src.data(), n, ra.start, ra.end);
+      k::detail::mac_simd<sm::EmuOps>(emu_b, src.data(), n, rb.start, rb.end);
+    }
+    INFO("n " << n << " a " << ra.start << ".." << ra.end << " b " << rb.start << ".." << rb.end << " off " << src.off);
+    CHECK(std::memcmp(got_a, want_a, sizeof got_a) == 0);
+    CHECK(std::memcmp(got_b, want_b, sizeof got_b) == 0);
+    CHECK(std::memcmp(emu_a, want_a, sizeof emu_a) == 0);
+    CHECK(std::memcmp(emu_b, want_b, sizeof emu_b) == 0);
+  }
+  CHECK(fused > 100u);  // the fused loop is what ran for the steady, open, aligned, even blocks
+  // A whole block at the production shape (aligned, 64 frames, both steady and open) takes the fused loop.
+  alignas(8) std::int32_t a[kN] = {}, b[kN] = {};
+  Buf16 s;
+  Rng r2(22);
+  for (std::int16_t& v : s.store) v = random_sample(r2, true);
+  CHECK(k::detail::mac2_steady<sm::EmuOps>(a, b, s.data(), kN, k::GainRamp{k::kUnity, k::kUnity}, k::GainRamp{k::kUnity / 2, k::kUnity / 2}));
+  for (std::uint32_t i = 0; i < kN; ++i) {
+    CHECK(a[i] == 16 * static_cast<std::int32_t>(s.data()[i]));
+  }
+}
+
 TEST_CASE("kernels: the strip kernels are gain then mac, bit for bit, one track or two, centre or stereo, steady or ramping") {
   Rng rng(20);
   for (int iter = 0; iter < kIters; ++iter) {

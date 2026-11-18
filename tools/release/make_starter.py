@@ -619,6 +619,120 @@ def write_zip(path, entries):
     os.replace(tmp, path)
 
 
+# ---- the split kit (OS-RELGHA) --------------------------------------------------------------------------------------------
+# A release carries two zips instead of one: the modules zip (modules/, Effects/ plugins, licences) and the examples zip (samples, wavetables,
+# songs, demo projects, licences). Each has its own README.txt and a SHA256SUMS over everything in it, README.txt included. The Firmware/ entries
+# of the one-zip archive are not part of either: the .ptf is a release file of its own.
+
+README_MODULES = """track3r-os %(v)s - modules and Sample Editor plugins
+==========================================
+
+track3r-os is unofficial community firmware for the Polyend Tracker. It is not affiliated with or endorsed by Polyend. This is
+pre-release software: install it at your own risk and keep a copy of the official firmware file so that you can go back.
+
+What this archive is
+--------------------
+Unpack the whole archive into the ROOT of the SD card (folders modules/ and Effects/ at the top).
+Since v1.3.0 the TB-303, Chip, FM and SID instruments are not inside the firmware: a project that uses one
+needs its file in modules/instruments/. Overwrite older copies there (an older chip.tmod lacks waves 4..11).
+modules/importers/tracker.tmod is needed to IMPORT MOD, S3M and OctaMED files.
+
+What goes where
+---------------
+modules/apps/        apps for the TOOLS screen (.tmod): Chords, Humanize, Loudness, MIDI monitor, Morph, Mutate, Pads (the SDK's
+                     example app), Rhythm Gen, Scope, SMF export, Tap tempo and Tuner.
+modules/effects/     effect modules (.tmod) for a track's insert: Autopan, Biquad filter, Stereo chorus, Comp, Crush, Drive,
+                     Env filter, Fold, Phaser, Ping-pong, Wide.
+modules/instruments/ instrument modules (.tmod): TB-303, Chip, FM, SID and Sine (the SDK's example voice). The four synths are
+                     not inside the firmware: without their files a project that uses one says the module is missing. NOTICES.txt
+                     next to them has the licence texts of the TB-303 and Chip code.
+modules/presets/     factory preset packs (.o3mp) for TB-303, chip, FM and SID, one folder per module.
+modules/importers/   the importer modules (.tmod): tracker.tmod is what reads MOD, S3M and OctaMED files on IMPORT (File screen,
+                     F6). Without it an import says NO IMPORTER; copy it from this archive if it is missing on the card.
+Effects/             Sample Editor plugins (.ptfx): Add Silence, Analog Kick, Chiptune, Multimode Filter, Stereo Delay,
+                     Stereo to Mono, Overdrive, Delay, Bitcrusher, Chorus, Flanger, Limiter and Three-Band EQ, and our own WT Forge,
+                     WT Notes, Grain Lock, Pad Forge, WT Resynth and Pad Stretch. They are listed on the Sample Editor's plugin page.
+LICENSES/            the licence texts, and CREDITS.txt: author, title, source and licence of every file.
+SHA256SUMS           the SHA-256 of every file in this archive: sha256sum -c SHA256SUMS from the card root.
+
+Licences
+--------
+The content made for this archive is CC0 (public domain). The other files keep their own licence: CC0, Public Domain, CC BY 4.0
+(the author must be named: see LICENSES/CREDITS.txt) and GPL-3.0 (the Surge wavetables). The Effects/ plugins are MIT: most are from
+Polyend's open tracker-ce source (LICENSES/MIT-tracker-ce.txt), six are our own (LICENSES/CREDITS.txt). Nothing in here comes from the official firmware's binaries.
+
+The manual
+----------
+%(m)s
+"""
+
+README_EXAMPLES = """track3r-os %(v)s - example content
+==========================================
+
+track3r-os is unofficial community firmware for the Polyend Tracker. It is not affiliated with or endorsed by Polyend. This is
+pre-release software: install it at your own risk and keep a copy of the official firmware file so that you can go back.
+
+What this archive is
+--------------------
+Unpack the whole archive into the ROOT of the SD card. The files have names of their own, so they do not
+replace your files unless you already have the same names. Copy the card to your computer first.
+Importing the Songs/ modules needs modules/importers/tracker.tmod from the modules zip.
+
+What goes where
+---------------
+Samples/Drums/       a drum kit: kick, snare, hats, clap, toms, rim shot, cowbell (16-bit mono WAV, made for this archive).
+Samples/VCSL/        percussion one-shots from the Versilian Community Sample Library.
+Samples/AKWF/        single-cycle waveforms from the Adventure Kid Waveforms collection.
+WTABLE/Generated/    wavetables made for this archive: files of 32 windows of 2,048 samples. Load them with Sample load
+                     (WT AUTO) and play them in the WAVETABLE mode.
+WTABLE/Surge/        wavetables from Surge XT (.wt files).
+Songs/MOD, S3M, XM, IT, MED
+                     tracker modules for the importers (MOD, S3M, XM, IT and an OctaMED module).
+Projects/Starter-Samples
+                     a demo project: a drum groove on the kit, with a wavetable pad. Its samples are in its samples folder.
+Projects/Starter-Modules
+                     a demo project: bass, lead and chords on the TB-303, chip and FM modules.
+LICENSES/            the licence texts, and CREDITS.txt: author, title, source and licence of every file.
+SHA256SUMS           the SHA-256 of every file in this archive: sha256sum -c SHA256SUMS from the card root.
+
+Licences
+--------
+The content made for this archive is CC0 (public domain). The other files keep their own licence: CC0, Public Domain, CC BY 4.0
+(the author must be named: see LICENSES/CREDITS.txt) and GPL-3.0 (the Surge wavetables). The Effects/ plugins are MIT: most are from
+Polyend's open tracker-ce source (LICENSES/MIT-tracker-ce.txt), six are our own (LICENSES/CREDITS.txt). Nothing in here comes from the official firmware's binaries.
+
+The manual
+----------
+%(m)s
+"""
+
+
+def split_entries(entries, version):
+    """({path: bytes} of the modules zip, {path: bytes} of the examples zip) from the entries of the one-zip archive."""
+    mods, ex = {}, {}
+    for path, data in entries.items():
+        if path in ("README.txt", "SHA256SUMS") or path.startswith("Firmware/"):
+            continue
+        if path.startswith(("modules/", "Effects/")):
+            mods[path] = data
+        elif path.startswith("LICENSES/"):
+            mods[path] = data
+            ex[path] = data
+        else:
+            ex[path] = data
+    if not any(p.startswith("modules/") for p in mods) or not any(not p.startswith("LICENSES/") for p in ex):
+        raise StarterError("the split would leave a zip without content")
+    for part, readme in ((mods, README_MODULES), (ex, README_EXAMPLES)):
+        part["README.txt"] = (readme % {"v": version, "m": MANUAL_URL}).encode("utf-8")
+        part["SHA256SUMS"] = sums_text(part).encode("utf-8")
+    return mods, ex
+
+
+def split_prefix(ptf_path):
+    """`track3r-os-v1.4.0` from `track3r-os-v1.4.0.ptf`: the zips are named after the update file."""
+    return os.path.basename(ptf_path)[:-len(".ptf")]
+
+
 def check_out_dir(out):
     """Nothing is written into the repository tree except below a build*/ directory (ignored by git)."""
     real = os.path.realpath(out)
@@ -703,6 +817,7 @@ def run(argv):
     ap.add_argument("--cache", help="download cache (default: OUT/cache)")
     ap.add_argument("--manifest", default=DEFAULT_MANIFEST, help="the manifest of third-party files")
     ap.add_argument("--offline", action="store_true", help="no network: use the cache only (tests)")
+    ap.add_argument("--split", action="store_true", help="write the modules zip and the examples zip (track3r-os-<tag>-modules.zip, -examples.zip, named after the .ptf) instead of the one zip")
     ap.add_argument("--check-manifest", action="store_true", help="validate the manifest and exit")
     args = ap.parse_args(argv)
 
@@ -729,19 +844,29 @@ def run(argv):
     os.makedirs(args.out, exist_ok=True)
 
     entries, record = build_entries(manifest, args.version, args.ptf, args.modules_dir, cache, args.offline, args.ptfx_dir)
-    zip_path = os.path.join(args.out, "track3r-os-%s.zip" % args.version)
-    write_zip(zip_path, entries)
-    with open(zip_path, "rb") as f:
-        digest = sha256_hex(f.read())
-    with open(zip_path + ".sha256", "w", encoding="utf-8") as f:
-        f.write("%s  %s\n" % (digest, os.path.basename(zip_path)))
+    if args.split:
+        mods, ex = split_entries(entries, args.version)
+        prefix = split_prefix(args.ptf)
+        for kind, part in (("modules", mods), ("examples", ex)):
+            zip_path = os.path.join(args.out, "%s-%s.zip" % (prefix, kind))
+            write_zip(zip_path, part)
+            print("\n".join(summary(part)))
+            print("wrote %s (%d bytes)" % (zip_path, os.path.getsize(zip_path)))
+    else:
+        zip_path = os.path.join(args.out, "track3r-os-%s.zip" % args.version)
+        write_zip(zip_path, entries)
+        with open(zip_path, "rb") as f:
+            digest = sha256_hex(f.read())
+        with open(zip_path + ".sha256", "w", encoding="utf-8") as f:
+            f.write("%s  %s\n" % (digest, os.path.basename(zip_path)))
     if record:
         with open(os.path.join(args.out, "track3r-os-%s.licence-check.txt" % args.version), "w", encoding="utf-8") as f:
             when = "read from the cache (offline)" if args.offline else "re-read " + datetime.date.today().isoformat()
             f.write("Mod Archive licences, %s\n" % when)
             f.write("\n".join(record) + "\n")
-    print("\n".join(summary(entries)))
-    print("wrote %s (%d bytes) sha256 %s" % (zip_path, os.path.getsize(zip_path), digest))
+    if not args.split:
+        print("\n".join(summary(entries)))
+        print("wrote %s (%d bytes) sha256 %s" % (zip_path, os.path.getsize(zip_path), digest))
     return 0
 
 

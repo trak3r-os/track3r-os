@@ -555,9 +555,9 @@ TEST_CASE("fw arm pad: the pad word changes nothing for a good image, and every 
   std::vector<std::uint8_t> config = good_image(3000, false);
   config[0x40C] = 0xDC;  // a flash configuration field that could lock the MCU, in an unpadded image too
   const std::string locked = to_hex(config);
-  std::vector<std::uint8_t> sp = good_image(3000, false);
-  put_word(sp, 0, 0x20020000u);
-  const std::string bad_sp = to_hex(sp);
+  std::vector<std::uint8_t> key = good_image(3000, false);
+  key[0x400] = 0x00;  // a backdoor-key byte of the field (OS-BUG-UPDFOREIGN: the SP, reset and vector rules are gone, the field stays)
+  const std::string bad_key = to_hex(key);
   const std::string raw = to_hex(good_image(3000, false));
   const std::string no_eof = to_hex(good_image(3000, false), "\n", 16, false);
   struct Row {
@@ -568,7 +568,7 @@ TEST_CASE("fw arm pad: the pad word changes nothing for a good image, and every 
   };
   const Row rows[] = {
       {"locked.ptf", &locked, 0u, "ERR flash configuration field is not the required one"},
-      {"badsp.ptf", &bad_sp, 0u, nullptr},
+      {"badkey.ptf", &bad_key, 0u, "ERR flash configuration field is not the required one"},
       {"noeof.ptf", &no_eof, 0u, "ERR no EOF record"},
       {"crc.ptf", &raw, 1u, "ERR crc mismatch"},
   };

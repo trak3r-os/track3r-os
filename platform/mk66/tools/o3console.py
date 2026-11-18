@@ -25,7 +25,7 @@ Firmware update over USB (OS-006c; the device side is `fw` in platform/mk66/READ
     o3console.py --put FILE.ptf [--pad] [--name o3os-0.7.ptf] [--expect-volume ABCD-1234]
     o3console.py --update o3os-0.7.ptf --crc 1A2B3C4D --yes-update [--pad] [--expect-volume ABCD-1234] [--expect-version TEXT]
 
-`--put` first runs `check_image.py check` (this directory) on the file and refuses to send one that fails it, then sends `fw put <name> <bytes> <crc32>`
+`--put` first runs `check_image.py check --profile device` (this directory: the rules of the unit's own updater, no SP, reset vector or vector table check, OS-BUG-UPDFOREIGN) on the file and refuses to send one that fails it, then sends `fw put <name> <bytes> <crc32>`
 and the file in windows of 4096 bytes past the last acknowledgement the unit printed, and prints the unit's reply (`ok <name> <bytes> <crc> image <length>`,
 or `ERR <reason> at <offset>`). `--update` runs `fw arm` and `fw update <token>` (the unit then restarts into the bootloader), waits for the port to disappear
 and come back (up to --reboot-timeout seconds), runs `version` and prints it; `--expect-version` makes a version that does not contain the text a failure.
@@ -145,8 +145,6 @@ WINDOW = 4096  # bytes the host may have outstanding past the last `+N` acknowle
 UPDATE_NAME_MAX = 30
 FLASH_SECTOR = 4096  # the unit's flash sector: an image ends on a multiple of it (OS-GATE-BOOTCRASH)
 NAME_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z._-]{0,%d}\.ptf$" % (UPDATE_NAME_MAX - 4 - 1), re.IGNORECASE | re.ASCII)
-EXPECT_SP = "0x20030000"
-RAMFUNC_L = "0x1FFF0000:0xC000"
 
 
 def valid_image_name(name):
@@ -250,7 +248,7 @@ def padded_for_put(path, data, name, explicit, out):
 def local_check(path, out):
     """Runs check_image.py on the file (the gate the build runs). True when it passes."""
     tool = os.path.join(os.path.dirname(os.path.abspath(__file__)), "check_image.py")
-    run = subprocess.run([sys.executable, "-I", tool, "check", path, "--expect-sp", EXPECT_SP, "--ramfunc-l", RAMFUNC_L],
+    run = subprocess.run([sys.executable, "-I", tool, "check", path, "--profile", "device"],
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     if run.returncode != 0:
         print(run.stdout, file=out)

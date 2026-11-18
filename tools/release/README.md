@@ -1,4 +1,31 @@
-# tools/release: the starter-content zip (OS-STARTER)
+# tools/release: the release kit and the starter-content zips (OS-STARTER, OS-RELGHA)
+
+## The release flow (OS-RELGHA, maintainer 2026-11-18)
+
+Push a tag `v<major>.<minor>.<patch>[-suffix]` and GitHub does the rest (`.github/workflows/release.yml`; there is no other GitHub workflow, CI is
+`tools/ci.sh` run locally): two clean MK66 builds, `cmp`, the image checks, then `make_kit.sh`, then the release is PUBLISHED and marked Latest with
+four files: `track3r-os-<tag>.ptf`, `track3r-os-<tag>-modules.zip`, `track3r-os-<tag>-examples.zip` and one `SHA256SUMS` over those three. The
+body is `docs/release/<tag>.md` (relative links made absolute to the tag by `notes_links.py`), followed by the SHA-256 and CRC-32
+table; a tag without that page fails the run at its start. Redo: Actions, release, Run workflow, type the tag: an existing release gets its files replaced (`--clobber`) and its notes
+rewritten. Write `docs/release/<tag>.md` before the tag, and make sure the tag is on the commit you mean before pushing it: the release is public at once.
+
+```
+ARM_GNU_ROOT=<the Arm GNU toolchain> tools/release/make_kit.sh <tag> <outdir> [<the gated .ptf>]
+```
+
+`make_kit.sh` is what the workflow runs and what a person can run: it builds the modules (host build with the Arm compiler: the `o3m_<name>_tmod`
+targets of the manifest and `o3_ptfx`), calls `make_starter.py --split`, and writes `<outdir>/SHA256SUMS` over the `.ptf` and the two zips (the
+`.ptf` is `<outdir>/track3r-os-<tag>.ptf` or the third argument). It needs the network (pinned downloads, Mod Archive licence pages): a failed
+fetch, a hash mismatch or a changed licence fails the run. `<outdir>` inside the repository must be below `build*/`. `O3OS_KIT_JOBS` (default 4) sets
+the jobs, `O3OS_KIT_CACHE` the download cache.
+
+`make_starter.py --split` writes the two zips instead of the one: the modules zip (`modules/`, `Effects/`, `LICENSES/`) and the examples zip
+(`Samples/`, `WTABLE/`, `Songs/`, `Projects/`, `LICENSES/`), named after the `.ptf` (`track3r-os-<tag>-modules.zip`), each with its own `README.txt`
+(`README_MODULES`, `README_EXAMPLES`) and a `SHA256SUMS` over all its other files. The `Firmware/` entries of the one-zip archive are not in either.
+From the v1.4.0 inputs it gives the same entry lists as the published v1.4.0 zips, and the same bytes apart from the version string in `README.txt`
+and `LICENSES/CREDITS.txt` (and so `SHA256SUMS`) when the version differs. The one-zip mode (below) is unchanged.
+
+## The starter zip
 
 `make_starter.py` builds `track3r-os-<version>.zip`, the archive that goes next to the bare `.ptf` of an alpha release. It is unpacked into the root
 of the SD card. It never goes into git, and nothing here uploads or publishes it: a person does that after the maintainer's go.

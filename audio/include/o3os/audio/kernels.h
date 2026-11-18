@@ -91,6 +91,11 @@ O3OS_AUDIO_HOT void gain(std::int16_t* dst, const std::int16_t* src, std::uint32
 void mac_ref(std::int32_t* acc, const std::int16_t* src, std::uint32_t n, std::int32_t start, std::int32_t end) noexcept;
 O3OS_AUDIO_HOT void mac(std::int32_t* acc, const std::int16_t* src, std::uint32_t n, std::int32_t start, std::int32_t end) noexcept;
 
+// OS-PERF-R1: the two sends of a strip: mac(acc_a, src, a) then mac(acc_b, src, b), bit for bit (mac2_ref). mac2 is the fused form with one read of src for the usual block only (both gains
+// steady and open, src 4-byte aligned, n even): it returns true when it did both, and false with nothing touched, the caller then runs mac twice. acc_a != acc_b.
+void mac2_ref(std::int32_t* acc_a, std::int32_t* acc_b, const std::int16_t* src, std::uint32_t n, GainRamp a, GainRamp b) noexcept;
+O3OS_AUDIO_HOT bool mac2(std::int32_t* acc_a, std::int32_t* acc_b, const std::int16_t* src, std::uint32_t n, GainRamp a, GainRamp b) noexcept;
+
 // ---- the strip pass: level and pan in one go -----------------------------------------------------------------------------
 // The track strip's hot path: the fader and the pan law with one load of each sample instead of three, and (the two-track forms) one load and
 // one store of each accumulator for two tracks instead of one each. In place on x, for each lane:

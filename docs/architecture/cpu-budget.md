@@ -687,3 +687,21 @@ Static budget: the state is about 1.5-1.6 KB of SRAM (`Sequencer`, the held tabl
 | `lane_replace`, one `memmove` of the pool tail (up to 60 KiB in SDRAM, the delay region's spare) plus the undo record copy, inside one `WriteWindow` | up to about 0.7 ms for the 60 KiB tail at the SDRAM copy rate [est, unmeasured]; the render sees an odd `seq` for that time, plays nothing, loses no note-off and plays the owed events late (`Stats::lane_odd` counts the blocks) | not measured: needs the unit (a take commit over a long lane) |
 
 Method when measured: bench image (`-DO3OS_BENCH=OFF` for the size, bench ON for the cycles), a project with 16 lanes of 4096 CCs, `ins`-style render total with and without the store attached; for the window, commit a take into the first lane of a full pool and read `Stats::lane_odd`. Hardware check pending; none of these figures is a measurement.
+
+## OS-PERF-R1: the two send MACs fused; two claims checked and dropped (2026-11-12; branch `feat/OS-PERF-R1-strips-delay`)
+
+Three claims were checked in the code before any change; one holds.
+
+| Claim | Verdict | Why |
+|---|---|---|
+| The strip's two send MACs read the block twice; one fused pass saves a read | kept | `run_tracks` (pre-fader) and `run_input` call `kernel::mac` once per open send on the same block. `kernel::mac2` (`kernels_impl.h` `mac2_steady`) does both in one pass for the usual block (both gains steady, `src` 4-byte aligned, even `n`), integer arithmetic only, the same `smlawb` / `smlawt` per sample as `mac`: bit-identical. Any other block (a ramp, a closed send, an odd start) returns false with nothing touched and the strip runs `mac` twice as before. `send_macs` (graph.cpp) is the one copy of the call logic for both callers. |
+| `meter_now_` and the stems flags are tested per frame in the strips | dropped | They are tested once per strip per block (one bit test, about 50 cycles for 16 strips). Nothing to hoist. |
+| The send delay's `read_taps` stages the ring twice when the L and R taps share a span | dropped | The second `stage_read` runs only when `dl != dr`, and the spans overlap only when `|dl - dr| < 64` frames, a delay under about 6 ms. At the default 500 ms and any usual time they never overlap, so the saving is 0. No replacement was invented. |
+
+Cost of the kept part (static, by the instruction count of the loop): per two samples the fused loop does 1 load of the word pair and 4 MACs where two `mac` calls do 2 loads and the same 4 MACs, so it saves 32 loads and the second call's loop overhead per 64-frame block per strip with both sends open. [est] a few tens of cycles a block per strip with both sends open; not measured on the unit.
+
+Bytes (`tools/remote_ci.sh mk66`, `check_ramfunc` PASS): `.ramfunc_l` 26,956 -> 27,156 B (+200 B, the brief's cap; the first version, with the fallback inside `mac2` and the loop inlined at both callers, was +456 B), SRAM_U and SDRAM_STATIC 0, flash `.text` unchanged at the table's granularity (1,000,816 B). `mac2` returns bool and holds only the fused loop; the fallback stays in `send_macs`.
+
+Tests: `tests/audio_kernels_test.cpp` (`mac2`: random blocks, steady and ramping, any length and alignment, `mac2` + fallback against `mac2_ref`, and the `EmuOps` copy, by `memcmp`); the audio, export byte-identity and mixer scenarios unchanged (no golden changed).
+
+Unit check pending: bench rows `k_mac_x2_steady` (two `k::mac`) against `k_mac2_steady` (`k::mac2`), then `diag bench` stages `strips` and `buses` on Dense8.

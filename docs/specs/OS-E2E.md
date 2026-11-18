@@ -25,7 +25,7 @@ Facts from the catalogue, 2026-10-18 (569 `| QA-` rows in `docs/qa/catalogue/*.m
 |---|---|
 | D1 | **No firmware change.** New code lives only in `sim/`, `platform/host/`, `tests/`, `tools/` and `docs/`, plus host-only build scripts. Firmware code is called, never edited. Each slice proves it at merge (§3). |
 | D2 | **No `stat drift`** and no other firmware hook. A unit soak, if one is ever done, polls the existing `diag cpu` with o3hil's `collect` and `stat`. |
-| D3 | **On demand or at releases only.** The battery runs through `tools/ci.sh e2e`. A ctest label `e2e` keeps it out of `tools/ci.sh host` and out of GitHub CI. |
+| D3 | **On demand or at releases only.** The battery runs through `tools/ci.sh e2e`. A ctest label `e2e` keeps it out of `tools/ci.sh host` (there is no GitHub CI since 2026-11-18). |
 | D4 | **Release gate.** `tools/ci.sh e2e` joins the release checklist next to the full `tools/ci.sh` and `fw-gate-check`. A failing journey blocks the release. It starts with the release after `v0.7.0-alpha.1`. |
 | D5 | **Audio correctness is in scope**, proven four ways: measured properties, reference players, null tests, and regression fingerprints (§5). |
 | D6 | **Screen readability is in scope** (§6). |
@@ -298,7 +298,7 @@ This slice also wires the on-demand mode that later slices reuse.
 
 **The `e2e` label and `tools/ci.sh e2e`**
 - `cmake/O3osLabels.cmake` gets a new label `e2e`. Every e2e ctest also keeps an area label (`app` for sim journeys), because `ci.sh` refuses a test without one (`ALL_LABELS_RE`, `tools/ci.sh:195`). `e2e` is not added to `ALL_LABELS_RE`.
-- `tools/ci.sh` `run_mode` excludes the label on every normal run: `-LE '^e2e$'` beside the scope `-L` in the ctest call (`tools/ci.sh:182`). GitHub calls `tools/ci.sh host` (`.github/workflows/ci.yml`), so it is excluded there too.
+- `tools/ci.sh` `run_mode` excludes the label on every normal run: `-LE '^e2e$'` beside the scope `-L` in the ctest call (`tools/ci.sh:182`). `tools/ci.sh host` is the only normal run (GitHub CI was dropped, OS-RELGHA).
 - A new mode, `tools/ci.sh e2e`, runs `run_mode e2e -DO3OS_SANITIZE=ON` with `-L '^e2e$'` instead of the exclusion.
   - It then writes `build-e2e/<YYYY-MM-DD>/`: `report.md` (the pass/fail table from ctest), `screens.png` (the contact sheet from `o3sim --legibility --sheet`), and later the journeys' WAVs.
   - It is added to `usage`, to the header comment, and to `docs/toolchain.md`.

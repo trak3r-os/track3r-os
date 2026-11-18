@@ -6,7 +6,7 @@
 
 Builds a corpus of HEX files from check_image.py's own helpers (the good image of its self-test and the same families of mutations: every record
 defect, holes, address range, the head, SP, reset and vector cases, the SRAM_L window, every byte of the flash configuration field), runs both
-checkers on every file and requires the SAME verdict: check_image.py with --expect-sp 0x20030000 --ramfunc-l 0x1FFF0000:0xC000 (how the build runs it)
+checkers on every file and requires the SAME verdict: check_image.py with --profile device (the relaxed rules of the on-device updater, OS-BUG-UPDFOREIGN)
 against the device validator. For an accepted file the image length and the CRC-32 of the file must agree as well. With --hex the real built image
 and a family of mutations of it join the corpus. One documented difference is checked as such: records out of ascending order, which check_image.py
 accepts and the device refuses (it keeps O(1) state; objcopy never writes them). check_image.py's `sector_end` (the image ends on a 4 KiB flash
@@ -214,12 +214,12 @@ def build_corpus(ci, real_text):
 
 
 def reference_verdict(ci, text):
-    """(ok, image length) by check_image.py's own functions, with the options of the build."""
+    """(ok, image length) by check_image.py's own functions, with the device profile (OS-BUG-UPDFOREIGN: no SP, reset vector or vector table check)."""
     try:
         memory = ci.parse_ihex(text)
     except ci.ImageError:
         return False, 0
-    results = ci.check_image(memory, expect_sp=0x20030000, ramfunc_l=(0x1FFF0000, 0xC000))
+    results = ci.check_image(memory, profile="device")
     ok = all(r[1] for r in results)   # every verdict, `sector_end` included (the device refuses an unpadded image: Fault::NotPadded)
     return ok, max(memory) + 1
 

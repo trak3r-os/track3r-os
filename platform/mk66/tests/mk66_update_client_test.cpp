@@ -1169,15 +1169,6 @@ TEST_CASE("fw client pad: only NotPadded gets the offer, every other defect refu
       cases.push_back({"config byte", to_hex(im), Fault::BadConfig});
       im[0x400 + position] = up::kRequiredConfig[position];
     }
-    std::vector<std::uint8_t> sp = good_image(kRawCode, false);
-    put_word(sp, 0, 0x20020000u);
-    cases.push_back({"SP", to_hex(sp), Fault::BadSp});
-    std::vector<std::uint8_t> reset = good_image(kRawCode, false);
-    put_word(reset, 4, 0u);
-    cases.push_back({"reset", to_hex(reset), Fault::BadReset});
-    std::vector<std::uint8_t> vec = good_image(kRawCode, false);
-    put_word(vec, 8u * 4u, 0x00000510u);
-    cases.push_back({"vector", to_hex(vec), Fault::BadVector});
     std::string sum = to_hex(good_image(kRawCode, false));
     sum[sum.find('\n') - 1u] = sum[sum.find('\n') - 1u] == '0' ? '1' : '0';  // the first record's checksum
     cases.push_back({"checksum", sum, Fault::HexChecksum});

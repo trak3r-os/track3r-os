@@ -76,7 +76,7 @@ TEST_CASE("hex validator: a good image is accepted, with its length and the CRC 
   CHECK(accepts(hex_of(good_image(65'000))));
   CHECK(validate(hex_of(good_image(65'000))).length == good_image(65'000).size());  // 0x410 + 65'000, padded to the next 4 KiB boundary
   CHECK(good_image(65'000).size() == 69632u);
-  CHECK(validate(hex_of(good_image(0, false))).fault == Fault::BadReset);  // no code for the reset vector to point at (the unpadded end is checked after it)
+  CHECK(validate(hex_of(good_image(0, false))).fault == Fault::NotPadded);  // the reset vector is not checked (OS-BUG-UPDFOREIGN): only the missing padding is wrong
 }
 
 TEST_CASE("hex validator: the verdict does not depend on how the stream is cut") {
@@ -248,9 +248,9 @@ TEST_CASE("hex validator: the image must end on a 4 KiB boundary (OS-GATE-BOOTCR
   CHECK(padded.back() == 0);
   CHECK(accepts(hex_of(padded)));
   // Another defect of the image is reported first: the sector rule is the last verdict.
-  std::vector<std::uint8_t> bad_sp = good_image(100, false);
-  put_word(bad_sp, 0, 0x20020000u);
-  CHECK(validate(hex_of(bad_sp)).fault == Fault::BadSp);
+  std::vector<std::uint8_t> bad_config = good_image(100, false);
+  bad_config[0x40C] = 0xDC;
+  CHECK(validate(hex_of(bad_config)).fault == Fault::BadConfig);
   // Its console and screen text names the rule.
   CHECK(std::strcmp(up::fault_name(Fault::NotPadded), "image not padded: may not boot") == 0);
 }
@@ -281,9 +281,9 @@ TEST_CASE("hex validator: the image must end at or below 0xFF000, the last flash
   // A padded image that fills the last sector is the case that hung the unit.
   CHECK(validate(hex_of(good_image(0x100000 - 0x410 - 100))).fault == Fault::LastSector);
   // Another defect of the image is reported first.
-  std::vector<std::uint8_t> bad_sp = good_image(0x100000 - 0x410, false);
-  put_word(bad_sp, 0, 0x20020000u);
-  CHECK(validate(hex_of(bad_sp)).fault == Fault::BadSp);
+  std::vector<std::uint8_t> bad_config = good_image(0x100000 - 0x410, false);
+  bad_config[0x40C] = 0xDC;
+  CHECK(validate(hex_of(bad_config)).fault == Fault::BadConfig);
   CHECK(std::strcmp(up::fault_name(Fault::LastSector), "image reaches last flash sector") == 0);
 }
 
@@ -322,40 +322,39 @@ TEST_CASE("hex validator: the flash configuration field must be exactly ffffffff
   CHECK(spelled == "ffffffffffffffffffffffffdef9ffff");
 }
 
-TEST_CASE("hex validator: initial SP, reset vector and the vector table") {
-  for (const std::uint32_t sp : {0u, 0x00001000u, 0x1FFEFFF8u, 0x20030008u, 0x20030004u, 0x2002FFF8u, 0x20020000u, 0x40000000u}) {
-    const Verdict v = validate(hex_of(with_word(0, sp)));
-    CHECK_MESSAGE(!v.ok, "SP " << sp);
-    CHECK(v.fault == Fault::BadSp);
+TEST_CASE("hex validator: initial SP, reset vector and the vector table are not checked (OS-BUG-UPDFOREIGN)") {
+  // Every value the old rules refused is accepted now: the device installs any well-formed image, the reset button is the way back.
+  for (const std::uint32_t sp : {0u, 0x00001000u, 0x1FFEFFF8u, 0x20030004u, 0x20020000u, 0x40000000u}) {
+    CHECK_MESSAGE(accepts(hex_of(with_word(0, sp))), "SP " << sp);
   }
-  for (const std::uint32_t reset : {0x00000500u, 0x00200001u, 0x00000101u, 0x00000405u, 0x000FF001u, 0u, 0x0000040Fu, 0x00000611u + 0x1000u}) {
-    const Verdict v = validate(hex_of(with_word(4, reset)));
-    CHECK_MESSAGE(!v.ok, "reset " << reset);
-    CHECK(v.fault == Fault::BadReset);
+  for (const std::uint32_t reset : {0x00000500u, 0x00200001u, 0x00000101u, 0x000001D1u, 0u, 0x1FFF0101u}) {
+    CHECK_MESSAGE(accepts(hex_of(with_word(4, reset))), "reset " << reset);
   }
-  CHECK(accepts(hex_of(with_word(4, 0x00000411u))));  // the first byte past the field
-  for (const unsigned index : {2u, 3u, 15u, 16u, 60u, 115u}) {
-    for (const std::uint32_t value : {0x00000510u, 0u, 0x00300001u, 0x00000041u, 0x00000401u, 0xFFFFFFFFu, 0x00001001u}) {
-      const Verdict v = validate(hex_of(with_word(index * 4u, value)));
-      CHECK_MESSAGE(!v.ok, "vector " << index << " = " << value);
-      CHECK(v.fault == Fault::BadVector);
+  for (const unsigned index : {2u, 7u, 8u, 9u, 10u, 13u, 16u, 115u}) {
+    for (const std::uint32_t value : {0x00000510u, 0u, 0x00300001u, 0x1FFF0001u, 0xFFFFFFFFu, 0x20000101u}) {
+      CHECK_MESSAGE(accepts(hex_of(with_word(index * 4u, value))), "vector " << index << " = " << value);
     }
   }
+}
+
+TEST_CASE("hex validator: an image shaped like a foreign (official) layout has only the padding to fix") {
+  // Synthetic bytes only: reset handler below the flash configuration (0x1D1), a different SP, reserved vectors non-zero, an SRAM vector.
+  std::vector<std::uint8_t> foreign = good_image(512, false);
+  put_word(foreign, 0, 0x20020000u);
+  put_word(foreign, 4, 0x000001D1u);
   for (const unsigned index : {7u, 8u, 9u, 10u, 13u}) {
-    CHECK(validate(hex_of(with_word(index * 4u, 0x00000511u))).fault == Fault::BadVector);
-    CHECK(validate(hex_of(with_word(index * 4u, 1u))).fault == Fault::BadVector);
+    put_word(foreign, index * 4u, 0x00000211u);
   }
-  CHECK(accepts(hex_of(with_word(11u * 4u, 0x00000511u))));  // SVCall is not reserved: filled
-  CHECK(accepts(hex_of(with_word(12u * 4u, 0x00000511u))));
-  // The SRAM_L code window: Thumb addresses inside it, at an offset inside the image, are fine; the rest of SRAM is not.
-  for (const unsigned index : {16u + 15u, 16u + 64u, 115u}) {
-    CHECK(accepts(hex_of(with_word(index * 4u, 0x1FFF0101u))));
-    CHECK(accepts(hex_of(with_word(index * 4u, 0x1FFF0000u + 0x411u))));
-    for (const std::uint32_t value : {0x1FFF0100u, 0x1FFFC001u, 0x1FFFC000u | 1u, 0x20000101u, 0x1FFF8001u, 0x1FFEFFFFu, 0x1FFF0000u + 0x1000u + 1u}) {  // the last: one past the padded image's 4096 bytes
-      CHECK_MESSAGE(!accepts(hex_of(with_word(index * 4u, value))), "vector " << index << " = " << value);
-    }
-  }
-  CHECK(validate(hex_of(with_word(4, 0x1FFF0101u))).fault == Fault::BadReset);  // the reset vector is in flash
+  put_word(foreign, 20u * 4u, 0x1FFF0001u);
+  const Verdict unpadded = validate(hex_of(foreign));
+  CHECK_FALSE(unpadded.ok);
+  CHECK(unpadded.fault == Fault::NotPadded);
+  foreign.resize((foreign.size() + up::kFlashSector - 1u) / up::kFlashSector * up::kFlashSector, 0);
+  CHECK(accepts(hex_of(foreign)));
+  CHECK(validate(hex_of(foreign), 5).ok);
+  // The lock-safety checks still bite on such an image.
+  foreign[0x40C] = 0xDC;
+  CHECK(validate(hex_of(foreign)).fault == Fault::BadConfig);
 }
 
 TEST_CASE("hex validator: nothing the stream can contain is undefined (every byte value in every state)") {

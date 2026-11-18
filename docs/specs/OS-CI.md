@@ -1,6 +1,6 @@
 # OS-CI — GitHub Actions for `os/` (maintainer decision, 2026-10-11)
 
-Status: specified 2026-10-11.
+Status: specified 2026-10-11. **Superseded 2026-11-18 (maintainer, OS-RELGHA):** there is no GitHub CI; `.github/workflows/ci.yml` is deleted and the gate is `tools/ci.sh` run locally. Only `release.yml` remains (a pushed tag builds and publishes the release). The text below is the history of the old workflow.
 
 - **One script, two callers.** `tools/ci.sh <host|qemu|mk66>` holds the configure, build and test commands, and returns non-zero on any warning or test failure. The workflow only calls it, so the same script is run locally and reviewed. `docs/architecture/os-tree.md` documents it.
 - **Workflow `.github/workflows/ci.yml`:**

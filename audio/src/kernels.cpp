@@ -28,6 +28,11 @@ void mac_ref(std::int32_t* acc, const std::int16_t* src, std::uint32_t n, std::i
   }
 }
 
+void mac2_ref(std::int32_t* acc_a, std::int32_t* acc_b, const std::int16_t* src, std::uint32_t n, GainRamp a, GainRamp b) noexcept {
+  mac_ref(acc_a, src, n, a.start, a.end);
+  mac_ref(acc_b, src, n, b.start, b.end);
+}
+
 void gain_pan_ref(const StripLane& a, std::int32_t* acc_l, std::int32_t* acc_r, std::uint32_t n) noexcept {
   gain_ref(a.x, a.x, n, a.level.start, a.level.end);
   mac_ref(acc_l, a.x, n, a.left.start, a.left.end);
@@ -138,6 +143,9 @@ void gain(std::int16_t* dst, const std::int16_t* src, std::uint32_t n, std::int3
 }
 void mac(std::int32_t* acc, const std::int16_t* src, std::uint32_t n, std::int32_t start, std::int32_t end) noexcept {
   detail::mac_simd<simd::NativeOps>(acc, src, n, start, end);
+}
+bool mac2(std::int32_t* acc_a, std::int32_t* acc_b, const std::int16_t* src, std::uint32_t n, GainRamp a, GainRamp b) noexcept {
+  return detail::mac2_steady<simd::NativeOps>(acc_a, acc_b, src, n, a, b);
 }
 void gain_pan(const StripLane& a, std::int32_t* acc_l, std::int32_t* acc_r, std::uint32_t n) noexcept {
   const StripLane lanes[1] = {a};
